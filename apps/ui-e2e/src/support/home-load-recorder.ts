@@ -1,4 +1,6 @@
 /* oxlint-disable typescript/consistent-type-definitions -- The recorder's record crosses the page boundary as plain JSON shapes. */
+import { test } from 'vitest';
+import { commands } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
 /**
@@ -292,6 +294,8 @@ export type ProjectLoadProbe = {
   readonly hydrated: string;
   /** A project row of the sidebar, followed by its top offset. */
   readonly projectRow: string;
+  /** The row's disclosure button; its accessible name carries the project's name and nothing else. */
+  readonly projectRowDisclosure: string;
 };
 
 export const projectLoadProbe: ProjectLoadProbe = {
@@ -306,6 +310,7 @@ export const projectLoadProbe: ProjectLoadProbe = {
   skeleton: '[data-slot="skeleton"]',
   hydrated: '[aria-label="Ask Tau to build anything..."][contenteditable="true"]',
   projectRow: '[data-slot="project-trigger"]',
+  projectRowDisclosure: 'button[aria-expanded][aria-label]',
 };
 
 /** One frame the recorder saw something in: the animation-frame index (1 is the first) and its time. */
@@ -337,6 +342,11 @@ export type ProjectLoadRecord = {
   readonly viewerDockHeaders: readonly ProjectLoadFrame[];
   /** Each project row's top offset whenever it changed, by the row's name, from its first frame on. */
   readonly projectRows: ReadonlyArray<ProjectLoadFrame & { readonly row: string; readonly y: number }>;
+  /**
+   * Frames that drew a tall vertical lane border, with each border's x offset, whatever element drew it. Recorded
+   * only when the recorder was installed with `laneBorders`, since it reads every element's box in every frame.
+   */
+  readonly laneBorders: ReadonlyArray<ProjectLoadFrame & { readonly xs: readonly number[] }>;
   /** The first frame the rich composer was in: the page had hydrated by then. */
   readonly hydratedFirstFrame: ProjectLoadFrame | undefined;
   /** Frames with a skeleton block, and how many. */
@@ -369,7 +379,11 @@ const projectLoadFrameLimit = 400;
  *
  * @param input - The selectors, and how many frames of one kind to keep.
  */
-export const recordProjectLoad = (input: { readonly probe: ProjectLoadProbe; readonly limit: number }): void => {
+export const recordProjectLoad = (input: {
+  readonly probe: ProjectLoadProbe;
+  readonly limit: number;
+  readonly laneBorders: boolean;
+}): void => {
   const { probe, limit } = input;
   const describe = (node: Node | undefined): string => {
     if (!(node instanceof HTMLElement)) {
@@ -396,6 +410,7 @@ export const recordProjectLoad = (input: { readonly probe: ProjectLoadProbe; rea
     composer: [] as Array<ProjectLoadFrame & { y: number; height: number }>,
     viewerDockHeaders: [] as ProjectLoadFrame[],
     projectRows: [] as Array<ProjectLoadFrame & { row: string; y: number }>,
+    laneBorders: [] as Array<ProjectLoadFrame & { xs: number[] }>,
     hydratedFirstFrame: undefined as ProjectLoadFrame | undefined,
     skeletonFrames: [] as Array<ProjectLoadFrame & { count: number }>,
     shifts: [] as HomeLoadShift[],
@@ -486,8 +501,43 @@ export const recordProjectLoad = (input: { readonly probe: ProjectLoadProbe; rea
     }
   }).observe({ type: 'paint', buffered: true });
 
+  /* A lane border is a visible left or right border on a box at least half the window tall. */
+  const scanLaneBorders = (frame: ProjectLoadFrame): void => {
+    const xs = new Set<number>();
+    for (const element of document.body.querySelectorAll('*')) {
+      const rect = element.getBoundingClientRect();
+      if (rect.height < innerHeight / 2 || rect.width === 0) {
+        continue;
+      }
+      if (!element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+        continue;
+      }
+      const style = getComputedStyle(element);
+      if (Number.parseFloat(style.borderLeftWidth) > 0 && style.borderLeftStyle !== 'none') {
+        xs.add(Math.round(rect.left));
+      }
+      if (Number.parseFloat(style.borderRightWidth) > 0 && style.borderRightStyle !== 'none') {
+        xs.add(Math.round(rect.right));
+      }
+    }
+    if (xs.size > 0) {
+      keep(record.laneBorders, { ...frame, xs: [...xs].toSorted((left, right) => left - right) });
+    }
+  };
   let lastComposer = '';
   const rowOffsets = new Map<string, number>();
+  const scanProjectRows = (frame: ProjectLoadFrame): void => {
+    for (const row of document.querySelectorAll(probe.projectRow)) {
+      /* Keyed by the project's name alone: the row's text also carries its status, which changes as it opens. */
+      const disclosure = row.querySelector(probe.projectRowDisclosure)?.getAttribute('aria-label') ?? '';
+      const name = disclosure.replace(/^(?:Expand|Collapse)\s+/u, '').trim() || row.textContent.trim().slice(0, 60);
+      const y = Math.round(row.getBoundingClientRect().y);
+      if (name !== '' && rowOffsets.get(name) !== y) {
+        rowOffsets.set(name, y);
+        keep(record.projectRows, { ...frame, row: name, y });
+      }
+    }
+  };
   const sample = (): void => {
     record.frames += 1;
     const frame: ProjectLoadFrame = { frame: record.frames, t: now() };
@@ -517,13 +567,9 @@ export const recordProjectLoad = (input: { readonly probe: ProjectLoadProbe; rea
         keep(record.composer, { ...frame, ...face });
       }
     }
-    for (const row of document.querySelectorAll(probe.projectRow)) {
-      const name = row.textContent.trim().slice(0, 60);
-      const y = Math.round(row.getBoundingClientRect().y);
-      if (name !== '' && rowOffsets.get(name) !== y) {
-        rowOffsets.set(name, y);
-        keep(record.projectRows, { ...frame, row: name, y });
-      }
+    scanProjectRows(frame);
+    if (input.laneBorders) {
+      scanLaneBorders(frame);
     }
     if (document.querySelector(probe.hydrated)) {
       record.hydratedFirstFrame ??= frame;
@@ -541,14 +587,15 @@ export const recordProjectLoad = (input: { readonly probe: ProjectLoadProbe; rea
  * Each move of a sidebar project row between two frames, by name, frame and pixels.
  *
  * @param record - One load's record.
+ * @param since - Count only moves painted at or after this time (milliseconds from navigation start).
  * @returns One line per move.
  */
-export const projectRowMoves = (record: ProjectLoadRecord): string[] => {
+export const projectRowMoves = (record: ProjectLoadRecord, since = 0): string[] => {
   const last = new Map<string, number>();
   const moves: string[] = [];
   for (const entry of record.projectRows) {
     const before = last.get(entry.row);
-    if (before !== undefined && before !== entry.y) {
+    if (before !== undefined && before !== entry.y && entry.t >= since) {
       moves.push(
         `frame ${entry.frame} (${entry.t} ms): "${entry.row}" top ${before} -> ${entry.y} px (${entry.y - before} px)`,
       );
@@ -558,9 +605,17 @@ export const projectRowMoves = (record: ProjectLoadRecord): string[] => {
   return moves;
 };
 
-/** Install the project load recorder on every document the target page loads from now on. */
-export const installProjectLoadRecorder = async (): Promise<void> =>
-  target.addInitScript(recordProjectLoad, { probe: projectLoadProbe, limit: projectLoadFrameLimit });
+/**
+ * Install the project load recorder on every document the target page loads from now on.
+ *
+ * @param options - `laneBorders` also records every frame's lane borders, which costs a pass over the document.
+ */
+export const installProjectLoadRecorder = async (options: { readonly laneBorders?: boolean } = {}): Promise<void> =>
+  target.addInitScript(recordProjectLoad, {
+    probe: projectLoadProbe,
+    limit: projectLoadFrameLimit,
+    laneBorders: options.laneBorders === true,
+  });
 
 /** The current document's project load record, without its page-side helpers. */
 export const readProjectLoad = async (): Promise<ProjectLoadRecord> =>
@@ -752,3 +807,110 @@ export const armWorkerReadDelay = async (rules: readonly WorkerReadDelay[]): Pro
 /** The worker calls the current document made, and which were answered late. */
 export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
+
+/* A0.10's request delay: the commands `browser-command.ts` registers, declared here so the lane adds nothing to
+ * `external-target.ts`. */
+declare module 'vitest/browser' {
+  interface BrowserCommands {
+    uiDelayTargetRequests: (pattern: string, milliseconds: number) => Promise<void>;
+    uiReadDelayedTargetRequests: () => Promise<readonly string[]>;
+  }
+}
+
+/**
+ * Hold every request whose URL matches `pattern` for `milliseconds`, for the rest of the test. Routing turns the
+ * context's HTTP cache off, so a reload after this fetches every matching file again and is held.
+ *
+ * @param pattern - A regular expression source matched against the request URL.
+ * @param milliseconds - How long each request is held.
+ */
+export const delayRequests = async (pattern: string, milliseconds: number): Promise<void> =>
+  commands.uiDelayTargetRequests(pattern, milliseconds);
+
+/** The URLs {@link delayRequests} held in this target context so far. */
+export const readDelayedRequests = async (): Promise<readonly string[]> => commands.uiReadDelayedTargetRequests();
+
+/**
+ * Run `measure` with a bound: past it the returned promise rejects, and the work still running is left to the
+ * target's teardown.
+ */
+const withinBudget = async <Measured>(measure: () => Promise<Measured>, milliseconds: number): Promise<Measured> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  /* Settled into a value either way, so a measure that fails after the bound is never an unhandled rejection. */
+  const running = (async (): Promise<{ readonly value: Measured } | { readonly error: unknown }> => {
+    try {
+      return { value: await measure() };
+    } catch (error) {
+      return { error };
+    }
+  })();
+  const deadline = new Promise<{ readonly error: unknown }>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({ error: new Error(`the measure phase did not finish within ${milliseconds} ms`) });
+    }, milliseconds);
+  });
+  const outcome = await Promise.race([running, deadline]);
+  clearTimeout(timer);
+  if ('error' in outcome) {
+    throw outcome.error;
+  }
+  return outcome.value;
+};
+
+/**
+ * Define the known-defect rows of one spec (A0.10, D25). Each row is an expected failure until its fix flips it to
+ * `test`. It runs in two phases so that only the defect can make it pass as expected:
+ *
+ * - `measure` seeds, loads, checks the forcing happened and checks every precondition. Any error in it, a wait that
+ *   runs out included, is kept as an artifact and the body returns normally, so `test.fails` reports the row red.
+ *   It is bounded by `budget`, and the test's own timeout is above that, so a test timeout never ends a row.
+ * - `assert` is the defect's own assertion and the only thing that may throw out of the body. Its message is kept
+ *   as an artifact, so a run shows which assertion failed and in which frame.
+ *
+ * @param directory - The artifact directory of the spec.
+ * @returns The row definer.
+ */
+export const knownDefectRows =
+  (directory: string) =>
+  <Measured>(
+    title: string,
+    row: {
+      readonly artifact: string;
+      /** The measure phase's bound. Milliseconds. */
+      readonly budget: number;
+      readonly measure: () => Promise<Measured>;
+      readonly assert: (measured: Measured) => void;
+    },
+  ): void => {
+    test.fails(title, { timeout: row.budget + 60_000 }, async () => {
+      const keep = async (kind: string, error: unknown): Promise<void> => {
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        await target.writeArtifact(`${directory}/${row.artifact}/${kind}-${Date.now()}.txt`, `${message}\n`);
+      };
+      let measured: Measured;
+      try {
+        measured = await withinBudget(row.measure, row.budget);
+      } catch (error) {
+        await keep('measure-failure', error).catch(() => undefined);
+        return;
+      }
+      try {
+        row.assert(measured);
+      } catch (error) {
+        await keep('failure', error);
+        throw error;
+      }
+    });
+  };
+
+/**
+ * A measure-phase precondition: throws a plain error, which the row keeps as a measure failure, never as the defect.
+ *
+ * @param condition - What must hold for the row to measure its defect.
+ * @param message - What did not hold.
+ */
+export const precondition = (condition: boolean, message: string): void => {
+  if (!condition) {
+    throw new Error(`precondition: ${message}`);
+  }
+};

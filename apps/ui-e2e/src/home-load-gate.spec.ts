@@ -14,6 +14,8 @@ import {
   installHomeLoadRecorder,
   installProjectLoadRecorder,
   installWorkerReadDelay,
+  knownDefectRows,
+  precondition,
   projectRowMoves,
   readHomeLoad,
   readProjectLoad,
@@ -175,7 +177,8 @@ test.each(
  * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
  * row forces its defect by answering a file-manager worker read late, so it is red on every run, and is written
  * `test.fails` so `main` stays green. The title names the defect; the failure names the frame and the node. The
- * fixing lane flips the row to `test`. On each failure the row writes its message as an artifact.
+ * fixing lane flips the row to `test`. A row measures first and asserts after; an error while measuring never
+ * passes as the defect (`knownDefectRows`).
  */
 
 /** How late a delayed worker read answers. Milliseconds. */
@@ -189,20 +192,9 @@ const chatListingRead: WorkerReadDelay = {
   milliseconds: readDelay,
 };
 
-/**
- * A row that pins a known defect: an expected failure until its fix flips it, its failure message kept as evidence.
- */
-const knownDefect = (title: string, artifact: string, body: () => Promise<void>): void => {
-  test.fails(title, async () => {
-    try {
-      await body();
-    } catch (error) {
-      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      await target.writeArtifact(`home-load-gate/${artifact}/failure-${Date.now()}.txt`, `${message}\n`);
-      throw error;
-    }
-  });
-};
+const knownDefect = knownDefectRows('home-load-gate');
+/** The measure budget of a row: seven projects created through the UI, then two loads of Home. Milliseconds. */
+const homeBudget = 600_000;
 
 /** The returning visitor, then one reload of Home with `delays` armed, watched until the late reads answered. */
 const measureReturningReload = async ({
@@ -216,7 +208,7 @@ const measureReturningReload = async ({
   readonly label: string;
   /** What the visitor did on Home before the measured reload. */
   readonly prepare?: () => Promise<void>;
-}): Promise<ProjectLoadRecord> => {
+}): Promise<{ readonly record: ProjectLoadRecord; readonly since: number }> => {
   await target.setViewport(viewports.wide);
   await target.installModelCatalogFixture(catalogLatency);
   await target.startModelCatalogApi();
@@ -239,58 +231,72 @@ const measureReturningReload = async ({
     `home-load-gate/${label}.json`,
     `${JSON.stringify({ record, workerReads: reads }, null, 2)}\n`,
   );
-  expect(
-    reads.some((read) => read.delayed),
-    `${label}: no worker read was delayed`,
-  ).toBe(true);
-  return record;
+  const delayed = reads.filter((read) => read.delayed);
+  precondition(delayed.length > 0, `${label}: no worker read was delayed`);
+  return { record, since: delayed[0]!.t };
 };
 
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(
     `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
-    `h1-${viewport}`,
-    async () => {
-      const record = await measureReturningReload({
-        viewport,
-        delays: [projectListingRead],
-        label: `h1-${viewport}`,
-      });
-      const hydrated = record.hydratedFirstFrame;
-      expect(hydrated, 'H1: the rich composer never mounted').toBeDefined();
-      const after = record.skeletonFrames.filter((frame) => frame.frame >= (hydrated?.frame ?? 0));
-      expect(
-        after.map((frame) => `frame ${frame.frame} (${frame.t} ms): ${frame.count}`).slice(0, 5),
-        `H1: hydrated by frame ${hydrated?.frame ?? 0} (${hydrated?.t ?? 0} ms), then [data-slot=skeleton] blocks in ${after.length} frames`,
-      ).toEqual([]);
+    {
+      artifact: `h1-${viewport}`,
+      budget: homeBudget,
+      measure: async () => {
+        const { record } = await measureReturningReload({
+          viewport,
+          delays: [projectListingRead],
+          label: `h1-${viewport}`,
+        });
+        precondition(record.hydratedFirstFrame !== undefined, 'H1: the rich composer never mounted');
+        return record;
+      },
+      assert: (record) => {
+        const hydrated = record.hydratedFirstFrame!;
+        const after = record.skeletonFrames.filter((frame) => frame.frame >= hydrated.frame);
+        expect(
+          after.map((frame) => `frame ${frame.frame} (${frame.t} ms): ${frame.count}`).slice(0, 5),
+          `H1: hydrated by frame ${hydrated.frame} (${hydrated.t} ms), then [data-slot=skeleton] blocks in ${after.length} frames`,
+        ).toEqual([]);
+      },
     },
   );
 }
 
 knownDefect(
   'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
-  'h5-wide',
-  async () => {
-    /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's sidebar did. */
-    const expanded = seededProjects.at(-1)!;
-    const record = await measureReturningReload({
-      viewport: 'wide',
-      delays: [chatListingRead],
-      label: 'h5-wide',
-      prepare: async () => {
-        const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
-        await target.click(disclosure);
-        await target.expectAttribute(
-          selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
-          'aria-expanded',
-          'true',
-        );
-        /* The disclosure is persisted before the measured load. */
-        await target.delay(settleWindow);
-      },
-    });
-    expect(record.projectRows.length, 'H5: no sidebar project row was on screen').toBeGreaterThan(0);
-    const moved = projectRowMoves(record);
-    expect(moved, `H5: a sidebar project row moved between frames: ${moved.join(' | ')}`).toEqual([]);
+  {
+    artifact: 'h5-wide',
+    budget: homeBudget,
+    measure: async () => {
+      /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's did. */
+      const expanded = seededProjects.at(-1)!;
+      const measured = await measureReturningReload({
+        viewport: 'wide',
+        delays: [chatListingRead],
+        label: 'h5-wide',
+        prepare: async () => {
+          const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
+          await target.click(disclosure);
+          await target.expectAttribute(
+            selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
+            'aria-expanded',
+            'true',
+          );
+          /* The disclosure is persisted before the measured load. */
+          await target.delay(settleWindow);
+        },
+      });
+      precondition(measured.record.projectRows.length > 0, 'H5: no sidebar project row was on screen');
+      return measured;
+    },
+    assert: ({ record, since }) => {
+      /* Only what the late listing can move: a move before it was requested is not this defect's. */
+      const moved = projectRowMoves(record, since);
+      expect(
+        moved,
+        `H5: after the chat listing was requested at ${since} ms, a sidebar project row moved between frames: ${moved.join(' | ')}`,
+      ).toEqual([]);
+    },
   },
 );

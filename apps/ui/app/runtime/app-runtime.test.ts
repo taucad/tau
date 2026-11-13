@@ -29,6 +29,7 @@ import {
   noAnalytics,
   selectAppEnvironment,
   selectAppRuntimeFault,
+  selectFileManagerHost,
   selectRootFiles,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
@@ -182,6 +183,21 @@ describe('app runtime root', () => {
     expect(noOp).toHaveBeenCalledOnce();
     expect(capture).toHaveBeenCalledOnce();
     noOp.mockRestore();
+  });
+
+  /* The remote-host harness renders no file manager, so its runtime reads no Home engine and connects no worker. */
+  it('should leave its file managers idle when asked to', async () => {
+    const loadHomeBackend = vi.fn(async (): Promise<'opfs'> => 'opfs');
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      loadHomeBackend,
+      idleFileManagers: true,
+    }).start();
+    await flush();
+    expect(loadHomeBackend).not.toHaveBeenCalled();
+    expect(selectFileManagerHost(runtime.getSnapshot()).getSnapshot().value).toBe('resolving');
+    expect(selectRootFiles(runtime.getSnapshot()).getSnapshot().value).toBe('initializing');
+    runtime.stop();
   });
 
   it('should keep the first fault and keep answering (D23)', async () => {

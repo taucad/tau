@@ -39,6 +39,7 @@ import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -143,13 +144,12 @@ export function RootLayout({
       </ProjectManagerProvider>
     </HeadlessImageProvider>
   );
-  const application =
-    data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
-      children
-    ) : (
-      /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
-      <RootFileManagerProvider>{managedChildren}</RootFileManagerProvider>
-    );
+  const application = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
+    children
+  ) : (
+    /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
+    <RootFileManagerProvider>{managedChildren}</RootFileManagerProvider>
+  );
 
   /*
    * `QueryClientProvider` is outermost so `AuthConfigProvider`'s own
@@ -276,7 +276,7 @@ export function ProductApp(): React.JSX.Element {
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;
-  return data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
+  return isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
     page
   ) : (
     <ProjectSessionsHost>{page}</ProjectSessionsHost>

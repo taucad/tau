@@ -4,8 +4,19 @@ import { MachineSettingsStore } from '#components/print/machine-settings-store.j
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
 import type { FileSystemBridgeRootedProxy, FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useId, useLayoutEffect, useRef } from 'react';
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+} from 'react';
 import { useSelector } from '@xstate/react';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
@@ -140,11 +151,24 @@ function assertNotErrorState(snapshot: FileManagerSnapshot): void {
   }
 }
 
+/**
+ * Wait for a file manager's content and tree services, up to the ready bound.
+ *
+ * For a caller outside a provider. In the app, a caller uses its scope's `whenServicesReady`, which waits on the
+ * runtime's clock (row S18); this wait runs on `options.clock`, or the default clock without one.
+ *
+ * @param fileManagerRef - The file manager to wait for.
+ * @param options - The bound in milliseconds, and the clock to wait on.
+ * @returns The services.
+ * @throws {FileManagerNotReadyError} When the bound passes first, or the file manager is in `error`.
+ * @public
+ */
 export async function waitForFileManagerServices(
   fileManagerRef: FileManagerRef,
   options?: {
     /** Milliseconds. */
     readyTimeout?: number;
+    clock?: ActorOptions<AnyActorLogic>['clock'];
   },
 ): Promise<{
   contentService: FileContentService;
@@ -157,6 +181,7 @@ export async function waitForFileManagerServices(
   const settled = await awaitFileManager(fileManagerRef, 'services', {
     reason: 'services-timeout',
     ...(options?.readyTimeout === undefined ? {} : { timeoutMilliseconds: options.readyTimeout }),
+    ...(options?.clock === undefined ? {} : { clock: options.clock }),
   });
   return servicesOf(settled);
 }
@@ -692,13 +717,24 @@ export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
  * release starts the grace, so StrictMode's remount keeps the lease and an unmount releases it after the grace (B3).
  * No ref callback: a context provider renders no element to hold one, so the retain is the commit's layout effect.
  * It neither sends, subscribes nor times; the store does (I1, I16).
+ *
+ * A render that commits after its entry's grace (a transition held by a slow lazy chunk) finds the entry dropped: the
+ * mount renders again, and the store builds a fresh one for the key. The leased providers key their scope by the
+ * actor, so nothing below keeps the stopped one.
  */
 function useLeasedFileManager(spec: FileManagerSpec): LeaseEntry<FileManagerActor> {
   const runtime = useAppRuntime();
   const mount = useId();
   const key = JSON.stringify([mount, spec.rootDirectory, spec.projectId ?? null, spec.backend]);
   const lease = selectRuntimeFiles(runtime).leaseFileManager(key, spec);
-  useLayoutEffect(() => lease.retain(), [lease]);
+  const [, renew] = useReducer((generation: number) => generation + 1, 0);
+  useLayoutEffect(() => {
+    const release = lease.retain();
+    if (lease.isDropped()) {
+      renew();
+    }
+    return release;
+  }, [lease]);
   return lease;
 }
 
@@ -739,7 +775,13 @@ export function HomeFileManagerProvider({
     ...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart }),
   });
   return (
-    <FileManagerScope fileManagerRef={lease.actor} rootDirectory={rootDirectory} projectId={projectId} lease={lease}>
+    <FileManagerScope
+      key={lease.actor.sessionId}
+      fileManagerRef={lease.actor}
+      rootDirectory={rootDirectory}
+      projectId={projectId}
+      lease={lease}
+    >
       {children}
     </FileManagerScope>
   );
@@ -760,7 +802,13 @@ export function FileManagerProvider({
     ...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart }),
   });
   return (
-    <FileManagerScope fileManagerRef={lease.actor} rootDirectory={rootDirectory} projectId={projectId} lease={lease}>
+    <FileManagerScope
+      key={lease.actor.sessionId}
+      fileManagerRef={lease.actor}
+      rootDirectory={rootDirectory}
+      projectId={projectId}
+      lease={lease}
+    >
       {children}
     </FileManagerScope>
   );

@@ -43,7 +43,15 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
     analytics?: Analytics;
     /** Read Home's storage engine selection; the handle store's by default. */
     loadHomeBackend?: () => Promise<HomeStorageBackend>;
+    /**
+     * Leave the file managers idle: Home is never read and `rootFiles` never connects. For a page that renders no file
+     * manager, such as the remote-host harness, which runs its transport check without one.
+     */
+    idleFileManagers?: boolean;
   }>;
+
+/** The Home read of an idle runtime: it never settles, so the host stays `resolving`. */
+const neverReadHome = async (): Promise<HomeStorageBackend> => Promise.withResolvers<HomeStorageBackend>().promise;
 
 /** The no-op analytics client of the server and of tests. @public */
 export const noAnalytics: Analytics = { capture: () => undefined };
@@ -81,9 +89,11 @@ export const createAppRuntime = ({
   environment,
   analytics = noAnalytics,
   loadHomeBackend,
+  idleFileManagers = false,
   ...options
 }: AppRuntimeOptions = {}): AppRuntime => {
-  const host = createFileManagerHost({ analytics, ...(loadHomeBackend === undefined ? {} : { loadHomeBackend }) });
+  const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
+  const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
   const table = createLeaseTable();
   const runtime = createActor(
     appRuntimeMachine.provide({
@@ -95,7 +105,13 @@ export const createAppRuntime = ({
         sessions: createSessionsRegistryLogic(host.sharedWorker),
       },
     }),
-    { ...options, input: { sessions: sessionsRegistryInput(), rootFiles: host.rootFilesInput() } },
+    {
+      ...options,
+      input: {
+        sessions: sessionsRegistryInput(),
+        rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
+      },
+    },
   );
   const { fileManagerHost, leases } = runtime.getSnapshot().context;
   const store: LeaseStore = table.storeFor(leases);

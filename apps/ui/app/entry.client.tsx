@@ -15,6 +15,8 @@ import { createAppRuntime } from '#runtime/app-runtime.js';
 import { heldAppRuntime, holdAppRuntime } from '#runtime/app-runtime-holder.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { admittedAnalytics } from '#providers/posthog-analytics-provider.js';
+import { ENV } from '#environment.config.js';
+import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
@@ -36,7 +38,14 @@ installStaleBuildNavigation();
  * hot update keeps the held one (`import.meta.hot.data`), so development never makes a second. */
 if (heldAppRuntime() === undefined) {
   /* The workspace telemetry the file-manager host builds captures through the admitted client (A1b, D15). */
-  holdAppRuntime(createAppRuntime({ analytics: admittedAnalytics, ...(inspect === undefined ? {} : { inspect }) }));
+  holdAppRuntime(
+    createAppRuntime({
+      analytics: admittedAnalytics,
+      /* The remote-host harness renders no file manager (`root-layout.tsx`), so its runtime starts none. */
+      idleFileManagers: isRemoteHostHarness(ENV.TAU_DEBUG, globalThis.location.pathname),
+      ...(inspect === undefined ? {} : { inspect }),
+    }),
+  );
 }
 
 startTransition(() => {

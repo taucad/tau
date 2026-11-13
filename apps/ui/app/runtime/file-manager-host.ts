@@ -57,8 +57,13 @@ export type FileManagerBuildOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
 export type FileManagerHost = Readonly<{
   /** The machine with its backend read and worker watch provided: the runtime's `fileManagerHost` child. */
   logic: typeof fileManagerHostMachine;
-  /** The input of `rootFiles`, which the runtime spawns from {@link fileManagerMachine}. */
-  rootFilesInput: () => InputFrom<typeof fileManagerMachine>;
+  /**
+   * The input of `rootFiles`, which the runtime spawns from {@link fileManagerMachine}.
+   *
+   * @param options - `idle` leaves it unconnected, for a runtime whose page renders no file manager.
+   * @returns The input.
+   */
+  rootFilesInput: (options?: Readonly<{ idle?: boolean }>) => InputFrom<typeof fileManagerMachine>;
   /** The shared worker `rootFiles` holds, once it has one. */
   sharedWorker: () => Worker | undefined;
   /**
@@ -135,7 +140,8 @@ export function createFileManagerHost({
     logic: fileManagerHostMachine.provide({
       actors: { loadHomeBackend: loadBackend, sharedWorker: watchSharedWorker },
     }),
-    rootFilesInput: () => inputFor({ rootDirectory: '/', backend: 'home' }, undefined, undefined),
+    rootFilesInput: ({ idle = false } = {}) =>
+      inputFor({ rootDirectory: '/', backend: 'home', shouldInitializeOnStart: !idle }, undefined, undefined),
     sharedWorker: () => sharedWorker,
     build: (host, spec, options) => {
       const resolved = spec.backend === 'home' ? selectHomeBackend(host.getSnapshot()) : spec.backend;

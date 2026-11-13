@@ -83,6 +83,7 @@ describe('lease store', () => {
     entry.attach(disposed);
 
     /* Mount, StrictMode's unmount, and the remount: one lease throughout. */
+    expect(entry.isDropped()).toBe(false);
     const firstRelease = entry.retain();
     firstRelease();
     const release = entry.retain();
@@ -136,6 +137,7 @@ describe('lease store', () => {
     clock.advance(leaseGraceMilliseconds);
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
+    expect(entry.isDropped()).toBe(true);
     const release = entry.retain();
     release();
     expect(builds.starts).toBe(0);

@@ -37,6 +37,8 @@ export type LeaseEntry<Leased extends AnyActor> = Readonly<{
   retain: () => () => void;
   /** Run `dispose` when the entry is dropped. Attaching the same function twice runs it once. */
   attach: (dispose: () => void) => void;
+  /** Whether the entry was dropped: its actor is stopped, and the store builds a fresh entry for its key. */
+  isDropped: () => boolean;
 }>;
 
 /** The store a mount leases from. @public */
@@ -119,7 +121,7 @@ export function createLeaseTable(): Readonly<{
         retain: () => {
           if (held.dropped) {
             /* A render that committed after its unretained entry's grace: the entry is gone and is never restarted
-             * (MC-R24). The next render leases a fresh one. */
+             * (MC-R24). The mount sees `isDropped` and renders again, which leases a fresh one. */
             console.error(`[leases] '${key}' was retained after it was dropped`);
             return () => undefined;
           }
@@ -136,6 +138,7 @@ export function createLeaseTable(): Readonly<{
             }
           };
         },
+        isDropped: () => held.dropped,
         attach: (dispose) => {
           if (held.dropped) {
             dispose();

@@ -18,7 +18,9 @@ import {
   configure,
   getConfig,
   cleanup,
+  within,
 } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
 import type { RenderHookOptions, RenderOptions } from '@testing-library/react';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createActor } from 'xstate';
@@ -28,6 +30,7 @@ import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
 
 const workerTestState = vi.hoisted(() => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- recursive type cannot be expressed inline
@@ -299,7 +302,7 @@ const {
   useHomeStorageBackend,
   SharedWorkerGate,
 } = await import('#hooks/use-file-manager.js');
-const { createAppRuntime, selectRuntimeFileManagerHost, selectRuntimeRootFiles } =
+const { createAppRuntime, selectRuntimeFileManagerHost, selectRuntimeFiles, selectRuntimeRootFiles } =
   await import('#runtime/app-runtime.js');
 const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
 const { leaseGraceMilliseconds } = await import('#runtime/leases.machine.js');
@@ -468,6 +471,51 @@ describe('HomeFileManagerProvider', () => {
     readsHome = true;
   });
 
+  const probed: Array<ReturnType<typeof useFileManager>['fileManagerRef']> = [];
+  function LeaseProbe(): React.JSX.Element {
+    probed.push(useFileManager().fileManagerRef);
+    return <span hidden />;
+  }
+
+  /* A render that commits after its unretained lease's grace (a transition held by a slow lazy chunk) finds the entry
+   * dropped: the mount renders again and leases a fresh file manager instead of keeping the stopped one (MC-R24). The
+   * late commit is staged by ending the grace inside the lease's render, which no real scheduler can be made to do. */
+  it('leases a fresh file manager when its render commits after the grace', async () => {
+    const view = render(<span>before</span>);
+    const files = selectRuntimeFiles(testRuntime) as { leaseFileManager: AppRuntimeFiles['leaseFileManager'] };
+    const lease = files.leaseFileManager;
+    const leased: Array<ReturnType<AppRuntimeFiles['leaseFileManager']>> = [];
+    files.leaseFileManager = (key, spec) => {
+      const entry = lease(key, spec);
+      if (leased.length === 0) {
+        testClock.advance(leaseGraceMilliseconds);
+      }
+      leased.push(entry);
+      return entry;
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      view.rerender(
+        <HomeFileManagerProvider rootDirectory='/projects/late'>
+          <LeaseProbe />
+        </HomeFileManagerProvider>,
+      );
+    } finally {
+      files.leaseFileManager = lease;
+    }
+    const late = leased[0]!;
+    expect(late.isDropped()).toBe(true);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('was retained after it was dropped'));
+    error.mockRestore();
+
+    const committed = probed.at(-1)!;
+    expect(committed).not.toBe(late.actor);
+    await waitFor(() => {
+      expect(committed.getSnapshot().value).toBe('ready');
+    });
+    view.unmount();
+  });
+
   /* A server render and the first client render agree: the runtime is created and not started, `rootFiles` and a
    * leased file manager both exist with their initial snapshots, and nothing reads storage or starts a worker. */
   it('renders useful HTML without selecting storage or starting a worker', () => {
@@ -487,11 +535,66 @@ describe('HomeFileManagerProvider', () => {
     expect(selectRuntimeRootFiles(serverRuntime).getSnapshot().value).toBe('initializing');
     expect(workerTestState.instances).toHaveLength(before);
 
-    /* The client's first render reads the same unstarted snapshots, so hydration matches. */
-    const clientRuntime = newTestRuntime();
-    const clientHtml = renderToString(<AppRuntimeProvider runtime={clientRuntime}>{page}</AppRuntimeProvider>);
-    expect(clientHtml).toBe(html);
-    expect(workerTestState.instances).toHaveLength(before);
+    serverRuntime.stop();
+  });
+
+  /* The client hydrates that HTML in StrictMode: its first render reads the same unstarted snapshots, then the commit
+   * retains the lease and the runtime starts, with no mismatch and nothing created or started twice. */
+  it('hydrates the server HTML with no mismatch, and starts each file manager once', async () => {
+    const page = (
+      <StrictMode>
+        <AppRuntimeProvider runtime={testRuntime}>
+          <RootFileManagerProvider>
+            <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+              <LeaseProbe />
+              <input aria-label='Project name' />
+            </HomeFileManagerProvider>
+          </RootFileManagerProvider>
+        </AppRuntimeProvider>
+      </StrictMode>
+    );
+    const serverRuntime = newTestRuntime();
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <AppRuntimeProvider runtime={serverRuntime}>
+        <RootFileManagerProvider>
+          <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+            <LeaseProbe />
+            <input aria-label='Project name' />
+          </HomeFileManagerProvider>
+        </RootFileManagerProvider>
+      </AppRuntimeProvider>,
+    );
+    serverRuntime.stop();
+    document.body.append(container);
+    const served = within(container).getByRole('textbox', { name: 'Project name' });
+    probed.length = 0;
+    const workersBefore = workerTestState.instances.length;
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, 'error');
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, page, { onRecoverableError });
+      });
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/hydrat/i);
+      expect(within(container).getByRole('textbox', { name: 'Project name' })).toBe(served);
+      /* One leased actor across StrictMode's double render and remount, started once by the commit. */
+      expect(new Set(probed).size).toBe(1);
+      expect(testRuntime.getSnapshot().status).toBe('active');
+      await waitFor(() => {
+        expect(probed[0]!.getSnapshot().value).toBe('ready');
+      });
+      /* No gate here, so the lease was built before `rootFiles` had a worker: each started one, and none twice. */
+      expect(workerTestState.instances.length - workersBefore).toBe(2);
+    } finally {
+      act(() => {
+        root?.unmount();
+      });
+      container.remove();
+      consoleError.mockRestore();
+    }
   });
 
   it('preserves the page and actor identity when the pending backend resolves', async () => {

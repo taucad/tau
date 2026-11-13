@@ -2202,8 +2202,15 @@ describe.runIf(enabled)('shell qualification', () => {
       writeFileSync(join(pointer, '.git'), `gitdir: ${join(elsewhere, '.git')}\n`);
       const folderOf = (tool: string): string =>
         dirname(realpathSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim()));
-      const tools = [...new Set([folderOf('git'), folderOf('git-lfs')])];
-      const toolchain = { roots: tools, bins: tools };
+      /*
+       * The real git install, never a launcher in front of it: on macOS `/usr/bin/git` is Apple's xcrun shim, which
+       * writes a cache outside the sandbox, while the desktop bundles a real git. Its exec path sits beside its `bin`.
+       */
+      const execPath = realpathSync(hostGit(store, '--exec-path').trim());
+      const installedBin = join(dirname(dirname(execPath)), 'bin');
+      const gitFolder = existsSync(join(installedBin, 'git')) ? installedBin : folderOf('git');
+      const bins = [...new Set([gitFolder, folderOf('git-lfs')])];
+      const toolchain = { roots: [...new Set([...bins, execPath])], bins };
 
       /* The agent's view of the same store, right after the save: the large file is not listed, and an edit is. */
       const agent = await drive(
@@ -2273,6 +2280,9 @@ describe.runIf(enabled)('shell qualification', () => {
         const version = await terminal.run('git --version');
         expect(version.exitCode, version.text).toBe(0);
         measurements = { git: version.text.trim() };
+        /* Which git and git-lfs the Terminal resolves, named in any failure below. */
+        const where = await terminal.run('command -v git git-lfs');
+        const resolved = where.text.trim();
         const expectations: ReadonlyArray<readonly [string, RegExp | string]> = [
           ['git status --porcelain', ''],
           ['git diff HEAD~1 HEAD -- part.scad', /-cube\(1\);\n\+cube\(2\);/u],
@@ -2284,11 +2294,11 @@ describe.runIf(enabled)('shell qualification', () => {
         for (const [command, expected] of expectations) {
           // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
           const answer = await terminal.run(command);
-          expect(answer.exitCode, `${command}: ${answer.text}`).toBe(0);
+          expect(answer.exitCode, `${command} (${resolved}): ${answer.text}`).toBe(0);
           if (typeof expected === 'string') {
-            expect(answer.text, command).toBe(expected);
+            expect(answer.text, `${command} (${resolved})`).toBe(expected);
           } else {
-            expect(answer.text, command).toMatch(expected);
+            expect(answer.text, `${command} (${resolved})`).toMatch(expected);
           }
         }
 

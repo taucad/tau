@@ -21,6 +21,8 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/runtime/choices-kernel-selection.ts",
+      "apps/ui/app/runtime/choices.ts",
       "apps/ui/app/runtime/converter-client-options.desktop.ts",
       "apps/ui/app/runtime/converter-client-options.ts",
       "apps/ui/app/runtime/image-runtime.definition.ts",
@@ -28,6 +30,7 @@
       "apps/ui/app/runtime/observability/observability.middleware.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
+      "apps/ui/app/runtime/project-runtime.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
       "apps/ui/app/runtime/ui-runtime.config.ts",

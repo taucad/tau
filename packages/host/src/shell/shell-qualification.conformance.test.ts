@@ -2358,7 +2358,8 @@ describe.runIf(enabled)('shell qualification', () => {
       try {
         const status = await pointed.run('git status --porcelain');
         expect(status.exitCode, status.text).toBe(128);
-        expect(status.text).toMatch(/not a git repository/u);
+        /* Older git calls the unreadable store no repository; newer git names the pointer that leads nowhere. */
+        expect(status.text).toMatch(/not a git repository|gitfile does not point to a valid repository/u);
       } finally {
         await pointed.close();
       }

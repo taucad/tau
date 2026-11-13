@@ -239,12 +239,18 @@ const liveCheckoutId = 'live';
  *   path that is not a directory disables hooks on every platform.
  * - `init.templateDir` installs hooks and config into a repository this port
  *   creates. Empty is git's own "no template", and it is silent.
+ * - `core.fsmonitor` names a program git runs on `status`, `diff` and every
+ *   index refresh. A value in the store's own `config` is somebody else's
+ *   program run by Tau's plumbing; `false` is git's own "no monitor"
+ *   (linux-terminal-git-parity LP4, threat case 1).
  */
 const pinnedConfiguration: readonly string[] = Object.freeze([
   '-c',
   'core.autocrlf=false',
   '-c',
   'core.hooksPath=/dev/null',
+  '-c',
+  'core.fsmonitor=false',
   '-c',
   'init.templateDir=',
 ]);
@@ -319,15 +325,39 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         .map((name) => [name, undefined]),
     );
 
+  /** The store this port owns: every checkout's common directory. */
+  const storePath = join(repositoryPath, gitDirectoryName);
+
+  /**
+   * The cleared environment, pinned to this project's own store as its common
+   * directory, for a command in a linked checkout.
+   *
+   * A linked checkout finds its admin directory, `worktrees/<id>`, from its
+   * `.git` file, and git then reads the common directory — config, hooks,
+   * objects, refs — from that admin directory's `commondir` file, as it reads
+   * the store's own `commondir` when one is present. Either file, written by
+   * anything that can write the store, would re-point every command at a
+   * config of its choosing (linux-terminal-git-parity LP4, threat cases 3 and
+   * 5). `GIT_COMMON_DIR` wins over both, so the admin directory stays the
+   * checkout's own and the common directory stays the real store.
+   *
+   * @returns The environment a linked checkout's commands run under.
+   */
+  const linkedGitEnvironment = (): Record<string, string | undefined> => {
+    const pinned = clearedGitEnvironment();
+    pinned['GIT_COMMON_DIR'] = storePath;
+    return pinned;
+  };
+
   /**
    * The cleared environment, pinned to this project's own store and work tree.
    *
    * @returns The environment every command of this port runs under.
    */
   const gitEnvironment = (): Record<string, string | undefined> => {
-    const pinned = clearedGitEnvironment();
+    const pinned = linkedGitEnvironment();
     // Environment names, not identifiers: assigned rather than spelled as keys.
-    pinned['GIT_DIR'] = join(repositoryPath, gitDirectoryName);
+    pinned['GIT_DIR'] = storePath;
     pinned['GIT_WORK_TREE'] = repositoryPath;
     pinned['GIT_TERMINAL_PROMPT'] = '0';
     return pinned;
@@ -1798,7 +1828,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     if (root === undefined) {
       return join(repositoryPath, gitDirectoryName);
     }
-    const result = await run(['-C', root, 'rev-parse', '--absolute-git-dir'], { env: clearedGitEnvironment() });
+    const result = await run(['-C', root, 'rev-parse', '--absolute-git-dir'], { env: linkedGitEnvironment() });
     return result.exitCode === 0 ? textDecoder.decode(result.stdout).trim() : undefined;
   };
 
@@ -1837,7 +1867,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   ): Promise<void> => {
     /* A linked worktree finds its own admin directory from its `.git` file. */
     const prefix = root === undefined ? [] : ['-C', root];
-    const environment = root === undefined ? gitEnvironment() : clearedGitEnvironment();
+    const environment = root === undefined ? gitEnvironment() : linkedGitEnvironment();
     const readTree = head === undefined ? ['read-tree', '--empty'] : ['read-tree', head];
     if (replaced === undefined) {
       await run([...prefix, ...readTree], { env: environment });
@@ -2135,8 +2165,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
     /* Discovery, not the pinned store: the question is what is *already* at
      * this path, so `GIT_DIR` must be absent here rather than pointed at the
-     * answer. Every `GIT_*` the caller exported is still stripped. */
-    const discovery = clearedGitEnvironment();
+     * answer. Every `GIT_*` the caller exported is still stripped. A store
+     * directory that is already here is the one discovery finds first, so its
+     * common directory is pinned to itself and a `commondir` planted in it
+     * cannot answer for it (LP4); with no store yet there is nothing to pin,
+     * and pinning a missing one would hide a bare repository at this path. */
+    const discovery = gitEntry?.isDirectory() === true ? linkedGitEnvironment() : clearedGitEnvironment();
     const bare = await run(['rev-parse', '--is-bare-repository'], { env: discovery });
     if (bare.exitCode === 0 && textDecoder.decode(bare.stdout).trim() === 'true') {
       // Review 4 R26: a bare repository has no work tree to snapshot, and
@@ -2378,7 +2412,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           root === undefined
             ? await output(command)
             : // A linked worktree finds its own admin directory from its `.git` file.
-              await output(['-C', root, ...command], { env: clearedGitEnvironment() });
+              await output(['-C', root, ...command], { env: linkedGitEnvironment() });
         return textDecoder
           .decode(listed)
           .split('\0')
@@ -3236,7 +3270,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         /* The way back: the branch Git's own log says this worktree left last. */
         const previous = await run(
           [...(root === undefined ? [] : ['-C', root]), 'rev-parse', '--symbolic-full-name', '@{-1}'],
-          root === undefined ? {} : { env: clearedGitEnvironment() },
+          root === undefined ? {} : { env: linkedGitEnvironment() },
         );
         const left = previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : '';
         return Object.freeze({
@@ -3297,7 +3331,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
          * differs as modified without asking the filter, so once the fill writes
          * the bytes `git status` would list every large file. `read-tree` leaves
          * stat data zero, and Git compares contents on its next refresh (R14). */
-        await run(['-C', root, 'read-tree', 'HEAD'], { env: clearedGitEnvironment() });
+        await run(['-C', root, 'read-tree', 'HEAD'], { env: linkedGitEnvironment() });
       };
       await (withMutationAuthority?.(
         {

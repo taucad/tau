@@ -154,6 +154,7 @@ describe('ci.yml affected-only lanes', () => {
       'cli-e2e': { targets: ['test:scenarios'], pr: 'queue' },
       size: { targets: ['size'] },
       formal: { targets: ['formal:tla'], pr: 'queue' },
+      'formal-nightly': { targets: ['formal:nightly'], pr: 'queue' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
       'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
@@ -221,6 +222,7 @@ describe('ci.yml affected-only lanes', () => {
       'api',
       'billing-e2e',
       'shell',
+      'formal-nightly',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -1027,7 +1029,7 @@ describe('plan lane selection', () => {
       root: 'apps/libs/api-billing',
       type: 'lib',
       tags: ['scope:api'],
-      targets: ['test', 'test:billing-foundation'],
+      targets: ['test', 'test:billing-foundation', 'formal:nightly'],
     },
     ui: {
       root: 'apps/ui',
@@ -1042,7 +1044,12 @@ describe('plan lane selection', () => {
       targets: ['test:scenarios', 'test-geospec', 'test:native-linux'],
     },
     sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
-    host: { root: 'packages/host', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
+    host: {
+      root: 'packages/host',
+      type: 'lib',
+      tags: ['ci:shell'],
+      targets: ['test:shell-conformance', 'formal:nightly'],
+    },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -1229,6 +1236,22 @@ describe('plan lane selection', () => {
     expect(pullRequest.outputs['shell']).toBe('false');
   });
 
+  it('should run the affected formal nightly projects in the merge queue and none on a pull request', () => {
+    const queue = plan('merge_group', { affected: ['host', 'api'], files: ['packages/host/src/acp/server.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['formal-nightly']).toBe('true');
+    expect(queue.outputs['formal-nightly-projects']).toBe('["host"]');
+    const both = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(both.outputs['formal-nightly-projects']).toBe('["api-billing","host"]');
+    const pullRequest = plan('pull_request', { affected: ['host'], files: ['packages/host/src/acp/server.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['formal-nightly']).toBe('false');
+    expect(pullRequest.outputs['formal-nightly-projects']).toBe('[]');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['formal-nightly']).toBe('false');
+  });
+
   it('should not select the shell lane for a file beside the fixture paths', () => {
     const queue = plan('merge_group', { affected: [], files: ['apps/desktop/scripts/hosted-linux-vm.sh'] });
     expect(queue.status, queue.stderr).toBe(0);
@@ -1240,5 +1263,102 @@ describe('plan lane selection', () => {
     const { status, stderr } = plan('merge_group', { affected: everything, files: [], selectors });
     expect(status).not.toBe(0);
     expect(stderr).toContain('lane selectors name a pull-request rule other than queue or touched');
+  });
+});
+
+describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
+  type FormalNightlyWorkflow = {
+    readonly on: Record<string, unknown> & {
+      readonly workflow_call?: {
+        readonly inputs?: Record<string, { readonly type?: string; readonly required?: boolean }>;
+      };
+    };
+    readonly concurrency?: { readonly group?: string; readonly 'cancel-in-progress'?: boolean };
+    readonly jobs: Record<string, Job>;
+  };
+  const nightly = load(read('.github/workflows/formal-nightly.yml')) as FormalNightlyWorkflow;
+  const lane = ci.jobs['formal-nightly'];
+  const condition =
+    "!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.formal-nightly == 'true' && github.event_name == 'merge_group'";
+
+  it('should plan the lane from formal:nightly, in the merge queue only', () => {
+    expect(laneSelectors['formal-nightly']).toEqual({ targets: ['formal:nightly'], pr: 'queue' });
+    expect(planScript).toContain('formal_nightly=$(flag formal-nightly)');
+    expect(planScript).toContain('echo "formal-nightly-projects=$formal_nightly_projects"');
+    expect(ci.jobs['plan']?.outputs?.['formal-nightly-projects']).toBe(
+      expression('steps.plan.outputs.formal-nightly-projects'),
+    );
+    expect(lane?.if).toBe(expression(condition));
+  });
+
+  it('should call the nightly tiers with the planned projects, seeded by the queue commit', () => {
+    expect(lane?.uses).toBe('./.github/workflows/formal-nightly.yml');
+    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.with).toEqual({
+      ref: expression('github.sha'),
+      projects: expression('needs.plan.outputs.formal-nightly-projects'),
+      seed: expression('github.sha'),
+    });
+  });
+
+  it('should require the lane in the required check when the queue planned it', () => {
+    const step = ci.jobs['affected']?.steps?.[0];
+    expect(step?.env?.['FORMAL_NIGHTLY_REQUIRED']).toBe(expression('needs.plan.outputs.formal-nightly'));
+    expect(step?.env?.['FORMAL_NIGHTLY_RESULT']).toBe(expression('needs.formal-nightly.result'));
+    const check = step?.run ?? '';
+    const rule =
+      'if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi';
+    expect(check).toContain(rule);
+    expect(check.indexOf(rule)).toBeGreaterThan(check.indexOf('if [ -n "$REUSED" ]; then'));
+  });
+
+  it('should take ref, projects and seed as workflow_call inputs and give each caller its own group', () => {
+    const inputs = nightly.on.workflow_call?.inputs ?? {};
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed']);
+    expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
+    expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
+    expect(inputs['seed']).toMatchObject({ type: 'string', required: false });
+    expect(nightly.concurrency?.group).toBe(
+      `formal-nightly\${{ inputs.ref && format('-{0}-{1}', inputs.ref, github.run_id) || '' }}`,
+    );
+    expect(nightly.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('should narrow the matrix to the requested projects and fail on an unknown or empty list', () => {
+    const step = nightly.jobs['projects']?.steps?.find((candidate) => candidate.id === 'list');
+    expect(step?.env?.['REQUESTED']).toBe(expression("inputs.projects || ''"));
+    const script = step?.run ?? '';
+    expect(script).toContain('type == "array" and length > 0');
+    expect(script).toContain('--argjson requested "$projects"');
+  });
+
+  it('should derive FORMAL_SEED from the seed source and leave it random without one', () => {
+    const run = nightly.jobs['formal-nightly']?.steps?.find((step) => step.run?.includes('nx run-many'));
+    expect(run?.env?.['TAU_FORMAL_SEED']).toBe(expression("inputs.seed || ''"));
+    const derive = /^\s*(FORMAL_SEED=.*)$/mu.exec(run?.run ?? '')?.[1] ?? '';
+    expect(derive).toBe(
+      'FORMAL_SEED=$(( 16#$(printf \'%s\' "$TAU_FORMAL_SEED" | sha256sum | cut -c1-8) % 2147483647 ))',
+    );
+    const seedOf = (source: string): number => {
+      const result = spawnSync('bash', ['-euo', 'pipefail', '-c', `${derive}; echo "$FORMAL_SEED"`], {
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', process.env['PATH'] ?? ''],
+          ['TAU_FORMAL_SEED', source],
+        ]),
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return Number(result.stdout.trim());
+    };
+    const sha = '1f869be2c0ffee00000000000000000000000000';
+    // The same source replays the same seed; a commit sha and a run id both give a seed the tools accept.
+    expect(seedOf(sha)).toBe(seedOf(sha));
+    expect(seedOf(sha)).not.toBe(seedOf('43212287515'));
+    for (const source of [sha, '43212287515']) {
+      expect(Number.isInteger(seedOf(source))).toBe(true);
+      expect(seedOf(source)).toBeGreaterThanOrEqual(0);
+      expect(seedOf(source)).toBeLessThan(2_147_483_647);
+    }
+    expect(run?.run).toContain('if [ -n "$TAU_FORMAL_SEED" ]; then');
   });
 });

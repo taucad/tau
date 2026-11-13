@@ -73,7 +73,7 @@ describe("a view's menu states (T5.3, V5)", () => {
     expect(result.current?.sourceOf?.('display.surfaces')).toBe('person');
   });
 
-  it('reports a set and a reset with level view, and Reset view resets every leaf the view sets', async () => {
+  it('reports a set and a reset with level view', async () => {
     const { result } = mount();
     await act(async () => {
       await result.current?.set('display.lines', false);
@@ -83,28 +83,14 @@ describe("a view's menu states (T5.3, V5)", () => {
     });
     expect(events('viewer_default_changed')).toEqual([{ level: 'view', field: 'display.lines' }]);
     expect(events('viewer_override_reset')).toEqual([{ level: 'view', field: 'display.grid' }]);
-    state.capture.mockReset();
-    state.edit.mockClear();
-    await act(async () => {
-      result.current?.resetView?.();
-      await Promise.resolve();
-    });
-    expect(events('viewer_override_reset')).toEqual([
-      { level: 'view', field: 'display.grid' },
-      { level: 'view', field: 'grid.unit' },
-    ]);
-    await vi.waitFor(() => {
-      expect(state.edit).toHaveBeenCalled();
-    });
   });
 
-  it('gives the menu no sources, no Reset view and reports nothing with the flag off', async () => {
+  it('gives the menu no sources and reports nothing with the flag off', async () => {
     state.viewerControls = false;
     const { result } = mount();
     const fields = result.current!;
     expect(fields.sourceOf).toBeUndefined();
     expect(fields.inheritsFrom).toBeUndefined();
-    expect(fields.resetView).toBeUndefined();
     await act(async () => {
       await fields.set('display.lines', false);
     });

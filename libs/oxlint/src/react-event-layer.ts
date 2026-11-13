@@ -551,7 +551,8 @@ export function reactEventLayerZeroProblems(
 }
 
 /**
- * Measures a project's directories against its committed ceiling manifest.
+ * Measures a project's directories against its committed ceiling manifest. A line naming a file that no longer
+ * exists is reported, so a deleted or moved file cannot leave its line behind.
  *
  * @param check - The manifest, the directories it covers and any zero scope.
  * @returns Every manifest problem and ceiling violation; empty when the project passes.
@@ -575,6 +576,11 @@ export function checkReactEventLayerCeiling(check: ReactEventLayerCheck): string
     }
     return isInScope(name, prefixes) ? [] : [`${name}: a zero-scope path outside the measured directories`];
   });
+  const missingLines = Object.keys(ceiling).flatMap((key) =>
+    existsSync(join(workspaceRoot, key))
+      ? []
+      : [`${key}: a ceiling line whose file does not exist; delete the line, or carry it to the moved path`],
+  );
   const exceptions = check.zero?.exceptions ?? {};
   const allowed: Record<string, number> = { ...ceiling };
   for (const [path, { sites }] of Object.entries(exceptions)) {
@@ -583,6 +589,7 @@ export function checkReactEventLayerCeiling(check: ReactEventLayerCheck): string
   return [
     ...duplicateManifestKeys(manifestText),
     ...reactEventLayerManifestProblems(ceiling, prefixes),
+    ...missingLines,
     ...missingScope,
     ...reactEventLayerZeroProblems(measured, ceiling, { scope, exceptions }),
     ...reactEventLayerViolations(measured, allowed, { name: manifestName, zeroScope: scope }),

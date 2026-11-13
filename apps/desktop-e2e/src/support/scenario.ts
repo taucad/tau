@@ -242,9 +242,18 @@ export const pressModelTreeShortcut = async (page: Page): Promise<void> => {
   await page.keyboard.press('Control+a');
 };
 
-/** Choose the CAD kernel from the home page's kernel row. */
+/**
+ * Choose the CAD kernel from the composer's kernel picker. Home starts on Auto, and the picker is a searchable list
+ * whose rows lead with the kernel's name (a badge may follow with no space), so the search narrows it to that kernel before the row is chosen.
+ */
 export const selectKernel = async (page: Page, kernelName: string): Promise<void> => {
-  await page.getByRole('button', { name: kernelName, exact: true }).first().click();
+  await page
+    .getByRole('button', { name: /^Kernel: /u })
+    .first()
+    .click();
+  await page.getByPlaceholder('Search kernels…').fill(kernelName);
+  const leading = new RegExp(`^${kernelName.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)}`, 'u');
+  await page.getByRole('option', { name: leading }).first().click();
   await parkPointer(page);
 };
 

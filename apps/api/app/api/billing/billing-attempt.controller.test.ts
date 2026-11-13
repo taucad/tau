@@ -5,27 +5,28 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { attemptReceiptSchema } from '@taucad/agent-host/wire';
-import type { Auth } from 'better-auth';
-import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type { z } from 'zod';
 import { BillingAttemptController, BillingUsageService, recoveryGraceMinutes } from '@taucad/api-billing';
 import type { AttemptLookupAnswer } from '@taucad/api-billing';
 import { environmentSchemaBase } from '@taucad/api-core';
 import { HostsService } from '@taucad/api-hosts';
 import { LlmGatewayAuthGuard } from '@taucad/api-llm-gateway';
-import { authInstanceKey } from '@taucad/api-auth';
+import { SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSession, FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
-type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;
+type Session = NonNullable<FakeSession>;
 type Device = NonNullable<Awaited<ReturnType<HostsService['authenticateDevice']>>>;
 
 const createApp = async (input: { readonly sessionUserId?: string; readonly deviceOwnerId?: string }) => {
   const usage = mock<BillingUsageService>();
   usage.getAttemptReceipt.mockResolvedValue({ state: 'not_found', voided: true });
-  const auth = mockDeep<Auth>();
+  const getSession = vi.fn<FakeSessionLookup>();
   // The guards read only the principal's id; the rest of each record is out of scope.
-  auth.api.getSession.mockResolvedValue(
+  getSession.mockResolvedValue(
     input.sessionUserId === undefined ? null : mock<Session>({ user: { id: input.sessionUserId } }),
   );
   const hosts = mock<HostsService>();
@@ -39,7 +40,7 @@ const createApp = async (input: { readonly sessionUserId?: string; readonly devi
     providers: [
       Reflector,
       LlmGatewayAuthGuard,
-      { provide: authInstanceKey, useValue: auth },
+      { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
       { provide: HostsService, useValue: hosts },
       { provide: BillingUsageService, useValue: usage },
       {

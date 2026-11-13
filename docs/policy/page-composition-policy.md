@@ -3,7 +3,7 @@ title: 'Page Composition Policy'
 description: 'Page frame, title row, view controls, collection grid and pagination, card anatomy and states, button roles, busy and collection states, copy, view URL state, keyboard order and first-viewport budget for Tau product pages.'
 status: active
 created: '2026-09-28'
-updated: '2026-11-11'
+updated: '2026-11-13'
 related:
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
@@ -96,7 +96,7 @@ Choose the filter control by its vocabulary:
 | Vocabulary                                                                        | Control                                                                                                                                                     | Current value                        |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | One value from a small closed set the visitor came to explore (up to six kernels) | Single-select `ToggleGroup` shelf: each tile shows the `SvgIcon` mark, catalog name, result count and catalog one-line `description`; two columns on phones | The pressed tile                     |
-| One value from a closed set of up to ten                                          | Outline trigger + `DropdownMenuRadioItem` (`geometry/cad/grid-control.tsx`)                                                                                 | The trigger label and the radio mark |
+| One value from a closed set of up to ten                                          | Outline trigger + `DropdownMenuRadioItem` (`routes/parts/route.tsx`)                                                                                        | The trigger label and the radio mark |
 | Several values from a closed set                                                  | Outline trigger + count `Badge` + `DropdownMenuCheckboxItem` (`routes/usage/route.tsx`)                                                                     | The badge and the checkbox marks     |
 | An open or growing set                                                            | `ComboBoxResponsive` (UX Policy Rule 6)                                                                                                                     | The field value                      |
 

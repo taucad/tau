@@ -252,6 +252,16 @@ export const environmentSchemaBase = z.object({
 
   // Authentication
   AUTH_SECRET: z.string(),
+  // Auth session cookie cache: seconds a session snapshot (session_data) may answer cookie GETs without a store read.
+  AUTH_SESSION_CACHE_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(300)
+    .default(0)
+    .describe(
+      'Seconds a Better Auth session snapshot may authenticate cookie GET/HEAD requests without a PostgreSQL read; 0 disables the cookie cache',
+    ),
   /**
    * HMAC secret for short-lived anonymous publication view dedup. Must be at least 32 characters.
    */

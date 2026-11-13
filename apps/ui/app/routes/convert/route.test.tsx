@@ -16,9 +16,6 @@ vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
 vi.mock('#components/geometry/cad/capture-view-control.js', () => ({
   CaptureViewControl: () => <button type='button' aria-label='Capture view to chat' />,
 }));
-vi.mock('@taucad/viewer/cad/grid-control', () => ({
-  GridSizeIndicator: () => <button type='button' aria-label='Grid 10 mm, units and grid' />,
-}));
 vi.mock('@taucad/viewer/cad/viewer-settings', () => ({
   ViewerSettings: () => <button type='button' aria-label='Viewer settings' />,
 }));
@@ -61,14 +58,7 @@ describe('ConverterViewer', () => {
       within(bar)
         .getAllByRole('button')
         .map((button) => button.getAttribute('aria-label') ?? button.textContent),
-    ).toEqual([
-      'Grid 10 mm, units and grid',
-      'Section view',
-      'Measure',
-      'Fit view',
-      'Enter fullscreen',
-      'Viewer settings',
-    ]);
+    ).toEqual(['Section view', 'Measure', 'Fit view', 'Enter fullscreen', 'Viewer settings']);
     expect(bar.closest('[data-viewer-frame]')).toContainElement(screen.getByRole('img', { name: 'Model' }));
   });
 

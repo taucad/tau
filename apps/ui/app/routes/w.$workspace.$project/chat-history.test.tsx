@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useImperativeHandle } from 'react';
+import { Profiler, useImperativeHandle, useSyncExternalStore } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { MyUIMessage } from '@taucad/chat';
@@ -23,9 +23,29 @@ vi.mock('#hooks/use-kernel.js', () => ({
 
 // Chat-history only reads `messageOrder` / `messages` selectors from useChat
 // now; sendMessage / regenerate / etc. flow through useCadChatClient.
-const chatStateRef: { current: { messages: readonly MyUIMessage[] } } = { current: { messages: [] } };
+/** The transcript's load state the chat session reports (I21: `loading | loaded | empty`); A12 adds it to the store. */
+type TranscriptState = 'loading' | 'loaded' | 'empty';
+type MockChatState = { readonly messages: readonly MyUIMessage[]; readonly transcript?: TranscriptState };
+const chatStateRef: { current: MockChatState } = { current: { messages: [] } };
 const setMockMessages = (messages: readonly MyUIMessage[]): void => {
   chatStateRef.current = { messages };
+};
+/* A row that drives a load publishes through the session's subscription, so its state change commits as the store's
+ * would, without a rerender from the row. */
+const chatStateListeners = new Set<() => void>();
+let chatStateVersion = 0;
+const subscribeChatState = (listener: () => void): (() => void) => {
+  chatStateListeners.add(listener);
+  return () => {
+    chatStateListeners.delete(listener);
+  };
+};
+const publishChatState = (state: MockChatState): void => {
+  chatStateRef.current = state;
+  chatStateVersion += 1;
+  for (const listener of chatStateListeners) {
+    listener();
+  }
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
 let archiveOpen = false;
@@ -70,12 +90,14 @@ const emitRestoreCancelledDraft = (payload: unknown): void => {
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: (selector: (state: unknown) => unknown) => {
-    const { messages } = chatStateRef.current;
+    useSyncExternalStore(subscribeChatState, () => chatStateVersion);
+    const { messages, transcript = messages.length === 0 ? 'empty' : 'loaded' } = chatStateRef.current;
     return selector({
       messages,
       messageOrder: messages.map((m) => m.id),
       turnGroups: buildTurnGroups(messages),
       agentInvocations: '',
+      transcript,
     });
   },
   useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
@@ -183,7 +205,7 @@ vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
 }));
 
 vi.mock('@taucad/project-workspace/components/chat-history-empty', () => ({
-  ChatHistoryEmpty: () => null,
+  ChatHistoryEmpty: () => <div data-slot='panel-empty-state' />,
 }));
 
 vi.mock('#components/ui/floating-panel.js', () => ({
@@ -243,6 +265,9 @@ const capturedVirtuoso: {
   initialTopMostItemIndex?: { index: string; align: string };
 } = {};
 const scrollToIndexMock = vi.fn();
+const DefaultScroller = ({ children }: { readonly children?: React.ReactNode }): React.JSX.Element => (
+  <div>{children}</div>
+);
 vi.mock('react-virtuoso', () => ({
   Virtuoso: (properties: {
     readonly data: readonly unknown[];
@@ -250,6 +275,12 @@ vi.mock('react-virtuoso', () => ({
     readonly itemContent: (index: number, item: unknown) => React.ReactNode;
     readonly followOutput: () => 'auto' | false;
     readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
+    readonly components?: {
+      readonly EmptyPlaceholder?: React.ComponentType<{ readonly context?: unknown }>;
+      readonly Scroller?: React.ComponentType<{ readonly children?: React.ReactNode; readonly context?: unknown }>;
+    };
+    readonly context?: unknown;
+    readonly 'data-transcript-state'?: string;
   }) => {
     capturedVirtuoso.initialTopMostItemIndex = properties.initialTopMostItemIndex;
     capturedVirtuoso.totalCount = properties.data.length;
@@ -264,7 +295,17 @@ vi.mock('react-virtuoso', () => ({
         </div>,
       );
     }
-    return <div data-testid='virtuoso'>{items}</div>;
+    /* Like Virtuoso, the root takes the list's own attributes, the list's Scroller holds its rows, the empty
+     * placeholder shows for no data, and both custom components receive the list's `context`. */
+    const EmptyPlaceholder = properties.components?.EmptyPlaceholder;
+    const Scroller = properties.components?.Scroller ?? DefaultScroller;
+    return (
+      <div data-testid='virtuoso' data-transcript-state={properties['data-transcript-state']}>
+        <Scroller context={properties.context}>
+          {items.length === 0 && EmptyPlaceholder ? <EmptyPlaceholder context={properties.context} /> : items}
+        </Scroller>
+      </div>
+    );
   },
 }));
 
@@ -616,5 +657,110 @@ describe('ChatHistory — composer refocus', () => {
     unmount();
 
     expect(persistenceListeners.get('restoreCancelledDraft')?.size ?? 0).toBe(0);
+  });
+});
+
+/**
+ * The list's own container marks its transcript's load state: lane A12 renders `data-transcript-state` on the
+ * Virtuoso root (passed as a Virtuoso prop), or on its Scroller from the list's `context`. The mock renders both and
+ * passes `context` to the Scroller and the empty placeholder, as Virtuoso does. It does not exist yet.
+ */
+const transcriptLoadingMarker = '[data-transcript-state="loading"]';
+/** The same marker once the list has left `loading` with the chat's turns. */
+const transcriptLoadedMarker = '[data-transcript-state="loaded"]';
+
+type CommitFrame = {
+  readonly emptyState: boolean;
+  readonly loading: boolean;
+  readonly loaded: boolean;
+  readonly turns: number;
+};
+
+/** What the document holds now: the empty-chat state, the list's load markers, and the turns shown. */
+const readFrame = (): CommitFrame => ({
+  emptyState: document.querySelector('[data-slot="panel-empty-state"]') !== null,
+  loading: document.querySelector(transcriptLoadingMarker) !== null,
+  loaded: document.querySelector(transcriptLoadedMarker) !== null,
+  turns: document.querySelectorAll('[data-testid="chat-message"]').length,
+});
+
+/**
+ * Render the chat lane over a transcript load the row controls, reading the document at every React commit.
+ *
+ * @param history - What the load resolves to: the chat's turns, or none for a truly empty chat.
+ * @returns Every commit's frame, and the step that settles the load.
+ */
+const renderOverDeferredTranscript = (history: readonly MyUIMessage[]) => {
+  const commits: CommitFrame[] = [];
+  publishChatState({ messages: [], transcript: 'loading' });
+  render(
+    <Profiler
+      id='chat-history'
+      onRender={() => {
+        commits.push(readFrame());
+      }}
+    >
+      <ChatHistory />
+    </Profiler>,
+  );
+  return {
+    commits,
+    resolve: () => {
+      act(() => {
+        publishChatState({ messages: history, transcript: history.length === 0 ? 'empty' : 'loaded' });
+      });
+    },
+  };
+};
+
+describe('ChatHistory — transcript load (I21)', () => {
+  const history = [message('u1', 'user'), message('a1', 'assistant')];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockMessages([]);
+    archiveOpen = false;
+  });
+
+  it.fails('never shows the empty-chat state for a chat with history while its transcript loads (U7)', () => {
+    const load = renderOverDeferredTranscript(history);
+    const steps = [readFrame()];
+    load.resolve();
+    steps.push(readFrame());
+
+    expect(load.commits.length).toBeGreaterThan(1);
+    expect(load.commits.filter((frame) => frame.emptyState)).toEqual([]);
+    expect(steps.filter((frame) => frame.emptyState)).toEqual([]);
+    expect(screen.getAllByTestId('chat-message')).toHaveLength(2);
+  });
+
+  it('shows the empty-chat state at once for a chat that is truly empty (U7)', () => {
+    publishChatState({ messages: [], transcript: 'empty' });
+    const commits: CommitFrame[] = [];
+    render(
+      <Profiler
+        id='chat-history'
+        onRender={() => {
+          commits.push(readFrame());
+        }}
+      >
+        <ChatHistory />
+      </Profiler>,
+    );
+
+    expect(commits[0]?.emptyState).toBe(true);
+    // A truly empty chat is out of `loading` from its first commit, not marked by its turn count.
+    expect(commits.filter((frame) => frame.loading)).toEqual([]);
+    expect(document.querySelector('[data-slot="panel-empty-state"]')).toBeInTheDocument();
+  });
+
+  it.fails('has no commit with the list neither loading nor showing a turn, for a chat with history (U19)', () => {
+    const load = renderOverDeferredTranscript(history);
+    load.resolve();
+
+    expect(load.commits.length).toBeGreaterThan(1);
+    expect(load.commits.filter((frame) => !frame.loading && frame.turns === 0)).toEqual([]);
+    // The list leaves `loading` once the load settles, so the filter above holds that commit to its turns.
+    expect(load.commits.at(-1)).toMatchObject({ loading: false, loaded: true, turns: 2 });
   });
 });

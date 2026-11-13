@@ -206,6 +206,19 @@ describe('projectRun', () => {
       ).toEqual(verified);
     });
 
+    it('ignores a todo or workbench update after the last check, which changes no model file', async () => {
+      expect(
+        await success({
+          tools: [
+            tool(['c1', 'edit_file', 3]),
+            tool(['c2', 'test_model', 10], 'passed'),
+            tool(['c3', 'update_todos', 20]),
+            tool(['c4', 'arrange_workbench', 30]),
+          ],
+        }),
+      ).toEqual(verified);
+    });
+
     it('cannot decide a run with no check, no check after its last edit, or no decided check', async () => {
       expect(await success({ tools: [tool(['c1', 'edit_file', 3])] })).toEqual(unknown);
       expect(

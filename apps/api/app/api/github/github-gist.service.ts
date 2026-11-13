@@ -168,7 +168,7 @@ export class GithubGistService {
     }
     let lease;
     try {
-      lease = await this.auth.api.getAccessToken({ headers, body: { accountId: linked.id } });
+      lease = await this.auth.getAccessToken(headers, { accountId: linked.id });
     } catch {
       throw new UnauthorizedException({ code: 'GITHUB_GIST_RECONNECT_REQUIRED' });
     }

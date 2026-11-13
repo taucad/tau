@@ -39,7 +39,8 @@ type WorkspaceConnectionContext = {
 
 export type WorkspaceConnectionFailedPhase = 'registering' | 'mounting' | 'discovering' | 'publishing';
 
-type WorkspaceConnectionEvent =
+/** Events accepted by workspaceConnectionMachine. @public */
+export type WorkspaceConnectionEvent =
   | { readonly type: 'beginSelection'; readonly operationId: string }
   | { readonly type: 'selectionCancelled' }
   | {
@@ -56,6 +57,58 @@ type WorkspaceCatalogPreparedEvent = {
   readonly type: 'workspaceCatalogPrepared';
   readonly catalog: PreparedWorkspaceCatalog;
 };
+
+/**
+ * The workspace connection machine's public alphabet: every {@link WorkspaceConnectionEvent} type, in the union's
+ * order. The totality test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const workspaceConnectionEventTypes = [
+  'beginSelection',
+  'selectionCancelled',
+  'workspaceSelected',
+  'retry',
+  'workspaceRegistered',
+  'workspaceCatalogPrepared',
+] as const satisfies ReadonlyArray<WorkspaceConnectionEvent['type']>;
+
+const workspaceConnectionStates = [
+  'idle',
+  'selecting',
+  'registering',
+  'mounting',
+  'browsing',
+  'discovering',
+  'publishing',
+  'ready',
+  'failed',
+] as const;
+
+/** Every state but the ones named, for a pair the machine answers in those states only. */
+const workspaceConnectionStatesExcept = (...answered: ReadonlyArray<(typeof workspaceConnectionStates)[number]>) =>
+  workspaceConnectionStates.filter((state) => !answered.includes(state));
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
+ * state where no transition takes the event. `beginSelection` is answered at the root, in every state.
+ *
+ * - `selectionCancelled` and `workspaceSelected` outside `selecting`: the picker answered a pick no longer open.
+ * - `retry` outside `failed`: there is no failed step to resume.
+ * - `workspaceRegistered` outside `registering` and `workspaceCatalogPrepared` outside `discovering`: an effect's
+ *   report lands only while its invoke runs.
+ *
+ * @public
+ */
+export const workspaceConnectionIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...workspaceConnectionStatesExcept('selecting').flatMap((state) => [
+    [state, 'selectionCancelled'] as const,
+    [state, 'workspaceSelected'] as const,
+  ]),
+  ...workspaceConnectionStatesExcept('failed').map((state) => [state, 'retry'] as const),
+  ...workspaceConnectionStatesExcept('registering').map((state) => [state, 'workspaceRegistered'] as const),
+  ...workspaceConnectionStatesExcept('discovering').map((state) => [state, 'workspaceCatalogPrepared'] as const),
+];
 
 export type WorkspaceConnectionState =
   | { readonly phase: 'idle' }

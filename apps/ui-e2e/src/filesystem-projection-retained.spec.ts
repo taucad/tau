@@ -145,7 +145,10 @@ test('adopts independent rooted layout and view records in the retained browser 
     }),
   );
   await target.expectVisible(selectors.getByCss(`.dv-tab[data-tab-panel-id="${viewId}"]`), 60_000);
-  await target.expectVisible(selectors.getByRole('button', { name: /Grid .* in, units and grid/iu }), 60_000);
+  // The grid size and unit read on Viewer settings' Grid & units row.
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last());
+  await target.expectVisible(selectors.getByRole('menuitem', { name: /^Grid & units, .* in(?:,|$)/u }), 60_000);
+  await target.keyboardPress('Escape');
   await expect
     .poll(
       async () =>
@@ -333,10 +336,7 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
     throw error;
   }
   await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last());
-  await target.expectVisible(
-    selectors.getByCss('[data-slot="dropdown-menu-select-item"] [role="combobox"]').filter({ hasText: 'Disabled' }),
-    60_000,
-  );
+  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Timeout, Disabled' }), 60_000);
   await target.keyboardPress('Escape');
   // S15: keep the export panel mounted while independently authored preferences arrive.
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));

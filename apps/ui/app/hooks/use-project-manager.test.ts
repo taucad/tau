@@ -4897,4 +4897,230 @@ describe('useProjectManager.createProject', () => {
       ['chat', activityChat.id],
     ]);
   });
+
+  // ── Route access answers (L8, A0.4) ─────────────────────────────────────────
+  /*
+   * One row per answer of `getProjectRouteAccess`, and the two reads it must
+   * take again: an epoch that moves while the route is verified, and a
+   * recovery that starts while the library row is read. Characterisation of
+   * today's loop; ordering is held by deferred promises.
+   */
+  describe('route access answers (L8)', () => {
+    const verified: ProjectRouteVerification = {
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    };
+    /** A mock call that reports when it is reached and settles only once released. */
+    const held = <T>(value: T) => {
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      return {
+        reached: reached.promise,
+        release: () => {
+          release.resolve();
+        },
+        call: async (): Promise<T> => {
+          reached.resolve();
+          await release.promise;
+          return value;
+        },
+      };
+    };
+
+    it('L8: should answer recovering while this tab replays a row for the project', async () => {
+      mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+      const commit = held({ status: 'committed' } as const);
+      mockCommitPendingProjectDirectory.mockImplementationOnce(commit.call);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+          status: 'recovering',
+          recovery: {
+            operationId,
+            projectId: fakeProject.id,
+            kind: 'create',
+            storage: { backend: 'opfs', providerBasePath: pendingCreate.providerBasePath },
+            status: 'recovering',
+          },
+        });
+      });
+      expect(mockVerifyProjectRoute).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await commit.reached;
+        commit.release();
+        await result.current.getProjectListing();
+      });
+    });
+
+    it('L8: should answer recovery-failed once this tab has given up on a row for the project', async () => {
+      vi.useFakeTimers();
+      try {
+        mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+        mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
+        const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+        await act(async () => {
+          await result.current.getProjectListing();
+          // Drain the recovery loop; the fake clock yields once and fires nothing.
+          await vi.advanceTimersByTimeAsync(0);
+        });
+
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+          status: 'recovery-failed',
+          recovery: {
+            operationId,
+            projectId: fakeProject.id,
+            kind: 'create',
+            storage: { backend: 'opfs', providerBasePath: pendingCreate.providerBasePath },
+            status: 'failed',
+            reason: 'filesystem-error',
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('L8: should answer unavailable when the verified route reports its storage unavailable', async () => {
+      mockVerifyProjectRoute.mockResolvedValue({ status: 'unavailable' });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'unavailable' });
+      });
+      expect(mockVerifyProjectRoute).toHaveBeenCalledExactlyOnceWith({ projectId: fakeProject.id });
+      expect(mockListProjectManifests).not.toHaveBeenCalled();
+      expect(mockGetProjectLibraryState).not.toHaveBeenCalled();
+    });
+
+    it('L8: should answer ready for a verified route whose library row is not trashed', async () => {
+      mockVerifyProjectRoute.mockResolvedValue(verified);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({
+          status: 'ready',
+          project: { ...projectToManifest(fakeProject), id: fakeProject.id },
+        });
+      });
+      expect(mockGetProjectLibraryState).toHaveBeenCalledExactlyOnceWith(fakeProject.id);
+    });
+
+    it('L8: should answer trashed for a verified route whose library row is trashed', async () => {
+      mockVerifyProjectRoute.mockResolvedValue(verified);
+      mockGetProjectLibraryState.mockResolvedValue({ projectId: fakeProject.id, lastActivityAt: 10, deletedAt: 11 });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({
+          status: 'trashed',
+          project: { ...projectToManifest(fakeProject), id: fakeProject.id },
+        });
+      });
+    });
+
+    it('L8: should answer conflict when discovery finds the project id in two directories', async () => {
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [fakeLocator, { ...fakeLocator, relativeDirectory: 'test-project-copy' }].map((locator) => ({
+          status: 'duplicate-id',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator,
+        })),
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'conflict' });
+      });
+      expect(mockVerifyProjectRoute).toHaveBeenCalledExactlyOnceWith({ projectId: fakeProject.id });
+      expect(mockGetProjectLibraryState).not.toHaveBeenCalled();
+    });
+
+    it('L8: should answer missing when no pass discovers the project and no route names it', async () => {
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
+      });
+      expect(mockGetProjectFileSystemConfig).toHaveBeenCalledWith(fakeProject.id);
+    });
+
+    it('L8: should verify again when the discovery epoch moves while the route is being verified', async () => {
+      const stale = held(verified);
+      mockVerifyProjectRoute.mockImplementationOnce(stale.call).mockResolvedValueOnce({ status: 'unavailable' });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      const access = result.current.getProjectRouteAccess(fakeProject.id);
+      await act(async () => stale.reached);
+      act(() => {
+        emitWorkerChange('fileDeleted', '/test-project/tau.json');
+      });
+      stale.release();
+
+      // The verification the epoch overtook is never answered from.
+      await act(async () => {
+        await expect(access).resolves.toEqual({ status: 'unavailable' });
+      });
+      expect(mockVerifyProjectRoute).toHaveBeenCalledTimes(2);
+      expect(mockGetProjectLibraryState).not.toHaveBeenCalled();
+    });
+
+    it.each(['verified', 'discovered'] as const)(
+      'L8: should answer recovering when a recovery for the project starts while its %s library row is read',
+      async (route) => {
+        mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+        mockVerifyProjectRoute.mockResolvedValue(route === 'verified' ? verified : { status: 'discovery-required' });
+        mockGetProjectFileSystemConfig.mockResolvedValue({
+          projectId: fakeProject.id,
+          backend: 'opfs',
+          providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+        });
+        mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValue([pendingPermanentDelete]);
+        const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+        // Discovery is ready before the route asks, so the deletion below runs no pass and moves no epoch.
+        await act(async () => result.current.getProjectListing());
+        if (route === 'verified') {
+          // Drop the snapshot so the route verifies instead of reading the listing.
+          act(() => {
+            emitWorkerChange('fileDeleted', '/unrelated-project/tau.json');
+          });
+        }
+        const libraryRead = held<ProjectLibraryState | undefined>({ projectId: fakeProject.id, lastActivityAt: 10 });
+        mockGetProjectLibraryState.mockImplementationOnce(libraryRead.call);
+        const deletion = held({ status: 'deleted' } as const);
+        mockPermanentlyDeleteProjectDirectory.mockImplementationOnce(deletion.call);
+        const verifications = mockVerifyProjectRoute.mock.calls.length;
+
+        const access = result.current.getProjectRouteAccess(fakeProject.id);
+        await act(async () => libraryRead.reached);
+        expect(mockVerifyProjectRoute).toHaveBeenCalledTimes(route === 'verified' ? verifications + 1 : verifications);
+        // The recovery starts while the route is still reading the library row.
+        const deleting = result.current.permanentlyDeleteProject(fakeProject.id);
+        await act(async () => deletion.reached);
+        libraryRead.release();
+
+        await act(async () => {
+          await expect(access).resolves.toMatchObject({
+            status: 'recovering',
+            recovery: {
+              operationId: pendingPermanentDelete.operationId,
+              kind: 'permanent-delete',
+              status: 'recovering',
+            },
+          });
+        });
+        await act(async () => {
+          deletion.release();
+          await deleting;
+        });
+      },
+    );
+  });
 });

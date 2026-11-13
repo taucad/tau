@@ -120,6 +120,19 @@ describe('summaryGrantOf', () => {
     expect(purposeGrantOf(since(-1, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
     expect(purposeGrantOf(since(Number.NaN, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
   });
+
+  it('should claim the protection the server read for the account, and `unknown` when it names none', () => {
+    const subject = { principal: 'user-a', project: 'project-a' };
+
+    expect(summaryGrantOf({ ...answer(true), protection: 'pro' }, subject)).toEqual(
+      grant({ protection: 'pro', content: {} }),
+    );
+    expect(summaryGrantOf({ ...answer(true), protection: 'free' }, subject)).toEqual(
+      grant({ protection: 'free', content: {} }),
+    );
+    expect(summaryGrantOf(answer(true), subject)).toEqual(grant({ content: {} }));
+    expect(summaryGrantOf({ ...answer(true), protection: 'enterprise' }, subject)).toEqual(grant({ content: {} }));
+  });
 });
 
 describe('the content grant (LW6)', () => {

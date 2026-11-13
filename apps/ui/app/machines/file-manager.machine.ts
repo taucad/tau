@@ -727,11 +727,73 @@ type FileManagerEventLifecycle =
    */
   | { type: 'reloadWorkspace' };
 
-type FileManagerEvent =
+/** Events accepted by fileManagerMachine. @public */
+export type FileManagerEvent =
   | FileManagerEventLifecycle
   | WorkerConnectedEvent
   | WorkerInitializedEvent
   | WebAccessUnavailableEvent;
+
+/**
+ * The file manager machine's public alphabet: every {@link FileManagerEvent} type, in the union's order. The totality
+ * test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const fileManagerEventTypes = [
+  'initialize',
+  'resolveInitialBackend',
+  'setRoot',
+  'setBackendType',
+  'reloadWorkspace',
+  'workerConnected',
+  'workerInitialized',
+  'webAccessUnavailable',
+] as const satisfies ReadonlyArray<FileManagerEvent['type']>;
+
+const fileManagerStates = [
+  'initializing',
+  'connectingWorker',
+  'initializingServices',
+  'ready',
+  'webAccessUnavailable',
+  'error',
+] as const;
+
+/** Every state but the ones named, for a pair the machine answers in those states only. */
+const fileManagerStatesExcept = (...answered: ReadonlyArray<(typeof fileManagerStates)[number]>) =>
+  fileManagerStates.filter((state) => !answered.includes(state));
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline. A pair names a state
+ * where some event of its type goes unanswered; a mixed pair's type is also answered there with other context (a
+ * pair cannot say which), and the totality test checks that answer with its own row.
+ *
+ * - `initialize` once started, except from `error`, where it is the retry.
+ * - `resolveInitialBackend` once started: the engine was chosen before the worker connected.
+ * - `setRoot` to the current root, after `initializing` and outside `error`: nothing moves.
+ * - `setBackendType` outside `ready`.
+ * - `reloadWorkspace` before an init settles: `initializing` waits for `initialize`, and in `connectingWorker` and
+ *   `initializingServices` the running init reads the persistent binding itself.
+ * - `workerConnected` outside `connectingWorker`, `workerInitialized` and `webAccessUnavailable` outside
+ *   `initializingServices`: an effect's report lands only while its invoke runs.
+ *
+ * @public
+ */
+export const fileManagerIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...fileManagerStatesExcept('initializing', 'error').map((state) => [state, 'initialize'] as const),
+  ...fileManagerStatesExcept('initializing').map((state) => [state, 'resolveInitialBackend'] as const),
+  ...fileManagerStatesExcept('initializing', 'error').map((state) => [state, 'setRoot'] as const),
+  ...fileManagerStatesExcept('ready').map((state) => [state, 'setBackendType'] as const),
+  ...(['initializing', 'connectingWorker', 'initializingServices'] as const).map(
+    (state) => [state, 'reloadWorkspace'] as const,
+  ),
+  ...fileManagerStatesExcept('connectingWorker').map((state) => [state, 'workerConnected'] as const),
+  ...fileManagerStatesExcept('initializingServices').flatMap((state) => [
+    [state, 'workerInitialized'] as const,
+    [state, 'webAccessUnavailable'] as const,
+  ]),
+];
 
 type FileManagerInput = {
   rootDirectory: string;

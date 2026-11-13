@@ -5,7 +5,8 @@ import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
 /**
- * Real-browser acceptance of recovered external edit disclosures.
+ * Real-browser acceptance of recovered external edit disclosures and the
+ * composer height across the transcript load (U10).
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
@@ -23,6 +24,8 @@ export default defineConfig({
       headless: true,
       provider: playwright({ launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium' }],
+      // The U10 expected-failure row fails on every run; keep it from writing screenshots into the tree.
+      screenshotFailures: false,
     },
   },
 });

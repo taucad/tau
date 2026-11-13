@@ -3,18 +3,19 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
 import { ZodValidationPipe } from 'nestjs-zod';
-import { afterEach, describe, expect, it } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSession, FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { CloudHostEvidenceGuard, HostsService } from '@taucad/api-hosts';
 import { TelemetryPurposeController } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.controller';
 import type { EffectiveTelemetryPurposes } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.schema';
 import { TelemetryPurposeService } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.service';
 
-type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;
+type Session = NonNullable<FakeSession>;
 type Device = NonNullable<Awaited<ReturnType<HostsService['authenticateDevice']>>>;
 
 /* A plain value: a mock proxy is not serialisable. Its shape is the service's concern. */
@@ -23,8 +24,8 @@ const cloudHost = mock<Device>({ id: 'device-1', ownerId: 'owner-1', cloudProjec
 
 const apps: NestFastifyApplication[] = [];
 const createApp = async () => {
-  const auth = mockDeep<Auth>();
-  auth.api.getSession.mockResolvedValue(null);
+  const getSession = vi.fn<FakeSessionLookup>();
+  getSession.mockResolvedValue(null);
   const purposes = mock<TelemetryPurposeService>();
   purposes.getEffectivePurposes.mockResolvedValue(effective);
   const hosts = mock<HostsService>();
@@ -39,7 +40,7 @@ const createApp = async () => {
       CloudHostEvidenceGuard,
       { provide: TelemetryPurposeService, useValue: purposes },
       { provide: HostsService, useValue: hosts },
-      { provide: authInstanceKey, useValue: auth },
+      { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
     ],
   }).compile();
   const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
@@ -49,7 +50,7 @@ const createApp = async () => {
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   apps.push(app);
-  return { app, auth, purposes };
+  return { app, getSession, purposes };
 };
 
 const asHost = { authorization: 'Bearer device-credential' };
@@ -100,8 +101,8 @@ describe('TelemetryPurposeController', () => {
   });
 
   it('still answers a session for any project it names', async () => {
-    const { app, auth, purposes } = await createApp();
-    auth.api.getSession.mockResolvedValue(mock<Session>({ user: { id: 'user-1' } }));
+    const { app, getSession, purposes } = await createApp();
+    getSession.mockResolvedValue(mock<Session>({ user: { id: 'user-1' } }));
 
     const response = await app.inject({ method: 'GET', url: '/v1/telemetry-purposes?projectId=project-2' });
 

@@ -9,7 +9,7 @@ import {
 } from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry, IngestReceipt, TelemetryPolicyAnswer } from '@taucad/telemetry';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { AuthGuard, OptionalAuth, OptionalUser } from '@taucad/api-auth';
+import { AuthGuard, OptionalAuth, OptionalUser, PublicAuth } from '@taucad/api-auth';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
@@ -97,13 +97,14 @@ export class TelemetryController {
 
   /**
    * The entry-free policy probe (AR-W17-02): what this deployment does with runtime entries and how long a client may
-   * cache the answer. No body, no entry; the session, if any, is ignored for the answer.
+   * cache the answer. No body, no entry and no session: the answer is the same for everyone, so the route is public
+   * and its shared `max-age` never accompanies a session cookie.
    *
    * @param reply - The reply, for `Cache-Control`.
    * @returns The policy answer.
    */
   @Get('policy')
-  @OptionalAuth()
+  @PublicAuth()
   public policy(@Res({ passthrough: true }) reply: FastifyReply): TelemetryPolicyAnswer {
     const answer = this.runtimeIngest.policy(new Date());
     void reply.header('cache-control', `max-age=${String(answer.maxAge)}`);

@@ -44,27 +44,35 @@
 (*   2. An apply carries the edit count at the step its publication       *)
 (*      arrived, and lands only while that publication is the latest and  *)
 (*      the count is unchanged; otherwise it is discarded.                *)
-(*   3. An own publication is never applied; it may be acknowledged.      *)
+(*   3. An own publication whose bytes the arrangement already holds is   *)
+(*      not re-applied; any other publication, own or foreign, is applied *)
+(*      under rules 2 and 8. It may be acknowledged either way.           *)
 (*   4. A revision is acknowledged only while an adapter is attached, no  *)
 (*      apply is in flight and the arrangement holds its bytes; any       *)
 (*      detach makes the applied revision unknown.                        *)
-(*   5. A restore is settled against the arrangement at that step.        *)
+(*   5. A restore is settled against the arrangement at that step, and is *)
+(*      refused while a local edit is unwritten.                          *)
 (*   6. A route key change drops every queued intent in the same step.    *)
 (*   7. A workbench intent while the workbench lane is closed, or on a    *)
 (*      device with none, is dropped `workbenchClosed`.                   *)
-(*   8. While a local edit is unwritten, no apply lands: a publication    *)
-(*      that arrives then does not hold the edit, at whatever edit count  *)
-(*      it arrived. The record's rebase of the edit (`recordSync`, not    *)
-(*      modelled) publishes the arrangement that does.                    *)
+(*   8. A publication that arrives while a local edit is unwritten does   *)
+(*      not hold the edit, whatever edit count it arrived at: it is       *)
+(*      fenced at arrival (`held`) and its apply never lands. The         *)
+(*      record's rebase of the edit (`recordSync`, not modelled) comes    *)
+(*      back as a later publication, which rule 3 applies.                *)
+(*   9. An apply, and any adapter change event it causes, never counts as *)
+(*      an edit.                                                          *)
+(*   10. An adapter detaches either for a remount, after which it         *)
+(*      attaches again, or because its lane closes.                       *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                       *)
 (*   EditCount  TRUE: rule 2's count. FALSE: an apply lands whatever was  *)
 (*              edited since its publication (no-edit-count, a limit).    *)
 (*   Expected   TRUE: rule 5. FALSE: a restore is applied without         *)
 (*              comparing (no-expected, a limit).                         *)
-(*   Unwritten  TRUE: rule 8. FALSE: an apply computed at the current     *)
-(*              edit count lands over an unwritten edit (no-unwritten, a  *)
-(*              limit; A0.3's host I10 row).                              *)
+(*   Unwritten  TRUE: rule 8. FALSE: the apply of a publication that      *)
+(*              arrived over an unwritten edit, at the current edit       *)
+(*              count, lands (no-unwritten, a limit; A0.3 host I10 row).  *)
 (*   Today      FALSE: the record session is a runtime child of the       *)
 (*              project actor and outlives any mount (I13). TRUE: the     *)
 (*              store as built in `workbench-record-host.tsx` (inventory  *)
@@ -127,7 +135,7 @@ Reasons == {"routeChanged", "workbenchClosed", "unavailable"}
 Settled == {"applied"} \cup Reasons
 IntentIds == 1..MaxIntents
 RestoreIds == 1..MaxRestores
-NoApply == [state |-> "none", bytes |-> InitialBytes, fresh |-> TRUE, latest |-> FALSE, same |-> FALSE]
+NoApply == [state |-> "none", bytes |-> InitialBytes, fresh |-> TRUE, held |-> FALSE, latest |-> FALSE, same |-> FALSE]
 NoIntent == [state |-> "unsent", target |-> "viewer", applies |-> 0]
 NoRestore == [state |-> "unsent", expected |-> InitialBytes, to |-> InitialBytes]
 
@@ -138,10 +146,11 @@ AnyAttached == Attached # {}
 SessionCount == sessions.live + sessions.lingering
 
 TypeOK ==
-  /\ rec \in [bytes : Bytes, origin : {"own", "foreign"}, fresh : BOOLEAN, done : BOOLEAN, same : BOOLEAN]
+  /\ rec \in [bytes : Bytes, origin : {"own", "foreign"}, fresh : BOOLEAN, held : BOOLEAN, done : BOOLEAN,
+              same : BOOLEAN]
   /\ shown \in Bytes
   /\ edited \in BOOLEAN
-  /\ pending \in [state : {"none", "computed", "landed", "discarded"}, bytes : Bytes, fresh : BOOLEAN,
+  /\ pending \in [state : {"none", "computed", "landed", "discarded"}, bytes : Bytes, fresh : BOOLEAN, held : BOOLEAN,
                   latest : BOOLEAN, same : BOOLEAN]
   /\ applied \in {Unknown, "latest", "older"}
   /\ adapter \in [Adapters -> {"detached", "attaching", "attached"}]
@@ -153,7 +162,7 @@ TypeOK ==
   /\ act \in STRING
 
 Init ==
-  /\ rec = [bytes |-> InitialBytes, origin |-> "own", fresh |-> TRUE, done |-> TRUE, same |-> TRUE]
+  /\ rec = [bytes |-> InitialBytes, origin |-> "own", fresh |-> TRUE, held |-> FALSE, done |-> TRUE, same |-> TRUE]
   /\ shown = InitialBytes
   /\ edited = FALSE
   /\ pending = NoApply
@@ -190,7 +199,8 @@ Leave(as) ==
 Published ==
   /\ bound.pubs < MaxPubs
   /\ \E b \in Bytes, o \in {"own", "foreign"} :
-       rec' = [bytes |-> b, origin |-> o, fresh |-> TRUE, done |-> (o = "own"), same |-> (b = shown)]
+       rec' = [bytes |-> b, origin |-> o, fresh |-> TRUE, held |-> sessions.writing,
+               done |-> (o = "own" /\ b = shown), same |-> (b = shown)]
   /\ pending' = [pending EXCEPT !.latest = FALSE]
   /\ applied' = IF applied = "latest" THEN "older" ELSE applied
   /\ edited' = FALSE
@@ -198,21 +208,22 @@ Published ==
   /\ act' = Label("Published")
   /\ UNCHANGED <<shown, adapter, wbOpen, intent, restore, route, sessions>>
 
-\* Rule 3 (an own publication is born `done`); an apply of the latest foreign publication replaces one
-\* in flight for an older publication.
+\* Rule 3: an own publication whose bytes the arrangement already holds is born `done`; any other
+\* publication is applied under rules 2 and 8. An apply of the latest publication replaces one in flight
+\* for an older publication.
 ApplyComputed ==
   /\ AnyAttached
   /\ ~rec.done
   /\ ~(pending.state = "computed" /\ pending.latest)
-  /\ pending' = [state |-> "computed", bytes |-> rec.bytes, fresh |-> rec.fresh, latest |-> TRUE,
-                 same |-> rec.same]
+  /\ pending' = [state |-> "computed", bytes |-> rec.bytes, fresh |-> rec.fresh, held |-> rec.held,
+                 latest |-> TRUE, same |-> rec.same]
   /\ rec' = [rec EXCEPT !.done = TRUE]
   /\ edited' = FALSE
   /\ act' = Label("ApplyComputed")
   /\ UNCHANGED <<shown, applied, adapter, wbOpen, intent, restore, route, sessions, bound>>
 
 \* Rules 2 and 8.
-Current == pending.latest /\ (EditCount => pending.fresh) /\ (Unwritten => ~sessions.writing)
+Current == pending.latest /\ (EditCount => pending.fresh) /\ (Unwritten => ~pending.held)
 
 ApplyLanded ==
   /\ pending.state = "computed"
@@ -273,8 +284,11 @@ AdapterAttached(a) ==
   /\ act' = Label("AdapterAttached")
   /\ UNCHANGED <<rec, shown, pending, applied, wbOpen, intent, restore, route, sessions, bound>>
 
+\* A remount: the adapter leaves and will attach again, so it detaches only while it has an attach cycle
+\* left. The workbench's last detach is `WorkbenchClosed`; the viewer pane has no lane to close.
 AdapterDetached(a) ==
   /\ adapter[a] # "detached"
+  /\ bound.attaches[a] < MaxAttaches
   /\ Leave({a})
   /\ edited' = FALSE
   /\ act' = Label("AdapterDetached")
@@ -335,11 +349,12 @@ RouteKeyChanged ==
   /\ act' = Label("RouteKeyChanged")
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, restore, sessions, bound>>
 
-\* Rule 7 for the intents queued when the person closes the lane. The lane closes with its adapter, so
-\* the workbench's attach cycles bound the closes.
+\* Rule 7 for the intents queued when the person closes the lane, whether its adapter is attached or
+\* between a remount's detach and attach. Only `AdapterAttaching` reopens the lane, so the workbench's
+\* attach cycles bound the closes.
 WorkbenchClosed ==
   /\ wbOpen
-  /\ "workbench" \in Adapters /\ adapter["workbench"] # "detached"
+  /\ "workbench" \in Adapters
   /\ wbOpen' = FALSE
   /\ Leave({"workbench"})
   /\ intent' = [i \in IntentIds |->
@@ -362,10 +377,11 @@ RestoreAsked(k) ==
   /\ act' = Label("RestoreAsked")
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, intent, route, sessions, bound>>
 
-\* Rule 5, and rule 1 for an applied restore.
+\* Rule 5, and rule 1 for an applied restore. As built (`store.restore`), a restore is also refused while a
+\* local edit is unwritten.
 RestoreSettled(k) ==
   /\ restore[k].state = "asked"
-  /\ IF ~Expected \/ shown = restore[k].expected
+  /\ IF (~Expected \/ shown = restore[k].expected) /\ ~sessions.writing
      THEN /\ restore' = [restore EXCEPT ![k] = [NoRestore EXCEPT !.state = "applied"]]
           /\ shown' = restore[k].to
           /\ Counted
@@ -426,19 +442,29 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-\* Weak fairness of the adapters (an attaching adapter attaches) and of the intent queue (an intent its
-\* adapter can take is taken; a workbench intent with the lane closed is dropped).
+\* A detached adapter whose lane is open attaches again: the end of a remount (`AdapterDetached`).
+Reattach(a) == (a = "viewer" \/ wbOpen) /\ AdapterAttaching(a)
+
+\* Weak fairness of the adapters (an adapter with an open lane attaches) and of the intent queue (an
+\* intent its adapter can take is taken; a workbench intent with the lane closed is dropped).
 Fairness ==
-  /\ \A a \in Adapters : WF_vars(AdapterAttached(a))
+  /\ \A a \in Adapters : WF_vars(Reattach(a)) /\ WF_vars(AdapterAttached(a))
   /\ \A i \in IntentIds : WF_vars(IntentApplied(i)) /\ WF_vars(DropClosed(i))
 
 LiveSpec == Spec /\ Fairness
 
-\* The state the checker keeps: the ghosts `act` and `edited` are dropped, how the last apply ended is
-\* forgotten, and a settled intent or restore is only settled. Each dropped part is read by no action and
-\* by a property only in the step that sets it, so two states that differ only there have the same
-\* behaviours. Not used by the liveness configuration.
-View == <<rec, shown, IF pending.state = "computed" THEN pending ELSE NoApply, applied, adapter, wbOpen,
+\* The state the checker keeps. Dropped: the ghosts `act` and `edited`; how the last apply ended; how a
+\* settled intent or restore ended; a publication's origin, which only `Published` reads; once its apply
+\* is done, everything of a publication but its bytes, since while it can be computed again (rule 4) the
+\* apply in flight holds the same `fresh`, `held` and `same`; and everything of an apply in flight that
+\* can no longer land (`Current` only falls), which is only discarded or replaced. Each dropped part is
+\* read by no enabled action and by a property only in the step that sets it, so two states that differ
+\* only there have the same behaviours. Not used by the liveness configuration.
+View == <<IF rec.done THEN [bytes |-> rec.bytes, done |-> TRUE] ELSE [rec EXCEPT !.origin = "own"], shown,
+          IF pending.state # "computed" THEN NoApply
+          ELSE IF Current THEN pending
+          ELSE [NoApply EXCEPT !.state = "computed", !.latest = pending.latest],
+          applied, adapter, wbOpen,
           [i \in IntentIds |-> IF intent[i].state \in Settled THEN "settled" ELSE intent[i]],
           [k \in RestoreIds |-> IF restore[k].state \in {"applied", "refused"} THEN "settled" ELSE restore[k]],
           route, sessions, bound>>
@@ -468,9 +494,9 @@ IntentAccounted ==
 RouteChangeDrops ==
   [][route' # route => \A i \in IntentIds : intent[i].state = "queued" => intent'[i].state = "routeChanged"]_vars
 
-\* I10, as A0.3's host I10 row states it: while a local edit is unwritten, no apply lands that changes the
-\* arrangement, including one computed at the current edit count from a foreign publication.
-UnwrittenEditKept == [][(Lands /\ sessions.writing) => shown' = shown]_vars
+\* I10, as A0.3's host I10 row states it: no apply of a publication that arrived while a local edit was
+\* unwritten lands, including one that arrived at the current edit count. `held` is the fact at arrival.
+UnwrittenEditKept == [][Lands => ~pending.held]_vars
 
 \* I12: `Acknowledged(r)` only when an adapter is attached and the arrangement reflects `r`.
 AckMeansApplied ==
@@ -478,6 +504,9 @@ AckMeansApplied ==
 
 \* I12: while no adapter is attached, the applied revision is `unknown`.
 UnknownWhileDetached == ~AnyAttached => applied = Unknown
+
+\* Witness for today-store-orphan-write: no store that was disposed still has a write in flight.
+NoWriteAfterDispose == sessions.lingering = 0
 
 \* I13: the number of record sessions for a file is at most one.
 SingleSession == SessionCount <= 1
@@ -500,17 +529,12 @@ IdenticalBytesHarmless ==
 -----------------------------------------------------------------------------
 (* Liveness *)
 
-\* An intent can settle: its adapter is attached, or it is for a workbench lane that is closed.
-CanSettle(i) ==
-  \/ intent[i].target \in Adapters /\ adapter[intent[i].target] = "attached"
-  \/ intent[i].target = "workbench" /\ ~wbOpen
-
 \* Quiescence predicate of IntentEventuallyAccounted: no intent is queued.
 IntentsSettled == \A i \in IntentIds : intent[i].state # "queued"
 
 \* Under weak fairness of the adapter, every intent becomes applied or dropped once an adapter stays
 \* attached and the route key stops changing (it changes at most MaxRoutes times).
 IntentEventuallyAccounted ==
-  \A i \in IntentIds : (<>[]CanSettle(i)) => [](intent[i].state = "queued" => <>(intent[i].state # "queued"))
+  \A i \in IntentIds : (<>[]AnyAttached) => [](intent[i].state = "queued" => <>(intent[i].state # "queued"))
 
 =============================================================================

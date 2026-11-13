@@ -3,7 +3,7 @@
     "LayoutApply.target.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "I10 to I14, D18 and rule 8 on both adapters, narrowed for the merge queue: 2 publications, 2 person edits, 2 intents, 1 restore command, 1 attach cycle per adapter, 1 route key change, 2 arrangements (wide holds the wider bounds)"
+      "ref": "I10 to I14, D18 and rule 8 on both adapters: 2 publications, 2 person edits, 2 intents, 1 restore command, 1 attach cycle per adapter, 1 route key change, 2 arrangements. Narrowed from the plan's 3, 2, 2, 2 and 2 attach cycles to fit the merge queue (programme control ruling); target-phone holds the plan's bounds on one adapter"
     },
     "LayoutApply.target-detached.cfg": {
       "tier": "pr",
@@ -13,12 +13,12 @@
     "LayoutApply.target-phone.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "The viewer adapter only; workbench intents settle as workbenchClosed with no workbench adapter: 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles, 1 route key change"
+      "ref": "The viewer adapter only, at the formal plan's target bounds; workbench intents settle as workbenchClosed with no workbench adapter: 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles, 1 route key change"
     },
     "LayoutApply.liveness.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "IntentEventuallyAccounted (quiescence IntentsSettled) under weak fairness of AdapterAttached, IntentApplied and DropClosed: 1 publication, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters"
+      "ref": "IntentEventuallyAccounted as the plan states it (antecedent: some adapter stays attached; quiescence IntentsSettled) under weak fairness of Reattach, AdapterAttached, IntentApplied and DropClosed: 1 publication, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters"
     },
     "LayoutApply.today-store-replaced.cfg": {
       "tier": "pr",
@@ -29,13 +29,21 @@
       "ref": "Y3: a remounted host's useMemo creates and starts a second layout store before the old one is disposed in a microtask, and a write the old store had in flight outlives the dispose; 1 publication, 1 person edit, 1 attach cycle, 1 remount",
       "fixedBy": "A8b"
     },
+    "LayoutApply.today-orphan-write.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoWriteAfterDispose"
+      },
+      "kind": "witness",
+      "ref": "Y3: after a remount, the old store is disposed while its write is in flight, and the write stays in flight: the old store remains a writer of the file after dispose. Guards the OrphanWriteLanded path of today-store-replaced; 1 publication, 1 person edit, 1 attach cycle, 1 remount"
+    },
     "LayoutApply.no-edit-count.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "PersonEditNotReverted"
       },
       "kind": "limit",
-      "ref": "Rule 2 is necessary: without the edit count an apply computed before a person edit lands once the edit is written and reverts it; 1 publication, 1 person edit, 1 attach cycle"
+      "ref": "Rule 2 is necessary: without the edit count, an apply computed before a person edit lands after it. The checker's shortest trace lands bytes equal to the edit, so it shows the landing the property forbids rather than a visible revert; 1 publication, 1 person edit, 1 attach cycle"
     },
     "LayoutApply.no-unwritten.cfg": {
       "tier": "pr",
@@ -43,7 +51,7 @@
         "violated": "UnwrittenEditKept"
       },
       "kind": "limit",
-      "ref": "Rule 8 is necessary (A0.3 host I10 row): a foreign publication that arrives after a person edit, at the current edit count, is applied over the edit while it is unwritten; 1 publication, 1 person edit, 1 attach cycle"
+      "ref": "Rule 8 is necessary (A0.3 host I10 row): a publication that arrives after a person edit, at the current edit count, while the edit is unwritten, is applied over it; 1 publication, 1 person edit, 1 attach cycle"
     },
     "LayoutApply.no-expected.cfg": {
       "tier": "pr",
@@ -51,12 +59,12 @@
         "violated": "StaleRestoreRefused"
       },
       "kind": "limit",
-      "ref": "Rule 5 is necessary: without its expected arrangement a restore command is applied over an arrangement that moved; 1 person edit, 2 restore commands, 1 attach cycle, 3 arrangements"
+      "ref": "Rule 5 is necessary: without its expected arrangement, a restore command whose expected arrangement is not the one shown is applied; 1 person edit, 2 restore commands, 1 attach cycle, 3 arrangements"
     },
     "LayoutApply.wide.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "Both adapters, 3 publications, 2 person edits, 2 intents, 2 restore commands, 1 attach cycle per adapter, 1 route key change, 2 arrangements: about 5 million distinct states. The plan's 4, 3, 3, 3 and 3 do not fit, and 2 attach cycles per adapter do not finish within the 900 s watchdog"
+      "ref": "Both adapters, 3 publications, 2 person edits, 2 intents, 2 restore commands, 1 attach cycle per adapter, 1 route key change, 2 arrangements (programme control ruling). Known limit: the plan's 4, 3, 3, 3 and 3, and 3, 2, 2, 2 with 2 attach cycles per adapter, both exceeded the 900 s nightly watchdog at the runner's flags"
     },
     "LayoutApply.export.cfg": {
       "tier": "pr",

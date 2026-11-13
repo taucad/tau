@@ -41,6 +41,7 @@ import type {
   ProjectRuntimeLibrary,
   ProjectRuntimeProfile,
   ProjectRuntimeProfileOptions,
+  ObservablePort,
 } from '#runtime/project-runtime.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import type * as CadMachineModule from '#machines/cad.machine.js';
@@ -124,11 +125,36 @@ const createLibrary = () => {
   return library;
 };
 
-/** Let the fakes' promises deliver: one real macrotask per round, in order. */
+/** A port whose value never changes. */
+const fixedPort = <T>(value: T): ObservablePort<T> => ({ get: () => value, subscribe: () => () => undefined });
+
+/** A port the test replaces, which counts its subscribers. */
+const createPort = <T>(initial: T) => {
+  let value = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set: (next: T) => {
+      value = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    size: () => listeners.size,
+  };
+};
+
 /** The editor profile loading from disk takes the view record ports; no view opens in these rows. */
 const profileOptions = (profile: ProjectRuntimeProfile): ProjectRuntimeProfileOptions =>
   profile === 'editor' ? { profile, viewRecordPorts: mock<ViewRecordPortsHandle>() } : { profile };
 
+/** Let the fakes' promises deliver: one real macrotask per round, in order. */
 const settle = async (rounds = 10): Promise<void> => {
   for (let round = 0; round < rounds; round += 1) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- each round must follow the previous one.
@@ -148,7 +174,7 @@ describe('createProjectRuntime', () => {
         projectId: project.id,
         fileManager: {
           fileManagerRef: createFileManager(content.service),
-          parameterFiles: mock<ParameterFilesClient>(),
+          parameterFiles: fixedPort(mock<ParameterFilesClient>()),
         },
         library,
         ...profileOptions(profile),
@@ -156,7 +182,7 @@ describe('createProjectRuntime', () => {
         clock,
         inspect: guard.inspect,
       });
-      const close = vi.spyOn(parameterService, 'close');
+      const close = vi.spyOn(parameterService.get(), 'close');
       expect(actor.getSnapshot().status).toBe('active');
       expect(selectProjectRef(actor.getSnapshot()).getSnapshot().status).toBe('active');
       // Unstarted: nothing has loaded yet.
@@ -194,7 +220,10 @@ describe('createProjectRuntime', () => {
     const content = createContent();
     const { actor } = createProjectRuntime({
       projectId: project.id,
-      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles: mock<ParameterFilesClient>() },
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
       library: createLibrary(),
       ...profileOptions('editor'),
       kernelSelection: { kernelOptionsFactory: vi.fn() },
@@ -225,7 +254,10 @@ describe('createProjectRuntime', () => {
     };
     const { actor, parameterService } = createProjectRuntime({
       projectId: project.id,
-      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles: mock<ParameterFilesClient>() },
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
       library: createLibrary(),
       profile: 'shared',
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the reads the runtime makes of a preview's service.
@@ -234,10 +266,95 @@ describe('createProjectRuntime', () => {
       clock: new StepClock(),
       inspect: guard.inspect,
     });
-    expect(parameterService).toBe(previewParameterService);
+    expect(parameterService.get()).toBe(previewParameterService);
     actor.start();
     await settle();
     actor.stop();
+    await settle(2);
+    expect(previewParameterService.close).not.toHaveBeenCalled();
+    guard.take();
+  });
+
+  it('should rebuild the parameter service over a replaced client and close the one it replaced', async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const first = mock<ParameterFilesClient>();
+    first.exists.mockResolvedValue(false);
+    const second = mock<ParameterFilesClient>();
+    second.exists.mockResolvedValue(false);
+    const parameterFiles = createPort<ParameterFilesClient>(first);
+    const { actor, parameterService } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles },
+      library: createLibrary(),
+      ...profileOptions('editor'),
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    actor.start();
+    await settle();
+    const replaced = parameterService.get();
+    const close = vi.spyOn(replaced, 'close');
+    const changed = vi.fn();
+    const unsubscribe = parameterService.subscribe(changed);
+
+    parameterFiles.set(second);
+    expect(changed).toHaveBeenCalledTimes(1);
+    const rebuilt = parameterService.get();
+    expect(rebuilt).not.toBe(replaced);
+    expect(close).toHaveBeenCalledTimes(1);
+    await expect(rebuilt.readSettled('main.ts')).resolves.toBeUndefined();
+    expect(second.exists).toHaveBeenCalled();
+    expect(first.exists).not.toHaveBeenCalled();
+
+    // The same client again changes nothing.
+    parameterFiles.set(second);
+    expect(parameterService.get()).toBe(rebuilt);
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    actor.stop();
+    await settle(2);
+    guard.take();
+  });
+
+  it("should release the parameter client port when it stops, and never rebuild a preview's service", async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const parameterFiles = createPort(mock<ParameterFilesClient>());
+    const { actor } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles },
+      library: createLibrary(),
+      ...profileOptions('editor'),
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    actor.start();
+    await settle();
+    expect(parameterFiles.size()).toBe(1);
+    actor.stop();
+    expect(parameterFiles.size()).toBe(0);
+
+    const previewParameterService = mock<ParameterSetService>();
+    const previewFiles = createPort(mock<ParameterFilesClient>());
+    const preview = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef: createFileManager(createContent().service), parameterFiles: previewFiles },
+      library: createLibrary(),
+      profile: 'shared',
+      previewParameterService,
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    preview.actor.start();
+    await settle();
+    expect(previewFiles.size()).toBe(0);
+    previewFiles.set(mock<ParameterFilesClient>());
+    expect(preview.parameterService.get()).toBe(previewParameterService);
+    preview.actor.stop();
     await settle(2);
     expect(previewParameterService.close).not.toHaveBeenCalled();
     guard.take();
@@ -249,7 +366,10 @@ describe('createProjectRuntime', () => {
     const content = createContent();
     const { actor } = createProjectRuntime({
       projectId: project.id,
-      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles: mock<ParameterFilesClient>() },
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
       library: createLibrary(),
       profile: 'shared',
       input: { shouldLoadModelOnStart: false },
@@ -359,8 +479,8 @@ describe('the parameter observers', () => {
     set.start();
     const bytes = new Uint8Array([1, 2, 3]);
     let actorListeners = 0;
-    const parameterService = {
-      actor: (entryPath: string) => (entryPath === 'main.ts' ? set : undefined),
+    const serviceOver = (setActor: typeof set) => ({
+      actor: (entryPath: string) => (entryPath === 'main.ts' ? setActor : undefined),
       snapshot: () => ({ bytes }),
       subscribeActors: () => {
         actorListeners += 1;
@@ -368,13 +488,14 @@ describe('the parameter observers', () => {
           actorListeners -= 1;
         };
       },
-    };
+    });
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the three reads the observers make.
+    const services = createPort(serviceOver(set) as unknown as ParameterSetService);
     const standIn = createActor(projectStandIn, { clock });
     standIn.start();
     const observers = createActor(
       createParameterObserversLogic({
-        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the three reads the observers make.
-        parameterService: parameterService as unknown as ParameterSetService,
+        parameterService: services,
       }),
       {
         clock,
@@ -394,12 +515,24 @@ describe('the parameter observers', () => {
     ]);
     expect(actorListeners).toBe(1);
 
-    standIn.send({ type: 'setUnits', geometryUnits: new Map() });
+    // A rebuilt service: the observers follow it and let the replaced one go.
+    const rebuiltSet = createActor(setMachine, { clock });
+    rebuiltSet.start();
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the three reads the observers make.
+    services.set(serviceOver(rebuiltSet) as unknown as ParameterSetService);
     set.send({ type: 'settle' });
     expect(unit.getSnapshot().context.received).toHaveLength(1);
+    rebuiltSet.send({ type: 'settle' });
+    expect(unit.getSnapshot().context.received).toHaveLength(2);
+    expect(actorListeners).toBe(1);
+
+    standIn.send({ type: 'setUnits', geometryUnits: new Map() });
+    rebuiltSet.send({ type: 'settle' });
+    expect(unit.getSnapshot().context.received).toHaveLength(2);
 
     observers.stop();
     expect(actorListeners).toBe(0);
+    expect(services.size()).toBe(0);
     expect(clock.nextDue()).toBeUndefined();
   });
 });

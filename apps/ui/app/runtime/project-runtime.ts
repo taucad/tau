@@ -4,7 +4,8 @@
  *
  * `createProjectRuntime` builds what `ProjectProvider` (`hooks/use-project.tsx`) builds today: the project and editor
  * actors, the parameter service, the parameter observers and the manifest observation. It returns the root unstarted
- * (MC-R4) with the parameter service beside it. Starting the root sends the editor `load`, which a mount effect sends
+ * (MC-R4) with the current parameter service beside it, as a port, since the runtime rebuilds it when the file
+ * manager's connections change. Starting the root sends the editor `load`, which a mount effect sends
  * today; stopping it releases every subscription and each geometry unit's kernel runtime, which the provider's unmount
  * effect does today. The parameter service is not closed on stop, except on the shared profile without a preview
  * service, because the project session owns its final close (as the provider leaves it today).
@@ -29,6 +30,7 @@ import type {
   SnapshotFrom,
 } from 'xstate';
 import { toast } from 'sonner';
+import { Topic } from '@taucad/events';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -89,10 +91,21 @@ export type ProjectRuntimeLibrary = Readonly<
   }
 >;
 
-/** The parts of the project's file manager the runtime reads. */
+/** A value that can change: the current value, and a listener called after each change. */
+export type ObservablePort<T> = Readonly<{
+  get: () => T;
+  subscribe: (listener: () => void) => () => void;
+}>;
+
+/**
+ * The parts of the project's file manager the runtime reads. The root directory and the content service are read
+ * from the file-manager actor's snapshot. The parameter client is a port because it is built outside that actor and
+ * replaced when the filesystem's connections are (a new bridge opener): A6b feeds it from the file-manager provider,
+ * and A6c from the session's file-manager child.
+ */
 export type ProjectRuntimeFileManager = Readonly<{
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
-  parameterFiles: ParameterFilesClient;
+  parameterFiles: ObservablePort<ParameterFilesClient>;
 }>;
 
 type ProjectMachineInput = NonNullable<InputFrom<typeof projectMachine>>;
@@ -181,6 +194,9 @@ const manifestObservation: ProjectChildLogic<ManifestObservationEvent> = createC
 >(() => undefined);
 const libraryEvents: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => undefined);
 const resources: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => undefined);
+const parameterServiceOwner: CallbackActorLogic<{ type: 'never' }> = createCallbackLogic<{ type: 'never' }>(
+  () => undefined,
+);
 
 export const projectRuntimeActors = {
   project: projectMachine,
@@ -189,6 +205,7 @@ export const projectRuntimeActors = {
   manifestObservation,
   libraryEvents,
   resources,
+  parameterServiceOwner,
 };
 
 const describeFault = (error: unknown): string =>
@@ -250,6 +267,7 @@ export const projectRuntimeMachine = setup({
         },
         { id: 'libraryEvents', src: 'libraryEvents', input: ({ context }) => ({ project: context.projectRef }) },
         { id: 'resources', src: 'resources', input: ({ context }) => ({ project: context.projectRef }) },
+        { id: 'parameterServiceOwner', src: 'parameterServiceOwner' },
       ],
     },
   },
@@ -258,11 +276,28 @@ export const projectRuntimeMachine = setup({
 export type ProjectRuntimeActor = Actor<typeof projectRuntimeMachine>;
 export type ProjectRuntimeSnapshot = SnapshotFrom<typeof projectRuntimeMachine>;
 
-/** A built project runtime: the unstarted root and the parameter service its children share. */
+/** A built project runtime: the unstarted root and the parameter service its children share, which can be rebuilt. */
 export type ProjectRuntime = Readonly<{
   actor: ProjectRuntimeActor;
-  parameterService: ParameterSetService;
+  parameterService: ObservablePort<ParameterSetService>;
 }>;
+
+/** The runtime's current parameter service, which its owner child replaces. */
+type ParameterServiceHolder = ObservablePort<ParameterSetService> &
+  Readonly<{ replace: (next: ParameterSetService) => void }>;
+
+const createParameterServiceHolder = (initial: ParameterSetService): ParameterServiceHolder => {
+  let current = initial;
+  const changes = new Topic<void>({ name: 'project-runtime-parameter-service' });
+  return {
+    get: () => current,
+    subscribe: (listener) => changes.subscribe(listener),
+    replace: (next) => {
+      current = next;
+      changes.emit();
+    },
+  };
+};
 
 /* Readers for React and for the session: the only way anything outside reads the root (MC-R25). */
 export const selectProjectRef = (snapshot: ProjectRuntimeSnapshot): ProjectRef => snapshot.context.projectRef;
@@ -284,10 +319,15 @@ const errorMessage = (error: unknown): string =>
  * @returns The observers' callback logic.
  */
 export const createParameterObserversLogic = (
-  options: Readonly<{ parameterService: ParameterSetService; previewParameterService?: ParameterSetService }>,
+  options: Readonly<{
+    parameterService: ObservablePort<ParameterSetService>;
+    previewParameterService?: ParameterSetService;
+  }>,
 ): ProjectChildLogic => {
-  const { parameterService, previewParameterService } = options;
+  const { previewParameterService } = options;
   return createCallbackLogic<{ type: 'never' }, ProjectChildInput>(({ input: { project } }) => {
+    /* The service the observers are bound to: a rebuilt service rebinds them, as the provider's effect re-runs. */
+    let parameterService = options.parameterService.get();
     /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path gets a fresh
      * subscription. */
     const observers = new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>();
@@ -395,7 +435,17 @@ export const createParameterObserversLogic = (
       ({ geometryUnits } = snapshot.context);
       release = observeUnits(geometryUnits);
     });
+    const unsubscribeService = options.parameterService.subscribe(() => {
+      const next = options.parameterService.get();
+      if (next === parameterService) {
+        return;
+      }
+      release();
+      parameterService = next;
+      release = observeUnits(geometryUnits);
+    });
     return () => {
+      unsubscribeService();
       projectSubscription.unsubscribe();
       release();
     };
@@ -543,7 +593,7 @@ export const createLibraryEventsLogic = (
  * @returns The resources' callback logic.
  */
 export const createResourcesLogic = (
-  options: Readonly<{ parameterService: ParameterSetService; closesParameterService: boolean }>,
+  options: Readonly<{ parameterService: ObservablePort<ParameterSetService>; closesParameterService: boolean }>,
 ): ProjectChildLogic => {
   const { parameterService, closesParameterService } = options;
   return createCallbackLogic<{ type: 'never' }, ProjectChildInput>(({ input: { project } }) => () => {
@@ -554,12 +604,99 @@ export const createResourcesLogic = (
       // async-iife: bootstrap -- a callback's cleanup cannot await the service's close.
       void (async () => {
         try {
-          await parameterService.close();
+          await parameterService.get().close();
         } catch (error) {
           toast.error(error instanceof Error ? error.message : 'Parameter service could not close.');
         }
       })();
     }
+  });
+};
+
+/** What a parameter service is built over: it is rebuilt when any of them changes, as the provider's memo is. */
+type ParameterServiceSource = Readonly<{
+  rootDirectory: string;
+  client: ParameterFilesClient;
+  contentService: FileContentService | undefined;
+}>;
+
+const readParameterServiceSource = (fileManager: ProjectRuntimeFileManager): ParameterServiceSource => {
+  const { rootDirectory, contentService } = fileManager.fileManagerRef.getSnapshot().context;
+  return { rootDirectory, client: fileManager.parameterFiles.get(), contentService };
+};
+
+const sameParameterServiceSource = (a: ParameterServiceSource, b: ParameterServiceSource): boolean =>
+  a.rootDirectory === b.rootDirectory && a.client === b.client && a.contentService === b.contentService;
+
+/** Build a parameter service over one source; its watches read that source's content service. */
+const buildParameterService = ({
+  rootDirectory,
+  client,
+  contentService,
+}: ParameterServiceSource): ParameterSetService =>
+  createParameterSetService({
+    rootDirectory,
+    client,
+    watchReady: (request, onEvent) => {
+      if (!contentService) {
+        throw new Error('The parameter filesystem is not ready.');
+      }
+      const watch = contentService.watchReady(request, onEvent);
+      return {
+        ready: watch.ready,
+        closed: (async () => {
+          await watch.closed;
+        })(),
+        unsubscribe: watch.dispose,
+      };
+    },
+    onError: (error) => {
+      toast.error(errorMessage(error));
+    },
+  });
+
+/**
+ * The parameter service's owner: it rebuilds the service when the file manager's root, content service or parameter
+ * client changes, and closes the one it replaced, as `ProjectProvider` does today. It never closes the current one:
+ * the project session owns the final close.
+ *
+ * @param options - The file manager, the holder of the current service and the source it was built over.
+ * @returns The owner's callback logic.
+ */
+export const createParameterServiceOwnerLogic = (
+  options: Readonly<{
+    fileManager: ProjectRuntimeFileManager;
+    holder: ParameterServiceHolder;
+    source: ParameterServiceSource;
+  }>,
+): CallbackActorLogic<{ type: 'never' }> => {
+  const { fileManager, holder } = options;
+  let { source } = options;
+  return createCallbackLogic<{ type: 'never' }>(() => {
+    const sync = (): void => {
+      const next = readParameterServiceSource(fileManager);
+      if (sameParameterServiceSource(source, next)) {
+        return;
+      }
+      source = next;
+      const previous = holder.get();
+      holder.replace(buildParameterService(next));
+      // async-iife: bootstrap -- a listener cannot await the replaced service's close.
+      void (async () => {
+        try {
+          await previous.close();
+        } catch (error) {
+          toast.error(errorMessage(error));
+        }
+      })();
+    };
+    const unsubscribeClient = fileManager.parameterFiles.subscribe(sync);
+    const fileManagerSubscription = fileManager.fileManagerRef.subscribe(sync);
+    sync();
+    return () => {
+      unsubscribeClient();
+      fileManagerSubscription.unsubscribe();
+    };
   });
 };
 
@@ -577,29 +714,11 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
   const kernelOptionsFactory =
     options.kernelSelection?.kernelOptionsFactory ?? localKernelOptions(projectId, undefined, getComputeReuseMode());
 
-  const parameterService =
-    previewParameterService ??
-    createParameterSetService({
-      rootDirectory: fileSystemRoot,
-      client: fileManager.parameterFiles,
-      watchReady: (request, onEvent) => {
-        const content = fileManagerRef.getSnapshot().context.contentService;
-        if (!content) {
-          throw new Error('The parameter filesystem is not ready.');
-        }
-        const watch = content.watchReady(request, onEvent);
-        return {
-          ready: watch.ready,
-          closed: (async () => {
-            await watch.closed;
-          })(),
-          unsubscribe: watch.dispose,
-        };
-      },
-      onError: (error) => {
-        toast.error(errorMessage(error));
-      },
-    });
+  /* A preview's own service is used as given and never rebuilt; otherwise the owner child rebuilds this one. */
+  const parameterSource = readParameterServiceSource(fileManager);
+  const parameterService = createParameterServiceHolder(
+    previewParameterService ?? buildParameterService(parameterSource),
+  );
 
   const projectActors = {
     loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
@@ -698,6 +817,10 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
         parameterService,
         closesParameterService: profile === 'shared' && previewParameterService === undefined,
       }),
+      parameterServiceOwner:
+        previewParameterService === undefined
+          ? createParameterServiceOwnerLogic({ fileManager, holder: parameterService, source: parameterSource })
+          : parameterServiceOwner,
     },
   });
 
@@ -724,5 +847,5 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
       },
     },
   });
-  return { actor, parameterService };
+  return { actor, parameterService: { get: parameterService.get, subscribe: parameterService.subscribe } };
 }

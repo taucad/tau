@@ -7,7 +7,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import type * as HandleStore from '#filesystem/handle-store.js';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { StrictMode, useEffect } from 'react';
+import { StrictMode, Suspense, use, useEffect, useState } from 'react';
 import {
   renderHook as renderHookBare,
   render as renderBare,
@@ -476,6 +476,43 @@ describe('HomeFileManagerProvider', () => {
     probed.push(useFileManager().fileManagerRef);
     return <span hidden />;
   }
+
+  /* A revealed Suspense boundary that re-suspends hides the subtree but keeps it mounted: its file manager lives on
+   * however long the boundary stays hidden, as `useActorRef`'s did. */
+  it('keeps a lease while a re-suspended boundary hides it for longer than the grace', async () => {
+    const never = Promise.withResolvers<undefined>().promise;
+    const control = { suspend: (_value: boolean): void => undefined };
+    function MaySuspend(): React.JSX.Element {
+      const [suspended, setSuspended] = useState(false);
+      control.suspend = setSuspended;
+      if (suspended) {
+        use(never);
+      }
+      return <LeaseProbe />;
+    }
+    const view = render(
+      <Suspense fallback={<i>Loading</i>}>
+        <HomeFileManagerProvider rootDirectory='/projects/hidden'>
+          <MaySuspend />
+        </HomeFileManagerProvider>
+      </Suspense>,
+    );
+    const shown = probed.at(-1)!;
+    expect(shown.getSnapshot().status).toBe('active');
+    await act(async () => {
+      control.suspend(true);
+    });
+    expect(screen.getByText('Loading')).toBeInTheDocument();
+    act(() => {
+      testClock.advance(leaseGraceMilliseconds * 2);
+    });
+    expect(shown.getSnapshot().status).toBe('active');
+    await act(async () => {
+      control.suspend(false);
+    });
+    expect(probed.at(-1)).toBe(shown);
+    view.unmount();
+  });
 
   /* A render that commits after its unretained lease's grace (a transition held by a slow lazy chunk) finds the entry
    * dropped: the mount renders again and leases a fresh file manager instead of keeping the stopped one (MC-R24). The

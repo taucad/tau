@@ -73,6 +73,8 @@ export type AppRuntimeFiles = Readonly<{
   ) => Promise<FileManagerSnapshot>;
   /** The shared worker `rootFiles` holds, once it has one. */
   sharedWorker: () => Worker | undefined;
+  /** Whether the runtime was created with idle file managers, for the remote-host harness's document. */
+  idleFileManagers: boolean;
 }>;
 
 /* Each runtime's file closures, by runtime; the composition writes one per runtime it creates. */
@@ -124,6 +126,7 @@ export const createAppRuntime = ({
         reason,
       }),
     sharedWorker: host.sharedWorker,
+    idleFileManagers,
   });
   return runtime;
 };
@@ -142,6 +145,16 @@ export const selectRuntimeFiles = (runtime: AppRuntime): AppRuntimeFiles => {
   }
   return files;
 };
+
+/**
+ * Whether a runtime's file managers are idle (the remote-host harness's document).
+ *
+ * @param runtime - An app runtime.
+ * @returns Its idleness, or `undefined` for a runtime {@link createAppRuntime} did not make.
+ * @public
+ */
+export const selectRuntimeIdleFileManagers = (runtime: AppRuntime): boolean | undefined =>
+  runtimeFiles.get(runtime)?.idleFileManagers;
 
 /** The file manager for `/`, which the root spawned with itself and never replaces. @public */
 export const selectRootFiles = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): FileManagerRef =>

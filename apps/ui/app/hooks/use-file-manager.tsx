@@ -715,8 +715,10 @@ export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
  * server render and hydration) with its root, project and backend, so a mount that changes its root leases a fresh
  * file manager built for it, where it used to send `setRoot`. The store starts the actor on the first retain; a
  * release starts the grace, so StrictMode's remount keeps the lease and an unmount releases it after the grace (B3).
- * No ref callback: a context provider renders no element to hold one, so the retain is the commit's layout effect.
- * It neither sends, subscribes nor times; the store does (I1, I16).
+ * No ref callback: a context provider renders no element to hold one, so the retain is the commit's passive effect.
+ * Not a layout effect: React cleans those up when a revealed Suspense boundary re-suspends and hides the subtree, which
+ * would release a mounted lease and drop it after the grace; a passive effect lives as long as the mount, as
+ * `useActorRef`'s actor did. It neither sends, subscribes nor times; the store does (I1, I16).
  *
  * A render that commits after its entry's grace (a transition held by a slow lazy chunk) finds the entry dropped: the
  * mount renders again, and the store builds a fresh one for the key. The leased providers key their scope by the
@@ -728,7 +730,7 @@ function useLeasedFileManager(spec: FileManagerSpec): LeaseEntry<FileManagerActo
   const key = JSON.stringify([mount, spec.rootDirectory, spec.projectId ?? null, spec.backend]);
   const lease = selectRuntimeFiles(runtime).leaseFileManager(key, spec);
   const [, renew] = useReducer((generation: number) => generation + 1, 0);
-  useLayoutEffect(() => {
+  useEffect(() => {
     const release = lease.retain();
     if (lease.isDropped()) {
       renew();

@@ -31,6 +31,7 @@ import {
   selectAppRuntimeFault,
   selectFileManagerHost,
   selectRootFiles,
+  selectRuntimeIdleFileManagers,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
@@ -197,6 +198,8 @@ describe('app runtime root', () => {
     expect(loadHomeBackend).not.toHaveBeenCalled();
     expect(selectFileManagerHost(runtime.getSnapshot()).getSnapshot().value).toBe('resolving');
     expect(selectRootFiles(runtime.getSnapshot()).getSnapshot().value).toBe('initializing');
+    expect(selectRuntimeIdleFileManagers(runtime)).toBe(true);
+    expect(selectRuntimeIdleFileManagers(createAppRuntime({ environment: () => undefined }))).toBe(false);
     runtime.stop();
   });
 

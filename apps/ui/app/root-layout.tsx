@@ -40,6 +40,8 @@ import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
+import { selectRuntimeIdleFileManagers } from '#runtime/app-runtime.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -144,7 +146,8 @@ export function RootLayout({
       </ProjectManagerProvider>
     </HeadlessImageProvider>
   );
-  const application = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
+  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname);
+  const application = isHarness ? (
     children
   ) : (
     /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
@@ -173,6 +176,7 @@ export function RootLayout({
                 <ColorProvider>
                   <AppViewerEnvironment>
                     <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                      <HarnessDocumentLoad isHarness={isHarness} />
                       {application}
                     </LayoutDocument>
                   </AppViewerEnvironment>
@@ -281,6 +285,22 @@ export function ProductApp(): React.JSX.Element {
   ) : (
     <ProjectSessionsHost>{page}</ProjectSessionsHost>
   );
+}
+
+/**
+ * Load the page as a document when a client navigation crosses into or out of the remote-host harness: the runtime's
+ * file managers are idle for the harness's document only, and that is fixed when the runtime is created. Renders
+ * nothing, so the server render and hydration are unchanged.
+ */
+function HarnessDocumentLoad({ isHarness }: { readonly isHarness: boolean }): React.ReactNode {
+  const runtime = useOptionalAppRuntime();
+  const isIdle = runtime === undefined ? undefined : selectRuntimeIdleFileManagers(runtime);
+  useEffect(() => {
+    if (isIdle !== undefined && isIdle !== isHarness) {
+      globalThis.location.reload();
+    }
+  }, [isHarness, isIdle]);
+  return undefined;
 }
 
 export function RootErrorBoundary(): React.JSX.Element {

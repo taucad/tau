@@ -306,6 +306,35 @@ describe('libraryAccess', () => {
       expect(harness.discovery.calls).toHaveLength(0);
     });
 
+    it('should read the journal again for a question asked after it failed, and answer once it is read', async () => {
+      const harness = start();
+      harness.send({ type: 'journalFailed', message: 'idb closed' });
+      ask(harness, 'q1');
+      ask(harness, 'q2', 'p2');
+      expect(harness.emitted.filter((event) => event.type === 'journalWanted')).toHaveLength(1);
+      expect(harness.answered()).toEqual([]);
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'discoveryReady' });
+      await resolve(harness.verify, { status: 'unavailable' });
+      expect(harness.answers('q2')).toEqual([{ status: 'unavailable' }]);
+      harness.verify.calls[0]?.resolve({ status: 'unavailable' });
+      await flush();
+      expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+    });
+
+    it('should run the bootstrap pass again for a question asked after it failed', () => {
+      const harness = start();
+      ask(harness, 'q1');
+      harness.send({ type: 'journalReady', pending: 1 });
+      harness.send({ type: 'discoveryFailed', message: 'scan failed' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'scan failed' }]);
+      ask(harness, 'q2');
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      expect(harness.answers('q2')).toEqual([]);
+      harness.send({ type: 'discoveryReady' });
+      expect(harness.discovery.calls).toEqual([expect.objectContaining({ input: { requestId: 'q2', gen: 0 } })]);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
@@ -358,6 +387,29 @@ describe('libraryAccess', () => {
       harness.send({ type: 'epochMoved', epoch: 2, current: false });
       await resolve(harness.discovery, pass(2, [entry('route-blocked', 'p1')]));
       expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+      expect(harness.verify.calls).toHaveLength(1);
+    });
+
+    it("should fence the found path's ensure on the pass's own epoch", async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'epochMoved', epoch: 2, current: false });
+      await resolve(harness.discovery, pass(2, [valid('p1')]));
+      await resolve(harness.ensure, {});
+      expect(harness.answers('q1')).toEqual([{ status: 'ready', project: { name: 'p1', id: 'p1' } }]);
+      expect(harness.verify.calls).toHaveLength(1);
+    });
+
+    it('should not read again for a recovery of another project', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      await resolve(harness.verify, { status: 'verified', project: project('p1') });
+      harness.send({ type: 'recoveryStarted', projectId: 'p9' });
+      await resolve(harness.ensure, {});
+      expect(harness.answers('q1')).toEqual([{ status: 'ready', project: project('p1') }]);
       expect(harness.verify.calls).toHaveLength(1);
     });
 
@@ -476,6 +528,27 @@ describe('libraryAccess', () => {
       ]);
     });
 
+    it('should keep only the first fault the root onError catches, and keep answering', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      // A report that breaks the answer's contract: the transition that reads it throws, each time differently.
+      for (const broken of [undefined, null]) {
+        harness.send({
+          type: 'queryAnswered',
+          requestId: 'q1',
+          gen: 0,
+          epoch: 1,
+          answer: broken as unknown as AccessAnswer,
+          cacheHits: 0,
+        });
+      }
+      expect(harness.actor.getSnapshot().context.fault).toMatch(/undefined/u);
+      expect(harness.guard.take('fault').length).toBeGreaterThan(0);
+      await resolve(harness.verify, { status: 'unavailable' });
+      expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+    });
+
     it('should answer nothing for a cancelled question, and drop a stale report', async () => {
       const harness = start();
       settledLibrary(harness);
@@ -516,6 +589,8 @@ const facts: Record<AccessFactEvent['type'], readonly AccessFactEvent[]> = {
   epochMoved: [{ type: 'epochMoved', epoch: 1, current: false }],
   discoveryReady: [{ type: 'discoveryReady' }],
   discoveryFailed: [{ type: 'discoveryFailed', message: 'x' }],
+  discoveryRetrying: [{ type: 'discoveryRetrying' }],
+  journalRetrying: [{ type: 'journalRetrying' }],
   journalReady: [{ type: 'journalReady', pending: 0 }],
   journalFailed: [{ type: 'journalFailed', message: 'x' }],
   recoveriesChanged: [

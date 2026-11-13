@@ -503,6 +503,14 @@ export const selectDiscoveryEpoch = (snapshot: LibraryDiscoverySnapshot): number
 export const selectCurrentListing = (snapshot: LibraryDiscoverySnapshot): ProjectDiscoveryResult | undefined =>
   snapshot.context.snapshot?.epoch === snapshot.context.epoch ? snapshot.context.snapshot.result : undefined;
 
+/**
+ * Whether a listing settled at `epoch` may still be published: the fence for work the service does after a pass (today
+ * `prepareCurrentWorkspaceCatalog` enriches the listing before it reaches the catalog). Checked in the same task as the
+ * publish, as rule 1 asks.
+ */
+export const selectEpochCurrent = (snapshot: LibraryDiscoverySnapshot, epoch: number): boolean =>
+  snapshot.context.epoch === epoch;
+
 /** I9: the catalog is reported current only with no pass in flight or owed and no pass skipped in this stop. */
 export const selectCatalogCurrent = (snapshot: LibraryDiscoverySnapshot): boolean =>
   snapshot.matches({ pass: 'idle' }) && !snapshot.context.owed && !snapshot.context.skipped;

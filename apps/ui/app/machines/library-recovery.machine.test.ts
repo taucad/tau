@@ -112,6 +112,32 @@ describe('libraryRecovery', () => {
       expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1']);
     });
 
+    it('should announce the rows it read before it reports the journal ready', async () => {
+      const harness = start();
+      harness.readJournal.calls[0]?.resolve([row('o1', 'p1')]);
+      await flush();
+      const types = harness.emitted.map((event) => event.type);
+      expect(types.indexOf('recoveriesChanged')).toBeGreaterThanOrEqual(0);
+      expect(types.indexOf('recoveriesChanged')).toBeLessThan(types.indexOf('journalReady'));
+    });
+
+    it('should keep only the first fault the root onError catches', async () => {
+      const harness = start();
+      await ready(harness, []);
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      harness.send({ type: 'mutationJournaled', requestId: 'm1', row: row('o1', 'p1') });
+      // A caller that breaks the outcome's contract: the transition that reads it throws, each time differently.
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: undefined as unknown as ReplayOutcome });
+      const first = harness.actor.getSnapshot().context.fault;
+      expect(first).toMatch(/undefined/u);
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: null as unknown as ReplayOutcome });
+      expect(harness.guard.take('fault').length).toBeGreaterThan(0);
+      expect(harness.actor.getSnapshot().context.fault).toBe(first);
+      // It keeps answering: the row is still applying, and a well-formed report settles it.
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: recovered });
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'recovered' }));
+    });
+
     it('should replay one row at a time, in journal order', async () => {
       const harness = start();
       await ready(harness, [row('o1', 'p1'), row('o2', 'p2')]);
@@ -249,6 +275,20 @@ describe('libraryRecovery', () => {
       expect(harness.replay.calls).toHaveLength(1);
     });
 
+    it('should run one more check for a retry that arrives during a check that fails', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      await settleReplay(harness, workspaceGone);
+      harness.send({ type: 'retryRequested' });
+      harness.send({ type: 'retryRequested' });
+      harness.check.calls[0]?.reject(new Error('picker gone'));
+      await flush();
+      expect(harness.check.calls).toHaveLength(2);
+      harness.check.calls[1]?.resolve(['o1']);
+      await flush();
+      expect(harness.replay.calls).toHaveLength(2);
+    });
+
     it('should not re-arm a row on a check that began before its latest attempt', async () => {
       const harness = start();
       await ready(harness, [row('o1', 'p1', 'w1')]);
@@ -364,6 +404,28 @@ describe('libraryRecovery', () => {
       expect(harness.of('mutationAdmitted').map((event) => event.requestId)).toEqual(['m1', 'm2', 'm3']);
       expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'recovered', attempts: 0 }));
     });
+    it('should take a mutation journaled and settled while the journal is read, and admit nothing until it returns', async () => {
+      const harness = start();
+      harness.send({ type: 'mutationAsked', requestId: 'm2', projectId: 'p1' });
+      // A caller that skipped the gate journaled and applied its row before this tab's read returned.
+      harness.send({ type: 'mutationJournaled', requestId: 'm1', row: row('o1', 'p1') });
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: recovered });
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'recovered' }));
+      expect(harness.of('mutationAdmitted')).toEqual([]);
+      await ready(harness, [row('o1', 'p1')]);
+      expect(harness.replay.calls).toHaveLength(0);
+      expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm2' }]);
+    });
+
+    it("should not let a mutation's report settle a row the loop is replaying", async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1')]);
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: recovered });
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'replaying', via: 'journal' }));
+      expect(harness.of('rowSettled')).toEqual([]);
+      await settleReplay(harness, recovered);
+      expect(harness.of('rowSettled').map((event) => event.operationId)).toEqual(['o1']);
+    });
   });
 
   describe('the person', () => {
@@ -375,6 +437,23 @@ describe('libraryRecovery', () => {
       await settleReplay(harness, recovered);
       expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1', 'o2']);
       await settleReplay(harness, workspaceGone);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: true }]);
+    });
+
+    it('should answer a replay of a row at its attempt cap at once, held, without a fourth attempt', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      for (let attempt = 1; attempt < maxRecoveryAttempts; attempt += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- each attempt settles before the workspace returns again.
+        await settleReplay(harness, workspaceGone);
+        harness.send({ type: 'workspaceReturned' });
+      }
+      await settleReplay(harness, workspaceGone);
+      expect(harness.statusOf('o1')).toEqual(
+        expect.objectContaining({ status: 'failed', attempts: maxRecoveryAttempts }),
+      );
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      expect(harness.replay.calls).toHaveLength(maxRecoveryAttempts);
       expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: true }]);
     });
 

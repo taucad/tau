@@ -92,6 +92,10 @@ export type AccessFactEvent =
   | { type: 'epochMoved'; epoch: number; current: boolean }
   | { type: 'discoveryReady' }
   | { type: 'discoveryFailed'; message: string }
+  /** The failed bootstrap pass is being run again: questions wait for it. */
+  | { type: 'discoveryRetrying' }
+  /** The failed journal read is being run again: questions wait for it. */
+  | { type: 'journalRetrying' }
   | { type: 'journalReady'; pending: number }
   | { type: 'journalFailed'; message: string }
   | { type: 'recoveriesChanged'; recoveries: readonly PendingProjectRecovery[] }
@@ -108,6 +112,12 @@ export type LibraryAccessEvent =
 /** Events a `libraryAccess` actor emits. */
 export type LibraryAccessEmitted =
   | { type: 'accessAnswered'; requestId: string; epoch: number; answer: AccessAnswer }
+  /**
+   * A question arrived after the journal read or the bootstrap pass failed: run it again (recovery's `load`, the
+   * bootstrap `passRequested`), as today's `ensureJournalReady` and `ensureDiscoveryReady` retry on the next call.
+   */
+  | { type: 'journalWanted' }
+  | { type: 'discoveryWanted' }
   /** A question's query started: its access span begins. */
   | { type: 'accessBegan'; requestId: string; gen: number }
   /** A question's query ended, answered or stopped (replaced or cancelled): its access span finishes. */
@@ -135,6 +145,8 @@ export const libraryAccessEventTypes = [
   'epochMoved',
   'discoveryReady',
   'discoveryFailed',
+  'discoveryRetrying',
+  'journalRetrying',
   'journalReady',
   'journalFailed',
   'recoveriesChanged',
@@ -151,6 +163,8 @@ export const libraryAccessQueryEventTypes = [
   'epochMoved',
   'discoveryReady',
   'discoveryFailed',
+  'discoveryRetrying',
+  'journalRetrying',
   'journalReady',
   'journalFailed',
   'recoveriesChanged',
@@ -187,6 +201,12 @@ const withFact = (facts: AccessFacts, event: AccessFactEvent): AccessFacts => {
     }
     case 'discoveryFailed': {
       return { ...facts, discoveryError: event.message };
+    }
+    case 'discoveryRetrying': {
+      return { ...facts, discoveryError: undefined };
+    }
+    case 'journalRetrying': {
+      return facts.journal.status === 'failed' ? { ...facts, journal: { status: 'loading' } } : facts;
     }
     case 'journalReady': {
       return { ...facts, journal: { status: 'ready', pending: event.pending } };
@@ -404,6 +424,12 @@ export const libraryAccessQueryMachine = setup({
     discoveryFailed: refines('Unmodelled', ({ context, event }) => ({
       context: { facts: withFact(context.facts, event) },
     })),
+    discoveryRetrying: refines('Unmodelled', ({ context, event }) => ({
+      context: { facts: withFact(context.facts, event) },
+    })),
+    journalRetrying: refines('Unmodelled', ({ context, event }) => ({
+      context: { facts: withFact(context.facts, event) },
+    })),
     journalReady: refines('Unmodelled', ({ context, event }) => ({
       context: { facts: withFact(context.facts, event) },
     })),
@@ -619,15 +645,33 @@ export const libraryAccessMachine = setup({
           cacheHits: 0,
         });
       }
+      // A failed read is run again for the new question (and every open one waits for it), as today's next call does.
+      const retries: AccessFactEvent[] = [
+        ...(context.facts.journal.status === 'failed' ? [{ type: 'journalRetrying' } as const] : []),
+        ...(context.facts.discoveryError === undefined ? [] : [{ type: 'discoveryRetrying' } as const]),
+      ];
+      let { facts } = context;
+      for (const retry of retries) {
+        facts = withFact(facts, retry);
+      }
+      for (const retry of retries) {
+        for (const [requestId, open] of Object.entries(context.questions)) {
+          if (requestId !== event.requestId) {
+            enq.sendTo(open.ref, retry);
+          }
+        }
+        enq.emit({ type: retry.type === 'journalRetrying' ? 'journalWanted' : 'discoveryWanted' });
+      }
       const seen = context.generations[event.requestId];
       const gen = seen === undefined ? 0 : seen + 1;
       const ref = enq.spawn(actors.query, {
         id: `query:${event.requestId}:${String(gen)}`,
-        input: { requestId: event.requestId, gen, projectId: event.projectId, facts: context.facts, parentRef: self },
+        input: { requestId: event.requestId, gen, projectId: event.projectId, facts, parentRef: self },
       });
       enq.emit({ type: 'accessBegan', requestId: event.requestId, gen });
       return {
         context: {
+          facts,
           questions: { ...context.questions, [event.requestId]: { projectId: event.projectId, gen, ref } },
           generations: { ...context.generations, [event.requestId]: gen },
         },
@@ -664,6 +708,8 @@ export const libraryAccessMachine = setup({
     epochMoved: foldFact,
     discoveryReady: foldFact,
     discoveryFailed: foldFact,
+    discoveryRetrying: foldFact,
+    journalRetrying: foldFact,
     journalReady: foldFact,
     journalFailed: foldFact,
     recoveriesChanged: foldFact,

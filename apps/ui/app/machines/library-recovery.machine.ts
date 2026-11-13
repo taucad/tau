@@ -175,10 +175,8 @@ export const libraryRecoveryIgnoredEvents = [
   ['loading', 'load'],
   ['loading', 'workspaceReturned'],
   ['loading', 'retryRequested'],
-  ['loading', 'mutationSettled'],
   ['loadFailed', 'workspaceReturned'],
   ['loadFailed', 'retryRequested'],
-  ['loadFailed', 'mutationSettled'],
   ['ready', 'load'],
 ] as const satisfies ReadonlyArray<readonly [state: string, eventType: string]>;
 
@@ -293,7 +291,7 @@ const rearm = (context: Context, operationIds: readonly string[], enq: Emit): Pa
 const settleRow = (
   context: Context,
   enq: Emit,
-  { row, outcome }: Readonly<{ row: RecoveryRow; outcome: ReplayOutcome }>,
+  { row, outcome, admit = true }: Readonly<{ row: RecoveryRow; outcome: ReplayOutcome; admit?: boolean }>,
 ): Patch => {
   const next: RecoveryRow =
     outcome.status === 'failed'
@@ -302,7 +300,20 @@ const settleRow = (
   // Storage may have changed either way, so the listing owes a pass (the model's `Bump`).
   enq.emit({ type: 'rowSettled', operationId: row.operationId, projectId: row.projectId });
   const settled = { ...context, rows: { ...context.rows, [row.operationId]: next } };
-  return changed(context, { rows: settled.rows, ...admitWaiting(settled, enq) }, enq);
+  return changed(context, { rows: settled.rows, ...(admit ? admitWaiting(settled, enq) : {}) }, enq);
+};
+
+/** A mutation's own apply settled; anything but its own applying row is a late or repeated report. */
+const mutationSettled = (
+  context: Context,
+  enq: Emit,
+  { event, admit }: Readonly<{ event: Extract<LibraryRecoveryEvent, { type: 'mutationSettled' }>; admit: boolean }>,
+): { context?: Patch } => {
+  const row = context.rows[event.operationId];
+  if (row?.status !== 'replaying' || row.via !== 'mutation') {
+    return {};
+  }
+  return { context: settleRow(context, enq, { row, outcome: event.outcome, admit }) };
 };
 
 /** Add a row this tab had not seen (another tab's, read again by `createProject(id)`). */
@@ -436,8 +447,14 @@ export const libraryRecoveryMachine = setup({
       enq.emit({ type: 'discardSettled', requestId: event.requestId, ok: false });
       return {};
     }),
-    /* A mutation admitted before the journal was read journals its row: it is held from now on. */
+    /*
+     * A row journaled before this tab's read returned (a caller that skipped the gate) is a fact: it is held from now
+     * on, and its settle is taken too, so it is never left applying. Nothing is admitted until the read returns.
+     */
     mutationJournaled: refines('MutationJournaled', ({ context, event }, enq) => journaled(context, event, enq)),
+    mutationSettled: refines('ReplaySettled', ({ context, event }, enq) =>
+      mutationSettled(context, enq, { event, admit: false }),
+    ),
   },
   initial: 'loading',
   states: {
@@ -454,12 +471,11 @@ export const libraryRecoveryMachine = setup({
               order.push(input.operationId);
             }
           }
-          enq.emit({ type: 'journalReady', pending: event.output.length });
           const loaded = { ...context, rows, order, loadError: undefined };
-          return {
-            target: 'ready',
-            context: changed(context, { rows, order, loadError: undefined, ...admitWaiting(loaded, enq) }, enq),
-          };
+          const patch = changed(context, { rows, order, loadError: undefined, ...admitWaiting(loaded, enq) }, enq);
+          // After the rows are announced, so a question that starts on `journalReady` already sees them held.
+          enq.emit({ type: 'journalReady', pending: event.output.length });
+          return { target: 'ready', context: patch };
         }),
         onError: settles('Unmodelled', ({ event }: Failed, enq) => {
           const message = messageOf(event.error);
@@ -494,14 +510,9 @@ export const libraryRecoveryMachine = setup({
           return { context: { admitted, asked: released.asked, ...admitWaiting(released, enq) } };
         }),
         // `ReplaySettled` of a mutation's own row, which the model labels `MutationApplied`.
-        mutationSettled: refines('ReplaySettled', ({ context, event }, enq) => {
-          const row = context.rows[event.operationId];
-          // A mutation settles only its own row while it is applying it; anything else is a late or repeated report.
-          if (row?.status !== 'replaying' || row.via !== 'mutation') {
-            return {};
-          }
-          return { context: settleRow(context, enq, { row, outcome: event.outcome }) };
-        }),
+        mutationSettled: refines('ReplaySettled', ({ context, event }, enq) =>
+          mutationSettled(context, enq, { event, admit: true }),
+        ),
         workspaceReturned: refines('WorkspaceReturned', ({ context, event }, enq) => ({
           context: rearm(
             context,

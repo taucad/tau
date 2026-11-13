@@ -25,6 +25,7 @@ import {
   libraryDiscoveryMachine,
   selectCatalogCurrent,
   selectCurrentListing,
+  selectEpochCurrent,
 } from '#machines/library-discovery.machine.js';
 import type {
   DiscoveryPlan,
@@ -200,6 +201,83 @@ describe('libraryDiscovery', () => {
       expect(harness.answers('r2')).toHaveLength(1);
     });
 
+    it.each([false, true])(
+      'I7: should fence a workspace catalog enriched after its pass on that pass epoch (moved during enrichment: %s)',
+      async (moved) => {
+        const harness = start();
+        harness.send({ type: 'passRequested', requestId: 'r1', reuse: false });
+        await settlePass(harness, listing('a'));
+        const [settled] = harness.answers('r1');
+        // The service enriches the listing (`buildProjectListing`); a manifest event may land meanwhile.
+        if (moved) {
+          harness.send({ type: 'invalidated' });
+        }
+        expect(selectEpochCurrent(harness.actor.getSnapshot(), settled?.epoch ?? -1)).toBe(!moved);
+      },
+    );
+
+    it('should start a stale pass again when its scan fails, answering its requester from the fresh one', async () => {
+      const harness = start();
+      harness.send({ type: 'passRequested', requestId: 'r1', reuse: false });
+      harness.send({ type: 'invalidated' });
+      harness.scan.calls[0]?.reject(new Error('worker gone'));
+      await flush();
+      expect(harness.answers('r1')).toEqual([]);
+      expect(harness.scan.calls).toHaveLength(2);
+      await settlePass(harness, listing('a'));
+      expect(harness.answers('r1').map((answer) => answer.type)).toEqual(['passSettled']);
+    });
+
+    it('should not answer a reuse request from a listing a failed pass left behind', async () => {
+      const harness = start();
+      harness.send({ type: 'poll' });
+      await settlePass(harness, listing('a'));
+      harness.send({ type: 'poll' });
+      harness.scan.calls[1]?.reject(new Error('worker gone'));
+      await flush();
+      harness.send({ type: 'passRequested', requestId: 'r1', reuse: true });
+      expect(harness.answers('r1')).toEqual([]);
+      expect(harness.scan.calls).toHaveLength(3);
+    });
+
+    it.each(['metadata', 'discovery'] as const)(
+      'should keep only the first fault, the %s watch breaking first',
+      async (first) => {
+        const harness = start();
+        const broken = (name: 'metadata' | 'discovery') =>
+          createCallbackLogic<LibraryDiscoveryEvent>(({ receive }) => {
+            if (name === first) {
+              throw new Error(`${name} watch broke`);
+            }
+            receive(() => {
+              throw new Error(`${name} watch broke`);
+            });
+          });
+        const guard = guardActors({ ignore: { 'library-discovery': libraryDiscoveryIgnoredEvents } });
+        // Each watch breaks its contract: the first at start, the other when a refresh reaches it.
+        const actor = createLibraryDiscovery({
+          clock: new StepClock(),
+          inspect: guard.inspect,
+          ports: {
+            ...harness.ports,
+            metadataObservation: broken('metadata'),
+            discoveryObservation: broken('discovery'),
+          },
+        });
+        actor.start();
+        expect(actor.getSnapshot().context.fault).toBe(`${first} watch broke`);
+        actor.send({ type: 'refreshObservations' });
+        // A plan port that breaks its contract: the transition that reads it throws, and the root onError catches it.
+        actor.send({ type: 'poll' });
+        harness.scan.calls[0]?.resolve(listing('a'));
+        await flush();
+        harness.plan.calls[0]?.resolve(undefined as unknown as DiscoveryPlan);
+        await flush();
+        expect(guard.take('fault').length).toBeGreaterThan(0);
+        expect(actor.getSnapshot().context.fault).toBe(`${first} watch broke`);
+      },
+    );
+
     it('should announce every epoch move and listing change for the route-access fence', async () => {
       const harness = start();
       harness.send({ type: 'poll' });
@@ -257,6 +335,20 @@ describe('libraryDiscovery', () => {
       await flush();
       expect(harness.apply.calls).toHaveLength(0);
       expect(harness.actor.getSnapshot().context.skipped).toBe(true);
+    });
+
+    it('I9: should publish a pass with nothing to write that meets a stop, and owe nothing for it', async () => {
+      const harness = start();
+      harness.send({ type: 'poll' });
+      harness.scan.calls[0]?.resolve(listing('a'));
+      await flush();
+      harness.send({ type: 'writeStopBegan' });
+      harness.plan.calls[0]?.resolve({ result: listing('a'), writes: writes(0) });
+      await flush();
+      expect(harness.actor.getSnapshot().context.skipped).toBe(false);
+      harness.send({ type: 'writeStopEnded' });
+      expect(harness.scan.calls).toHaveLength(1);
+      expect(selectCatalogCurrent(harness.actor.getSnapshot())).toBe(true);
     });
 
     it('I9: should let a pass still in flight end before the redo, and redo once', async () => {

@@ -11,7 +11,8 @@ import type { OnboardingFlags } from '../../ui-e2e/src/support/flag-state.ts';
 
 /*
  * FL4 harness smoke on desktop (T0.4): each launch opens the renderer in the flag state it names, and the app
- * resolves exactly that state. A stored `tau:flags` override changes nothing (FL1, FL2).
+ * resolves exactly that state; a fresh profile opens setup by itself only in the state with every flag on. A stored
+ * `tau:flags` override changes nothing (FL1, FL2).
  */
 
 let session: DesktopSession | undefined;
@@ -41,7 +42,15 @@ const readAppFlags = async (current: DesktopSession): Promise<OnboardingFlags> =
 test.for(flagStateNames)('opens the renderer in the %s flag state', async (state) => {
   session = await launchDesktopApp({ token: 'unused', flagState: state });
   const { page } = session;
-  await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+  if (flagStateFlags[state].onboardingAutoOpen) {
+    // A fresh profile is a first run, and only this state opens setup by itself on one.
+    await page.waitForURL((url) => url.pathname === '/welcome' && url.searchParams.get('entry') === 'first_launch', {
+      timeout: 120_000,
+    });
+    await expectVisible(page.getByRole('heading', { level: 1, name: 'What do you want to make?' }), 60_000);
+  } else {
+    await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+  }
   expect(await readAppFlags(session)).toStrictEqual(flagStateFlags[state]);
 
   await page.evaluate(() => {
@@ -51,6 +60,6 @@ test.for(flagStateNames)('opens the renderer in the %s flag state', async (state
     );
   });
   await page.reload({ waitUntil: 'load' });
-  await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+  await expectVisible(page.getByRole('main'), 120_000);
   expect(await readAppFlags(session)).toStrictEqual(flagStateFlags[state]);
 });

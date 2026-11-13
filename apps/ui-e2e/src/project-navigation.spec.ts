@@ -77,7 +77,8 @@ const openActivityChat = async (name: string): Promise<void> => {
 type CameraInput = Readonly<{
   position: readonly [number, number, number];
   target: readonly [number, number, number];
-  fov: number;
+  /** Sent to the live camera only; omitted, the camera keeps the field of view it presents. */
+  fov?: number;
   zoom: number;
   rollRadians: number;
 }>;
@@ -140,6 +141,32 @@ const readCamera = async (): Promise<CameraEvidence> =>
     }
     return bridge.getCamera();
   });
+
+/*
+ * The field of view is a view command's leaf since #1911: the view's controls write the record, which seeds the camera,
+ * and a change sent straight to the camera (the bridge's `fov`) is never written. A durable field of view is set here
+ * through the person's control.
+ */
+const setFieldOfView = async (degrees: number): Promise<void> => {
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }));
+  const row = selectors.getByRole('menuitem', { name: /^Field of view, 0° is orthographic, / });
+  await target.expectVisible(row);
+  await target.focus(row);
+  await target.keyboardPress('Enter');
+  for (const digit of String(degrees)) {
+    // oxlint-disable-next-line no-await-in-loop -- The digits are keystrokes, typed in order.
+    await target.keyboardPress(digit);
+  }
+  await target.keyboardPress('Enter');
+  await target.expectAttribute(row, 'aria-label', `Field of view, 0° is orthographic, ${degrees}°`);
+  await target.keyboardPress('Escape');
+  await expect
+    .poll(async () => {
+      const camera = await readCamera();
+      return camera.requestedFov;
+    })
+    .toBe(degrees);
+};
 
 const startCameraRestoreObservation = async (entryPath: string): Promise<void> => {
   await target.evaluate((observedEntryPath) => {
@@ -360,6 +387,8 @@ test('client navigation keeps every project-scoped resource on one logical proje
   );
   await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
   await waitForCameraBridge();
+  /* The entry's first frame replaces any pose set before it (the framing machine), so the camera is set after it. */
+  await target.expectGeometryFramed();
   const legacyDefaultCamera = await readCamera();
   expect(legacyDefaultCamera.projection).toBe('perspective');
   expect(legacyDefaultCamera.requestedFov).toBe(60);
@@ -379,6 +408,7 @@ test('client navigation keeps every project-scoped resource on one logical proje
      * active tab, and waiting for B's own camera first hid alpha's first frames behind a race. */
     await startCameraRestoreObservation('alpha.ts');
     await waitForCameraBridge();
+    await target.expectGeometryFramed();
     await waitForTwoFrames();
     const projectBetaCamera = await readCamera();
     expect(projectBetaCamera.projection).toBe('perspective');
@@ -749,14 +779,16 @@ test('revisit and reload restore the same durable view settings', async () => {
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
   await waitForCameraBridge();
+  await target.expectGeometryFramed();
 
+  await setFieldOfView(42);
   const camera = await setCamera({
     position: [43, -31, 27],
     target: [3, -4, 5],
-    fov: 42,
     zoom: 1,
     rollRadians: 0.37,
   });
+  expect(camera.requestedFov).toBe(42);
   await setSectionCuts([
     { kind: 'plane', plane: 'xz', offset: 0.022, isFlipped: true },
     { kind: 'revolution', axis: 'z', start: 23, sweep: 120 },

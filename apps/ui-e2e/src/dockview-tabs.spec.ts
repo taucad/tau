@@ -68,7 +68,9 @@ type TabVisualState = {
 
 const readTabVisualState = async (tab: Locator): Promise<TabVisualState> =>
   target.evaluateLocator(tab, (element) => {
-    const title = element.querySelector<HTMLElement>('.scroll-shadow-right');
+    /* The title dissolves through the shared `fade-label` mask (7fb6915c8f), which widens to the
+       `--fade-label-size-actions` 42 px once the tab is hovered or focused. */
+    const title = element.querySelector<HTMLElement>('.fade-label');
     const close = element.querySelector<HTMLElement>('.dv-default-tab-action');
     if (!title || !close) {
       throw new Error('Tau Dockview tab content was incomplete.');

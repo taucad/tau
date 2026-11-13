@@ -113,9 +113,24 @@ test.describe('theme persistence and accessibility media', () => {
     await target.navigate('/?settings=general');
     await selectTheme(/^black/i);
 
+    // The canvas is pure black whatever notation the build serializes it in: the production CSS minifier rewrites the
+    // source's `oklch(0 0 none)` as `lab(0% 0 0)` with a `#000` fallback, so read the painted pixel, not the text.
     expect(
-      await target.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--background').trim()),
-    ).toBe('oklch(0 0 none)');
+      await target.evaluate(() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('Expected a 2D canvas context');
+        }
+        // White first, so a value the canvas cannot parse (which it ignores) cannot pass as black.
+        context.fillStyle = '#fff';
+        context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--background').trim();
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data];
+      }),
+    ).toEqual([0, 0, 0, 255]);
     await target.expectClass(getHtml(), /\bdark\b.*\bblack\b/);
   });
 

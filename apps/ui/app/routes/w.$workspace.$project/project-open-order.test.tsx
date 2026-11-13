@@ -27,6 +27,7 @@ import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as ViewerDockviewModule from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import type * as UnavailableOverlayModule from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
@@ -71,18 +72,12 @@ const facts = vi.hoisted(() => ({
 /** What the revision client has published: `undefined` until its first projection. */
 const revisionStatus = createFact<RevisionStatusProjection | undefined>(undefined);
 
-/** A clean, backed-up local checkout; the fact the rows move is its readiness (D10). */
-const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection =>
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a projection's other facets are absent on purpose: availability reads `largeObjects === undefined` as "no download runs", which a deep mock would answer
-  ({
-    projectId: projectA,
-    checkoutId: 'checkout-main',
-    readiness,
-    projectDirty: false,
-    line: { kind: 'unknown' },
-    sync: { chats: 'ready', online: true, state: 'backedUp', pendingCount: 0 },
-    remote: { phase: 'idle' },
-  }) as unknown as RevisionStatusProjection;
+/** The shared harness's clean local checkout; the fact the rows move is its readiness (D10). */
+const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection => ({
+  ...revisionStatusHarness.status,
+  projectId: projectA,
+  readiness,
+});
 
 type EditorStateValue = string | { readonly [state: string]: EditorStateValue };
 
@@ -175,27 +170,19 @@ const projectValue = {
 
 /**
  * The layout record as the record host serves it (`workbench-record-host.tsx`, `registerViewer`): a viewer that
- * registers after the record was read is applied at once, and a read that lands later is applied to the registered one.
+ * registers after the record was read is applied at once. The phone rows read it before the route mounts.
  */
 const mainViewer: ViewerNode = { kind: 'group', tabs: [{ kind: 'view', view: 'view-main' }] };
-const layoutRecord: {
-  viewer: ViewerNode | undefined;
-  apply: ((node: ViewerNode, applied: () => void) => void) | undefined;
-} = { viewer: undefined, apply: undefined };
+const layoutRecord: { viewer: ViewerNode | undefined } = { viewer: undefined };
 const layoutController: WorkbenchLayoutController = {
   snapshot: () => undefined,
   subscribe: () => () => undefined,
   restorePreviousArrangement: async () => false,
   registerViewer(apply) {
-    layoutRecord.apply = apply;
     if (layoutRecord.viewer) {
       apply(layoutRecord.viewer, () => undefined);
     }
-    return () => {
-      if (layoutRecord.apply === apply) {
-        layoutRecord.apply = undefined;
-      }
-    };
+    return () => undefined;
   },
   registerWorkbench: () => () => undefined,
   personViewerChanged: () => undefined,
@@ -578,7 +565,6 @@ beforeEach(() => {
   facts.isMobile = false;
   facts.isRealViewerBox = false;
   layoutRecord.viewer = undefined;
-  layoutRecord.apply = undefined;
   facts.viewer.mounts = 0;
   facts.viewer.removals = 0;
   revisionStatus.set(undefined);
@@ -627,6 +613,10 @@ describe('project open order (A0.7)', () => {
       revisionStatus.set(statusAt('materialized'));
     });
     await settle();
+    expect(
+      facts.viewer.mounts - facts.viewer.removals,
+      'U13: no viewer content is mounted while the first files check is outstanding',
+    ).toBe(0);
     await act(async () => {
       revisionStatus.set(statusAt('filled'));
     });
@@ -653,6 +643,10 @@ describe('project open order (A0.7)', () => {
       render(<OpenRoute />);
       await settle();
       expect(session.get()).toBe(true);
+      expect(
+        facts.viewer.mounts - facts.viewer.removals,
+        'U20: no viewer content is mounted while the first files check is outstanding',
+      ).toBe(0);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200);
       });

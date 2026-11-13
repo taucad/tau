@@ -36,7 +36,7 @@ const samples: Samples = {
   close: [{ type: 'close', projectId: 'a', reason: 'user' }],
   touch: [{ type: 'touch', projectId: 'a' }],
   chatRequested: [{ type: 'chatRequested', projectId: 'a', chatId: 'chat-1' }],
-  libraryChanged: [{ type: 'libraryChanged', epoch: 1 }],
+  libraryEpochChanged: [{ type: 'libraryEpochChanged', epoch: 1 }],
   idleExpired: [{ type: 'idleExpired', projectId: 'a' }],
   releaseMemory: [{ type: 'releaseMemory', keepProjectId: 'a' }],
   sessionState: [

@@ -829,6 +829,30 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
+  it('should resume a budget-refused open with its request once the person closes a project (R8)', async () => {
+    const { actor, started, emitted } = harness({ budget: 2 });
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+    report(actor, 'projA', { runs: 1 });
+    actor.send({ type: 'open', projectId: 'projRun' });
+    await settle();
+    report(actor, 'projRun', { runs: 1 });
+    const request = requestFor('projB');
+
+    actor.send({ type: 'open', projectId: 'projB', request });
+    await settle();
+    expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projB');
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projB', request });
+
+    report(actor, 'projA');
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+
+    expect(started).toEqual(['projA', 'projRun', 'projB']);
+    expect(sessionRequest(actor, 'projB')).toEqual(request);
+    actor.stop();
+  });
+
   it('should keep a return to a closing project with its request and resume it once the close lands', async () => {
     const closeFlush = Promise.withResolvers<void>();
     const { actor, started } = harness({ budget: 2, closeFlush: closeFlush.promise });
@@ -941,7 +965,7 @@ describe('sessionsMachine — the stale-epoch resume (A5c, spec-pf RegistryCheck
   const waitingOpen = async (epoch: number | undefined) => {
     const closeFlush = Promise.withResolvers<void>();
     const registry = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
-    registry.actor.send({ type: 'libraryChanged', epoch: 1 });
+    registry.actor.send({ type: 'libraryEpochChanged', epoch: 1 });
     await openIdle(registry.actor, 'projA');
     registry.actor.send({
       type: 'open',
@@ -956,7 +980,7 @@ describe('sessionsMachine — the stale-epoch resume (A5c, spec-pf RegistryCheck
   it('should drop a resumed open whose epoch a library change made stale, and say so to focus', async () => {
     const { actor, started, stopped, emitted, release } = await waitingOpen(1);
 
-    actor.send({ type: 'libraryChanged', epoch: 2 });
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
     release();
     await settle();
 
@@ -985,7 +1009,7 @@ describe('sessionsMachine — the stale-epoch resume (A5c, spec-pf RegistryCheck
   it('should resume a waiting open whose request names no epoch, which it cannot judge', async () => {
     const { actor, started, emitted, release } = await waitingOpen(undefined);
 
-    actor.send({ type: 'libraryChanged', epoch: 2 });
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
     release();
     await settle();
 
@@ -994,21 +1018,44 @@ describe('sessionsMachine — the stale-epoch resume (A5c, spec-pf RegistryCheck
     actor.stop();
   });
 
-  it('should resume a waiting open built at an epoch newer than any the registry has heard of', async () => {
-    const { actor, started, release } = await waitingOpen(5);
+  it('should drop a waiting open built at an epoch the registry has not heard of, which it cannot judge current', async () => {
+    const { actor, started, emitted, release } = await waitingOpen(5);
 
     release();
     await settle();
 
-    expect(started).toEqual(['projA', 'projB']);
+    expect(started).toEqual(['projA']);
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([
+      { type: 'pendingOpenDropped', projectId: 'projB', epoch: 5 },
+    ]);
+    actor.stop();
+  });
+
+  it('should drop a waiting open that names an epoch while the registry has heard of none', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started, emitted } = harness({
+      budget: constrainedLiveProjectBudget,
+      closeFlush: closeFlush.promise,
+    });
+    await openIdle(actor, 'projA');
+    actor.send({ type: 'open', projectId: 'projB', request: requestFor('projB', { epoch: 0 }) });
+    await settle();
+
+    closeFlush.resolve();
+    await settle();
+
+    expect(started).toEqual(['projA']);
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([
+      { type: 'pendingOpenDropped', projectId: 'projB', epoch: 0 },
+    ]);
     actor.stop();
   });
 
   it('should never move its library epoch back on a late report of an older one', () => {
     const { actor } = harness();
 
-    actor.send({ type: 'libraryChanged', epoch: 3 });
-    actor.send({ type: 'libraryChanged', epoch: 2 });
+    actor.send({ type: 'libraryEpochChanged', epoch: 3 });
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
 
     expect(actor.getSnapshot().context.libraryEpoch).toBe(3);
     actor.stop();
@@ -1016,7 +1063,7 @@ describe('sessionsMachine — the stale-epoch resume (A5c, spec-pf RegistryCheck
 
   it('should take a fresh open after a drop, so the re-send of focus from its fresh answer goes live', async () => {
     const { actor, started, release } = await waitingOpen(1);
-    actor.send({ type: 'libraryChanged', epoch: 2 });
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
     release();
     await settle();
 
@@ -1049,7 +1096,7 @@ describe('sessionsMachine — the machine contract (PV-S5, MC-R17)', () => {
       { type: 'cancelPendingOpen' },
       { type: 'releaseMemory', keepProjectId: 'a' },
       { type: 'chatRequested', projectId: 'a', chatId: 'chat-1' },
-      { type: 'libraryChanged', epoch: 1 },
+      { type: 'libraryEpochChanged', epoch: 1 },
     ] satisfies SessionsMachineEvent[];
     expect(
       unansweredEvents(sessionsMachine, {

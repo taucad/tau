@@ -118,7 +118,7 @@ export type SessionsMachineContext = Readonly<{
    */
   pendingOpen: SessionsPendingOpen | undefined;
   /**
-   * The newest library epoch the registry has heard of (`libraryChanged`), or `undefined` before the first.
+   * The newest library epoch the registry has heard of (`libraryEpochChanged`), or `undefined` before the first.
    *
    * A resumed open whose request names an older epoch was built from an answer the library has since moved past, so
    * the registry drops it instead of spawning it and says so (`pendingOpenDropped`, spec-pf `RegistryChecksEpoch`).
@@ -146,8 +146,11 @@ export type SessionsMachineEvent =
       readonly chatId?: string;
       readonly createdChatId?: string;
     }
-  /** The library moved to `epoch`; a resumed open built at an older epoch is dropped (spec-pf, A5c). */
-  | { readonly type: 'libraryChanged'; readonly epoch: number }
+  /**
+   * The library is at `epoch` (spec-pf, A5c). Its sender (A5b) reports every epoch, the first included, before it
+   * sends an open whose request names it; a resumed open built at another epoch is dropped.
+   */
+  | { readonly type: 'libraryEpochChanged'; readonly epoch: number }
   | { readonly type: 'idleExpired'; readonly projectId: string }
   /** Free memory: close every project a policy may close except the focused one (B-08). */
   | { readonly type: 'releaseMemory'; readonly keepProjectId?: string }
@@ -178,7 +181,7 @@ export const sessionsEventTypes = [
   'close',
   'touch',
   'chatRequested',
-  'libraryChanged',
+  'libraryEpochChanged',
   'idleExpired',
   'releaseMemory',
   'sessionState',
@@ -284,14 +287,16 @@ const carriesChat = (request: ProjectSessionOpenRequest | undefined): request is
   request?.chatId !== undefined || request?.createdChatId !== undefined;
 
 /**
- * A waiting open built from an answer older than the newest library epoch the registry heard of (A5c).
+ * A waiting open whose request was not built at the library epoch the registry last heard of (A5c).
  *
- * An open with no request or no epoch, or a registry that has heard of no epoch, cannot be judged and resumes as
- * today.
+ * The model drops a request whose epoch is not the library's (`RegistryChecksEpoch`). The registry's copy of that
+ * epoch arrives by event and can lag, so when the two differ, or the registry has heard of none, it cannot know the
+ * request is current, and it fails safe: it drops the open and says so, and focus re-sends from its fresh answer
+ * (`liveness-registry-epoch`). An open whose request names no epoch (a bare open, until A5b) resumes as today.
  */
 const isStalePendingOpen = (context: SessionsMachineContext, pending: SessionsPendingOpen): boolean => {
   const epoch = pending.request?.epoch;
-  return epoch !== undefined && context.libraryEpoch !== undefined && epoch < context.libraryEpoch;
+  return epoch !== undefined && epoch !== context.libraryEpoch;
 };
 
 const withoutKey = <T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> =>
@@ -404,7 +409,7 @@ export const sessionsMachine = setup({
      * next close would resume something nobody is waiting for any more. */
     cancelPendingOpen: { context: { pendingOpen: undefined } },
     /* Monotonic: a late report of an older epoch never makes a stale request look current. */
-    libraryChanged: ({ context, event }) => ({
+    libraryEpochChanged: ({ context, event }) => ({
       context: {
         libraryEpoch: context.libraryEpoch === undefined ? event.epoch : Math.max(context.libraryEpoch, event.epoch),
       },

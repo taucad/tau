@@ -807,12 +807,14 @@ for (const row of ports) {
           .find((value) => value['type'] === type);
       try {
         await held.revisions.channel.request({ command: 'mergeBranch', branch: 'feature' });
-        await expect.poll(() => toastOf('branch'), { timeout: 10_000 }).toMatchObject({
-          operation: 'merge',
-          branch: 'feature',
-          revisionId: feature.commitId,
-          before,
-        });
+        await expect
+          .poll(() => toastOf('branch'), { timeout: 10_000 })
+          .toMatchObject({
+            operation: 'merge',
+            branch: 'feature',
+            revisionId: feature.commitId,
+            before,
+          });
         expect(await readFile(join(held.workspaceRoot, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
 
         await held.revisions.channel.request({ command: 'undoMerge', revisionId: feature.commitId, before });

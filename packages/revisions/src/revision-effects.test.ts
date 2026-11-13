@@ -5370,7 +5370,11 @@ for (const actorSet of actorSets) {
       const { port, filesystem, ours, theirs, write } = context;
       const merged = await mergeInto(context, 'feature', 'main');
       const undone = await undoMerge(context, merged.revisionId, ours);
-      const more = await write({ 'a.txt': 'theirs\n', 'b.txt': 'theirs only\n', 'c.txt': 'new work\n' }, [theirs], 'More');
+      const more = await write(
+        { 'a.txt': 'theirs\n', 'b.txt': 'theirs only\n', 'c.txt': 'new work\n' },
+        [theirs],
+        'More',
+      );
       await port.updateRef({ name: 'feature', expectedHead: revisionId(theirs), head: revisionId(more) });
 
       await expect(mergeInto(context, 'feature', 'main')).rejects.toMatchObject({ code: 'MERGE_UNDONE' });
@@ -5401,7 +5405,10 @@ for (const actorSet of actorSets) {
       const later = await write({ 'a.txt': 'base\n', 'd.txt': 'later\n' }, [ours], 'Later');
       await port.updateRef({ name: 'main', expectedHead: revisionId(ours), head: revisionId(later) });
       await filesystem.writeFile('d.txt', 'later\n');
-      const plan = await run<{ planId: string }>(context.actors.restore.computePlan, { checkoutId: 'live', target: ours });
+      const plan = await run<{ planId: string }>(context.actors.restore.computePlan, {
+        checkoutId: 'live',
+        target: ours,
+      });
       await run(context.actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
       await restoreCut(context, later, ours);
 

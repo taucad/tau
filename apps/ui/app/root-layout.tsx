@@ -46,6 +46,7 @@ import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
+  readonly pathname: string;
   readonly theme: ThemeWithSystem;
   /** The server-visible preferences the request's cookies carried; `useCookie`'s server snapshot. */
   readonly preferences?: ServerPreferences;
@@ -96,8 +97,6 @@ export function RootLayout({
   readonly documentChrome?: ReactNode;
 }): React.JSX.Element {
   const data = useRouteLoaderData<RootLoaderData>('root');
-  /* The router's location, not loader data: a client navigation does not re-run the root loader (U23). */
-  const { pathname } = useLocation();
   // Preserve null so the theme provider can resolve the system preference before hydration.
   const ssrTheme = data?.theme ?? null;
   const queryClient = useMemo(() => {
@@ -148,7 +147,7 @@ export function RootLayout({
       </ProjectManagerProvider>
     </HeadlessImageProvider>
   );
-  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, pathname);
+  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname);
   const application = isHarness ? (
     children
   ) : (
@@ -281,9 +280,12 @@ export function ProductApp(): React.JSX.Element {
   );
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
-  const { pathname } = useLocation();
   const page = <Page />;
-  return isRemoteHostHarness(data?.env.TAU_DEBUG, pathname) ? page : <ProjectSessionsHost>{page}</ProjectSessionsHost>;
+  return isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
+    page
+  ) : (
+    <ProjectSessionsHost>{page}</ProjectSessionsHost>
+  );
 }
 
 /**

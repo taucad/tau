@@ -1,10 +1,12 @@
 /**
  * Root loader revalidation on a client navigation (loading-states blueprint, lane S-nav, row F11).
  *
+ * F11 (S-nav part). The 100 ms pushState and destination-frame half belongs to A15b (frame hint).
+ *
  * The forced condition: every `.data` request that would run the root loader is held for 3 s in the
- * page. A click on a project row from Home must change the URL without one, so it never waits on the
- * server. The row fails on the defect's own assertion, the root `.data` requests the click issued,
- * never on a timeout.
+ * page. A click on a project row from Home must issue no root `.data` request, and the URL must
+ * commit before a held root request would settle. The row fails on the defect's own assertion, the
+ * root `.data` requests the click issued, never on a timeout.
  */
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
@@ -74,7 +76,7 @@ const readRecord = async (): Promise<NavigationRecord> =>
     };
   });
 
-test('F11 (U23, S-nav): a click on a project row from Home changes the URL with no root loader request', async ({
+test('F11 (U23, S-nav part): a click on a project row from Home issues no root .data request, and the URL commits before a held root request settles', async ({
   annotate,
 }) => {
   await target.setViewport({ width: 1440, height: 900 });
@@ -112,7 +114,10 @@ test('F11 (U23, S-nav): a click on a project row from Home changes the URL with 
     `click to pushState: ${elapsed.toFixed(1)} ms; root .data requests: ${record.rootDataRequests.length}`,
   );
 
-  expect(record.rootDataRequests, 'the click re-ran the root loader on the server').toStrictEqual([]);
-  expect(elapsed, 'the URL changed only after a held root loader request').toBeLessThan(rootDataDelay);
+  expect(
+    record.rootDataRequests,
+    'no root .data request: the click re-ran the root loader on the server',
+  ).toStrictEqual([]);
+  expect(elapsed, 'the URL commits before a held root request settles').toBeLessThan(rootDataDelay);
   await target.expectUrl(projectRoute);
 });

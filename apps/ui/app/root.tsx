@@ -6,6 +6,7 @@ import { readThemeCookie } from '#theme-cookie.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
+import { remoteHostHarnessPath } from '#utils/remote-host-harness.js';
 import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
@@ -67,6 +68,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     consentStatus: readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl),
     globalPrivacyControl,
     env: await getClientEnvironment(),
+    pathname,
     // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
     projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
     // R4/R7: sidebar state and request platform, so the shell's first paint is final.
@@ -78,16 +80,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /**
- * The root loader reads request headers, cookies and the server environment; none of them
- * change on a client navigation, and every consumer of its data reads it as the server
- * snapshot only (the client keeps its own copy of each value after hydration). So a GET
- * navigation, whether it changes the pathname or the query string, does not re-run it, and a
- * click never waits for the server before the URL changes (U23).
+ * The root loader reads request headers, cookies and the server environment, none of which a
+ * client navigation changes, so a GET navigation that changes the pathname or the query string
+ * does not re-run it, and a click never waits for the server before the URL changes (U23). The
+ * `pathname` it returns is then the path the root data was last loaded for, not the current one.
  *
- * Submissions and an explicit revalidation of the same URL keep the default. Leaving the
- * offline shell path keeps the default too: its neutral prerendered document carries no
- * cookies' data and no model catalog, so the first page after it loads the real root data.
- * The offline shell path itself never revalidates the root.
+ * What that gives up: the `HydrationBoundary` over `queries` used to rehydrate the model
+ * catalog from the server on every navigation. The client's own catalog query now refreshes it,
+ * through its `staleTime` and `refetchInterval`. The cookie-backed values (consent, theme,
+ * sidebar, preferences, project count) are read from loader data only as the server snapshot.
+ *
+ * The default is kept for submissions, an explicit revalidation of the same URL, leaving the
+ * offline shell path (its neutral prerendered document has no real root data), and a navigation
+ * into or out of the remote-host harness: the root layout's harness check reads `pathname` from
+ * this loader's data, so revalidating there keeps that value correct whenever the check depends
+ * on it. The offline shell path itself never revalidates the root.
  */
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   currentUrl,
@@ -98,8 +105,10 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   if (isOfflineShellPath(nextUrl.pathname)) {
     return false;
   }
+  const touchesHarness = currentUrl.pathname === remoteHostHarnessPath || nextUrl.pathname === remoteHostHarnessPath;
   const isClientNavigation =
     formMethod === undefined &&
+    !touchesHarness &&
     !isOfflineShellPath(currentUrl.pathname) &&
     (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
   return isClientNavigation ? false : defaultShouldRevalidate;

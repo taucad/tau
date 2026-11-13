@@ -132,6 +132,8 @@ export class ProjectLibrary {
   #bound = Promise.withResolvers<void>();
   /** The current binding's provider disposed its reads and has not bound again. */
   #released = false;
+  /** Counts releases, so a read can tell its provider released and resumed it while it ran (StrictMode). */
+  #releases = 0;
   readonly #changed = new Topic<void>({ name: 'project-library' });
   readonly #filesChanged = new Topic<void>({ name: 'project-library-files' });
   #snapshot: ProjectLibrarySnapshot;
@@ -238,6 +240,7 @@ export class ProjectLibrary {
       return;
     }
     this.#released = true;
+    this.#releases += 1;
     this.#bound = Promise.withResolvers<void>();
   }
 
@@ -353,11 +356,12 @@ export class ProjectLibrary {
    */
   async #read<T>(call: (chats: ProjectLibraryChatPorts) => Promise<T>): Promise<T> {
     const binding = await this.#current();
+    const releases = this.#releases;
     try {
       return await call(binding.chats);
     } catch (error) {
-      /* Failed while its provider still serves it: the read's own failure. */
-      if (this.#binding === binding && !this.#released) {
+      /* Failed while its provider served it throughout: the read's own failure. */
+      if (this.#binding === binding && !this.#released && this.#releases === releases) {
         throw error;
       }
       /* Released or replaced, in either order: ask the binding that serves reads next. */

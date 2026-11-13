@@ -187,6 +187,33 @@ describe('ProjectLibrary', () => {
     await expect(call).resolves.toMatchObject({ id: 'new:c1' });
   });
 
+  it('should ask a read again when its provider released and resumed it while it ran (StrictMode)', async () => {
+    const library = createLibrary();
+    const first = Promise.withResolvers<Chat | undefined>();
+    let attempts = 0;
+    library.bind(
+      bindingNamed('only', {
+        chats: {
+          ...bindingNamed('only').chats,
+          getChat: async (chatId) => {
+            attempts += 1;
+            return attempts === 1 ? first.promise : chatOf(`only:${chatId}`);
+          },
+        },
+      }),
+    );
+    const call = library.getChat('c1');
+    await flush();
+
+    /* The effect's cleanup and setup run back to back, then the first attempt's disposal is seen. */
+    library.release();
+    library.resume();
+    first.reject(new Error('Chat observation was disposed.'));
+
+    await expect(call).resolves.toMatchObject({ id: 'only:c1' });
+    expect(attempts).toBe(2);
+  });
+
   it('should hold ports while released, and deliver them on the same binding once its provider resumes', async () => {
     const library = createLibrary();
     library.bind(bindingNamed('only'));

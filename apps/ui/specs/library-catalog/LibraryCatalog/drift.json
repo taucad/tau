@@ -1,0 +1,23 @@
+{
+  "alphabet": [],
+  "sources": {
+    "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813"
+  },
+  "specs": {
+    "LibraryCatalog.tla": "5b6fe28bcd00d6554c0a61020cfd553aaeb6dab94663209a768db0b8a33b2d17"
+  },
+  "tables": {
+    "LibraryCatalog.env-double-replay-witness.cfg": "3a626edd08a2f14e25efdec4bd1e2cc8dd41e7dc5666392e40bc80778575074d",
+    "LibraryCatalog.env-double-replay.cfg": "8d452903d42a7eab43a6605485d1f92bc247c37f6af673508f7333011a88c4a0",
+    "LibraryCatalog.export.cfg": "b685cf694820d37285594e31ea4377b24cee15827441b997411dfea0645d7dc3",
+    "LibraryCatalog.liveness.cfg": "4b7fca761ac65177b66cc4da42ab5b4ab644f4fbf7b60c6b56c599d0a338be33",
+    "LibraryCatalog.no-epoch.cfg": "a42f874043a8a652bfa60f8b6bcd539b805e8b59239a84cb9f35bc8ee7dcf8be",
+    "LibraryCatalog.target-access.cfg": "6c78b2eac17fa3c240768120304a6e0b495aedcbee8048c64b5d808787cc9405",
+    "LibraryCatalog.target-environment.cfg": "ecee52fb50fe5e8d4a27d7b29324a632efe0e2214097f9c822495b7e94aaaaf4",
+    "LibraryCatalog.target-workspace.cfg": "59b2822d85a26c52e19ec35df728374792f55c52cba7519b56dcc12eaee40bf4",
+    "LibraryCatalog.target.cfg": "41fec0a8432ee6c81c208f481a9243fc46d0750a7372544d9c74a61a3065a559",
+    "LibraryCatalog.today-access-loop.cfg": "8dd2456cfabb04b4352860c745ef13cf526ef0db428669ac2f693208edb099b3",
+    "LibraryCatalog.today-ref-epoch.cfg": "ba4aa98b30e318379321ccf59522459919b684e425988bc4a5af21490ce2267c",
+    "expected.json": "703ca1f621173b1f0eb39c6c67469fb1d38a9c0478e621c6f3227e4bd800f325"
+  }
+}

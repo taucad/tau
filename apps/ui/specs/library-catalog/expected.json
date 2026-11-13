@@ -1,0 +1,77 @@
+{
+  "configs": {
+    "LibraryCatalog.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I7, I8, I9: discovery, recovery and mutations at 2 projects, 1 journal row at start, 2 mutations, 1 crash and 1 write stop, with a quiet environment (no other tab, no invalidation without a change, the workspace available) and no retryable failure while it is"
+    },
+    "LibraryCatalog.target-environment.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The same properties while another tab changes a root once and settles one journal row this tab is not replaying: 2 projects, 1 row at start, 2 mutations, no crash, no write stop"
+    },
+    "LibraryCatalog.target-workspace.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The same properties while the workspace goes away and returns once and a replay may also fail with a retryable reason, so a row reaches its third attempt: 2 projects, 1 row at start, 2 mutations, no crash, no write stop"
+    },
+    "LibraryCatalog.liveness.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "RowEventuallySettled under LiveSpec (weak fairness of the replay and of discovery; the person, a crash and the workspace are not fair), no SYMMETRY: 2 projects, 1 row at start, 1 mutation, 1 crash, the workspace away once, retryable failures"
+    },
+    "LibraryCatalog.today-ref-epoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoStaleReconcile"
+      },
+      "kind": "witness",
+      "ref": "Inventory L5: getProjectListing compares discoveryEpochRef after the pass settles and the listing lands in the query cache later; a pass started by a poll in between moves the epoch without cancelling the query, so a listing of the previous epoch replaces the catalog. Every invalidation after a storage change cancels the query, so the listing that lands still matches storage. 2 projects, 1 row at start, 1 mutation, 1 poll"
+    },
+    "LibraryCatalog.target-access.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "I4, I18, AccessAnswerFenced and AccessMatchedById: 2 questions about 2 projects, each resting on 2 reads, 1 invalidation with no change, and 1 mutation whose row starts recovering while a question reads; no row at start, no crash"
+    },
+    "LibraryCatalog.today-access-loop.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AccessAnswerFenced"
+      },
+      "kind": "witness",
+      "ref": "Inventory L8: getProjectRouteAccess (use-project-manager.tsx lines 2419 to 2545) re-checks the epoch after every read but the recovery set only on the found path; a creation of the asked project journaled while the configuration read is pending moves no epoch, and the loop answers missing while the tab holds a recovering row for the project. Same bounds as target-access"
+    },
+    "LibraryCatalog.env-double-replay.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Another tab settles one row this tab is replaying (OQ6, no lock): every property holds for this tab, which settles its own replay and accounts for the row. 2 projects, 1 row at start, 2 mutations, no crash, no write stop"
+    },
+    "LibraryCatalog.env-double-replay-witness.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SingleReplay"
+      },
+      "kind": "witness",
+      "ref": "The inherited risk beside env-double-replay, at its bounds: another tab settles a row while this tab replays it, so two tabs replay one row"
+    },
+    "LibraryCatalog.no-epoch.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoStaleReconcile"
+      },
+      "kind": "limit",
+      "ref": "D10 rules the epoch fence: without it a pass that an invalidation overtook (a mutation settling during the scan) replaces the catalog with what storage held before. 2 projects, 1 row at start, 1 mutation"
+    },
+    "LibraryCatalog.export.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "The target, labelled, at 1 project, 1 row at start, 1 mutation and 1 access question resting on 1 read, with no crash and no write stop, so the graph stays under 1 MB (graphs.LibraryCatalog)"
+    }
+  },
+  "graphs": {
+    "LibraryCatalog": {
+      "config": "LibraryCatalog.export.cfg",
+      "phase": "pass.st"
+    }
+  }
+}

@@ -43,6 +43,7 @@ import {
   revisionCommitterSignature,
   revisionTagMessage,
   taggerSignature,
+  unrecordedAuthorOf,
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
@@ -556,7 +557,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
       /* B3: a commit Tau did not record reads as its git author, as GitHub shows it. */
-      ...(trailer === undefined ? { authorName: commit.author.name } : {}),
+      ...(trailer === undefined ? unrecordedAuthorOf(commit) : {}),
       conflicted: commit.conflictedTrees !== undefined,
     });
   };

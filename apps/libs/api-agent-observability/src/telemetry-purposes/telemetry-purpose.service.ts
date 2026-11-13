@@ -63,8 +63,8 @@ export class TelemetryPurposeService {
    */
   @Span()
   public async getEffectivePurposes(userId: string, projectId?: string): Promise<EffectiveTelemetryPurposes> {
-    const { effective } = await this.getAdmissionAuthority(userId, projectId);
-    return effective;
+    const { effective, protection } = await this.getAdmissionAuthority(userId, projectId);
+    return { ...effective, protection };
   }
 
   /**

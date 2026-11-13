@@ -3,6 +3,7 @@ import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
+import { reportUiError } from '#lib/error-reporting.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import type { PartialDeep } from 'type-fest';
@@ -127,6 +128,11 @@ export type EditorStateContext = {
   materialiseModel?: (path: string) => Promise<void>;
   /** In-flight deferred open (only set while materialising). */
   pendingOpenFile?: PendingOpenFile;
+  /**
+   * The first defect the root `onError` caught (MC-R12, charter D23): a child that failed with no handler of its own,
+   * an effect that threw, or a send to no child. Later defects are usually its consequences, so they do not replace it.
+   */
+  fault: string | undefined;
 };
 
 type PendingOpenFile = Readonly<{
@@ -447,6 +453,17 @@ const restartDebounce = { target: 'pending', reenter: true } as const;
 const markPendingChanges = { context: { hasPendingChanges: true } } as const;
 
 /**
+ * Report the editor's first fault through the app's error reporter, as the route error boundary reports what it
+ * catches. The project runtime's single fault hook replaces this (A6b).
+ *
+ * @param error - What the root `onError` was handed.
+ */
+export const reportEditorFault = (error: unknown): void => {
+  // async-iife: bootstrap -- an effect cannot await the report, and a report that fails is not retried.
+  void reportUiError(error);
+};
+
+/**
  * Editor State Machine
  *
  * Manages transient Editor state per-build:
@@ -470,6 +487,18 @@ export const editorMachine = setup({
   },
 }).createMachine({
   id: 'editor',
+  // A defect is recorded and the editor stays in the state it was in, which still answers every public event (MC-R12,
+  // charter B2). The first is kept and reported once: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }, enq) => {
+    if (context.fault === undefined) {
+      enq(reportEditorFault, event.error);
+    }
+    return {
+      context: {
+        fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+      },
+    };
+  },
   context: ({ input }) => ({
     projectId: input.projectId,
     openFiles: [],
@@ -486,6 +515,7 @@ export const editorMachine = setup({
     focusedChatError: undefined,
     materialiseModel: undefined,
     pendingOpenFile: undefined,
+    fault: undefined,
   }),
   initial: 'idle',
   on: {

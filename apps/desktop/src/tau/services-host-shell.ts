@@ -10,6 +10,7 @@
  *
  * @module
  */
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -42,6 +43,11 @@ export type DesktopShellOptions = Readonly<{
   home?: string | undefined;
   /** On Linux, the host-owned file journalling protected-path stand-ins, swept at the next start after a crash. */
   standInJournal?: string | undefined;
+  /**
+   * The bundled git's toolchain ({@link bundledGitToolchain}): readable, and first on both shells' `PATH`, so the agent
+   * and the Terminal run the git the revision engine records with.
+   */
+  toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }> | undefined;
   /** Injected for tests; otherwise {@link desktopShellProvider}. */
   provider?: ShellProvider | undefined;
   log?: ((event: string, detail?: unknown, level?: 'info' | 'warn') => void) | undefined;
@@ -79,6 +85,30 @@ export type DesktopShell = Readonly<{
   /** Forget a project's runs once its host is gone. */
   release: (projectRoot: string) => void;
 }>;
+
+/**
+ * The shell toolchain for the `git` this build ships: its payload folder readable, and its `bin` folder and the exec
+ * path that holds its `git-lfs` on `PATH`. Git starts its LFS filter through its own exec path, so `git status` on a
+ * project with large files works without a `git-lfs` of the machine's own, and `git-lfs` is there to type as well.
+ * Without a bundled git (a development tree, a platform with no payload) the shell keeps the machine's `PATH`.
+ *
+ * @param gitExecutable - The bundled `git` (`TAU_GIT_EXECUTABLE`), `<payload>/bin/git`.
+ * @returns The toolchain, or `undefined` when no git is bundled.
+ */
+export const bundledGitToolchain = (
+  gitExecutable: string | undefined,
+): Readonly<{ roots: readonly string[]; bins: readonly string[] }> | undefined => {
+  if (gitExecutable === undefined || gitExecutable === '') {
+    return undefined;
+  }
+  const bin = dirname(gitExecutable);
+  const payload = dirname(bin);
+  const execPath = join(payload, 'libexec', 'git-core');
+  return {
+    roots: [payload],
+    bins: existsSync(join(execPath, 'git-lfs')) ? [bin, execPath] : [bin],
+  };
+};
 
 /**
  * Resolve the supervisor beside the launched utility entry, even when this module lives in a shared bundle chunk.
@@ -264,6 +294,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
               projectRoots: () => [...new Set([...checkouts.projects.keys(), ...(options.projectRoots?.() ?? [])])],
               platform,
               ...(options.home === undefined ? {} : { home: options.home }),
+              ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
               permissionModeOf,
               /* I7: an earlier host's agent receipts wait for the project whose run records still name them. */
               projectExecutions: () =>

@@ -8,6 +8,9 @@ import type { ProjectSessionCloseReason } from '#machines/project-session.machin
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
+import { createActor } from 'xstate';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { sessionsMachine } from '#machines/sessions.machine.js';
 
 const navigate = vi.fn();
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
@@ -324,5 +327,34 @@ describe('ProjectRouteNotice', () => {
     const results = await axe.run(container);
 
     expect(results.violations).toEqual([]);
+  });
+});
+
+/*
+ * A0.2 (row S39): the notice's reopen is the other sender of `open` (`project-route-notices.tsx` 277 to 278).
+ * It sends a bare project id and a touch. Whether the reopened session carries the request focus kept (I4)
+ * is pinned over the route gate harness in `project-route.test.tsx`, which is the one that ever held it.
+ */
+describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)', () => {
+  const nativeProject: Project = { ...project, assets: { main: { entryPath: 'main.py' } } };
+  let registry: ReturnType<typeof createActor<typeof sessionsMachine>> | undefined;
+
+  afterEach(() => {
+    registry?.stop();
+    registry = undefined;
+    send.mockReset();
+  });
+
+  it('should spawn a session for the project it reopens and touch it', async () => {
+    const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
+    registry = started;
+    send.mockImplementation((event: Parameters<typeof started.send>[0]) => {
+      started.send(event);
+    });
+    render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project: nativeProject, reason: 'user' }} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
+
+    expect(started.getSnapshot().context.refs[projectId]?.getSnapshot().context.projectId).toBe(projectId);
+    expect(started.getSnapshot().context.touchOrder[projectId]).toBe(2);
   });
 });

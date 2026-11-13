@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createFakeShellProvider } from '@taucad/native-process-core/shell';
 
-import { createDesktopShell, desktopShellCustody, desktopShellProvider } from '#tau/services-host-shell.js';
+import {
+  bundledGitToolchain,
+  createDesktopShell,
+  desktopShellCustody,
+  desktopShellProvider,
+} from '#tau/services-host-shell.js';
 
 let base = '';
 let project = '';
@@ -39,7 +44,47 @@ const versionThenOk = () =>
       : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } },
   );
 
+describe('bundledGitToolchain', () => {
+  it('names the payload readable and puts its bin folder and the exec path holding git-lfs on PATH', async () => {
+    const payload = join(base, 'resources', 'git', 'linux-x64');
+    await mkdir(join(payload, 'bin'), { recursive: true });
+    await mkdir(join(payload, 'libexec', 'git-core'), { recursive: true });
+    await writeFile(join(payload, 'bin', 'git'), '');
+    const git = join(payload, 'bin', 'git');
+
+    expect(bundledGitToolchain(git)).toStrictEqual({ roots: [payload], bins: [join(payload, 'bin')] });
+    await writeFile(join(payload, 'libexec', 'git-core', 'git-lfs'), '');
+    expect(bundledGitToolchain(git)).toStrictEqual({
+      roots: [payload],
+      bins: [join(payload, 'bin'), join(payload, 'libexec', 'git-core')],
+    });
+    expect(bundledGitToolchain(undefined)).toBeUndefined();
+    expect(bundledGitToolchain('')).toBeUndefined();
+  });
+});
+
 describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('createDesktopShell', () => {
+  it('runs both shells with the bundled git first on PATH and its payload readable', async () => {
+    const provider = versionThenOk();
+    const toolchain = { roots: [join(base, 'git')], bins: [join(base, 'git', 'bin'), join(base, 'git', 'libexec')] };
+    const shell = createDesktopShell({ appDataRoots: [appData], provider, home: base, toolchain });
+    shell.forProject(project, new Map([['run-bracket', { cwd: project }]]));
+    const probe = await shell.probe();
+    if (probe.status !== 'available') {
+      throw new Error(probe.message);
+    }
+    await probe.shell.run({
+      runId: 'run-bracket',
+      toolCallId: 'call-git',
+      signal: new AbortController().signal,
+      input: { command: 'git --version' },
+    });
+    const launch = provider.launches.at(-1)!;
+
+    expect(launch.environment['PATH']?.split(':').slice(0, 2)).toStrictEqual(toolchain.bins);
+    expect(launch.filesystem.readable).toContain(join(base, 'git'));
+  });
+
   it('offers nothing until the probe is ready, then the same memoised shell to every project', async () => {
     const provider = versionThenOk();
     const shell = createDesktopShell({ appDataRoots: [appData], provider, home: base });

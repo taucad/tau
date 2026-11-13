@@ -48,6 +48,13 @@ export type RevisionRowWho =
       kind: 'unrecorded';
       /** The commit's git author name; absent when the commit names none. */
       authorName?: string;
+      /**
+       * The Tau account its author address names: a commit that person made
+       * with git under their Tau no-reply address. An address, not an identity
+       * Tau recorded, so a reader trusts it only as far as Tau Cloud's push
+       * record confirms it.
+       */
+      authorAccountId?: string;
     }>;
 
 /** One revision as a person reads it. @public */
@@ -338,6 +345,7 @@ const whoOf = (
       who: Object.freeze({
         kind: 'unrecorded',
         ...(entry.authorName === undefined || entry.authorName === '' ? {} : { authorName: entry.authorName }),
+        ...(entry.authorAccountId === undefined ? {} : { authorAccountId: entry.authorAccountId }),
       }),
     };
   }

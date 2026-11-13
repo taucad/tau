@@ -81,6 +81,10 @@ DATABASE_STATEMENT_TIMEOUT_MS = '15000'
 DATABASE_LOCK_TIMEOUT_MS = '5000'
 DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
 DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
+# Auth session cookie cache blueprint (Tau Brain research/auth-session-cookie-blueprint.md): seconds an
+# encrypted session snapshot may answer cookie GET/HEAD requests without a PostgreSQL read. 0 disables it;
+# 60 is the rollout value, set per environment after its acceptance checks (WP6), never by default.
+AUTH_SESSION_CACHE_MAX_AGE_SECONDS = '60'
 # Deploy-cut charter D15: a funded model step may run up to 600 s, as in production
 # (operator ruling 2026-11-10). kill_timeout stays 120 s and shutdownPhases and recoveryGraceMinutes are
 # unchanged: a step cut by a deploy still settles at zero with service_restart.
@@ -113,8 +117,7 @@ TAU_S3_FORCE_PATH_STYLE = 'false'
 # TAU_FILES_LINK_SIGNING_KEY, which tau-cloud's staging stack writes (gate 3,
 # tau-cloud#136; docs/files-service-runbook.md "Apply order").
 # Remove this line and redeploy to roll back to presigned downloads.
-# STO-26 rollback drill: TAU_FILES_BASE_URL (https://files.taucad.dev) is removed
-# so staging serves presigned R2 downloads; the drill's follow-up PR restores it.
+TAU_FILES_BASE_URL = 'https://files.taucad.dev'
 # Runtime Observability PR-2: staging records runtime telemetry entries (on | off | paused-until:<ISO>).
 TAU_RUNTIME_TELEMETRY = 'on'
 

@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { SessionResolver } from '@taucad/api-auth';
 import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import { createSessionCacheHarness, dataCookie, tokenCookie } from '@taucad/api-auth/testing/session-cache';
+import type { SessionCacheHarness } from '@taucad/api-auth/testing/session-cache';
 import type { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
@@ -599,4 +601,68 @@ describe('HostsGateway in production', () => {
       server.close();
     }
   }, 10_000);
+});
+
+/** Blueprint WP4 case 10 (H3): a deleted session row closes the browser upgrade although a fresh snapshot is replayed. */
+describe('HostsGateway browser routes with the session cookie cache', () => {
+  let auth: SessionCacheHarness;
+
+  beforeAll(async () => {
+    auth = await createSessionCacheHarness();
+  });
+
+  afterAll(async () => {
+    await auth.close();
+  });
+
+  const upgrade = async (cookie: string) => {
+    const acceptBrowserRoute = vi.fn(async () => undefined);
+    let handler: WebSocketConnectionHandler | undefined;
+    const devWebSocketService = {
+      registerPathHandler: vi.fn(),
+      registerPrefixHandler: vi.fn((_prefix: string, register: WebSocketConnectionHandler) => {
+        handler = register;
+      }),
+      ensureStarted: vi.fn(async () => undefined),
+    } as unknown as DevWebSocketService;
+    const gateway = new HostsGateway(
+      { acceptBrowserRoute } as unknown as HostsService,
+      devWebSocketService,
+      auth.sessions,
+      {} as HttpAdapterHost,
+    );
+    await gateway.onModuleInit();
+    const socket = routeSocket();
+    await handler?.(socket, {
+      url: '/v1/agents/sessions/as_abc/browser/agent',
+      headers: { host: 'localhost', cookie },
+    } as unknown as IncomingMessage);
+    return { socket, acceptBrowserRoute };
+  };
+
+  const cookiesOf = async (): Promise<{ wellFormed: string; nbsp: string; userId: string }> => {
+    const { jar, userId } = await auth.signUp();
+    expect(jar.get(dataCookie)).toBeDefined();
+    const token = `${tokenCookie}=${jar.get(tokenCookie) ?? ''}`;
+    const data = `${dataCookie}=${jar.get(dataCookie) ?? ''}`;
+    return { wellFormed: `${token}; ${data}`, nbsp: `${data};\u00A0${token}`, userId };
+  };
+
+  it('admits the cookies while the session row exists (positive control)', async () => {
+    const { wellFormed, userId } = await cookiesOf();
+    const { socket, acceptBrowserRoute } = await upgrade(wellFormed);
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(acceptBrowserRoute).toHaveBeenCalledWith(expect.objectContaining({ userId }));
+  });
+
+  it('closes 4401 on a replay after the row is deleted, well-formed and with U+00A0 before the token', async () => {
+    const { wellFormed, nbsp, userId } = await cookiesOf();
+    auth.deleteSessions(userId);
+    for (const cookie of [wellFormed, nbsp]) {
+      // oxlint-disable-next-line no-await-in-loop -- one upgrade per header shape.
+      const { socket, acceptBrowserRoute } = await upgrade(cookie);
+      expect(socket.close).toHaveBeenCalledWith(4401, 'browser session required');
+      expect(acceptBrowserRoute).not.toHaveBeenCalled();
+    }
+  });
 });

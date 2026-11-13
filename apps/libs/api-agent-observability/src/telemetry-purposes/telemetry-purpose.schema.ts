@@ -79,6 +79,12 @@ export const effectiveTelemetryPurposesSchema = z
       .describe(
         "The server's clock when it answered, in milliseconds, so a host can read `allowedSince` on its own clock.",
       ),
+    protection: z
+      .enum(['free', 'pro', 'unknown'])
+      .optional()
+      .describe(
+        "The protection the account's material carries now. A host claims it on its evidence; ingress still keeps the stricter of the claim and its own reading.",
+      ),
   })
   .meta({ id: 'EffectiveTelemetryPurposes' });
 

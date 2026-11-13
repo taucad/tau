@@ -149,6 +149,17 @@ describe('createSandboxShellProvider admission', () => {
     }
   });
 
+  it('should refuse toolchain folders for the startup files on a launch without them', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], toolchainBins: ['/opt/tau/git/bin'] }));
+
+    expect(outcome).toStrictEqual({
+      status: 'unsupported',
+      requirement: 'environment',
+      message: 'only the Terminal Zsh with its startup files takes toolchain folders.',
+    });
+  });
+
   it('should refuse a relative path', async () => {
     const outcome = await createSandboxShellProvider({ supervisor }).launch(
       launchOf({ arguments: ['-c', 'true'], workingDirectory: 'project' }),
@@ -862,6 +873,57 @@ describe('shellSandboxProfile on macOS', () => {
     expect(
       seatbeltDecision(literal, { operation: 'file-read-data', path: join(project, '.git', 'objects', 'x') }),
     ).toBe('deny');
+  });
+
+  /*
+   * The person's Terminal reads the real store (operator ruling 2026-11-12): `.git` is read-only and not denied. A
+   * read-only root is carved out of a denied one only when it lies strictly inside it, so naming `.git` in both lists
+   * would leave every read denied on macOS, while Linux binds it back readable: the two must never be combined.
+   */
+  const terminalLaunch = (
+    root: string,
+    lists: Readonly<{ readOnly: readonly string[]; denied: readonly string[] }>,
+  ): Parameters<typeof shellSandboxProfile>[0] => {
+    const project = join(root, 'project');
+    for (const directory of ['.git/objects/ab', '.git/refs/heads', '.git/hooks', '.git/lfs', 'src']) {
+      mkdirSync(join(project, directory), { recursive: true });
+    }
+    mkdirSync(join(root, 'home'));
+    return {
+      filesystem: { readable: [], writable: [project, join(root, 'home')], ...lists },
+      network: { domains: [] },
+    };
+  };
+
+  it('should let the Terminal read every file of a read-only .git and write, create or remove none of it', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const store = join(project, '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(terminalLaunch(root, { readOnly: [store], denied: [join(project, '.tau', 'binding.json')] })),
+    );
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    for (const path of ['', 'HEAD', 'index', 'config', 'refs/heads/main', 'objects/ab/cdef', 'lfs/objects/x']) {
+      expect(decide('file-read-data', join(store, path)), path).toBe('allow');
+    }
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of ['', 'HEAD', 'index.lock', 'config', 'hooks/post-commit', 'objects/ab/new', 'lfs/tmp/x']) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('deny');
+      }
+    }
+    expect(decide('file-read-data', join(project, '.tau', 'binding.json'))).toBe('deny');
+    expect(decide('file-write-data', join(project, 'src', 'main.scad'))).toBe('allow');
+  });
+
+  it('should deny every read of a .git named both read-only and denied, the shape that must not return', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const profile = seatbeltProfileOf(darwinProfile(terminalLaunch(root, { readOnly: [store], denied: [store] })));
+
+    for (const path of ['', 'HEAD', 'index', 'refs/heads/main', 'objects/ab/cdef']) {
+      expect(seatbeltDecision(profile, { operation: 'file-read-data', path: join(store, path) }), path).toBe('deny');
+    }
   });
 });
 

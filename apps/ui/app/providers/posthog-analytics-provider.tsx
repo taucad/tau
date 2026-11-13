@@ -158,6 +158,7 @@ function PostHogLifecycle({
         posthog = await loadSdk();
       } catch {
         // Optional analytics must not prevent the product from opening.
+        disconnectRemoteFlags();
         return;
       }
       if (withdrawn) {

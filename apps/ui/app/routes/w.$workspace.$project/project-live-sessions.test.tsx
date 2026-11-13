@@ -19,13 +19,14 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import type * as XstateReactModule from '@xstate/react';
 import type * as UseProjectModule from '#hooks/use-project.js';
 import type * as CloudProjectsModule from '#hooks/use-cloud-projects.js';
+import type * as SessionsStoreModule from '#services/sessions-store.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
-import { createSessionsActor } from '#services/sessions-store.js';
+import { createSessionsActor, forgetProjectRegions } from '#services/sessions-store.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 
@@ -156,6 +157,33 @@ const createRevisionClient = (order: string[], projectId: string): FixtureRevisi
     },
   };
 };
+
+/** The person's choices the binding reads (models, kernel), as a store a row can change. */
+const choiceStore = vi.hoisted(() => {
+  let value = { model: 'fixture-model', kernel: 'openscad' };
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set: (next: Partial<{ model: string; kernel: string }>) => {
+      value = { ...value, ...next };
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    reset: () => {
+      value = { model: 'fixture-model', kernel: 'openscad' };
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+});
+
+/** The browser agent host lease: one retain per project, released by the returned function. */
+const browserLease = vi.hoisted(() => ({ retained: [] as string[], released: [] as string[] }));
 
 const fixtures = vi.hoisted(() => ({
   /** Every send, flush and cut, in order, across projects. */
@@ -368,12 +396,21 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatSessions }));
 vi.mock('#hooks/use-models.js', () => ({
-  useModels: () => ({
-    defaultExecution: { kind: 'tau', model: 'fixture-model' },
-    resolveModel: (id: string) => ({ id, name: id, isResolved: false, provider: { id: 'unknown', name: 'Unknown' } }),
-  }),
+  useModels: () => {
+    const { model } = useSyncExternalStore(choiceStore.subscribe, choiceStore.get);
+    return {
+      defaultExecution: { kind: 'tau', model },
+      resolveModel: (id: string) => ({ id, name: id, isResolved: false, provider: { id: 'unknown', name: 'Unknown' } }),
+    };
+  },
 }));
-vi.mock('#hooks/use-kernel.js', () => ({ useKernel: () => ({ kernel: 'openscad' }) }));
+vi.mock('#hooks/use-kernel.js', () => ({
+  useKernel: () => ({ kernel: useSyncExternalStore(choiceStore.subscribe, choiceStore.get).kernel }),
+}));
+vi.mock('#services/sessions-store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof SessionsStoreModule>();
+  return { ...actual, forgetProjectRegions: vi.fn(actual.forgetProjectRegions) };
+});
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -388,7 +425,12 @@ vi.mock('#services/agent-host-client.js', () => ({
   noteBrowserRunPresented: async () => undefined,
   noteBrowserRunRated: async () => undefined,
   readBrowserRunStoppability: async () => 'stoppable',
-  retainBrowserAgentHostProject: () => () => undefined,
+  retainBrowserAgentHostProject: (options: { readonly authority: { readonly projectId: string } }) => {
+    browserLease.retained.push(options.authority.projectId);
+    return () => {
+      browserLease.released.push(options.authority.projectId);
+    };
+  },
 }));
 vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
@@ -460,16 +502,18 @@ const parameterService = mock<ParameterSetService>({
 });
 
 const unpublishConnector = vi.fn();
+async function stopProjectedRun(chatId: string): Promise<'stopped' | 'continuing' | 'absent'> {
+  fixtures.order.push(`cancel:${chatId}`);
+  return 'stopped';
+}
+
 const chatSessions = mock<ChatSessionStore>({
   setRevisionFacts: vi.fn(),
   setProjectSession: vi.fn(),
   setFocusedProject: vi.fn(),
   publishProjectHostConnector: vi.fn(() => unpublishConnector),
   getChatHostSettings: vi.fn(async () => undefined),
-  cancelProjectedRun: vi.fn(async (chatId: string): Promise<'stopped' | 'continuing' | 'absent'> => {
-    fixtures.order.push(`cancel:${chatId}`);
-    return 'stopped';
-  }),
+  cancelProjectedRun: vi.fn(stopProjectedRun),
   refreshRemoteSegments: vi.fn(async () => undefined),
   observedChatIdsOf: vi.fn(() => ['chat-observed']),
 });
@@ -571,6 +615,9 @@ beforeEach(() => {
   fixtures.chatProducers.clear();
   flushRegistrations.length = 0;
   browserClientOptions.length = 0;
+  browserLease.retained.length = 0;
+  browserLease.released.length = 0;
+  choiceStore.reset();
   vi.clearAllMocks();
 });
 
@@ -655,6 +702,60 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
       ['placement', projectA],
     ]);
     expect(context.openComputeStorePort).toHaveBeenCalledExactlyOnceWith(projectA);
+  });
+
+  it('should hand the next connect the choices the person changed after the connector was published (S7)', async () => {
+    await openAndRender([projectA], { projectId: projectA });
+    const connect = vi.mocked(chatSessions.publishProjectHostConnector).mock.calls.at(-1)?.[1];
+    await act(async () => {
+      await connect?.('chat-1');
+    });
+    /* The kernel and the model reach the host through the system prompt it is built with. */
+    const promptOf = (): string =>
+      String((browserClientOptions.at(-1) as { readonly systemPrompt?: string } | undefined)?.systemPrompt);
+    expect(promptOf()).toContain('openscad');
+    expect(promptOf()).toContain('fixture-model');
+    expect(promptOf()).not.toContain('replicad');
+    const publishes = vi.mocked(chatSessions.publishProjectHostConnector).mock.calls.length;
+
+    act(() => {
+      choiceStore.set({ model: 'later-model', kernel: 'replicad' });
+    });
+    await flushTasks();
+    await act(async () => {
+      await connect?.('chat-2');
+    });
+
+    /* The same connector, not a republished one, reads the new choices through the ref. */
+    expect(vi.mocked(chatSessions.publishProjectHostConnector).mock.calls).toHaveLength(publishes);
+    expect(promptOf()).toContain('replicad');
+    expect(promptOf()).toContain('later-model');
+    expect(promptOf()).not.toContain('fixture-model');
+  });
+
+  it('should retain the browser agent host once for the project and release it once with the subtree (S7)', async () => {
+    const view = await openAndRender([projectA], { projectId: projectA });
+    const connect = vi.mocked(chatSessions.publishProjectHostConnector).mock.calls.at(-1)?.[1];
+    await act(async () => {
+      await connect?.('chat-1');
+      await connect?.('chat-2');
+    });
+    expect(browserLease).toEqual({ retained: [projectA], released: [] });
+
+    view.rerender(tree({ projectId: projectA }, false));
+    await flushTasks();
+
+    expect(browserLease).toEqual({ retained: [projectA], released: [projectA] });
+  });
+
+  it("should forget the project's region reports when its subtree unmounts (S7)", async () => {
+    const view = await openAndRender([projectA], { projectId: projectA });
+    vi.mocked(forgetProjectRegions).mockClear();
+
+    view.rerender(tree({ projectId: projectA }, false));
+    await flushTasks();
+
+    expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([[projectA]]);
   });
 
   it('should relay the revision facts to the session and to the chat store (S3)', async () => {
@@ -891,31 +992,52 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
 // ===========================================================================
 
 describe('cancelRuns on close (A0.2 item 8, D18)', () => {
+  /*
+   * `chat-still` was listed stoppable and its projection never moved after that: the store's own answer for
+   * a projection that has not caught up is 'absent' (`ChatSessionStore.cancelProjectedRun`). `chat-moving`
+   * joins later and is stopped. The close must still ask for both and complete.
+   */
   it('should cancel every stoppable chat, including one whose projection has not moved since it was listed', async () => {
-    await openAndRender([projectA], { projectId: projectA });
-    act(() => {
-      sessionOf(projectA)?.send({
-        type: 'projectedRunsChanged',
-        runs: ['chat-moving', 'chat-still'],
-        stoppableRuns: ['chat-moving', 'chat-still'],
-      });
-      /* Only the first chat's projection moves again; the second is still listed as it was. */
-      sessionOf(projectA)?.send({
-        type: 'projectedRunsChanged',
-        runs: ['chat-moving', 'chat-still'],
-        stoppableRuns: ['chat-moving', 'chat-still'],
-      });
+    vi.mocked(chatSessions.cancelProjectedRun).mockImplementation(async (chatId) => {
+      fixtures.order.push(`cancel:${chatId}`);
+      return chatId === 'chat-still' ? 'absent' : 'stopped';
     });
+    try {
+      await openAndRender([projectA], { projectId: projectA });
+      act(() => {
+        sessionOf(projectA)?.send({
+          type: 'projectedRunsChanged',
+          runs: ['chat-still'],
+          stoppableRuns: ['chat-still'],
+        });
+        /* Only `chat-moving` moves: it joins the projection; `chat-still` is listed as it was. */
+        sessionOf(projectA)?.send({
+          type: 'projectedRunsChanged',
+          runs: ['chat-moving', 'chat-still'],
+          stoppableRuns: ['chat-moving', 'chat-still'],
+        });
+      });
 
-    await act(async () => {
-      registry.send({ type: 'close', projectId: projectA, reason: 'user' });
-      sessionOf(projectA)?.send({ type: 'confirmClose' });
-      await Promise.resolve();
-    });
-    await flushTasks();
+      await act(async () => {
+        registry.send({ type: 'close', projectId: projectA, reason: 'user' });
+        sessionOf(projectA)?.send({ type: 'confirmClose' });
+        await Promise.resolve();
+      });
+      await flushTasks();
 
-    expect(vi.mocked(chatSessions.cancelProjectedRun).mock.calls).toEqual([['chat-moving'], ['chat-still']]);
-    expect(sessionOf(projectA)).toBeUndefined();
+      expect(new Set(vi.mocked(chatSessions.cancelProjectedRun).mock.calls.map(([chatId]) => chatId))).toEqual(
+        new Set(['chat-moving', 'chat-still']),
+      );
+      const answers = await Promise.all(
+        vi
+          .mocked(chatSessions.cancelProjectedRun)
+          .mock.results.map(async ({ value }) => value as Promise<'stopped' | 'continuing' | 'absent'>),
+      );
+      expect(new Set(answers)).toEqual(new Set(['absent', 'stopped']));
+      expect(sessionOf(projectA)).toBeUndefined();
+    } finally {
+      vi.mocked(chatSessions.cancelProjectedRun).mockImplementation(stopProjectedRun);
+    }
   });
 });
 

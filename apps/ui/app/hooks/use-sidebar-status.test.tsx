@@ -1330,11 +1330,17 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
 
 /*
  * A0.2 (row S39): the sidebar's `openProject` is one of the two other senders of `open`. It sends a bare
- * project id, so the session the registry spawns for it has no open request: no native kernel id, no chat.
- * I4 wants every open to carry the request focus kept for that project.
+ * project id. Whether the reopened session carries the request focus kept (I4) is pinned over the route
+ * gate harness in `project-route.test.tsx`, which is the one that ever held that request.
  */
-describe('use-sidebar-status — pin (A0.2 S39): the sidebar open and the reopened session', () => {
+describe('use-sidebar-status — pin (A0.2 S39): the sidebar open', () => {
   const reopened = 'proj_sidebar_open_aaaaaaa';
+  let registry: ReturnType<typeof createActor<typeof sessionsMachine>> | undefined;
+
+  afterEach(() => {
+    registry?.stop();
+    registry = undefined;
+  });
 
   function Open(): React.JSX.Element {
     const { openProject } = useSidebarCommands();
@@ -1350,29 +1356,15 @@ describe('use-sidebar-status — pin (A0.2 S39): the sidebar open and the reopen
     );
   }
 
-  const openThroughRegistry = (): ReturnType<typeof createActor<typeof sessionsMachine>> => {
-    const registry = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
-    vi.mocked(useSessions).mockImplementation(() => registry);
+  it('sends the registry an open that spawns a session for the project', () => {
+    const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
+    registry = started;
+    vi.mocked(useSessions).mockImplementation(() => started);
     render(<Open />);
     act(() => {
       screen.getByRole('button', { name: 'Open' }).click();
     });
-    return registry;
-  };
 
-  it('sends the registry an open that spawns a session for the project', () => {
-    const registry = openThroughRegistry();
-
-    expect(registry.getSnapshot().context.refs[reopened]?.getSnapshot().context.projectId).toBe(reopened);
-    registry.stop();
-  });
-
-  it.fails('I4: hands the reopened session the open request, with the native kernel id and chat it was opened with', () => {
-    const registry = openThroughRegistry();
-
-    expect(registry.getSnapshot().context.refs[reopened]?.getSnapshot().context).toMatchObject({
-      request: { nativeKernelId: 'build123d', chatId: 'chat-1' },
-    });
-    registry.stop();
+    expect(started.getSnapshot().context.refs[reopened]?.getSnapshot().context.projectId).toBe(reopened);
   });
 });

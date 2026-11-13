@@ -1,7 +1,7 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useEffect, useSyncExternalStore } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
 import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -1451,15 +1451,19 @@ function RouteStateProbe(): React.JSX.Element {
 const router: {
   location: ReturnType<typeof useLocation> | undefined;
   navigate: ReturnType<typeof useNavigate> | undefined;
-} = { location: undefined, navigate: undefined };
+  /** How the router got to `location`: PUSH, REPLACE or POP. */
+  action: ReturnType<typeof useNavigationType> | undefined;
+} = { location: undefined, navigate: undefined, action: undefined };
 
 function RouterProbe(): undefined {
   const location = useLocation();
   const navigate = useNavigate();
+  const action = useNavigationType();
   useEffect(() => {
     router.location = location;
     router.navigate = navigate;
-  }, [location, navigate]);
+    router.action = action;
+  }, [location, navigate, action]);
   return undefined;
 }
 
@@ -1860,6 +1864,7 @@ describe('A0.2 the same project keeps its editor (I20, D7)', () => {
 
     expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-3' });
     expect(router.location?.key).not.toBe(historyKey);
+    expect(router.action).toBe('REPLACE');
     expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-3' });
     expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
     expect(noticeKinds).toEqual([]);
@@ -2090,6 +2095,32 @@ describe('A0.2 the other senders of open keep what the gate kept (S39)', () => {
       expect(focusedSessionId()).toBe(projectA);
       expect(new Set(kernelIdsOf(projectA))).toEqual(new Set(['build123d']));
       expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-1' });
+    },
+  );
+
+  /*
+   * I4: "a person's open re-sends the one focus kept". The gate kept build123d (main.py) and chat-1 for this
+   * project; the reopened session must carry them as its open request. Today both senders send a bare
+   * project id, so the session holds no request. The row above pins the preconditions (the same session
+   * is spawned and focused), so this one fails only on the request assertion.
+   */
+  it.fails.each(['Notice reopen', 'Sidebar open'])(
+    'I4: should open the session %s spawns with the request focus kept: native kernel build123d and chat-1',
+    async (control) => {
+      renderHost('/w/ws/alpha?chat=chat-1', <ReopenControls />);
+      await flushTasks();
+      await act(async () => {
+        sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
+        await Promise.resolve();
+      });
+      await flushTasks();
+
+      fireEvent.click(screen.getByRole('button', { name: control }));
+      await flushTasks();
+
+      expect(sessionsActor.getSnapshot().context.refs[projectA]?.getSnapshot().context).toMatchObject({
+        request: { nativeKernelId: 'build123d', chatId: 'chat-1' },
+      });
     },
   );
 });

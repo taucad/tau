@@ -332,37 +332,29 @@ describe('ProjectRouteNotice', () => {
 
 /*
  * A0.2 (row S39): the notice's reopen is the other sender of `open` (`project-route-notices.tsx` 277 to 278).
- * It sends a bare project id and a touch, so the session the registry spawns for it has no open request.
- * I4 wants every open to carry the request focus kept for that project: here, the native kernel id its
- * `main.py` entry needs and the chat it was on.
+ * It sends a bare project id and a touch. Whether the reopened session carries the request focus kept (I4)
+ * is pinned over the route gate harness in `project-route.test.tsx`, which is the one that ever held it.
  */
 describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)', () => {
   const nativeProject: Project = { ...project, assets: { main: { entryPath: 'main.py' } } };
+  let registry: ReturnType<typeof createActor<typeof sessionsMachine>> | undefined;
 
-  const reopenThroughRegistry = async (): Promise<ReturnType<typeof createActor<typeof sessionsMachine>>> => {
-    const registry = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
-    send.mockImplementation((event: Parameters<typeof registry.send>[0]) => {
-      registry.send(event);
+  afterEach(() => {
+    registry?.stop();
+    registry = undefined;
+    send.mockReset();
+  });
+
+  it('should spawn a session for the project it reopens and touch it', async () => {
+    const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
+    registry = started;
+    send.mockImplementation((event: Parameters<typeof started.send>[0]) => {
+      started.send(event);
     });
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project: nativeProject, reason: 'user' }} />);
     await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
-    return registry;
-  };
 
-  it('should spawn a session for the project it reopens and touch it', async () => {
-    const registry = await reopenThroughRegistry();
-
-    expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.projectId).toBe(projectId);
-    expect(registry.getSnapshot().context.touchOrder[projectId]).toBe(2);
-    registry.stop();
-  });
-
-  it.fails('I4: should hand the reopened session the open request, with the native kernel id and chat it was opened with', async () => {
-    const registry = await reopenThroughRegistry();
-
-    expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().context).toMatchObject({
-      request: { nativeKernelId: 'build123d', chatId: 'chat-1' },
-    });
-    registry.stop();
+    expect(started.getSnapshot().context.refs[projectId]?.getSnapshot().context.projectId).toBe(projectId);
+    expect(started.getSnapshot().context.touchOrder[projectId]).toBe(2);
   });
 });

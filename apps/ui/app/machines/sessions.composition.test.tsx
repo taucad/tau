@@ -1573,20 +1573,6 @@ describe('sessions composition — the workbench follows the selection (S48(14))
   });
 });
 
-/**
- * S48(17), the renderer half — the quit hold, painted and cut short.
- *
- * `apps/desktop-e2e/src/desktop-quit-hold.spec.ts` owns the main-process half:
- * the window is asked (`main.renderer-quiesce`) before the services utility is
- * quiesced. What it cannot observe is the overlay — a desktop quit with
- * nothing live is answered inside the same React commit, so nothing paints,
- * and making a project live on the packaged shell needs an account and a turn.
- *
- * Composed here: the actual desktop bridge, registry/session machines, overlay
- * and Quit-anyway verb. Not composed here: Electron main/preload and a real
- * revision port; the desktop e2e owns the former and the Node close row owns
- * the latter. Only the sync flush is held open (D31, P49).
- */
 /*
  * A0.2: the registry steps `ProjectFocus` assumes on a one-project device (B-08), and the only check of
  * them: no conformance test is claimed for `sessions.machine`. Leaving a project closes it through the
@@ -1704,8 +1690,18 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.actor.getSnapshot().context.status['one-unpushed-a']?.pushed).toBe(false);
     mounted.length = 0;
     serviceCalls.length = 0;
+    /* What had mounted when the close took its cut. */
+    let mountedAtCut: readonly string[] | undefined;
+    const push = serviceCalls.push.bind(serviceCalls);
+    const recordCut = vi.spyOn(serviceCalls, 'push').mockImplementation((...calls: string[]) => {
+      if (calls.includes('quiesce')) {
+        mountedAtCut ??= [...mounted];
+      }
+      return push(...calls);
+    });
 
     await view.navigate('/w/workspace/one-unpushed-b');
+    recordCut.mockRestore();
 
     /* The memory release refused the unpushed project; the open then took the switch close. */
     expect(registry.actor.getSnapshot().context.closed['one-unpushed-a']?.reason).toBe('user');
@@ -1714,6 +1710,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.liveSets.every((projectIds) => projectIds.length <= 1)).toBe(true);
     /* The close took its cut before the next project's subtree mounted. */
     expect(serviceCalls).toContain('quiesce');
+    expect(mountedAtCut).toEqual([]);
     expect(mounted).toEqual(['unmount:one-unpushed-a', 'mount:one-unpushed-b']);
     expect(registry.received).toContain('open');
     expect(registry.received).not.toContain('close');
@@ -1745,6 +1742,20 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
   });
 });
 
+/**
+ * S48(17), the renderer half — the quit hold, painted and cut short.
+ *
+ * `apps/desktop-e2e/src/desktop-quit-hold.spec.ts` owns the main-process half:
+ * the window is asked (`main.renderer-quiesce`) before the services utility is
+ * quiesced. What it cannot observe is the overlay — a desktop quit with
+ * nothing live is answered inside the same React commit, so nothing paints,
+ * and making a project live on the packaged shell needs an account and a turn.
+ *
+ * Composed here: the actual desktop bridge, registry/session machines, overlay
+ * and Quit-anyway verb. Not composed here: Electron main/preload and a real
+ * revision port; the desktop e2e owns the former and the Node close row owns
+ * the latter. Only the sync flush is held open (D31, P49).
+ */
 describe('sessions composition — the desktop quit hold (S48(17))', () => {
   afterEach(() => {
     vi.unstubAllEnvs();

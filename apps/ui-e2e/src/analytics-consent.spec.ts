@@ -212,6 +212,10 @@ test('records editor, chat and file text in replay but never a credential block'
   if ((await target.getAttribute(chatToggle, 'aria-pressed')) === 'false') {
     await target.click(chatToggle);
   }
+  await target.fill(
+    selectors.getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]').last(),
+    'Private composer sentinel',
+  );
   const surfaces = await target.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-container');
     const files = document.querySelector<HTMLElement>('[role="treeitem"]')?.parentElement ?? null;
@@ -242,6 +246,7 @@ test('records editor, chat and file text in replay but never a credential block'
     'Visible source sentinel',
     'Visible filename sentinel',
     'Private credential sentinel',
+    'Private composer sentinel',
     'Public project control',
   ]);
   expect(summary.events).toContain('$snapshot');
@@ -249,6 +254,7 @@ test('records editor, chat and file text in replay but never a credential block'
   expect(summary.present['Visible source sentinel']).toBe(true);
   expect(summary.present['Visible filename sentinel']).toBe(true);
   expect(summary.present['Private credential sentinel']).toBe(false);
+  expect(summary.present['Private composer sentinel']).toBe(false);
 });
 
 test('withdraws an accepted tab when the website announces a decline', async () => {

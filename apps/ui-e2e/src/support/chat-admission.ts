@@ -233,7 +233,7 @@ export const completeFirstTurn = async (chatId: string): Promise<void> => {
 };
 
 /**
- * Edit the first user message in place and send it.
+ * Edit the first user message in place and send it, with `suffix` appended.
  *
  * @param suffix - Text appended to the message before it is sent.
  * @returns Nothing.
@@ -242,6 +242,10 @@ export const editFirstMessage = async (suffix: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: /First plain message/u }).first());
   const editComposer = selectors.getByCss(editComposerSelector).first();
   await target.expectVisible(editComposer, 30_000);
+  /* The edit composer opens with the caret at the start, so a long message keeps
+   * its first line in view (5e74b24f48, #590). Typing there prepended the suffix
+   * and sent `Edited.First plain message.`; the suffix belongs at the end. */
+  await target.press(editComposer, 'ControlOrMeta+End');
   await target.type(editComposer, suffix);
   await target.press(editComposer, 'Enter');
 };

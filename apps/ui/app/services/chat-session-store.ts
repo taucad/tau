@@ -2116,6 +2116,20 @@ export class ChatSessionStore {
   }
 
   /**
+   * Whether the project's record still holds this chat's legacy unread mark (D9). Once the chat's log is read, a mark
+   * on a log with no attention row no longer makes the chat unread, but the mark stays in the record, and the next page
+   * answers from it until that page has read the log. `markViewed` clears it.
+   *
+   * @param chatId - A chat with a live session.
+   * @returns Whether a loaded record marks the chat.
+   * @public
+   */
+  public hasUnreadMark(chatId: string): boolean {
+    const projectId = this.#sessions.get(chatId)?.projectId;
+    return projectId !== undefined && this.#unreadRecords.get(projectId)?.legacy.has(chatId) === true;
+  }
+
+  /**
    * Wake a reader when any chat's unread answer may have moved: a record loaded, a receipt written, an attention row
    * arrived.
    *

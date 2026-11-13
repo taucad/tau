@@ -260,7 +260,16 @@ const resetRegistry = (): void => {
 const liveProject = (projectId: string, status: Partial<SessionsProjectStatus> = {}): void => {
   fakeRegistry.refs[projectId] = sessionRefFor(projectId);
   fakeRegistry.chatReferences[projectId] ??= {};
-  fakeRegistry.status[projectId] = { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0, ...status };
+  fakeRegistry.status[projectId] = {
+    state: 'live',
+    runs: 0,
+    dirty: false,
+    pushed: true,
+    pending: 0,
+    chatReady: true,
+    availability: 'settled',
+    ...status,
+  };
 };
 
 const closeProject = (projectId: string, reason: ProjectSessionCloseReason): void => {

@@ -185,7 +185,15 @@ test('should own Files and Markdown views independently in each Workbench pane',
   await target.reload();
   await target.expectVisible(packageRegion, 60_000);
   // The layout record keeps file tabs with their Files state; a placeholder pane returns as its launcher (B3).
-  const restoredLauncher = selectors.getByCss('.dv-groupview:has(.dv-tab[aria-label="New tab"])');
+  // Launchers are window-local, so the window's own launcher stays as a trailing tab in the first group (#1386).
+  await target.expectCount(
+    selectors.getByCss('.dv-groupview:has(.dv-tab[aria-label="package.json"]) .dv-tab[aria-label="New tab"]'),
+    1,
+    60_000,
+  );
+  const restoredLauncher = selectors.getByCss(
+    '.dv-groupview:has(.dv-tab[aria-label="New tab"]):not(:has(.dv-tab[aria-label="package.json"]))',
+  );
   await target.expectCount(restoredLauncher, 1, 60_000);
   await target.expectCount(openFileRegion, 0);
   await target.click(restoredLauncher.getByRole('button', { name: /^Files/u }));

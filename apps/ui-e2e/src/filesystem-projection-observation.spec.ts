@@ -178,6 +178,12 @@ const captureObservationPrecondition = async (stage: string, config: StoredProje
   );
 };
 
+/** Open Plugins from the sidebar's More menu, where it has been since 8f929d9c8d (#817). */
+const openPlugins = async (): Promise<void> => {
+  await target.click(selectors.getByCss('[data-slot="sidebar"]').getByRole('button', { name: 'More', exact: true }));
+  await target.click(selectors.getByRole('menuitem', { name: 'Plugins', exact: true }));
+};
+
 const openFixture = async (
   extraWatch?: string,
   { shouldOpenFiles = true }: { shouldOpenFiles?: boolean } = {},
@@ -777,7 +783,7 @@ test('retries the same mounted Home plugin manifest through held acknowledgment 
   expect(originalSkill).toBeUndefined();
   try {
     await writeProjectionHomeFile(path, '{}\n');
-    await target.click(selectors.getByRole('link', { name: 'Plugins', exact: true }));
+    await openPlugins();
     await target.expectVisible(selectors.getByRole('heading', { name: 'Plugins', exact: true }));
     const install = selectors.getByRole('button', { name: 'Install Woodworking', exact: true });
     await target.expectVisible(install);
@@ -862,7 +868,7 @@ test('exposes real Plugins catalog health and acknowledged retry at the Home roo
   });
   await openFixture();
   try {
-    await target.click(selectors.getByRole('link', { name: 'Plugins', exact: true }));
+    await openPlugins();
     await target.expectVisible(selectors.getByRole('heading', { name: 'Plugins', exact: true }));
     const acquiredValue12 = await controlWorkbenchObservation('close', '.agents');
     expect(acquiredValue12.closed).toBeGreaterThan(0);

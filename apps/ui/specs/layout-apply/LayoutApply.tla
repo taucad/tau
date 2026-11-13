@@ -67,8 +67,10 @@
 (* Environment assumptions (Dockview and the adapters, not the machine):  *)
 (*   A. An apply, and any adapter change event it causes, never counts as *)
 (*      an edit.                                                          *)
-(*   B. A detached adapter whose lane is open attaches again (liveness    *)
-(*      only: `Reattach`, with `DetachGuard`).                            *)
+(*   B. A detached adapter whose lane is open attaches again; on a       *)
+(*      phone, the workbench attaches while a workbench intent is queued  *)
+(*      (the intent switched to the editor tab). Liveness only:           *)
+(*      `Reattach`, with `DetachGuard`.                                   *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                       *)
 (*   EditCount  TRUE: rule 2's count. FALSE: an apply lands whatever was  *)
@@ -121,7 +123,8 @@ ASSUME /\ InitialBytes \in Bytes
 VARIABLES
   rec,       \* the latest publication: bytes, attributed origin, `fresh` (no edit counted since it arrived),
              \* `held` (rule 8's fence), `done` (its apply landed or was discarded); ghosts `same`: its bytes
-             \* were the arrangement when it arrived, and `over`: it arrived while a local edit was unwritten
+             \* were the arrangement when it arrived, `over`: it arrived while a local edit was unwritten, and
+             \* `unt`: no edit was counted since it arrived (as `fresh`, but read by no guard)
   shown,     \* the arrangement
   edited,    \* ghost: this step counted an edit (rule 1)
   pending,   \* the apply in flight: its bytes, `fresh`, `latest` (its publication is still the latest),
@@ -148,7 +151,7 @@ Settled == {"applied"} \cup Reasons
 IntentIds == 1..MaxIntents
 RestoreIds == 1..MaxRestores
 NoApply == [state |-> "none", bytes |-> InitialBytes, fresh |-> TRUE, held |-> FALSE, latest |-> FALSE, same |-> FALSE,
-              over |-> FALSE]
+              over |-> FALSE, unt |-> TRUE]
 NoIntent == [state |-> "unsent", target |-> "viewer", applies |-> 0]
 NoRestore == [state |-> "unsent", expected |-> InitialBytes, to |-> InitialBytes]
 
@@ -160,11 +163,11 @@ SessionCount == sessions.live + sessions.lingering
 
 TypeOK ==
   /\ rec \in [bytes : Bytes, origin : {"own", "foreign"}, fresh : BOOLEAN, held : BOOLEAN, done : BOOLEAN,
-              same : BOOLEAN, over : BOOLEAN]
+              same : BOOLEAN, over : BOOLEAN, unt : BOOLEAN]
   /\ shown \in Bytes
   /\ edited \in BOOLEAN
   /\ pending \in [state : {"none", "computed", "landed", "discarded"}, bytes : Bytes, fresh : BOOLEAN, held : BOOLEAN,
-                  latest : BOOLEAN, same : BOOLEAN, over : BOOLEAN]
+                  latest : BOOLEAN, same : BOOLEAN, over : BOOLEAN, unt : BOOLEAN]
   /\ applied \in {Unknown, "latest", "older"}
   /\ adapter \in [Adapters -> {"detached", "attaching", "attached"}]
   /\ wbOpen \in BOOLEAN
@@ -176,7 +179,7 @@ TypeOK ==
 
 Init ==
   /\ rec = [bytes |-> InitialBytes, origin |-> "own", fresh |-> TRUE, held |-> FALSE, done |-> TRUE, same |-> TRUE,
-             over |-> FALSE]
+             over |-> FALSE, unt |-> TRUE]
   /\ shown = InitialBytes
   /\ edited = FALSE
   /\ pending = NoApply
@@ -193,8 +196,8 @@ Init ==
 \* Rule 1: a local change counts an edit, and is unwritten until its write lands (rule 8).
 Counted ==
   /\ edited' = TRUE
-  /\ rec' = [rec EXCEPT !.fresh = FALSE]
-  /\ pending' = [pending EXCEPT !.fresh = FALSE]
+  /\ rec' = [rec EXCEPT !.fresh = FALSE, !.unt = FALSE]
+  /\ pending' = [pending EXCEPT !.fresh = FALSE, !.unt = FALSE]
   /\ sessions' = [sessions EXCEPT !.writing = TRUE]
 
 \* An adapter leaves: rule 4, and an apply in flight has nowhere to land once none is attached; if it
@@ -214,7 +217,8 @@ Published ==
   /\ bound.pubs < MaxPubs
   /\ \E b \in Bytes, o \in {"own", "foreign"} :
        rec' = [bytes |-> b, origin |-> o, fresh |-> TRUE, held |-> sessions.writing,
-               done |-> (o = "own" /\ b = shown), same |-> (b = shown), over |-> sessions.writing]
+               done |-> (o = "own" /\ b = shown), same |-> (b = shown), over |-> sessions.writing,
+               unt |-> TRUE]
   /\ pending' = [pending EXCEPT !.latest = FALSE]
   /\ applied' = IF applied = "latest" THEN "older" ELSE applied
   /\ edited' = FALSE
@@ -230,7 +234,8 @@ ApplyComputed ==
   /\ ~rec.done
   /\ ~(pending.state = "computed" /\ pending.latest)
   /\ pending' = [state |-> "computed", bytes |-> rec.bytes, fresh |-> rec.fresh, held |-> rec.held,
-                 latest |-> TRUE, same |-> rec.same, over |-> rec.over]
+                 latest |-> TRUE, same |-> rec.same, over |-> rec.over,
+                 unt |-> rec.unt]
   /\ rec' = [rec EXCEPT !.done = TRUE]
   /\ edited' = FALSE
   /\ act' = Label("ApplyComputed")
@@ -456,10 +461,17 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-\* Environment assumption: a detached adapter whose lane is open attaches again, the end of a remount
-\* (`AdapterDetached`). With `DetachGuard` every detach leaves a cycle for this, so under `LiveSpec` the
-\* antecedent `<>[]AnyAttached` of IntentEventuallyAccounted always holds.
-Reattach(a) == (a = "viewer" \/ wbOpen) /\ AdapterAttaching(a)
+\* A workbench intent is queued.
+WorkbenchQueued == \E i \in IntentIds : intent[i].state = "queued" /\ intent[i].target = "workbench"
+
+\* Environment assumption B: a detached adapter whose lane is open attaches again, the end of a remount
+\* (`AdapterDetached`). On a phone the lane is the editor tab, which only a workbench intent switches to,
+\* so there the workbench is assumed to attach again only while a workbench intent is queued; the person need not
+\* return to the tab otherwise. With `DetachGuard` every detach leaves a cycle for this, so under
+\* `LiveSpec` the antecedent `<>[]AnyAttached` of IntentEventuallyAccounted always holds (the viewer).
+Reattach(a) ==
+  /\ a = "viewer" \/ (~Phone /\ wbOpen) \/ (Phone /\ WorkbenchQueued)
+  /\ AdapterAttaching(a)
 
 \* Weak fairness of the adapters (an adapter with an open lane attaches) and of the intent queue (an
 \* intent its adapter can take is taken).
@@ -472,7 +484,7 @@ LiveSpec == Spec /\ Fairness
 \* The state the checker keeps. Dropped: the ghosts `act` and `edited`; how the last apply ended; how a
 \* settled intent or restore ended; a publication's origin, which only `Published` reads; once its apply
 \* is done, everything of a publication but its bytes, since while it can be computed again (rule 4) the
-\* apply in flight holds the same `fresh`, `held`, `same` and `over`; and everything of an apply in flight
+\* apply in flight holds the same `fresh`, `held`, `same`, `over` and `unt`; and everything of an apply in flight
 \* that can no longer land, which is only discarded or replaced and is kept as a "dead" value distinct
 \* from every live apply. A dead apply stays dead: `Current` only falls, since `latest` and `fresh` are
 \* only ever cleared and `held` is fixed at arrival, so no later step reads its dropped fields. Each dropped part is read by no enabled action and by a property
@@ -498,7 +510,8 @@ Symmetry == Permutations(Bytes)
 Lands == pending.state = "computed" /\ pending'.state = "landed"
 
 \* I10: `ApplyLanded` never happens for an apply computed at an edit count lower than the current one.
-PersonEditNotReverted == [][Lands => pending.fresh]_vars
+\* It reads the ghost `unt`, which no action guard reads, so it does not restate rule 2's guard `fresh`.
+PersonEditNotReverted == [][Lands => pending.unt]_vars
 
 \* I11: every intent id is `applied` at most once, and leaves `queued` only by `IntentApplied` or by
 \* `IntentDropped` with a reason; a settled intent stays settled.

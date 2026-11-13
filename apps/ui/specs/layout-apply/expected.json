@@ -13,12 +13,17 @@
     "LayoutApply.target-phone.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "A phone at the formal plan's target bounds: both adapters (the editor tab mounts the workbench Dockview, chat-interface-mobile.tsx and chat-editor-layout.tsx), no lane close, the workbench detaching and attaching again on a tab switch; a workbench intent switches to the editor tab and is applied on attach (project-workspace-context.tsx 535 to 543, 426 to 432): 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles per adapter, 1 route key change; about 450 s, over the pr watchdog, so it stays nightly"
+      "ref": "A phone at the formal plan's target bounds: both adapters (the editor tab mounts the workbench Dockview, chat-interface-mobile.tsx and chat-editor-layout.tsx), no lane close, the workbench detaching and attaching again on a tab switch; a workbench intent switches to the editor tab and is applied on attach (project-workspace-context.tsx 535 to 543, 426 to 432): 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles per adapter, 1 route key change; 6,891,968 distinct states in about 435 s, over the pr watchdog, so it stays nightly"
     },
     "LayoutApply.liveness.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "IntentEventuallyAccounted as the plan states it (antecedent: some adapter stays attached; quiescence IntentsSettled) under weak fairness of Reattach, AdapterAttached and IntentApplied, with DetachGuard (a detach or lane close only while an attach cycle is left, so the antecedent always holds); a workbench intent opens the lane (rule 7); covers the phone, whose behaviours are a subset: 1 publication, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "IntentEventuallyAccounted as the plan states it (antecedent: some adapter stays attached; quiescence IntentsSettled) on a desktop, under weak fairness of Reattach (a detached adapter whose lane is open attaches), AdapterAttached and IntentApplied, with DetachGuard (a detach or lane close only while an attach cycle is left, so the antecedent always holds); a workbench intent opens the lane (rule 7): 1 publication, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+    },
+    "LayoutApply.liveness-phone.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "IntentEventuallyAccounted on a phone (Phone TRUE, no lane close): assumption B holds there only while a workbench intent is queued, as the intent switched to the editor tab (project-workspace-context.tsx 535 to 543), so Reattach of the workbench is fair only then; DetachGuard; the same bounds as liveness. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
     },
     "LayoutApply.today-store-replaced.cfg": {
       "tier": "nightly",
@@ -26,7 +31,7 @@
         "violated": "SingleSession"
       },
       "kind": "defect",
-      "ref": "Y3: a remounted host's useMemo creates and starts a second layout store before the old one is disposed in a microtask, and a write the old store had in flight outlives the dispose; 1 publication, 1 person edit, 1 attach cycle, 1 remount. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier",
+      "ref": "Y3: a remounted host's useMemo creates and starts a second layout store before the old one is disposed in a microtask; the shortest SingleSession trace is HostRemounted alone and needs no write in flight; 1 publication, 1 person edit, 1 attach cycle, 1 remount. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier",
       "fixedBy": "A8b"
     },
     "LayoutApply.today-orphan-write.cfg": {

@@ -9,24 +9,20 @@ import { useAr } from '#components/cad/use-ar.js';
 import type { ArFailure } from '#components/cad/use-ar.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
-/** Shared AR glyph for the launch button and proposed grouped controls: the scan frame with a small "AR" inside it. */
+/**
+ * Shared AR glyph for the launch button and proposed grouped controls: the scan frame with a small "AR" inside it. The
+ * letters are drawn as strokes, not typeset: an SVG `<text>` depends on the font, and accessibility checkers read it
+ * as text whose contrast they cannot judge against the icon, though the glyph is hidden from assistive technology.
+ */
 export function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
   return (
     <Scan aria-hidden className={className}>
-      {/* Baseline at the frame's centre plus half the capitals' height (~0.73 em), so "AR" itself is centred; a
-          `central` baseline centres the font's em box instead, which sits low and varies by font. */}
-      <text
-        x='12'
-        y='15.1'
-        textAnchor='middle'
-        fontSize='8.5'
-        fontWeight='700'
-        letterSpacing='-0.2'
-        fill='currentColor'
-        stroke='none'
-      >
-        AR
-      </text>
+      {/* Capitals 6 units tall, centred on the frame: A from x 7 to 11.6, R from 13 to 17. */}
+      <path
+        data-slot='ar-letters'
+        strokeWidth='1.5'
+        d='M7 15 9.3 9l2.3 6M7.9 13h2.8M13 15V9h2.2a1.6 1.6 0 0 1 0 3.2H13m2 0 2 2.8'
+      />
     </Scan>
   );
 }

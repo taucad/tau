@@ -17,8 +17,8 @@ export type WaitIndicatorProps = Readonly<{
   /** The words from 10,000 ms, such as "Still loading chat". Defaults to the label. */
   slowLabel?: string;
   /**
-   * When the wait started, on the performance timeline: `0` (the default) for a wait that started with the document,
-   * the gesture's time for a later one.
+   * When the wait started, on the performance timeline (`performance.now()`, not `Date.now()`): `0` (the default) for
+   * a wait that started with the document, the gesture's time for a later one, such as a refetch or a Retry. Milliseconds.
    */
   startedAt?: number;
   /** How far the wait is, from 0 to 1, shown as a whole percentage; omit while unknown. */
@@ -43,11 +43,18 @@ const variantClasses = {
   pill: 'h-7 gap-1.5 rounded-lg border bg-sidebar px-2 text-xs text-foreground shadow-xs',
 } as const;
 
+/** The slot is as tall as its body at every state, so idle and active slots have one height. */
+const slotHeightClasses = { inline: 'min-h-6', pill: 'min-h-7' } as const;
+
 type WaitTimingStyle = React.CSSProperties & Partial<Record<`--wait-${string}`, string>>;
 
 function timingStyle(timing: WaitIndicatorTiming): WaitTimingStyle | undefined {
   if (timing.state === 'waiting') {
-    const style: WaitTimingStyle = { '--wait-reveal-delay': timing.revealDelay, '--wait-slow-delay': timing.slowDelay };
+    const style: WaitTimingStyle = {
+      '--wait-reveal-delay': timing.revealDelay,
+      '--wait-slow-delay': timing.slowDelay,
+      '--wait-entrance': timing.entrance,
+    };
     return style;
   }
   if (timing.state === 'holding') {
@@ -62,7 +69,7 @@ function timingStyle(timing: WaitIndicatorTiming): WaitTimingStyle | undefined {
  * already has, shown only once a wait passes 1,000 ms, kept at least 500 ms, and saying the wait is long, with Retry,
  * from 10,000 ms. It always carries words, because the spinner stops under reduced motion.
  *
- * The slot is always rendered, one row tall, so it can sit in a header's trailing slot without changing the header's
+ * The slot is always rendered, at its skin's height, so it can sit in a header's trailing slot without changing the header's
  * height. Its words are laid out (and hidden) from the wait's start, so the reveal moves nothing. While nothing is
  * showing the slot is empty to assistive technology, because hidden words are not in the accessibility tree; they
  * enter it only when revealed, so a fast load announces nothing. A CSS animation reveals them, so the server-rendered
@@ -98,7 +105,7 @@ export function WaitIndicator({
   variant = 'inline',
   className,
 }: WaitIndicatorProps): React.JSX.Element {
-  const timing = useWaitClock({ active, startedAt });
+  const { timing, wait } = useWaitClock({ active, startedAt });
   const isWaiting = timing.state === 'waiting';
   const hasSlowWords = slowLabel !== undefined || onRetry !== undefined;
 
@@ -107,10 +114,12 @@ export function WaitIndicator({
       data-slot='wait-indicator'
       data-state={timing.state}
       role={live ? 'status' : undefined}
-      className={cn('inline-flex min-h-6 items-center', className)}
+      className={cn('inline-flex items-center', slotHeightClasses[variant], className)}
     >
       {timing.state === 'idle' ? null : (
         <span
+          // A new wait gets a new element, so its animations start from the new wait's delays.
+          key={wait}
           data-slot='wait-indicator-body'
           style={timingStyle(timing)}
           className={cn('inline-flex items-center', variantClasses[variant], isWaiting ? 'wait-reveal' : 'wait-hold')}

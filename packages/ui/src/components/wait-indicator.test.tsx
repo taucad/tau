@@ -40,7 +40,7 @@ const body = (): HTMLElement | undefined =>
   document.querySelector<HTMLElement>('[data-slot=wait-indicator-body]') ?? undefined;
 
 describe('WaitIndicator', () => {
-  it('keeps an empty status slot in the DOM while nothing is waiting', () => {
+  it('should keep an empty status slot in the DOM while nothing is waiting', () => {
     renderWithClock(createTestClock(), { active: false, label: 'Loading chat' });
 
     expect(screen.getByRole('status')).toBe(slot());
@@ -48,7 +48,7 @@ describe('WaitIndicator', () => {
     expect(slot().dataset['state']).toBe('idle');
   });
 
-  it('reveals its words 1,000 ms after the wait started, by an animation delay and no timer', () => {
+  it('should reveal its words 1,000 ms after the wait started, by an animation delay and no timer', () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     const clock = createTestClock(0);
     renderWithClock(clock, { active: true, label: 'Loading chat' });
@@ -60,19 +60,19 @@ describe('WaitIndicator', () => {
     setTimeoutSpy.mockRestore();
   });
 
-  it('measures a region that mounts 999 ms into the wait from the wait, so it shows 1 ms later', () => {
+  it('should measure a region that mounts 999 ms into the wait from the wait, so it shows 1 ms later', () => {
     renderWithClock(createTestClock(999), { active: true, label: 'Loading chat', startedAt: 0 });
 
     expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('1ms');
   });
 
-  it('shows at once for a region that mounts after the delay', () => {
+  it('should show at once for a region that mounts after the delay', () => {
     renderWithClock(createTestClock(5000), { active: true, label: 'Loading chat', startedAt: 3800 });
 
     expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('-200ms');
   });
 
-  it('empties the slot when content arrives at 600 ms, before the indicator ever showed', () => {
+  it('should empty the slot when content arrives at 600 ms, before the indicator ever showed', () => {
     const clock = createTestClock(0);
     const view = renderWithClock(clock, { active: true, label: 'Loading chat' });
     clock.set(600);
@@ -82,7 +82,7 @@ describe('WaitIndicator', () => {
     expect(slot()).toBeEmptyDOMElement();
   });
 
-  it('keeps the indicator to 1,500 ms when content arrives at 1,100 ms', () => {
+  it('should keep the indicator to 1,500 ms when content arrives at 1,100 ms', () => {
     const clock = createTestClock(0);
     const view = renderWithClock(clock, { active: true, label: 'Loading chat' });
     clock.set(1100);
@@ -93,7 +93,7 @@ describe('WaitIndicator', () => {
     expect(body()!.style.getPropertyValue('--wait-hide-delay')).toBe('400ms');
   });
 
-  it('keeps the slot and the same element across the hold, so the frame never moves', () => {
+  it('should keep the same slot element across the hold, so the frame never moves', () => {
     const clock = createTestClock(0);
     const view = renderWithClock(clock, { active: true, label: 'Loading chat' });
     const before = slot();
@@ -103,7 +103,7 @@ describe('WaitIndicator', () => {
     expect(slot()).toBe(before);
   });
 
-  it('swaps in the slow words and Retry at 10,000 ms', () => {
+  it('should swap in the slow words and Retry at 10,000 ms', () => {
     const onRetry = vi.fn();
     renderWithClock(createTestClock(0), {
       active: true,
@@ -122,20 +122,20 @@ describe('WaitIndicator', () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
-  it('always carries words, and a percentage when the fraction is known', () => {
+  it('should always carry words, and a percentage when the fraction is known', () => {
     renderWithClock(createTestClock(), { active: true, label: 'Downloading model', progress: 0.424 });
 
     expect(slot()).toHaveTextContent('Downloading model…42%');
   });
 
-  it('is seen but not announced inside a route open', () => {
+  it('should be seen but not announced inside a route open', () => {
     renderWithClock(createTestClock(), { active: true, label: 'Loading chat', live: false });
 
     expect(screen.queryByRole('status')).toBeNull();
     expect(slot()).toHaveTextContent('Loading chat…');
   });
 
-  it('renders on the server with delays from navigation start, and hydrates the same element', async () => {
+  it('should render on the server with delays from navigation start, and hydrate the same element', async () => {
     const html = renderToString(<WaitIndicator active label='Loading projects' />);
     expect(html).toContain('--wait-reveal-delay:calc(1000ms + var(--wait-offset, 0ms))');
     expect(html).toContain('wait-reveal');
@@ -163,5 +163,37 @@ describe('WaitIndicator', () => {
       root.unmount();
     });
     container.remove();
+  });
+
+  it('should restart the animation on a new wait, such as a Retry that moves startedAt', () => {
+    const clock = createTestClock(11_000);
+    const view = renderWithClock(clock, { active: true, label: 'Loading chat', startedAt: 0 });
+    const first = body();
+    view.rerenderWith({ startedAt: 11_000 });
+
+    expect(body()).not.toBe(first);
+    expect(body()!.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+    expect(body()!.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+  });
+
+  it('should hold a late-mounted indicator for its full minimum from when it showed', () => {
+    const clock = createTestClock(1200);
+    const view = renderWithClock(clock, { active: true, label: 'Loading chat', startedAt: 0 });
+    clock.set(1300);
+    view.rerenderWith({ active: false });
+
+    expect(body()!.style.getPropertyValue('--wait-hide-delay')).toBe('400ms');
+  });
+
+  it('should settle once for a startedAt of NaN instead of rendering forever', () => {
+    renderWithClock(createTestClock(), { active: true, label: 'Loading chat', startedAt: Number.NaN });
+
+    expect(slot().dataset['state']).toBe('waiting');
+  });
+
+  it('should give an idle pill slot the height of the pill', () => {
+    renderWithClock(createTestClock(), { active: false, label: 'Checking model files', variant: 'pill' });
+
+    expect(slot()).toHaveClass('min-h-7');
   });
 });

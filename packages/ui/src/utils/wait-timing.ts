@@ -8,14 +8,14 @@
  */
 
 /**
- * A click or key press produces a visible change within this time.
+ * A click or key press produces a visible change within this time. Milliseconds.
  *
  * @public
  */
 export const acknowledgeMilliseconds = 100;
 
 /**
- * No wait indicator appears before this much of the wait has passed.
+ * No wait indicator appears before this much of the wait has passed. Milliseconds.
  *
  * @public
  */
@@ -23,21 +23,22 @@ export const indicatorDelayMilliseconds = 1000;
 
 /**
  * A shown indicator stays at least this long. It holds the indicator only: content that arrives inside the minimum
- * renders at once, and the indicator finishes its time in its own slot.
+ * renders at once, and the indicator finishes its time in its own slot. Counted from when the indicator became
+ * visible, which is later than the delay for a region that mounts partway through a wait. Milliseconds.
  *
  * @public
  */
 export const indicatorMinimumMilliseconds = 500;
 
 /**
- * At this point the indicator's words say the wait is long and Retry appears beside it.
+ * At this point the indicator's words say the wait is long and Retry appears beside it. Milliseconds.
  *
  * @public
  */
 export const slowWaitMilliseconds = 10_000;
 
 /**
- * The indicator's opacity entrance. Reduced motion collapses it; loaded content has no entrance at all.
+ * The indicator's opacity entrance. Reduced motion collapses it; loaded content has no entrance at all. Milliseconds.
  *
  * @public
  */
@@ -53,8 +54,10 @@ export type WaitPhase = 'hidden' | 'shown' | 'slow';
 /**
  * The phase of a wait indicator `elapsed` milliseconds after its wait started.
  *
- * @param elapsed - Time since the wait started.
- * @param settledAt - When the wait ended, measured from the same start; omit while it is still running.
+ * @param elapsed - Time since the wait started. Milliseconds.
+ * @param settledAt - When the wait ended, measured from the same start; omit while it is still running. Milliseconds.
+ * @param shownAt - When the indicator became visible, measured from the same start: the delay, or later for a region
+ *   that mounted after it. Defaults to the delay. Milliseconds.
  * @returns `hidden` before the delay, and after a settled wait's indicator has served its minimum; `shown` from the
  *   delay; `slow` from the slow mark.
  * @public
@@ -66,9 +69,13 @@ export type WaitPhase = 'hidden' | 'shown' | 'slow';
  * export const phases = [waitPhaseAt(1200, 1100), waitPhaseAt(1500, 1100)]; // ['shown', 'hidden']
  * ```
  */
-export function waitPhaseAt(elapsed: number, settledAt?: number): WaitPhase {
+export function waitPhaseAt(
+  elapsed: number,
+  settledAt?: number,
+  shownAt: number = indicatorDelayMilliseconds,
+): WaitPhase {
   if (settledAt !== undefined && elapsed >= settledAt) {
-    const holdsUntil = indicatorDelayMilliseconds + indicatorMinimumMilliseconds;
+    const holdsUntil = Math.max(shownAt, indicatorDelayMilliseconds) + indicatorMinimumMilliseconds;
     return settledAt >= indicatorDelayMilliseconds && elapsed < holdsUntil ? 'shown' : 'hidden';
   }
   if (elapsed < indicatorDelayMilliseconds) {
@@ -93,7 +100,7 @@ export function waitPhaseAt(elapsed: number, settledAt?: number): WaitPhase {
  */
 export type WaitIndicatorTiming =
   | Readonly<{ state: 'idle' }>
-  | Readonly<{ state: 'waiting'; revealDelay: string; slowDelay: string }>
+  | Readonly<{ state: 'waiting'; revealDelay: string; slowDelay: string; entrance: string }>
   | Readonly<{ state: 'holding'; hideDelay: string }>;
 
 const idleTiming: WaitIndicatorTiming = { state: 'idle' };
@@ -101,8 +108,8 @@ const idleTiming: WaitIndicatorTiming = { state: 'idle' };
 /**
  * The timing of a running wait.
  *
- * @param startedAt - When the wait started, on the performance timeline.
- * @param now - The current time on the same timeline; omit before hydration, where the page has no script clock and
+ * @param startedAt - When the wait started, on the performance timeline. Milliseconds.
+ * @param now - The current time on the same timeline, in milliseconds; omit before hydration, where the page has no script clock and
  *   the delays are taken from navigation start through the `--wait-offset` variable (the elapsed time, negated, that
  *   the pre-paint script writes on the root element; `0ms` when it is absent).
  * @returns Reveal and slow delays measured from now, or from navigation start before hydration.
@@ -111,28 +118,32 @@ const idleTiming: WaitIndicatorTiming = { state: 'idle' };
 export function waitingTiming(startedAt: number, now?: number): WaitIndicatorTiming {
   const revealAt = startedAt + indicatorDelayMilliseconds;
   const slowAt = startedAt + slowWaitMilliseconds;
+  const entrance = `${indicatorEntranceMilliseconds}ms`;
   if (now === undefined) {
     return {
       state: 'waiting',
       revealDelay: `calc(${revealAt}ms + var(--wait-offset, 0ms))`,
       slowDelay: `calc(${slowAt}ms + var(--wait-offset, 0ms))`,
+      entrance,
     };
   }
-  return { state: 'waiting', revealDelay: `${revealAt - now}ms`, slowDelay: `${slowAt - now}ms` };
+  return { state: 'waiting', revealDelay: `${revealAt - now}ms`, slowDelay: `${slowAt - now}ms`, entrance };
 }
 
 /**
  * The timing once a wait ends `settledAt` milliseconds after it started.
  *
- * @param settledAt - Time from the wait's start to its end.
+ * @param settledAt - Time from the wait's start to its end. Milliseconds.
+ * @param shownAt - When the indicator became visible, measured from the same start. Defaults to the delay.
+ *   Milliseconds.
  * @returns `holding` while a shown indicator still owes part of its minimum, otherwise `idle`.
  * @public
  */
-export function settledTiming(settledAt: number): WaitIndicatorTiming {
-  const holdsUntil = indicatorDelayMilliseconds + indicatorMinimumMilliseconds;
-  if (waitPhaseAt(settledAt, settledAt) === 'hidden') {
+export function settledTiming(settledAt: number, shownAt: number = indicatorDelayMilliseconds): WaitIndicatorTiming {
+  if (waitPhaseAt(settledAt, settledAt, shownAt) === 'hidden') {
     return idleTiming;
   }
+  const holdsUntil = Math.max(shownAt, indicatorDelayMilliseconds) + indicatorMinimumMilliseconds;
   return { state: 'holding', hideDelay: `${holdsUntil - settledAt}ms` };
 }
 

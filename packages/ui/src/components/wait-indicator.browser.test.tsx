@@ -40,7 +40,7 @@ function renderAt(time: number, props: WaitIndicatorProps) {
   );
 }
 
-it('is hidden at 999 ms and shown from 1,000 ms after the wait started', () => {
+it('should be hidden at 999 ms and shown from 1,000 ms after the wait started', () => {
   renderAt(0, { active: true, label: 'Loading chat' });
 
   seek(999);
@@ -50,7 +50,7 @@ it('is hidden at 999 ms and shown from 1,000 ms after the wait started', () => {
   expect(getComputedStyle(find('wait-indicator-body')).opacity).toBe('1');
 });
 
-it('keeps its geometry from the start of the wait, so the reveal moves nothing', () => {
+it('should keep its geometry from the start of the wait, so the reveal moves nothing', () => {
   renderAt(0, { active: true, label: 'Loading chat' });
   seek(0);
   const before = boxOf(find('wait-indicator'));
@@ -60,7 +60,7 @@ it('keeps its geometry from the start of the wait, so the reveal moves nothing',
   expect(after).toEqual(before);
 });
 
-it('swaps to the slow words and Retry at 10,000 ms without changing its box', () => {
+it('should swap to the slow words and Retry at 10,000 ms without changing its box', () => {
   renderAt(0, { active: true, label: 'Loading chat', slowLabel: 'Still loading chat', onRetry: () => undefined });
 
   seek(9999);
@@ -74,7 +74,7 @@ it('swaps to the slow words and Retry at 10,000 ms without changing its box', ()
   expect(boxOf(find('wait-indicator'))).toEqual(box);
 });
 
-it('keeps the slow words hidden while the indicator itself is still hidden', () => {
+it('should keep the slow words hidden while the indicator itself is still hidden', () => {
   renderAt(0, { active: true, label: 'Loading chat', slowLabel: 'Still loading chat' });
 
   seek(500);
@@ -82,7 +82,7 @@ it('keeps the slow words hidden while the indicator itself is still hidden', () 
   expect(isShown(find('wait-indicator-slow'))).toBe(false);
 });
 
-it('holds the indicator to 1,500 ms when content arrives at 1,100 ms', () => {
+it('should hold the indicator to 1,500 ms when content arrives at 1,100 ms', () => {
   const view = renderAt(0, { active: true, label: 'Loading chat' });
   view.rerender(
     <WaitClockProvider clock={clockAt(1100)}>
@@ -94,4 +94,20 @@ it('holds the indicator to 1,500 ms when content arrives at 1,100 ms', () => {
   expect(isShown(find('wait-indicator-body'))).toBe(true);
   seek(401);
   expect(isShown(find('wait-indicator-body'))).toBe(false);
+});
+
+it('should start a new wait hidden when a Retry moves startedAt past the slow mark', () => {
+  const view = renderAt(11_000, { active: true, label: 'Loading chat', slowLabel: 'Still loading chat', startedAt: 0 });
+  view.rerender(
+    <WaitClockProvider clock={clockAt(11_000)}>
+      <WaitIndicator active label='Loading chat' slowLabel='Still loading chat' startedAt={11_000} />
+    </WaitClockProvider>,
+  );
+
+  seek(999);
+  expect(isShown(find('wait-indicator-body'))).toBe(false);
+  seek(1000 + 150);
+  expect(isShown(find('wait-indicator-body'))).toBe(true);
+  expect(isShown(find('wait-indicator-label'))).toBe(true);
+  expect(isShown(find('wait-indicator-slow'))).toBe(false);
 });

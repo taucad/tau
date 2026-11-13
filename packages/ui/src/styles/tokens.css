@@ -649,10 +649,11 @@
 
 /* The wait ladder (UI Policy § 6; `utils/wait-timing.ts`). `WaitIndicator` reveals its words with an animation delay
    rather than a script timer, so the server-rendered indicator keeps time before hydration. The delays are set per
-   wait as `--wait-reveal-delay`, `--wait-slow-delay` and `--wait-hide-delay`, and may be negative for a wait that is
-   already under way. Reduced motion collapses the 150ms entrance to nothing; the delays still hold. */
+   wait as `--wait-reveal-delay`, `--wait-slow-delay`, `--wait-hide-delay` and `--wait-entrance` from the constants,
+   and may be negative for a wait that is already under way. The fallbacks below repeat the constants and
+   `wait-timing.test.ts` pins them. Reduced motion collapses the entrance to nothing; the delays still hold. */
 @utility wait-reveal {
-  animation: wait-reveal 150ms ease-out var(--wait-reveal-delay, 1000ms) both;
+  animation: wait-reveal var(--wait-entrance, 150ms) ease-out var(--wait-reveal-delay, 1000ms) both;
 }
 
 @utility wait-hold {

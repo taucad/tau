@@ -100,6 +100,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import * as machineModule from '#sync.machine.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
+import { commitRefusalMarker } from '#refusal-markers.js';
 import type {
   SyncActors,
   SyncFetchActorOutput,
@@ -732,6 +733,87 @@ describe('syncMachine', () => {
     expect(facet.reason).toBe('quota');
     expect(facet.error).toContain('Tau: repository size limit exceeded');
     expect(facet.error).toContain('huge.bin (5000 bytes)');
+
+    harness.stop();
+  });
+
+  /**
+   * A commit made with git under an address that is not the person's Tau
+   * identity stays in every later push of its branch, so Tau Cloud refuses
+   * each retry with the same sentence. It is shown once, with the fix the
+   * remote named, and waits for *Try again* instead of re-announcing itself on
+   * every backoff.
+   */
+  it('settles a refused commit once, with the remote’s fix, and never replays it on the backoff', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    const sentence = [
+      'Tau: refused commit 0123456789ab — Tau did not record it, and it was not made with your Tau identity.',
+      'Commit with your Tau identity to back it up.',
+      'Tau: your Tau no-reply address is user_1@users.noreply.tau.new.',
+      'Tau: nothing was written.',
+    ].join(' ');
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: pushResult({ name: mainRef, status: 'rejected', head: 'h1', reason: sentence }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+      state: 'failed',
+      reason: 'rejected',
+      error: sentence,
+    });
+    /* No backoff: the same refusal is not pushed, fetched or shown again. */
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    expect(harness.effects.running('fetch')).toBe(0);
+    /* An autosave behind the refused commit waits with it; *Try again* is the person's. */
+    harness.actor.send({
+      type: 'revisionMinted',
+      checkoutId: 'live',
+      trigger: 'idle',
+      revisionId: 'h2',
+      branch: 'main',
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+    harness.actor.send({ type: 'syncNow' });
+    expect(harness.actor.getSnapshot().matches('failed')).toBe(false);
+
+    harness.stop();
+  });
+
+  it('settles a thrown commit refusal as terminal too', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      error: Object.assign(
+        new Error(`${commitRefusalMarker} 0123456789ab — it does not name the account pushing it.`),
+        {
+          code: 'REMOTE_REJECTED',
+        },
+      ),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
 
     harness.stop();
   });

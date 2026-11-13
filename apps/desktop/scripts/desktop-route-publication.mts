@@ -117,15 +117,16 @@ export const desktopCandidateRoutes = (
 };
 
 /**
- * Clean-host (operator VM) acceptance state of one admitted route. `pending` is admitted only for a staging Mac-only
- * publication, whose operator has ruled that CI evidence suffices until clean-host testing is done by hand; it is
- * published as such and never presented as clean-host qualified.
+ * Clean-host (operator VM) acceptance state of one admitted route. `pending` is admitted only for a Mac-only (`macos`
+ * scope) publication on either channel: the operator ruled that CI evidence suffices on staging (2026-10-26) and in
+ * production (2026-11-13, clean-host acceptance by hand on the live release). It is published as such and never
+ * presented as clean-host qualified.
  */
 export type DesktopCleanHostQualification = 'passed' | 'pending';
 
 /**
  * Require real CI evidence for every route of the explicitly selected scope, and operator VM evidence for every route
- * except where a staging Mac-only publication explicitly records clean-host acceptance as pending. A VM receipt that is
+ * except where a Mac-only publication explicitly records clean-host acceptance as pending. A VM receipt that is
  * present must still be complete, unambiguous and release-trusted; it is never silently ignored.
  */
 export const qualifyDesktopScopedRoutes = (
@@ -149,8 +150,8 @@ export const qualifyDesktopScopedRoutes = (
   ) {
     throw new Error(`${platformScopes[scope].name} publication cannot admit another platform route`);
   }
-  // Only a staging Mac-only publication may record clean-host acceptance as pending; production always needs VM receipts.
-  const cleanHostMayBePending = scope === 'macos' && manifest.channel === 'staging';
+  // Only a Mac-only publication may record clean-host acceptance as pending; `all` and Linux always need VM receipts.
+  const cleanHostMayBePending = scope === 'macos';
   return {
     manifest,
     routes: routes.map(({ route, target }) => {
@@ -208,8 +209,8 @@ export type DesktopInstallerCatalog = {
     route: keyof typeof catalogKinds;
     target: DesktopReleaseTarget;
     /**
-     * `vm: true` is clean-host (operator VM) acceptance; `vm: 'pending'` marks a staging Mac route admitted on CI
-     * evidence alone, which consumers must neither treat as clean-host qualified nor accept in production.
+     * `vm: true` is clean-host (operator VM) acceptance; `vm: 'pending'` marks a Mac route admitted on CI evidence
+     * alone (Mac-only scope, either channel), which consumers must never treat as clean-host qualified.
      */
     qualification: { ci: true; vm: true | 'pending'; trust: 'release' };
     artifacts: Array<{ kind: DesktopArtifactKind; name: string; sha256: string; size: number }>;

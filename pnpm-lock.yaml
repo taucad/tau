@@ -2008,9 +2008,24 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../libs/agent-observability
+      '@taucad/agent-tools':
+        specifier: workspace:*
+        version: link:../../libs/agent-tools
+      '@taucad/assimp':
+        specifier: workspace:*
+        version: link:../../packages/plugins/assimp
       '@taucad/bambu':
         specifier: workspace:*
         version: link:../../packages/plugins/bambu
+      '@taucad/brep':
+        specifier: workspace:*
+        version: link:../../packages/plugins/brep
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../../packages/plugins/build123d
       '@taucad/carvera':
         specifier: workspace:*
         version: link:../../packages/plugins/carvera
@@ -2020,30 +2035,84 @@ importers:
       '@taucad/desktop-services-host':
         specifier: workspace:*
         version: link:../libs/desktop-services-host
+      '@taucad/desktop-terminal':
+        specifier: workspace:*
+        version: link:../libs/desktop-terminal
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../../packages/plugins/esbuild
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
+      '@taucad/gltf':
+        specifier: workspace:*
+        version: link:../../packages/plugins/gltf
       '@taucad/grbl':
         specifier: workspace:*
         version: link:../../packages/plugins/grbl
       '@taucad/host':
         specifier: workspace:*
         version: link:../../packages/host
+      '@taucad/image':
+        specifier: workspace:*
+        version: link:../../packages/plugins/image
+      '@taucad/jscad':
+        specifier: workspace:*
+        version: link:../../packages/plugins/jscad
+      '@taucad/manifold':
+        specifier: workspace:*
+        version: link:../../packages/plugins/manifold
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../../packages/plugins/middleware
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../packages/core/native-process
+      '@taucad/opencascade':
+        specifier: workspace:*
+        version: link:../../packages/plugins/opencascade
+      '@taucad/openrscad':
+        specifier: workspace:*
+        version: link:../../packages/plugins/openrscad
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../../packages/plugins/picogk
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../../packages/plugins/picovoxel
+      '@taucad/replicad':
+        specifier: workspace:*
+        version: link:../../packages/plugins/replicad
+      '@taucad/rpc':
+        specifier: workspace:*
+        version: link:../../packages/rpc
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
       '@taucad/sandbox':
         specifier: workspace:*
         version: link:../../libs/sandbox
+      '@taucad/shell-service':
+        specifier: workspace:*
+        version: link:../../libs/shell-service
+      '@taucad/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../packages/plugins/slicer
+      '@taucad/smlib':
+        specifier: workspace:*
+        version: link:../../packages/plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../../packages/plugins/smlibpy
+      '@taucad/tscircuit':
+        specifier: workspace:*
+        version: link:../../packages/plugins/tscircuit
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -2059,6 +2128,9 @@ importers:
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
+      fflate:
+        specifier: 'catalog:'
+        version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
         version: 0.6.0

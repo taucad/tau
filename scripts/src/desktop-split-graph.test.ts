@@ -152,6 +152,14 @@ describe('desktop split graph: services host (extracted)', () => {
     expect(graph.dependencies['desktop-services-host']?.map(({ target }) => target)).not.toContain('ui');
   });
 
+  it('keeps fflate a desktop dependency, so electron-vite leaves it external', () => {
+    // It reaches the bundle through `@taucad/bambu` and `@taucad/slicer`. Inlined, its ESM build's own
+    // `var require` collides with the CommonJS shim's `const require` and the main process fails to load.
+    const manifest = JSON.parse(read(`${desktopRoot}/package.json`)) as { dependencies?: Record<string, string> };
+
+    expect(manifest.dependencies?.['fflate']).toBeDefined();
+  });
+
   it('keeps the packaged suite a dependent of desktop', async () => {
     const graph = await projectGraph();
 

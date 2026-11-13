@@ -252,8 +252,35 @@ const config: KnipConfig = {
         '@agentclientprotocol/codex-acp',
         '@anthropic-ai/sandbox-runtime',
         'nanoraster',
-        // Externalized too, and imported only by desktop-services-host's kernel runtime, which the app bundles.
+        // Imported only by desktop-services-host, which the app bundles. The app is the bundle owner, so it
+        // declares them: electron-vite externalizes the app's dependencies and the packaging script copies
+        // them in. Dropping one inlines it into the bundle instead (fflate's own `require` then collides
+        // with the CommonJS shim, and the main process fails to load).
+        '@taucad/agent-observability',
+        '@taucad/agent-tools',
+        '@taucad/assimp',
+        '@taucad/brep',
+        '@taucad/build123d',
+        '@taucad/desktop-terminal',
+        '@taucad/esbuild',
+        '@taucad/events',
+        '@taucad/gltf',
+        '@taucad/image',
+        '@taucad/jscad',
+        '@taucad/manifold',
+        '@taucad/middleware',
+        '@taucad/opencascade',
+        '@taucad/openrscad',
+        '@taucad/picovoxel',
+        '@taucad/replicad',
+        '@taucad/rpc',
+        '@taucad/shell-service',
+        '@taucad/skills',
+        '@taucad/smlib',
+        '@taucad/smlibpy',
+        '@taucad/tscircuit',
         '@taulabs/openrscad-engine',
+        'fflate',
         // The `shell-supervisor` input of electron.vite.config.ts is the sandbox's supervisor entry, by path.
         '@taucad/sandbox',
       ],

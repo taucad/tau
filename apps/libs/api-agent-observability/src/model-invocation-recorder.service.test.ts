@@ -194,6 +194,33 @@ describe('ModelInvocationEvidenceRecorder content', () => {
     expect(recorder.outcomes()).toEqual({ accepted: 1 });
   });
 
+  it('asks again at admission when the lookup started before the call refused the summary', async () => {
+    const { recorder, admitted, purposes, settled } = setup({ accept: true });
+    /* The relay's early lookup ran before the new project's row was committed. */
+    purposes.getAdmissionAuthority.mockResolvedValueOnce({
+      effective: { epoch: 'epoch-a', purposes: [{ purpose: 'summary', allowed: false, decided: true, granted: true }] },
+      protection: 'pro',
+    });
+
+    recorder.record(attempt(), recorder.permission('user-a', 'project-a'));
+    await settled();
+
+    expect(purposes.getAdmissionAuthority).toHaveBeenCalledTimes(2);
+    expect(admitted.map((evidence) => evidence.payload.plane)).toEqual(['summary']);
+    expect(recorder.outcomes()).toEqual({ accepted: 1 });
+  });
+
+  it('admits nothing when the account still refuses the summary at admission', async () => {
+    const { recorder, admitted, purposes, settled } = setup({ allowed: false });
+
+    recorder.record(attempt(), recorder.permission('user-a', 'project-a'));
+    await settled();
+
+    expect(purposes.getAdmissionAuthority).toHaveBeenCalledTimes(2);
+    expect(admitted).toEqual([]);
+    expect(recorder.outcomes()).toEqual({ 'not-permitted': 1 });
+  });
+
   it('answers no content while the lookup is pending, and none the mode or account refuses', async () => {
     const refused = setup({ content: false, mode: 'on' });
     const pending = setup({ content: true, mode: 'on' });

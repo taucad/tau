@@ -47,7 +47,7 @@ type Workflow = {
     readonly push?: { readonly paths?: readonly string[] };
     readonly workflow_call?: { readonly inputs?: Record<string, { readonly type?: string }> };
   };
-  readonly concurrency?: { readonly group?: string };
+  readonly concurrency?: { readonly group?: string; readonly 'cancel-in-progress'?: string };
   readonly jobs: Record<string, Job>;
 };
 
@@ -487,11 +487,36 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
   it.each([
     ['native-hosts', nativeHosts],
     ['viewer-parity', viewerParity],
-  ])('should run %s from ci.yml and never on a pull request', (_name, workflow) => {
+  ])('should run %s from ci.yml', (_name, workflow) => {
     expect(workflow.on !== undefined && 'workflow_call' in workflow.on).toBe(true);
-    expect(workflow.on?.pull_request).toBeUndefined();
     // A group equal to the caller's (`github.workflow` is `CI` in a called workflow) would cancel the call.
     expect(workflow.concurrency?.group ?? '').not.toContain('github.workflow');
+  });
+
+  it('should never run native hosts on a pull request', () => {
+    expect(nativeHosts.on?.pull_request).toBeUndefined();
+  });
+
+  it('should run viewer parity on a pull request only while it carries the viewer-parity label', () => {
+    expect(viewerParity.on?.pull_request).toEqual({ types: ['opened', 'synchronize', 'reopened', 'labeled'] });
+    // One guard on the first job: `viewer` and `gate` need it, so they skip with it.
+    expect(viewerParity.jobs['fixtures']?.if).toBe(
+      "github.event_name != 'pull_request' || " +
+        "(contains(github.event.pull_request.labels.*.name, 'viewer-parity') && " +
+        "(github.event.action != 'labeled' || github.event.label.name == 'viewer-parity') && " +
+        "github.triggering_actor != 'dependabot[bot]')",
+    );
+    expect(viewerParity.jobs['viewer']?.needs).toBe('fixtures');
+    expect(viewerParity.jobs['gate']?.needs).toEqual(['fixtures', 'viewer']);
+    // Only a labelled pull request's own runs share a group and cancel; a call from ci.yml or a dispatch gets its
+    // run's own group, so a newer push never cancels a `main` run's parity jobs.
+    expect(viewerParity.concurrency?.group).toContain(
+      "format('pr-{0}', github.event.pull_request.number) || github.run_id",
+    );
+    expect(viewerParity.concurrency?.group).toContain("github.event.label.name != 'viewer-parity' && '-other-label'");
+    expect(viewerParity.concurrency?.['cancel-in-progress']).toBe(expression("github.event_name == 'pull_request'"));
+    // The plan never selects the lane on a pull request, so ci.yml's call never meets the label guard.
+    expect(laneSelectors['viewer-parity']).toEqual({ targets: ['test:viewer-parity'], pr: 'queue' });
   });
 
   it('should select viewer parity through the graph, not hand-kept paths', () => {
@@ -559,7 +584,7 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
         readonly inputs?: Record<string, { readonly type?: string; readonly required?: boolean }>;
       };
     };
-    readonly concurrency?: { readonly group?: string };
+    readonly concurrency?: { readonly group?: string; readonly 'cancel-in-progress'?: string };
     readonly jobs: Record<string, Job>;
   };
   const shellText = read('.github/workflows/shell-conformance.yml');

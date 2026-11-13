@@ -4,7 +4,7 @@
  *
  * It runs no suite. Each oracle is a job in a workflow that already runs it, and this script reads that job's latest
  * conclusion through the GitHub REST API: in this run for the nightly's own jobs (falling back to the latest nightly
- * on `main` when this run skipped them, such as under `only: packaged`), on `main` for the push workflows, and the
+ * on `main` when this run skipped them), on `main` for the push and candidate workflows, and the
  * latest run on any ref for the path-filtered pull-request workflows, marked stale but still deciding after seven days
  * (ruling X62). An oracle may name one step of a job that runs several. A consumer whose oracle runs in no workflow is
  * a failing row, not an omission.
@@ -114,11 +114,12 @@ export const consumers: readonly Consumer[] = [
     oracles: [
       {
         kind: 'job',
-        workflow: nightly,
-        job: 'Packaged desktop end-to-end (darwin-arm64)',
+        workflow: 'release-desktop-staging.yml',
+        /* The candidate gate (DS-3), `desktop-packaged.yml` called as a job; the nightly's own job is gone (DS-4). */
+        job: 'Packaged desktop gate / Packaged desktop end-to-end (darwin-arm64)',
         match: 'exact',
-        scope: 'this-run',
-        proves: '`desktop-e2e:test:e2e:packaged` on macos-26',
+        scope: 'main',
+        proves: '`desktop-e2e:test:e2e:packaged` on macos-26, on the latest staging candidate',
       },
     ],
   },

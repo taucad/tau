@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import tailwindcss from '@tailwindcss/vite';
 import { createElement } from 'react';
@@ -162,13 +161,13 @@ describe('shipping installer catalog browser behavior', () => {
     return { page, requests, before, close: async () => context.close() };
   };
 
-  /** Every visible Mac file link names the format its URL serves, and no DMG is claimed over a ZIP. */
-  const expectTruthfulMacLabels = (links: Surface['links'], format: 'DMG' | 'ZIP'): void => {
+  /** Every Mac file link names the DMG its URL serves, and no DMG is claimed over another file. */
+  const expectTruthfulMacLabels = (links: Surface['links']): void => {
     const mac = links.filter((link) => /Apple silicon|Intel Mac/u.test(link.text) && link.text.startsWith('Download'));
     expect(mac.length).toBeGreaterThanOrEqual(3);
     for (const link of mac) {
-      expect(link.text).toMatch(new RegExp(`^Download ${format} for (?:Apple silicon|Intel Mac)$`, 'u'));
-      expect(new URL(link.href).pathname).toMatch(format === 'DMG' ? /\.dmg$/u : /\.zip$/u);
+      expect(link.text).toMatch(/^Download DMG for (?:Apple silicon|Intel Mac)$/u);
+      expect(new URL(link.href).pathname).toMatch(/\.dmg$/u);
     }
     for (const link of links) {
       if (/DMG/u.test(link.text)) {
@@ -177,13 +176,28 @@ describe('shipping installer catalog browser behavior', () => {
     }
   };
 
+  /** Without an admitted DMG a Mac visitor is offered no Mac file at all: no ZIP fallback and no dead link. */
+  const expectNoMacFallback = async (page: Page, links: Surface['links']): Promise<void> => {
+    expect(links.filter((link) => /macos/u.test(link.href))).toEqual([]);
+    const visibleMac = links.filter(
+      (link) => link.visible && /Apple silicon|Intel Mac|\bMac\b|\bIntel\b/u.test(link.text),
+    );
+    expect(visibleMac).toEqual([]);
+    const shown = await page
+      .locator('[data-mac-route]')
+      .evaluateAll((nodes) => nodes.map((node) => node.checkVisibility()));
+    expect(shown).toEqual([false, false, false]);
+    const host = page.locator('a[data-host-download="direct"]');
+    expect(await host.getAttribute('href')).toBe('#downloads');
+    expect(await host.textContent()).toMatch(/^Choose your download/u);
+  };
+
   it('keeps the default off and admits only qualified installers with APT enrollment and archive alternatives', async () => {
     const off = await open({ enabled: false });
     expect(off.requests).toHaveLength(0);
-    expect(await off.page.locator('[data-download-platform="mac"]').getAttribute('href')).toContain('.zip');
     const disabled = await surface(off.page);
-    expectTruthfulMacLabels(disabled.links, 'ZIP');
-    expect(disabled.text).not.toContain('DMG');
+    await expectNoMacFallback(off.page, disabled.links);
+    expect(disabled.text).not.toMatch(/DMG|ZIP for/u);
     await off.close();
 
     const { page, requests, close } = await open();
@@ -209,7 +223,11 @@ describe('shipping installer catalog browser behavior', () => {
 
     const unpromoted = await open({ catalog: { ...projection(), promoted: false } });
     expect(await unpromoted.page.locator('[data-download-platform="windows"]').getAttribute('href')).toContain('.zip');
-    expect(await unpromoted.page.locator('[data-platform-note]').textContent()).toContain('Tau asks before restarting');
+    // A Mac without an admitted catalog keeps the page's general guidance: no Mac file, so no Mac install steps.
+    const generalNote = await unpromoted.page.locator('[data-platform-note]').textContent();
+    expect(generalNote).toContain('Mac builds update automatically');
+    const unpromotedSurface = await surface(unpromoted.page);
+    await expectNoMacFallback(unpromoted.page, unpromotedSurface.links);
     expect(await unpromoted.page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
     await unpromoted.close();
   }, 60_000);
@@ -221,7 +239,7 @@ describe('shipping installer catalog browser behavior', () => {
     expect(await host.getAttribute('href')).toBe(
       'https://downloads.tau.new/releases/desktop%400.2.0/Tau-macos-arm64.dmg',
     );
-    expect(await page.locator('[data-mac-intel="hero"]').isVisible()).toBe(true);
+    expect(await page.locator('[data-mac-hero]').isVisible()).toBe(true);
     const read = async (selector: string) =>
       page.locator(selector).evaluateAll((links) =>
         links.map((link) => ({
@@ -255,7 +273,7 @@ describe('shipping installer catalog browser behavior', () => {
       visible('Tau-macos-x64.zip', `${base}/Tau-macos-x64.zip`),
     ]);
     const upgraded = await surface(page);
-    expectTruthfulMacLabels(upgraded.links, 'DMG');
+    expectTruthfulMacLabels(upgraded.links);
     const instructions = await page.locator('[data-install-instructions]').textContent();
     expect(instructions).toMatch(
       /Open the DMG to mount it, drag Tau to Applications, eject the disk image, then launch/u,
@@ -268,7 +286,7 @@ describe('shipping installer catalog browser behavior', () => {
     const { page, requests, before, close } = await open({ origin: 'https://taucad.dev', catalog: macOnlyStaging() });
     expect(requests).toEqual(['https://downloads.taucad.dev/latest/installers.json']);
     const after = await surface(page);
-    expectTruthfulMacLabels(after.links, 'DMG');
+    expectTruthfulMacLabels(after.links);
     expect(await page.locator('a[data-host-download="direct"]').getAttribute('href')).toBe(
       'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-arm64.dmg',
     );
@@ -315,7 +333,7 @@ describe('shipping installer catalog browser behavior', () => {
     }
     const { page, close } = await open({ origin: 'https://taucad.dev', catalog: pending });
     const after = await surface(page);
-    expectTruthfulMacLabels(after.links, 'DMG');
+    expectTruthfulMacLabels(after.links);
     expect(await page.locator('a[data-host-download="direct"]').getAttribute('href')).toBe(
       'https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.455/Tau-macos-arm64.dmg',
     );
@@ -330,62 +348,35 @@ describe('shipping installer catalog browser behavior', () => {
     await close();
   }, 60_000);
 
-  it('keeps production on truthful ZIP links when any Mac route has clean-host testing pending', async () => {
+  it('offers production the same Mac DMG as staging while clean-Mac install testing is pending', async () => {
     const pending = projection();
-    pending.routes[1]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
-    const { page, requests, before, close } = await open({ catalog: pending });
+    for (const route of pending.routes.filter(({ route }) => route === 'macos-zip')) {
+      route.qualification = { ci: true, vm: 'pending', trust: 'release' };
+    }
+    const { page, requests, close } = await open({ catalog: pending });
     expect(requests).toHaveLength(1);
     const after = await surface(page);
-    expect(after).toEqual(before);
-    expectTruthfulMacLabels(after.links, 'ZIP');
-    expect(after.text).not.toContain('DMG');
-    expect(after.text).not.toContain('pending');
-    expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
+    expectTruthfulMacLabels(after.links);
+    expect(await page.locator('a[data-host-download="direct"]').getAttribute('href')).toBe(
+      'https://downloads.tau.new/releases/desktop%400.2.0/Tau-macos-arm64.dmg',
+    );
+    expect(await page.locator('[data-download-detail="host"]').textContent()).toMatch(
+      /^Apple silicon · DMG installer · clean-Mac install testing pending · ZIP: Tau-macos-arm64\.zip$/u,
+    );
+    expect(after.text).not.toMatch(/clean-Mac install (?:tested|passed|verified)/iu);
     await close();
   }, 60_000);
 
-  it('should keep fresh staging visitors on truthful downloadable ZIPs after a catalog 404', async () => {
+  it('should offer fresh staging visitors no Mac fallback after a catalog 404', async () => {
     const { page, requests, before, close } = await open({ origin: 'https://taucad.dev', catalog: 404 });
     try {
       expect(requests).toEqual(['https://downloads.taucad.dev/latest/installers.json']);
       const after = await surface(page);
       expect(after).toEqual(before);
-      expectTruthfulMacLabels(after.links, 'ZIP');
+      await expectNoMacFallback(page, after.links);
       expect(after.text).not.toContain('DMG');
       expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
-      expect(await page.locator('[data-install-instructions]').textContent()).toMatch(/ZIP/u);
-
-      // Intel Macs are unlisted without a qualified Intel route, so the fallback offers no Intel archive.
-      expect(await page.locator('#downloads a[data-download-platform="macIntel"]').isVisible()).toBe(false);
-      for (const [platform, architecture] of [['mac', 'arm64']] as const) {
-        const filename = `Tau-macos-${architecture}.zip`;
-        const url = `https://downloads.taucad.dev/latest/${filename}`;
-        const bytes = `ZIP fixture for ${architecture}`;
-        // oxlint-disable-next-line no-await-in-loop -- Each real button download is observed before starting the next.
-        await page.route(url, async (route) =>
-          route.fulfill({
-            body: bytes,
-            headers: {
-              'Content-Type': 'application/zip',
-              'Content-Disposition': `attachment; filename="${filename}"`,
-            },
-          }),
-        );
-        // oxlint-disable-next-line no-await-in-loop -- As above.
-        const [downloaded] = await Promise.all([
-          page.waitForEvent('download'),
-          page.locator(`#downloads a[data-download-platform="${platform}"]`).click(),
-        ]);
-        expect(downloaded.url()).toBe(url);
-        expect(downloaded.suggestedFilename()).toBe(filename);
-        // oxlint-disable-next-line no-await-in-loop -- Verify the completed file before the context is closed.
-        expect(await downloaded.failure()).toBeNull();
-        // oxlint-disable-next-line no-await-in-loop -- As above.
-        const path = await downloaded.path();
-        expect(path).not.toBeNull();
-        // oxlint-disable-next-line no-await-in-loop -- As above.
-        expect(await readFile(path, 'utf8')).toBe(bytes);
-      }
+      expect(await page.locator('[data-install-instructions]').textContent()).not.toMatch(/ZIP|archive/u);
     } finally {
       await close();
     }
@@ -406,13 +397,13 @@ describe('shipping installer catalog browser behavior', () => {
       },
     ],
   ])(
-    'keeps truthful ZIP labels and links after %s',
+    'offers no Mac fallback after %s',
     async (_name, catalog) => {
       const { page, requests, before, close } = await open({ origin: 'https://taucad.dev', catalog });
       expect(requests).toHaveLength(1);
       const after = await surface(page);
       expect(after).toEqual(before);
-      expectTruthfulMacLabels(after.links, 'ZIP');
+      await expectNoMacFallback(page, after.links);
       expect(after.text).not.toContain('DMG');
       expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
       await close();
@@ -425,7 +416,7 @@ describe('shipping installer catalog browser behavior', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     const selectors = [
       'a[data-host-download="direct"]',
-      '[data-mac-intel="hero"] a[data-download-platform="macIntel"]',
+      '[data-mac-hero] a[data-download-platform="macIntel"]',
       '#downloads a[data-download-platform="mac"]',
       '#downloads a[data-download-platform="macIntel"]',
       '#downloads [data-download-alternative="mac"]',

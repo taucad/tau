@@ -4,7 +4,7 @@ import * as target from '#support/external-target.js';
 
 /*
  * PF1, the trackpad pinch fix (onboarding plan T4a.1): a pinch is a `ctrlKey` wheel in Chromium and Firefox. In
- * perspective it changes the camera's distance and leaves `camera.zoom` at 1, in the same direction and by the same
+ * perspective it changes the camera's distance and leaves `camera.zoom` where framing put it, in the same direction and by the same
  * ratio as a plain wheel of the same sign; in orthographic both change the zoom (the span shown). This spec runs in the
  * chromium, firefox and webkit-smoke projects. Playwright's WebKit is not Safari, so real Safari, which sends gesture
  * events for a pinch, is the manual run RO9.
@@ -136,7 +136,7 @@ describe('Viewer trackpad pinch (PF1)', () => {
   test.each([
     { direction: 'in', deltaY: -wheelDeltaPixels },
     { direction: 'out', deltaY: wheelDeltaPixels },
-  ])('dollies a perspective pinch $direction as a plain wheel does, leaving the zoom at 1', async ({ deltaY }) => {
+  ])('dollies a perspective pinch $direction as a plain wheel does, leaving the zoom unchanged', async ({ deltaY }) => {
     await openBirdhouseFixture();
 
     const pinch = await wheel({ deltaY, ctrlKey: true });
@@ -148,9 +148,13 @@ describe('Viewer trackpad pinch (PF1)', () => {
     const plainRatio = plain.after.controlsDistance / plain.before.controlsDistance;
     expect(Math.sign(pinchRatio - 1), 'the pinch moves the camera the way the wheel does').toBe(Math.sign(deltaY));
     expect(pinchRatio).toBeCloseTo(plainRatio, 3);
-    expect(pinch.after.zoom).toBe(1);
-    expect(pinch.after.requestedPerspectiveZoom).toBe(1);
-    expect(plain.after.zoom).toBe(1);
+    /*
+     * Framing sets the perspective zoom that fits the bounds (`frameCameraBounds` in `@taucad/camera`), which lands within an ulp of 1, not on
+     * it: the pinch and the wheel must leave that zoom exactly where framing put it.
+     */
+    expect(pinch.after.zoom).toBe(pinch.before.zoom);
+    expect(pinch.after.requestedPerspectiveZoom).toBe(pinch.before.requestedPerspectiveZoom);
+    expect(plain.after.zoom).toBe(plain.before.zoom);
   });
 
   test.each([

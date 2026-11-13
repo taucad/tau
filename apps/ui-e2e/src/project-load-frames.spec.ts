@@ -156,10 +156,13 @@ const seedTranscriptWithTray = async (chatId: string): Promise<void> => {
   await target.delay(settleWindow);
 };
 
-/** The transcript stream's page read for one chat. */
+/**
+ * The transcript's event-log listing for one chat: the page's own read that the transcript waits for. (The
+ * transcript's `read` page stream now runs in the agent host, past the page's ports, and only tails the log.)
+ */
 const transcriptRead = (chatId: string): WorkerReadDelay => ({
-  method: 'read',
-  path: `"chatId":"${chatId}"`,
+  method: 'readdir',
+  path: String.raw`^\.tau/chats/${chatId}/events$`,
   milliseconds: readDelay,
 });
 
@@ -170,7 +173,7 @@ const trayRead = (chatId: string): WorkerReadDelay => ({
   milliseconds: readDelay,
 });
 
-/** The transcript stream's page read and the tray's file, for one chat. */
+/** The transcript's event-log listing and the tray's file, for one chat. */
 const transcriptReads = (chatId: string): WorkerReadDelay[] => [transcriptRead(chatId), trayRead(chatId)];
 
 /** The project chat listing: every project's `.tau/chats` directory read. */
@@ -405,8 +408,8 @@ knownDefect('U6: no sidebar project row moves on a reload with the chat listing 
     /* The delayed reads answer after the workspace is up; the row they move is watched until then. */
     await target.delay(readDelay);
     await target.expectVisible(selectors.getByRole('link', { name: projectNames.b }).first(), 60_000);
-    const since = await requireReadDelayed('U6', chatListingRead);
-    return { record: await keepRecord('u6-wide', { since }), since };
+    const record = await keepRecord('u6-wide');
+    return { record, since: await requireReadDelayed('U6', chatListingRead) };
   },
   assert: ({ record, since }) => {
     /* Only what the late listing can move: a move before it was requested is the shell's (U2). */
@@ -430,8 +433,8 @@ knownDefect('U7: the largest contentful paint is not the empty-chat state with t
     await settleProject();
     await target.delay(readDelay);
     await target.expectVisible(selectors.getByText(finalReply, { exact: true }), 60_000);
-    await requireReadDelayed('U7', transcriptRead(chatId));
     const record = await keepRecord('u7-wide');
+    await requireReadDelayed('U7', transcriptRead(chatId));
     precondition(record.largestPaints.length > 0, 'U7: no largest-contentful-paint entry');
     return record;
   },
@@ -458,8 +461,8 @@ knownDefect(
       await settleProject();
       await target.delay(readDelay);
       await target.expectVisible(traySummary, 60_000);
-      await requireReadDelayed('U10', trayRead(chatId));
       const record = await keepRecord('u10-wide');
+      await requireReadDelayed('U10', trayRead(chatId));
       precondition(record.composer.length > 0, 'U10: the composer was never on screen');
       return record;
     },

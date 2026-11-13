@@ -505,10 +505,13 @@ export const libraryAccessQueryMachine = setup({
         if (mayStart(facts)) {
           return top(context, io);
         }
-        // Rows were pending and the bootstrap pass failed: the question is answered as today's rejection is.
-        return facts.journal.status === 'ready' && facts.discoveryError !== undefined
+        if (facts.journal.status !== 'ready' || facts.discoveryError === undefined) {
+          return undefined;
+        }
+        // Rows were pending and the bootstrap pass failed: `error`, as today's rejection is, unless a row is held (rule 8).
+        return heldRow(context) === undefined
           ? answer(context, io, { status: 'error', message: facts.discoveryError })
-          : undefined;
+          : top(context, io);
       }),
     },
     verifying: {

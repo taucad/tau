@@ -393,14 +393,14 @@ describe('libraryAccess', () => {
       expect(harness.discovery.calls).toHaveLength(1);
     });
 
-    it('should wait for the bootstrap pass when rows were pending, even with a row held, and answer its failure', () => {
+    it('should wait for the bootstrap pass when rows were pending, even with a row held, and answer the row if it fails', () => {
       const harness = start();
       harness.send({ type: 'recoveriesChanged', recoveries: [recovery('p1', 'recovering')] });
       harness.send({ type: 'journalReady', pending: 1 });
       ask(harness);
       expect(harness.answered()).toEqual([]);
       harness.send({ type: 'discoveryFailed', message: 'scan failed' });
-      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'scan failed' }]);
+      expect(harness.answers('q1')).toEqual([{ status: 'recovering', recovery: recovery('p1', 'recovering') }]);
     });
 
     it('should skip verification while a current listing exists', () => {

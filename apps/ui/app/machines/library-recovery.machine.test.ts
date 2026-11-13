@@ -468,6 +468,57 @@ describe('libraryRecovery', () => {
       expect(harness.of('discoveryWanted')).toHaveLength(2);
     });
 
+    it.each([
+      ['an ungated mutation', { type: 'mutationAsked', requestId: 'm1', projectId: 'p3' }],
+      ["a person's replay alone", { type: 'replayAsked', requestId: 'c1', row: row('x1', 'p2') }],
+    ] as const)(
+      'should ask for a failed bootstrap pass again for %s once the journal is read',
+      async (_name, event) => {
+        const harness = start();
+        await ready(harness, [row('o1', 'p1')]);
+        // `ready` sent discoveryReady; a tab whose bootstrap failed has not heard it.
+        const fresh = start();
+        fresh.readJournal.calls[0]?.resolve([row('o1', 'p1')]);
+        await flush();
+        fresh.send({ type: 'discoveryFailed' });
+        fresh.send(event);
+        expect(fresh.of('discoveryWanted')).toHaveLength(1);
+        // A tab whose bootstrap ran asks for nothing.
+        harness.send({ type: 'discoveryFailed' });
+        harness.send(event);
+        expect(harness.of('discoveryWanted')).toHaveLength(0);
+      },
+    );
+
+    it.each([
+      ['mutation', { type: 'mutationAsked', requestId: 'm1', projectId: 'p3' }],
+      ["person's replay", { type: 'replayAsked', requestId: 'c1', row: row('x1', 'p2') }],
+    ] as const)(
+      'should ask for a failed bootstrap pass again for a %s while the journal loads or after it failed',
+      async (_name, event) => {
+        const loading = start();
+        loading.send({ type: 'discoveryFailed' });
+        loading.send(event);
+        expect(loading.of('discoveryWanted')).toHaveLength(1);
+        const failed = start();
+        failed.readJournal.calls[0]?.reject(new Error('idb closed'));
+        await flush();
+        failed.send({ type: 'discoveryFailed' });
+        failed.send(event);
+        expect(failed.of('discoveryWanted')).toHaveLength(1);
+      },
+    );
+
+    it('should not ask for a bootstrap pass that ran after it failed', async () => {
+      const harness = start();
+      harness.readJournal.calls[0]?.resolve([row('o1', 'p1')]);
+      await flush();
+      harness.send({ type: 'discoveryFailed' });
+      harness.send({ type: 'discoveryReady' });
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('x1', 'p2') });
+      expect(harness.of('discoveryWanted')).toHaveLength(0);
+    });
+
     it('should hold a mutation until the journal is read', async () => {
       const harness = start();
       harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });

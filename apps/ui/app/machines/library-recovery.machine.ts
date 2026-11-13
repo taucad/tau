@@ -571,7 +571,12 @@ export const libraryRecoveryMachine = setup({
             };
           }
           enq.emit({ type: 'mutationAdmitted', requestId: event.requestId });
-          return { context: { admitted: { ...context.admitted, [event.requestId]: event.projectId } } };
+          return {
+            context: {
+              admitted: { ...context.admitted, [event.requestId]: event.projectId },
+              ...wantDiscovery(context, enq),
+            },
+          };
         }),
         mutationAbandoned: refines('Unmodelled', ({ context, event }, enq) => {
           const { [event.requestId]: _gone, ...admitted } = context.admitted;

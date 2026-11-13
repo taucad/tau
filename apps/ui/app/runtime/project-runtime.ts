@@ -98,27 +98,35 @@ export type ProjectRuntimeFileManager = Readonly<{
 type ProjectMachineInput = NonNullable<InputFrom<typeof projectMachine>>;
 type ProjectRef = ActorRefFrom<typeof projectMachine>;
 
+/** The project's own loader, replacing its actors wholesale: a project that is not on disk loads from its source. */
+export type ProjectRuntimeProvide = Readonly<{
+  actors: Pick<MachineActors<typeof projectMachine>, 'loadProjectActor'>;
+}>;
+
+/**
+ * The profile and how the project loads. The editor profile loading from disk always runs each view's record session
+ * over the ports every view shares (charter G6b), so it must be given them; a project with its own loader, and a
+ * shared workbench, keep no view records.
+ */
+export type ProjectRuntimeProfileOptions =
+  | Readonly<{ profile: 'editor'; provide?: undefined; viewRecordPorts: ViewRecordPortsHandle }>
+  | Readonly<{ profile: 'editor'; provide: ProjectRuntimeProvide; viewRecordPorts?: undefined }>
+  | Readonly<{ profile: 'shared'; provide?: ProjectRuntimeProvide; viewRecordPorts?: undefined }>;
+
 export type ProjectRuntimeOptions = Readonly<{
   projectId: string;
   fileManager: ProjectRuntimeFileManager;
   library: ProjectRuntimeLibrary;
-  profile: ProjectRuntimeProfile;
   /** Omitted, the project runs the local kernel with the current reuse preference (the converter's case today). */
   kernelSelection?: Pick<ProjectKernelSelection, 'kernelOptionsFactory'>;
-  /** Replaces the project's actors wholesale: a project that is not on disk loads from its own source. */
-  provide?: Readonly<{ actors: Pick<MachineActors<typeof projectMachine>, 'loadProjectActor'> }>;
   /** The rest of the project machine's input. */
   input?: Omit<ProjectMachineInput, 'projectId' | 'fileManagerRef' | 'fileSystemRoot' | 'kernelOptionsFactory'>;
   /** The chat the route asked for when the editor is created. */
   requestedChatId?: string;
   /** A preview's own parameter service: used instead of building one, and its values reach the kernel as previews. */
   previewParameterService?: ParameterSetService;
-  /**
-   * The ports every view's record session shares (charter G6b). On the editor profile, and without `provide`, each
-   * view runs its record session over them; without them a view keeps no record, as the machine's default does.
-   */
-  viewRecordPorts?: ViewRecordPortsHandle;
 }> &
+  ProjectRuntimeProfileOptions &
   Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
 
 type ProjectRuntimeInput = Readonly<{
@@ -622,11 +630,12 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
     }),
   } satisfies Partial<MachineActors<typeof projectMachine>>;
 
-  /* Only the editor writes view records (G6b): a project loaded from its own source or a shared workbench does not. */
+  /* Only the editor loading from disk writes view records (G6b), and only it is given the ports (by its options' type). */
   const providedProject =
     provide === undefined
-      ? profile === 'editor' && viewRecordPorts !== undefined
-        ? projectMachine.provide({
+      ? viewRecordPorts === undefined
+        ? projectMachine.provide({ actors: projectActors })
+        : projectMachine.provide({
             actors: {
               ...projectActors,
               viewRecord: createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(({ input: session }) =>
@@ -634,7 +643,6 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
               ),
             },
           })
-        : projectMachine.provide({ actors: projectActors })
       : projectMachine.provide({ actors: provide.actors });
 
   const providedEditor = editorMachine.provide({

@@ -6,8 +6,8 @@ import { createActor, createCallbackLogic, setup } from 'xstate';
 import type { AnyStateMachine } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import { editorIgnoredEvents, editorMachine } from '#machines/editor.machine.js';
-import { projectIgnoredEvents, projectMachine } from '#machines/project.machine.js';
+import { editorIgnoredEvents, editorMachine, reportEditorFault } from '#machines/editor.machine.js';
+import { projectIgnoredEvents, projectMachine, reportProjectFault } from '#machines/project.machine.js';
 import { projectRuntimeMachine, selectProjectRuntimeFault } from '#runtime/project-runtime.js';
 import type {
   ManifestObservationEvent,
@@ -15,6 +15,9 @@ import type {
   ProjectRuntimeFileManager,
 } from '#runtime/project-runtime.js';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
+
+const reporter = vi.hoisted(() => ({ reportUiError: vi.fn(async () => undefined) }));
+vi.mock('#lib/error-reporting.js', () => reporter);
 
 type RootErrorHandler = (
   args: Readonly<{ context: unknown; event: Readonly<{ type: string; error: unknown }> }>,
@@ -40,15 +43,66 @@ describe('the root onError of the composed machines', () => {
   it.each(owners)('%s should record the first defect, keep it over later ones and name no target', (_name, machine) => {
     const { onError } = machine.config as { onError?: RootErrorHandler };
     expect(onError).toBeTypeOf('function');
-    expect(onError!({ context: {}, event: { type: 'xstate.error.execution', error: new Error('boom') } }, {})).toEqual({
-      context: { fault: 'boom' },
-    });
+    const enq = vi.fn();
+    expect(onError!({ context: {}, event: { type: 'xstate.error.execution', error: new Error('boom') } }, enq)).toEqual(
+      {
+        context: { fault: 'boom' },
+      },
+    );
     expect(
       onError!(
         { context: { fault: 'boom' }, event: { type: 'xstate.error.communication', error: { message: 'later' } } },
-        {},
+        enq,
       ),
     ).toEqual({ context: { fault: 'boom' } });
+  });
+
+  it.each([
+    ['project', projectMachine, reportProjectFault],
+    ['editor', editorMachine, reportEditorFault],
+  ] as const)('%s should report the first fault once and no later one', (_name, machine, report) => {
+    const { onError } = machine.config as { onError?: RootErrorHandler };
+    const enq = vi.fn();
+    const first = new Error('boom');
+    onError!({ context: { fault: undefined }, event: { type: 'xstate.error.execution', error: first } }, enq);
+    expect(enq.mock.calls).toEqual([[report, first]]);
+    onError!({ context: { fault: 'boom' }, event: { type: 'xstate.error.actor', error: new Error('later') } }, enq);
+    expect(enq).toHaveBeenCalledTimes(1);
+    // The named effect hands the fault to the app's error reporter.
+    reporter.reportUiError.mockClear();
+    report(first);
+    expect(reporter.reportUiError.mock.calls).toEqual([[first]]);
+  });
+
+  it("should report a running project's first fault once through the error reporter, and no later one", () => {
+    const guard = guardActors({ ignore: { project: projectIgnoredEvents } });
+    reporter.reportUiError.mockClear();
+    const first = new Error('the log child failed');
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a failing stand-in for the log child.
+    const failingLogs = createCallbackLogic(() => {
+      throw first;
+    }) as unknown as MachineActors<typeof projectMachine>['logs'];
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a failing stand-in for the model interaction child.
+    const failingInteraction = createCallbackLogic(() => {
+      throw new Error('a later child failed');
+    }) as unknown as MachineActors<typeof projectMachine>['modelInteraction'];
+    const actor = createActor(
+      projectMachine.provide({
+        actors: { logs: failingLogs, modelInteraction: failingInteraction },
+        guards: { isNotBrowser: () => false, shouldAutoLoad: () => false },
+      }),
+      {
+        clock: new StepClock(),
+        inspect: guard.inspect,
+        input: { projectId, fileManagerRef: createFileManager(), fileSystemRoot: '/', kernelOptionsFactory: vi.fn() },
+      },
+    );
+    actor.start();
+    expect(guard.take('fault').length).toBeGreaterThanOrEqual(2);
+    expect(actor.getSnapshot().context.fault).toBe('the log child failed');
+    expect(reporter.reportUiError.mock.calls).toEqual([[first]]);
+    actor.stop();
+    guard.take();
   });
 
   it('should keep the project running and answering after a child fails', () => {

@@ -40,9 +40,23 @@ import type {
   ProjectRuntimeFileManager,
   ProjectRuntimeLibrary,
   ProjectRuntimeProfile,
+  ProjectRuntimeProfileOptions,
 } from '#runtime/project-runtime.js';
+import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
+import type * as CadMachineModule from '#machines/cad.machine.js';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
+const disposal = vi.hoisted(() => ({ dispose: vi.fn() }));
+vi.mock('#machines/cad.machine.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof CadMachineModule>();
+  return {
+    ...actual,
+    disposeCadRuntime: (...args: Parameters<typeof actual.disposeCadRuntime>) => {
+      disposal.dispose(...args);
+      actual.disposeCadRuntime(...args);
+    },
+  };
+});
 
 const project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -111,6 +125,10 @@ const createLibrary = () => {
 };
 
 /** Let the fakes' promises deliver: one real macrotask per round, in order. */
+/** The editor profile loading from disk takes the view record ports; no view opens in these rows. */
+const profileOptions = (profile: ProjectRuntimeProfile): ProjectRuntimeProfileOptions =>
+  profile === 'editor' ? { profile, viewRecordPorts: mock<ViewRecordPortsHandle>() } : { profile };
+
 const settle = async (rounds = 10): Promise<void> => {
   for (let round = 0; round < rounds; round += 1) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- each round must follow the previous one.
@@ -133,7 +151,7 @@ describe('createProjectRuntime', () => {
           parameterFiles: mock<ParameterFilesClient>(),
         },
         library,
-        profile,
+        ...profileOptions(profile),
         input: { shouldLoadModelOnStart: false },
         clock,
         inspect: guard.inspect,
@@ -170,6 +188,60 @@ describe('createProjectRuntime', () => {
       expect(selectProjectRuntimeFault(actor.getSnapshot())).toBeUndefined();
     },
   );
+
+  it("should release each geometry unit's kernel runtime when it stops", async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const { actor } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles: mock<ParameterFilesClient>() },
+      library: createLibrary(),
+      ...profileOptions('editor'),
+      kernelSelection: { kernelOptionsFactory: vi.fn() },
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    actor.start();
+    await settle();
+    const projectRef = selectProjectRef(actor.getSnapshot());
+    projectRef.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+    const unit = projectRef.getSnapshot().context.geometryUnits.get('main.ts');
+    expect(unit).toBeDefined();
+    disposal.dispose.mockClear();
+    actor.stop();
+    expect(disposal.dispose).toHaveBeenCalledWith(unit?.getSnapshot().context);
+    guard.take();
+  });
+
+  it("should leave a preview's own parameter service open when the shared profile stops", async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const previewParameterService = {
+      actor: () => undefined,
+      snapshot: () => undefined,
+      subscribeActors: () => () => undefined,
+      close: vi.fn(async () => undefined),
+    };
+    const { actor, parameterService } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef: createFileManager(content.service), parameterFiles: mock<ParameterFilesClient>() },
+      library: createLibrary(),
+      profile: 'shared',
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the reads the runtime makes of a preview's service.
+      previewParameterService: previewParameterService as unknown as ParameterSetService,
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    expect(parameterService).toBe(previewParameterService);
+    actor.start();
+    await settle();
+    actor.stop();
+    await settle(2);
+    expect(previewParameterService.close).not.toHaveBeenCalled();
+    guard.take();
+  });
 
   it('should follow the manifest, report its observation closing and retry it, on the step clock', async () => {
     const guard = guardActors({ ignore });

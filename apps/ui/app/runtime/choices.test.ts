@@ -3,7 +3,7 @@
  *
  * 1. `listening`: initial; each `choicesChanged` is folded into the parent's context
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, setup, types } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { guardActors } from '@taucad/xstate-testing/inspect';
@@ -233,9 +233,13 @@ describe('choices', () => {
     expect(ports.listeners()).toBeGreaterThan(0);
     actor.stop();
     expect(ports.listeners()).toBe(0);
-    ports.setCatalog({ status: 'unavailable' });
+    // Every change re-reads the catalog port, so a store listener left behind would read it again.
+    const reads = vi.spyOn(ports.catalog, 'read');
     selectRemoteComputeDevice('device-b');
     setComputeReuseMode('off');
+    expect(reads).not.toHaveBeenCalled();
+    ports.setCatalog({ status: 'unavailable' });
+    expect(reads).not.toHaveBeenCalled();
     expect(received(actor)).toHaveLength(1);
   });
 

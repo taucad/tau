@@ -25,6 +25,8 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/machines/focus.machine.ts",
+      "apps/ui/app/machines/focus.route-state.ts",
       "apps/ui/app/runtime/app-runtime-faults.ts",
       "apps/ui/app/runtime/app-runtime-holder.ts",
       "apps/ui/app/runtime/app-runtime.machine.ts",

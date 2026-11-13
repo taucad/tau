@@ -1,33 +1,41 @@
 import {
+  archiveDownloads,
   createDesktopDownloadCatalog,
   desktopDownloadHref,
   desktopDownloadLabel,
-  desktopDownloads,
   desktopFileLabel,
   detectDesktopPlatform,
+  isArchivePlatform,
 } from '#www/downloads.js';
 import type { QualifiedDesktopDownload } from '#www/downloads.js';
 import { downloadsOrigin, environmentHref, stagingDesktopNote } from '#www/environment.js';
 
 /**
- * Recommend the visitor's build before any catalog is read. Direct Mac links name the ZIP they serve.
- * @param hostname - The hostname serving the page, which selects the download origin and staging note.
+ * Recommend the visitor's build before any catalog is read. Windows and Linux link their channel archive directly; a
+ * Mac has no archive fallback, so its direct link waits for the catalog's qualified DMG and keeps pointing at the list.
+ * @param hostname - The hostname serving the page, which selects the download origin.
  */
 export const initializeHostDownload = (hostname: string): void => {
   const hostPlatform = detectDesktopPlatform(navigator);
   if (!hostPlatform) {
     return;
   }
-  const download = desktopDownloads[hostPlatform];
   for (const link of document.querySelectorAll('[data-host-download]')) {
-    if (link instanceof HTMLElement && link.dataset['hostDownload'] === 'direct') {
+    if (!(link instanceof HTMLElement)) {
+      continue;
+    }
+    if (link.dataset['hostDownload'] !== 'direct') {
+      link.innerHTML = desktopDownloadLabel(hostPlatform);
+    } else if (isArchivePlatform(hostPlatform)) {
       link.innerHTML = desktopFileLabel(hostPlatform);
       link.setAttribute('href', environmentHref(desktopDownloadHref(hostPlatform), hostname));
-    } else {
-      link.innerHTML = desktopDownloadLabel(hostPlatform);
     }
   }
-  const detail = document.querySelector('[data-download-detail]');
+  if (!isArchivePlatform(hostPlatform)) {
+    return;
+  }
+  const download = archiveDownloads[hostPlatform];
+  const detail = document.querySelector('[data-download-detail="host"]');
   const instructions = document.querySelector('[data-install-instructions]');
   const note = document.querySelector('[data-platform-note]');
   if (detail) {
@@ -37,7 +45,7 @@ export const initializeHostDownload = (hostname: string): void => {
     instructions.textContent = download.install;
   }
   if (note) {
-    note.textContent = (hostPlatform === 'mac' ? stagingDesktopNote(hostname) : undefined) ?? download.updates;
+    note.textContent = download.updates;
   }
 };
 
@@ -146,7 +154,7 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
         if (choice.platform === 'linux') {
           link.textContent = 'Set up Linux with APT';
         } else if (diskImage) {
-          link.innerHTML = desktopFileLabel(diskImage.platform, 'DMG');
+          link.innerHTML = desktopFileLabel(diskImage.platform);
         }
       };
       const describe = (detail: Element): void => {
@@ -156,6 +164,12 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
           detail.textContent = choice.detail;
         }
       };
+      // A Mac entry is shown only once its qualified DMG exists; an Intel hero entry is offered only to a Mac.
+      if (diskImage) {
+        for (const entry of document.querySelectorAll<HTMLElement>(`[data-mac-route="${diskImage.platform}"]`)) {
+          entry.hidden = entry.dataset['macHero'] !== undefined && host !== 'mac';
+        }
+      }
       for (const link of document.querySelectorAll<HTMLAnchorElement>(
         `a[data-download-platform="${choice.platform}"]`,
       )) {
@@ -223,12 +237,6 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
       body.append(alternatives);
       fragment.append(section);
     }
-    // Intel Macs stay unlisted unless the catalog qualifies an Intel disk image; the hero offers it only to a Mac.
-    if (catalog.some((choice) => choice.platform === 'macIntel' && macDiskImage(choice))) {
-      for (const entry of document.querySelectorAll<HTMLElement>('[data-mac-intel]')) {
-        entry.hidden = entry.dataset['macIntel'] === 'hero' && host !== 'mac';
-      }
-    }
     if (choices instanceof HTMLElement) {
       choices.replaceChildren(fragment);
       choices.hidden = false;
@@ -246,6 +254,6 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
       }
     }
   } catch {
-    // Qualification/network failure retains all existing manual archive links and their truthful copy.
+    // Qualification/network failure keeps the Mac entries hidden and the Windows and Linux archive links unchanged.
   }
 };

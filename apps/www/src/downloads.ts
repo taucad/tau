@@ -1,24 +1,25 @@
 import { downloadsOrigin } from '#www/environment.js';
 import { platformIcons } from '#www/platform-icons.js';
 
-/** The published architectures are explicit; browser OS hints do not establish CPU compatibility. */
-export const desktopDownloads = {
+/**
+ * Mac builds are offered only as a qualified disk image from the installer catalog: there is no archive fallback, so a
+ * Mac entry stays hidden until the catalog admits its DMG.
+ */
+const macDownloads = {
   mac: {
     label: 'Mac',
     icon: platformIcons.apple,
-    file: 'Tau-macos-arm64.zip',
-    detail: 'Apple silicon · ZIP download',
-    install: 'Open the ZIP, drag Tau to Applications, then open Tau and sign in.',
     updates: 'Updates download automatically. Tau asks before restarting and saves your projects first.',
   },
   macIntel: {
     label: 'Intel',
     icon: platformIcons.apple,
-    file: 'Tau-macos-x64.zip',
-    detail: 'Intel Mac · ZIP download',
-    install: 'Open the ZIP, drag Tau to Applications, then open Tau and sign in.',
     updates: 'Updates download automatically. Tau asks before restarting and saves your projects first.',
   },
+};
+
+/** Platforms that still link a channel archive before (or without) the installer catalog. */
+export const archiveDownloads = {
   windows: {
     label: 'Windows',
     icon: platformIcons.windows,
@@ -38,6 +39,16 @@ export const desktopDownloads = {
       'Updates are manual: download the new version from this page and replace the app. Keep your project files.',
   },
 };
+
+/** The published architectures are explicit; browser OS hints do not establish CPU compatibility. */
+export const desktopDownloads = { ...macDownloads, ...archiveDownloads };
+
+/**
+ * @param platform - A desktop platform.
+ * @returns Whether the platform links a channel archive without the installer catalog.
+ */
+export const isArchivePlatform = (platform: keyof typeof desktopDownloads): platform is keyof typeof archiveDownloads =>
+  Object.hasOwn(archiveDownloads, platform);
 
 /**
  * Select an OS from low-entropy browser hints, without persisting or transmitting them.
@@ -73,11 +84,11 @@ export const detectDesktopPlatform = (browser: {
 };
 
 /**
- * @param platform - Published desktop build.
+ * @param platform - A platform published as a channel archive.
  * @returns The production archive URL.
  */
-export const desktopDownloadHref = (platform: keyof typeof desktopDownloads): string =>
-  `${downloadsOrigin}/latest/${desktopDownloads[platform].file}`;
+export const desktopDownloadHref = (platform: keyof typeof archiveDownloads): string =>
+  `${downloadsOrigin}/latest/${archiveDownloads[platform].file}`;
 
 /**
  * @param platform - Published desktop build.
@@ -90,15 +101,14 @@ export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): s
 const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
 
 /**
- * Label a link that downloads a file directly. A Mac label names the format it serves, so a link only says DMG while
- * its URL is a DMG; Windows and Linux keep their platform label.
+ * Label a link that downloads a file directly. A Mac link only ever serves its qualified DMG, so it says DMG and names
+ * the chip; Windows and Linux keep their platform label.
  * @param platform - Published desktop build.
- * @param format - The format the link's URL serves; Mac archive links default to their ZIP.
  * @returns Label markup from checked-in icon and product constants only.
  */
-export const desktopFileLabel = (platform: keyof typeof desktopDownloads, format: 'DMG' | 'ZIP' = 'ZIP'): string =>
+export const desktopFileLabel = (platform: keyof typeof desktopDownloads): string =>
   platform === 'mac' || platform === 'macIntel'
-    ? `${desktopDownloads[platform].icon}<span>Download ${format} for ${macFileLabels[platform]}</span>`
+    ? `${desktopDownloads[platform].icon}<span>Download DMG for ${macFileLabels[platform]}</span>`
     : desktopDownloadLabel(platform);
 
 const macDiskImageInstall =
@@ -183,7 +193,7 @@ const admitDesktopCatalog = (
       names: { 'macos-dmg': 'Tau-macos-arm64.dmg', 'macos-zip': 'Tau-macos-arm64.zip' },
       detail: 'Apple silicon · DMG installer',
       install: macDiskImageInstall,
-      updates: desktopDownloads.mac.updates,
+      updates: macDownloads.mac.updates,
     },
     'macos-zip:darwin-x64': {
       platform: 'macIntel',
@@ -191,7 +201,7 @@ const admitDesktopCatalog = (
       names: { 'macos-dmg': 'Tau-macos-x64.dmg', 'macos-zip': 'Tau-macos-x64.zip' },
       detail: 'Intel Mac · DMG installer',
       install: macDiskImageInstall,
-      updates: desktopDownloads.macIntel.updates,
+      updates: macDownloads.macIntel.updates,
     },
     'windows-nsis:win32-x64': {
       platform: 'windows',

@@ -1,6 +1,6 @@
 import { SiteLink } from '#www/site-link.js';
 import { appHref } from '#www/environment.js';
-import { desktopDownloads, desktopDownloadHref, desktopFileLabel } from '#www/downloads.js';
+import { archiveDownloads, desktopDownloadHref, desktopDownloadLabel, desktopFileLabel } from '#www/downloads.js';
 import { sourceUrl } from '#www/content.js';
 import { out, down, intro } from '#www/page-components.js';
 import { MarketingPage } from '#app/marketing-page.js';
@@ -9,11 +9,21 @@ export const loader: typeof loadMarketingPage = loadMarketingPage;
 
 /**
  * The icon and label are the link's own children, as the client relabels them, so a button's icon padding applies.
- * @param platform - Published desktop build.
+ * @param platform - A platform published as a channel archive.
  * @returns Inner HTML from checked-in brand SVGs and product constants only.
  */
-const downloadLabel = (platform: keyof typeof desktopDownloads): { __html: string } => ({
+const downloadLabel = (platform: keyof typeof archiveDownloads): { __html: string } => ({
   __html: desktopFileLabel(platform),
+});
+
+/**
+ * A Mac entry renders hidden with its platform label and no file URL; only the installer catalog reveals it, with the
+ * qualified DMG's link and label.
+ * @param platform - A Mac architecture.
+ * @returns Inner HTML from checked-in brand SVGs and product constants only.
+ */
+const macPlaceholderLabel = (platform: 'mac' | 'macIntel'): { __html: string } => ({
+  __html: desktopDownloadLabel(platform),
 });
 
 export const content = (): React.JSX.Element => (
@@ -38,19 +48,17 @@ export const content = (): React.JSX.Element => (
               macOS · Windows · Linux
             </p>
           </div>
-          <div data-mac-intel='hero' hidden>
+          <div data-mac-route='macIntel' data-mac-hero hidden>
             <SiteLink
               className='button'
-              href={desktopDownloadHref('macIntel')}
+              href='#downloads'
               data-event='download'
               data-placement='download'
               data-download-platform='macIntel'
               // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
-              dangerouslySetInnerHTML={downloadLabel('macIntel')}
+              dangerouslySetInnerHTML={macPlaceholderLabel('macIntel')}
             />
-            <p className='fine' data-download-detail='macIntel'>
-              {desktopDownloads.macIntel.detail}
-            </p>
+            <p className='fine' data-download-detail='macIntel' />
           </div>
         </div>
       ),
@@ -59,9 +67,7 @@ export const content = (): React.JSX.Element => (
       <article className='cell' data-platform-card='desktop'>
         <p className='kicker'>Installation</p>
         <h2>Install Tau</h2>
-        <p data-install-instructions>
-          Download the build for your computer, extract the archive, then open Tau and sign in.
-        </p>
+        <p data-install-instructions>Download the build for your computer, then open Tau and sign in.</p>
         <p data-platform-note>
           Mac builds update automatically. On Windows and Linux, download new versions from this page.
         </p>
@@ -77,9 +83,23 @@ export const content = (): React.JSX.Element => (
             Not sure which Mac you have? Open Apple menu → About This Mac and check the Chip or Processor line.
           </p>
           <div className='actions'>
-            {(['mac', 'macIntel', 'windows', 'linux'] as const).map((platform) => (
-              // Intel Macs are unlisted until a qualified catalog publishes an Intel route (no channel publishes its ZIP).
-              <div key={platform} {...(platform === 'macIntel' ? { 'data-mac-intel': 'list', hidden: true } : {})}>
+            {(['mac', 'macIntel'] as const).map((platform) => (
+              // Mac entries are unlisted until a qualified catalog publishes that architecture's DMG.
+              <div key={platform} data-mac-route={platform} hidden>
+                <SiteLink
+                  className='text-link'
+                  href='#downloads'
+                  data-download-platform={platform}
+                  data-event='download'
+                  data-placement='download'
+                  // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
+                  dangerouslySetInnerHTML={macPlaceholderLabel(platform)}
+                />
+                <p className='fine' data-download-detail={platform} />
+              </div>
+            ))}
+            {(['windows', 'linux'] as const).map((platform) => (
+              <div key={platform}>
                 <SiteLink
                   className='text-link'
                   href={desktopDownloadHref(platform)}
@@ -90,7 +110,7 @@ export const content = (): React.JSX.Element => (
                   dangerouslySetInnerHTML={downloadLabel(platform)}
                 />
                 <p className='fine' data-download-detail={platform}>
-                  {desktopDownloads[platform].detail}
+                  {archiveDownloads[platform].detail}
                 </p>
               </div>
             ))}

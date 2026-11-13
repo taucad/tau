@@ -3,8 +3,10 @@ import {
   createDesktopDownloadCatalog,
   desktopDownloadHref,
   desktopDownloadLabel,
+  archiveDownloads,
   desktopDownloads,
   desktopFileLabel,
+  isArchivePlatform,
 } from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
@@ -16,8 +18,12 @@ describe('qualified desktop download catalog', () => {
     expect(
       createDesktopDownloadCatalog({ enabled: false, channel: 'production', qualification: projection() }),
     ).toBeUndefined();
-    expect(desktopDownloads.mac.file).toBe('Tau-macos-arm64.zip');
-    expect(desktopDownloads.windows.file).toBe('Tau-win32-x64.zip');
+    expect(archiveDownloads.windows.file).toBe('Tau-win32-x64.zip');
+    // A Mac has no archive fallback: it is offered only as the catalog's qualified DMG.
+    expect(Object.hasOwn(desktopDownloads.mac, 'file')).toBe(false);
+    expect(isArchivePlatform('mac')).toBe(false);
+    expect(isArchivePlatform('macIntel')).toBe(false);
+    expect(isArchivePlatform('linux')).toBe(true);
     expect(desktopDownloadHref('linux')).toBe('https://downloads.tau.new/latest/Tau-linux-x64.tar.gz');
   });
   it('selects immutable installer links with retained archives and truthful update ownership', () => {
@@ -85,15 +91,12 @@ describe('qualified desktop download catalog', () => {
     expect(catalog?.[0]?.href).toContain('https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.75/');
     expect(() => select(value)).toThrow();
   });
-  it('names the Mac file format a direct link serves and keeps Windows and Linux labels', () => {
-    expect(desktopFileLabel('mac')).toContain('<span>Download ZIP for Apple silicon</span>');
-    expect(desktopFileLabel('macIntel')).toContain('<span>Download ZIP for Intel Mac</span>');
-    expect(desktopFileLabel('mac', 'DMG')).toContain('<span>Download DMG for Apple silicon</span>');
-    expect(desktopFileLabel('macIntel', 'DMG')).toContain('<span>Download DMG for Intel Mac</span>');
-    expect(desktopFileLabel('windows', 'DMG')).toBe(desktopDownloadLabel('windows'));
+  it('labels a direct Mac link as its DMG and keeps Windows and Linux labels', () => {
+    expect(desktopFileLabel('mac')).toContain('<span>Download DMG for Apple silicon</span>');
+    expect(desktopFileLabel('macIntel')).toContain('<span>Download DMG for Intel Mac</span>');
+    expect(desktopFileLabel('windows')).toBe(desktopDownloadLabel('windows'));
     expect(desktopFileLabel('linux')).toBe(desktopDownloadLabel('linux'));
-    expect(desktopDownloads.mac.detail).toContain('ZIP');
-    expect(desktopDownloads.macIntel.detail).toContain('ZIP');
+    expect(JSON.stringify(desktopDownloads)).not.toContain('Tau-macos');
   });
   it('selects both Mac disk images from a Mac-only staging catalog with mount, drag, eject and launch steps', () => {
     const value = projection();

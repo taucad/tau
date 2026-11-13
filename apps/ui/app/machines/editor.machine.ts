@@ -127,6 +127,11 @@ export type EditorStateContext = {
   materialiseModel?: (path: string) => Promise<void>;
   /** In-flight deferred open (only set while materialising). */
   pendingOpenFile?: PendingOpenFile;
+  /**
+   * The first defect the root `onError` caught (MC-R12, charter D23): a child that failed with no handler of its own,
+   * an effect that threw, or a send to no child. Later defects are usually its consequences, so they do not replace it.
+   */
+  fault: string | undefined;
 };
 
 type PendingOpenFile = Readonly<{
@@ -470,6 +475,13 @@ export const editorMachine = setup({
   },
 }).createMachine({
   id: 'editor',
+  // A defect is recorded and the editor stays in the state it was in, which still answers every public event (MC-R12,
+  // charter B2). The first is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({
+    context: {
+      fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+    },
+  }),
   context: ({ input }) => ({
     projectId: input.projectId,
     openFiles: [],
@@ -486,6 +498,7 @@ export const editorMachine = setup({
     focusedChatError: undefined,
     materialiseModel: undefined,
     pendingOpenFile: undefined,
+    fault: undefined,
   }),
   initial: 'idle',
   on: {

@@ -88,6 +88,11 @@ export type ProjectContext = {
   /** The main entry path from project.assets.main.entryPath. Set after project loads. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
+  /**
+   * The first defect the root `onError` caught (MC-R12, charter D23): a child that failed with no handler of its own,
+   * an effect that threw, or a send to no child. Later defects are usually its consequences, so they do not replace it.
+   */
+  fault: string | undefined;
 };
 
 /**
@@ -658,6 +663,13 @@ export const projectMachine = setup({
   },
 }).createMachine({
   id: 'project',
+  // A defect is recorded and the project stays in the state it was in, which still answers every public event (MC-R12,
+  // charter B2). The first is kept: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }) => ({
+    context: {
+      fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+    },
+  }),
   context: ({ input, spawn, actors }) => {
     const {
       projectId,
@@ -709,6 +721,7 @@ export const projectMachine = setup({
       kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
+      fault: undefined,
     };
   },
   // The project owns the shared model interaction, so it observes the focus there and forwards it to each view.

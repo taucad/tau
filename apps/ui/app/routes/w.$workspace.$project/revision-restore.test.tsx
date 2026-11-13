@@ -243,6 +243,41 @@ describe('RevisionRestore', () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
+  /* M1: a merge that brought nothing never says *Merged*; nor does one refused over undone history. */
+  it('says a branch already in is already in, and a merge over undone history merged nothing, as warnings', () => {
+    render(<RevisionRestore />);
+
+    emit({
+      type: 'error',
+      subject: 'branch',
+      operation: 'merge',
+      branch: 'enclosure-v2',
+      code: 'MERGE_UP_TO_DATE',
+      message: 'enclosure-v2 is already in main.',
+    });
+    emit({
+      type: 'error',
+      subject: 'branch',
+      operation: 'merge',
+      branch: 'enclosure-v2',
+      code: 'MERGE_UNDONE',
+      message: 'Part of what these branches share was taken back by an Undo or a Restore, so nothing was merged.',
+    });
+
+    expect(toastWarning.mock.calls).toEqual([
+      ['Nothing to merge', { description: 'Everything on enclosure-v2 is already here. Nothing changed.' }],
+      [
+        'Nothing was merged',
+        {
+          description:
+            'An Undo or a Restore took back part of what these branches share, so merging now would leave work out. Nothing changed. To bring the work back, open History and restore the entry that has it.',
+        },
+      ],
+    ]);
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
   /* A discarded branch reads as closed, the branch menu's word for it; its Undo reopens it at the head it kept. */
   it('says a discarded branch was closed, and its Undo reopens it at its head', async () => {
     revisionStatusHarness.status = {

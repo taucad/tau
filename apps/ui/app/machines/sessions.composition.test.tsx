@@ -1749,7 +1749,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
 
     expect(liveOn(registry)).toEqual(['one-running-a']);
     expect(registry.budgetRefusals).toEqual(['one-running-b']);
-    expect(registry.actor.getSnapshot().context.pendingOpen).toBe('one-running-b');
+    expect(registry.actor.getSnapshot().context.pendingOpen?.projectId).toBe('one-running-b');
     expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
     expect(registry.received).not.toContain('close');
   });

@@ -29,9 +29,14 @@ import type { SessionsMachineEvent } from '#machines/sessions.machine.js';
 type Samples = { [T in SessionsMachineEvent['type']]: ReadonlyArray<Extract<SessionsMachineEvent, { type: T }>> };
 
 const samples: Samples = {
-  open: [{ type: 'open', projectId: 'a' }],
+  open: [
+    { type: 'open', projectId: 'a' },
+    { type: 'open', projectId: 'a', request: { workspace: 'w', chatId: 'chat-1', epoch: 0 } },
+  ],
   close: [{ type: 'close', projectId: 'a', reason: 'user' }],
   touch: [{ type: 'touch', projectId: 'a' }],
+  chatRequested: [{ type: 'chatRequested', projectId: 'a', chatId: 'chat-1' }],
+  libraryEpochChanged: [{ type: 'libraryEpochChanged', epoch: 1 }],
   idleExpired: [{ type: 'idleExpired', projectId: 'a' }],
   releaseMemory: [{ type: 'releaseMemory', keepProjectId: 'a' }],
   sessionState: [

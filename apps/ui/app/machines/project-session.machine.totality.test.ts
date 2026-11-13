@@ -65,6 +65,7 @@ const samples: Samples = {
     { type: 'visibilityChanged', visible: false, focused: false },
   ],
   attention: [{ type: 'attention', count: 1 }],
+  chatRequested: [{ type: 'chatRequested', chatId: 'chat-1' }],
   revisionState: [
     { type: 'revisionState', dirty: true, pushed: false, pendingCount: 1 },
     { type: 'revisionState', dirty: false, pushed: true, recording: true },

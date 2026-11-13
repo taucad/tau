@@ -153,6 +153,9 @@ const sourceLine = (mark: LeafMark, otherwise?: string): React.ReactNode => {
   return otherwise;
 };
 
+/** A line of text in the phone drawer starts at the drawer rows' 16px inset, where their icons and labels start. */
+const inSettingsDrawerInset = 'in-[[data-slot=dropdown-menu-drawer-items]]:px-4';
+
 /** The widest field of view in degrees; 0° is orthographic. */
 const maxVerticalFieldOfView = 90;
 /** Degrees per arrow-key step while Shift is held. */
@@ -293,7 +296,7 @@ function FieldOfViewRow(): React.JSX.Element {
       {mark.isFromDefaults || mark.reset ? (
         <div
           data-slot='viewer-field-of-view-source'
-          className='flex items-center gap-2 px-3 pb-1.5 text-xs text-muted-foreground'
+          className={cn('flex items-center gap-2 px-3 pb-1.5 text-xs text-muted-foreground', inSettingsDrawerInset)}
         >
           <LeafDot mark={mark} />
           {mark.isFromDefaults ? fromMyDefaults : setInThisView}
@@ -375,7 +378,12 @@ function GridUnitsRow(): React.JSX.Element | undefined {
         {isGridSizeLocked ? <Lock /> : <LockOpen />}
         Lock grid size ({gridLabel})
       </DropdownMenuSwitchItem>
-      <span className='inline-flex items-center gap-1 p-2 text-xs font-medium text-muted-foreground/80'>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 p-2 text-xs font-medium text-muted-foreground/80',
+          inSettingsDrawerInset,
+        )}
+      >
         <Info className='size-3 stroke-2' /> Adjust grid size by changing zoom level
       </span>
     </SettingsSubViewRow>
@@ -519,7 +527,8 @@ export function ViewerSettings({
   const controlSize = useViewerControlSize();
 
   return (
-    <DropdownMenu open={isOpen} onOpenChange={handleOpenChange}>
+    // On a phone the settings open in a bottom drawer (the responsive menu), where the placement is not read.
+    <DropdownMenu isResponsive open={isOpen} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
@@ -543,6 +552,7 @@ export function ViewerSettings({
         alignOffset={placement.alignOffset}
         // Its width is the placement's `viewerSettingsMenuWidthPx`.
         className='w-72'
+        drawerTitle='Viewer settings'
         onEscapeKeyDown={preventMenuSliderEscapeDismissal}
         onPointerDownOutside={() => {
           isClosingFromPointerRef.current = true;

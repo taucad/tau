@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import type { PostHog, PostHogConfig } from 'posthog-js';
@@ -223,6 +223,18 @@ function PostHogLifecycle({
 }
 
 /**
+ * The admitted analytics client: a no-op until a decision admits the SDK. Module-level, so the app runtime's
+ * composition can take it from the client entry (D15) as the boundary below hands it to React.
+ *
+ * @public
+ */
+export const admittedAnalytics: Analytics = {
+  capture(event, properties) {
+    captureAdmitted(event, properties);
+  },
+};
+
+/**
  * PostHog analytics boundary shared by the web and desktop hosts: stable ancestry, with the SDK
  * running only while `isActive`.
  *
@@ -240,17 +252,8 @@ export function PostHogAnalyticsProvider({
   readonly isReplayEnabled: boolean;
   readonly children: ReactNode;
 }): React.JSX.Element {
-  const analytics = useMemo<Analytics>(
-    () => ({
-      capture(event, properties) {
-        captureAdmitted(event, properties);
-      },
-    }),
-    [],
-  );
-
   return (
-    <AnalyticsContextProvider analytics={analytics}>
+    <AnalyticsContextProvider analytics={admittedAnalytics}>
       <PostHogLifecycle
         isActive={isActive && posthogConfig.apiKey !== ''}
         options={options}

@@ -6,14 +6,12 @@
 import { createStaticHandler } from 'react-router';
 import type { AppLoadContext, EntryContext } from 'react-router';
 import { mock, mockDeep } from 'vitest-mock-extended';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import handleRequest from '#runtime/app-runtime-spa-entry.server.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useAppRuntime } from '#runtime/app-runtime-provider.js';
 import { selectAppEnvironment } from '#runtime/app-runtime.js';
-
-vi.mock('#hooks/use-file-manager.js', () => ({ useSharedFileManagerWorker: () => undefined }));
 
 /* The SPA prerender renders the root's `Layout` around its fallback, as the desktop and serve roots export. */
 function Layout({ children }: { readonly children: React.ReactNode }): React.JSX.Element {

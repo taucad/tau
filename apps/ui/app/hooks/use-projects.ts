@@ -37,6 +37,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   const {
     data: listing = { projects: [], conflicts: [], recoveries: [], workspaceBindingRepairs: [] },
     isLoading,
+    isSuccess,
     error,
     refetch,
   } = useQuery({
@@ -206,6 +207,10 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
      * "no projects" — which is how the sidebar came to say `No projects yet`
      * over a project it was counting as live. */
     isLoading: isLoading || isWorkerLoading,
+    /* A discovery pass has answered this listing. `isLoading` is no proof of that: a first scan that is
+     * cancelled (a filesystem event cancels the key before it refetches) reverts to pending-but-idle, so for
+     * that moment the listing reads empty with no load and no error, though it never finished. */
+    isListed: isSuccess,
     error: discoveryObservationError
       ? new Error(discoveryObservationError)
       : error instanceof Error

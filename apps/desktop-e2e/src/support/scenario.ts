@@ -243,6 +243,20 @@ export const pressModelTreeShortcut = async (page: Page): Promise<void> => {
 };
 
 /**
+ * Choose the CAD kernel on *New project (from code)* (`/projects/new`). With no concrete kernel remembered on the
+ * device the page preselects Replicad, since Auto became every device's default in #1982 (blueprint E5), so a row
+ * whose project must hold an OpenSCAD `main.scad` picks that kernel before *Create Project*.
+ *
+ * @param page - The renderer, on `/projects/new`.
+ * @param kernelName - The kernel's display name, such as `OpenSCAD`.
+ */
+export const chooseNewProjectKernel = async (page: Page, kernelName: string): Promise<void> => {
+  const choice = page.getByRole('radio', { name: kernelName, exact: true });
+  await choice.click();
+  await expect.poll(async () => choice.getAttribute('aria-checked'), { timeout: 15_000 }).toBe('true');
+};
+
+/**
  * Choose the CAD kernel from the composer's kernel picker. Home starts on Auto, and the picker is a searchable list
  * whose rows lead with the kernel's name (a badge may follow with no space), so the search narrows it to that kernel before the row is chosen.
  */

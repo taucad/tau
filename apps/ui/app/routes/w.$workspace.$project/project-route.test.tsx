@@ -242,7 +242,6 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useSharedFileManagerWorker: () => undefined,
   SharedWorkerGate: ({
     children,
     placeholder,

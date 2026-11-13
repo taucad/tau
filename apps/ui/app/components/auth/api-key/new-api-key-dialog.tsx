@@ -63,7 +63,8 @@ export function NewApiKeyDialog({ open, onOpenChange, name, secretKey }: NewApiK
         <div className='flex flex-col gap-2'>
           <Label htmlFor='new-api-key-secret'>{name ?? apiKeyLocalization.apiKey}</Label>
 
-          <InputGroup>
+          {/* `ph-no-capture`: session replay never records an API key secret. */}
+          <InputGroup className='ph-no-capture'>
             <InputGroupInput id='new-api-key-secret' value={secretKey ?? ''} readOnly className='font-mono text-xs' />
 
             <InputGroupAddon align='inline-end'>

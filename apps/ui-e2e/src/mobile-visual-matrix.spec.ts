@@ -1056,14 +1056,16 @@ test('reselects same-file saved views through All after reload without changing 
     await waitForModelReady();
     // oxlint-disable-next-line no-await-in-loop -- its saved settings must be applied to the live viewer.
     await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last(), { touch: true });
-    // oxlint-disable-next-line no-await-in-loop -- the saved grid unit reads on the Grid & units row.
+    // On a phone the settings open in their drawer, not a menu.
+    const settingsDrawer = selectors.getByRole('dialog', { name: 'Viewer settings' });
+    // oxlint-disable-next-line no-await-in-loop -- the saved grid unit reads on the drawer's Grid & units row.
     await target.expectVisible(
-      selectors.getByRole('menuitem', { name: new RegExp(`^Grid & units, .* ${unit}(?:,|$)`, 'u') }),
+      settingsDrawer.getByRole('button', { name: new RegExp(`^Grid & units, .* ${unit}(?:,|$)`, 'u') }),
     );
-    // oxlint-disable-next-line no-await-in-loop -- close the menu before the camera and screenshot.
+    // oxlint-disable-next-line no-await-in-loop -- close the drawer before the camera and screenshot.
     await target.keyboardPress('Escape');
-    // oxlint-disable-next-line no-await-in-loop -- the menu must be gone from the screenshot.
-    await target.expectCount(selectors.getByRole('menu'), 0);
+    // oxlint-disable-next-line no-await-in-loop -- the drawer must be gone from the screenshot.
+    await target.expectCount(settingsDrawer, 0);
     // oxlint-disable-next-line no-await-in-loop -- capture the rendered camera, not only the authored record.
     cameras.push(
       // oxlint-disable-next-line no-await-in-loop -- capture each selected live camera before switching away.

@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
@@ -813,6 +814,24 @@ function useCheckoutComparisonRefresh(
 }
 
 /**
+ * Read one query again, now. A plain `refetch` joins a first read that is still pending, because a query with no data
+ * is never cancelled for a refetch, so a Retry at a slow wait's mark would ask nothing new; cancelling the read in
+ * flight first makes the Retry a new read.
+ *
+ * @param queryClient - The client that holds the query.
+ * @param queryKey - The query's exact key.
+ * @param refetch - The query's own refetch.
+ */
+async function retryRead(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[],
+  refetch: () => Promise<unknown>,
+): Promise<void> {
+  await queryClient.cancelQueries({ queryKey, exact: true });
+  await refetch();
+}
+
+/**
  * Paths that differ between a revision and the selected live checkout.
  *
  * @param card - The saved revision to compare with the current files.
@@ -828,6 +847,7 @@ export function useRevisionChangesSince(card: RevisionCard | undefined): Readonl
   const { projectId } = useProject();
   const client = useRevisionClient();
   const status = useRevisionStatus();
+  const queryClient = useQueryClient();
   const revision = card?.revisionId;
   const checkoutId = status?.checkoutId;
   const head = status?.headRevisionId;
@@ -852,7 +872,7 @@ export function useRevisionChangesSince(card: RevisionCard | undefined): Readonl
     isLoaded: data !== undefined,
     error: error instanceof Error ? error.message : undefined,
     retry: () => {
-      void refetch();
+      void retryRead(queryClient, queryKey, refetch);
     },
   };
 }
@@ -895,6 +915,7 @@ export function useRevisionFileComparison(
   const { projectId } = useProject();
   const client = useRevisionClient();
   const status = useRevisionStatus();
+  const queryClient = useQueryClient();
   const checkoutId = against === 'checkout' ? status?.checkoutId : undefined;
   const head = against === 'checkout' ? status?.headRevisionId : undefined;
   const queryKey = useMemo(
@@ -931,7 +952,7 @@ export function useRevisionFileComparison(
     isLoaded: data !== undefined,
     error: error instanceof Error ? error.message : undefined,
     retry: () => {
-      void refetch();
+      void retryRead(queryClient, queryKey, refetch);
     },
   };
 }

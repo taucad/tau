@@ -1,0 +1,250 @@
+name: Release gate
+
+# The release gate (CI throughput review RG-1): fresh, uncached evidence on the exact commit being shipped,
+# in place of the whole-graph sweep the nightlies used to give. The merge queue runs only what a landing
+# affects and reads the remote cache; this gate runs every project with no cache at all, so an input Nx does
+# not see (a cross-root read, an undeclared environment variable, a stale cached output) cannot carry a
+# green verdict to users.
+#
+# - Sweep: every project's `lint`, `typecheck`, `build` (with `size` and `check-desktop-payload`),
+#   package checks and `test`, in the `ci.yml` affected lanes' shards, with `--skip-nx-cache` and no
+#   remote cache server. `test` excludes `tag:scope:api` (it needs PostgreSQL and MinIO, which only the
+#   `ci.yml` API job provides) and `tag:ci:quarantined`, as the `ci.yml` lanes do.
+# - Formal matrix: `formal-nightly.yml` for every `formal:nightly` project and target, seeded by this run's
+#   id, so each gate run explores a fresh seed and prints it for replay.
+# - Cross-root reads: `scripts:validate-cross-root-reads`, which also runs in every `ci.yml` workspace job.
+#
+# When (event-driven, nothing waits on a timer):
+# - A desktop candidate: when `release-build.yml` is requested for a `desktop-staging@*` or `desktop@*` tag,
+#   the gate starts on that tag's commit, alongside the build. One gate per channel runs at a time and a
+#   newer candidate cancels the older one's gate, so only the newest candidate is ever being gated; a
+#   cancelled candidate gets a gate on demand if it is ever promoted. UI and API release tags start no
+#   gate: `release-build.yml` deploys them ungated.
+# - On demand: `desktop-route-promotion.yml` (promote-routes, either channel) and `deploy-production.yml`
+#   (a forward deploy) read the commit's verdict (`.github/actions/release-gate-verdict`). Green proceeds;
+#   running or red blocks and names the run; none dispatches this workflow from `main` for the commit and
+#   blocks naming it, and the operator dispatches the promotion again once it passes. A renewal, a rollback
+#   and a redeploy never read it. An operator can dispatch it from `main` for any commit, too.
+#
+# Each run is named `Release gate <sha>` and records one verdict job, `Release gate verdict (<sha>)`.
+#
+# Trust: a `workflow_run` run always runs `main`'s copy of this file, and a dispatch counts only from
+# `main`, so a changed copy of the gate on another branch can never record a verdict a promotion reads.
+#
+# A commit gates once: the `reuse` job ends the run early when a trusted green verdict for the commit
+# exists, and dispatched runs on one commit queue behind each other.
+run-name: Release gate ${{ inputs.ref || github.event.workflow_run.head_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Full commit sha to gate
+        type: string
+        required: true
+  workflow_run:
+    workflows: ['Release build']
+    types: [requested]
+
+# A candidate's gate shares its channel's group and the newest candidate wins; a `workflow_run` for any other
+# tag (a UI or API release) runs no job and gets a group of its own, so it cancels nothing; a dispatch queues
+# per commit.
+concurrency:
+  group: >-
+    ${{ github.event_name == 'workflow_run' && (
+      startsWith(github.event.workflow_run.head_branch, 'desktop-staging@') && 'release-gate-candidate-staging' ||
+      startsWith(github.event.workflow_run.head_branch, 'desktop@') && 'release-gate-candidate-production' ||
+      format('release-gate-other-{0}', github.run_id)) || format('release-gate-{0}', inputs.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # No remote cache server and no local cache reads: every task runs.
+  NX_SKIP_NX_CACHE: 'true'
+  NX_NO_CLOUD: 'true'
+
+jobs:
+  reuse:
+    name: Find a release gate verdict for this commit
+    # A release build of a UI or API tag gates nothing.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.workflow_run.head_branch, 'desktop-staging@') ||
+      startsWith(github.event.workflow_run.head_branch, 'desktop@')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      run-id: ${{ steps.find.outputs.run-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Name the commit
+        id: ref
+        env:
+          REF: ${{ inputs.ref || github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ref must be a full commit sha: $REF"; exit 1; }
+          echo "Gating ${REF}."
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Find a green verdict for the commit
+        id: find
+        uses: ./.github/actions/release-gate-verdict
+        with:
+          sha: ${{ steps.ref.outputs.ref }}
+          github-token: ${{ github.token }}
+
+  sweep:
+    name: Release sweep (${{ matrix.lane }})
+    needs: [reuse]
+    if: needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3, cross-root-reads]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.reuse.outputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Setup Linux sandbox prerequisites
+        if: startsWith(matrix.lane, 'test-')
+        uses: ./.github/actions/setup-linux-sandbox
+
+      - name: Find the lane's pinned downloads
+        id: pins
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          graph="$RUNNER_TEMP/lane-graph.json"
+          case "$LANE" in
+            lint) pnpm nx run-many -t lint --graph="$graph" > /dev/null ;;
+            typecheck) pnpm nx run-many -t typecheck --graph="$graph" > /dev/null ;;
+            build) pnpm nx run-many -t build size check-desktop-payload --graph="$graph" > /dev/null ;;
+            pkgcheck-*) pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
+            test-*) pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
+            cross-root-reads) exit 0 ;;
+            *) echo "Unknown lane $LANE" >&2; exit 1 ;;
+          esac
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Python kernel seeds
+        if: steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Restore the wasi-sdk archive
+        if: steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+
+      # The same shards and `--parallel` caps as the `ci.yml` affected lanes (see the reasons there: two of
+      # ui's lint, typecheck or build exhaust a hosted runner), over every project instead of the affected ones.
+      - name: Run the lane's tasks
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          case "$LANE" in
+            lint) pnpm nx run-many -t lint --parallel=1 ;;
+            typecheck) pnpm nx run-many -t typecheck --parallel=1 ;;
+            build) pnpm nx run-many -t build size check-desktop-payload --parallel=1 ;;
+            pkgcheck-*)
+              pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --graph="$RUNNER_TEMP/pkgcheck-graph.json" > /dev/null
+              projects=$(jq -c '
+                [.tasks.tasks[] | select(.target.target | IN("pkgcheck", "audit-public-surface", "readme-quickstart")) | .target.project]
+                | unique' "$RUNNER_TEMP/pkgcheck-graph.json")
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#pkgcheck-}" --shards 3 \
+                --durations scripts/src/pkgcheck-shard-durations.json)
+              if [ -z "$shard" ]; then
+                echo "No package checks in this shard."
+                exit 0
+              fi
+              echo "Shard projects: $shard"
+              # The builds run serially first, so the checks (three at a time) never race a build.
+              built=$(jq -r --arg shard "$shard" '
+                ($shard | split(",")) as $mine
+                | [.tasks.tasks[] | select(.target.target == "pkgcheck") | .target.project]
+                | unique | map(select(IN($mine[]))) | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
+              if [ -n "$built" ]; then
+                pnpm nx run-many -t build --projects "$built" --parallel=1
+              fi
+              pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$shard" --parallel=3
+              ;;
+            test-*)
+              pnpm nx run-many -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
+              projects=$(jq -c '
+                .graph.nodes as $nodes
+                | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
+              if [ -z "$shard" ]; then
+                echo "No test projects in this shard."
+                exit 0
+              fi
+              echo "Shard projects: $shard"
+              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static
+              ;;
+            cross-root-reads) pnpm nx run scripts:validate-cross-root-reads ;;
+            *) echo "Unknown lane $LANE" >&2; exit 1 ;;
+          esac
+
+  formal:
+    name: Release formal matrix
+    needs: [reuse]
+    if: needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    uses: ./.github/workflows/formal-nightly.yml
+    with:
+      ref: ${{ needs.reuse.outputs.ref }}
+      seed: ${{ github.run_id }}
+
+  # The verdict a promotion reads. Its name carries the commit, which is what `release-gate-verdict` looks for;
+  # it passes on a reused verdict, or when the sweep and the formal matrix both passed, and fails otherwise.
+  verdict:
+    name: Release gate verdict (${{ inputs.ref || github.event.workflow_run.head_sha }})
+    needs: [reuse, sweep, formal]
+    if: ${{ !cancelled() && needs.reuse.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the sweep and the formal matrix
+        env:
+          REUSE_RESULT: ${{ needs.reuse.result }}
+          REUSED: ${{ needs.reuse.outputs.run-id }}
+          SWEEP_RESULT: ${{ needs.sweep.result }}
+          FORMAL_RESULT: ${{ needs.formal.result }}
+        run: |
+          set -euo pipefail
+          test "$REUSE_RESULT" = success
+          if [ -n "$REUSED" ]; then
+            echo "Release gate passed on this commit in run $REUSED."
+            exit 0
+          fi
+          test "$SWEEP_RESULT" = success || { echo "::error::The release sweep did not pass ($SWEEP_RESULT)."; exit 1; }
+          test "$FORMAL_RESULT" = success || { echo "::error::The release formal matrix did not pass ($FORMAL_RESULT)."; exit 1; }
+          echo "Release gate passed."

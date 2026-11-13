@@ -1201,7 +1201,12 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
     if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
       const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
       const payload: unknown = JSON.parse(decoded);
-      const events: unknown[] = Array.isArray(payload) ? (payload as unknown[]) : [payload];
+      /* PostHog posts one event, an array of them, or a batch envelope (`{ api_key, batch: [...] }`). */
+      const events: unknown[] = Array.isArray(payload)
+        ? (payload as unknown[])
+        : payload !== null && typeof payload === 'object' && 'batch' in payload && Array.isArray(payload.batch)
+          ? (payload.batch as unknown[])
+          : [payload];
       for (const event of events) {
         if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
           const compressed: string[] = [];

@@ -149,6 +149,17 @@ describe('createSandboxShellProvider admission', () => {
     }
   });
 
+  it('should refuse toolchain folders for the startup files on a launch without them', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], toolchainBins: ['/opt/tau/git/bin'] }));
+
+    expect(outcome).toStrictEqual({
+      status: 'unsupported',
+      requirement: 'environment',
+      message: 'only the Terminal Zsh with its startup files takes toolchain folders.',
+    });
+  });
+
   it('should refuse a relative path', async () => {
     const outcome = await createSandboxShellProvider({ supervisor }).launch(
       launchOf({ arguments: ['-c', 'true'], workingDirectory: 'project' }),

@@ -84,7 +84,7 @@ DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
 # Auth session cookie cache blueprint (Tau Brain research/auth-session-cookie-blueprint.md): seconds an
 # encrypted session snapshot may answer cookie GET/HEAD requests without a PostgreSQL read. 0 disables it;
 # 60 is the rollout value, set per environment after its acceptance checks (WP6), never by default.
-AUTH_SESSION_CACHE_MAX_AGE_SECONDS = '0'
+AUTH_SESSION_CACHE_MAX_AGE_SECONDS = '60'
 # Deploy-cut charter D15: a funded model step may run up to 600 s, as in production
 # (operator ruling 2026-11-10). kill_timeout stays 120 s and shutdownPhases and recoveryGraceMinutes are
 # unchanged: a step cut by a deploy still settles at zero with service_restart.

@@ -42,7 +42,35 @@ const projectManagerActors = {
   initializeWorkerActor,
 } as const;
 
-type ProjectManagerEvent = { type: 'initialize' } | WorkerInitializedEvent;
+/** Events accepted by projectManagerMachine. @public */
+export type ProjectManagerEvent = { type: 'initialize' } | WorkerInitializedEvent;
+
+/**
+ * The project manager machine's public alphabet: every {@link ProjectManagerEvent} type, in the union's order. The
+ * totality test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const projectManagerEventTypes = ['initialize', 'workerInitialized'] as const satisfies ReadonlyArray<
+  ProjectManagerEvent['type']
+>;
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
+ * state where no transition takes the event.
+ *
+ * - `initialize` while a worker is being created or is ready: a second start has nothing to restart.
+ * - `workerInitialized` outside `creatingWorker`: the worker's report only lands while its invoke runs.
+ *
+ * @public
+ */
+export const projectManagerIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ['creatingWorker', 'initialize'],
+  ['ready', 'initialize'],
+  ['initializing', 'workerInitialized'],
+  ['ready', 'workerInitialized'],
+  ['error', 'workerInitialized'],
+];
 
 /**
  * Project Manager Machine

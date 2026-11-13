@@ -147,8 +147,10 @@ type EditorStateMachineInput = {
 
 /**
  * Editor state Machine Events
+ *
+ * @public
  */
-type EditorStateEvent =
+export type EditorStateEvent =
   | { type: 'load' }
   // File operations (consolidated from fileExplorerMachine)
   | { type: 'openFile'; path: string; source: FileOpenSource; lineNumber?: number; column?: number; readOnly?: boolean }
@@ -185,6 +187,91 @@ type EditorStateEvent =
   // User-initiated retry from `<FocusedChatErrorPanel>` after
   // `ensureFocusedChatActor` rejected.
   | { type: 'retryEnsureFocusedChat' };
+
+/**
+ * The editor machine's public alphabet: every {@link EditorStateEvent} type, in the union's order. The totality test
+ * samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const editorEventTypes = [
+  'load',
+  'openFile',
+  'registerMaterialiseModel',
+  'closeFile',
+  'setActiveFile',
+  'revealFileInTree',
+  'revealModelComponentInExplorer',
+  'revealModelComponentInKinematics',
+  'renameFile',
+  'closeAll',
+  'setRequestedChatId',
+  'focusKnownChat',
+  'setFocusedChatId',
+  'setPanelState',
+  'setPreviousLayout',
+  'setFileSidebarWidth',
+  'setGraphicsBackendPreference',
+  'flushNow',
+  'editorStateRetrieved',
+  'focusedChatEnsured',
+  'focusedChatDeferred',
+  'retryEnsureFocusedChat',
+] as const satisfies ReadonlyArray<EditorStateEvent['type']>;
+
+/** The events only `ready` answers: tab, chat, panel and flush verbs, and the focused-chat retry. */
+const editorReadyOnlyEvents = [
+  'openFile',
+  'registerMaterialiseModel',
+  'closeFile',
+  'setActiveFile',
+  'revealFileInTree',
+  'revealModelComponentInExplorer',
+  'revealModelComponentInKinematics',
+  'renameFile',
+  'closeAll',
+  'setFocusedChatId',
+  'setPanelState',
+  'setPreviousLayout',
+  'setFileSidebarWidth',
+  'setGraphicsBackendPreference',
+  'flushNow',
+  'retryEnsureFocusedChat',
+] as const;
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
+ * state where no transition takes the event. `setRequestedChatId` and `focusKnownChat` are answered at the root.
+ *
+ * - Before `ready` (`idle` and `loading`), every verb only `ready` answers: a tab, panel or chat change sent while the
+ *   editor loads is dropped.
+ * - `load` once loading has begun: the editor loads once.
+ * - `editorStateRetrieved` outside `loading.hydrating`: the load's report lands only while its invoke runs.
+ * - `focusedChatEnsured` and `focusedChatDeferred` outside the two `ensuringFocusedChat` states: the ensure's report
+ *   lands only while its invoke runs.
+ * - `flushNow` in `ready.storing.idle` unless the last write failed, and in `ready.storing.writing`: there is nothing
+ *   pending to flush, or the write is already running.
+ *
+ * @public
+ */
+export const editorIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...['idle', 'loading'].flatMap((state) => editorReadyOnlyEvents.map((type) => [state, type] as const)),
+  ['loading', 'load'],
+  ['ready', 'load'],
+  ['idle', 'editorStateRetrieved'],
+  ['loading.ensuringFocusedChat', 'editorStateRetrieved'],
+  ['ready', 'editorStateRetrieved'],
+  ...[
+    'idle',
+    'loading.hydrating',
+    'ready.operation.idle',
+    'ready.operation.materializingOpenFile',
+    'ready.operation.focusedChatDeferred',
+    'ready.operation.focusedChatUnresolved',
+  ].flatMap((state) => [[state, 'focusedChatEnsured'] as const, [state, 'focusedChatDeferred'] as const]),
+  ['ready.storing.idle', 'flushNow'],
+  ['ready.storing.writing', 'flushNow'],
+];
 
 /**
  * Editor state Machine Emitted Events

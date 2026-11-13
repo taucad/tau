@@ -242,7 +242,114 @@ type ProjectEventInternal =
     }
   | { type: 'flushNow' };
 
-type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
+/**
+ * Every event the project machine accepts, its own and the load's report.
+ *
+ * @public
+ */
+export type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
+
+/**
+ * The project machine's public alphabet: every {@link ProjectEvent} type, in the union's order. The totality test
+ * samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const projectEventTypes = [
+  'reloadProject',
+  'closeRuntime',
+  'geometryUnit.runtimeClosed',
+  'manifestIssueObserved',
+  'repairManifest',
+  'updateName',
+  'updateDescription',
+  'updateTags',
+  'loadModel',
+  'setMainFile',
+  'createGeometryUnit',
+  'setViewerGeometryDemand',
+  'claimGeometryUnit',
+  'releaseGeometryUnit',
+  'geometryUnit.kernelRefused',
+  'openInViewer',
+  'parkRuntime',
+  'resumeRuntime',
+  'destroyGeometryUnit',
+  'createViewGraphics',
+  'destroyViewGraphics',
+  'viewPresentationChanged',
+  'modelComponentFocusObserved',
+  'fileMoved',
+  'fileDeleted',
+  'directoryDeleted',
+  'projectFileActivity',
+  'flushNow',
+  'projectRetrieved',
+] as const satisfies ReadonlyArray<ProjectEvent['type']>;
+
+/** The states outside `ready` that a person or a participant can still reach with a `ready` verb. */
+const projectNotReadyStates = ['idle', 'loading', 'error', 'runtimeClosing', 'runtimeClosed', 'runtimeCloseFailed'];
+const projectRuntimeCloseStates = ['runtimeClosing', 'runtimeClosed', 'runtimeCloseFailed'];
+
+/** The verbs only `ready` answers: manifest, metadata, unit, viewer-demand, participant and flush events. */
+const projectReadyOnlyEvents = [
+  'manifestIssueObserved',
+  'repairManifest',
+  'updateName',
+  'updateDescription',
+  'updateTags',
+  'loadModel',
+  'setMainFile',
+  'createGeometryUnit',
+  'setViewerGeometryDemand',
+  'claimGeometryUnit',
+  'releaseGeometryUnit',
+  'openInViewer',
+  'destroyGeometryUnit',
+  'fileMoved',
+  'fileDeleted',
+  'directoryDeleted',
+  'projectFileActivity',
+  'flushNow',
+] as const;
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
+ * state where no transition takes the event. The view, focus, refusal and runtime-closed reports are answered at the
+ * root.
+ *
+ * - Outside `ready`, every verb only `ready` answers.
+ * - In `ready`, the metadata verbs return `undefined` when they would change nothing or the manifest is degraded
+ *   (`updateName` to the current name, `updateDescription`, `updateTags`, `setMainFile`); `repairManifest` unless the
+ *   manifest is repairable and nothing is being written; `projectFileActivity` for metadata only; `flushNow` unless a
+ *   write failed, and while a write or repair runs.
+ * - `projectRetrieved` outside `loading`: the load's report lands only while its invoke runs.
+ * - `reloadProject` while loading and once the runtime is closing or closed.
+ * - The close states' static `{}` answers, which `can()` reads as refused: `closeRuntime` while closing or closed,
+ *   `parkRuntime` and `resumeRuntime` in all three.
+ * - `createViewGraphics` and `destroyViewGraphics` in `error` and the close states: a view's graphics actor created
+ *   before the load failed is not stopped when its pane closes.
+ *
+ * @public
+ */
+export const projectIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...projectNotReadyStates.flatMap((state) => projectReadyOnlyEvents.map((type) => [state, type] as const)),
+  ...(
+    ['repairManifest', 'updateName', 'updateDescription', 'updateTags', 'setMainFile', 'projectFileActivity'] as const
+  ).map((type) => ['ready', type] as const),
+  ...['ready.storing.idle', 'ready.storing.writing', 'ready.storing.repairing'].map(
+    (state) => [state, 'flushNow'] as const,
+  ),
+  ...['idle', 'ready', 'error', ...projectRuntimeCloseStates].map((state) => [state, 'projectRetrieved'] as const),
+  ...['loading', ...projectRuntimeCloseStates].map((state) => [state, 'reloadProject'] as const),
+  ['runtimeClosing', 'closeRuntime'],
+  ['runtimeClosed', 'closeRuntime'],
+  ...projectRuntimeCloseStates.flatMap((state) => [[state, 'parkRuntime'] as const, [state, 'resumeRuntime'] as const]),
+  ...['error', ...projectRuntimeCloseStates].flatMap((state) => [
+    [state, 'createViewGraphics'] as const,
+    [state, 'destroyViewGraphics'] as const,
+  ]),
+];
 
 /**
  * Project Machine Emitted Events

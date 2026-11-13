@@ -730,13 +730,39 @@ describe('ProjectNavigation', () => {
       }));
 
     /*
-     * U6/H5 for project rows. Already true on main: the rows are reserved from
-     * the remembered shape (R5), so this is a guard, not an expected failure.
-     * The sidebar is the root layout's, so the same row covers Home (H5).
+     * U6/H5 for project rows while nothing is live: the rows are reserved from
+     * the remembered count (R5), so this is a guard, not an expected failure.
+     * It covers Home reloads, where no session is live; the sidebar is the root
+     * layout's, so the same row covers Home (H5).
      */
     it.each([2, 5, 7])(
-      'U6/H5: project row count is equal before and after the project listing resolves with %i remembered',
+      'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and nothing live',
       (count) => {
+        rememberedShape = { count };
+        mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+        const view = render(<ProjectNavigation />);
+        const loadingRows = projectRowCount();
+
+        mockUseProjects.mockReturnValue({ ...projectsResult, projects: listing(count) });
+        view.rerender(<ProjectNavigation />);
+
+        expect(screen.getAllByRole('link')).toHaveLength(Math.min(count, 5));
+        expect(loadingRows).toBe(projectRowCount());
+      },
+    );
+
+    /*
+     * U6/H5 for project rows with a live project states the defect only. On a
+     * direct project load the session goes live before the listing resolves;
+     * once it resolves, the "Earlier" label row joins the list (a live and a
+     * non-live project are both visible), and the loading frame reserved no row
+     * for it, so the rows jump by one. It says nothing about how the frame
+     * should account for the label.
+     */
+    it.fails.each([2, 5, 7])(
+      'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and a live project',
+      (count) => {
+        liveProjectIds = ['proj_1'];
         rememberedShape = { count };
         mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
         const view = render(<ProjectNavigation />);

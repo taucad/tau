@@ -26,6 +26,12 @@ const workbenchClosedProject = {
   editorState: { panelState: { desktopLayout: { chatOpen: true, workbenchOpen: false } } },
 };
 
+const workbenchOpenProject = {
+  ...workbenchClosedProject,
+  description: 'Workbench open',
+  editorState: { panelState: { desktopLayout: { chatOpen: true, workbenchOpen: true } } },
+};
+
 const { WorkspaceSkeleton } = await import('#routes/w.$workspace.$project/workspace-skeleton.js');
 
 const renderForProject = (url: string): HTMLElement => {
@@ -60,5 +66,17 @@ describe('WorkspaceSkeleton', () => {
     const lanes = renderForProject('/w/home/one');
 
     expect(lanes.querySelectorAll(':scope > .border-l')).toHaveLength(0);
+  });
+
+  /*
+   * The green twin of U5: a workbench-open project keeps its third lane in the
+   * loading frame, so a fix that drops the lane for every project cannot turn
+   * U5 green.
+   */
+  it('U5 guard: the loading frame of a workbench-open project keeps its third lane border', () => {
+    mockUseProjects.mockReturnValue({ projects: [workbenchOpenProject], isLoading: false, error: undefined });
+    const lanes = renderForProject('/w/home/one');
+
+    expect(lanes.querySelectorAll(':scope > .border-l')).toHaveLength(1);
   });
 });

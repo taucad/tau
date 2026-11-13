@@ -1765,6 +1765,41 @@ describe('A0.2 route gate rows', () => {
     expect(projectProviderInputs).not.toContain(projectB);
   });
 
+  it('should open nothing when the leave flush settles while the newest destination is still checking access', async () => {
+    const accessC = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockImplementation(async (id) => (id === projectC ? accessC.promise : ready(id)));
+    const { Provider, view } = renderRouteProvider();
+    await flushTasks();
+    setEditorIdle(false);
+
+    /* B's access answers and its effect waits on the flush; C's access is still out. */
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+    currentProjectId = projectC;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+
+    act(() => {
+      setEditorIdle(true);
+    });
+    await flushTasks();
+
+    /* The superseded B request must not open once the flush it waited on settles. */
+    expect(focusedSessionId()).toBe(projectA);
+    expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA]);
+    expect(projectProviderInputs).not.toContain(projectB);
+
+    await act(async () => {
+      accessC.resolve(ready(projectC));
+      await accessC.promise;
+    });
+    await flushTasks();
+
+    expect(focusedSessionId()).toBe(projectC);
+    expect(projectProviderInputs).not.toContain(projectB);
+  });
+
   it('should drop an access answer that a library revision superseded while it was resolving', async () => {
     const first = deferred<ProjectRouteAccess>();
     const second = deferred<ProjectRouteAccess>();

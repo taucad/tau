@@ -1611,6 +1611,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     actor.on('liveSetChanged', (event) => liveSets.push(event.projectIds));
     actor.on('budgetRefused', (event) => budgetRefusals.push(event.projectId));
     actor.start();
+    started.push(actor);
     return { actor, received, liveSets, budgetRefusals };
   };
 
@@ -1637,6 +1638,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
         </QueryClientProvider>
       </MemoryRouter>,
     );
+    unmounts.push(view.unmount);
     await settle(quiet);
     return {
       navigate: async (target) => {
@@ -1653,11 +1655,24 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
   const liveOn = (registry: OneProjectRegistry): readonly string[] =>
     Object.keys(registry.actor.getSnapshot().context.refs);
 
+  /* Torn down whether or not a row's assertions pass. */
+  const started: Array<ReturnType<typeof createSessionsActor>> = [];
+  const unmounts: Array<() => void> = [];
+  let restoreSpies: (() => void) | undefined;
+
   beforeEach(() => {
     deviceMemory.constrained = true;
   });
 
   afterEach(() => {
+    restoreSpies?.();
+    restoreSpies = undefined;
+    for (const unmount of unmounts.splice(0)) {
+      unmount();
+    }
+    for (const actor of started.splice(0)) {
+      actor.stop();
+    }
     deviceMemory.constrained = false;
   });
 
@@ -1676,8 +1691,6 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.received).toEqual(expect.arrayContaining(['open', 'releaseMemory']));
     expect(registry.received).not.toContain('close');
     expect(screen.getByTestId('route-state')).toHaveTextContent('editor');
-    view.unmount();
-    registry.actor.stop();
   });
 
   it('closes an unpushed project being left as the person’s close, flushes it, then opens the next from the pending slot', async () => {
@@ -1700,8 +1713,13 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
       return push(...calls);
     });
 
+    restoreSpies = () => {
+      recordCut.mockRestore();
+    };
+
     await view.navigate('/w/workspace/one-unpushed-b');
-    recordCut.mockRestore();
+    restoreSpies();
+    restoreSpies = undefined;
 
     /* The memory release refused the unpushed project; the open then took the switch close. */
     expect(registry.actor.getSnapshot().context.closed['one-unpushed-a']?.reason).toBe('user');
@@ -1714,8 +1732,6 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(mounted).toEqual(['unmount:one-unpushed-a', 'mount:one-unpushed-b']);
     expect(registry.received).toContain('open');
     expect(registry.received).not.toContain('close');
-    view.unmount();
-    registry.actor.stop();
   });
 
   it('keeps a running project being left and refuses the next open, holding it in the pending slot', async () => {
@@ -1737,8 +1753,6 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.actor.getSnapshot().context.pendingOpen).toBe('one-running-b');
     expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
     expect(registry.received).not.toContain('close');
-    view.unmount();
-    registry.actor.stop();
   });
 });
 

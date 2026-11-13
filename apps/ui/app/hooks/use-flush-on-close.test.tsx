@@ -322,8 +322,20 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
 describe('the quit guard — producers before the close cut (A0.2 item 9, D26)', () => {
   const projectId = 'proj_quit_aaaaaaaaaaaaaaa';
   let releaseServices: (() => void) | undefined;
+  let registry: ReturnType<typeof createSessionsActor> | undefined;
+
+  beforeEach(() => {
+    /* The order rows above leave the page hidden. */
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+  });
 
   afterEach(() => {
+    registry?.stop();
+    registry = undefined;
     releaseServices?.();
     releaseServices = undefined;
     desktopQuit.ask = undefined;
@@ -333,7 +345,8 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
   it("should settle every producer registration before the registry takes a session's close cut", async () => {
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
-    const registry = createSessionsActor({ clock: new StepClock() }).start();
+    const started = createSessionsActor({ clock: new StepClock() }).start();
+    registry = started;
     releaseServices = registerProjectSessionServices(projectId, {
       cancelRuns: async () => undefined,
       flushProducers: async () => {
@@ -344,13 +357,13 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
       },
       closeRuntime: async () => undefined,
     });
-    registry.send({ type: 'open', projectId });
+    started.send({ type: 'open', projectId });
     render(
       <UnloadProvider>
         {registrations.map(({ site, stage, callback }) => (
           <Registration key={site} stage={stage} callback={callback} />
         ))}
-        <SessionsProvider actor={registry}>
+        <SessionsProvider actor={started}>
           <span>app</span>
         </SessionsProvider>
       </UnloadProvider>,
@@ -363,7 +376,7 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     const producers = registrations.filter(({ stage }) => stage === 'producer');
     for (const producer of producers) {
       expect(sequence).not.toContain('session-service:close-cut');
-      expect(registry.getSnapshot().matches('ready')).toBe(true);
+      expect(started.getSnapshot().matches('ready')).toBe(true);
       // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
       await act(async () => {
         producer.release();
@@ -381,6 +394,6 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     ).toHaveLength(7);
     /* Quit runs the producer stage itself; the session stage is the registry's close, not `hidden`'s. */
     expect(sequence.filter((entry) => entry.startsWith('session:'))).toEqual([]);
-    expect(registry.getSnapshot().matches('quiesced')).toBe(true);
+    expect(started.getSnapshot().matches('quiesced')).toBe(true);
   });
 });

@@ -579,6 +579,20 @@ const flushTasks = async (): Promise<void> => {
 
 const sessionOf = (projectId: string) => registry.getSnapshot().context.refs[projectId];
 
+/** The legitimate way a subtree goes: the registry closes the project, so it leaves the live set. */
+const closeThroughRegistry = async (projectIds: readonly string[]): Promise<void> => {
+  await act(async () => {
+    for (const projectId of projectIds) {
+      registry.send({ type: 'close', projectId, reason: 'user' });
+    }
+    await Promise.resolve();
+  });
+  await flushTasks();
+  for (const projectId of projectIds) {
+    expect(sessionOf(projectId)).toBeUndefined();
+  }
+};
+
 /** Open projects through the registry, render the subtrees and let every region report. */
 const openAndRender = async (projectIds: readonly string[], focus: Focus): Promise<ReturnType<typeof render>> => {
   for (const projectId of projectIds) {
@@ -733,8 +747,8 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(promptOf()).not.toContain('fixture-model');
   });
 
-  it('should retain the browser agent host once for the project and release it once with the subtree (S7)', async () => {
-    const view = await openAndRender([projectA], { projectId: projectA });
+  it('should retain the browser agent host once for the project and release it once when the registry closes it (S7)', async () => {
+    await openAndRender([projectA], { projectId: projectA });
     const connect = vi.mocked(chatSessions.publishProjectHostConnector).mock.calls.at(-1)?.[1];
     await act(async () => {
       await connect?.('chat-1');
@@ -742,18 +756,16 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     });
     expect(browserLease).toEqual({ retained: [projectA], released: [] });
 
-    view.rerender(tree({ projectId: projectA }, false));
-    await flushTasks();
+    await closeThroughRegistry([projectA]);
 
     expect(browserLease).toEqual({ retained: [projectA], released: [projectA] });
   });
 
-  it("should forget the project's region reports when its subtree unmounts (S7)", async () => {
-    const view = await openAndRender([projectA], { projectId: projectA });
+  it("should forget the project's region reports when the registry closes it (S7)", async () => {
+    await openAndRender([projectA], { projectId: projectA });
     vi.mocked(forgetProjectRegions).mockClear();
 
-    view.rerender(tree({ projectId: projectA }, false));
-    await flushTasks();
+    await closeThroughRegistry([projectA]);
 
     expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([[projectA]]);
   });
@@ -845,19 +857,24 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(sessionOf(projectA)).toBeUndefined();
   });
 
-  it('should register each live session with the chat store and clear it when the subtree goes (S7)', async () => {
-    const view = await openAndRender([projectA, projectB], { projectId: projectA });
+  it('should register each live session with the chat store and clear it when the registry closes it (S7)', async () => {
+    await openAndRender([projectA, projectB], { projectId: projectA });
     const sessionA = sessionOf(projectA);
     expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toContainEqual([projectA, sessionA]);
     expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toContainEqual([projectB, sessionOf(projectB)]);
+    vi.mocked(chatSessions.setProjectSession).mockClear();
 
-    view.unmount();
+    await closeThroughRegistry([projectA, projectB]);
 
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.at(-1)?.[1]).toBeUndefined();
-    /* One clear per project from StrictMode's rehearsal cleanup, and one per project on unmount. */
-    expect(
-      vi.mocked(chatSessions.setProjectSession).mock.calls.filter(([, session]) => session === undefined),
-    ).toHaveLength(4);
+    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toEqual(
+      expect.arrayContaining([
+        [projectA, undefined],
+        [projectB, undefined],
+      ]),
+    );
+    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.every(([, session]) => session === undefined)).toBe(
+      true,
+    );
   });
 
   it('should name only the focused project to the chat store, and clear it when focus leaves (S7)', async () => {
@@ -883,13 +900,13 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(revisionClientOf(projectB).focus).toHaveBeenLastCalledWith(true);
   });
 
-  it('should publish one host connector per live project and withdraw it with the subtree (S7)', async () => {
-    const view = await openAndRender([projectA, projectB], { projectId: projectA });
+  it('should publish one host connector per live project and withdraw it when the registry closes the project (S7)', async () => {
+    await openAndRender([projectA, projectB], { projectId: projectA });
     const publishedFor = new Set(vi.mocked(chatSessions.publishProjectHostConnector).mock.calls.map(([id]) => id));
     expect(publishedFor).toEqual(new Set([projectA, projectB]));
     const withdrawnBefore = unpublishConnector.mock.calls.length;
 
-    view.unmount();
+    await closeThroughRegistry([projectA, projectB]);
 
     expect(unpublishConnector.mock.calls.length - withdrawnBefore).toBe(2);
   });
@@ -962,6 +979,39 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     await hide();
 
     expect(sessionOf(projectA)?.getSnapshot().context.visible).toBe(false);
+  });
+
+  it.fails('I5: should keep the host connector of a live session published after its binding unmounted', async () => {
+    const view = await openAndRender([projectA], { projectId: projectA });
+    const withdrawnBefore = unpublishConnector.mock.calls.length;
+
+    view.rerender(tree({ projectId: projectA }, false));
+    await flushTasks();
+
+    expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+    expect(unpublishConnector.mock.calls.length - withdrawnBefore).toBe(0);
+  });
+
+  it.fails("I5: should keep a live session's region reports after its binding unmounted", async () => {
+    const view = await openAndRender([projectA], { projectId: projectA });
+    vi.mocked(forgetProjectRegions).mockClear();
+
+    view.rerender(tree({ projectId: projectA }, false));
+    await flushTasks();
+
+    expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+    expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([]);
+  });
+
+  it.fails('I5: should keep a live session registered with the chat store after its binding unmounted', async () => {
+    const view = await openAndRender([projectA], { projectId: projectA });
+    const session = sessionOf(projectA);
+
+    view.rerender(tree({ projectId: projectA }, false));
+    await flushTasks();
+
+    expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.findLast(([id]) => id === projectA)?.[1]).toBe(session);
   });
 
   it.fails('I5: should still flush its producers and take its close cut when it closes without a binding', async () => {

@@ -148,7 +148,7 @@ const owner = (ownerId: string): FinancialSessionIdentity => ({
 });
 
 describe('FinancialSessionScope', () => {
-  it.fails('N1: keeps the children mounted when identity goes from none to an owner', () => {
+  it('N1: keeps the children mounted when identity goes from none to an owner', () => {
     let mounts = 0;
     const Marker = (): undefined => {
       useEffect(() => {
@@ -172,7 +172,7 @@ describe('FinancialSessionScope', () => {
     expect(mounts).toBe(1);
   });
 
-  it.fails('H7: keeps a child upgraded state and its single mount when identity goes from none to an owner', () => {
+  it('H7: keeps a child upgraded state and its single mount when identity goes from none to an owner', () => {
     let mounts = 0;
     const seen: boolean[] = [];
     /** Stands in for the rich composer: it upgrades once after mount. */

@@ -903,18 +903,13 @@ jobs:
 
       - name: Deal affected formal tasks
         id: deal
-        # The tasks are `<project>:<target>` ids. A `formal:tla` that only depends on family tasks
-        # (`nx:noop`, tools/formal.plugin.ts) is left out: its families are dealt instead.
+        # The tasks are `<project>:<target>` ids (scripts/src/formal-tasks.ts). A `formal:tla` that only
+        # depends on family tasks (`nx:noop`, tools/formal.plugin.ts) is left out: its families are dealt instead.
         env:
           SHARD: ${{ matrix.shard }}
         run: |
           pnpm nx affected -t formal:tla formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
-          tasks=$(jq -c '
-            [.tasks.tasks[] | .target
-              | select(.target == "formal:lean" or .target == "formal:tla" or (.target | startswith("formal:tla:")))
-              | "\(.project):\(.target)"] as $all
-            | [$all[] | . as $task | select(($task | endswith(":formal:tla")) and ($all | any(startswith($task + ":"))) | not)]
-            | unique' "$RUNNER_TEMP/formal-graph.json")
+          tasks=$(node scripts/src/formal-tasks.ts "$RUNNER_TEMP/formal-graph.json")
           shard=$(echo "$tasks" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 3 \
             --durations scripts/src/formal-shard-durations.json)
           echo "tasks=$shard" >> "$GITHUB_OUTPUT"
@@ -936,14 +931,17 @@ jobs:
         env:
           TASKS: ${{ steps.deal.outputs.tasks }}
         run: |
+          set -o pipefail
           failed=()
+          log="$RUNNER_TEMP/formal-task.log"
           IFS=',' read -ra tasks <<< "$TASKS"
           for task in "${tasks[@]}"; do
             # `<project>:<target>`; project names hold no colon, target names may.
             project="${task%%:*}"
             target="${task#*:}"
             echo "::group::$task"
-            if ! pnpm nx run-many -t "$target" -p "$project"; then
+            # run-many exits 0 when the task does not exist, so a task id that resolved to nothing fails too.
+            if ! pnpm nx run-many --targets="$target" --projects="$project" 2>&1 | tee "$log" || grep -q 'No tasks were run' "$log"; then
               failed+=("$task")
             fi
             echo "::endgroup::"

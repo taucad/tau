@@ -121,7 +121,7 @@ java -cp tla2tools.jar tlc2.TLC -cleanup AttachGeneration.tla   # -cleanup delet
 | Field   | `formal:logs`    | ≤ 3 min                | Every captured `events.jsonl`                                                           |
 | Nightly | `formal:nightly` | ≤ 45 min in total      | Liveness, wide scopes, Apalache, fresh seeds, mutant matrices                           |
 
-The Java budget is per target, because an owner with several model families splits them into parallel targets. When every TLA+ directory of an owner is a family below `specs/` (`specs/record-sync/`), the formal plugin gives each family its own `formal:tla:<family>` target, and the owner's `formal:tla` only depends on them. CI deals the family targets to parallel runners. Keep each family within 3 minutes; when one outgrows it, narrow its `pr` configurations and move the wider bounds to the nightly tier.
+The Java budget is per target, because an owner with several model families splits them into parallel targets. When every TLA+ directory of an owner is a family below `specs/` (`specs/record-sync/`), the formal plugin gives each family its own `formal:tla:<family>` target, and the owner's `formal:tla` only depends on them. CI deals the family targets to parallel runners. Keep each family within 3 minutes; when one outgrows it, narrow its `pr` configurations and move the wider bounds to the nightly tier. `agent-host`'s single `formal:tla` (about 400 s on a CI runner, its specs at `specs/` itself) predates the split and is over the budget until it moves into families or trims its `pr` configurations.
 
 ### 7. Generated Files Are Committed and Checked
 

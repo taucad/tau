@@ -1,11 +1,12 @@
 {
-  "$comment": "Uncached seconds per formal task (`<project>:<target>`) for the three `Formal models (<n>/3)` shards of ci.yml, which deal the affected `formal:tla`, `formal:tla:<family>` and `formal:lean` tasks with scripts/src/test-shard-dealer.ts. Source: merge-queue job 131090042426 (run 43190779343, 2026-11-12), where a tools/formal change made every formal project affected, timed between consecutive task ends at --parallel=1; agent-host's row holds its formal:tla and formal:lean seconds together, as that job timed them. The family rows of ui and revisions were measured locally on 2026-11-13 (4 cores, the runner's flags) when formal:tla split into families, and api's and sandbox's single family keep their project's time. A task not listed weighs defaultSeconds. Refresh when a listed task's time moves by more than a quarter or when a family adds a large configuration.",
+  "$comment": "Uncached seconds per formal task (`<project>:<target>`) for the three `Formal models (<n>/3)` shards of ci.yml, which deal the affected `formal:tla`, `formal:tla:<family>` and `formal:lean` tasks with scripts/src/test-shard-dealer.ts. Source: merge-queue job 131090042426 (run 43190779343, 2026-11-12), where a tools/formal change made every formal project affected, timed between consecutive task ends at --parallel=1; agent-host's formal:tla and formal:lean rows are that job's 438 s split at the end of its formal:tla task. The family rows of ui and revisions were measured locally on 2026-11-13 (4 cores, the runner's flags) when formal:tla split into families, and api's and sandbox's single family keep their project's time. A task not listed weighs defaultSeconds. Refresh when a listed task's time moves by more than a quarter or when a family adds a large configuration.",
   "measuredAt": "2026-11-13",
   "defaultSeconds": 30,
   "seconds": {
-    "agent-host:formal:tla": 438,
-    "api:formal:tla:project-deletion": 5,
+    "agent-host:formal:lean": 36,
+    "agent-host:formal:tla": 402,
     "api-billing:formal:tla": 36,
+    "api:formal:tla:project-deletion": 5,
     "camera:formal:tla": 21,
     "chat-ui:formal:lean": 1,
     "formal:formal:tla": 11,

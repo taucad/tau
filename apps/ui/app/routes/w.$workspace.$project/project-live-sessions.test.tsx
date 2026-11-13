@@ -1040,6 +1040,20 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(vi.mocked(chatSessions.setProjectSession).mock.calls.findLast(([id]) => id === projectA)?.[1]).toBe(session);
   });
 
+  /* A0.2 carried this row to A7a: the revision client a live session owns must outlive its binding (row S27). */
+  it.fails('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
+    const view = await openAndRender([projectA], { projectId: projectA });
+    /* StrictMode mounts, closes and mounts once more: the lifecycle is open when the row starts. */
+    expect(fixtures.lifecycleMounts.at(-1)).toBe(`mount:${projectA}`);
+    const settled = fixtures.lifecycleMounts.length;
+
+    view.rerender(tree({ projectId: projectA }, false));
+    await flushTasks();
+
+    expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+    expect(fixtures.lifecycleMounts.slice(settled)).toEqual([]);
+  });
+
   it.fails('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     view.rerender(tree({ projectId: projectA }, false));

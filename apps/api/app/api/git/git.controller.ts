@@ -44,7 +44,7 @@ import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { gitRetryAfterSeconds } from '@taucad/api-git-core/git-refusals';
-import type { AffectedPublication } from '#api/git/git.service.js';
+import type { RefRemoval } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { gitExecutionKey } from '@taucad/api-git-core/forwarding/git-execution';
 import type { GitExecution } from '@taucad/api-git-core/forwarding/git-execution';
@@ -473,41 +473,29 @@ export class GitController {
   }
 
   /**
-   * The audited ref-removal verb (D24, I2): the only way a named version or a
-   * conflict line leaves the Hosted Remote, since the push hook refuses every
-   * deletion. Owner only.
-   *
-   * Removing a name a live publication points at answers `409
-   * GIT_REF_PUBLISHED` carrying that publication in the body; the caller shows
-   * it and asks again with `publication=<id>`, which retires the publication
-   * with the name, so the person always sees what a removal affects before it
-   * happens. The 409 is rendered here rather than thrown, because the global
-   * exception filter keeps only the error envelope and the publication is the
-   * point of this answer. `finalize` rather than `write` authorizes it,
+   * The audited ref-removal verb (D24, I2): the only way a conflict line
+   * leaves the Hosted Remote, since the push hook refuses every deletion.
+   * Owner only. A version is never removed, so a tag is refused
+   * `GIT_REF_NOT_REMOVABLE`. `finalize` rather than `write` authorizes it,
    * because a removal must stay possible for an owner whose plan allowance is
    * spent — it is how they free some.
    *
    * @param repository - `<projectId>` or `<projectId>.git`.
-   * @param ref - The full ref name, `refs/tags/*` or `refs/heads/conflicts/*`.
-   * @param confirmPublicationId - The publication the caller was shown, when the name backs one.
+   * @param ref - The full ref name, `refs/heads/conflicts/<line>`.
    * @param userId - The authenticated caller.
    * @param request - The request, for the cloud host it came through (which is refused).
    * @param reply - The reply, for `Retry-After`.
-   * @returns The removed ref, the tip it held and the publication it retired, or the 409 to confirm.
+   * @returns The removed ref and the tip it held.
    */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
   @Delete(':repo/refs')
   public async removeRef(
     @Param('repo') repository: string,
     @Query('name') ref: string | undefined,
-    @Query('publication') confirmPublicationId: string | undefined,
     @User('id') userId: string,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<
-    | { ref: string; tip: string; publication?: AffectedPublication }
-    | { statusCode: number; code: 'GIT_REF_PUBLISHED'; error: string; publication: AffectedPublication }
-  > {
+  ): Promise<RefRemoval> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
@@ -517,28 +505,7 @@ export class GitController {
     /* A cloud host authorizes as `write` (I10), which `removeRef` refuses as
        not the owner — behind the transport's allowlist, which refuses it first. */
     const access = await this.repositories.authorize({ projectId, userId, mode: 'finalize', viaDevice });
-    const removal = await this.withRetryAfter(reply, async () =>
-      this.repositories.removeRef({
-        access,
-        ref,
-        committedBy: userId,
-        ...(confirmPublicationId === undefined ? {} : { confirmPublicationId }),
-      }),
-    );
-    if (removal.outcome === 'confirm') {
-      void reply.status(HttpStatus.CONFLICT);
-      return {
-        statusCode: HttpStatus.CONFLICT,
-        code: 'GIT_REF_PUBLISHED',
-        error: `Removing this name retires the publication “${removal.publication.title}”; confirm it to remove the name.`,
-        publication: removal.publication,
-      };
-    }
-    return {
-      ref: removal.ref,
-      tip: removal.tip,
-      ...(removal.publication === undefined ? {} : { publication: removal.publication }),
-    };
+    return this.withRetryAfter(reply, async () => this.repositories.removeRef({ access, ref, committedBy: userId }));
   }
 
   /**

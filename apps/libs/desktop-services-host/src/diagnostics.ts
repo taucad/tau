@@ -10,10 +10,18 @@
  * @module
  */
 
-/** One line's severity. Nothing here is user-facing; it is all operator text. */
+/**
+ * One line's severity. Nothing here is user-facing; it is all operator text.
+ *
+ * @public
+ */
 export type DiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 
-/** The sink a utility writes into. */
+/**
+ * The sink a utility writes into.
+ *
+ * @public
+ */
 export type DiagnosticsLog = {
   /** Append one record. Never throws: a failing log must not take the utility down. */
   log(level: DiagnosticLevel, event: string, detail?: unknown): void;
@@ -21,7 +29,11 @@ export type DiagnosticsLog = {
   flush(): Promise<void>;
 };
 
-/** Options for one utility's log. */
+/**
+ * Options for one utility's log.
+ *
+ * @public
+ */
 export type DiagnosticsLogOptions = {
   /** Directory that receives the log file. */
   readonly directory: string;
@@ -29,7 +41,11 @@ export type DiagnosticsLogOptions = {
   readonly producer: string;
 };
 
-/** Opens a log; the desktop app's `createDiagnosticsLog`. */
+/**
+ * Opens a log; the desktop app's `createDiagnosticsLog`.
+ *
+ * @public
+ */
 export type DiagnosticsLogFactory = (options: DiagnosticsLogOptions) => DiagnosticsLog;
 
 let factory: DiagnosticsLogFactory | undefined;
@@ -37,6 +53,7 @@ let factory: DiagnosticsLogFactory | undefined;
 /**
  * Hand this process's utilities the log factory. The app's utility entries call it before they import the utility.
  *
+ * @public
  * @param next - The factory, or `undefined` to log nothing to disk again.
  */
 export const provideDiagnosticsLog = (next: DiagnosticsLogFactory | undefined): void => {
@@ -46,6 +63,7 @@ export const provideDiagnosticsLog = (next: DiagnosticsLogFactory | undefined): 
 /**
  * Open a log through the factory this process was handed.
  *
+ * @public
  * @param options - Log directory and producer label.
  * @returns The log, or `undefined` when the process was handed no factory.
  */

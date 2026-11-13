@@ -5542,10 +5542,15 @@ describe('ChatSessionStore', () => {
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
-      /* I21: A12 makes the store report `transcript: loading | loaded | empty`. Until then the session reports only its
-       * chat-row load and its messages, and a session out of that load with no messages is what the lane shows as the
-       * empty chat. A12 replaces this reading with its own state. */
-      const reportedTranscript = (session: ReturnType<StoreType['acquire']>): 'loading' | 'loaded' | 'empty' => {
+      /* I21: A12 makes the session report `transcript: loading | loaded | empty`, and this reads it once it exists.
+       * Until then the session reports only its chat-row load and its messages, and a session out of that load with
+       * no messages is what the lane shows as the empty chat. */
+      type TranscriptState = 'loading' | 'loaded' | 'empty';
+      const reportedTranscript = (session: ReturnType<StoreType['acquire']>): TranscriptState => {
+        const declared = (session as { readonly transcript?: TranscriptState }).transcript;
+        if (declared !== undefined) {
+          return declared;
+        }
         if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
           return 'loading';
         }

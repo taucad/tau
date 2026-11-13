@@ -19,9 +19,18 @@ type MockChatSession = {
   readonly messages: readonly MyUIMessage[];
   readonly transcript: 'loading' | 'loaded' | 'empty';
   readonly todoList: FileContentResult;
+  /**
+   * The composer trays this chat showed when it was last open, known before its transcript loads. Lane A12 reads it
+   * to reserve the trays' height while the transcript loads (U10); nothing reads it yet.
+   */
+  readonly rememberedComposerTrays: readonly RememberedComposerTray[];
 };
+/** A tray above the textarea that a chat can remember having shown. */
+type RememberedComposerTray = 'todo';
+/** A chat whose task-list tray was showing when it was last open. */
+const taskListTray: readonly RememberedComposerTray[] = ['todo'];
 const chatSession: { current: MockChatSession } = {
-  current: { messages: [], transcript: 'loading', todoList: { kind: 'loading' } },
+  current: { messages: [], transcript: 'loading', todoList: { kind: 'loading' }, rememberedComposerTrays: [] },
 };
 const chatSessionListeners = new Set<() => void>();
 let chatSessionVersion = 0;
@@ -63,13 +72,14 @@ vi.doMock('react-router', async (importOriginal) => ({
 vi.doMock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [false, vi.fn()] }));
 vi.doMock('#hooks/use-chat.js', () => ({
   useChatSelector: (selector: (state: unknown) => unknown) => {
-    const { messages, transcript } = readChatSession();
+    const { messages, transcript, rememberedComposerTrays } = readChatSession();
     return selector({
       messages,
       messageOrder: messages.map((message) => message.id),
       turnGroups: buildTurnGroups(messages),
       agentInvocations: '',
       transcript,
+      rememberedComposerTrays,
     });
   },
   useChatContext: () => ({ activeChatId: 'chat_tray', persistenceActorRef: undefined }),
@@ -231,41 +241,67 @@ const history: readonly MyUIMessage[] = [
   { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
 ];
 
+type LaneLayout = { readonly composer: number; readonly composerTop: number; readonly history: number };
+
+/** The composer region's height and top edge, and the transcript region's height, in CSS pixels. */
+const readLaneLayout = (): LaneLayout => {
+  const composer = screen.getByRole('region', { name: 'Chat composer' }).getBoundingClientRect();
+  const history = screen.getByRole('region', { name: 'Chat history' }).getBoundingClientRect();
+  return { composer: composer.height, composerTop: composer.top, history: history.height };
+};
+
 /**
- * Measure the composer region while the transcript loads and again once it resolves.
+ * Lay the lane out while the transcript loads and again once it resolves.
  *
- * @param todo - What the chat's task-list read answers with the transcript: the list, or no file.
- * @returns The region's height before and after, in CSS pixels.
+ * @param chat - What the chat remembers before the load, and what its task-list read answers with the transcript.
+ * @param chat.rememberedComposerTrays - The trays it showed when last open.
+ * @param chat.todoList - The task-list file: the list, or no file.
+ * @returns The lane's layout before and after.
  */
-const composerHeightAcrossLoad = async (todo: FileContentResult): Promise<{ before: number; after: number }> => {
+const laneLayoutAcrossLoad = async ({
+  rememberedComposerTrays,
+  todoList: todo,
+}: Pick<MockChatSession, 'rememberedComposerTrays' | 'todoList'>): Promise<{
+  before: LaneLayout;
+  after: LaneLayout;
+}> => {
   await page.viewport(640, 800);
-  publishChatSession({ messages: [], transcript: 'loading', todoList: { kind: 'loading' } });
+  publishChatSession({ messages: [], transcript: 'loading', todoList: { kind: 'loading' }, rememberedComposerTrays });
   render(
     <TooltipProvider>
       <ChatHistory />
     </TooltipProvider>,
   );
-  const composer = screen.getByRole('region', { name: 'Chat composer' });
-  const before = composer.getBoundingClientRect().height;
+  const before = readLaneLayout();
   act(() => {
-    publishChatSession({ messages: history, transcript: 'loaded', todoList: todo });
+    publishChatSession({ messages: history, transcript: 'loaded', todoList: todo, rememberedComposerTrays });
   });
   await expect.element(page.getByText('u1')).toBeVisible();
-  return { before, after: composer.getBoundingClientRect().height };
+  return { before, after: readLaneLayout() };
 };
 
 describe('chat composer across the transcript load', () => {
   it.fails('keeps the composer region height when the transcript resolves, for a chat with a tray (U10)', async () => {
-    const { before, after } = await composerHeightAcrossLoad(todoList);
+    const { before, after } = await laneLayoutAcrossLoad({ rememberedComposerTrays: taskListTray, todoList });
 
     expect(screen.getByRole('button', { name: /Tasks:/u })).toBeVisible();
-    expect(after).toBe(before);
+    expect(after.composer).toBe(before.composer);
+    // The transcript above does not move either: the tray is not drawn outside the region instead.
+    expect(after.composerTop).toBe(before.composerTop);
+    expect(after.history).toBe(before.history);
   });
 
   it('keeps the composer region height when the transcript resolves, for a chat without a tray (U10)', async () => {
-    const { before, after } = await composerHeightAcrossLoad({ kind: 'orphaned' });
+    const { before, after } = await laneLayoutAcrossLoad({
+      rememberedComposerTrays: [],
+      todoList: { kind: 'orphaned' },
+    });
 
     expect(screen.queryByRole('button', { name: /Tasks:/u })).toBeNull();
-    expect(after).toBe(before);
+    expect(after.composer).toBe(before.composer);
+    expect(after.composerTop).toBe(before.composerTop);
+    expect(after.history).toBe(before.history);
+    // Nothing is reserved for a tray this chat does not have: the region is the textarea alone.
+    expect(after.composer).toBe(screen.getByTestId('chat-textarea').getBoundingClientRect().height);
   });
 });

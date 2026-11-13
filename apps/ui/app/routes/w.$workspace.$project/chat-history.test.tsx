@@ -91,7 +91,7 @@ const emitRestoreCancelledDraft = (payload: unknown): void => {
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: (selector: (state: unknown) => unknown) => {
     useSyncExternalStore(subscribeChatState, () => chatStateVersion);
-    const { messages, transcript } = chatStateRef.current;
+    const { messages, transcript = messages.length === 0 ? 'empty' : 'loaded' } = chatStateRef.current;
     return selector({
       messages,
       messageOrder: messages.map((m) => m.id),

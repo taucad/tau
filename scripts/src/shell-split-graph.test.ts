@@ -5,6 +5,8 @@ import type { ProjectGraph } from '@nx/devkit';
 import { bundledLibraries, workspace } from '@taucad/nx';
 import { describe, expect, it } from 'vitest';
 
+import { cacheViolations, isConformanceTarget } from '#shell-evidence.js';
+
 /*
  * The shell split's graph guards (shell split blueprint). PR 1 extracted the sandbox into the private
  * `libs/sandbox` library that `@taucad/native-process-core` bundles; PR 2 extracted the shell service into the
@@ -369,14 +371,12 @@ describe('shell split graph', () => {
     }
   });
 
-  it('keeps every shell conformance and qualification target uncached', async () => {
+  it('keeps every shell conformance and qualification target uncached or keyed on the environment fingerprint', async () => {
     const graph = await projectGraph();
     const targets = Object.values(graph.nodes).flatMap(({ name, data }) =>
       Object.entries(data.targets ?? {})
-        .filter(([target]) =>
-          /^test:[\w-]*conformance$|^test:shell-qualification$|^test:native-sandbox-integration$/u.test(target),
-        )
-        .map(([target, configuration]) => ({ target: `${name}:${target}`, cache: configuration.cache })),
+        .filter(([target]) => isConformanceTarget(target) || target === 'test:native-sandbox-integration')
+        .map(([target, configuration]) => ({ target: `${name}:${target}`, configuration })),
     );
 
     expect(targets.map(({ target }) => target).toSorted()).toEqual(
@@ -390,6 +390,20 @@ describe('shell split graph', () => {
         'shell-service:test:shell-conformance',
       ]),
     );
-    expect(targets.filter(({ cache }) => cache !== false)).toEqual([]);
+    expect(targets.flatMap(({ target, configuration }) => cacheViolations(target, configuration))).toEqual([]);
+    // Only the receipt-writing conformance targets of the ci:shell projects are fingerprint-keyed (CF-1); the sandbox
+    // integration suite and the desktop's own Terminal rows stay uncached.
+    expect(
+      targets
+        .filter(({ configuration }) => configuration.cache !== false)
+        .map(({ target }) => target)
+        .toSorted(),
+    ).toEqual([
+      'desktop-terminal:test:terminal-conformance',
+      'host:test:shell-conformance',
+      'host:test:shell-qualification',
+      'sandbox:test:shell-conformance',
+      'shell-service:test:shell-conformance',
+    ]);
   });
 });

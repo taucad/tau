@@ -13,7 +13,14 @@
 #   provider. The macOS Terminal rows run with the shipped own-pty Seatbelt rule (operator ruling 2026-11-09).
 # - WIN-ARM is not a row yet: the Windows provider is paused.
 #
-# Noncacheable by construction: the target sets `cache: false` and every row passes `--skip-nx-cache`.
+# Fresh by construction except where reuse is asked for (CF-1): the sandbox, service, host, qualification and Terminal
+# concern targets are cacheable only under the environment fingerprint of `scripts/src/shell-evidence.ts`, which is a
+# fresh nonce unless `TAU_SHELL_EVIDENCE` is `reuse`. Only the merge queue's semantics-tier call and a labelled pull
+# request run ask for reuse; the nightly, `workflow_dispatch` and the candidate gate's call run fresh and still pass
+# `--skip-nx-cache`, `desktop:test:terminal-conformance` is never cached, and the Linux guests always run fresh. The
+# stamp step then records each macOS receipt as fresh or as a verdict reused from an Nx hash first proven at another
+# commit, and refuses a reused receipt in a fresh run. This workflow has no remote cache env yet (CP-5b follow-up), so
+# until then a reuse run can only hit the runner's local cache, which is empty on a hosted runner.
 name: Shell conformance
 
 # Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run nightly on `main`
@@ -168,6 +175,12 @@ jobs:
       contains(fromJSON(needs.select.outputs.projects), 'desktop-terminal'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    env:
+      # Reuse a fingerprinted verdict only in the merge queue's semantics-tier call and on this workflow's own pull
+      # request trigger; the candidate gate (no tier, never `merge_group` or `pull_request`), the nightly and a
+      # dispatch need fresh evidence (CF-1). Nothing reads a pull request run's verdict: the promotion lookup skips it.
+      TAU_SHELL_EVIDENCE: ${{ ((github.event_name == 'merge_group' && needs.select.outputs.tier == 'semantics') || (github.event_name == 'pull_request' && !inputs.ref && needs.select.outputs.tier == 'full')) && 'reuse' || 'fresh' }}
+      TAU_SHELL_TIER: ${{ needs.select.outputs.tier }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,14 +221,14 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run sandbox:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run sandbox:test:shell-conformance ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       - name: Run the shell service conformance target
         if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'shell-service')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/service-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run shell-service:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run shell-service:test:shell-conformance ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       # The service rows that run through a real Tau agent host and the host's tool registry (H08-H10).
       - name: Run the host shell conformance target
@@ -223,7 +236,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/host-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-conformance ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       # The W7 application and adversarial qualification rows: the agent host over the real provider (T, E and S rows).
       - name: Run the shell qualification target
@@ -231,7 +244,7 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/qualification-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run host:test:shell-qualification ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
 
       # The desktop Terminal rows (W5): probe, refusal and PTY rows, on macOS with the shipped own-pty Seatbelt rule.
       - name: Run the desktop terminal conformance target
@@ -247,7 +260,22 @@ jobs:
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-concern-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop-terminal:test:terminal-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop-terminal:test:terminal-conformance ${{ env.TAU_SHELL_EVIDENCE == 'fresh' && '--skip-nx-cache' || '' }}
+
+      # Uncached: each receipt of a listed project is stamped fresh (this run, this commit) or reused (restored by a
+      # cache hit, with the Nx hash and the commit that first proved it). A fresh run refuses a reused receipt, and a
+      # listed project's missing receipt is refused.
+      - name: Stamp the receipts
+        if: success() || failure()
+        env:
+          TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
+          TAU_SHELL_PROJECTS: ${{ needs.select.outputs.projects }}
+        run: >-
+          GITHUB_SHA="$(git rev-parse HEAD)" node scripts/src/shell-evidence.ts stamp
+          "out/test-results/shell-conformance/$TAU_SHELL_CONFORMANCE_ROW"
+          sandbox=receipt.json shell-service=service-receipt.json host=host-receipt.json
+          host=qualification-receipt.json desktop=terminal-receipt.json
+          desktop-terminal=terminal-concern-receipt.json
 
       - name: Upload the receipt
         if: always()

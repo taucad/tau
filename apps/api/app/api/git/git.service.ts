@@ -37,6 +37,7 @@ import {
   hydratesPerCallerPerDay,
   isRemovableRef,
   linkedForges,
+  notRemovableMessage,
   quotaRefusalSentence,
   repositoryStoreKey,
 } from '@taucad/api-git-core/git.constants';
@@ -170,13 +171,6 @@ const storageLimitOf = (entitlements: CommercialEntitlements): number =>
       (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]))
     : 0;
 
-/** A publication a ref removal would leave without its named version (D24). */
-export type AffectedPublication = {
-  readonly id: string;
-  readonly title: string;
-  readonly visibility: string;
-};
-
 /**
  * Whether `manifest` is `receipt`'s generation with only deferred compactions
  * after it ({@link onlyCompactedSince}) and still holds every ref where the
@@ -187,19 +181,8 @@ const compactedOver = (receipt: StorageReceipt, manifest: Manifest): boolean =>
   onlyCompactedSince(manifest, receipt) &&
   receipt.movedRefs.every((moved) => manifest.refs[moved.ref]?.oid === moved.after);
 
-/**
- * What the removal verb answered (D24): a live publication to show the owner
- * before anything changes, or the ref it removed with the tip it held and the
- * publication it retired.
- */
-export type RefRemoval =
-  | { readonly outcome: 'confirm'; readonly publication: AffectedPublication }
-  | {
-      readonly outcome: 'removed';
-      readonly ref: string;
-      readonly tip: string;
-      readonly publication?: AffectedPublication;
-    };
+/** What the removal verb answered (D24): the conflict line it removed and the tip it held. */
+export type RefRemoval = { readonly ref: string; readonly tip: string };
 
 export type GitLfsObjectState = {
   readonly oid: string;
@@ -790,52 +773,36 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
    * The audited ref-removal verb (D24, charter I2).
    *
    * The push hook refuses every deletion, so this is the only way a ref ever
-   * leaves the Hosted Remote, and it is the owner's alone. It removes a named
-   * version (`refs/tags/*`) or a conflict line (`refs/heads/conflicts/*`, D14),
-   * the latter being how an owner clears an abandoned line another device left.
+   * leaves the Hosted Remote, and it is the owner's alone. It removes only a
+   * conflict line (`refs/heads/conflicts/<line>`, D14), which is how an owner
+   * clears an abandoned line another device left. A version, `refs/tags/v<n>`,
+   * is never removed (a rename rewrites its tag at the same ref, rule 14), so a
+   * tag is refused like every other ref.
    *
-   * A named version a live publication points at is answered `confirm` with
-   * that publication until the caller names it back as `confirmPublicationId`,
-   * so the person sees what the removal affects before anything changes. A
-   * confirmed removal retires that publication in the same step: it is marked
-   * unpublished, so it stops serving and a later push that re-creates the name
-   * does not bring it back (`materializePublishedTags` skips it). Publishing it
-   * again is the owner's explicit act.
+   * The removal runs inside one transaction holding the project's lock, which
+   * commits only once tau-storage answered that the removal's manifest commit
+   * landed (DC1), so a project deletion cannot land between the check and the
+   * removal. tau-storage refuses the removal if the ref no longer holds the
+   * tip read here. The appended attribution record (EQ11), carrying the ref
+   * without a tip, plus the log line, is the audit.
    *
-   * The decision and the retirement run inside one transaction holding the
-   * project's publication lock, and the transaction commits only once
-   * tau-storage answered that the removal's manifest commit landed (DC1): a
-   * publish cannot land between the check and the removal, and a failed
-   * commit rolls the retirement back. tau-storage refuses the removal if the
-   * ref no longer holds the tip read here. The appended attribution record
-   * (EQ11), carrying the ref without a tip, plus the log line, is the audit.
-   *
-   * @param args - The access, the ref, the authenticated caller and the publication they confirmed.
-   * @returns `confirm` with the publication to show, or `removed` with the tip it held.
+   * @param args - The access, the ref and the authenticated caller.
+   * @returns The ref removed and the tip it held.
    * @throws ForbiddenException When the caller is not the owner.
-   * @throws BadRequestException When the ref is not a named version or a conflict line.
+   * @throws BadRequestException When the ref is not a conflict line.
    * @throws NotFoundException When the repository holds no such ref.
    */
-  public async removeRef(args: {
-    access: GitAccess;
-    ref: string;
-    committedBy: string;
-    confirmPublicationId?: string;
-  }): Promise<RefRemoval> {
+  public async removeRef(args: { access: GitAccess; ref: string; committedBy: string }): Promise<RefRemoval> {
     const { access, ref } = args;
     if (access.role !== 'owner') {
       throw new ForbiddenException({
         code: 'GIT_REF_REMOVAL_OWNER_ONLY',
-        message: 'Only the project’s owner can remove a named version or a conflict line.',
+        message: 'Only the project’s owner can remove a conflict line.',
       });
     }
     if (!isRemovableRef(ref)) {
-      throw new BadRequestException({
-        code: 'GIT_REF_NOT_REMOVABLE',
-        message: 'Only a named version (refs/tags/*) or a conflict line (refs/heads/conflicts/*) can be removed.',
-      });
+      throw new BadRequestException({ code: 'GIT_REF_NOT_REMOVABLE', message: notRemovableMessage });
     }
-    const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : undefined;
 
     const release = await this.admitRpc(access, 'remove_ref');
     let removal: RefRemoval;
@@ -847,65 +814,29 @@ export class GitRepositoryService implements PublicationRepositoryLeases {
         throw new NotFoundException({ code: 'GIT_REF_NOT_FOUND', message: `This repository has no ${ref}.` });
       }
       /* The push's stop gate: a removal that has not started when the process
-         begins to stop is refused before it retires a publication. */
+         begins to stop is refused before it commits. */
       this.refuseWhenStopping('This server is restarting; retry the removal.');
       const facts = await this.grantFacts(access, { committedBy: args.committedBy, authoritative: true });
       await this.spendHydrate(access, 'remove_ref');
-      const decided = await this.databaseService.database.transaction(async (transaction) => {
+      const removed = await this.databaseService.database.transaction(async (transaction) => {
         await assertActiveProjectLocked(
           transaction,
           access.projectId,
           access.viaDevice === undefined ? access.callerId : access.ownerId,
         );
-        const [affected] =
-          tag === undefined
-            ? []
-            : await transaction
-                .select({ id: publication.id, title: publication.title, visibility: publication.visibility })
-                .from(publication)
-                .where(
-                  and(
-                    eq(publication.projectId, access.projectId),
-                    eq(publication.tag, tag),
-                    isNull(publication.unpublishedAt),
-                  ),
-                );
-        if (affected !== undefined && affected.id !== args.confirmPublicationId) {
-          return { outcome: 'confirm', publication: affected } as const;
-        }
-        if (affected !== undefined) {
-          await transaction
-            .update(publication)
-            .set({ unpublishedAt: new Date() })
-            .where(eq(publication.id, affected.id));
-        }
-        const removed = await this.forwardWrite(access, async () =>
-          this.executor.removeRef({ ...facts, ref, tip: held }),
-        );
-        return { outcome: 'removed', removed, affected } as const;
+        return this.forwardWrite(access, async () => this.executor.removeRef({ ...facts, ref, tip: held }));
       });
-      if (decided.outcome === 'confirm') {
-        removal = decided;
-      } else {
-        await this.applyReceipt(decided.removed.receipt, access);
-        removal = {
-          outcome: 'removed',
-          ref,
-          tip: held,
-          ...(decided.affected === undefined ? {} : { publication: decided.affected }),
-        };
-      }
+      await this.applyReceipt(removed.receipt, access);
+      removal = { ref, tip: held };
     } catch (error) {
       throw refusalFor(error, this.#logger);
     } finally {
       release();
     }
-    if (removal.outcome === 'removed') {
-      this.#logger.log(
-        { projectId: access.projectId, ref, tip: removal.tip, by: args.committedBy, retired: removal.publication?.id },
-        'Removed a ref through the audited verb',
-      );
-    }
+    this.#logger.log(
+      { projectId: access.projectId, ref, tip: removal.tip, by: args.committedBy },
+      'Removed a ref through the audited verb',
+    );
     return removal;
   }
 

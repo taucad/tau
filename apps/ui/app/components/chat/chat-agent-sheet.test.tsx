@@ -371,7 +371,7 @@ describe('ChatAgentSheet', () => {
     /* Browsing an agent changes nothing, and the way back is to the agents. */
     expect(setActiveExecution).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText('Search Codex models…')).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Back to agents' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to agents' })).toHaveTextContent(/^Back$/u);
     await userEvent.click(screen.getByRole('option', { name: 'GPT-5.6-Sol' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({
@@ -671,7 +671,7 @@ describe('ChatAgentSheet', () => {
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
 
     await userEvent.click(settings);
-    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent('Settings');
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent(/^Back$/u);
     /* Focus lands on the first control: the chosen Collaboration mode. */
     expect(
       within(screen.getByRole('tablist', { name: 'Collaboration mode' })).getByRole('tab', { name: 'Plan' }),

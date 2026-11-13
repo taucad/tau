@@ -54,14 +54,14 @@ const open = async (): Promise<{ user: ReturnType<typeof userEvent.setup>; menu:
 };
 
 describe('DropdownMenuSub as a sub-view', () => {
-  it('should replace the items in the same menu, with a Back row naming the sub-view', async () => {
+  it('should replace the items in the same menu, under a Back row, in a group named for the sub-view', async () => {
     const { user, menu } = await open();
     await user.click(within(menu).getByRole('menuitem', { name: 'Quick export' }));
 
     expect(screen.getAllByRole('menu')).toHaveLength(1);
     expect(within(menu).queryByRole('menuitem', { name: 'Rename' })).not.toBeInTheDocument();
     const back = within(menu).getByRole('menuitem', { name: 'Back to Options' });
-    expect(back).toHaveTextContent('Quick export');
+    expect(back).toHaveTextContent(/^Back$/u);
     expect(within(menu).getByRole('group', { name: 'Quick export' })).toBeVisible();
     await waitFor(() => {
       expect(within(menu).getByRole('menuitem', { name: 'STL' })).toHaveFocus();
@@ -105,7 +105,8 @@ describe('DropdownMenuSub as a sub-view', () => {
     await user.click(within(menu).getByRole('menuitem', { name: /Format/u }));
 
     const back = within(menu).getByRole('menuitem', { name: 'Back to Quick export' });
-    expect(back).toHaveTextContent('Format');
+    expect(back).toHaveTextContent(/^Back$/u);
+    expect(within(menu).getByRole('group', { name: 'Format' })).toBeVisible();
     expect(within(menu).queryByRole('menuitem', { name: 'STL' })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(within(menu).getByRole('menuitemradio', { name: 'Binary' })).toHaveFocus();
@@ -126,7 +127,7 @@ describe('DropdownMenuSelectItem', () => {
       <DropdownMenu>
         <DropdownMenuTrigger>Viewer settings</DropdownMenuTrigger>
         <DropdownMenuContent>
-          <DropdownMenuItem>Reset view</DropdownMenuItem>
+          <DropdownMenuItem>Rename</DropdownMenuItem>
           <DropdownMenuSelectItem
             value='60s'
             options={options}
@@ -163,5 +164,19 @@ describe('DropdownMenuSelectItem', () => {
     await waitFor(() => {
       expect(within(menu).getByRole('menuitem', { name: /Timeout/u })).toHaveFocus();
     });
+  });
+
+  it('should keep its value against the chevron: only the value takes the free space', async () => {
+    const user = userEvent.setup();
+    render(<TimeoutMenu onValueChange={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Viewer settings' }));
+    const row = within(await screen.findByRole('menu')).getByRole('menuitem', { name: /Timeout/u });
+
+    const chevron = row.lastElementChild;
+    const value = chevron?.previousElementSibling;
+    expect(value).toHaveTextContent('60s');
+    expect(value).toHaveClass('ml-auto');
+    // Two `ml-auto` split the free space and float the value mid-row; the chevron gives its margin up after a value.
+    expect(chevron).toHaveClass('ml-auto', '[.ml-auto+&]:ml-0');
   });
 });

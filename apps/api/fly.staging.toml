@@ -113,7 +113,8 @@ TAU_S3_FORCE_PATH_STYLE = 'false'
 # TAU_FILES_LINK_SIGNING_KEY, which tau-cloud's staging stack writes (gate 3,
 # tau-cloud#136; docs/files-service-runbook.md "Apply order").
 # Remove this line and redeploy to roll back to presigned downloads.
-TAU_FILES_BASE_URL = 'https://files.taucad.dev'
+# STO-26 rollback drill: TAU_FILES_BASE_URL (https://files.taucad.dev) is removed
+# so staging serves presigned R2 downloads; the drill's follow-up PR restores it.
 # Runtime Observability PR-2: staging records runtime telemetry entries (on | off | paused-until:<ISO>).
 TAU_RUNTIME_TELEMETRY = 'on'
 

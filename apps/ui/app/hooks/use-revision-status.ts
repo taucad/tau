@@ -1690,6 +1690,8 @@ export type RevisionCommands = Readonly<{
   undo: () => void;
   /** *Undo*: reverse this device's newest operation on the line (D15). */
   undoOperation: () => void;
+  /** The *Merged* toast's *Undo*: return `<current>` to `before` while `revisionId` is still its head (I11). */
+  undoMerge: (revisionId: string, before: string) => void;
   switchTo: (branch: string) => void;
   followChat: (chatId: string) => void;
   pinTo: (checkoutId: string) => void;
@@ -1790,6 +1792,7 @@ export const useRevisionCommands = (): RevisionCommands => {
       restore: (revisionId: string) => client?.send({ command: 'restore', revisionId }),
       undo: () => client?.send({ command: 'undo' }),
       undoOperation: () => client?.send({ command: 'undoOperation' }),
+      undoMerge: (revisionId: string, before: string) => client?.send({ command: 'undoMerge', revisionId, before }),
       switchTo: (branch: string) => client?.send({ command: 'switch', branch }),
       followChat: (chatId: string) => client?.send({ command: 'followChat', chatId }),
       pinTo: (checkoutId: string) => client?.send({ command: 'pinTo', checkoutId }),

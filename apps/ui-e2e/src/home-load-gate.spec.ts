@@ -200,7 +200,7 @@ const loadSignedInHome = async (
 };
 
 cloudDefectRow(
-  { api: cloudRow, expectedFailure: true, title: 'N1: removes no child of body on a signed-in load of Home' },
+  { api: cloudRow, expectedFailure: false, title: 'N1: removes no child of body on a signed-in load of Home' },
   async (defect) => {
     const record = await loadSignedInHome('n1-body', {});
     await defect(() => {
@@ -212,7 +212,7 @@ cloudDefectRow(
 cloudDefectRow(
   {
     api: cloudRow,
-    expectedFailure: true,
+    expectedFailure: false,
     title: `N1: keeps the sidebar wrapper on Home while get-session is held ${String(sessionHeld)} ms`,
   },
   async (defect) => {
@@ -231,7 +231,7 @@ cloudDefectRow(
 cloudDefectRow(
   {
     api: cloudRow,
-    expectedFailure: true,
+    expectedFailure: false,
     title:
       'H7: never puts the plain textarea back after the rich composer upgraded, get-session held until the upgrade',
   },

@@ -56,10 +56,15 @@ const createFakeClient = (
   name: string,
   log: ClientLog,
 ): RevisionClient &
-  Readonly<{ setApplying: (roots: readonly string[]) => void; userAnswer: PromiseWithResolvers<void> }> => {
+  Readonly<{
+    setApplying: (roots: readonly string[]) => void;
+    userAnswer: PromiseWithResolvers<void>;
+    holdSave: () => PromiseWithResolvers<void>;
+  }> => {
   const listeners = createSignal();
   let applyingRoots: readonly string[] = [];
   const userAnswer = Promise.withResolvers<void>();
+  let saveGate: PromiseWithResolvers<void> | undefined;
   const client = {
     send: (command: { command: string }) => {
       log.push(`${name}:send:${command.command}:${JSON.stringify(command)}`);
@@ -80,6 +85,11 @@ const createFakeClient = (
     },
     saveRevision: async (trigger?: string) => {
       log.push(`${name}:saveRevision:${trigger ?? 'save'}`);
+      await saveGate?.promise;
+    },
+    holdSave: () => {
+      saveGate = Promise.withResolvers<void>();
+      return saveGate;
     },
     status: () => ({ applyingRoots }),
     subscribe: listeners.subscribe,
@@ -491,6 +501,19 @@ describe('session revisions', () => {
     await settle();
     log.length = 0;
 
+    /* C16: `hidden` settles only when the close revision has answered, so `pagehide` offers this push's pack. */
+    const save = client.holdSave();
+    let hiddenSettled = false;
+    const hidden = cut?.('hidden').then(() => {
+      hiddenSettled = true;
+    });
+    await settle();
+    expect(hiddenSettled).toBe(false);
+    save.resolve();
+    await hidden;
+    expect(hiddenSettled).toBe(true);
+    log.length = 0;
+
     const phases: FlushPhase[] = ['hidden', 'pagehide'];
     for (const phase of phases) {
       // oxlint-disable-next-line no-await-in-loop -- The phases run in order, as the unload sequencer runs them.
@@ -552,6 +575,29 @@ describe('session revisions', () => {
 
     expect(log).not.toContain('a:open');
     expect(log.slice(-2)).toEqual(['a:setCredential:withdrawn', 'a:close']);
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('should relay nothing to a client it closed when the worker went away', async () => {
+    const guard = guardActors();
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts();
+    const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
+    const session = createSession(fake.ports, fileManager.ref, { guard });
+    session.start();
+    await settle();
+
+    fileManager.set({ worker: undefined });
+    expect(log.slice(-2)).toEqual(['a:setCredential:withdrawn', 'a:close']);
+    log.length = 0;
+    fake.setUser({ id: 'usr_2' });
+    githubProjectBinding.remove(projectId);
+
+    expect(log).toEqual([]);
+    session.stop();
     expect(guard.take()).toEqual([]);
   });
 

@@ -504,9 +504,10 @@ describe('session revisions', () => {
     /* C16: `hidden` settles only when the close revision has answered, so `pagehide` offers this push's pack. */
     const save = client.holdSave();
     let hiddenSettled = false;
-    const hidden = cut?.('hidden').then(() => {
+    const hidden = (async (): Promise<void> => {
+      await cut?.('hidden');
       hiddenSettled = true;
-    });
+    })();
     await settle();
     expect(hiddenSettled).toBe(false);
     save.resolve();

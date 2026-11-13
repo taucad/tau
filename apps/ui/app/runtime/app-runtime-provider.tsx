@@ -2,12 +2,12 @@
  * The runtime's start boundary: named boundary 2 (app state orchestration charter D5, D15; I1).
  *
  * `AppRuntimeProvider` hands the app runtime to the tree. It reads the client entry's held runtime; the server and
- * tests pass theirs as `runtime`. Its one effect starts the runtime after hydration, so the server render and the
- * first client render read the same unstarted snapshot. That effect is the only `.start()` a component may hold. The
+ * tests pass theirs as `runtime`. Its one layout effect starts the runtime after hydration, before any passive effect
+ * of that commit can send to it, so the server render and the first client render read the same unstarted snapshot. That effect is the only `.start()` a component may hold. The
  * provider never stops the runtime: it outlives every tree that reads it, StrictMode's simulated unmount included,
  * and a second start of a running actor does nothing.
  */
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useLayoutEffect } from 'react';
 import type { Context, ReactNode } from 'react';
 import type { AppRuntime } from '#runtime/app-runtime.js';
 import { heldAppRuntime } from '#runtime/app-runtime-holder.js';
@@ -39,8 +39,10 @@ export function AppRuntimeProvider({
     throw new Error('AppRuntimeProvider has no runtime: the client entry holds one; the server and tests pass one.');
   }
 
-  /* Named boundary 2 (D15): the one start, after hydration. */
-  useEffect(() => {
+  /* Named boundary 2 (D15): the one start, after hydration. A layout effect, so it runs before every passive effect
+   * of the hydration commit, whose sends (a constrained device's first `releaseMemory`) then reach a running
+   * registry instead of queueing on an unstarted one. The server runs no effect, so it never starts. */
+  useLayoutEffect(() => {
     runtime.start();
   }, [runtime]);
 

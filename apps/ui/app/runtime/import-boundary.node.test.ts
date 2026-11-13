@@ -10,7 +10,7 @@
  *
  * The walk follows the app's own specifiers (`#…` through the package imports map, and relative paths). For every
  * build-selected module it follows each variant beside it (`.cloud`, `.self-host`, `.desktop`), so the check holds
- * for every build. Type-only imports and exports erase, and `import()` is the lazy edge, so neither is followed.
+ * for every build. Declaration-level `import type` and `export type` erase, and `import()` is the lazy edge, so neither is followed.
  * Workspace packages never import `apps/ui/app`, so they are not walked.
  */
 
@@ -22,8 +22,18 @@ import { describe, expect, it } from 'vitest';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** The roots of the graph: both entries and the root route. */
-const roots = ['entry.client.tsx', 'entry.server.tsx', 'root.tsx'] as const;
+/** The roots of the graph: the web entries and root route, and the SPA builds' relocated ones (desktop, serve). */
+const roots = [
+  'entry.client.tsx',
+  'entry.server.tsx',
+  'root.tsx',
+  '../desktop/app/entry.client.tsx',
+  '../desktop/app/entry.server.tsx',
+  '../desktop/app/root.tsx',
+  '../serve/app/entry.client.tsx',
+  '../serve/app/entry.server.tsx',
+  '../serve/app/root.tsx',
+] as const;
 
 /** Modules only a session's dynamic import may load (D5), and the two machines they compose. */
 const lazyOnly = [
@@ -58,22 +68,12 @@ function resolveSpecifier(specifier: string, importer: string): string[] {
   return candidates.filter((candidate) => existsSync(candidate));
 }
 
+/**
+ * Only a declaration-level `import type` erases. `import { type X } from '…'` keeps a side-effect import of the
+ * module under `verbatimModuleSyntax`, so it is a real edge.
+ */
 function isTypeOnlyImport(statement: ts.ImportDeclaration): boolean {
-  const clause = statement.importClause;
-  if (clause === undefined) {
-    return false;
-  }
-  if (clause.phaseModifier === ts.SyntaxKind.TypeKeyword) {
-    return true;
-  }
-  const bindings = clause.namedBindings;
-  return (
-    clause.name === undefined &&
-    bindings !== undefined &&
-    ts.isNamedImports(bindings) &&
-    bindings.elements.length > 0 &&
-    bindings.elements.every((element) => element.isTypeOnly)
-  );
+  return statement.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword;
 }
 
 /** The specifiers a module loads statically: value imports and re-exports. */

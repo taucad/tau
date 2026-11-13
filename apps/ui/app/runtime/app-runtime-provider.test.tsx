@@ -20,6 +20,8 @@ import type { FakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type * as SessionsStore from '#services/sessions-store.js';
 import { SessionsProvider, useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
+import { useMemoryRelease } from '#hooks/use-memory-release.js';
+import type { SessionsMachineEvent } from '#machines/sessions.machine.js';
 
 const sessionsStore = vi.hoisted(() => ({ created: 0 }));
 
@@ -144,6 +146,54 @@ describe('AppRuntimeProvider start boundary', () => {
     /* Unmounting stops nothing: the runtime outlives the tree that read it. */
     view.unmount();
     expect(host.listeners().length).toBe(4);
+    runtime.stop();
+  });
+
+  it('should start before the first commit sends: a first-commit send on a constrained direct open reaches a running registry', () => {
+    const registry: { current?: unknown } = {};
+    const processed: string[] = [];
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost({ coarse: true }),
+      inspect: (inspection) => {
+        if (
+          inspection.type === '@xstate.transition' &&
+          inspection.actorRef === registry.current &&
+          !inspection.event.type.startsWith('@xstate.')
+        ) {
+          processed.push(inspection.event.type);
+        }
+      },
+    });
+    registry.current = selectSessionsRegistry(runtime.getSnapshot());
+    /* What the registry had processed at the moment each send left the first commit's passive effect. */
+    const atSend: string[][] = [];
+    function DirectOpen(): undefined {
+      const sessions = useSessions();
+      useMemoryRelease({
+        sessions: {
+          send: (event: SessionsMachineEvent) => {
+            sessions.send(event);
+            atSend.push([...processed]);
+          },
+        },
+        focusedProjectId: 'p1',
+        constrained: true,
+      });
+      return undefined;
+    }
+
+    render(
+      <AppRuntimeProvider runtime={runtime}>
+        <UnloadProvider>
+          <SessionsProvider>
+            <DirectOpen />
+          </SessionsProvider>
+        </UnloadProvider>
+      </AppRuntimeProvider>,
+    );
+
+    /* Delivered synchronously, so the registry was running: not queued on an actor not yet started. */
+    expect(atSend).toEqual([['releaseMemory']]);
     runtime.stop();
   });
 });

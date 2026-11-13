@@ -1769,10 +1769,12 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     const freshRuntime = await import('#runtime/app-runtime.js');
     const freshRuntimeProvider = await import('#runtime/app-runtime-provider.js');
 
-    /* The registry is the app runtime's (A1a): the provider reads it, and the runtime's boundary starts it. */
+    /* The registry is the app runtime's (A1a): the provider reads it, and the runtime's boundary starts it. No page
+     * listeners: this row is about the quit ask. */
+    const runtime = freshRuntime.createAppRuntime({ environment: () => undefined });
     const view = render(
       <QueryClientProvider client={queryClient}>
-        <freshRuntimeProvider.AppRuntimeProvider runtime={freshRuntime.createAppRuntime()}>
+        <freshRuntimeProvider.AppRuntimeProvider runtime={runtime}>
           <freshSessions.SessionsProvider>
             <span>app</span>
           </freshSessions.SessionsProvider>
@@ -1785,6 +1787,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     expect(answers).toEqual(['quiesced']);
     view.unmount();
     expect(ready).toBe(false);
+    runtime.stop();
   });
 
   it('paints what is being waited for, and Quit anyway answers main', async () => {

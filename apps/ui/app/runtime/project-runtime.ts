@@ -254,7 +254,9 @@ export const projectRuntimeMachine = setup({
   initial: 'running',
   states: {
     running: {
+      // The owner stops first, so a file-manager change during the root's stop cannot rebuild after the shared close.
       invoke: [
+        { id: 'parameterServiceOwner', src: 'parameterServiceOwner' },
         {
           id: 'parameterObservers',
           src: 'parameterObservers',
@@ -267,7 +269,6 @@ export const projectRuntimeMachine = setup({
         },
         { id: 'libraryEvents', src: 'libraryEvents', input: ({ context }) => ({ project: context.projectRef }) },
         { id: 'resources', src: 'resources', input: ({ context }) => ({ project: context.projectRef }) },
-        { id: 'parameterServiceOwner', src: 'parameterServiceOwner' },
       ],
     },
   },

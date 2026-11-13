@@ -364,7 +364,6 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
     enableGrid: settings.enableGrid,
     enableAxes: settings.enableAxes,
     enableMatcap: settings.enableMatcap,
-    enablePostProcessing: settings.enablePostProcessing,
     upDirection: settings.upDirection,
     pinnedMeasurements: settings.pinnedMeasurements,
     sectionView: settings.sectionView,

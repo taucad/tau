@@ -898,7 +898,6 @@ export function RenderingProfile(): React.JSX.Element {
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
       ...defaultGraphicsSettings,
-      enablePostProcessing: true,
       enableMatcap: false,
       upDirection: 'z',
       graphicsBackend: 'webgl',

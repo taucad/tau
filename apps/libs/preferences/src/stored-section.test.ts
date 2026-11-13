@@ -80,6 +80,23 @@ describe('prepareSectionWrite', () => {
     });
   });
 
+  it('drops view defaults Settings no longer offers and keeps the rest of the viewer section', () => {
+    const stored = JSON.stringify({
+      value: {
+        version: 1,
+        controls: {},
+        gizmo: {},
+        viewDefaults: {
+          'display.surfaces': false,
+          'display.lines': false,
+          'display.postProcessing': true,
+          'display.grid': false,
+        },
+      },
+    });
+    expect(readSection(viewerPreferencesSection, stored).value.viewDefaults).toEqual({ 'display.grid': false });
+  });
+
   it('keeps the synced half as it was', () => {
     const synced = { value: profile, revision: 4 };
     const write = prepareSectionWrite(personProfileSection, JSON.stringify({ value: profile, synced }), {

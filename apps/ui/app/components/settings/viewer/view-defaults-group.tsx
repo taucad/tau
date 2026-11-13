@@ -1,6 +1,6 @@
 /**
  * The View defaults group (onboarding blueprint, Finding 6, V4): the person's own value for the inheritable leaves a
- * person picks a default for. Surfaces, edges and post-processing are view leaves without a personal default here. Every view that does not set a leaf shows this value; no view file is written. A set leaf shows
+ * person picks a default for. Every view that does not set a leaf shows this value; no view file is written. A set leaf shows
  * the modified dot, which removes it; "Reset all" removes every leaf and is disabled when none is set.
  */
 import { useState } from 'react';
@@ -22,7 +22,7 @@ import {
   viewDefaultCopy,
   viewDefaultsInfo,
 } from '#components/settings/viewer/viewer-settings-copy.js';
-import type { ShownViewDefaultLeaf, ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
+import type { ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 
@@ -34,9 +34,9 @@ const rows = [
   ['display.axes', 'viewer-axes'],
   ['display.matcap', 'viewer-matcap'],
   ['grid.unit', 'viewer-grid-unit'],
-] as const satisfies ReadonlyArray<readonly [ShownViewDefaultLeaf, SettingId]>;
+] as const satisfies ReadonlyArray<readonly [ViewDefaultLeaf, SettingId]>;
 
-type SwitchLeaf = Extract<ShownViewDefaultLeaf, `display.${string}`>;
+type SwitchLeaf = Extract<ViewDefaultLeaf, `display.${string}`>;
 
 /** The widest field of view in degrees; 0° is orthographic. The editor's Viewer settings uses the same range. */
 const maxFieldOfView = 90;
@@ -83,7 +83,7 @@ function ProjectionControl({
         </span>
       }
       className={projectionFieldClassName}
-      aria-label='Field of view, 0° is orthographic'
+      aria-label={viewDefaultCopy.fieldOfView.title}
       aria-valuetext={`${shownAngle}°`}
       onScrubChange={setDragAngle}
       onScrubCommit={commit}
@@ -162,7 +162,7 @@ export function ViewDefaultsGroup({
     }
   };
 
-  const controlOf = (leaf: ShownViewDefaultLeaf): React.ReactNode => {
+  const controlOf = (leaf: ViewDefaultLeaf): React.ReactNode => {
     if (leaf === 'fieldOfView') {
       return (
         <ProjectionControl

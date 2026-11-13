@@ -204,7 +204,7 @@ async function mount(
         listener();
       }
     },
-    /** What graphics shows for the seven display flags, in the record's order. */
+    /** What graphics shows for the six display flags, in the record's order. */
     display: (): boolean[] => {
       const { context } = graphics.getSnapshot();
       return [
@@ -214,7 +214,6 @@ async function mount(
         context.enableGrid,
         context.enableAxes,
         context.enableMatcap,
-        context.enablePostProcessing,
       ];
     },
   };
@@ -474,13 +473,13 @@ describe('view record session', () => {
 });
 
 /*
- * The ten inheritable leaves on the live path (onboarding blueprint, Finding 6; graphics charter ruling of 2026-11-12):
+ * The nine inheritable leaves on the live path (onboarding blueprint, Finding 6; graphics charter ruling of 2026-11-12):
  * they flow one way, from the record resolved over the person's defaults and this device's exceptions to the owners,
  * and only view commands write them. Carried from the deleted `useViewSettingsSync` rows of PR 4 of the onboarding
  * plan.
  */
 describe('view record session: inheritable leaves flow one way (onboarding WP3)', () => {
-  const tenLeaves = (record: WorkbenchView | undefined): string =>
+  const nineLeaves = (record: WorkbenchView | undefined): string =>
     JSON.stringify([record?.fieldOfView, record?.upDirection, record?.display, record?.grid]);
   const fieldOfView = (harness: Awaited<ReturnType<typeof mount>>): number =>
     harness.camera.getSnapshot().context.view.requestedVerticalFieldOfView;
@@ -553,14 +552,14 @@ describe('view record session: inheritable leaves flow one way (onboarding WP3)'
   });
 
   it('should write no inheritable leaf while a camera move and a section change persist and a personal default changes (V6)', async () => {
-    const record = view({ display: { ...view().display, postProcessing: true }, grid: { unit: 'cm' } });
+    const record = view({ display: { ...view().display, matcap: true }, grid: { unit: 'cm' } });
     const harness = await mount(record);
     await harness.frame();
     harness.drag([1, 0, 0], 5);
     harness.graphics.send({ type: 'setSectionViewActive', payload: true });
     // This tab changes a default, then another tab does (the section store's change reaches every session).
     harness.setLevels({ person: { 'display.grid': false, fieldOfView: 0 } });
-    harness.setLevels({ person: { 'display.grid': false, 'display.surfaces': false } });
+    harness.setLevels({ person: { 'display.grid': false, 'display.axes': false } });
     harness.release();
     await harness.quiet();
     harness.clock.increment(sectionSettleDelay);
@@ -569,11 +568,11 @@ describe('view record session: inheritable leaves flow one way (onboarding WP3)'
     expect(harness.file()?.section.active).toBe(true);
     expect(harness.writes.length).toBeGreaterThan(0);
     for (const next of harness.writes) {
-      expect(tenLeaves(next)).toBe(tenLeaves(record));
+      expect(nineLeaves(next)).toBe(nineLeaves(record));
     }
     // The live owners show the resolution, which no write copied into the file.
     expect(harness.graphics.getSnapshot().context.enableGrid).toBe(false);
-    expect(harness.graphics.getSnapshot().context.enableSurfaces).toBe(false);
+    expect(harness.graphics.getSnapshot().context.enableAxes).toBe(false);
     expect(fieldOfView(harness)).toBe(record.fieldOfView);
   });
 
@@ -591,11 +590,8 @@ describe('view record session: inheritable leaves flow one way (onboarding WP3)'
   });
 
   it.each([
-    [
-      'post-processing on, every other leaf at its format value',
-      { display: { ...view().display, postProcessing: true } },
-    ],
-    ['post-processing off, every other leaf at its format value', {}],
+    ['matcap on, every other leaf at its format value', { display: { ...view().display, matcap: true } }],
+    ['every leaf at its format value', {}],
     [
       'every leaf away from its format value',
       {
@@ -608,7 +604,6 @@ describe('view record session: inheritable leaves flow one way (onboarding WP3)'
           grid: false,
           axes: false,
           matcap: true,
-          postProcessing: true,
         },
         grid: { unit: 'in' },
       },

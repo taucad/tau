@@ -66,11 +66,11 @@ describe("a view's menu states (T5.3, V5)", () => {
 
   it('follows a change to the person’s defaults', () => {
     const { result } = mount();
-    expect(result.current?.sourceOf?.('display.surfaces')).toBe('tau');
+    expect(result.current?.sourceOf?.('display.matcap')).toBe('tau');
     act(() => {
-      personRecordStores.viewer.write({ viewDefaults: { 'display.surfaces': false } });
+      personRecordStores.viewer.write({ viewDefaults: { 'display.matcap': true } });
     });
-    expect(result.current?.sourceOf?.('display.surfaces')).toBe('person');
+    expect(result.current?.sourceOf?.('display.matcap')).toBe('person');
   });
 
   it('reports a set and a reset with level view, and Reset view resets every leaf the view sets', async () => {

@@ -40,8 +40,7 @@ const renderSection = (): ReturnType<typeof render> =>
 
 const row = (title: string): HTMLElement => screen.getByRole('group', { name: title });
 const viewDefaults = (): Readonly<Record<string, unknown>> => personRecordStores.viewer.read().viewDefaults;
-const fieldOfView = (): HTMLElement =>
-  within(row('Projection')).getByRole('spinbutton', { name: 'Field of view, 0° is orthographic' });
+const fieldOfView = (): HTMLElement => within(row('Projection')).getByRole('spinbutton', { name: 'Projection' });
 
 /* Radix Select opens from the keyboard in jsdom, which models no pointer capture. */
 const choose = async (label: string, option: string): Promise<void> => {

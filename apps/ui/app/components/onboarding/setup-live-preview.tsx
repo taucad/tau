@@ -73,7 +73,6 @@ export default function SetupLivePreview({
           enableAxes: false,
           enableLines: true,
           enableSurfaces: true,
-          enablePostProcessing: false,
         }}
       />
     </div>

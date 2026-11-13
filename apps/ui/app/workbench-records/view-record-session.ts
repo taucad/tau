@@ -12,7 +12,7 @@
  * - framing's entry and state become `framingChanged`;
  * - graphics' pinned measurements become `ownersChanged`, with the changed fields only;
  * - a change of the levels above the view (the person's defaults or this device's exceptions) becomes `levelsChanged`,
- *   so the ten inheritable leaves are seeded from their new resolution (onboarding blueprint, Finding 6);
+ *   so the nine inheritable leaves are seeded from their new resolution (onboarding blueprint, Finding 6);
  * - graphics' section quiet gate becomes `sectionEdited` and `sectionSettled`;
  * - the store's publications become `recordPublished`, with their origin and the patch an own write carried.
  *
@@ -204,7 +204,7 @@ export const sectionOf = (context: GraphicsContext): PersistedSectionView => ({
 });
 
 /**
- * The graphics-held owner values a view record keeps. The ten inheritable leaves are not among them: view commands
+ * The graphics-held owner values a view record keeps. The nine inheritable leaves are not among them: view commands
  * write those, and graphics only shows their resolution.
  */
 export const graphicsOwnersOf = (context: GraphicsContext): Omit<ViewOwners, 'camera'> => ({

@@ -275,7 +275,7 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *
  * - **durable** -- in `GraphicsViewSettings`, seeded once at spawn and restored identically by an
  *   in-app revisit and a page reload: `enableSurfaces`, `enableLines`, `enableGizmo`, `enableGrid`,
- *   `enableAxes`, `enableMatcap`, `enablePostProcessing`, `upDirection`, `graphicsBackendPreference`,
+ *   `enableAxes`, `enableMatcap`, `upDirection`, `graphicsBackendPreference`,
  *   the pinned half of `measurements`, and the section view -- `isSectionViewActive` and the values of
  *   `sectionCuts` (entry-scoped; the cut ids are made anew at every seed).
  * - **session** -- survives an in-app revisit because this actor is retained, and is lost on reload
@@ -343,7 +343,6 @@ export interface GraphicsContext {
   enableGrid: boolean;
   enableAxes: boolean;
   enableMatcap: boolean;
-  enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
   /** User preference (`auto` uses runtime GPU probe). */
   graphicsBackendPreference: GraphicsBackendPreference;
@@ -521,7 +520,6 @@ export type GraphicsEvent =
   | { type: 'setGridVisibility'; payload: boolean }
   | { type: 'setAxesVisibility'; payload: boolean }
   | { type: 'setMatcapVisibility'; payload: boolean }
-  | { type: 'setPostProcessingVisibility'; payload: boolean }
   | { type: 'setUpDirection'; payload: 'x' | 'y' | 'z' }
   /**
    * A view record's up direction (charter G6): graphics takes it, and the camera adopts it through
@@ -829,7 +827,6 @@ export const graphicsEventTypes = [
   'setGridVisibility',
   'setAxesVisibility',
   'setMatcapVisibility',
-  'setPostProcessingVisibility',
   'setUpDirection',
   'adoptUpDirection',
   'setGraphicsBackendPreference',
@@ -1625,7 +1622,6 @@ const graphicsMachineDefinition = setup({
       enableGrid: input.enableGrid ?? true,
       enableAxes: input.enableAxes ?? true,
       enableMatcap: input.enableMatcap ?? false,
-      enablePostProcessing: input.enablePostProcessing ?? true,
       upDirection: input.upDirection ?? 'z',
       graphicsBackendPreference: preference,
       webGpuAvailable: false,
@@ -1916,7 +1912,6 @@ const graphicsMachineDefinition = setup({
         setGridVisibility: { context: ({ event }) => ({ enableGrid: event.payload }) },
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
         setMatcapVisibility: { context: ({ event }) => ({ enableMatcap: event.payload }) },
-        setPostProcessingVisibility: { context: ({ event }) => ({ enablePostProcessing: event.payload }) },
         setUpDirection: ({ context, event }, enq) => {
           if (event.payload === context.upDirection) {
             return {};

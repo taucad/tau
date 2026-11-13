@@ -30,8 +30,8 @@
  *   record asks for nothing again, and a dropped pose is not requested twice.
  * - **No time here (D3, I8).** The camera applies an adoption only in `input.idle` and drops it otherwise; the section
  *   quiet gate is graphics' (`sectionEdited` and `sectionSettled`). Edits are coalesced by `recordSync`'s debounce.
- * - **The ten inheritable leaves (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for them).** Up
- *   direction, field of view, the seven display flags and the grid unit are command-written and resolver-seeded: each
+ * - **The nine inheritable leaves (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for them).** Up
+ *   direction, field of view, the six display flags and the grid unit are command-written and resolver-seeded: each
  *   record (of any origin) and each `levelsChanged` seeds the owners from `resolveViewSettings` output, and no edit
  *   writes them from the owners.
  * - Foreign field of view and up direction go through `adoptPersistedPose` with the pose, never through the camera's

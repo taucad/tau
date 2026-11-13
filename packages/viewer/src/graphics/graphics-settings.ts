@@ -63,7 +63,6 @@ export type GraphicsViewSettings = {
   enableGrid: boolean;
   enableAxes: boolean;
   enableMatcap: boolean;
-  enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
   cameraFovAngle: number;
   /** Canonical user-authored camera view; derived viewport, bounds, and clipping are intentionally omitted. */
@@ -126,7 +125,6 @@ export type GraphicsOwnedSettings = Pick<
   | 'enableGrid'
   | 'enableAxes'
   | 'enableMatcap'
-  | 'enablePostProcessing'
   | 'upDirection'
   | 'graphicsBackend'
   | 'pinnedMeasurements'
@@ -193,7 +191,6 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   enableGrid: true,
   enableAxes: true,
   enableMatcap: false,
-  enablePostProcessing: true,
   upDirection: 'z',
   cameraFovAngle: 60,
   graphicsBackend: 'webgpu',

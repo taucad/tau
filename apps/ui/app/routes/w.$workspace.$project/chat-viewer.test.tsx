@@ -305,7 +305,6 @@ const mockGraphicsActor = {
       enableGrid: true,
       enableAxes: true,
       enableMatcap: false,
-      enablePostProcessing: false,
       upDirection: 'z',
       cameraFovAngle: 45,
       measurements: [],

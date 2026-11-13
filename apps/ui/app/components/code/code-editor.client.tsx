@@ -99,6 +99,8 @@ export type CodeEditorProps = Readonly<{
   readOnly?: boolean;
   /** The placeholder's accessible name until the editor mounts, such as "Loading main.ts". */
   loadingLabel?: string;
+  /** The file's text as read, shown in the placeholder until the document is held; the document's text wins. */
+  loadingText?: string;
   extensions?: Extension;
   syntaxExtension?: Extension;
   diagnostics?: EditorDiagnostics;
@@ -249,7 +251,7 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       </div>
     );
   }
-  const { loadingLabel, ...viewProps } = props;
+  const { loadingLabel, loadingText, ...viewProps } = props;
   const body =
     View && props.document ? (
       <View
@@ -262,7 +264,7 @@ export function CodeEditor(props: CodeEditorBoundaryProps): React.ReactNode {
       <EditorPanePlaceholder
         ref={placeholderRef}
         label={loadingLabel ?? 'Loading editor'}
-        text={props.document?.text}
+        text={props.document?.text ?? loadingText}
         hasLineNumbers={props.showLineNumbers}
         className={props.className}
         onScroll={props.document ? handlePlaceholderScroll : undefined}

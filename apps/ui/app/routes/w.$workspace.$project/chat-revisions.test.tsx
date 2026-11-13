@@ -1225,7 +1225,7 @@ describe('Revisions pane vocabulary and History', () => {
     renderPane();
 
     const card = await screen.findByRole('group', { name: 'History' });
-    expect(card.querySelector('[data-slot="history-loading"]')).toHaveAttribute('aria-busy', 'true');
+    expect(card).toHaveAttribute('aria-busy', 'true');
     /* The header's trailing slot holds the wait; the strip's status line is the pane's one announcement. */
     const indicator = card.querySelector('[data-slot="wait-indicator"]');
     expect(indicator).toHaveAttribute('data-state', 'waiting');
@@ -1247,8 +1247,29 @@ describe('Revisions pane vocabulary and History', () => {
 
     const card = await screen.findByRole('group', { name: 'History' });
     expect(document.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton shapes in the History pane').toHaveLength(0);
-    expect(card.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(card).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
+  });
+
+  /* A later wait in the same mount (a branch switch, a reconnect) is timed from its own start, not the mount's. */
+  it('times a later History wait from when it starts, not from when the pane mounted', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    await waitFor(() => {
+      expect(card).not.toHaveAttribute('aria-busy');
+    });
+
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    rerender(<RevisionsPanelBody />);
+
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    const body = card.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
   });
 
   /*

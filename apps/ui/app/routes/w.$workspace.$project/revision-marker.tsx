@@ -36,7 +36,7 @@ import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { useWaitStart } from '#components/code/editor-pane-placeholder.js';
+import { useWaitStart } from '#hooks/use-wait-start.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
@@ -121,7 +121,7 @@ function FileComparison({
   if (isLoading) {
     return (
       <div id={id} role='group' aria-label={label} aria-busy='true' className='border-t px-2 py-1.5'>
-        <ComparisonWait label='Loading comparison' />
+        <ComparisonWait label='Loading comparison' onRetry={retry} />
       </div>
     );
   }
@@ -192,12 +192,32 @@ function FileComparison({
  * 1,000 ms (loading states UX blueprint, U17; M7). Compare is a gesture after the
  * route opened, so the wait is its own group and its slot is live.
  *
- * @param props - What is being waited for.
+ * From 10,000 ms Retry sits beside the slow words; it reads again and starts a
+ * new wait, timed from the Retry.
+ *
+ * @param props - What is being waited for, and how to read it again.
  * @returns The indicator slot.
  */
-function ComparisonWait({ label }: { readonly label: string }): React.JSX.Element {
-  const startedAt = useWaitStart();
-  return <WaitIndicator active label={label} slowLabel={`Still ${label.toLowerCase()}`} startedAt={startedAt} />;
+function ComparisonWait({
+  label,
+  onRetry,
+}: {
+  readonly label: string;
+  readonly onRetry: () => void;
+}): React.JSX.Element {
+  const { startedAt, restart } = useWaitStart(true);
+  return (
+    <WaitIndicator
+      active
+      label={label}
+      slowLabel={`Still ${label.toLowerCase()}`}
+      startedAt={startedAt}
+      onRetry={() => {
+        restart();
+        onRetry();
+      }}
+    />
+  );
 }
 
 /**
@@ -353,7 +373,7 @@ function CurrentComparison({
         )
       ) : (
         <div aria-busy='true'>
-          <ComparisonWait label='Loading changes' />
+          <ComparisonWait label='Loading changes' onRetry={retry} />
         </div>
       )
     ) : (

@@ -611,6 +611,36 @@ describe('FileEditor routing', () => {
     expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
   });
 
+  /* Loading states UX blueprint P-i: the pane owns one "Opening file" wait, which survives the body's move from the
+     loading branch to the routed viewer and keeps its 500 ms minimum there. */
+  it('keeps one Opening file wait across the move from loading to the file’s text', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    let content: FileContentResult = { kind: 'loading' };
+    mockUseFileContent.mockImplementation(() => content);
+    const pane = render(<FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const slot = pane.container.querySelector('[data-slot="file-pane-frame"] > div > [data-slot="wait-indicator"]');
+    expect(slot).toHaveAttribute('data-state', 'waiting');
+    expect(slot).toHaveTextContent('Opening file…');
+
+    now.mockReturnValue(1300);
+    content = { kind: 'text', content: new TextEncoder().encode('let ready = true;') };
+    pane.rerender(
+      <FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} parameters={{ filePath: 'main.ts' }} />,
+    );
+    expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
+    // The same node: shown at 1,100 ms, it holds until 1,600 ms, 300 ms after the text arrived.
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('data-state', 'holding');
+    expect(
+      slot
+        ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+        ?.style.getPropertyValue('--wait-hide-delay'),
+    ).toBe('300ms');
+  });
+
   it('does not rerender for unrelated or unchanged open file entries', () => {
     mockUseFileContent.mockReturnValue({ kind: 'loading' });
     editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'image.png' }];

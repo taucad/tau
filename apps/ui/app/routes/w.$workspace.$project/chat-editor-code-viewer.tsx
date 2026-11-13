@@ -13,6 +13,7 @@ import { useEditorSymbolPathReporter } from '#routes/w.$workspace.$project/edito
 export function ChatEditorCodeViewer({
   paneId,
   filePath,
+  content,
   language,
   onApply,
   onHistory,
@@ -30,6 +31,7 @@ export function ChatEditorCodeViewer({
       onHistory={onHistory}
       readOnly={readOnly}
       loadingLabel={loadingLabel}
+      loadingText={content}
       projectId={projectId}
     />
   );
@@ -43,10 +45,12 @@ function MountedCodeEditor({
   onHistory,
   readOnly,
   loadingLabel,
+  loadingText,
   projectId,
 }: Pick<ChatEditorViewerProps, 'paneId' | 'language' | 'onApply' | 'onHistory' | 'readOnly'> & {
   readonly document: EditorDocument | undefined;
   readonly loadingLabel: string;
+  readonly loadingText: string;
   readonly projectId: string;
 }): React.JSX.Element {
   const environment = useEditorLanguageEnvironment();
@@ -125,6 +129,7 @@ function MountedCodeEditor({
         viewId={paneId}
         languageId={language}
         loadingLabel={loadingLabel}
+        loadingText={loadingText}
         className='h-full bg-background'
         readOnly={readOnly}
         extensions={

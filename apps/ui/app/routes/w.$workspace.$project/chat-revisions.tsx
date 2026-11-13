@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
-import { useWaitStart } from '#components/code/editor-pane-placeholder.js';
+import { useWaitStart } from '#hooks/use-wait-start.js';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -1467,17 +1467,6 @@ function HistoryList(): React.JSX.Element {
 }
 
 /**
- * Loading is not empty (DESIGN, I6, S20): History's own card, empty and busy, under the strip's one *Loading
- * history…* sentence, never *No history yet*. Nothing stands for rows that have not arrived (loading states UX
- * blueprint, U17); the card's header says "Loading history" once the wait passes 1,000 ms.
- *
- * @returns The empty, busy card body.
- */
-function HistoryLoading(): React.JSX.Element {
-  return <div data-slot='history-loading' aria-busy='true' />;
-}
-
-/**
  * The marker text the worker materialized, by revision and path.
  *
  * *Open* is a request, not a render: `resolution.machine` reads the three terms
@@ -1609,7 +1598,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const isHistoryLoading = isLoading || line.kind === 'unknown';
   /* Remembered entries are content: the wait is shown only while History has none to show. */
   const isHistoryWaiting = isHistoryLoading && revisions.length === 0;
-  const historyWaitStart = useWaitStart();
+  const historyWait = useWaitStart(isHistoryWaiting);
 
   return (
     <div data-slot='revisions-panel-body' className='@container flex size-full min-h-0 flex-col bg-sidebar'>
@@ -1652,6 +1641,9 @@ export function RevisionsPanelBody(): React.JSX.Element {
           id='revision-history-heading'
           title='History'
           isLandmark={false}
+          /* Loading is not empty (DESIGN, I6, S20): the card itself is busy and its body empty, never *No history yet*,
+             and nothing stands for rows that have not arrived (loading states UX blueprint, U17). */
+          isBusy={isHistoryWaiting}
           /* The header's trailing slot is always rendered, so the indicator never changes the header's height. Not live:
              the strip's status line is the pane's one announcement and already says *Loading history…*. */
           action={
@@ -1659,14 +1651,12 @@ export function RevisionsPanelBody(): React.JSX.Element {
               active={isHistoryWaiting}
               label='Loading history'
               slowLabel='Still loading history'
-              startedAt={historyWaitStart}
+              startedAt={historyWait.startedAt}
               live={false}
             />
           }
         >
-          {isHistoryWaiting ? (
-            <HistoryLoading />
-          ) : revisions.length === 0 ? (
+          {isHistoryWaiting ? null : revisions.length === 0 ? (
             <PanelEmptyState
               icon={History}
               title='No history yet'

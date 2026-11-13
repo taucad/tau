@@ -363,7 +363,8 @@ describe('libraryRecovery', () => {
       await settleReplay(harness, workspaceGone);
       harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
       expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm1' }]);
-      // The workspace returns while the mutation writes its row: o1 waits, so the journal sees no active row for p1.
+      // The workspace returns while the mutation writes its row. o1 is re-armed but does not start: the model reaches
+      // the same state with the return after the journaling, so the loop holds o1 until the mutation settles.
       harness.send({ type: 'workspaceReturned' });
       harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
       expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'waiting' }));
@@ -373,6 +374,34 @@ describe('libraryRecovery', () => {
       expect(harness.replay.calls).toHaveLength(1);
       harness.send({ type: 'mutationSettled', operationId: 'o2', outcome: recovered });
       expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1', 'o1']);
+    });
+
+    it("should read the journal again for a person's replay or a mutation after a failed read, as today", async () => {
+      const harness = start();
+      harness.readJournal.calls[0]?.reject(new Error('idb closed'));
+      await flush();
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      expect(harness.readJournal.calls).toHaveLength(2);
+      harness.readJournal.calls[1]?.reject(new Error('idb closed'));
+      await flush();
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p2' });
+      expect(harness.readJournal.calls).toHaveLength(3);
+      harness.readJournal.calls[2]?.resolve([]);
+      await flush();
+      harness.send({ type: 'discoveryReady' });
+      expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm1' }]);
+      await settleReplay(harness, recovered);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: false }]);
+    });
+
+    it('should re-arm a row that failed on its workspace while the journal was read, when the workspace returns', async () => {
+      const harness = start();
+      harness.send({ type: 'mutationJournaled', requestId: 'm1', row: row('o1', 'p1', 'w1') });
+      harness.send({ type: 'mutationSettled', operationId: 'o1', outcome: workspaceGone });
+      harness.send({ type: 'workspaceReturned', workspaceId: 'w1' });
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'waiting' }));
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1']);
     });
 
     it('should hold a mutation until the journal is read', async () => {

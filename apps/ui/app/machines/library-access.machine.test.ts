@@ -359,6 +359,16 @@ describe('libraryAccess', () => {
       expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
     });
 
+    it('should not ensure the library row of a project verified at an epoch that has since moved', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      harness.send({ type: 'epochMoved', epoch: 2, current: false });
+      await resolve(harness.verify, { status: 'verified', project: project('p1') });
+      expect(harness.ensure.calls).toHaveLength(0);
+      expect(harness.verify.calls).toHaveLength(2);
+    });
+
     it('should read again on superseded', async () => {
       const harness = start();
       settledLibrary(harness);
@@ -367,16 +377,25 @@ describe('libraryAccess', () => {
       expect(harness.verify.calls).toHaveLength(2);
     });
 
-    it('should read again when the pass answers from an epoch that has since moved', async () => {
-      const harness = start();
-      settledLibrary(harness);
-      ask(harness);
-      await resolve(harness.verify, { status: 'discovery-required' });
-      harness.send({ type: 'epochMoved', epoch: 2, current: false });
-      await resolve(harness.discovery, pass(1, [entry('route-blocked', 'p1')]));
-      expect(harness.answers('q1')).toEqual([]);
-      expect(harness.verify.calls).toHaveLength(2);
-    });
+    it.each([
+      ['a route-blocked entry', [entry('route-blocked', 'p1')]],
+      ['the project', [valid('p1')]],
+      ['no entry', []],
+    ] as const)(
+      'should read again when the pass that finds %s answers from an epoch that has since moved',
+      async (_name, entries) => {
+        const harness = start();
+        settledLibrary(harness);
+        ask(harness);
+        await resolve(harness.verify, { status: 'discovery-required' });
+        harness.send({ type: 'epochMoved', epoch: 2, current: false });
+        await resolve(harness.discovery, pass(1, entries));
+        expect(harness.answers('q1')).toEqual([]);
+        expect(harness.ensure.calls).toHaveLength(0);
+        expect(harness.config.calls).toHaveLength(0);
+        expect(harness.verify.calls).toHaveLength(2);
+      },
+    );
 
     it("should fence a pass's answer on the pass's own epoch, not on the epoch the turn began at", async () => {
       const harness = start();

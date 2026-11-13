@@ -167,15 +167,13 @@ export const libraryRecoveryEventTypes = [
 ] as const satisfies ReadonlyArray<LibraryRecoveryEvent['type']>;
 
 /**
- * Pairs a state takes without a transition (MC-R17). While the journal is being read nothing is known about a row, so
- * the workspace and retry signals carry nothing to act on: the journal read that follows sees the workspace as it is.
- * `load` is for a failed read only.
+ * Pairs a state takes without a transition (MC-R17). A retry checks the workspaces of the rows the journal holds, so
+ * before it is read there is nothing to check: the replay of each row it reads sees the workspace as it is. `load` is
+ * for a failed read only.
  */
 export const libraryRecoveryIgnoredEvents = [
   ['loading', 'load'],
-  ['loading', 'workspaceReturned'],
   ['loading', 'retryRequested'],
-  ['loadFailed', 'workspaceReturned'],
   ['loadFailed', 'retryRequested'],
   ['ready', 'load'],
 ] as const satisfies ReadonlyArray<readonly [state: string, eventType: string]>;
@@ -455,6 +453,21 @@ export const libraryRecoveryMachine = setup({
     mutationSettled: refines('ReplaySettled', ({ context, event }, enq) =>
       mutationSettled(context, enq, { event, admit: false }),
     ),
+    /* A row this tab already knows (one journaled while the read runs) waits for its workspace in every state. */
+    workspaceReturned: refines('WorkspaceReturned', ({ context, event }, enq) => ({
+      context: rearm(
+        context,
+        context.order.filter((operationId) => {
+          const row = context.rows[operationId];
+          return (
+            row !== undefined &&
+            rearmable(row) &&
+            (event.workspaceId === undefined || row.workspaceId === undefined || row.workspaceId === event.workspaceId)
+          );
+        }),
+        enq,
+      ),
+    })),
   },
   initial: 'loading',
   states: {
@@ -487,6 +500,15 @@ export const libraryRecoveryMachine = setup({
     loadFailed: {
       on: {
         load: refines('Unmodelled', () => ({ target: 'loading' })),
+        /* As today's `ensureJournalReady`, which drops a failed read: the next caller that needs the journal reads it again. */
+        mutationAsked: refines('Unmodelled', ({ context, event }) => ({
+          target: 'loading',
+          context: { asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }] },
+        })),
+        replayAsked: refines('Unmodelled', ({ context, event }) => ({
+          target: 'loading',
+          context: { personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }] },
+        })),
       },
     },
     ready: {
@@ -513,22 +535,6 @@ export const libraryRecoveryMachine = setup({
         mutationSettled: refines('ReplaySettled', ({ context, event }, enq) =>
           mutationSettled(context, enq, { event, admit: true }),
         ),
-        workspaceReturned: refines('WorkspaceReturned', ({ context, event }, enq) => ({
-          context: rearm(
-            context,
-            context.order.filter((operationId) => {
-              const row = context.rows[operationId];
-              return (
-                row !== undefined &&
-                rearmable(row) &&
-                (event.workspaceId === undefined ||
-                  row.workspaceId === undefined ||
-                  row.workspaceId === event.workspaceId)
-              );
-            }),
-            enq,
-          ),
-        })),
         replayAsked: refines('Unmodelled', ({ context, event }) => ({
           context: { personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }] },
         })),

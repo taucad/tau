@@ -109,7 +109,9 @@ export type FocusSessionStatus = 'absent' | 'starting' | 'live' | 'closing' | 'f
 
 /**
  * How the registry answered one `open` focus sent, matched by the open's id. The wiring reads it off the registry's
- * snapshot after the send, and again when the open waiting in `pendingOpen` is resumed, dropped or refused.
+ * snapshot after the send, and again when the open waiting in `pendingOpen` is resumed, dropped or refused. With a
+ * `live` answer it also reports the session's facts: focus joins only on facts reported since its open, because a
+ * record from before the open may belong to a session that is going away.
  *
  * - `live`: a spawn, a touch of a live session, or the resume of the waiting open (also `reopenRetained`);
  * - `waiting`: the open waits in `pendingOpen`;
@@ -275,8 +277,8 @@ export type FocusOpen = Readonly<{
   /** A person's reopen of the project focus was on. */
   person: boolean;
   /**
-   * The session reported live since this open was sent: only then does `absent` or `failed` mean the session went
-   * away (rule 11, "an open that never went live is not a close").
+   * The session reported starting or live since this open was sent: only then does `absent` or `failed` mean the
+   * session went away (rule 11, "an open that never went live is not a close").
    */
   seenLive: boolean;
 }>;
@@ -559,7 +561,6 @@ const sendOpen = (
   }
   sendRegistry(effects, context, { type: 'open', projectId, request, requestId: openId });
   context.lastSent = { openId, projectId, epoch: request.epoch };
-  context.droppedAt = undefined;
   context.kept = { ...context.kept, [projectId]: request };
   context.forwarded = {
     ...context.forwarded,
@@ -685,6 +686,7 @@ const advance = (context: Patch, start: State, effects: Effects): State => {
           prefix: 'open',
         });
         context.open = { openId, live: false, patience: false, person: false, seenLive: false };
+        context.droppedAt = undefined;
       }
     }
     // The join (I20), or the session focus opened went away or failed before it.
@@ -696,6 +698,7 @@ const advance = (context: Patch, start: State, effects: Effects): State => {
           state = settleOn(context, target);
         } else if (
           facts.status === 'live' &&
+          context.open.seenLive &&
           isFresh(context) &&
           context.module === 'loaded' &&
           ((facts.chatReady && facts.availability === 'settled') || context.open.patience)
@@ -899,10 +902,13 @@ export const createFocusMachine = (policy: FocusPolicy) => {
     projectId: string,
     request: FocusOpenRequest,
   ): State => {
-    const opening = state === 'opening' && context.open.openId !== undefined && !context.open.live;
+    const status = context.facts[projectId]?.status;
+    // A session in the live set: the open is a touch, and focus does not move (rule 13, `PersonOpenAsked`).
+    const inLiveSet = status === 'live' || status === 'starting';
+    const opening = state === 'opening' && context.open.openId !== undefined;
     const openId = sendOpen(context, effects, { projectId, request, prefix: 'person' });
     context.personOpens = { ...context.personOpens, [openId]: projectId };
-    if (context.answer?.projectId !== projectId) {
+    if (context.answer?.projectId !== projectId || inLiveSet) {
       return state;
     }
     if (state === 'focused') {
@@ -910,7 +916,7 @@ export const createFocusMachine = (policy: FocusPolicy) => {
       return 'opening';
     }
     if (opening) {
-      context.open = { ...context.open, openId, seenLive: false };
+      context.open = { ...context.open, openId, live: false, seenLive: false };
       if (context.pending?.projectId === projectId) {
         context.pending = undefined;
       }
@@ -937,9 +943,11 @@ export const createFocusMachine = (policy: FocusPolicy) => {
       } satisfies FocusLibraryCommand);
       return { context: patch };
     }
+    // An answer at a later epoch is where focus hears the library moved (as in `TAnswered`).
+    patch.epoch = event.epoch;
     if (event.answer.status !== 'ready' || slugs === undefined) {
       effects.emit({ type: 'openRefused', projectId, answer: event.answer });
-      return { context: patch };
+      return result(value, patch, advance(patch, stateOf(value), effects));
     }
     const kernel = policy.nativeKernelOf(event.answer.project);
     const request: FocusOpenRequest = {
@@ -1135,7 +1143,7 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           /* Any open displaces the registry's single slot, and the reply can arrive after focus sent another: a wait
            * for an open that is not the last one sent is already displaced (rule 9). */
           const latest = context.lastSent?.openId === event.requestId;
-          if (event.result === 'waiting' && !latest) {
+          if ((event.result === 'waiting' || event.result === 'refused') && !latest) {
             if (own) {
               patch.open = { ...context.open, openId: undefined };
               return result(value, patch, advance(patch, state, effects));
@@ -1163,7 +1171,7 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           }
           if (!own) {
             const epoch = context.lastSent?.epoch ?? context.epoch;
-            const stale = event.result === 'waiting' && epoch !== context.epoch;
+            const stale = event.result === 'waiting' && epoch < context.epoch;
             if (event.result === 'refused' || stale) {
               // Withdraw it: a refused open, or one from before a library change, no longer stands (rules 9, 12).
               sendRegistry(effects, context, { type: 'cancelPendingOpen' });
@@ -1176,11 +1184,9 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           let next = state;
           switch (event.result) {
             case 'live': {
-              const target = context.answer?.projectId;
               patch.open = {
                 ...context.open,
                 live: true,
-                seenLive: target !== undefined && context.facts[target]?.status === 'live',
               };
               // A chat the route switched to while the open was out reaches the session now it is live (rule 2).
               if (
@@ -1193,7 +1199,7 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             }
             case 'waiting': {
               const sent = context.lastSent;
-              if (sent !== undefined && sent.epoch !== context.epoch) {
+              if (sent !== undefined && sent.epoch < context.epoch) {
                 /* The re-ask after a library change went out before this reply: the waiting open is from the old
                  * epoch, so focus withdraws it and opens again from the fresh answer (rule 9). */
                 sendRegistry(effects, context, { type: 'cancelPendingOpen' });
@@ -1261,10 +1267,10 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           };
           if (
             context.open.openId !== undefined &&
-            context.open.live &&
             context.answer?.projectId === event.projectId &&
-            event.status === 'live'
+            (event.status === 'starting' || event.status === 'live')
           ) {
+            // In the live set since the open was sent (the model's `live`): a later `absent` or `failed` is a close.
             patch.open = { ...context.open, seenLive: true };
           }
           return result(value, patch, advance(patch, stateOf(value), effectsOf(enq)));

@@ -871,6 +871,7 @@ describe('focus: replies that arrive out of turn', () => {
     harness.route('r3', 'a');
     harness.ready('r3', 'a');
     harness.settleOpen('live');
+    harness.facts('a', 'live');
 
     expect(harness.state()).toBe('focused');
 
@@ -1005,5 +1006,139 @@ describe('focus: replies around a library change or a blocked move', () => {
 
     expect(registryOf(harness, 'cancelPendingOpen')).toHaveLength(1);
     expect(harness.context().pending).toBeUndefined();
+  });
+});
+
+describe('focus: a session that leaves before the join, and person opens around it', () => {
+  it.each([
+    ['fails to start', ['starting', 'failed']],
+    ['closes while still starting', ['starting', 'closing', 'absent']],
+  ] as const)('should settle on the closed view when a spawned session %s (rules 10, 11)', (_how, statuses) => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.loaded();
+    harness.settleOpen('live');
+    for (const status of statuses) {
+      harness.facts('a', status, { chatReady: false, availability: 'pending' });
+    }
+
+    expect(harness.state()).toBe('focused');
+    expect(routeState(harness, 'a')).toBe('closed');
+  });
+
+  it('should not count a live record from before the open, read at a resume, as the session going live', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'b');
+    harness.facts('a', 'live');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    harness.settleOpen('waiting');
+    harness.settleOpen('live');
+    harness.facts('a', 'closing');
+    harness.facts('a', 'absent');
+
+    expect(harness.state()).toEqual({ opening: 'pending' });
+
+    harness.facts('a', 'starting', { chatReady: false, availability: 'pending' });
+    harness.facts('a', 'live', { chatReady: false, availability: 'pending' });
+
+    expect(routeState(harness, 'a', { live: ['a'] })).toBe('resolving');
+  });
+
+  it('should join again when the person reopens the project focus is opening while its session closes', () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.loaded();
+    harness.settleOpen('live');
+    harness.facts('a', 'live', { chatReady: false, availability: 'pending' });
+    harness.facts('a', 'closing', { chatReady: false, availability: 'pending' });
+    harness.send({ type: 'openRequested', projectId: 'a' });
+    harness.settleOpen('waiting');
+    harness.facts('a', 'absent', { chatReady: false, availability: 'pending' });
+
+    expect(harness.state()).toEqual({ opening: 'pending' });
+
+    harness.settleOpen('live');
+    harness.facts('a', 'starting', { chatReady: false, availability: 'pending' });
+    harness.facts('a', 'live', { chatReady: false, availability: 'pending' });
+
+    expect(routeState(harness, 'a', { live: ['a'] })).toBe('resolving');
+  });
+
+  it('should keep the editor when the person opens the focused project whose session is live (rule 13)', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'a');
+    harness.send({ type: 'openRequested', projectId: 'a' });
+
+    expect(harness.state()).toBe('focused');
+    expect(routeState(harness, 'a', { live: ['a'] })).toBe('editor');
+  });
+
+  it("should not let a person's open after a drop re-send focus's stale open", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'c');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    harness.settleOpen('waiting');
+    harness.settleOpen('dropped');
+    harness.send({ type: 'openRequested', projectId: 'c' });
+
+    expect(harness.opens().filter((open) => open.projectId === 'a')).toHaveLength(1);
+
+    harness.send({ type: 'libraryChanged', revision: 1 });
+    harness.ready('r1', 'a', 1);
+
+    expect(harness.lastOpen()).toMatchObject({ projectId: 'a', request: { epoch: 1 } });
+  });
+
+  it("should keep a person's open built from an answer newer than focus's epoch", () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'd');
+    harness.route('r2', 'b');
+    harness.ready('r2', 'b');
+    harness.loaded();
+    harness.facts('b', 'live');
+    harness.settleOpen('live');
+    harness.send({ type: 'openRequested', projectId: 'd' });
+    harness.send({
+      type: 'accessAnswered',
+      requestId: harness.lastAsked().requestId,
+      epoch: 1,
+      answer: { status: 'ready', project: projectFixture('d') },
+    });
+    const open = harness.lastOpen();
+    const cancels = registryOf(harness, 'cancelPendingOpen').length;
+    harness.settleOpen('waiting', open.requestId);
+
+    expect(open).toMatchObject({ projectId: 'd', request: { epoch: 1 } });
+    expect(registryOf(harness, 'cancelPendingOpen')).toHaveLength(cancels);
+    expect(harness.context().pending).toMatchObject({ projectId: 'd', person: true, epoch: 1 });
+  });
+
+  it("should not withdraw focus's open on a late refusal of an earlier person's open", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'c');
+    harness.focusOn('r1', 'b');
+    harness.settleFlush(true);
+    harness.facts('b', 'live');
+    harness.settleOpen('live');
+    harness.facts('c', 'closing');
+    harness.send({ type: 'openRequested', projectId: 'c' });
+    const person = harness.lastOpen().requestId;
+    harness.settleOpen('waiting', person);
+    harness.route('r2', 'a');
+    harness.ready('r2', 'a');
+    harness.settleFlush(true);
+    const own = harness.lastOpen().requestId;
+    harness.settleOpen('waiting', own);
+    const cancels = registryOf(harness, 'cancelPendingOpen').length;
+    harness.settleOpen('refused', person);
+
+    expect(registryOf(harness, 'cancelPendingOpen')).toHaveLength(cancels);
+    expect(harness.context().pending).toMatchObject({ openId: own, projectId: 'a' });
   });
 });

@@ -4,7 +4,7 @@
     "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813"
   },
   "specs": {
-    "LibraryCatalog.tla": "5523f97866f1fbbdee728ec9380088dab7198b2a0f017e72a7ca8c82b3e4cad7"
+    "LibraryCatalog.tla": "7d6bdb7460a1c202d38b4d39cc44dae6c75c47accf82e4608b0aee5b30df4a79"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",
@@ -22,6 +22,6 @@
     "LibraryCatalog.today-ref-epoch-safe.cfg": "6820ab1b6b89c0a0d47de908ceae256d01e4111049d8004d2daebb0e6c24f67b",
     "LibraryCatalog.today-ref-epoch.cfg": "bbd222e64dd0e6b9cbf59057f4346110ab64658a0c6f3f251023330665c0a87c",
     "LibraryCatalog.wide.cfg": "13bb12904b6222c282f37460eb225ff6f402cc2fa5d96f34bb54836ad214822c",
-    "expected.json": "d53465cb4b8b4d8201dc28635069f4a7f5990879e8649a78626252e080e4a99b"
+    "expected.json": "5eef894a57dad2c294e30a455e9ac7c7f8c9978b64d385003c822ab1a1a16060"
   }
 }

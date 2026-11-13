@@ -45,6 +45,7 @@
 (* State space. Three projects are cheap under SYMMETRY; the write stop, *)
 (* a second crash, the environment and access questions each multiply it *)
 (* several times, so the configurations combine them sparingly (README).  *)
+(* For now every configuration runs on the nightly tier (README).          *)
 (*                                                                         *)
 (* The model is untimed: the 5 s poll, the observation debounce and the    *)
 (* worker round trips are steps. What an operation writes is the root it   *)
@@ -289,7 +290,8 @@ Outcomes == IF ws = "unavailable" THEN {"workspace"} ELSE {"ok", "terminal"}
 
 \* A replay, or a mutation applying its own row (MutationApplied), settles. `settleRecovery` and
 \* `resumePendingProjectOperation`: success removes the row; any failure marks it failed with its reason
-\* and invalidates. A terminal failure resets the record, attempts included; a row that failed with
+\* and invalidates. A terminal row is never replayed in this tab, so the model keeps no attempts for it
+\* (today `recoveryAttemptsRef` keeps them, and nothing reads them again); a row that failed with
 \* `workspace-unavailable` keeps its attempts and waits for WorkspaceReturned. Only the recovery loop's
 \* replays count an attempt (ReplayStarted, `settleRecovery`); a mutation's own settle counts none.
 ReplaySettled(r) ==
@@ -616,17 +618,17 @@ Fenced(q) ==
 AccessAnswerFenced ==
   [][\A q \in Questions : (acc[q].st # "answered" /\ acc'[q].st = "answered") => Fenced(q)]_vars
 
-\* I18. An answer is delivered at most once per question {id, generation}, to the question open under
-\* that id and generation, on a reply that question sent, and it is the answer for that question's
-\* project: a ready, missing or unavailable answer is what a read of that project sees.
+\* I18. A reply changes only its own question, and only while that question is open under the reply's
+\* generation and about the reply's project; an answer is delivered at most once per question {id,
+\* generation}, to the question open under that id and generation.
 AccessMatchedById ==
-  [][\A q \in Questions, g \in 0..MaxAsks :
-       deliveries'[q][g] # deliveries[q][g] =>
-         /\ deliveries'[q][g] = 1
-         /\ g = acc[q].gen /\ acc'[q].gen = g
-         /\ acc[q].st \in {"asking", "reading"} /\ acc'[q].p = acc[q].p
-         /\ \A m \in replies \ replies' : m.id = q
-         /\ acc'[q].ans \in {"recovering", "recovery-failed"} \/ acc'[q].ans = Observe(acc[q].p)]_vars
+  [][/\ \A m \in replies \ replies', x \in Questions :
+          acc'[x] # acc[x] => (x = m.id /\ m.gen = acc[x].gen /\ m.p = acc[x].p)
+     /\ \A q \in Questions, g \in 0..MaxAsks :
+          deliveries'[q][g] # deliveries[q][g] =>
+            /\ deliveries'[q][g] = 1
+            /\ g = acc[q].gen /\ acc'[q].gen = g
+            /\ acc[q].st \in {"asking", "reading"} /\ acc'[q].p = acc[q].p]_vars
 
 \* Witness of the inherited risk: a row this tab replays is still in the journal, so no other tab has
 \* settled it. Expected to be violated when the environment may settle a row this tab holds.

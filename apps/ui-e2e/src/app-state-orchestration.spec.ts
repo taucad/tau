@@ -507,17 +507,22 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
   const cut: SectionCut = { kind: 'plane', plane: 'xz', offset: 0.017, isFlipped: true };
 
   if (isAtOnce) {
+    /* The lane toggle the page turn clicks is the one this locator resolves: the lane's own mount. */
+    await target.evaluateLocator(chatToggle, (element) => {
+      if (element instanceof HTMLElement) {
+        element.dataset['a01ChatToggle'] = '';
+      }
+    });
     await target.click(source);
     await target.keyboardPress('ControlOrMeta+End');
-    /* One task: the lane change (a programmatic click, which leaves focus in the editor), the section cut,
-     * the edit, then the reload. Each time is written where the reloaded page can read it back. */
+    /* One page turn: the lane change (a programmatic click, which leaves focus in the editor), the section
+     * cut, the edit, then the reload. Each time is written where the reloaded page can read it back. */
     await target
       .evaluateLocator(
         source,
         (element, input) => {
           const clock = (): number => performance.timeOrigin + performance.now();
-          const toggle = document.querySelector<HTMLButtonElement>('button[aria-label="Toggle Chat lane"]');
-          toggle?.click();
+          document.querySelector<HTMLButtonElement>('[data-a01-chat-toggle]')?.click();
           const toggledAt = clock();
           (
             globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge }
@@ -529,15 +534,19 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
             document.execCommand('insertText', false, input.text);
           }
           const insertedAt = clock();
-          /* The editor reads the input back from the DOM on a later frame: reload once its own document
-           * holds the edit, so the loss measured is the app's, not an input the editor never saw. */
+          /* The editor reads the input back from the DOM on a later frame, and the lane shows closed on a
+           * later render: reload on the first frame where both are in place, so the loss measured is the
+           * app's, not a change the app never saw. */
           type EditorDom = Element & {
             cmTile?: { root?: { view?: { state: { doc: { toString(): string } } } } };
           };
           const isInState = (): boolean =>
             (element as EditorDom).cmTile?.root?.view?.state.doc.toString().includes(input.text.trim()) ?? false;
           const finish = (frames: number): void => {
-            if (!isInState() && frames < 30) {
+            const isLaneClosed = [...document.querySelectorAll('button[aria-label="Toggle Chat lane"]')].some(
+              (button) => button.getAttribute('aria-pressed') === 'false',
+            );
+            if ((!isInState() || !isLaneClosed) && frames < 30) {
               requestAnimationFrame(() => {
                 finish(frames + 1);
               });
@@ -553,7 +562,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
                 reloadAt,
                 editInState: isInState(),
                 frames,
-                isLaneClosed: toggle?.getAttribute('aria-pressed') === 'false',
+                isLaneClosed,
               }),
             );
             location.reload();
@@ -609,13 +618,14 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
 
 /*
  * Row 5a makes the three changes and reloads within one page turn: the lane change, the section cut and
- * the edit, then `location.reload()` on the first frame on which the editor's own document holds the edit,
- * about 100 ms after the lane change, so the layout record's 500 ms debounce cannot have written it and only
- * the unload can. It asserts that gap and the arrangement's survival. The view setting's and the edit's
- * local survival are report-only (S26 local loss; owner A7c, after A5b's unload sequencer): neither is lost
- * every run, so neither can be an expected failure (D25). Forcing was tried: with the reload in the very
- * task of the changes, all three were lost, but the editor had not yet read the input, so that loss was the
- * harness's, not the app's. A7c moves both reads into the assertions once the unload settles every producer.
+ * the edit, then `location.reload()` on the first frame on which the editor's own document holds the edit
+ * and the lane shows closed, about 100 ms after the lane change. The layout record's 500 ms debounce
+ * cannot have written the lane by then, so only the unload can. It asserts that gap and the arrangement's
+ * survival. The view setting's and the edit's local survival are report-only (S26 local loss; owner A7c,
+ * after A5b's unload sequencer): neither is lost every run, so neither can be an expected failure (D25).
+ * Forcing was tried: with the reload in the very task of the changes, all three were lost, but the editor
+ * had not yet read the input, so that loss was the harness's, not the app's. A7c moves both reads into the
+ * assertions once the unload settles every producer.
  */
 test('A0.1 row 5a (S26, D26): an arrangement changed just before a reload survives it, and the view setting and the edit are reported', async ({
   annotate,

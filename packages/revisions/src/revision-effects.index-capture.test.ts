@@ -642,6 +642,47 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     expect(tree?.find(({ path }) => path === 'dir1/f6.txt')?.oid).toBe(blobOidOf(initial['dir1/f6.txt']!));
   });
 
+  /* F1: the record answers one capture, so a cut beside a compare or another cut may hash the file itself; the
+   * record is the file's own id, so every capture names the same tree and the revision minted from either is right. */
+  it.each(['cut', 'compare'] as const)(
+    "should mint the walked tree from a cut beside a %s that reads a committed import's record at once",
+    async (beside) => {
+      const initial = files(10);
+      const at = await fixture(initial);
+      await writeImportRecord(at, 'dir1/f1.txt', blobOidOf(initial['dir1/f1.txt']!));
+      at.reload();
+
+      const [first, other] = await Promise.all([
+        cut(at.actors),
+        beside === 'cut'
+          ? cut(at.actors)
+          : run<{ treeId: string }>(at.actors.checkout.captureTree, { checkoutId: 'live' }),
+      ]);
+      /* A checkout holds one cut: of two at once the later one is minted, and the earlier is refused, never minted. */
+      const isCut = (held: Readonly<{ treeId: string }>): held is Cut => 'cutId' in held;
+      const order = (held: Cut): number => Number(held.cutId.split('-').at(-1));
+      const [taken, replaced] = isCut(other) && order(other) > order(first) ? [other, first] : [first, other];
+      const write = async (held: Cut) =>
+        run<{ revisionId: string }>(at.actors.checkout.writeRevision, {
+          checkoutId: 'live',
+          cutId: held.cutId,
+          treeId: held.treeId,
+          parents: [],
+          trigger: 'save',
+          leaseIds: [],
+        });
+      const { revisionId: written } = await write(taken);
+      if (isCut(replaced)) {
+        await expect(write(replaced)).rejects.toThrow('no longer held');
+      }
+
+      const walked = await walkedTreeId(at.walking);
+      expect([first.treeId, other.treeId]).toEqual([walked, walked]);
+      const record = await at.port.readRevision(revisionId(written));
+      expect(record?.treeId).toBe(walked);
+    },
+  );
+
   it('should hash a same-size change the index has not observed yet, never pinning the recorded id to it', async () => {
     const initial = files(10);
     const at = await fixture(initial);

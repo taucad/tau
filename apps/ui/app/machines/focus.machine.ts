@@ -274,8 +274,11 @@ export type FocusOpen = Readonly<{
   patience: boolean;
   /** A person's reopen of the project focus was on. */
   person: boolean;
-  /** The session reported its facts since this open was sent: only then does `absent` mean it went away (rule 11). */
-  factsSeen: boolean;
+  /**
+   * The session reported live since this open was sent: only then does `absent` or `failed` mean the session went
+   * away (rule 11, "an open that never went live is not a close").
+   */
+  seenLive: boolean;
 }>;
 
 /** The open focus knows waits in the registry's single `pendingOpen` slot. @public */
@@ -314,6 +317,11 @@ export type FocusContext = Readonly<{
    * reply for an earlier one names an open the slot no longer holds.
    */
   lastSent: Readonly<{ openId: string; projectId: string; epoch: number }> | undefined;
+  /**
+   * The epoch of an open the registry dropped as stale (A5c): focus has not heard the library change yet, and opens
+   * again only from an answer at a later epoch.
+   */
+  droppedAt: number | undefined;
   module: 'unloaded' | 'loading' | 'loaded';
   facts: Readonly<Record<string, FocusSessionFacts>>;
   /** The open request focus last built per project, kept for a person's open (S34, S39). */
@@ -446,7 +454,7 @@ type Context = FocusContext;
 type Step = Readonly<{ context: Context; state: State; effects: Effects }>;
 type Patch = { -readonly [K in keyof Context]: Context[K] };
 
-const noOpen: FocusOpen = { live: false, patience: false, person: false, factsSeen: false };
+const noOpen: FocusOpen = { live: false, patience: false, person: false, seenLive: false };
 
 /** The state a snapshot value names, without `opening`'s substate. */
 const stateOf = (value: StateValue): State => (typeof value === 'string' ? value : Object.keys(value)[0]) as State;
@@ -551,6 +559,7 @@ const sendOpen = (
   }
   sendRegistry(effects, context, { type: 'open', projectId, request, requestId: openId });
   context.lastSent = { openId, projectId, epoch: request.epoch };
+  context.droppedAt = undefined;
   context.kept = { ...context.kept, [projectId]: request };
   context.forwarded = {
     ...context.forwarded,
@@ -660,7 +669,13 @@ const advance = (context: Patch, start: State, effects: Effects): State => {
       state = request?.home === true ? 'idle' : 'opening';
     }
     // TOpenAsked: the open carries the request built from the current ready answer (D7).
-    if (state === 'opening' && context.open.openId === undefined && isReady(context) && isFresh(context)) {
+    if (
+      state === 'opening' &&
+      context.open.openId === undefined &&
+      isReady(context) &&
+      isFresh(context) &&
+      (context.droppedAt === undefined || (context.answer?.epoch ?? 0) > context.droppedAt)
+    ) {
       const target = context.answer?.projectId;
       if (target !== undefined) {
         const workspace = context.slugsOf[target]?.workspaceSlug ?? '';
@@ -669,7 +684,7 @@ const advance = (context: Patch, start: State, effects: Effects): State => {
           request: buildRequest(context, target, workspace),
           prefix: 'open',
         });
-        context.open = { openId, live: false, patience: false, person: false, factsSeen: false };
+        context.open = { openId, live: false, patience: false, person: false, seenLive: false };
       }
     }
     // The join (I20), or the session focus opened went away or failed before it.
@@ -677,7 +692,7 @@ const advance = (context: Patch, start: State, effects: Effects): State => {
       const target = context.answer?.projectId;
       const facts = target === undefined ? undefined : context.facts[target];
       if (target !== undefined && facts !== undefined) {
-        if ((facts.status === 'absent' || facts.status === 'failed') && context.open.factsSeen) {
+        if ((facts.status === 'absent' || facts.status === 'failed') && context.open.seenLive) {
           state = settleOn(context, target);
         } else if (
           facts.status === 'live' &&
@@ -891,11 +906,11 @@ export const createFocusMachine = (policy: FocusPolicy) => {
       return state;
     }
     if (state === 'focused') {
-      context.open = { openId, live: false, patience: false, person: true, factsSeen: false };
+      context.open = { openId, live: false, patience: false, person: true, seenLive: false };
       return 'opening';
     }
     if (opening) {
-      context.open = { ...context.open, openId, factsSeen: false };
+      context.open = { ...context.open, openId, seenLive: false };
       if (context.pending?.projectId === projectId) {
         context.pending = undefined;
       }
@@ -970,6 +985,7 @@ export const createFocusMachine = (policy: FocusPolicy) => {
       open: noOpen,
       pending: undefined,
       lastSent: undefined,
+      droppedAt: undefined,
       module: 'unloaded',
       facts: {},
       kept: {},
@@ -1035,6 +1051,10 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           /* MC-R18: only the answer to the request focus is on, given at the epoch focus knows or a later one. An
            * answer from an older epoch is stale: the re-ask that epoch's change caused is already out. */
           const { question } = context;
+          if (!waitingStates.has(state) && question?.requestId === event.requestId) {
+            // The answer to the question out, in a state that takes none: the question is answered (the model's asks).
+            return { context: { ...context, question: undefined } };
+          }
           if (
             !waitingStates.has(state) ||
             event.requestId !== context.request?.requestId ||
@@ -1142,20 +1162,26 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             patch.pending = undefined;
           }
           if (!own) {
-            if (event.result === 'waiting' && personProject !== undefined) {
-              patch.pending = {
-                openId: event.requestId,
-                projectId: personProject,
-                epoch: context.lastSent?.epoch ?? context.epoch,
-                person: true,
-              };
+            const epoch = context.lastSent?.epoch ?? context.epoch;
+            const stale = event.result === 'waiting' && epoch !== context.epoch;
+            if (event.result === 'refused' || stale) {
+              // Withdraw it: a refused open, or one from before a library change, no longer stands (rules 9, 12).
+              sendRegistry(effects, context, { type: 'cancelPendingOpen' });
+              patch.personOpens = withoutKey(context.personOpens, event.requestId);
+            } else if (event.result === 'waiting' && personProject !== undefined) {
+              patch.pending = { openId: event.requestId, projectId: personProject, epoch, person: true };
             }
             return result(value, patch, state);
           }
           let next = state;
           switch (event.result) {
             case 'live': {
-              patch.open = { ...context.open, live: true };
+              const target = context.answer?.projectId;
+              patch.open = {
+                ...context.open,
+                live: true,
+                seenLive: target !== undefined && context.facts[target]?.status === 'live',
+              };
               // A chat the route switched to while the open was out reaches the session now it is live (rule 2).
               if (
                 context.answer?.projectId !== undefined &&
@@ -1167,7 +1193,12 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             }
             case 'waiting': {
               const sent = context.lastSent;
-              if (sent !== undefined) {
+              if (sent !== undefined && sent.epoch !== context.epoch) {
+                /* The re-ask after a library change went out before this reply: the waiting open is from the old
+                 * epoch, so focus withdraws it and opens again from the fresh answer (rule 9). */
+                sendRegistry(effects, context, { type: 'cancelPendingOpen' });
+                patch.open = { ...context.open, openId: undefined };
+              } else if (sent !== undefined) {
                 patch.pending = {
                   openId: event.requestId,
                   projectId: sent.projectId,
@@ -1199,7 +1230,9 @@ export const createFocusMachine = (policy: FocusPolicy) => {
               break;
             }
             case 'dropped': {
+              // The registry found the request stale: the library moved, and focus opens again once it hears that.
               patch.open = { ...context.open, openId: undefined };
+              patch.droppedAt = context.lastSent?.epoch ?? context.epoch;
               break;
             }
             case 'refused': {
@@ -1226,8 +1259,13 @@ export const createFocusMachine = (policy: FocusPolicy) => {
               [event.projectId]: { status: event.status, chatReady: event.chatReady, availability: event.availability },
             },
           };
-          if (context.open.openId !== undefined && context.answer?.projectId === event.projectId) {
-            patch.open = { ...context.open, factsSeen: true };
+          if (
+            context.open.openId !== undefined &&
+            context.open.live &&
+            context.answer?.projectId === event.projectId &&
+            event.status === 'live'
+          ) {
+            patch.open = { ...context.open, seenLive: true };
           }
           return result(value, patch, advance(patch, stateOf(value), effectsOf(enq)));
         },
@@ -1296,6 +1334,8 @@ export const createFocusMachine = (policy: FocusPolicy) => {
         let next: State;
         if (state === 'flushFailed') {
           patch.leave = context.leave === undefined ? undefined : { projectId: context.leave.projectId, flush: 'none' };
+          // An answer that landed while the move was blocked was dropped: ask again once the epoch says so.
+          patch.question = undefined;
           next = 'leaving';
         } else if (context.request?.projectId === undefined) {
           // A URL whose slugs name no project: nothing to ask again until the route changes.

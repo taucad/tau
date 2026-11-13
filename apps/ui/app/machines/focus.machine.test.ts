@@ -292,14 +292,21 @@ describe('focus: requests', () => {
 });
 
 describe('focus: the registry answers an open', () => {
-  it('should send its open again when the registry drops it, and when another open displaces it', () => {
+  it('should send its open again from the fresh answer when the registry drops it, and when another open displaces it', () => {
     const harness = createFocusHarness();
     harness.route('r1', 'a');
     harness.ready('r1', 'a');
     harness.settleOpen('waiting');
+    // The registry drops a stale request before focus hears the library change: focus waits for that change.
     harness.settleOpen('dropped');
 
+    expect(harness.opens()).toHaveLength(1);
+
+    harness.send({ type: 'libraryChanged', revision: 1 });
+    harness.ready('r1', 'a', 1);
+
     expect(harness.opens()).toHaveLength(2);
+    expect(harness.lastOpen().request.epoch).toBe(1);
 
     harness.settleOpen('waiting');
     harness.focus.send({ type: 'openRequested', projectId: 'a' });
@@ -923,5 +930,80 @@ describe('focus: replies that arrive out of turn', () => {
 
     expect(harness.context().pending).toBeUndefined();
     expect(registryOf(harness, 'cancelPendingOpen')).toHaveLength(1);
+  });
+});
+
+describe('focus: replies around a library change or a blocked move', () => {
+  it('should ask again after retry when the answer landed while a failed leave flush blocked the move', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+    harness.route('r2', 'b');
+    harness.ready('r2', 'b');
+    harness.send({ type: 'libraryChanged', revision: 1 });
+    harness.settleFlush(false);
+
+    expect(harness.state()).toBe('flushFailed');
+
+    harness.ready('r2', 'b', 1);
+    harness.send({ type: 'retry' });
+    harness.settleFlush(true);
+
+    expect(harness.lastAsked()).toMatchObject({ requestId: 'r2', projectId: 'b' });
+    expect(harness.ofType('library', 'accessAsked')).toHaveLength(4);
+
+    harness.ready('r2', 'b', 1);
+
+    expect(harness.lastOpen()).toMatchObject({ projectId: 'b', request: { epoch: 1 } });
+  });
+
+  it('should not read a session absent while its open waits as the session going away (rule 11)', () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleOpen('waiting');
+    harness.facts('a', 'absent', { chatReady: false, availability: 'pending' });
+    harness.settleOpen('live');
+
+    expect(harness.state()).toEqual({ opening: 'pending' });
+
+    harness.facts('a', 'starting', { chatReady: false, availability: 'pending' });
+    harness.facts('a', 'live', { chatReady: false, availability: 'pending' });
+
+    expect(harness.state()).toEqual({ opening: 'live' });
+    expect(routeState(harness, 'a', { live: ['a'] })).toBe('resolving');
+  });
+
+  it('should withdraw its open when the wait reply arrives after the re-ask for a library change', () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.loaded();
+    harness.send({ type: 'libraryChanged', revision: 1 });
+    harness.settleOpen('waiting');
+
+    expect(registryOf(harness, 'cancelPendingOpen')).toHaveLength(1);
+    expect(harness.context().pending).toBeUndefined();
+
+    harness.ready('r1', 'a', 1);
+
+    expect(harness.opens()).toHaveLength(2);
+    expect(harness.lastOpen().request.epoch).toBe(1);
+  });
+
+  it("should withdraw a person's open the registry refused", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+    harness.route('r2', 'b');
+    harness.ready('r2', 'b');
+    harness.settleFlush(true);
+    harness.settleOpen('live');
+    harness.facts('b', 'live');
+    harness.send({ type: 'openRequested', projectId: 'a' });
+    const person = harness.lastOpen();
+    harness.settleOpen('waiting', person.requestId);
+    harness.settleOpen('refused', person.requestId);
+
+    expect(registryOf(harness, 'cancelPendingOpen')).toHaveLength(1);
+    expect(harness.context().pending).toBeUndefined();
   });
 });

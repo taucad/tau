@@ -110,17 +110,11 @@ const measuringRow = (): HTMLElement => screen.getByRole('group', { name: 'Measu
 
 describe('ChatViewerControls', () => {
   describe('with viewerControls (FL1)', () => {
-    it('should offer the single-click camera controls and navigation keys only with the flag on', () => {
-      renderBar(startGraphics());
-      expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
-    });
-
-    it('should add the camera controls beside the bar with the flag on', () => {
+    it('should add no camera button group with the flag on, leaving Fit view to the bar', () => {
       mocks.viewerControls = true;
       renderBar(startGraphics());
-      const camera = screen.getByRole('group', { name: 'Camera' });
-      expect(within(camera).getByRole('button', { name: 'Zoom in' })).toBeTruthy();
-      expect(within(camera).getByRole('button', { name: 'Pan with the arrows' })).toBeTruthy();
+      expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
+      expect(screen.getAllByRole('button', { name: 'Fit view' })).toHaveLength(1);
     });
   });
 

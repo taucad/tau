@@ -11,9 +11,9 @@ import type { CreateNodesContextV2 } from '@nx/devkit';
 import { createNodesV2, specDirectories } from '../../tools/formal.plugin.js';
 
 /**
- * The formal plugin infers `formal` and `formal:lean` from the spec directories
+ * The formal plugin infers `formal:tla` and `formal:lean` from the spec directories
  * `formal check` reads under `{projectRoot}/specs/`: `formal:lean` for a
- * `lean-toolchain` beside an `expected.json` with a `lean` section, `formal` for a
+ * `lean-toolchain` beside an `expected.json` with a `lean` section, `formal:tla` for a
  * `*.tla` beside one without. It never infers `formal:nightly` or `formal:logs`,
  * which stay explicit per project.
  */
@@ -64,7 +64,7 @@ describe('formal plugin targets', () => {
     rmSync(workspaceRoot, { recursive: true, force: true });
   });
 
-  it('should infer formal for a project with a TLA+ spec beside its expected.json under specs', async () => {
+  it('should infer formal:tla for a project with a TLA+ spec beside its expected.json under specs', async () => {
     write('packages/a/project.json', { name: 'a' });
     const files = writeAll({
       'packages/a/specs/expected.json': tlaExpected,
@@ -75,7 +75,7 @@ describe('formal plugin targets', () => {
     });
 
     expect(await inferredTargets(files)).toEqual({
-      'packages/a': ['formal', 'formal'],
+      'packages/a': ['formal:tla', 'formal:tla'],
     });
   });
 
@@ -93,7 +93,7 @@ describe('formal plugin targets', () => {
 
     expect(await inferredTargets(files)).toEqual({
       'apps/lean-only': ['formal:lean'],
-      'packages/both': ['formal', 'formal:lean'],
+      'packages/both': ['formal:lean', 'formal:tla'],
     });
   });
 
@@ -188,7 +188,7 @@ describe('formal plugin targets', () => {
     });
 
     expect(await inferredTargets(files)).toEqual({
-      'packages/d': ['formal', 'formal:lean'],
+      'packages/d': ['formal:lean', 'formal:tla'],
     });
   });
 
@@ -206,7 +206,7 @@ describe('formal plugin targets', () => {
     const results = await createNodesV2[1](files, {}, context);
 
     expect(results).toEqual([
-      ['packages/e/specs/expected.json', { projects: { 'packages/e': { targets: { formal: {} } } } }],
+      ['packages/e/specs/expected.json', { projects: { 'packages/e': { targets: { 'formal:tla': {} } } } }],
     ]);
   });
 });

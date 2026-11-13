@@ -106,6 +106,12 @@ ADDITIONAL_CORS_ORIGINS = '["https://taucad-prod-us.netlify.app"]'
 TAU_S3_PUBLIC_BASE_URL = 'https://cdn.tau.new'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
+# Files service (tau-cloud files gates): LFS downloads are links to the files
+# Worker instead of presigned R2 URLs. Needs the Fly secret
+# TAU_FILES_LINK_SIGNING_KEY, which tau-cloud's prod-us stack writes (gate 3);
+# boot refuses this line without it (`refineFilesService`), so deploy it only
+# after that apply. Remove this line and redeploy to roll back to presigned downloads.
+TAU_FILES_BASE_URL = 'https://files.tau.new'
 # Runtime Observability PR-2: production records no runtime telemetry entries until the operator's
 # activation release (PR-9). Explicit, so the policy probe answers `off` and clients send nothing.
 TAU_RUNTIME_TELEMETRY = 'off'

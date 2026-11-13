@@ -14,8 +14,11 @@
         "{workspaceRoot}/apps/libs/chat-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/project-workspace/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/ui-core/src/**/*.tsx",
-        "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"
+        "reactEventLayer"
       ]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
     }
   }
 }

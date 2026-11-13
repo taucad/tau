@@ -16,7 +16,7 @@
  *   (a far pan or a deep zoom) the frame rides on the same event, so one gesture step is one camera change.
  * - `transitionstart`, `wake`, `update`, `control`, `controlstart`: a render request.
  *
- * Graphics to controls: `navigate`, one orbit, pan or zoom step from a key or a single-click control, moves the
+ * Graphics to controls: `navigate`, one orbit, pan or zoom step from a navigation key, moves the
  * controls at once; the next frame's `update` reports the pose with the source `input`, as a drag's does.
  *
  * Camera to canvas, once per presented change: the controls, the retained consumers, the raycaster clipping and R3F's
@@ -435,7 +435,7 @@ export const createControlsAdapter = ({
       }
     };
     /*
-     * A navigation step graphics forwards (an arrow key or a single-click control): the controls move at once and step
+     * A navigation step graphics forwards (an arrow, plus or minus key): the controls move at once and step
      * on the next frame, whose `update` reports the pose as the person's input. Not while the view cube holds the lock.
      */
     receive((event) => {

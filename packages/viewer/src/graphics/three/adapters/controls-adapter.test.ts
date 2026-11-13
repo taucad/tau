@@ -493,7 +493,7 @@ describe('controls adapter', () => {
     expect(update).toHaveBeenCalledOnce();
   });
 
-  /* N1 and N2: a navigation step graphics forwards moves the controls, and the next frame reports the pose to the
+  /* N1: a navigation step graphics forwards moves the controls, and the next frame reports the pose to the
    * camera as the person's input, as a drag does. */
   it("moves the camera by a navigation step graphics forwards, as the person's input", () => {
     const harness = createHarness();

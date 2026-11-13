@@ -14,6 +14,12 @@
         "cwd": "{projectRoot}",
         "command": "oxlint -c $NX_WORKSPACE_ROOT/.oxlintrc.json src && eslint src"
       }
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
     }
   }
 }

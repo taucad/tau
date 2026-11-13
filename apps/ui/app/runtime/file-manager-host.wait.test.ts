@@ -165,8 +165,19 @@ describe('file manager ready wait', () => {
     const waiting = awaitFileManager(never, 'ready', {
       clock,
       reason: 'services-timeout',
-      isGone: () => true,
+      gone: AbortSignal.abort(),
     });
+    await expect(waiting).rejects.toThrow('Actor terminated without satisfying predicate');
+    expect(clock.nextDue()).toBeUndefined();
+  });
+
+  it('should end when the lease of a never-started file manager is dropped during the wait', async () => {
+    const never = connecting();
+    const drop = new AbortController();
+    const clock = new StepClock();
+    const waiting = awaitFileManager(never, 'ready', { clock, reason: 'services-timeout', gone: drop.signal });
+    never.stop();
+    drop.abort();
     await expect(waiting).rejects.toThrow('Actor terminated without satisfying predicate');
     expect(clock.nextDue()).toBeUndefined();
   });

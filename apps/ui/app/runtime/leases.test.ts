@@ -158,6 +158,14 @@ describe('lease store', () => {
     expect(disposed).toHaveBeenCalledOnce();
   });
 
+  it('should abort the drop signal of an entry when it is dropped', () => {
+    const { clock, store, build } = startLeases();
+    const entry = store.get('a', build);
+    expect(entry.dropped.aborted).toBe(false);
+    clock.advance(leaseGraceMilliseconds);
+    expect(entry.dropped.aborted).toBe(true);
+  });
+
   it('should run every disposer when one of them throws', () => {
     const { clock, store, build } = startLeases();
     const entry = store.get('a', build);

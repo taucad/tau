@@ -71,8 +71,8 @@ export type AppRuntimeFiles = Readonly<{
     readiness: FileManagerReadiness,
     options: Readonly<{
       reason: 'proxy-timeout' | 'services-timeout';
-      /** Whether the file manager's lease was dropped; `rootFiles` has none. */
-      isGone?: () => boolean;
+      /** Aborted when the file manager's lease is dropped; `rootFiles` has none. */
+      gone?: AbortSignal;
     }>,
   ) => Promise<FileManagerSnapshot>;
   /** The shared worker `rootFiles` holds, once it has one. */

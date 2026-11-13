@@ -130,17 +130,18 @@ export async function awaitFileManager(
     clock?: ActorOptions<AnyActorLogic>['clock'];
     timeoutMilliseconds?: number;
     reason: 'proxy-timeout' | 'services-timeout';
-    /** Whether the file manager's owner has let it go (a dropped lease), which a never-started actor cannot say. */
-    isGone?: () => boolean;
+    /** Aborted when the file manager's owner lets it go (a dropped lease), which a never-started actor cannot say. */
+    gone?: AbortSignal;
   }>,
 ): Promise<FileManagerSnapshot> {
   const current = fileManager.getSnapshot();
   if (selectReadinessSettled(readiness, current)) {
     return current;
   }
-  if (current.status === 'stopped' || options.isGone?.() === true) {
+  if (current.status === 'stopped' || options.gone?.aborted === true) {
     /* A stopped actor never answers a new subscriber, and one stopped before it started still reads `active`: end
-     * now, not at the bound. A started actor stopped during the wait completes its observers, which ends it. */
+     * now, not at the bound. During the wait, a started actor's stop completes its observers, and the owner's signal
+     * covers one that never started. */
     throw new Error('Actor terminated without satisfying predicate');
   }
   let reached: FileManagerSnapshot | undefined;
@@ -151,6 +152,10 @@ export async function awaitFileManager(
         sendBack({ type: 'settled' });
       }
     };
+    const onGone = (): void => {
+      sendBack({ type: 'gone' });
+    };
+    options.gone?.addEventListener('abort', onGone, { once: true });
     const subscription = fileManager.subscribe({
       next: observe,
       error: () => {
@@ -162,6 +167,7 @@ export async function awaitFileManager(
     });
     observe(fileManager.getSnapshot());
     return () => {
+      options.gone?.removeEventListener('abort', onGone);
       subscription.unsubscribe();
     };
   });

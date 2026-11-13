@@ -39,6 +39,11 @@ export type LeaseEntry<Leased extends AnyActor> = Readonly<{
   attach: (dispose: () => void) => void;
   /** Whether the entry was dropped: its actor is stopped, and the store builds a fresh entry for its key. */
   isDropped: () => boolean;
+  /**
+   * Aborted when the entry is dropped. A wait on the actor listens to it: an actor stopped before it started tells
+   * its subscribers nothing.
+   */
+  dropped: AbortSignal;
 }>;
 
 /** The store a mount leases from. @public */
@@ -56,6 +61,7 @@ export type LeaseStore = Readonly<{
 type EntryState = {
   readonly actor: AnyActor;
   readonly disposers: Set<() => void>;
+  readonly drop: AbortController;
   started: boolean;
   dropped: boolean;
 };
@@ -86,6 +92,7 @@ export function createLeaseTable(): Readonly<{
     const { state } = held;
     state.dropped = true;
     state.actor.stop();
+    state.drop.abort();
     for (const dispose of state.disposers) {
       /* One failing disposer must not keep the rest from releasing what they hold. */
       try {
@@ -116,7 +123,13 @@ export function createLeaseTable(): Readonly<{
         return live.entry as LeaseEntry<Leased>;
       }
       const built = build();
-      const held: EntryState = { actor: built.actor, disposers: new Set(), started: false, dropped: false };
+      const held: EntryState = {
+        actor: built.actor,
+        disposers: new Set(),
+        drop: new AbortController(),
+        started: false,
+        dropped: false,
+      };
       if (built.dispose !== undefined) {
         held.disposers.add(built.dispose);
       }
@@ -144,6 +157,7 @@ export function createLeaseTable(): Readonly<{
           };
         },
         isDropped: () => held.dropped,
+        dropped: held.drop.signal,
         attach: (dispose) => {
           if (held.dropped) {
             dispose();

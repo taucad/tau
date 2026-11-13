@@ -36,6 +36,7 @@ type Job = {
   readonly steps?: readonly Step[];
   readonly uses?: string;
   readonly with?: Record<string, string>;
+  readonly secrets?: Record<string, string> | string;
   readonly env?: Record<string, string>;
   readonly name?: string;
   readonly permissions?: Record<string, string>;
@@ -638,6 +639,12 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
       projects: expression('needs.plan.outputs.shell-projects'),
     });
     expect(lane?.permissions).toEqual({ contents: 'read' });
+    // The read token alone, never `inherit`: the called macOS job's `nx-cache-write` environment supplies the write token.
+    expect(lane?.secrets).toEqual(
+      Object.fromEntries([
+        ['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', expression('secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN')],
+      ]),
+    );
   });
 
   it('should restrict the reusable call to the merge queue and never widen it', () => {

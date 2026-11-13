@@ -684,7 +684,9 @@ jobs:
   # projects' targets on the three stock Linux guests and the two macOS rows, with no Electron build
   # or application tier. A pull request keeps the `shell-conformance` label for early signal; a push
   # to `main` reuses the queue verdict, and the desktop candidate gate runs the full tier fresh.
-  # The required check waits for it (shell split blueprint PR 4).
+  # The required check waits for it (shell split blueprint PR 4). It passes the read token alone, never
+  # `secrets: inherit`; the called macOS job runs in `nx-cache-write`, whose write token replaces it, so the
+  # queue reads and writes the fingerprinted verdicts (CF-1, CP-5b follow-up).
   shell:
     name: Shell conformance
     needs: [plan]
@@ -696,6 +698,8 @@ jobs:
       ref: ${{ github.sha }}
       tier: semantics
       projects: ${{ needs.plan.outputs.shell-projects }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI

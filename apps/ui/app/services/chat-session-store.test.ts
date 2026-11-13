@@ -5558,10 +5558,15 @@ describe('ChatSessionStore', () => {
         return session.messages.length === 0 ? 'empty' : 'loaded';
       };
       const session = store.acquire(chatId, projectId);
-      const reports = [reportedTranscript(session)];
+      // Each report with the turns the session held when it made it.
+      const reported: Array<{ readonly transcript: TranscriptState; readonly messages: number }> = [];
+      const reports: TranscriptState[] = [];
       const record = (): void => {
-        reports.push(reportedTranscript(session));
+        const transcript = reportedTranscript(session);
+        reports.push(transcript);
+        reported.push({ transcript, messages: session.messages.length });
       };
+      record();
       const unsubscribeChat = store.subscribeChat(chatId, record);
       const unsubscribeProjection = store.subscribeProjection(chatId, record);
       const persistence = session.persistenceActorRef.subscribe(record);
@@ -5584,8 +5589,11 @@ describe('ChatSessionStore', () => {
         await vi.waitFor(() => {
           expect(reportedTranscript(session)).toBe('loaded');
         });
+        expect(session.messages.length).toBeGreaterThan(0);
         // Nor between the host's answer and the turns appearing: never `empty` across the whole load.
         expect(reports).not.toContain('empty');
+        // And `loaded` only with the turns it loaded: no report leaves `loading` for a blank lane (U19).
+        expect(reported.filter((report) => report.transcript === 'loaded' && report.messages === 0)).toEqual([]);
 
         // A chat with no history still settles to `empty` once its log answers that it has none.
         const emptySession = store.acquire(emptyChatId, projectId);

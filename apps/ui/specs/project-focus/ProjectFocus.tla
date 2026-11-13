@@ -337,13 +337,18 @@ SessionClosed(v) ==
   /\ act' = Label("SessionClosed")
 
 \* The close flush of a dirty session fails (I6): the session is not discarded. It returns to the live set
-\* with its unsaved work, retained until a later close's flush succeeds or the person discards it. The
-\* open waiting in pendingOpen keeps waiting: the registry has no room for it.
+\* with its unsaved work, retained until a later close's flush succeeds or the person discards it. An
+\* open waiting in pendingOpen for another project keeps waiting: the registry has no room for it. An
+\* open waiting for the retained session itself is answered by it: the registry reopens the retained
+\* session and clears pendingOpen (sessions.machine.ts 281 to 289, reopenRetained), so focus's own
+\* waiting open goes live.
 CloseFlushFailed(v) ==
   /\ sess[v] = "closing" /\ v \in dirty /\ cnt.closeFails < MaxCloseFails
   /\ sess' = [sess EXCEPT ![v] = "live"]
+  /\ pendingOpen' = IF pendingOpen.project = v THEN NoPending ELSE pendingOpen
+  /\ f' = IF FocusPending /\ pendingOpen.project = v THEN [f EXCEPT !.live = TRUE] ELSE f
   /\ cnt' = [cnt EXCEPT !.closeFails = @ + 1]
-  /\ UNCHANGED <<route, nreq, f, asks, lib, mod, sreq, fact, dirty, pendingOpen, reg, keep>>
+  /\ UNCHANGED <<route, nreq, asks, lib, mod, sreq, fact, dirty, reg, keep>>
   /\ act' = Label("CloseFlushFailed")
 
 (* The opening session's facts. They move only for the project focus holds an answer for: a session
@@ -679,7 +684,8 @@ PersonOpenAsked(p) ==
                        [f EXCEPT !.st = "opening", !.opened = TRUE, !.live = out = "spawn"]
                   \* Any outcome displaces the single slot: a wait keeps only the latest destination, and a
                   \* spawn or a failed start into the room clears it (sessions.machine.ts hasRoom). The
-                  \* registry tells focus its own waiting open was displaced, and focus asks again.
+                  \* registry sends no reply: focus derives that its own waiting open was displaced,
+                  \* because focus itself sends the displacing person's open, and focus asks again.
                   [] FocusPending /\ p # pendingOpen.project -> [f EXCEPT !.opened = FALSE]
                   [] OTHER -> f
   /\ UNCHANGED <<route, nreq, asks, lib, mod, dirty, reg, keep>>
@@ -763,7 +769,7 @@ FlushBeforeLeave ==
 \* retries or a newer request for another project arrives.
 FailedFlushBlocks == f.blocked => f.st = "flushFailed"
 
-\* I3. No step of focus starts a session's close; only PersonClosed, IdleExpired and
+\* I3. No step of focus starts a session's close; only PersonClosed, PersonDiscarded, IdleExpired and
 \* BudgetSwitchClose do.
 FocusNeverCloses == [][FocusStep => \A p \in Projects : sess[p] = "live" => sess'[p] = "live"]_vars
 

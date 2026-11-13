@@ -32,13 +32,14 @@
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "4cea41ab878b3d473d4df2709bd04504409e7bb8f68d329514ae47e798a01685"
   },
   "specs": {
-    "ProjectFocus.tla": "ce8f705f06ad617af4de5ffdf0f1f5a1fe3c4a3ab9428666174e83a61e0ed96e"
+    "ProjectFocus.tla": "8436de18c4cfc36c861232048c16c6acb15f3be5c10e365b47c70c8b6d30a05c"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",
-    "ProjectFocus.liveness-person-budget.cfg": "932af78a9d2df3f96a6a5ec0b92df82fb1fc0a9a8d35d4ac82d5271d3d459bae",
+    "ProjectFocus.liveness-person-budget.cfg": "5a29b4637b278b848804bd1457a93cfc39b61293f9c70b563009a648c6bb9ddc",
     "ProjectFocus.liveness-person-commands.cfg": "097a7525035d556f6c070286c8d8eb860f81404e453213e452657b27f849a81c",
     "ProjectFocus.liveness-registry-epoch.cfg": "f0e3b8f5781b99b389070395eedc2e579bf38acb060b006e3bb51de349494352",
+    "ProjectFocus.liveness-retained-reopen.cfg": "1cd9b36c9e3e9c66b92c72d039ea1825955ce1ae6c49a7804b97b5daeef2bfe3",
     "ProjectFocus.liveness.cfg": "1937ef3f61f77ed83ca1bfb0341bdedbd9ff70a4904051624a72df137de11d9a",
     "ProjectFocus.match-by-request-id.cfg": "1ecd492d8e2daaeb16fb998e1417db849a1307e1f270195e65f7328707c65aa5",
     "ProjectFocus.no-request-id.cfg": "6f790b295691761bdc4626c21e83395cc11838e3d33b4082c64cecfc8156c90d",
@@ -50,7 +51,7 @@
     "ProjectFocus.target-registry-epoch.cfg": "80475ff8cfeece49b10e50e5bae05772f281e9b6eb6f34fccf2bad7a6dc7bc65",
     "ProjectFocus.target-resume-window.cfg": "92aa2f3466f15bd97a2479693284a6e730741153103c1e62d6ec2f6e8f6d4ad4",
     "ProjectFocus.target-retained-session-reachable.cfg": "6a536afff28eae913d5b0bc54d075eb89ceb9b6a20d3622f1669833652011d57",
-    "ProjectFocus.target-retained-session.cfg": "cb548c80984560bda3368bc69ffe436e41be54a171cfa6907a613ef15bbd2e06",
+    "ProjectFocus.target-retained-session.cfg": "63e367261e2761d52a0fbaca3d5136a09ee1efa93a8ea295e2f6ea10699ca890",
     "ProjectFocus.target-same-project.cfg": "2acae6f1c865fec33ca6228601cb70bee9392f0b2cd647b37e826be5367f2ed3",
     "ProjectFocus.target.cfg": "70422bc78acae6b243e8870fe1bdbd77ac6a1e0f7ec8b41ba5f5f30f35a05622",
     "ProjectFocus.today-first-check.cfg": "40093556669e98a7cd64781d114695aa8f5a10a94e56f62d29da5490baa1d3b0",
@@ -63,6 +64,6 @@
     "ProjectFocus.today-superseded-open-reachable.cfg": "1680a7a1c62b8a13b187a3ec45984506e12b3d5a3842b375c756a1e5c47823ef",
     "ProjectFocus.today-superseded-open.cfg": "bb79efb47575e428d1b6c1e59b4020593c27e8f76a49cd5c58719591933b9e13",
     "ProjectFocus.wide.cfg": "89b78eb0662313104defd5ab54306da66b63a2d96b1eec2fdc53f899d1b9e4f4",
-    "expected.json": "af254d92ccd266482c14b45eef335cd5a28e74ff825ccc7ee08c11b549ffcc1d"
+    "expected.json": "d20a9541efdf2087b79881f69167923d9f579a52123c9fe5020ab94615b06038"
   }
 }

@@ -69,7 +69,12 @@
     "ProjectFocus.liveness-person-budget.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 2, 2 person opens and 2 person closes, no Home or flush failure; RequestEventuallySettles, FailedFlushSendsNoOpen and OpeningWaitsOrWentLive hold."
+      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 2, 2 person opens and 2 person closes, 1 failed session start, no Home or flush failure; RequestEventuallySettles, FailedFlushSendsNoOpen and OpeningWaitsOrWentLive hold."
+    },
+    "ProjectFocus.liveness-retained-reopen.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 1, 1 person close, 1 failed close flush, no person open, Home or leave-flush failure; the registry reopens a retained session focus waits for, and RequestEventuallySettles, FailedFlushSendsNoOpen and OpeningWaitsOrWentLive hold."
     },
     "ProjectFocus.liveness-registry-epoch.cfg": {
       "tier": "nightly",

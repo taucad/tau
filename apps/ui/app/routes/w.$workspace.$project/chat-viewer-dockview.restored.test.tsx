@@ -5,6 +5,7 @@ import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockv
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchView } from '@taucad/workbench';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
+import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const fixture = vi.hoisted(() => ({
   projectSend: vi.fn(),
@@ -15,6 +16,8 @@ const fixture = vi.hoisted(() => ({
   viewRecords: new Map<string, WorkbenchView>(),
   addRestoredPanel: (_id: string): void => undefined,
   mainEntryPath: 'main.ts',
+  /** The project workspace the viewer reads; absent (as in a shared embed) unless a row provides one. */
+  workspace: undefined as ReturnType<typeof ProjectWorkspaceContext.useProjectWorkspace> | undefined,
   availability: 'ready',
   emptyMain: false,
   notifyAvailability: () => undefined,
@@ -76,6 +79,11 @@ vi.mock('#hooks/use-project.js', () => {
   };
   return { useProject: () => project };
 });
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ProjectWorkspaceContext>()),
+  useProjectWorkspace: () => fixture.workspace,
+}));
 
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: fixture.viewEdit, remove: vi.fn(async () => true) }),
@@ -215,6 +223,25 @@ describe('restored viewer layout admission', () => {
     fixture.mainEntryPath = 'main.ts';
     fixture.emptyMain = false;
     fixture.availability = 'ready';
+    fixture.workspace = undefined;
+  });
+
+  // A0.3 row 2, Y8/I12: unmounting Dockview detaches the viewer adapter (the host then reads the applied revision as
+  // unknown), and a remounted Dockview attaches again.
+  it('should detach the viewer adapter on unmount and attach again on remount', () => {
+    const detach = vi.fn();
+    const registerViewer = vi.fn(() => detach);
+    fixture.workspace = {
+      layoutController: { registerViewer, personViewerChanged: vi.fn() },
+    } as unknown as NonNullable<typeof fixture.workspace>;
+    const view = render(<ViewerDockview profile='editor' />);
+    expect(registerViewer).toHaveBeenCalledOnce();
+    expect(detach).not.toHaveBeenCalled();
+    view.unmount();
+    expect(detach).toHaveBeenCalledOnce();
+    render(<ViewerDockview profile='editor' />);
+    expect(registerViewer).toHaveBeenCalledTimes(2);
+    expect(detach).toHaveBeenCalledOnce();
   });
 
   it('should publish the resolved main entry when a viewer starts before its manifest', () => {

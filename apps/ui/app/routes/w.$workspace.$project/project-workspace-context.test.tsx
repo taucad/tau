@@ -1108,8 +1108,8 @@ describe('ProjectWorkspaceProvider', () => {
       },
     );
 
-    // A0.3 row 1c, Y5/I11: closing the workbench drops a held Files intent but keeps a handed-back pane intent, which
-    // is still applied exactly once when a workbench next connects.
+    // A0.3 row 1c, Y5/I11: a handed-back pane intent survives a workbench close (only held Files and user-file intents
+    // are cleared there) and is still applied exactly once when a workbench next connects.
     it('should keep a handed-back pane intent across a workbench close and apply it once on the next connect', () => {
       render(
         <ProjectWorkspaceProvider>

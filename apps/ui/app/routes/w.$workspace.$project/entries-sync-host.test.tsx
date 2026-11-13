@@ -865,6 +865,7 @@ describe('entry owner reconciliation', () => {
         authority.resolve();
         view.unmount();
       }
+      expect(producers.size).toBe(0);
     });
 
     // A0.3 row 5, S25/I13: one record session per record file. Today StrictMode's double render builds a second

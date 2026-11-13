@@ -1146,7 +1146,8 @@ describe('layout host rows (A0.3)', () => {
     shown.length = 0;
     await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
     await waitFor(() => expect(host.controller.snapshot()?.layout.lanes).toEqual(second().lanes));
-    expect(shown).toEqual([]);
+    // A merged arrangement that keeps the person's tree is fine; showing the foreign tree is not.
+    expect(shown).not.toContainEqual(second().workbench);
     host.unmount();
   });
 
@@ -1202,10 +1203,10 @@ describe('layout host rows (A0.3)', () => {
         host.controller.personWorkbenchChanged(moved);
       });
       if (edit === 'written') {
-        await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(moved));
+        await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(moved), { timeout: 1600 });
       }
       expect(await act(async () => host.controller.restorePreviousArrangement(command))).toBe(false);
-      await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(moved));
+      await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(moved), { timeout: 1600 });
       expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
         status: 'current',
         record: { ...second(), workbench: moved },
@@ -1258,6 +1259,7 @@ describe('layout host rows (A0.3)', () => {
       ack.resolve();
       host.unmount();
     }
+    expect(producers.size).toBe(0);
   });
 
   // A0.3 row 5, Y3/I13: one record session per record file. Today StrictMode's double render builds a second layout

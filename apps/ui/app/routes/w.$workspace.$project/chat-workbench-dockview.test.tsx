@@ -1392,6 +1392,39 @@ describe('mounted Workbench user activation handoff', () => {
 });
 
 describe('workbench adapter record apply (A0.3)', () => {
+  // A0.3 row 2, Y6/I12: unmounting Dockview detaches the workbench adapter (the host then reads the applied revision
+  // as unknown), and a remounted Dockview attaches again.
+  it('should detach the workbench adapter on unmount and attach again on remount', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    const detach = vi.fn();
+    mockLayoutController.registerWorkbench.mockClear();
+    mockLayoutController.registerWorkbench.mockImplementation(() => detach);
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+    });
+
+    const view = render(<WorkbenchDockview />);
+    expect(mockLayoutController.registerWorkbench).toHaveBeenCalledOnce();
+    expect(detach).not.toHaveBeenCalled();
+    view.unmount();
+    expect(detach).toHaveBeenCalledOnce();
+    render(<WorkbenchDockview />);
+    expect(mockLayoutController.registerWorkbench).toHaveBeenCalledTimes(2);
+    expect(detach).toHaveBeenCalledOnce();
+  });
+
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
   // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
   it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {

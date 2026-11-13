@@ -1078,7 +1078,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        * stopped answering over a settlement failure would lose the next turn
        * too. W5 puts `turn.finalized` on the wire for the client. */
       onRevisionEvent: (event) => {
-        if (event.type === 'turn.finalized') {
+        /* An engine failure already reaches the verb that ran it; the daemon has no field reporter to tell. */
+        if (event.type === 'turn.finalized' || event.type === 'revision.engine-failed') {
           return;
         }
         if (event.type === 'revision.unavailable') {

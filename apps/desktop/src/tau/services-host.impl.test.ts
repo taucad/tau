@@ -2142,6 +2142,48 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     30_000,
   );
 
+  /* Field visibility for the revision engine: a failed `git worktree` reaches main with git's own words, for main's
+   * error reporting to redact, and the local log keeps only the port's sentence. */
+  /* POSIX only: the stand-in git is a `#!/bin/sh` script found through `which`. */
+  it.runIf(gitToolchainOnPath && process.platform !== 'win32')(
+    'hands main a failed worktree command with its code and git stderr',
+    async () => {
+      const failures: TauHost.RevisionEngineFailure[] = [];
+      const logged: Array<readonly [string, unknown]> = [];
+      const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+      const bundleRoot = await mkdtemp(join(tmpdir(), 'tau-services-git-worktree-'));
+      workspaces.push(bundleRoot);
+      const failingGit = join(bundleRoot, 'git');
+      await writeFile(
+        failingGit,
+        `#!/bin/sh\nfor argument in "$@"; do\n  if [ "$argument" = worktree ]; then\n    echo "fatal: '$PWD' forced worktree failure" >&2\n    exit 128\n  fi\ndone\nexec "${git}" "$@"\n`,
+      );
+      await chmod(failingGit, 0o755);
+      const { host, workspaceRoot } = await configuredHost(
+        {},
+        {
+          gitExecutable: failingGit,
+          onRevisionEngineFailure: (failure) => {
+            failures.push(failure);
+          },
+          log: (event, detail) => {
+            logged.push([event, detail]);
+          },
+        },
+      );
+      connect(host, workspaceRoot);
+
+      await expect.poll(() => failures.length, { timeout: 10_000 }).toBeGreaterThan(0);
+      expect(failures[0]?.code).toBe('ENGINE_FAILED');
+      expect(failures[0]?.message).toBe('Native Git failed worktree.');
+      expect(failures[0]?.detail).toMatch(/^fatal: '.+' forced worktree failure$/u);
+      const local = logged.filter(([event]) => event === 'agent-host.revision-engine-failed');
+      expect(local.length).toBeGreaterThan(0);
+      expect(JSON.stringify(local)).not.toContain('forced worktree failure');
+    },
+    30_000,
+  );
+
   it('leaves a direct turn to the project context main already registered', async () => {
     const runtimeContext = vi.fn();
     const { host, workspaceRoot } = await configuredHost({}, { runtimeContext });

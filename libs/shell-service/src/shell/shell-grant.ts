@@ -139,34 +139,99 @@ export type ShellProjectProtected = Readonly<{
 export type TerminalGitAccess = 'read' | 'write';
 
 /**
- * The names in a git directory through which git runs a program or reads another config, which a writable store keeps
- * read-only. `config` and `hooks` name programs directly. `commondir` makes git read the config and hooks of any folder
- * it names, in a repository of any kind, and `config.worktree` is read as config once `extensions.worktreeConfig` is
- * set. `worktrees` and `modules` hold the git directories of linked checkouts and submodules, each with its own
- * `commondir` or `config`. Every other name, objects, refs, the index, `HEAD`, logs, LFS objects and the in-progress
- * state of a merge, stash or rebase, stays writable.
+ * One entry of the {@link terminalGitStorePolicy}: a top-level name in a git directory, protected with everything under
+ * it, and whether it is a directory when present.
+ *
+ * @public
  */
-const gitExecutableNames: ReadonlyArray<Readonly<{ name: string; directory: boolean }>> = [
+export type TerminalGitStoreName = Readonly<{ name: string; directory: boolean }>;
+
+/**
+ * The store policy (Linux Terminal git parity blueprint R1): the top-level names in a git directory that a writable
+ * store keeps read-only, each with everything under it, because a write there makes git outside the sandbox, Tau's own
+ * engine or the person's git, run a program or follow another path. One list for every provider: the grant compiler
+ * spells it for Seatbelt here, and the Linux store guard reads the same list.
+ *
+ * `config` and `hooks` name programs directly. `commondir` makes git read the config and hooks of any folder it names,
+ * in a repository of any kind, and `config.worktree` is read as config once `extensions.worktreeConfig` is set.
+ * `worktrees` and `modules` hold the git directories of linked checkouts and submodules, each with its own `commondir`
+ * or `config`. `remotes` and `branches` are git's legacy remote files: `git fetch <name>` and `git push <name>` outside
+ * the sandbox follow the address in them. Every other name, objects, refs, the index, `HEAD`, logs, LFS objects and the
+ * in-progress state of a merge, stash or rebase, stays writable.
+ *
+ * Review this list against the blueprint's Threat Set (`docs/research/linux-terminal-git-parity-blueprint.md`)
+ * whenever the bundled git is bumped (`gitVersion` in `apps/desktop/scripts/git-payload.mts`): a name a newer git starts
+ * to trust stays open until it is added here.
+ *
+ * @public
+ */
+export const terminalGitStorePolicy: readonly TerminalGitStoreName[] = [
   { name: 'config', directory: false },
   { name: 'hooks', directory: true },
   { name: 'commondir', directory: false },
   { name: 'config.worktree', directory: false },
   { name: 'worktrees', directory: true },
   { name: 'modules', directory: true },
+  { name: 'remotes', directory: true },
+  { name: 'branches', directory: true },
 ];
 
 /** Characters the sandbox runtime reads as a glob. */
 const globCharacters = /[*?[\]]/u;
 
-/** A name as the one-segment glob that matches it under any ASCII case (`[cC][oO]…`), for a case-folding volume. */
-const caselessGlob = (name: string): string =>
-  [...name]
-    .map((character) => {
-      const lower = character.toLowerCase();
-      const upper = character.toUpperCase();
-      return lower === upper ? character : `[${lower}${upper}]`;
-    })
-    .join('');
+/**
+ * The non-ASCII characters a case-folding APFS volume reads as ASCII letters of a policy name. APFS compares names
+ * after canonical decomposition and Unicode full case folding, under which exactly these code points fold onto ASCII
+ * letters: U+017F (long s) onto `s`, U+212A (Kelvin sign) onto `k`, U+00DF and U+1E9E onto `ss`, and the Latin
+ * ligatures U+FB00 to U+FB06 onto `ff`, `fi`, `fl`, `ffi`, `ffl` and `st`. Of those letter runs only `s`, `k` and
+ * `fi` occur in the policy's names. A name created as `hook\u017F` would therefore be found by git outside as `hooks`,
+ * while Seatbelt matches the leaf of a name being created as it was typed.
+ */
+const foldingSpellings: ReadonlyArray<readonly [ascii: string, folding: string]> = [
+  ['fi', '\uFB01'],
+  ['s', '\u017F'],
+  ['k', '\u212A'],
+];
+
+/**
+ * A name as a volume that folds case compares it: canonical decomposition, then full case folding, approximated here
+ * by upper then lower case (`\u017F` and `S` both answer `s`, `\uFB01` answers `fi`).
+ *
+ * @param name - A file name.
+ * @returns Its folded form.
+ */
+const foldName = (name: string): string => name.normalize('NFD').toUpperCase().toLowerCase();
+
+/** One ASCII letter as the bracket that matches it under either case (`[cC]`); any other character as itself. */
+const caselessCharacter = (character: string): string => {
+  const lower = character.toLowerCase();
+  const upper = character.toUpperCase();
+  return lower === upper ? character : `[${lower}${upper}]`;
+};
+
+/**
+ * A name as the one-segment globs that match it under every spelling a case-folding volume reads as that name: each
+ * ASCII letter as a bracket of both cases (`[cC][oO]…`), and each letter run in {@link foldingSpellings} either so or as
+ * its folding character. The folding character is written outside any bracket, so the pattern means the same whether
+ * Seatbelt matches the path's bytes or its characters; a bracket holding a multi-byte character would not.
+ *
+ * @param name - A policy name.
+ * @returns Its globs, the ASCII-only one first.
+ */
+const caselessGlobs = (name: string): readonly string[] => {
+  let spellings = [''];
+  let index = 0;
+  while (index < name.length) {
+    const rest = name.slice(index).toLowerCase();
+    const folding = foldingSpellings.find(([ascii]) => rest.startsWith(ascii));
+    const run = name.slice(index, index + (folding?.[0].length ?? 1));
+    const bracketed = [...run].map((character) => caselessCharacter(character)).join('');
+    const options = folding === undefined ? [bracketed] : [bracketed, folding[1]];
+    spellings = spellings.flatMap((prefix) => options.map((option) => `${prefix}${option}`));
+    index += run.length;
+  }
+  return spellings;
+};
 
 /**
  * What a protected path is to the person's Terminal: a git `store` (a real `.git` directory), another git `entry` (a
@@ -194,13 +259,14 @@ const terminalGitEntry = async (root: string, path: string): Promise<'store' | '
 };
 
 /**
- * Every spelling of a writable store's executable names to keep read-only: each existing entry under its own spelling,
- * the canonical name, and its caseless glob. A store whose own path holds a glob character cannot be spelled that way,
- * so it is answered `undefined` and stays read-only whole.
+ * Every spelling of a writable store's policy names to keep read-only: each existing entry under its own spelling, the
+ * canonical name, and its caseless globs. A store whose own path holds a glob character cannot be spelled that way, so
+ * it is answered `undefined` and stays read-only whole.
  *
- * Git looks a name up through the filesystem, so on a case-folding volume `.git/COMMONDIR` is read as `commondir`, and
- * Seatbelt matches the leaf of a name being created as it was typed. An absent name is therefore protected by its glob,
- * which matches every ASCII spelling, and an existing one by its resolved spelling as well.
+ * Git looks a name up through the filesystem, so on a case-folding volume `.git/COMMONDIR`, and `.git/hook\u017F`
+ * too, is read as the policy's name, and Seatbelt matches the leaf of a name being created as it was typed. An absent
+ * name is therefore protected by its globs, which match every spelling that folds onto it, and an existing one by its
+ * resolved spelling as well.
  */
 const executableSpellings = async (
   store: string,
@@ -216,11 +282,11 @@ const executableSpellings = async (
   }
   const paths = new Set<string>();
   const directories = new Set<string>();
-  for (const { name, directory } of gitExecutableNames) {
+  for (const { name, directory } of terminalGitStorePolicy) {
     const spellings = [
-      ...present.filter((entry) => entry.toLowerCase() === name).map((entry) => join(store, entry)),
+      ...present.filter((entry) => foldName(entry) === name).map((entry) => join(store, entry)),
       join(store, name),
-      join(store, caselessGlob(name)),
+      ...caselessGlobs(name).map((glob) => join(store, glob)),
     ];
     for (const path of spellings) {
       paths.add(path);
@@ -257,7 +323,8 @@ export const terminalGitAccess = (platform: NodeJS.Platform): TerminalGitAccess 
  * having it denied. With `terminalGit: 'read'` (operator ruling 2026-11-12, "Real .git, read-only") each store is
  * read-only, so git there reads live history and can write none of it. With `terminalGit: 'write'` each store is
  * writable, so `add`, `commit`, `switch`, `stash` and `merge` work, and only the names through which git runs a program
- * stay read-only ({@link gitExecutableNames}): no code in the Terminal can make git outside the sandbox run anything.
+ * or follows another address stay read-only ({@link terminalGitStorePolicy}): no code in the Terminal can make git
+ * outside the sandbox run anything or push to a place it chose.
  * A `.git` pointer file, an absent `.git` and a store whose path cannot be spelled as a glob stay read-only whole.
  * `write` needs a provider that protects an absent name without creating it ({@link terminalGitAccess}).
  *

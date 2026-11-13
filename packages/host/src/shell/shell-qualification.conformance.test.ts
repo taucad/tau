@@ -2153,9 +2153,11 @@ describe.runIf(enabled)('shell qualification', () => {
   /*
    * Terminal git: the person's Terminal reaches the project's real store, so git there sees history live, a save made
    * after the session opened included. On macOS the store is writable except the names through which git runs a
-   * program (`config`, `hooks`, `commondir` and the rest), so `add`, `commit`, `switch -c`, `stash` and `merge` succeed
-   * and commit under the signed-in person's Tau no-reply address, while a `git config` write, a hook, a direct write to
-   * `.git/config`, a lock renamed over it and a planted `commondir` all fail. On Linux the store stays read-only, because
+   * program or follows another address (`config`, `hooks`, `commondir`, `remotes`, `branches` and the rest), so `add`,
+   * `commit`, `switch -c`, `stash` and `merge` succeed and commit under the signed-in person's Tau no-reply address,
+   * while a `git config` write, a hook, a direct write to `.git/config`, a lock renamed over it, a planted `commondir`
+   * and a planted legacy remote all fail, as do each name spelled with the characters a case-folding volume reads as
+   * its letters and a hard link to `config`. On Linux the store stays read-only, because
    * bubblewrap cannot keep an absent `commondir` from being created without leaving a stand-in that breaks git outside,
    * and every write fails. The project tracks a large file through Git LFS with the index Tau's refresh leaves after a
    * save (stat data zero), which makes git run the LFS clean filter: both the Terminal and the agent's view must still
@@ -2325,17 +2327,40 @@ describe.runIf(enabled)('shell qualification', () => {
         expect(afterSave).toStrictEqual({ exitCode: 0, text: '' });
 
         const gitDirectory = join(store, '.git');
-        const hooks = join(gitDirectory, 'hooks');
-        /* The names that run a program, judged outside: the config's bytes, the hooks' tree, and no `commondir`. */
+        /*
+         * The shell service's store policy, restated so the judge does not read the list it judges. Each name, under
+         * every spelling a case-folding volume reads as it (`HOOKS`, or `hook` + U+017F), is judged outside: its bytes
+         * or its tree, so a name the Terminal created, removed or wrote shows. `config` is judged by its link count
+         * too, so a second name for it shows.
+         */
+        const policy = [
+          'config',
+          'hooks',
+          'commondir',
+          'config.worktree',
+          'worktrees',
+          'modules',
+          'remotes',
+          'branches',
+        ];
+        const folded = (name: string): string => name.normalize('NFD').toUpperCase().toLowerCase();
         const executableDigest = (): string =>
           JSON.stringify({
-            config: readFileSync(join(gitDirectory, 'config'), 'utf8'),
-            hooks: existsSync(hooks) ? treeDigestOf(hooks) : 'absent',
-            commondir: readdirSync(gitDirectory).filter((name) => name.toLowerCase() === 'commondir'),
-            worktree: readdirSync(gitDirectory).filter((name) => name.toLowerCase() === 'config.worktree'),
+            links: statSync(join(gitDirectory, 'config')).nlink,
+            entries: readdirSync(gitDirectory)
+              .filter((name) => policy.includes(folded(name)))
+              .toSorted()
+              .map((name) => {
+                const path = join(gitDirectory, name);
+                return [name, statSync(path).isDirectory() ? treeDigestOf(path) : digestOf(path)];
+              }),
           });
         const executableBefore = executableDigest();
-        /* Every write that would make git outside the sandbox run a program; each one fails on both platforms. */
+        /*
+         * Every write that would make git outside the sandbox run a program or follow an address the Terminal chose;
+         * each one fails on both platforms. `remotes` and `branches` are git's legacy remote files, which `git push
+         * backup` and `git fetch mirror` outside would follow (blueprint Finding 6).
+         */
         const protectedWrites = [
           'git config core.hooksPath forged',
           `printf '#!/bin/sh\n' > .git/hooks/post-commit`,
@@ -2344,6 +2369,47 @@ describe.runIf(enabled)('shell qualification', () => {
           `printf '%s\n' "$PWD/forged" > .git/commondir`,
           `printf '%s\n' "$PWD/forged" > .git/COMMONDIR`,
           `printf '[core]\n\thooksPath = forged\n' > .git/config.worktree`,
+          `mkdir .git/remotes && printf 'URL: %s\nPush: refs/heads/main\n' "$PWD/forged" > .git/remotes/backup`,
+          `mkdir .git/branches && printf '%s\n' "$PWD/forged" > .git/branches/mirror`,
+        ];
+        /*
+         * The macOS residuals (blueprint T14, T15, LP6). A case-folding APFS volume reads U+017F as `s`, U+212A as `k`
+         * and U+FB01 as `fi`, so each policy name written with them is the policy name to git outside: each spelling
+         * is created, or written into where the volume finds the name already there. A hard link would give `config`
+         * a second name that no rule names, in the store or in the work tree. Each fails in the Terminal.
+         */
+        const foldings: ReadonlyArray<readonly [string, string]> = [
+          ['fi', '\uFB01'],
+          ['s', '\u017F'],
+          ['k', '\u212A'],
+        ];
+        const foldedSpellings = (name: string): string[] => {
+          const spellings = new Set<string>();
+          for (const [ascii, character] of foldings) {
+            for (let index = name.indexOf(ascii); index !== -1; index = name.indexOf(ascii, index + 1)) {
+              spellings.add(`${name.slice(0, index)}${character}${name.slice(index + ascii.length)}`);
+            }
+          }
+          let every = name;
+          for (const [ascii, character] of foldings) {
+            every = every.replaceAll(ascii, character);
+          }
+          if (every !== name) {
+            spellings.add(every);
+          }
+          return [...spellings];
+        };
+        const directoryNames = new Set(['hooks', 'worktrees', 'modules', 'remotes', 'branches']);
+        const macResiduals = [
+          ...policy.flatMap((name) =>
+            foldedSpellings(name).map((spelling) =>
+              directoryNames.has(name)
+                ? `mkdir -p '.git/${spelling}' && printf '%s\n' "$PWD/forged" > '.git/${spelling}/planted'`
+                : `printf '[core]\n\thooksPath = forged\n' >> '.git/${spelling}'`,
+            ),
+          ),
+          `ln .git/config .git/config-link && printf '[core]\n\thooksPath = forged\n' >> .git/config-link`,
+          `ln .git/config config-link && printf '[core]\n\thooksPath = forged\n' >> config-link`,
         ];
         const before = treeDigestOf(gitDirectory);
         if (writable) {
@@ -2405,12 +2471,16 @@ describe.runIf(enabled)('shell qualification', () => {
           measurements = { ...measurements, writesRefused: refused.length };
         }
         const refusedExecutable: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
-        for (const command of protectedWrites) {
+        for (const command of writable ? [...protectedWrites, ...macResiduals] : protectedWrites) {
           // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
           refusedExecutable.push({ command, ...(await terminal.run(command)) });
         }
         expect(refusedExecutable.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
-        /* Outside bytes are the judge: config, hooks and the absence of `commondir` are what the store had. */
+        /*
+         * Outside bytes are the judge: config, hooks and every other policy name, under any spelling, are what the
+         * store had, `config` has no second name, and nothing the residual cases named was left in the work tree.
+         */
+        expect(existsSync(join(store, 'config-link'))).toBe(false);
         expect(executableDigest()).toBe(executableBefore);
         if (!writable) {
           /* A read-only store is byte for byte what the save left. */

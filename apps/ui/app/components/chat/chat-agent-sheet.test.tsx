@@ -231,6 +231,8 @@ describe('ChatAgentSheet', () => {
     const trigger = screen.getByRole('button', { name: 'Agent and model: Model' });
     expect(trigger).not.toHaveTextContent(fable.id);
     expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('w-20');
+    // Cut like the name when the bar is narrow, so the bar's collapse sees it overflow (never squeezed under 24px).
+    expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('min-w-0', 'overflow-hidden');
     expect(trigger.querySelector('[data-slot="trigger-model"]')).toBeNull();
   });
 

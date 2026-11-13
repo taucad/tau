@@ -264,6 +264,46 @@ describe('revisionWho', () => {
     expect(revisionWho(entry('anon:3fa9c1'), solo).line).toBe('');
   });
 
+  /* A commit made with git under a person's Tau no-reply address names that person, and says how it was made. */
+  it('names a commit made with git under a Tau no-reply address as its person, made with git, on every project', () => {
+    const git = (authorAccountId: string, authorName = 'Ada Lovelace'): RevisionWhoEntry =>
+      entry({ kind: 'unrecorded', authorName, authorAccountId }, 'import');
+    /* Unlike Tau's own entries, a single-person project still names its person beside the mark. */
+    expect(revisionWho(git(ada.id), solo)).toEqual({ line: 'You · made with git', isYou: true, isAgent: false });
+    expect(revisionWho(git(ada.id), shared()).line).toBe('You · made with git');
+    /* Not backed up yet and not this session's: the directory's name, else the git author's. */
+    expect(revisionWho(git('user-maya'), shared()).line).toBe('Maya · made with git');
+    expect(revisionWho(git('user-sam', 'Sam'), solo)).toEqual({
+      line: 'Sam · made with git',
+      isYou: false,
+      isAgent: false,
+    });
+    /* Backed up by the account it names: the server checked the address, so the pusher's name. */
+    expect(revisionWho(git('user-maya'), shared(pushedBy('user-maya', 'Maya')))).toEqual({
+      line: 'Maya · made with git',
+      isYou: false,
+      isAgent: false,
+    });
+    expect(revisionWho(git(ada.id), shared(pushedBy(ada.id, 'Ada'))).isYou).toBe(true);
+  });
+
+  it('does not take a pushed commit’s address over the account that pushed it', () => {
+    const git: RevisionWhoEntry = entry(
+      { kind: 'unrecorded', authorName: 'Maya', authorAccountId: 'user-maya' },
+      'import',
+    );
+    /* A linked project takes commits without the address check: the pusher is who the server authenticated. */
+    expect(revisionWho(git, shared(pushedBy('user-bea', 'Bea'))).line).toBe('Bea');
+    expect(
+      revisionWho(
+        git,
+        shared(() => ({ kind: 'anonymous' })),
+      ).line,
+    ).toBe('Anonymous');
+    /* A commit with any other address still reads as its git author, unmarked. */
+    expect(revisionWho(entry({ kind: 'unrecorded', authorName: 'octo-dev' }, 'import'), solo).line).toBe('octo-dev');
+  });
+
   /* Blueprint A3 acceptance: on a one-member project every pushed entry is that member's, whatever its trailer says. */
   it('resolves root, prj_x, tau-host and a forged Tau-Actor on a one-member project to that member', () => {
     const one: RevisionWhoContext = {

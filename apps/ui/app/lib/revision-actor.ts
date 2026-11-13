@@ -416,6 +416,45 @@ const personOf = (who: RevisionRowWho): RevisionUserActor | undefined => {
 
 const nobody: RevisionWho = { line: '', isYou: false, isAgent: false };
 
+/** How History marks a commit the person made with git rather than in Tau. */
+const madeWithGit = 'made with git';
+
+/**
+ * Who a commit made with git reads as: the person whose Tau no-reply address
+ * authored it, marked {@link madeWithGit}, on every project, so the row says
+ * both who and how even where Tau's own entries show no who line.
+ *
+ * The address is the commit's claim, so it is believed only as far as the
+ * server confirms it. Tau Cloud backs up such a commit on a project it
+ * registered only for the account its address names, so a pushed one is that
+ * account's when that account pushed it. A project linked to GitHub takes
+ * commits without that check: one that another account pushed, or a push the
+ * server withholds, reads as any pushed entry does. Not pushed yet, it is
+ * made on this device, and reads as its address says.
+ *
+ * @param who - The entry's typed who.
+ * @param context - The session and push record.
+ * @param pusher - Who pushed the entry, when it is on Tau Cloud.
+ * @returns The who, or `undefined` when the entry is not a commit made with git under a Tau no-reply address.
+ */
+const madeWithGitWho = (
+  who: RevisionRowWho,
+  context: RevisionWhoContext,
+  pusher: RevisionPusher | undefined,
+): RevisionWho | undefined => {
+  if (who.kind !== 'unrecorded' || who.authorAccountId === undefined) {
+    return undefined;
+  }
+  const accountId = who.authorAccountId;
+  if (pusher !== undefined && (pusher.kind !== 'account' || pusher.accountId !== accountId)) {
+    return undefined;
+  }
+  const isYou = context.session?.id === accountId;
+  const pushedName = pusher?.kind === 'account' && pusher.name !== '' ? pusher.name : undefined;
+  const name = isYou ? 'You' : (pushedName ?? context.pushRecord?.memberName(accountId) ?? who.authorName ?? '');
+  return { line: name === '' ? madeWithGit : `${name} · ${madeWithGit}`, isYou, isAgent: false };
+};
+
 /**
  * Who a pushed entry reads as: the account the server authenticated, with
  * `recorded as` beside it when the entry names another account in the
@@ -465,8 +504,9 @@ const pushedWho = (
  * card and the arrival sentence show (blueprint "Who made it comes from what
  * the server authenticated", I2).
  *
- * In order: an agent's result reads `Agent`; an entry on Tau Cloud is the
- * account that pushed it; an entry made on this device is whoever is signed in
+ * In order: an agent's result reads `Agent`; a commit the person made with
+ * git under their Tau no-reply address is that person, `made with git`; an
+ * entry on Tau Cloud is the account that pushed it; an entry made on this device is whoever is signed in
  * here, and nobody signed out; a commit Tau did not write is its git author;
  * anything else shows no name. The recorded identity is read by its type (B2),
  * never printed and never trusted for a name, and no id is parsed for what it
@@ -501,6 +541,10 @@ export const revisionWho = (entry: RevisionWhoEntry, context: RevisionWhoContext
   const anonymous =
     context.showAnonymousId && isAnonymous ? `Anonymous · ${person.id.replace(/^anon:/u, '')}` : 'Anonymous';
   const pusher = context.pushRecord?.pushedBy(entry.revisionId);
+  const git = madeWithGitWho(entry.who, context, pusher);
+  if (git !== undefined) {
+    return git;
+  }
   if (pusher !== undefined) {
     return pushedWho({ person, context, pusher, anonymous, isShared });
   }

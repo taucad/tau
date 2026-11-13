@@ -1,7 +1,7 @@
+import { z } from 'zod';
 import { createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, EventObject } from 'xstate';
 
-import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineInput } from '#machines/sessions.machine.js';
 import type { EnvironmentEvent } from '#runtime/environment.js';
@@ -94,6 +94,12 @@ export const appRuntimeEventTypes = [
  */
 export const appRuntimeIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [];
 
+const environmentEventSchemas = {
+  visibilityChanged: z.object({ visible: z.boolean() }),
+  focusChanged: z.object({ focused: z.boolean() }),
+  memoryClassChanged: z.object({ constrained: z.boolean() }),
+} satisfies Record<AppRuntimeEvent['type'], z.ZodType>;
+
 /** The driver default: no page, no listeners. The composition provides the browser's (MC-R8). */
 const noEnvironment = createCallbackLogic<EventObject>(() => undefined);
 
@@ -107,9 +113,10 @@ const faultMessage = (error: unknown): string => (error instanceof Error ? error
 export const appRuntimeMachine = setup({
   schemas: {
     context: types<AppRuntimeContext>(),
-    events: eventSchemas<AppRuntimeEvent>(),
+    /* Runtime schemas (MC-R30): what `environment` reports, and the same payloads emitted. */
+    events: environmentEventSchemas,
     input: types<AppRuntimeInput>(),
-    emitted: eventSchemas<AppRuntimeEmitted>(),
+    emitted: environmentEventSchemas,
   },
   actors: { environment: noEnvironment, sessions: sessionsMachine },
 }).createMachine({

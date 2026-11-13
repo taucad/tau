@@ -107,6 +107,7 @@ describe('AppRuntimeProvider start boundary', () => {
     act(() => {
       root?.unmount();
     });
+    clientRuntime.stop();
   });
 
   it('should create and start nothing twice under StrictMode', () => {

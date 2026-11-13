@@ -9,6 +9,7 @@
 import { act, useEffect } from 'react';
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { flush } from '@taucad/xstate-testing/clock';
 import { describe, expect, it, vi } from 'vitest';
 import { FinancialSessionProvider, FinancialSessionScope } from '#providers/financial-session-provider.js';
 import { SessionsProvider, useProjectSession, useSessions } from '#hooks/use-sessions.js';
@@ -71,9 +72,11 @@ describe('B9: the runtime survives an owner change below the billing fence', () 
       reportRegionReady('p1', 'runtime');
       await Promise.resolve();
     });
-    await vi.waitFor(() => {
-      expect(registryA.getSnapshot().context.status['p1']?.state).toBe('live');
+    /* The agent-host double settles after a microtask; one macrotask lets every region report. */
+    await act(async () => {
+      await flush();
     });
+    expect(registryA.getSnapshot().context.status['p1']?.state).toBe('live');
     const sessionA = seen.session;
     expect(sessionA).toBeDefined();
     expect(seen.mounts).toBe(1);

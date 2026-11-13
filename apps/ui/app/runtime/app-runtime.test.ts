@@ -7,7 +7,8 @@
  * and the memory class, and never listens for an unload phase: `UnloadProvider` stays the one unload sequencer
  * until A5b (D26). The root keeps its first fault (D23).
  */
-import { StepClock } from '@taucad/xstate-testing/clock';
+import { flush, StepClock } from '@taucad/xstate-testing/clock';
+import { validated } from '@taucad/xstate-testing/inspect';
 import { recordEmitted } from '@taucad/xstate-testing/fakes';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { describe, expect, it, vi } from 'vitest';
@@ -29,6 +30,8 @@ import {
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
+import { createEnvironmentLogic } from '#runtime/environment.js';
+import { sessionsRegistryLogic } from '#services/sessions-store.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -98,7 +101,15 @@ describe('app runtime root', () => {
 
   it('should report visibility, focus and the memory class, and emit each change', () => {
     const host = createFakeEnvironmentHost({ visibilityState: 'visible', focused: true, coarse: false });
-    const runtime = createAppRuntime({ environment: () => host });
+    /* The factory's composition, under the harness's runtime schemas (MC-R30). */
+    const runtime = createActor(
+      validated(
+        appRuntimeMachine.provide({
+          actors: { environment: createEnvironmentLogic(() => host), sessions: sessionsRegistryLogic },
+        }),
+      ),
+      { input: { sessions: {} } },
+    );
     const emitted = recordEmitted(runtime);
     runtime.start();
 
@@ -162,9 +173,11 @@ describe('app runtime root', () => {
     const errors: string[] = [];
     const runtime = createActor(
       // A test double for each child: the root only sees that each one failed.
-      appRuntimeMachine.provide({
-        actors: { environment: first, sessions: later as unknown as typeof sessionsMachine },
-      }),
+      validated(
+        appRuntimeMachine.provide({
+          actors: { environment: first, sessions: later as unknown as typeof sessionsMachine },
+        }),
+      ),
       {
         input: { sessions: {} },
         inspect: (inspection) => {
@@ -174,9 +187,9 @@ describe('app runtime root', () => {
         },
       },
     ).start();
-    await vi.waitFor(() => {
-      expect(errors).toEqual(['environment', 'sessions']);
-    });
+    /* The environment double throws on start; the sessions double rejects after one microtask. */
+    await flush();
+    expect(errors).toEqual(['environment', 'sessions']);
 
     expect(selectAppRuntimeFault(runtime.getSnapshot())).toBe('environment failed first');
     expect(runtime.getSnapshot().status).toBe('active');

@@ -3,10 +3,16 @@ import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useActorRef, useSelector } from '@xstate/react';
-import { waitFor } from 'xstate';
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { ActorRefFrom } from 'xstate';
 import { z } from 'zod';
 import { projectIdSchema, projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
@@ -29,7 +35,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
 import type { StartOrigin } from '@taucad/revisions';
 import type { Remote } from 'comlink';
-import { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import {
@@ -101,7 +107,15 @@ import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import { selectWorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import {
+  selectLibraryError,
+  selectLibraryIsLoading,
+  selectLibraryWorkspaceConnection,
+} from '#runtime/project-library.js';
+import type { ProjectLibrary } from '#runtime/project-library.js';
+import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
@@ -859,10 +873,29 @@ function createMetadataReadOwner(source: ReturnType<typeof createChatFileStore>)
   };
 }
 
-export function ProjectManagerProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
-  const actorRef = useActorRef(projectManagerMachine);
+/**
+ * A provider over the runtime's project library (D9, A2): `useProjectManager()` keeps its shape. Discovery, recovery
+ * and route access still run here, against the library's actors, until A3b.
+ *
+ * @param props - The tree, and a library a test composes instead of the runtime's.
+ * @returns The provider element.
+ * @public
+ */
+export function ProjectManagerProvider({
+  children,
+  library: composed,
+}: {
+  readonly children?: ReactNode;
+  readonly library?: ProjectLibrary;
+}): React.JSX.Element {
+  const runtime = useOptionalAppRuntime();
+  const library = composed ?? (runtime === undefined ? undefined : selectRuntimeProjectLibrary(runtime));
+  if (library === undefined) {
+    throw new Error('ProjectManagerProvider must be used within <AppRuntimeProvider>, or be given a library');
+  }
+  const actorRef = library.projectManager;
   const fileManager = useFileManager();
-  const queryClient = useQueryClient();
+  const { queryClient } = library;
   /**
    * A chat is files in its project (D25, A30, W17): `.tau/chats/<id>/chat.json`
    * read and written through the same worker filesystem client the rest of this
@@ -1309,6 +1342,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     const unsubscribeDiscovery = discovery.subscribe(updateDiscoveryHealth);
     const unsubscribeMetadata = metadata.subscribe(updateMetadataHealth);
     metadataReadOwner.hold();
+    /* The library's reads run through this observation again (A2). */
+    library.resume();
     const discoveryLease = discovery.acquire();
     const metadataLease = metadata.acquire();
     updateDiscoveryHealth();
@@ -1330,33 +1365,19 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       disconnect();
       projectMetadata.clear();
       setMetadataObservationErrors((previous) => (previous.size === 0 ? previous : new Map()));
+      /* Released first, so a read the next line fails waits for the binding that serves next (B9). */
+      library.release();
       metadataReadOwner.fail(new Error('Chat observation was disposed.'));
     };
-  }, [fileManager.workerChangeChannel, fileManager.watchRecordFile, metadataReadOwner, queryClient]);
+  }, [fileManager.workerChangeChannel, fileManager.watchRecordFile, library, metadataReadOwner, queryClient]);
 
-  // Select state from the machine
-  const error = useSelector(actorRef, (state) => state.context.error);
-  const isLoading = useSelector(actorRef, (state) => {
-    return state.matches('initializing') || state.matches('creatingWorker');
-  });
+  /* What the library publishes, read through its module-level selectors (MC-R25). The library starts its actor and
+   * the worker with the runtime (row L3). */
+  const librarySnapshot = useSyncExternalStore(library.subscribe, library.getSnapshot, library.getSnapshot);
+  const error = selectLibraryError(librarySnapshot);
+  const isLoading = selectLibraryIsLoading(librarySnapshot);
 
-  useEffect(() => {
-    // Initialize the machine on mount
-    actorRef.send({ type: 'initialize' });
-  }, [actorRef]);
-
-  const getReadiedWorker = useCallback(async (): Promise<Remote<ObjectStoreWorker>> => {
-    const snapshot = await waitFor(actorRef, (state) => state.matches('ready') || state.matches('error'));
-    if (snapshot.matches('error')) {
-      throw new Error('Projct manager worker failed to initialize');
-    }
-
-    if (!snapshot.context.wrappedWorker) {
-      throw new Error('Projct manager worker not initialized');
-    }
-
-    return snapshot.context.wrappedWorker;
-  }, [actorRef]);
+  const { getReadiedWorker } = library;
 
   const discoverPermanentDeleteStorage = useCallback(
     async (projectId: string): Promise<PendingProjectStorage> => {
@@ -2976,14 +2997,20 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     }),
     [fileManager.workspace, prepareCurrentWorkspaceCatalog],
   );
-  const workspaceConnectionRef = useActorRef(workspaceConnectionMachine, { input: workspaceConnectionServices });
-  const workspaceConnection = useSelector(workspaceConnectionRef, selectWorkspaceConnectionState);
+  const workspaceConnectionRef = library.workspaceConnection;
+  const workspaceConnection = selectLibraryWorkspaceConnection(librarySnapshot);
 
   const waitForWorkspaceConnection = useCallback(
     async (operationId: string): Promise<ConnectedWorkspace> =>
       new Promise<ConnectedWorkspace>((resolve, reject) => {
         const settle = (snapshot: ReturnType<typeof workspaceConnectionRef.getSnapshot>): void => {
           if (snapshot.context.operationId !== operationId) {
+            /* Only a later `beginSelection` sets another id: this operation was superseded, so it settles. The
+             * library's connection outlives a provider remount, which clears the in-flight promise (A2). */
+            if (snapshot.context.operationId !== undefined) {
+              subscription.unsubscribe();
+              reject(new Error('Workspace connection was superseded.'));
+            }
             return;
           }
           if (snapshot.matches('ready')) {
@@ -3428,6 +3455,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     },
     [createProject, getProjectListing],
   );
+
+  /*
+   * The library's transitional binding (programme-control D15 ruling, A2), supplied in render where the chat store's
+   * mirror used to run, so a session acquired in this pass already reaches these implementations. A3b deletes the
+   * discovery half (touchProject's wait, the chat ports' epoch bumps, the connection services); A4b the file facade.
+   */
+  /* oxlint-disable-next-line react/refs -- the binding is handed over in render, as the mirror was, so a session acquired below in this pass reaches it; its ports read refs only when called. */
+  library.bind({
+    files: { client: fileManager.recordFiles, watchRecordFile: fileManager.watchRecordFile },
+    chats: {
+      getChat,
+      patchChat,
+      adoptLegacyChatPlacement,
+      touchChatRecency,
+      consumeChatStartupRequest,
+      commitCancelledDraftRestore,
+      getChatRecordsForResource,
+      createNavigationRepairChat,
+    },
+    touchProject,
+    connection: workspaceConnectionServices,
+  });
 
   const value = useMemo<ProjectManagerContextType>(() => {
     return {

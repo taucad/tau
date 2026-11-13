@@ -2,7 +2,7 @@ import { authQueryKeys } from '@better-auth-ui/core';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import type { ShouldRevalidateFunctionArgs } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { configureSessionQueryDefaults, handleQueryError } from '#root-layout.js';
+import { configureSessionQueryDefaults, handleQueryError } from '#runtime/root-query-client.js';
 import { shouldRevalidate } from '#root.js';
 
 const toastError = vi.hoisted(() => vi.fn());

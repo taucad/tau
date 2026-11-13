@@ -8,8 +8,10 @@ name: E2E nightly
 # night they run against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
 # nightly, never a merge gate.
-# `workflow_dispatch` takes an optional commit to run against instead, and `only` selects one
-# suite family (`packaged`: only the packaged desktop suite).
+# `workflow_dispatch` takes an optional commit to run against instead, `only` selects one
+# suite family (`packaged`: only the packaged desktop suite), and `flag_state` runs the browser
+# and desktop suites with every page opened in one of the four onboarding flag states
+# (`TAU_E2E_FLAG_STATE`, `apps/ui-e2e/src/support/flag-state.ts`); the schedule leaves it unset, which is all-off.
 
 on:
   schedule:
@@ -25,6 +27,11 @@ on:
         type: choice
         options: [all, packaged]
         default: all
+      flag_state:
+        description: 'Onboarding flag state every suite opens in'
+        type: choice
+        options: [all-off, viewer-controls, all-on, viewer-controls-onboarding]
+        default: all-off
 
 concurrency:
   group: e2e-nightly
@@ -189,6 +196,7 @@ jobs:
         timeout-minutes: 120
         env:
           TAU_E2E_WEBGPU_PROFILE: software
+          TAU_E2E_FLAG_STATE: ${{ inputs.flag_state || '' }}
           PROJECT: ${{ matrix.suite.project }}
           TARGET: ${{ matrix.suite.target }}
           SHARD: ${{ matrix.suite.shard }}

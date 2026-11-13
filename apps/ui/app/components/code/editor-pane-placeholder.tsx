@@ -1,27 +1,7 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useMemo } from 'react';
 import type { Ref, UIEventHandler } from 'react';
-import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-
-const subscribeToNothing = (): (() => void) => () => undefined;
-const isClient = (): boolean => true;
-const isServer = (): boolean => false;
-
-/**
- * When a pane's wait started, on the performance timeline, for `WaitIndicator`'s `startedAt`. A pane in the
- * server-rendered document is part of the route open, whose clock starts at navigation (0). A pane that mounts on the
- * client is opened by a gesture, or by the workbench right after one, so its mount stands in for that moment; for a
- * pane the workbench mounts during the open this is later than navigation, so its indicator can show late but never
- * early. Read once, in the first render.
- *
- * @returns The wait's start. Milliseconds.
- */
-export function useWaitStart(): number {
-  const isOnClient = useSyncExternalStore(subscribeToNothing, isClient, isServer);
-  const [startedAt] = useState(() => (isOnClient ? performance.now() : 0));
-  return startedAt;
-}
 
 /**
  * What an editor pane shows until its editor can mount, in the editor's own place: the editor's background, and as
@@ -33,10 +13,9 @@ export function useWaitStart(): number {
  * at least 4ch wide with `var(--spacing)` either side, the fold gutter as wide as its closed marker plus 2 px, a
  * lint gutter of zero width, and CodeMirror's own 6 px and 2 px line padding.
  *
- * The busy state is on the pane for the whole wait. Past 1,000 ms without the text, "Opening file" shows in the
- * pane's top corner. That slot is not live: a pane that opens with the route is part of the route's one announcement,
- * and a pane opened later carries the tab's own selected state and the busy state; a live slot here would speak twice
- * at open.
+ * The busy state is on the pane for the whole wait. The wait's words ("Opening file") belong to the pane that hosts
+ * this placeholder, which outlives it (the workbench's `FileEditor`): this node is replaced when the editor mounts, so
+ * an indicator here would lose its minimum and restart its clock.
  *
  * @param props - The pane's accessible name, the file's text once read, whether the editor shows line numbers, a
  *   scroll handler that hands the position to the editor, and the frame's classes and ref.
@@ -59,8 +38,14 @@ export function EditorPanePlaceholder({
   readonly ref?: Ref<HTMLDivElement>;
 }): React.JSX.Element {
   const isMobile = useIsMobile();
-  const startedAt = useWaitStart();
-  const lineCount = text === undefined ? 0 : text.split(/\r\n?|\n/u).length;
+  /* One pass over the text per text, not per render: the pane re-renders while it waits. */
+  const lineNumbers = useMemo(() => {
+    if (text === undefined) {
+      return '';
+    }
+    const lineCount = text.split(/\r\n?|\n/u).length;
+    return Array.from({ length: lineCount }, (_, index) => index + 1).join('\n');
+  }, [text]);
   return (
     <div
       ref={ref}
@@ -85,9 +70,7 @@ export function EditorPanePlaceholder({
           >
             {hasLineNumbers ? (
               /* CodeMirror sizes this gutter to the widest line number, as here: digits are one width in a mono font. */
-              <div className='box-border min-w-[4ch] px-(--spacing) text-right whitespace-pre'>
-                {Array.from({ length: lineCount }, (_, index) => index + 1).join('\n')}
-              </div>
+              <div className='box-border min-w-[4ch] px-(--spacing) text-right whitespace-pre'>{lineNumbers}</div>
             ) : null}
             {/* The fold gutter is as wide as its closed marker, which CodeMirror pads by 1 px each side. */}
             <span className='invisible px-px'>›</span>
@@ -100,15 +83,6 @@ export function EditorPanePlaceholder({
           </div>
         </div>
       )}
-      <div className='pointer-events-none absolute top-1 right-3'>
-        <WaitIndicator
-          active={text === undefined}
-          label='Opening file'
-          slowLabel='Still opening file'
-          startedAt={startedAt}
-          live={false}
-        />
-      </div>
     </div>
   );
 }

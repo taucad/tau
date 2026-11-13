@@ -23,6 +23,7 @@ afterEach(() => {
   syntax.loaded.mockClear();
   Reflect.deleteProperty(HTMLElement.prototype, 'checkVisibility');
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /**
@@ -91,5 +92,4 @@ it('keeps the idle gap for a shown pane in a page that is not visible', async ()
   await Promise.resolve();
   expect(requestIdle).toHaveBeenCalledOnce();
   expect(syntax.loaded).not.toHaveBeenCalled();
-  vi.restoreAllMocks();
 });

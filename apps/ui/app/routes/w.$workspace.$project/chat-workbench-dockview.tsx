@@ -87,6 +87,8 @@ import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js'
 import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import { Loader } from '@taucad/ui/components/loader';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitStart } from '#hooks/use-wait-start.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
@@ -1475,6 +1477,11 @@ export const FileEditor = memo(function ({
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
   const availability = useProjectAvailability();
+  /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
+     the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
+     own notice instead. */
+  const isWaitingForText = availability === 'ready' && !isAwaitingLargeObject && result.kind === 'loading';
+  const textWait = useWaitStart(isWaitingForText);
   switch (result.kind) {
     case 'loading': {
       const loadingLabel = `Loading ${filePath.split('/').pop() ?? filePath}`;
@@ -1624,23 +1631,37 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
+  let content: ReactNode;
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
-  }
-
-  if (isAwaitingLargeObject) {
-    return renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> });
-  }
-
-  if (result.kind === 'binary' || result.kind === 'text') {
-    return isPanelShown ? (
+    content = <ProjectSyncPlaceholder state={availability} />;
+  } else if (isAwaitingLargeObject) {
+    content = renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> });
+  } else if (result.kind === 'binary' || result.kind === 'text') {
+    content = isPanelShown ? (
       <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
     ) : (
       renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })
     );
+  } else {
+    content = renderPane({ body });
   }
 
-  return renderPane({ body });
+  /* The indicator's slot is a sibling of the pane, so it keeps its node, clock and minimum while the pane's body moves
+     from the loading branch to the routed viewer (which remounts the pane's header too, so it cannot live there). */
+  return (
+    <div className='relative size-full' data-slot='file-pane-frame'>
+      {content}
+      <div className='pointer-events-none absolute right-3 bottom-3 z-20'>
+        <WaitIndicator
+          active={isWaitingForText}
+          label='Opening file'
+          slowLabel='Still opening file'
+          startedAt={textWait.startedAt}
+          live={textWait.isGesture}
+        />
+      </div>
+    </div>
+  );
 });
 
 /** One file still downloading: the pane waits for its bytes, which replace the placeholder as they land. */

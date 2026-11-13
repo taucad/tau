@@ -23,8 +23,6 @@ describe('EditorPanePlaceholder', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     // The pane does not take focus by itself.
     expect(document.activeElement).toBe(document.body);
-    // The text is there, so nothing waits: the indicator slot is present and empty.
-    expect(pane.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'idle');
   });
 
   it('numbers every line in a gutter beside the text, and leaves the gutter out of the text', () => {
@@ -44,10 +42,7 @@ describe('EditorPanePlaceholder', () => {
     const pane = screen.getByRole('group', { name: 'Loading main.ts' });
     expect(pane).toHaveAttribute('aria-busy', 'true');
     expect(pane.querySelector('[data-slot="editor-pane-text"]')).toBeNull();
-    // Until the read, the wait runs; the indicator's CSS reveals its words at 1,000 ms, and its slot is not live.
-    const indicator = pane.querySelector('[data-slot="wait-indicator"]');
-    expect(indicator).toHaveAttribute('data-state', 'waiting');
-    expect(indicator).not.toHaveAttribute('role');
-    expect(indicator).toHaveTextContent('Opening file…');
+    // The wait's words belong to the pane that hosts this placeholder, which outlives it.
+    expect(pane.querySelector('[data-slot="wait-indicator"]')).toBeNull();
   });
 });

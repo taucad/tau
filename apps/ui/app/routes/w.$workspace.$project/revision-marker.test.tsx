@@ -411,6 +411,27 @@ describe('RevisionRow', () => {
     expect(document.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton shapes in the comparison').toHaveLength(0);
   });
 
+  /* From the slow mark the comparison's wait offers Retry, which asks the read again and times a new wait from the Retry. */
+  it('offers Retry on a slow comparison, timing the new wait from the Retry', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
+    await user.click(within(frame).getByRole('button', { name: 'Retry' }));
+    vi.restoreAllMocks();
+
+    const body = frame.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
   it('restores an entry the files are not at, naming it in the button’s accessible name', async () => {
     const user = userEvent.setup();
     onRestore.mockClear();

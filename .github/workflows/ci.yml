@@ -939,8 +939,11 @@ jobs:
           failed=()
           IFS=',' read -ra tasks <<< "$TASKS"
           for task in "${tasks[@]}"; do
+            # `<project>:<target>`; project names hold no colon, target names may.
+            project="${task%%:*}"
+            target="${task#*:}"
             echo "::group::$task"
-            if ! pnpm nx run "$task"; then
+            if ! pnpm nx run-many -t "$target" -p "$project"; then
               failed+=("$task")
             fi
             echo "::endgroup::"

@@ -179,7 +179,7 @@ With two arrangements, a restore that compares the arrangement as "not `to`" is 
 
 ## Graph, suite and drift
 
-`expected.json` has a `graphs` entry for `LayoutApply` with `export` and the phase `applied`. `LayoutApply/graph.json` is the reachable graph of `export`, and `LayoutApply/suite.json` the covering suite. `LayoutApply/drift.json` hashes this module only: `workbench-layout.machine` does not exist yet, so `layout-apply.drift.test.ts` checks the manifest with an empty alphabet. A8a's conformance test takes over that check and adds the machine's alphabet, version and `meta.tla` actions.
+`expected.json` has a `graphs` entry for `LayoutApply` with `export` and the phase `applied`. `LayoutApply/graph.json` is the reachable graph of `export`, and `LayoutApply/suite.json` the covering suite. `LayoutApply/drift.json` ties this module to `workbench-layout.machine`: `apps/ui/app/workbench-records/workbench-layout.machine.conformance.test.ts` checks the manifest with the machine's alphabet, version and `meta.tla` actions, replays the covering suite and 400 seeded walks of the `export` graph, and checks the action correspondence (MC-R27).
 
 Regenerate with `node tools/formal/src/cli.ts update apps/ui`.
 

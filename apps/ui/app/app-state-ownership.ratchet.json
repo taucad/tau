@@ -57,6 +57,8 @@
       "apps/ui/app/runtime/ui-runtime.schema.ts",
       "apps/ui/app/runtime/usdz-runtime.definition.ts",
       "apps/ui/app/runtime/usdz-runtime.worker.ts",
+      "apps/ui/app/workbench-records/pane-intents.ts",
+      "apps/ui/app/workbench-records/workbench-layout.machine.ts",
       "packages/ui/src/utils/wait-timing.ts"
     ]
   },

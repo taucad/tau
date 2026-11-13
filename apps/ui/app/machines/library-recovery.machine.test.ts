@@ -150,14 +150,18 @@ describe('libraryRecovery', () => {
       expect(harness.check.calls).toHaveLength(0);
     });
 
-    it('should restore a row the journal no longer holds and count no attempt for it', async () => {
+    it('should settle a row the journal no longer holds as recovered, and never replay it again', async () => {
       const harness = start();
       await ready(harness, [row('o1', 'p1')]);
+      // Another tab settled the row first.
       await settleReplay(harness, { status: 'absent' });
-      // The restored row is waiting again, so the loop replays it at once: one attempt, not two.
-      expect(harness.of('rowSettled')).toEqual([]);
-      expect(harness.replay.calls).toHaveLength(2);
-      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'replaying', attempts: 1 }));
+      expect(harness.replay.calls).toHaveLength(1);
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'recovered' }));
+      expect(harness.of('rowSettled')).toEqual([{ type: 'rowSettled', operationId: 'o1', projectId: 'p1' }]);
+      expect(selectRecoveries(harness.actor.getSnapshot())).toEqual([]);
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      expect(harness.replay.calls).toHaveLength(1);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: false }]);
     });
   });
 
@@ -245,6 +249,21 @@ describe('libraryRecovery', () => {
       expect(harness.replay.calls).toHaveLength(1);
     });
 
+    it('should not re-arm a row on a check that began before its latest attempt', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      await settleReplay(harness, workspaceGone);
+      harness.send({ type: 'retryRequested' });
+      // The workspace returns during the check, and the row is replayed and fails again.
+      harness.send({ type: 'workspaceReturned' });
+      await settleReplay(harness, workspaceGone);
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'failed', attempts: 2 }));
+      harness.check.calls[0]?.resolve(['o1']);
+      await flush();
+      expect(harness.replay.calls).toHaveLength(2);
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'failed', attempts: 2 }));
+    });
+
     it('should re-arm only the rows of the workspace that returned', async () => {
       const harness = start();
       await ready(harness, [row('o1', 'p1', 'w1'), row('o2', 'p2', 'w2')]);
@@ -283,6 +302,37 @@ describe('libraryRecovery', () => {
       expect(harness.of('mutationAdmitted')).toEqual([]);
       await settleReplay(harness, recovered);
       expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'd1' }]);
+    });
+
+    it('should admit nothing before the journal is read, even when a waiting mutation is abandoned', async () => {
+      const harness = start();
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      harness.send({ type: 'mutationAsked', requestId: 'm2', projectId: 'p2' });
+      harness.send({ type: 'mutationAbandoned', requestId: 'm1' });
+      expect(harness.of('mutationAdmitted')).toEqual([]);
+      // The journal holds a row for p2: m2 waits for it.
+      await ready(harness, [row('o1', 'p2')]);
+      expect(harness.of('mutationAdmitted')).toEqual([]);
+      await settleReplay(harness, recovered);
+      expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm2' }]);
+    });
+
+    it('I8: should start no row of a project between its mutation being admitted and journaled', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      await settleReplay(harness, workspaceGone);
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm1' }]);
+      // The workspace returns while the mutation writes its row: o1 waits, so the journal sees no active row for p1.
+      harness.send({ type: 'workspaceReturned' });
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'waiting' }));
+      expect(harness.replay.calls).toHaveLength(1);
+      harness.send({ type: 'mutationJournaled', requestId: 'm1', row: row('o2', 'p1') });
+      // It waits for the mutation's own apply as well.
+      expect(harness.replay.calls).toHaveLength(1);
+      harness.send({ type: 'mutationSettled', operationId: 'o2', outcome: recovered });
+      expect(harness.replay.calls.map((call) => call.input.operationId)).toEqual(['o1', 'o1']);
     });
 
     it('should hold a mutation until the journal is read', async () => {
@@ -357,6 +407,21 @@ describe('libraryRecovery', () => {
       expect(harness.of('rowSettled').map((event) => event.operationId)).toEqual(['o1', 'o1']);
       expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'discarded' }));
       expect(selectRecoveries(harness.actor.getSnapshot()).map((recovery) => recovery.operationId)).toEqual(['o2']);
+    });
+
+    it('should not replay a row while its discard runs', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      await settleReplay(harness, workspaceGone);
+      harness.send({ type: 'discardAsked', requestId: 'x1', operationId: 'o1' });
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('o1', 'p1') });
+      harness.send({ type: 'workspaceReturned' });
+      expect(harness.replay.calls).toHaveLength(1);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c1', held: true }]);
+      harness.discard.calls[0]?.resolve();
+      await flush();
+      expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'discarded' }));
+      expect(harness.of('rowSettled').map((event) => event.operationId)).toEqual(['o1', 'o1']);
     });
 
     it('should keep a row whose discard failed, so the person can try again', async () => {

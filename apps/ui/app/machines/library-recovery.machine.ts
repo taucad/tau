@@ -73,14 +73,18 @@ export type RecoveryRow =
   | (RowBase & Readonly<{ status: 'waiting' | 'replaying' | 'recovered' | 'discarded' }>)
   | (RowBase & Readonly<{ status: 'failed'; reason: PendingProjectRecoveryReason; discarding: boolean }>);
 
-/** What a replay or a mutation's own apply settled as. `absent`: the journal no longer holds the row. */
+/**
+ * What a replay or a mutation's own apply settled as. `absent`: the journal no longer holds the row, because another
+ * tab settled it; it counts as recovered here (today `retryFailedRecoveries` skips such a row), so it is never
+ * replayed again.
+ */
 export type ReplayOutcome =
   | Readonly<{ status: 'recovered' }>
   | Readonly<{ status: 'failed'; reason: PendingProjectRecoveryReason }>
   | Readonly<{ status: 'absent' }>;
 
 /** The replay in flight: whose it is, and the row as it was before it, for an `absent` answer. */
-type Replay = Readonly<{ operationId: string; requestId: string | undefined; previous: RecoveryRow }>;
+type Replay = Readonly<{ operationId: string; requestId: string | undefined }>;
 
 /** State owned by one `libraryRecovery` actor. */
 export type LibraryRecoveryContext = Readonly<{
@@ -100,6 +104,8 @@ export type LibraryRecoveryContext = Readonly<{
   personReplays: ReadonlyArray<Readonly<{ requestId: string; row: RecoveryRowInput }>>;
   /** Another `retryRequested` arrived while a workspace check ran. */
   recheck: boolean;
+  /** The attempts of each row the running workspace check asks about: a row replayed since is not re-armed by it. */
+  checked: Readonly<Record<string, number>>;
   /** Discards waiting behind the one in flight. */
   discards: ReadonlyArray<Readonly<{ requestId: string; operationId: string }>>;
   /** Why the journal could not be read, until it is. */
@@ -264,6 +270,12 @@ const rearmable = (row: RecoveryRow): row is Extract<RecoveryRow, { status: 'fai
   !row.discarding &&
   row.attempts < maxRecoveryAttempts;
 
+/** The attempts of every row a workspace check would ask about. */
+const checkedOf = (context: Context): Record<string, number> =>
+  Object.fromEntries(
+    Object.values(context.rows).flatMap((row) => (rearmable(row) ? [[row.operationId, row.attempts]] : [])),
+  );
+
 /** Re-arm the given rows: each goes back to `waiting` for the one loop (rules 6 and 7). */
 const rearm = (context: Context, operationIds: readonly string[], enq: Emit): Patch => {
   const rows = { ...context.rows };
@@ -277,21 +289,18 @@ const rearm = (context: Context, operationIds: readonly string[], enq: Emit): Pa
   return changed(context, { rows }, enq);
 };
 
-/** A row settled: recovered, or failed with its reason and the attempts it has. `absent` restores it as it was. */
+/** A row settled: recovered (or gone from the journal), or failed with its reason and the attempts it has. */
 const settleRow = (
   context: Context,
   enq: Emit,
-  { row, outcome, previous }: Readonly<{ row: RecoveryRow; outcome: ReplayOutcome; previous: RecoveryRow | undefined }>,
+  { row, outcome }: Readonly<{ row: RecoveryRow; outcome: ReplayOutcome }>,
 ): Patch => {
   const next: RecoveryRow =
-    outcome.status === 'absent' && previous !== undefined
-      ? previous
-      : outcome.status === 'failed'
-        ? { ...row, status: 'failed', reason: outcome.reason, discarding: false }
-        : { ...row, status: 'recovered' };
-  if (outcome.status !== 'absent') {
-    enq.emit({ type: 'rowSettled', operationId: row.operationId, projectId: row.projectId });
-  }
+    outcome.status === 'failed'
+      ? { ...row, status: 'failed', reason: outcome.reason, discarding: false }
+      : { ...row, status: 'recovered' };
+  // Storage may have changed either way, so the listing owes a pass (the model's `Bump`).
+  enq.emit({ type: 'rowSettled', operationId: row.operationId, projectId: row.projectId });
   const settled = { ...context, rows: { ...context.rows, [row.operationId]: next } };
   return changed(context, { rows: settled.rows, ...admitWaiting(settled, enq) }, enq);
 };
@@ -306,19 +315,33 @@ const withRow = (context: Context, input: RecoveryRowInput): Context =>
       }
     : context;
 
-/** The next replay for the loop: a waiting row in journal order, then the person's replays once none waits. */
+/**
+ * The next replay for the loop: a waiting row in journal order, then the person's replays once none waits. A project
+ * with a mutation admitted or applying is passed over until it settles: admission and journaling are one step in the
+ * model (`MutationJournaled` requires no active row), so no row of that project starts between them.
+ */
 const nextReplay = (
   context: Context,
 ): Readonly<{ operationId: string; requestId: string | undefined; context: Context }> | undefined => {
   if (!context.allowed || context.replay !== undefined) {
     return undefined;
   }
-  const waiting = context.order.find((operationId) => context.rows[operationId]?.status === 'waiting');
+  // A project whose mutation is admitted or applying its own row: its other rows wait for that mutation to settle.
+  const admitted = new Set([
+    ...Object.values(context.admitted),
+    ...Object.values(context.rows).flatMap((row) =>
+      row.status === 'replaying' && row.via === 'mutation' ? [row.projectId] : [],
+    ),
+  ]);
+  const waiting = context.order.find((operationId) => {
+    const row = context.rows[operationId];
+    return row?.status === 'waiting' && !admitted.has(row.projectId);
+  });
   if (waiting !== undefined) {
     return { operationId: waiting, requestId: undefined, context };
   }
   const [person] = context.personReplays;
-  if (person === undefined) {
+  if (person === undefined || admitted.has(person.row.projectId)) {
     return undefined;
   }
   return {
@@ -390,6 +413,7 @@ export const libraryRecoveryMachine = setup({
     asked: [],
     personReplays: [],
     recheck: false,
+    checked: {},
     discards: [],
     loadError: undefined,
     fault: undefined,
@@ -400,15 +424,10 @@ export const libraryRecoveryMachine = setup({
     mutationAsked: refines('Unmodelled', ({ context, event }) => ({
       context: { asked: [...context.asked, { requestId: event.requestId, projectId: event.projectId }] },
     })),
-    mutationAbandoned: refines('Unmodelled', ({ context, event }, enq) => {
-      const { [event.requestId]: _gone, ...admitted } = context.admitted;
-      const released = {
-        ...context,
-        admitted,
-        asked: context.asked.filter((ask) => ask.requestId !== event.requestId),
-      };
-      return { context: { admitted, asked: released.asked, ...admitWaiting(released, enq) } };
-    }),
+    /* Before the journal is read nothing is admitted: an abandoned mutation only leaves the queue. */
+    mutationAbandoned: refines('Unmodelled', ({ context, event }) => ({
+      context: { asked: context.asked.filter((ask) => ask.requestId !== event.requestId) },
+    })),
     replayAsked: refines('Unmodelled', ({ context, event }) => ({
       context: { personReplays: [...context.personReplays, { requestId: event.requestId, row: event.row }] },
     })),
@@ -465,6 +484,15 @@ export const libraryRecoveryMachine = setup({
           enq.emit({ type: 'mutationAdmitted', requestId: event.requestId });
           return { context: { admitted: { ...context.admitted, [event.requestId]: event.projectId } } };
         }),
+        mutationAbandoned: refines('Unmodelled', ({ context, event }, enq) => {
+          const { [event.requestId]: _gone, ...admitted } = context.admitted;
+          const released = {
+            ...context,
+            admitted,
+            asked: context.asked.filter((ask) => ask.requestId !== event.requestId),
+          };
+          return { context: { admitted, asked: released.asked, ...admitWaiting(released, enq) } };
+        }),
         // `ReplaySettled` of a mutation's own row, which the model labels `MutationApplied`.
         mutationSettled: refines('ReplaySettled', ({ context, event }, enq) => {
           const row = context.rows[event.operationId];
@@ -472,7 +500,7 @@ export const libraryRecoveryMachine = setup({
           if (row?.status !== 'replaying' || row.via !== 'mutation') {
             return {};
           }
-          return { context: settleRow(context, enq, { row, outcome: event.outcome, previous: undefined }) };
+          return { context: settleRow(context, enq, { row, outcome: event.outcome }) };
         }),
         workspaceReturned: refines('WorkspaceReturned', ({ context, event }, enq) => ({
           context: rearm(
@@ -515,7 +543,7 @@ export const libraryRecoveryMachine = setup({
                   row.status === 'discarded' ||
                   row.status === 'replaying' ||
                   row.attempts >= maxRecoveryAttempts ||
-                  (row.status === 'failed' && terminalRecoveryReasons.has(row.reason))
+                  (row.status === 'failed' && (row.discarding || terminalRecoveryReasons.has(row.reason)))
                 ) {
                   answerPerson(next.context, enq, next);
                   return {
@@ -546,7 +574,7 @@ export const libraryRecoveryMachine = setup({
                       rows: { ...next.context.rows, [row.operationId]: started },
                       order: next.context.order,
                       personReplays: next.context.personReplays,
-                      replay: { operationId: row.operationId, requestId: next.requestId, previous: row },
+                      replay: { operationId: row.operationId, requestId: next.requestId },
                     },
                     enq,
                   ),
@@ -578,7 +606,9 @@ export const libraryRecoveryMachine = setup({
             idle: {
               on: {
                 retryRequested: refines('Unmodelled', ({ context }) =>
-                  Object.values(context.rows).some((row) => rearmable(row)) ? { target: 'checking' } : {},
+                  Object.values(context.rows).some((row) => rearmable(row))
+                    ? { target: 'checking', context: { checked: checkedOf(context) } }
+                    : {},
                 ),
               },
             },
@@ -604,16 +634,23 @@ export const libraryRecoveryMachine = setup({
                     ];
                   }),
                 }),
-                onDone: settles('WorkspaceReturned', ({ context, event }: Done<readonly string[]>, enq) => ({
-                  target: context.recheck ? 'checking' : 'idle',
-                  reenter: true,
-                  context: { ...rearm(context, event.output, enq), recheck: false },
-                })),
+                onDone: settles('WorkspaceReturned', ({ context, event }: Done<readonly string[]>, enq) => {
+                  // Only rows unchanged since the check began: one replayed meanwhile failed on newer information.
+                  const present = event.output.filter(
+                    (operationId) => context.rows[operationId]?.attempts === context.checked[operationId],
+                  );
+                  const patch = rearm(context, present, enq);
+                  return {
+                    target: context.recheck ? 'checking' : 'idle',
+                    reenter: true,
+                    context: { ...patch, recheck: false, checked: checkedOf({ ...context, ...patch }) },
+                  };
+                }),
                 // A failed check re-arms nothing: the row waits for its workspace as before.
                 onError: settles('Unmodelled', ({ context }: Failed) => ({
                   target: context.recheck ? 'checking' : 'idle',
                   reenter: true,
-                  context: { recheck: false },
+                  context: { recheck: false, checked: checkedOf(context) },
                 })),
               },
               on: {
@@ -739,7 +776,7 @@ function loopSettled(context: Context, outcome: ReplayOutcome, enq: Emit): { tar
   if (current === undefined || row === undefined) {
     return { target: 'idle', context: { replay: undefined } };
   }
-  const patch = settleRow(context, enq, { row, outcome, previous: current.previous });
+  const patch = settleRow(context, enq, { row, outcome });
   answerPerson({ ...context, ...patch }, enq, current);
   return { target: 'idle', context: { ...patch, replay: undefined } };
 }

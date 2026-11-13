@@ -8,14 +8,14 @@
  *
  * 1. `pass.idle`, `stop.running`: initial
  * 2. `pass.idle`, `stop.stopped`: `writeStopBegan`
- * 3. `pass.passing`, `stop.running`: `poll`
- * 4. `pass.passing`, `stop.stopped`: `writeStopBegan`, `poll`
+ * 3. `pass.passing`, `stop.running`: `passRequested`
+ * 4. `pass.passing`, `stop.stopped`: `passRequested`, `writeStopBegan`
  */
 import { describe, expect, it } from 'vitest';
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import { matchesState } from 'xstate';
+import { createCallbackLogic, matchesState } from 'xstate';
 import type { AnyMachineSnapshot } from 'xstate';
 import type { ProjectDiscoveryResult } from '@taucad/filesystem';
 import {
@@ -83,7 +83,17 @@ const start = () => {
       (event): event is Extract<LibraryDiscoveryEmitted, { requestId: string }> =>
         'requestId' in event && event.requestId === requestId,
     );
-  return { actor, scan, plan, apply, emitted, send, answers, guard };
+  return {
+    actor,
+    scan,
+    plan,
+    apply,
+    emitted,
+    send,
+    answers,
+    guard,
+    ports: { scan: scan.port, plan: plan.port, apply: apply.port },
+  };
 };
 
 /** Settle the pass in flight through all three steps. */
@@ -279,12 +289,31 @@ describe('libraryDiscovery', () => {
 
   describe('the observations', () => {
     it('should keep each observation error until it clears, and forward a refresh to both watches', () => {
-      const harness = start();
-      harness.send({ type: 'observationChanged', observation: 'metadata', error: 'watch lost' });
-      expect(harness.actor.getSnapshot().context.observationErrors).toEqual({ metadata: 'watch lost' });
-      harness.send({ type: 'observationChanged', observation: 'metadata' });
-      expect(harness.actor.getSnapshot().context.observationErrors).toEqual({});
-      harness.send({ type: 'refreshObservations', resourceId: 'p1' });
+      const received: Array<{ watch: string; event: LibraryDiscoveryEvent }> = [];
+      const watch = (name: string) =>
+        createCallbackLogic<LibraryDiscoveryEvent>(({ receive }) => {
+          receive((event) => {
+            received.push({ watch: name, event });
+          });
+        });
+      const actor = createLibraryDiscovery({
+        clock: new StepClock(),
+        ports: {
+          ...start().ports,
+          discoveryObservation: watch('discovery'),
+          metadataObservation: watch('metadata'),
+        },
+      });
+      actor.start();
+      actor.send({ type: 'observationChanged', observation: 'metadata', error: 'watch lost' });
+      expect(actor.getSnapshot().context.observationErrors).toEqual({ metadata: 'watch lost' });
+      actor.send({ type: 'observationChanged', observation: 'metadata' });
+      expect(actor.getSnapshot().context.observationErrors).toEqual({});
+      actor.send({ type: 'refreshObservations', resourceId: 'p1' });
+      expect(received).toEqual([
+        { watch: 'discovery', event: { type: 'refreshObservations', resourceId: 'p1' } },
+        { watch: 'metadata', event: { type: 'refreshObservations', resourceId: 'p1' } },
+      ]);
     });
   });
 });

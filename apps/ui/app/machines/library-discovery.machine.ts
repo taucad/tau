@@ -22,7 +22,13 @@
  * `passRequested{requestId, reuse}` is answered with `passSettled{requestId, epoch, result}`, or `passFailed` when a
  * port rejected. Requests join the pass in flight (single flight). With `reuse`, a request is answered at once from
  * the last listing when its epoch is still current, as the cache at `use-project-manager.tsx` line 2474 does today.
- * `poll` starts a pass when none is in flight: the 5 s poll and the explicit refresh.
+ * `poll` starts a pass when none is in flight: an explicit refresh.
+ *
+ * An owed pass starts when someone asks for one, as today: an invalidation refetches the active `projects` query
+ * (`invalidateQueries`), and that refetch runs the pass. The listing query is the requester; it asks with
+ * `passRequested{reuse: true}` when it hears `epochMoved{current: false}` (A3b). The one pass the machine starts by
+ * itself is the redo after a write stop (rule 3). Nothing here is timed: today's listing has no refetch interval
+ * (`use-projects.test.ts` pins its absence), so the machine declares no `after`.
  *
  * Two observations are children: the manifest watch (`discoveryObservation`) and the chat-metadata watch
  * (`metadataObservation`). Each is a callback actor that holds its subscription in its closure (D4); a composition

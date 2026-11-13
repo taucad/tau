@@ -284,6 +284,28 @@ describe('libraryAccess', () => {
       expect(harness.discovery.calls).toHaveLength(1);
     });
 
+    it('should answer error when the bootstrap pass fails while rows were pending, as today', () => {
+      const harness = start();
+      ask(harness, 'q1');
+      harness.send({ type: 'journalReady', pending: 1 });
+      harness.send({ type: 'discoveryFailed', message: 'scan failed' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'scan failed' }]);
+      // A later question waits for the next bootstrap pass, which clears the failure.
+      harness.send({ type: 'discoveryReady' });
+      ask(harness, 'q2');
+      expect(harness.discovery.calls).toHaveLength(1);
+    });
+
+    it('should answer error when the bootstrap pass fails before a pass the query waits for', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'discoveryFailed', message: 'scan failed' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'scan failed' }]);
+      expect(harness.discovery.calls).toHaveLength(0);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
@@ -325,6 +347,18 @@ describe('libraryAccess', () => {
       await resolve(harness.discovery, pass(1, [entry('route-blocked', 'p1')]));
       expect(harness.answers('q1')).toEqual([]);
       expect(harness.verify.calls).toHaveLength(2);
+    });
+
+    it("should fence a pass's answer on the pass's own epoch, not on the epoch the turn began at", async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      // The pass the query waits for started after the top of the loop, at epoch 2, and nothing moved since.
+      harness.send({ type: 'epochMoved', epoch: 2, current: false });
+      await resolve(harness.discovery, pass(2, [entry('route-blocked', 'p1')]));
+      expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+      expect(harness.verify.calls).toHaveLength(1);
     });
 
     it.each(['verified', 'found'] as const)(
@@ -430,6 +464,18 @@ describe('libraryAccess', () => {
       expect(harness.discovery.calls).toHaveLength(0);
     });
 
+    it('should end the span of every open question when the machine stops', () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness, 'q1', 'p1');
+      ask(harness, 'q2', 'p2');
+      harness.actor.stop();
+      expect(harness.spans).toEqual([
+        { outcome: 'error', cacheHits: 0 },
+        { outcome: 'error', cacheHits: 0 },
+      ]);
+    });
+
     it('should answer nothing for a cancelled question, and drop a stale report', async () => {
       const harness = start();
       settledLibrary(harness);
@@ -469,6 +515,7 @@ describe('libraryAccess', () => {
 const facts: Record<AccessFactEvent['type'], readonly AccessFactEvent[]> = {
   epochMoved: [{ type: 'epochMoved', epoch: 1, current: false }],
   discoveryReady: [{ type: 'discoveryReady' }],
+  discoveryFailed: [{ type: 'discoveryFailed', message: 'x' }],
   journalReady: [{ type: 'journalReady', pending: 0 }],
   journalFailed: [{ type: 'journalFailed', message: 'x' }],
   recoveriesChanged: [
@@ -494,7 +541,14 @@ const queryInput = {
   gen: 0,
   projectId: 'p1',
   parentRef,
-  facts: { epoch: 0, current: false, discoveryReady: false, journal: { status: 'loading' }, recoveries: [] },
+  facts: {
+    epoch: 0,
+    current: false,
+    discoveryReady: false,
+    discoveryError: undefined,
+    journal: { status: 'loading' },
+    recoveries: [],
+  },
 };
 
 describe('libraryAccess totality', () => {

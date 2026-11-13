@@ -81,6 +81,8 @@ export type AccessFacts = Readonly<{
   current: boolean;
   /** The bootstrap discovery pass has run. */
   discoveryReady: boolean;
+  /** Why the bootstrap discovery pass failed, until one succeeds (today `ensureDiscoveryReady` rejects). */
+  discoveryError: string | undefined;
   journal: AccessJournal;
   recoveries: readonly PendingProjectRecovery[];
 }>;
@@ -89,6 +91,7 @@ export type AccessFacts = Readonly<{
 export type AccessFactEvent =
   | { type: 'epochMoved'; epoch: number; current: boolean }
   | { type: 'discoveryReady' }
+  | { type: 'discoveryFailed'; message: string }
   | { type: 'journalReady'; pending: number }
   | { type: 'journalFailed'; message: string }
   | { type: 'recoveriesChanged'; recoveries: readonly PendingProjectRecovery[] }
@@ -131,6 +134,7 @@ export const libraryAccessEventTypes = [
   'queryAnswered',
   'epochMoved',
   'discoveryReady',
+  'discoveryFailed',
   'journalReady',
   'journalFailed',
   'recoveriesChanged',
@@ -146,6 +150,7 @@ export const libraryAccessIgnoredEvents = [] as const satisfies ReadonlyArray<
 export const libraryAccessQueryEventTypes = [
   'epochMoved',
   'discoveryReady',
+  'discoveryFailed',
   'journalReady',
   'journalFailed',
   'recoveriesChanged',
@@ -178,7 +183,10 @@ const withFact = (facts: AccessFacts, event: AccessFactEvent): AccessFacts => {
       return { ...facts, epoch: event.epoch, current: event.current };
     }
     case 'discoveryReady': {
-      return { ...facts, discoveryReady: true };
+      return { ...facts, discoveryReady: true, discoveryError: undefined };
+    }
+    case 'discoveryFailed': {
+      return { ...facts, discoveryError: event.message };
     }
     case 'journalReady': {
       return { ...facts, journal: { status: 'ready', pending: event.pending } };
@@ -393,6 +401,9 @@ export const libraryAccessQueryMachine = setup({
     discoveryReady: refines('Unmodelled', ({ context, event }) => ({
       context: { facts: withFact(context.facts, event) },
     })),
+    discoveryFailed: refines('Unmodelled', ({ context, event }) => ({
+      context: { facts: withFact(context.facts, event) },
+    })),
     journalReady: refines('Unmodelled', ({ context, event }) => ({
       context: { facts: withFact(context.facts, event) },
     })),
@@ -412,10 +423,17 @@ export const libraryAccessQueryMachine = setup({
     waiting: {
       always: refines('AccessTop', ({ context, children }, enq) => {
         const io = ioOf(enq, children);
-        if (context.facts.journal.status === 'failed') {
-          return answer(context, io, { status: 'error', message: context.facts.journal.message });
+        const { facts } = context;
+        if (facts.journal.status === 'failed') {
+          return answer(context, io, { status: 'error', message: facts.journal.message });
         }
-        return mayStart(context.facts) ? top(context, io) : undefined;
+        if (mayStart(facts)) {
+          return top(context, io);
+        }
+        // Rows were pending and the bootstrap pass failed: the question is answered as today's rejection is.
+        return facts.journal.status === 'ready' && facts.discoveryError !== undefined
+          ? answer(context, io, { status: 'error', message: facts.discoveryError })
+          : undefined;
       }),
     },
     verifying: {
@@ -444,9 +462,15 @@ export const libraryAccessQueryMachine = setup({
       initial: 'gate',
       states: {
         gate: {
-          always: refines('AccessTop', ({ context }) =>
-            context.facts.discoveryReady ? { target: 'passing' } : undefined,
-          ),
+          always: refines('AccessTop', ({ context, children }, enq) => {
+            if (context.facts.discoveryReady) {
+              return { target: 'passing' };
+            }
+            const { discoveryError } = context.facts;
+            return discoveryError === undefined
+              ? undefined
+              : answer(context, ioOf(enq, children), { status: 'error', message: discoveryError });
+          }),
         },
         passing: {
           invoke: {
@@ -543,6 +567,7 @@ const initialFacts: AccessFacts = {
   epoch: 0,
   current: false,
   discoveryReady: false,
+  discoveryError: undefined,
   journal: { status: 'loading' },
   recoveries: [],
 };
@@ -638,6 +663,7 @@ export const libraryAccessMachine = setup({
     }),
     epochMoved: foldFact,
     discoveryReady: foldFact,
+    discoveryFailed: foldFact,
     journalReady: foldFact,
     journalFailed: foldFact,
     recoveriesChanged: foldFact,
@@ -729,6 +755,14 @@ export const createLibraryAccess = (
       spans.delete(key);
       span?.finish(event.outcome, { cacheHits: event.cacheHits });
     });
+    // The machine stopped with questions open (the tab's library went away): their spans end as today's `finally`.
+    const finishOpen = (): void => {
+      for (const span of spans.values()) {
+        span?.finish('error', { cacheHits: 0 });
+      }
+      spans.clear();
+    };
+    actor.subscribe({ complete: finishOpen, error: finishOpen });
   }
   return actor;
 };

@@ -4,12 +4,15 @@
  * suite (`LibraryCatalog.export.cfg`) and the action correspondence (MC-R27). The drift manifest is
  * `library-catalog.drift.test.ts`.
  *
- * The three machines run together, wired as the library service will wire them (A3b): discovery's `epochMoved`, and
+ * The three machines run together, with the relays the library service will add (A3b): discovery's `epochMoved`, and
  * recovery's `journalReady`, `recoveriesChanged` and `rowStarted` (as `recoveryStarted`), reach route access; a
- * recovery `rowSettled` invalidates the listing. The harness holds the scan, each replay, each discard and each
+ * recovery `rowSettled` invalidates the listing. Route access's discovery-pass port is the one stand-in: the model's
+ * route read observes storage directly (`Observe`) and starts no pass, so the port answers with the epoch it was asked
+ * at and storage as it is when it returns, and the pass join itself (`passRequested`, the pass's own epoch) is pinned
+ * by the machine rows instead. The harness holds the scan, each replay, each discard and each
  * route read, and keeps the journal and the project storage, so each spec step is one thing it does:
  *
- *   PassStarted       a `poll`; the scan captures storage as it is now
+ *   PassStarted       the listing query asks for the owed pass (`passRequested`); the scan captures storage now
  *   PassSettled       the held scan returns what it captured, and the plan finds nothing to write
  *   ReplayStarted     the bootstrap pass is announced to recovery (`discoveryReady`); the loop starts its replay
  *   ReplaySettled     the held replay settles as the model's next state says: recovered, or failed terminally
@@ -18,7 +21,7 @@
  *   PersonDiscarded   the person discards the failed row; the held discard completes
  *   AccessAsked       nothing yet: the question is held until the model's next access step
  *   AccessRead        the held question is asked; the query starts its first read, which the harness holds
- *   AccessAnswered    the held question is asked and answered at the top of its loop
+ *   AccessAnswered    the held question is asked and answered at the top of its loop, or the held read returns
  *   AccessReread      the held read returns a listing that no longer stands
  *
  * Two pairs of model steps are one machine step, as `RecordSync`'s `CompleteRead` and `IssueWrite` are. The model
@@ -155,6 +158,8 @@ const start = (initial: SpecState) => {
     discard: undefined as Pending<void>,
     read: undefined as (Pending<AccessPass> & { epoch: number }) | undefined,
     catalog: noListing,
+    /** Passes the listing query asked for. */
+    listings: 0,
     ask: undefined as { projectId: string } | undefined,
     answers: [] as AccessAnswer[],
     /** What the query's new top did after a reread, held back from the view (see the header). */
@@ -294,6 +299,18 @@ const queryOf = (harness: Harness) => {
 /** A route read is held (a function, so a read the query started since the last check is seen). */
 const readHeld = (harness: Harness): boolean => harness.held.read !== undefined;
 
+/** The held route read returns: the epoch it was asked at, and storage as it is now. */
+const returnRead = async (harness: Harness): Promise<void> => {
+  const { held } = harness;
+  const { read } = held;
+  if (read === undefined) {
+    throw new Error('No route read is held.');
+  }
+  held.read = undefined;
+  read.resolve({ epoch: read.epoch, result: listingOf(held.storage), cached: false });
+  await flush();
+};
+
 const askHeld = (harness: Harness): void => {
   const { ask } = harness.held;
   if (ask === undefined) {
@@ -309,7 +326,14 @@ const apply = async (harness: Harness, state: SpecState): Promise<void> => {
   await flush();
   switch (state.act) {
     case 'PassStarted': {
-      discovery.send({ type: 'poll' });
+      // An owed pass starts when the listing query asks for it (it refetches on every invalidation); one not owed
+      // is a poll (`MaxPolls`, 0 in the export).
+      if (discovery.getSnapshot().context.owed) {
+        held.listings += 1;
+        discovery.send({ type: 'passRequested', requestId: `listing-${String(held.listings)}`, reuse: true });
+      } else {
+        discovery.send({ type: 'poll' });
+      }
       break;
     }
     case 'PassSettled': {
@@ -380,21 +404,20 @@ const apply = async (harness: Harness, state: SpecState): Promise<void> => {
     }
     case 'AccessRead':
     case 'AccessAnswered': {
-      if (held.continued === undefined) {
+      if (held.continued !== undefined) {
+        // The query's new top after a reread already did this step.
+        held.continued = undefined;
+      } else if (state.act === 'AccessAnswered' && readHeld(harness)) {
+        // An answer delivered after its last read: the held read returns.
+        await returnRead(harness);
+      } else {
         askHeld(harness);
       }
-      held.continued = undefined;
       break;
     }
     case 'AccessReread': {
-      const { read } = held;
-      if (read === undefined) {
-        throw new Error('AccessReread: no read is held.');
-      }
-      held.read = undefined;
       const before = held.answers.length;
-      read.resolve({ epoch: read.epoch, result: listingOf(held.storage), cached: false });
-      await flush();
+      await returnRead(harness);
       held.continued = { answers: held.answers.length - before, read: readHeld(harness) };
       break;
     }

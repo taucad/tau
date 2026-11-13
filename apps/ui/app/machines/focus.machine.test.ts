@@ -1465,3 +1465,65 @@ describe('focus: touches the close outran, displaced waits and the slot focus mi
     expect(harness.context().pending).toBeUndefined();
   });
 });
+
+describe('focus: a session replaced by a resume no snapshot showed absent', () => {
+  const unsettled = { chatReady: false, availability: 'pending' } as const;
+
+  /** Opening `b` with chat `x`, live and past the open bound, the join held by the import. */
+  const heldPastBound = (): FocusHarness => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'b', { chatId: 'x' });
+    harness.ready('r1', 'b');
+    harness.settleOpen('live');
+    harness.facts('b', 'starting', unsettled);
+    harness.facts('b', 'live', unsettled);
+    harness.clock.increment(openPatienceMilliseconds);
+    return harness;
+  };
+
+  /** The person reopens `b` behind a stale live record; the close frees `b` and resumes that open at once. */
+  const reopenedBehindClose = (harness: FocusHarness, between?: () => void): void => {
+    harness.send({ type: 'openRequested', projectId: 'b' });
+    const person = harness.lastOpen().requestId;
+    // Focus still reads `b` live here, so a chat switch now reaches the session that is closing.
+    between?.();
+    harness.facts('b', 'closing', unsettled);
+    harness.settleOpen('waiting', person);
+    harness.settleOpen('live', person);
+    harness.facts('b', 'starting', unsettled);
+    harness.facts('b', 'live', unsettled);
+  };
+
+  it('should not join the new session on the open bound the old one passed', () => {
+    const harness = heldPastBound();
+
+    expect(harness.context().open.patience).toBe(true);
+
+    reopenedBehindClose(harness);
+    harness.loaded();
+
+    expect(harness.state()).toEqual({ opening: 'live' });
+    expect(routeState(harness, 'b', { live: ['b'] })).toBe('resolving');
+
+    harness.clock.increment(openPatienceMilliseconds);
+
+    expect(harness.state()).toBe('focused');
+  });
+
+  it('should give the new session the chat the route switched to after the person open was sent', () => {
+    const harness = heldPastBound();
+    let forwardedBeforeResume = 0;
+    reopenedBehindClose(harness, () => {
+      harness.route('r2', 'b', { chatId: 'y' });
+      forwardedBeforeResume = registryOf(harness, 'chatRequested').length;
+    });
+    harness.loaded();
+    harness.clock.increment(openPatienceMilliseconds);
+
+    // The resumed open carried chat `x`, so `y` goes to the new session again.
+    expect(harness.state()).toBe('focused');
+    expect(registryOf(harness, 'chatRequested').slice(forwardedBeforeResume)).toEqual([
+      { type: 'chatRequested', projectId: 'b', chatId: 'y' },
+    ]);
+  });
+});

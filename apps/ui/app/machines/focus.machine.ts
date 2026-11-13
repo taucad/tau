@@ -1250,6 +1250,15 @@ export const createFocusMachine = (policy: FocusPolicy) => {
               patch.pending = undefined;
             } else if (event.result === 'waiting' && personProject !== undefined) {
               patch.pending = { openId: event.requestId, projectId: personProject, epoch, person: true };
+            } else if (
+              (event.result === 'live' || event.result === 'on-failed') &&
+              personProject !== undefined &&
+              (state === 'focused' || state === 'opening')
+            ) {
+              /* A person's open of the project focus is on reached its session with the chat it was sent with, which
+               * a later chat switch may have replaced: the route's chat goes to the session again (rule 2). */
+              patch.forwarded = withoutKey(context.forwarded, personProject);
+              forwardChat(patch, effects, personProject);
             }
             if (latest && context.open.openId !== undefined && context.open.displaced === true && !context.open.live) {
               /* The later open's reply: focus's own open had no live answer before it, so the later open displaced its
@@ -1353,8 +1362,14 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             return result(value, patch, advance(patch, 'opening', effects));
           }
           if (context.open.openId !== undefined && context.open.live && context.answer?.projectId === event.projectId) {
-            // Facts after the open's live answer: the session it reached (the model's `live`).
-            patch.open = { ...context.open, seenLive: true };
+            /* Facts after the open's live answer: the session it reached (the model's `live`). The open bound runs only
+             * while the session reports live: a session that stops, or is replaced by a resume that no snapshot showed
+             * absent, starts the bound again when it next reports live (I20, `OpenBoundPassed` is per session). */
+            patch.open = {
+              ...context.open,
+              seenLive: true,
+              patience: event.status === 'live' ? context.open.patience : false,
+            };
             if (event.status === 'live') {
               // A chat the route switched to while the open was out reaches the session now it is live (rule 2).
               forwardChat(patch, effects, event.projectId);

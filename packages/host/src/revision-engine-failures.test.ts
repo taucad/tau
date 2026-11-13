@@ -107,11 +107,11 @@ describe('observeRevisionEngineFailures', () => {
 describe('observeRevisionEngineFailures on a class instance', () => {
   it('should keep the methods the port inherits and call them on the port', async () => {
     class InheritedPort {
-      get label(): string {
+      public get label(): string {
         return 'inherited';
       }
 
-      async setHead(): Promise<string> {
+      public async setHead(): Promise<string> {
         return this.label;
       }
     }

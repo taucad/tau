@@ -5534,6 +5534,85 @@ describe('ChatSessionStore', () => {
       store.release('chat_verified_empty');
     });
 
+    it.fails('reports a loading transcript, never an empty one, before the load settles for a chat with history (U7)', async () => {
+      const chatId = 'chat_deferred_transcript';
+      const projectId = 'project_deferred_transcript';
+      const runId = 'run_deferred_transcript';
+      const emptyChatId = 'chat_deferred_transcript_empty';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      /* I21: A12 makes the session report `transcript: loading | loaded | empty`, and this reads it once it exists.
+       * Until then the session reports only its chat-row load and its messages, and a session out of that load with
+       * no messages is what the lane shows as the empty chat. */
+      type TranscriptState = 'loading' | 'loaded' | 'empty';
+      const reportedTranscript = (session: ReturnType<StoreType['acquire']>): TranscriptState => {
+        const declared = (session as { readonly transcript?: TranscriptState }).transcript;
+        if (declared !== undefined) {
+          return declared;
+        }
+        if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
+          return 'loading';
+        }
+        return session.messages.length === 0 ? 'empty' : 'loaded';
+      };
+      const session = store.acquire(chatId, projectId);
+      // Each report with the turns the session held when it made it.
+      const reported: Array<{ readonly transcript: TranscriptState; readonly messages: number }> = [];
+      const reports: TranscriptState[] = [];
+      const record = (): void => {
+        const transcript = reportedTranscript(session);
+        reports.push(transcript);
+        reported.push({ transcript, messages: session.messages.length });
+      };
+      record();
+      const unsubscribeChat = store.subscribeChat(chatId, record);
+      const unsubscribeProjection = store.subscribeProjection(chatId, record);
+      const persistence = session.persistenceActorRef.subscribe(record);
+      try {
+        // The transcript is the host log's, and the row holds its answer back: the load has not settled.
+        await settle();
+        record();
+        expect(reports[0]).toBe('loading');
+        expect(reports).not.toContain('empty');
+
+        publishLogRows(store, chatId, [
+          ...runningRows(runId),
+          logRow(2, {
+            runId,
+            type: 'message.appended',
+            message: { id: 'deferred-reply', role: 'assistant', content: 'The bracket is ready.' },
+          }),
+          lifecycleRow(3, 'completed', runId),
+        ]);
+        await vi.waitFor(() => {
+          expect(reportedTranscript(session)).toBe('loaded');
+        });
+        expect(session.messages.length).toBeGreaterThan(0);
+        // Nor between the host's answer and the turns appearing: never `empty` across the whole load.
+        expect(reports).not.toContain('empty');
+        // And `loaded` only with the turns it loaded: no report leaves `loading` for a blank lane (U19).
+        expect(reported.filter((report) => report.transcript === 'loaded' && report.messages === 0)).toEqual([]);
+
+        // A chat with no history still settles to `empty` once its log answers that it has none.
+        const emptySession = store.acquire(emptyChatId, projectId);
+        try {
+          publishLogPage(store, emptyChatId, [], { cursor: 0, endCursor: 0 });
+          await vi.waitFor(() => {
+            expect(reportedTranscript(emptySession)).toBe('empty');
+          });
+        } finally {
+          store.release(emptyChatId);
+        }
+      } finally {
+        unsubscribeChat();
+        unsubscribeProjection();
+        persistence.unsubscribe();
+        store.release(chatId);
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();

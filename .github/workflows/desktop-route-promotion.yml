@@ -109,7 +109,7 @@ jobs:
       deployment: false
     permissions:
       contents: read
-      actions: read
+      actions: write # read runs, and dispatch the release gate for a candidate that has no verdict
       id-token: write
     env:
       pnpm_config_verify_deps_before_run: error
@@ -183,8 +183,10 @@ jobs:
           exit 1
       # The release gate (CI throughput review RG-1, `release-gate.yml`): a promotion on either channel
       # needs a green gate verdict on the candidate's own commit (the uncached sweep, the formal matrix and the
-      # cross-root read lint). The gate started by itself when `release-build.yml` ran for the tag; this reads
-      # its verdict and never runs or waits for it. A renewal publishes nothing new and does not read it.
+      # cross-root read lint). The newest candidate's gate started by itself when `release-build.yml` ran for
+      # its tag. Running or red blocks and names the run; no verdict dispatches the gate for the commit and
+      # blocks naming it, and the operator promotes again once it passes. Nothing here waits on it. A renewal
+      # publishes nothing new and does not read it.
       - name: Find the candidate's commit
         id: candidate-commit
         if: steps.selected.outputs.run == 'true' && inputs.operation == 'promote-routes'
@@ -202,6 +204,7 @@ jobs:
           sha: ${{ steps.candidate-commit.outputs.sha }}
           github-token: ${{ github.token }}
           require: 'true'
+          dispatch: 'true'
       - name: Load protected signing inputs
         if: steps.selected.outputs.run == 'true'
         env:

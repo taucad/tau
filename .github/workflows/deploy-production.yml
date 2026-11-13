@@ -25,9 +25,10 @@
 # A forward deploy (a release newer than production's, or the application's
 # first) also needs a green release gate verdict on the release's commit
 # (`release-gate.yml`, CI throughput review RG-1: the uncached sweep, the formal
-# matrix and the cross-root read lint). The gate started by itself when
-# `release-build.yml` ran for the tag; this reads its verdict and never runs or
-# waits for it. A rollback or a redeploy never reads it: both return production
+# matrix and the cross-root read lint). UI and API tags start no gate of their
+# own, so a forward deploy usually finds none: it then dispatches the gate for
+# the commit and stops naming it, and the operator dispatches this again once
+# it passes. Nothing here waits on it. A rollback or a redeploy never reads it: both return production
 # to a release it already ran or was already built for, and an incident must not
 # wait on a gate.
 #
@@ -169,6 +170,7 @@ jobs:
           sha: ${{ steps.release.outputs.commit }}
           github-token: ${{ github.token }}
           require: 'true'
+          dispatch: 'true'
 
       - name: Deploy the release at its tag
         env:

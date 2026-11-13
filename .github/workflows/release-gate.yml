@@ -14,19 +14,27 @@ name: Release gate
 #   id, so each gate run explores a fresh seed and prints it for replay.
 # - Cross-root reads: `scripts:validate-cross-root-reads`, which also runs in every `ci.yml` workspace job.
 #
-# When: the gate starts by itself when `release-build.yml` is requested for a tag (a desktop staging
-# candidate, a desktop, UI or API release), on that tag's commit, alongside the build. It records one
-# verdict job per commit, `Release gate verdict (<sha>)`. Nothing waits on a timer: `desktop-route-promotion.yml`
-# (promote-routes, either channel) and `deploy-production.yml` (a forward deploy) only read the verdict
-# (`.github/actions/release-gate-verdict`) and stop with the way to get one when it is missing or red. A
-# renewal, a rollback and a redeploy never read it, and `release-build.yml` never waits for it. An
-# operator dispatches the gate from `main` for a commit that has no verdict, or for a dry run.
+# When (event-driven, nothing waits on a timer):
+# - A desktop candidate: when `release-build.yml` is requested for a `desktop-staging@*` or `desktop@*` tag,
+#   the gate starts on that tag's commit, alongside the build. One gate per channel runs at a time and a
+#   newer candidate cancels the older one's gate, so only the newest candidate is ever being gated; a
+#   cancelled candidate gets a gate on demand if it is ever promoted. UI and API release tags start no
+#   gate: `release-build.yml` deploys them ungated.
+# - On demand: `desktop-route-promotion.yml` (promote-routes, either channel) and `deploy-production.yml`
+#   (a forward deploy) read the commit's verdict (`.github/actions/release-gate-verdict`). Green proceeds;
+#   running or red blocks and names the run; none dispatches this workflow from `main` for the commit and
+#   blocks naming it, and the operator dispatches the promotion again once it passes. A renewal, a rollback
+#   and a redeploy never read it. An operator can dispatch it from `main` for any commit, too.
+#
+# Each run is named `Release gate <sha>` and records one verdict job, `Release gate verdict (<sha>)`.
 #
 # Trust: a `workflow_run` run always runs `main`'s copy of this file, and a dispatch counts only from
 # `main`, so a changed copy of the gate on another branch can never record a verdict a promotion reads.
 #
 # A commit gates once: the `reuse` job ends the run early when a trusted green verdict for the commit
-# exists (two tags on one commit, a re-dispatch), and runs on one commit queue behind each other.
+# exists, and dispatched runs on one commit queue behind each other.
+run-name: Release gate ${{ inputs.ref || github.event.workflow_run.head_sha }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -38,9 +46,16 @@ on:
     workflows: ['Release build']
     types: [requested]
 
+# A candidate's gate shares its channel's group and the newest candidate wins; a `workflow_run` for any other
+# tag (a UI or API release) runs no job and gets a group of its own, so it cancels nothing; a dispatch queues
+# per commit.
 concurrency:
-  group: release-gate-${{ inputs.ref || github.event.workflow_run.head_sha }}
-  cancel-in-progress: false
+  group: >-
+    ${{ github.event_name == 'workflow_run' && (
+      startsWith(github.event.workflow_run.head_branch, 'desktop-staging@') && 'release-gate-candidate-staging' ||
+      startsWith(github.event.workflow_run.head_branch, 'desktop@') && 'release-gate-candidate-production' ||
+      format('release-gate-other-{0}', github.run_id)) || format('release-gate-{0}', inputs.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
 
 permissions:
   contents: read
@@ -54,6 +69,11 @@ env:
 jobs:
   reuse:
     name: Find a release gate verdict for this commit
+    # A release build of a UI or API tag gates nothing.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.workflow_run.head_branch, 'desktop-staging@') ||
+      startsWith(github.event.workflow_run.head_branch, 'desktop@')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -208,7 +228,7 @@ jobs:
   verdict:
     name: Release gate verdict (${{ inputs.ref || github.event.workflow_run.head_sha }})
     needs: [reuse, sweep, formal]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.reuse.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

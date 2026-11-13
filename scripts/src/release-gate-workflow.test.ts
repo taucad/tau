@@ -56,15 +56,34 @@ const production = load(read('.github/workflows/deploy-production.yml')) as Work
 const sha = 'a'.repeat(40);
 
 describe('release-gate.yml', () => {
-  it('should start on a requested release build and on a dispatch, one run per commit at a time', () => {
+  it('should start on a requested release build and on a dispatch, named by its commit', () => {
     expect(Object.keys(gate.on).toSorted()).toEqual(['workflow_dispatch', 'workflow_run']);
     expect(gate.on['workflow_dispatch']?.inputs?.['ref']).toMatchObject({ type: 'string', required: true });
     expect(Object.keys(gate.on['workflow_dispatch']?.inputs ?? {})).toEqual(['ref']);
     expect(gate.on['workflow_run']).toEqual({ workflows: ['Release build'], types: ['requested'] });
-    expect(gate.concurrency).toEqual({
-      group: `release-gate-${expression('inputs.ref || github.event.workflow_run.head_sha')}`,
-      'cancel-in-progress': false,
-    });
+    expect((gate as unknown as { 'run-name': string })['run-name']).toBe(
+      `Release gate ${expression('inputs.ref || github.event.workflow_run.head_sha')}`,
+    );
+  });
+
+  it('should gate only desktop candidates at the event, the newest per channel, and queue dispatches per commit', () => {
+    const { group, 'cancel-in-progress': cancel } = gate.concurrency as { group: string; 'cancel-in-progress': string };
+    const flat = group.replaceAll(/\s+/gu, ' ');
+    expect(flat).toContain(
+      "startsWith(github.event.workflow_run.head_branch, 'desktop-staging@') && 'release-gate-candidate-staging'",
+    );
+    expect(flat).toContain(
+      "startsWith(github.event.workflow_run.head_branch, 'desktop@') && 'release-gate-candidate-production'",
+    );
+    // Any other tag's run cancels nothing, and a dispatch never shares a candidate's group.
+    expect(flat).toContain("format('release-gate-other-{0}', github.run_id)");
+    expect(flat).toContain("|| format('release-gate-{0}', inputs.ref)");
+    expect(cancel).toBe(expression("github.event_name == 'workflow_run'"));
+    // A UI or API tag runs no job; the verdict is skipped with it.
+    expect(gate.jobs['reuse']?.if?.replaceAll(/\s+/gu, ' ').trim()).toBe(
+      "github.event_name == 'workflow_dispatch' || startsWith(github.event.workflow_run.head_branch, 'desktop-staging@') || startsWith(github.event.workflow_run.head_branch, 'desktop@')",
+    );
+    expect(gate.jobs['verdict']?.if).toBe(expression("!cancelled() && needs.reuse.result != 'skipped'"));
   });
 
   it('should read no cache, local or remote', () => {
@@ -129,7 +148,6 @@ describe('release-gate.yml', () => {
       `Release gate verdict (${expression('inputs.ref || github.event.workflow_run.head_sha')})`,
     );
     expect(verdict?.needs).toEqual(['reuse', 'sweep', 'formal']);
-    expect(verdict?.if).toBe(expression('!cancelled()'));
     const script = verdict?.steps?.[0]?.run ?? '';
     const judge = (env: Record<string, string>): number | undefined =>
       spawnSync('bash', ['-c', script], { env: { PATH: process.env['PATH'] ?? '', ...env } }).status ?? undefined;
@@ -150,29 +168,48 @@ describe('release-gate.yml', () => {
 
 describe('release-gate-verdict action', () => {
   const script = action.runs.steps[0]?.run ?? '';
-  type GateRun = { id: number; head_branch: string; event: string };
-  /** Runs the lookup with `gh` answering from `runs` and `jobs` (run id → jobs); returns status, output and stderr. */
+  type GateRun = {
+    id: number;
+    head_branch: string;
+    event: string;
+    display_title?: string;
+    status?: string;
+    conclusion?: string;
+  };
+  type Lookup = { status: number | undefined; output: string; stdout: string; calls: string[] };
+  /** Runs the lookup with `gh` answering from `runs` and `jobs` (run id → jobs); returns status, output and calls. */
   const lookup = ({
     ref,
     runs = [],
     jobs = {},
     require = 'false',
+    dispatch = 'false',
   }: {
     readonly ref: string;
     readonly runs?: readonly GateRun[];
     readonly jobs?: Record<string, ReadonlyArray<{ name: string; conclusion: string }>>;
     readonly require?: string;
-  }): { status: number | undefined; output: string; stdout: string } => {
+    readonly dispatch?: string;
+  }): Lookup => {
     const directory = mkdtempSync(join(tmpdir(), 'tau-release-gate-'));
     try {
-      writeFileSync(join(directory, 'runs.json'), JSON.stringify({ workflow_runs: runs }));
+      const filled = runs.map((run) => ({
+        display_title: `Release gate ${ref}`,
+        status: 'completed',
+        conclusion: 'success',
+        ...run,
+      }));
+      writeFileSync(join(directory, 'runs.json'), JSON.stringify({ workflow_runs: filled }));
       writeFileSync(join(directory, 'jobs.json'), JSON.stringify(jobs));
+      writeFileSync(join(directory, 'calls'), '');
       writeFileSync(
         join(directory, 'gh'),
         [
           '#!/usr/bin/env bash',
           'set -euo pipefail',
+          'echo "$*" >> "$FIXTURES/calls"',
           'case "$*" in',
+          '  "workflow run "*) ;;',
           '  *"/workflows/release-gate.yml/runs?"*)',
           '    filter=""; previous=""',
           '    for arg in "$@"; do [ "$previous" = --jq ] && filter=$arg; previous=$arg; done',
@@ -195,51 +232,103 @@ describe('release-gate-verdict action', () => {
           ['FIXTURES', directory],
           ['GITHUB_OUTPUT', output],
           ['GH_REPO', 'taucad/tau'],
+          ['SERVER', 'https://github.com'],
           ['SHA', ref],
           ['REQUIRE', require],
+          ['DISPATCH', dispatch],
         ]),
       });
-      return { status: result.status ?? undefined, output: readFileSync(output, 'utf8'), stdout: result.stdout };
+      return {
+        status: result.status ?? undefined,
+        output: readFileSync(output, 'utf8'),
+        stdout: result.stdout,
+        calls: readFileSync(join(directory, 'calls'), 'utf8').trim().split('\n'),
+      };
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   };
   const verdict = (commit: string, conclusion: string) => [{ name: `Release gate verdict (${commit})`, conclusion }];
+  const dispatched = (result: Lookup): string[] => result.calls.filter((call) => call.startsWith('workflow run'));
 
-  it('should find a green verdict from a tag-started run or a dispatch from main', () => {
+  it('should find a green verdict from a candidate-started run or a dispatch from main', () => {
     const tagged = lookup({
       ref: sha,
       runs: [{ id: 7, head_branch: 'desktop-staging@0.2.0-staging.1', event: 'workflow_run' }],
       jobs: { '7': verdict(sha, 'success') },
+      require: 'true',
+      dispatch: 'true',
     });
     expect(tagged.status).toBe(0);
     expect(tagged.output).toBe('run-id=7\n');
-    const dispatched = lookup({
+    expect(dispatched(tagged)).toEqual([]);
+    const fromMain = lookup({
       ref: sha,
       runs: [{ id: 8, head_branch: 'main', event: 'workflow_dispatch' }],
       jobs: { '8': verdict(sha, 'success') },
     });
-    expect(dispatched.output).toBe('run-id=8\n');
+    expect(fromMain.output).toBe('run-id=8\n');
   });
 
-  it("should ignore a red verdict, another commit's verdict and a dispatch from another branch", () => {
+  it("should ignore another commit's run and a dispatch from another branch", () => {
     const result = lookup({
       ref: sha,
       runs: [
-        { id: 7, head_branch: 'main', event: 'workflow_dispatch' },
-        { id: 9, head_branch: 'main', event: 'workflow_dispatch' },
+        { id: 9, head_branch: 'main', event: 'workflow_dispatch', display_title: `Release gate ${'b'.repeat(40)}` },
         { id: 11, head_branch: 'feature', event: 'workflow_dispatch' },
       ],
-      jobs: { '7': verdict(sha, 'failure'), '9': verdict('b'.repeat(40), 'success'), '11': verdict(sha, 'success') },
+      jobs: { '9': verdict('b'.repeat(40), 'success'), '11': verdict(sha, 'success') },
     });
     expect(result.status).toBe(0);
     expect(result.output).toBe('');
   });
 
-  it('should fail with the way to get a verdict only when one is required', () => {
-    const required = lookup({ ref: sha, require: 'true' });
-    expect(required.status).not.toBe(0);
-    expect(required.stdout).toContain(`dispatch release-gate.yml from main with ref ${sha}`);
+  it('should block on a running gate and name it, without dispatching another', () => {
+    const result = lookup({
+      ref: sha,
+      runs: [{ id: 12, head_branch: 'main', event: 'workflow_dispatch', status: 'in_progress', conclusion: '' }],
+      require: 'true',
+      dispatch: 'true',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain('still running: https://github.com/taucad/tau/actions/runs/12');
+    expect(dispatched(result)).toEqual([]);
+  });
+
+  it('should block on a red verdict and name it, never re-running it', () => {
+    const result = lookup({
+      ref: sha,
+      runs: [{ id: 13, head_branch: 'main', event: 'workflow_dispatch', conclusion: 'failure' }],
+      jobs: { '13': verdict(sha, 'failure') },
+      require: 'true',
+      dispatch: 'true',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain('failed on');
+    expect(result.stdout).toContain('/actions/runs/13');
+    expect(dispatched(result)).toEqual([]);
+  });
+
+  it('should dispatch the gate from main for a commit with no verdict, or a cancelled one, and block', () => {
+    for (const runs of [
+      [],
+      [{ id: 14, head_branch: 'desktop-staging@x', event: 'workflow_run', conclusion: 'cancelled' }],
+    ]) {
+      const result = lookup({
+        ref: sha,
+        runs,
+        jobs: { '14': verdict(sha, 'cancelled') },
+        require: 'true',
+        dispatch: 'true',
+      });
+      expect(result.status).not.toBe(0);
+      expect(dispatched(result)).toEqual([`workflow run release-gate.yml --repo taucad/tau --ref main -f ref=${sha}`]);
+      expect(result.stdout).toContain('so the gate was started');
+    }
+    const withoutDispatch = lookup({ ref: sha, require: 'true' });
+    expect(withoutDispatch.status).not.toBe(0);
+    expect(dispatched(withoutDispatch)).toEqual([]);
+    expect(withoutDispatch.stdout).toContain(`Dispatch release-gate.yml from main with ref ${sha}`);
     expect(lookup({ ref: sha }).status).toBe(0);
   });
 
@@ -263,6 +352,7 @@ describe('release gate readers', () => {
       sha: expression('steps.candidate-commit.outputs.sha'),
       'github-token': expression('github.token'),
       require: 'true',
+      dispatch: 'true',
     });
     // Read before any signing material is loaded or anything is published.
     const index = (name: string): number => steps.findIndex((step) => step.name === name);
@@ -278,8 +368,14 @@ describe('release gate readers', () => {
       sha: expression('steps.release.outputs.commit'),
       'github-token': expression('github.token'),
       require: 'true',
+      dispatch: 'true',
     });
     expect(steps.indexOf(require!)).toBe(steps.findIndex((step) => step.name === 'Deploy the release at its tag') - 1);
+  });
+
+  it('should give the readers the right to dispatch the gate', () => {
+    expect(promotion.jobs['publication']?.permissions?.['actions']).toBe('write');
+    expect(production.jobs['promote']?.permissions?.['actions']).toBe('write');
   });
 
   it('should never run or wait for the gate from a reader', () => {

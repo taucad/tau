@@ -133,9 +133,9 @@ it('redacts sign-in tokens from event URLs', () => {
   expect(sent.properties).toStrictEqual({ href: 'https://tau.new/auth/reset-password?token=[redacted]' });
 });
 
-it('records replay text, masks inputs and still blocks invitation links', () => {
+it('records replay text, masks inputs and the chat composer, and still blocks invitation links', () => {
   const recording = posthogConfig.options.session_recording;
-  expect(recording?.maskTextSelector).toBeUndefined();
+  expect(recording?.maskTextSelector).toBe('.ProseMirror');
   expect(recording?.maskAllInputs).toBe(true);
   expect(recording?.blockSelector).toContain('a[href*="/invitations/"]');
 });

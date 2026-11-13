@@ -1142,3 +1142,88 @@ describe('focus: a session that leaves before the join, and person opens around 
     expect(harness.context().pending).toMatchObject({ openId: own, projectId: 'a' });
   });
 });
+
+describe('focus: two replies to one open, and drops before the library change is heard', () => {
+  const unsettled = { chatReady: false, availability: 'pending' } as const;
+
+  it("should start a reopened session's open bound afresh when the person reopens the project focus is opening", () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleOpen('live');
+    harness.facts('a', 'starting', unsettled);
+    harness.facts('a', 'live', unsettled);
+    harness.clock.increment(openPatienceMilliseconds + 500);
+    harness.facts('a', 'closing', unsettled);
+    harness.send({ type: 'openRequested', projectId: 'a' });
+    const person = harness.lastOpen();
+    harness.settleOpen('waiting', person.requestId);
+    harness.facts('a', 'absent', unsettled);
+    harness.settleOpen('live', person.requestId);
+    harness.facts('a', 'starting', unsettled);
+    harness.facts('a', 'live', unsettled);
+    harness.loaded();
+
+    expect(harness.state()).toEqual({ opening: 'live' });
+    expect(routeState(harness, 'a', { live: ['a'] })).toBe('resolving');
+
+    harness.clock.increment(openPatienceMilliseconds);
+
+    expect(harness.state()).toBe('focused');
+  });
+
+  it('should open again from the fresh answer when its dropped open had an older epoch than a later person open', () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'c');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    const own = harness.lastOpen();
+    harness.send({ type: 'libraryChanged', revision: 1 });
+    harness.send({ type: 'openRequested', projectId: 'c' });
+    harness.ready(harness.lastAsked().requestId, 'c', 1);
+    const person = harness.lastOpen();
+    harness.settleOpen('dropped', own.requestId);
+    harness.settleOpen('waiting', own.requestId);
+    harness.settleOpen('live', person.requestId);
+    harness.ready('r1', 'a', 1);
+
+    expect(harness.lastOpen()).toMatchObject({ projectId: 'a', request: { epoch: 1 } });
+  });
+
+  it("should ignore a wait reply that arrives after the same open's live reply", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'b');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    const own = harness.lastOpen();
+    harness.settleOpen('live', own.requestId);
+    harness.facts('a', 'starting', unsettled);
+    harness.settleOpen('waiting', own.requestId);
+
+    expect(harness.context().pending).toBeUndefined();
+
+    harness.facts('a', 'live', unsettled);
+    harness.send({ type: 'openRequested', projectId: 'b' });
+
+    expect(harness.opens().filter((open) => open.projectId === 'a')).toHaveLength(1);
+    expect(harness.context().open).toMatchObject({ openId: own.requestId, live: true });
+  });
+
+  it("should ask the library first for a person's open whose kept request is at a dropped epoch", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r0', 'c');
+    harness.route('r1', 'a');
+    harness.ready('r1', 'a');
+    harness.settleFlush(true);
+    harness.settleOpen('waiting');
+    harness.facts('c', 'absent');
+    harness.settleOpen('dropped');
+    const opens = harness.opens().length;
+    harness.send({ type: 'openRequested', projectId: 'c' });
+
+    expect(harness.opens()).toHaveLength(opens);
+    expect(harness.lastAsked()).toMatchObject({ projectId: 'c' });
+  });
+});

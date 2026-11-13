@@ -1429,6 +1429,12 @@ jobs:
       - name: Run the durable-migration failure injection
         run: pnpm nx run-many -t test:models -- app/testing/git-storage-migration.integration.test.ts
 
+      # Auth session cookie blueprint, harness H2: the cookie cache over the real
+      # AuthModule, PostgreSQL and Redis (cases 2, 4, 5, 17 and 24). Lives under
+      # `app/testing/**`, so it runs through `test:models` like the edit bench.
+      - name: Run the session cookie cache cases on PostgreSQL
+        run: pnpm nx run-many -t test:models -- app/testing/session-cache.billing.integration.test.ts
+
       # Charter S2, end to end: two real API processes over one MinIO and one
       # PostgreSQL, driven by stock `git` and `git-lfs`. The target brings up its own
       # compose services (idempotent against the ones above) and migrates before it

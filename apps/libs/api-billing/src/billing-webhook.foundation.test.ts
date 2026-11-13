@@ -12,7 +12,8 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import type { Stripe } from 'stripe';
-import { authInstanceKey, authRouteExtensionsToken } from '@taucad/api-auth';
+import { authRouteExtensionsToken } from '@taucad/api-auth';
+import { authInstanceKey } from '@taucad/api-auth/testing';
 import { AuthModule } from '@taucad/api-auth/module';
 import { stripeWebhookRoute } from '#billing-stripe-webhook.route.js';
 import { BillingPaymentsService } from '#billing-payments.service.js';
@@ -44,6 +45,8 @@ let authCalls = 0;
 
 const auth = {
   options: { basePath: '/v1/auth', hooks: {} },
+  // The snapshot cookie's name, which forwardToAuth reads from the context before it strips the snapshot.
+  $context: Promise.resolve({ authCookies: { sessionData: { name: 'tau.session_data' } } }),
   async handler(): Promise<Response> {
     authCalls += 1;
     return new Response('auth wildcard', { status: 418 });

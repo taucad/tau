@@ -477,6 +477,9 @@ catalogs:
     better-auth:
       specifier: 1.7.7
       version: 1.7.7
+    better-call:
+      specifier: 1.4.0
+      version: 1.4.0
     bowser:
       specifier: ^2.14.1
       version: 2.14.1
@@ -2431,6 +2434,9 @@ importers:
       '@nestjs/testing':
         specifier: 'catalog:'
         version: 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
+      better-call:
+        specifier: 'catalog:'
+        version: 1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2

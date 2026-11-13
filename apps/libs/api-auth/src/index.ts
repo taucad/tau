@@ -6,5 +6,13 @@ export * from '#better-auth.service.js';
 export * from '#session-resolver.js';
 export * from '#decorators/auth.decorator.js';
 export * from '#email-domain-allowlist.js';
-export * from '#auth.constant.js';
+// Every constant except the instance token, which stays inside api-auth (tests take it from ./testing).
+export {
+  afterHookKey,
+  beforeHookKey,
+  hookKey,
+  isAuthoritativeSession,
+  isOptionalAuth,
+  isPublicAuth,
+} from '#auth.constant.js';
 export * from '#auth-extensions.js';

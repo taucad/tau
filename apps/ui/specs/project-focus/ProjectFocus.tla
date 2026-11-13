@@ -77,8 +77,9 @@
 (*                  whose question is not the order.                       *)
 (*   RegistryChecksEpoch  TRUE: the registry's resume drops a pendingOpen *)
 (*                  whose request's epoch (focus's library epoch) is       *)
-(*                  is stale, the requirement on A5c. FALSE: the registry  *)
-(*                  as built, which resumes it.                            *)
+(*                  stale, and replies to focus that it dropped it: the    *)
+(*                  requirement on A5c. FALSE: the registry as built,      *)
+(*                  which resumes it.                                      *)
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
@@ -220,7 +221,7 @@ TypeOK ==
   /\ f.ansEpoch \in 0..MaxLibraryChanges
   /\ f.on \in Projects \cup {None} /\ f.from \in Projects \cup {None}
   /\ f.lf \in {"none", "running", "ok", "failed"} /\ f.lfp \in Projects \cup {None}
-  /\ f.opened \in BOOLEAN /\ f.blocked \in BOOLEAN /\ f.err \in BOOLEAN /\ f.sup \in BOOLEAN
+  /\ f.opened \in BOOLEAN /\ f.live \in BOOLEAN /\ f.blocked \in BOOLEAN /\ f.err \in BOOLEAN /\ f.sup \in BOOLEAN
   /\ f.kept \in [Projects -> (0..MaxLibraryChanges) \cup {None}]
   /\ asks \subseteq [id : 1..MaxRequests, project : Projects, epoch : 0..MaxLibraryChanges]
   /\ lib.access \in [Projects -> AccessValues] /\ lib.epoch \in 0..MaxLibraryChanges
@@ -239,7 +240,7 @@ Init ==
   /\ nreq = 0
   /\ f = [req |-> NoReq, st |-> "idle", ans |-> "none", ansProj |-> None, ansEpoch |-> 0,
           pend |-> "none", pendEpoch |-> 0, effEpoch |-> 0, on |-> None, from |-> None,
-          lf |-> "none", lfp |-> None, opened |-> FALSE, kept |-> [p \in Projects |-> None],
+          lf |-> "none", lfp |-> None, opened |-> FALSE, live |-> FALSE, kept |-> [p \in Projects |-> None],
           blocked |-> FALSE, err |-> FALSE, sup |-> FALSE]
   /\ asks = {}
   /\ \E a0 \in [Projects -> AccessValues] : lib = [access |-> a0, epoch |-> 0, hist |-> <<a0>>]
@@ -315,8 +316,14 @@ SessionClosed(v) ==
                /\ sreq' = [sreq EXCEPT ![v] = NoOpenReq]
                /\ fact' = [fact EXCEPT ![v] = "pending"]
                /\ pendingOpen' = IF pendingOpen # NoPending /\ (s1[q] = "live" \/ stale) THEN NoPending ELSE pendingOpen
+  \* The registry's reply about focus's own waiting open: resumed (or already live), or dropped as stale,
+  \* which sends focus back to OpenAsked from its fresh answer (PendingOpenDropped, A5c).
+  /\ f' = IF ~FocusPending THEN f
+          ELSE IF sess'[pendingOpen.project] = "live" THEN [f EXCEPT !.live = TRUE]
+          ELSE IF pendingOpen' = NoPending THEN [f EXCEPT !.opened = FALSE]
+          ELSE f
   /\ keep' = IF keep.proj = v THEN NoKeep ELSE keep
-  /\ UNCHANGED <<route, nreq, f, asks, lib, mod, reg, cnt>>
+  /\ UNCHANGED <<route, nreq, asks, lib, mod, reg, cnt>>
   /\ act' = Label("SessionClosed")
 
 (* The opening session's facts. They move only for the project focus holds an answer for: a session
@@ -471,7 +478,7 @@ TOpenAsked ==
   /\ \E out \in Outcomes(f.ansProj) :
        /\ RegistryOpen(f.ansProj, Req(f.ansProj, f.ansEpoch), out, cnt)
        /\ f' = IF out = "failed" THEN [f EXCEPT !.st = "held", !.ans = "failed"]
-               ELSE [f EXCEPT !.opened = TRUE]
+               ELSE [f EXCEPT !.opened = TRUE, !.live = out \in {"spawn", "touch"}]
   /\ keep' = IF sess[f.ansProj] = "none" THEN KeepWork ELSE keep
   /\ UNCHANGED <<route, nreq, asks, lib, mod, dirty, reg>>
   /\ act' = Label("OpenAsked")
@@ -488,12 +495,13 @@ TOpenJoined ==
   /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, keep, cnt>>
   /\ act' = Label("OpenJoined")
 
-\* The session focus opened closed before the join: the person's close or a budget close (idle expiry
-\* spares it). Focus never reopens or closes on its own (I3): it settles on the project, whose state
+\* The session focus opened went live and closed before the join: the person's close or a budget
+\* close (idle expiry spares it). An open the registry dropped or superseded never went live: its reply
+\* sends focus back to TOpenAsked instead. Focus never reopens or closes on its own (I3): it settles on the project, whose state
 \* derives `closed` with the reopen offer, a person's open through focus.
 TOpenLost ==
   /\ Focus = "target"
-  /\ f.st = "opening" /\ f.opened /\ f.ans = "ready"
+  /\ f.st = "opening" /\ f.opened /\ f.live /\ f.ans = "ready"
   /\ sess[f.ansProj] = "none" /\ pendingOpen.project # f.ansProj
   /\ f' = [f EXCEPT !.st = "focused", !.on = f.ansProj, !.from = None, !.lf = "none", !.lfp = None]
   /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, keep, cnt>>
@@ -647,8 +655,12 @@ PersonOpenAsked(p) ==
   /\ f.kept[p] = lib.epoch /\ sess[p] = "none"
   /\ \E out \in Outcomes(p) :
        /\ RegistryOpen(p, Req(p, f.kept[p]), out, [cnt EXCEPT !.pOpens = @ + 1])
-       /\ f' = IF f.st = "focused" /\ f.ansProj = p /\ out # "failed"
-                 THEN [f EXCEPT !.st = "opening", !.opened = TRUE] ELSE f
+       /\ f' = CASE f.st = "focused" /\ f.ansProj = p /\ out # "failed" ->
+                       [f EXCEPT !.st = "opening", !.opened = TRUE, !.live = out = "spawn"]
+                  \* The single slot keeps the latest destination; the registry tells focus its own
+                  \* waiting open was superseded, and focus asks again.
+                  [] out = "wait" /\ FocusPending /\ p # pendingOpen.project -> [f EXCEPT !.opened = FALSE]
+                  [] OTHER -> f
   /\ UNCHANGED <<route, nreq, asks, lib, mod, dirty, reg, keep>>
   /\ act' = Label("PersonOpenAsked")
 
@@ -753,6 +765,18 @@ OpenOnlyOnCurrentAccess ==
          => (f'.ans = "ready" /\ f'.ansEpoch = lib.epoch /\ f'.ansProj = f'.req.project)
      /\ ~Closed => \A rq \in SentReqs \ {NoOpenReq} : rq.epoch = lib.epoch /\ lib.access[rq.project] = "ready"
      /\ \A q \in Projects : ResumeStep(q) => ResumeStands(q)]_vars
+
+\* I3, action form: while a failed leave flush blocks, no step of focus opens a session or fills
+\* pendingOpen, route open or bare. A person's open (S39) is the person's command to the registry
+\* through focus and does not move focus, so it stays allowed; the registry's resume is its own step.
+FailedFlushSendsNoOpen == [][(f.blocked /\ ~Closed /\ ~PersonOpenStep) => SentReqs = {}]_vars
+
+\* With RegistryChecksEpoch and no person close: focus never settles on `closed` for a project it holds a
+\* fresh ready answer for unless that project's session went live and something closed it. In that
+\* config only focus's own open can be closed, and only after the join moved focus elsewhere.
+NoSpuriousClosed ==
+  ~(f.st = "focused" /\ f.ans = "ready" /\ Fresh /\ f.ansProj \in Projects
+    /\ sess[f.ansProj] = "none" /\ pendingOpen.project # f.ansProj)
 
 \* Witness: the target's registry resumes focus's open after a library change focus has not noticed.
 StaleResumeUnreached == [][\A q \in Projects : ResumeStep(q) => pendingOpen.req.epoch = lib.epoch]_vars

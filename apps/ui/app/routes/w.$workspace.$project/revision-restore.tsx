@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { toast } from '@taucad/ui/components/sonner';
 import { useAnalytics } from '#hooks/use-analytics.js';
-import { useRevisionClient, useRevisionCommands } from '#hooks/use-revision-status.js';
+import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
 import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failure-copy';
@@ -13,9 +14,11 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import {
   needsDecision,
+  reopenedSentence,
   restoredSentence,
   switchedSentence,
   switchRefusedSentence,
+  undidMergeSentence,
   undidRestoreSentence,
   undidSentence,
   undoLabel,
@@ -44,17 +47,57 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   removeConflictLine: 'revision_remove_conflict_line_failed',
 };
 
+/** What a settled branch verb's Undo needs: the inverse verbs, and how to reopen a closed branch. */
+type BranchUndo = Readonly<{
+  switchTo: RevisionCommands['switchTo'];
+  undoMerge: RevisionCommands['undoMerge'];
+  reopen: (branch: string) => void;
+  /** Whether a *Created* settlement is an Undo's reopen, which then reads as one (I12). */
+  reopened: (branch: string) => boolean;
+}>;
+
+/* The toast action every Undo here wears: the switch toast's pattern (I11). */
+const undoAction = (onClick: () => void) => ({ action: { label: undoLabel, onClick } });
+
 /**
- * Says a branch verb settled. A switch acted at once (I11), so its Undo is a
- * switch back to where the person was; a switch with nowhere to go back offers none.
+ * Says a branch verb settled, with Undo wherever the verb acted at once (I11).
+ *
+ * A switch's Undo is a switch back. A merge's is a new entry on the branch
+ * merged into with its files from before the merge, written only while the
+ * merge is still that branch's newest entry, so a later change is never
+ * restored over (rule 10); the merged branch is untouched. A close's reopens
+ * the branch's files on this device at the head the branch kept. A verb with
+ * nothing to go back to offers none.
  *
  * @param entry - The settled verb.
- * @param switchTo - Moves the working copy to a branch.
+ * @param undo - The inverse verbs.
  */
-function raiseBranchSettled(
-  entry: Extract<RevisionToast, { type: 'branch' }>,
-  switchTo: (branch: string) => void,
-): void {
+function raiseBranchSettled(entry: Extract<RevisionToast, { type: 'branch' }>, undo: BranchUndo): void {
+  if (entry.operation === 'create' && undo.reopened(entry.branch)) {
+    toast.success(reopenedSentence(entry.branch));
+    return;
+  }
+  if (entry.operation === 'merge') {
+    const { revisionId, before } = entry;
+    toast.success(
+      branchSettledCopy.merge(entry.branch),
+      revisionId === undefined || before === undefined
+        ? undefined
+        : undoAction(() => {
+            undo.undoMerge(revisionId, before);
+          }),
+    );
+    return;
+  }
+  if (entry.operation === 'discard') {
+    toast.success(
+      branchSettledCopy.discard(entry.branch),
+      undoAction(() => {
+        undo.reopen(entry.branch);
+      }),
+    );
+    return;
+  }
   if (entry.operation !== 'switch') {
     toast.success(branchSettledCopy[entry.operation](entry.branch));
     return;
@@ -64,14 +107,9 @@ function raiseBranchSettled(
     switchedSentence(entry.branch, from, entry.saved === true),
     from === undefined || from === entry.branch
       ? undefined
-      : {
-          action: {
-            label: undoLabel,
-            onClick: () => {
-              switchTo(from);
-            },
-          },
-        },
+      : undoAction(() => {
+          undo.switchTo(from);
+        }),
   );
 }
 
@@ -99,6 +137,11 @@ function raiseRestored(
     toast.success(undidRestoreSentence);
     return;
   }
+  /* The merge's Undo is itself the undo; *Undo restore* in the header can still take it back. */
+  if (entry.mode === 'undoMerge') {
+    toast.success(undidMergeSentence);
+    return;
+  }
   const card = loaded.find((revision) => revision.revisionId === entry.revisionId);
   if (card !== undefined) {
     toast.success(restoredSentence(card), { action: { label: undoLabel, onClick: undo } });
@@ -121,10 +164,11 @@ function raiseRestored(
 /**
  * The toasts the revision tree raises for a person (S19, PC9).
  *
- * Restore and Switch act at once and offer Undo here, in the toast (I11): a
- * restore is a new entry on top that *Undo restore* takes back, and a switch
- * saves unsaved work on the branch it leaves before it moves, so its Undo is
- * one more switch back. Nothing here asks first; the one dialog that guards
+ * Restore, Switch, Merge and Close act at once and offer Undo here, in the
+ * toast (I11): a restore is a new entry on top that *Undo restore* takes back;
+ * a switch saves unsaved work on the branch it leaves before it moves, so its
+ * Undo is one more switch back; a merge's Undo is one more entry with the
+ * files from before it; a close's reopens the branch at the head it kept. Nothing here asks first; the one dialog that guards
  * what cannot be undone is disconnecting the backup, which the Sync region owns.
  *
  * @returns Nothing: the toasts are the surface.
@@ -140,11 +184,38 @@ export function RevisionRestore(): ReactNode {
   useEffect(() => {
     loaded.current = revisions;
   });
+  /* A closed branch keeps its head (Close removes only this device's files), which its Undo reopens at. */
+  const status = useRevisionStatus();
+  const branches = useRef(status?.branches);
+  useEffect(() => {
+    branches.current = status?.branches;
+  });
+  /* Branches an Undo is reopening: their *Created* settlement reads as *Reopened* (I12). */
+  const reopening = useRef(new Set<string>());
 
   useEffect(() => {
     if (client === undefined) {
       return undefined;
     }
+    /* A refusal reaches the toast channel as a branch error in its own words; only the bookkeeping is the reopen's. */
+    const reopen = async (branch: string): Promise<void> => {
+      reopening.current.add(branch);
+      const head = branches.current?.find((facet) => facet.name === branch)?.head;
+      try {
+        await commands.createBranch(branch, head);
+      } catch {
+        reopening.current.delete(branch);
+      }
+    };
+    const branchUndo: BranchUndo = {
+      switchTo: commands.switchTo,
+      undoMerge: commands.undoMerge,
+      reopen: (branch) => {
+        // async-iife: toast -- the reopen settles on the toast channel; a refusal only clears the bookkeeping.
+        void reopen(branch);
+      },
+      reopened: (branch) => reopening.current.delete(branch),
+    };
     return client.subscribeToasts((entry) => {
       /* The restore child, the branch child and a failed ambient cut all raise
        * `error` on this one channel; the frame names its subject so the title
@@ -203,7 +274,7 @@ export function RevisionRestore(): ReactNode {
        * so (A25: no removal is silent). */
       if (entry.type === 'branch') {
         analytics.capture('revision_branch_settled', { operation: entry.operation });
-        raiseBranchSettled(entry, commands.switchTo);
+        raiseBranchSettled(entry, branchUndo);
         return;
       }
       /* The two conflict notices are not messages for a person: the marker text

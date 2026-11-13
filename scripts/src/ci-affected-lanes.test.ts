@@ -36,6 +36,7 @@ type Job = {
   readonly steps?: readonly Step[];
   readonly uses?: string;
   readonly with?: Record<string, string>;
+  readonly secrets?: Record<string, string> | string;
   readonly env?: Record<string, string>;
   readonly name?: string;
   readonly permissions?: Record<string, string>;
@@ -47,7 +48,7 @@ type Workflow = {
     readonly push?: { readonly paths?: readonly string[] };
     readonly workflow_call?: { readonly inputs?: Record<string, { readonly type?: string }> };
   };
-  readonly concurrency?: { readonly group?: string };
+  readonly concurrency?: { readonly group?: string; readonly 'cancel-in-progress'?: string };
   readonly jobs: Record<string, Job>;
 };
 
@@ -154,10 +155,12 @@ describe('ci.yml affected-only lanes', () => {
       'cli-e2e': { targets: ['test:scenarios'], pr: 'queue' },
       size: { targets: ['size'] },
       formal: { targets: ['formal:tla'], pr: 'queue' },
+      'formal-nightly': { targets: ['formal:nightly'], pr: 'queue' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
       'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
       'native-linux': { targets: ['test:native-linux'], pr: 'queue' },
+      'native-darwin': { targets: ['test:native-darwin'], pr: 'queue' },
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue' },
@@ -216,11 +219,13 @@ describe('ci.yml affected-only lanes', () => {
       'geospec-examples',
       'cli-e2e',
       'native-hosts',
+      'native-darwin',
       'viewer-parity',
       'formal',
       'api',
       'billing-e2e',
       'shell',
+      'formal-nightly',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -287,7 +292,12 @@ describe('ci.yml affected-only lanes', () => {
   it('should skip every lane on a reused queue verdict by one rule, naming no lane', () => {
     // The plan reads only the verdict's run id: no per-lane conclusions of the queue run.
     expect(planStep?.env?.['REUSED']).toBe(expression('steps.queue.outputs.run-id'));
-    expect(Object.keys(planStep?.env ?? {}).sort()).toEqual(['LANE_SELECTORS', 'REUSED', 'SHELL_LANE_PATHS']);
+    expect(Object.keys(planStep?.env ?? {}).sort()).toEqual([
+      'LANE_SELECTORS',
+      'NATIVE_DARWIN_LANE_PATHS',
+      'REUSED',
+      'SHELL_LANE_PATHS',
+    ]);
     const reused = planScript.slice(planScript.indexOf('if [ -n "$REUSED" ]; then'));
     const block = reused.slice(0, reused.indexOf('\nfi\n'));
     // Every lane's selection is emptied at once, before any flag is read from it.
@@ -449,8 +459,15 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(affectedPlanOutputs()).toContain(job);
   });
 
-  it('should pass the affected test:native-linux projects to the native host rows', () => {
-    expect(ci.jobs['native-hosts']?.with).toEqual({ 'native-linux': expression('needs.plan.outputs.native-linux') });
+  it('should pass the affected test:native-linux projects and the Intel row to the native host rows', () => {
+    expect(ci.jobs['native-hosts']?.with).toEqual({
+      'native-linux': expression('needs.plan.outputs.native-linux'),
+      intel: expression('needs.plan.outputs.native-intel'),
+    });
+    // The Intel row runs when a tag:ci:native-hosts project (Build123d, PicoGK, the CLI) is affected (Q-3).
+    expect(ci.jobs['plan']?.outputs?.['native-intel']).toBe(expression('steps.plan.outputs.native-intel'));
+    expect(planScript).toContain('native_intel=$(flag native-hosts)');
+    expect(planScript).toContain('echo "native-intel=$native_intel"');
     expect(ci.jobs['plan']?.outputs?.['native-linux']).toBe(expression('steps.plan.outputs.native-linux'));
     expect(planScript).toContain(`native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")`);
     // The Linux rows run when a native host project or a native-linux project is affected.
@@ -464,6 +481,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     const check = gateStep?.run ?? '';
     for (const [key, job, output] of [
       ['NATIVE_HOSTS', 'native-hosts', 'native-hosts'],
+      ['NATIVE_DARWIN', 'native-darwin', 'native-darwin'],
       ['VIEWER_PARITY', 'viewer-parity', 'viewer-parity'],
       ['FORMAL', 'formal', 'formal'],
       ['API', 'api', 'api'],
@@ -475,21 +493,48 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     }
   });
 
-  it('should leave a push to the native-hosts workflow and skip viewer parity on a reused queue verdict', () => {
+  it('should run the native host rows and viewer parity on a push only when the queue did not prove it', () => {
     expect(planScript).toContain('viewer_parity=$(flag viewer-parity)');
-    const push = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = push ]; then'));
-    expect(push.slice(0, push.indexOf('\nfi\n'))).toMatch(/^\s*native_hosts=false$/mu);
-    expect(nativeHosts.on?.push).toBeDefined();
+    // No push override: a push that reuses the queue verdict empties every lane, and any other push runs
+    // the rows from ci.yml, since native-hosts.yml has no push trigger of its own (Q-3).
+    expect(planScript).not.toContain('if [ "$GITHUB_EVENT_NAME" = push ]; then');
+    expect(planScript).toContain(`lanes=$(jq -c 'map_values([])' <<< "$lanes")`);
+    expect(nativeHosts.on?.push).toBeUndefined();
   });
 
   it.each([
     ['native-hosts', nativeHosts],
     ['viewer-parity', viewerParity],
-  ])('should run %s from ci.yml and never on a pull request', (_name, workflow) => {
+  ])('should run %s from ci.yml', (_name, workflow) => {
     expect(workflow.on !== undefined && 'workflow_call' in workflow.on).toBe(true);
-    expect(workflow.on?.pull_request).toBeUndefined();
     // A group equal to the caller's (`github.workflow` is `CI` in a called workflow) would cancel the call.
     expect(workflow.concurrency?.group ?? '').not.toContain('github.workflow');
+  });
+
+  it('should never run native hosts on a pull request', () => {
+    expect(nativeHosts.on?.pull_request).toBeUndefined();
+  });
+
+  it('should run viewer parity on a pull request only while it carries the viewer-parity label', () => {
+    expect(viewerParity.on?.pull_request).toEqual({ types: ['opened', 'synchronize', 'reopened', 'labeled'] });
+    // One guard on the first job: `viewer` and `gate` need it, so they skip with it.
+    expect(viewerParity.jobs['fixtures']?.if).toBe(
+      "github.event_name != 'pull_request' || " +
+        "(contains(github.event.pull_request.labels.*.name, 'viewer-parity') && " +
+        "(github.event.action != 'labeled' || github.event.label.name == 'viewer-parity') && " +
+        "github.triggering_actor != 'dependabot[bot]')",
+    );
+    expect(viewerParity.jobs['viewer']?.needs).toBe('fixtures');
+    expect(viewerParity.jobs['gate']?.needs).toEqual(['fixtures', 'viewer']);
+    // Only a labelled pull request's own runs share a group and cancel; a call from ci.yml or a dispatch gets its
+    // run's own group, so a newer push never cancels a `main` run's parity jobs.
+    expect(viewerParity.concurrency?.group).toContain(
+      "format('pr-{0}', github.event.pull_request.number) || github.run_id",
+    );
+    expect(viewerParity.concurrency?.group).toContain("github.event.label.name != 'viewer-parity' && '-other-label'");
+    expect(viewerParity.concurrency?.['cancel-in-progress']).toBe(expression("github.event_name == 'pull_request'"));
+    // The plan never selects the lane on a pull request, so ci.yml's call never meets the label guard.
+    expect(laneSelectors['viewer-parity']).toEqual({ targets: ['test:viewer-parity'], pr: 'queue' });
   });
 
   it('should select viewer parity through the graph, not hand-kept paths', () => {
@@ -505,17 +550,23 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     ]);
   });
 
-  it('should skip the native-hosts plan in the merge queue and take the rows from ci.yml', () => {
+  it('should skip the native-hosts plan when ci.yml calls it and take the rows from ci.yml', () => {
     expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
-    expect(nativeHosts.jobs['plan']?.if).toBe("github.event_name != 'merge_group'");
+    expect(nativeHosts.on?.workflow_call?.inputs?.['intel']?.type).toBe('string');
+    // `inputs.intel` is set only on a call, so it tells a call from the nightly and a dispatch.
+    expect(nativeHosts.jobs['plan']?.if).toBe("inputs.intel == ''");
     expect(nativeHosts.jobs['linux']?.if).toBe(
-      expression("!cancelled() && (github.event_name == 'merge_group' || needs.plan.outputs.linux == 'true')"),
+      expression("!cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true')"),
     );
     expect(nativeHosts.jobs['linux']?.env?.['NATIVE_LINUX']).toBe(
       expression('inputs.native-linux || needs.plan.outputs.native-linux'),
     );
-    // The Intel row never runs in the queue: a skipped plan leaves its output empty.
-    expect(nativeHosts.jobs['intel']?.if).toBe("needs.plan.outputs.intel == 'true'");
+    // The Intel row joins the queue when ci.yml's plan selects it (Q-3).
+    expect(nativeHosts.jobs['intel']?.if).toBe(
+      expression("!cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true')"),
+    );
+    // A called run gets its own group, so a newer push never replaces a `main` run's rows.
+    expect(nativeHosts.concurrency?.group).toContain("inputs.intel != '' && github.run_id");
   });
 });
 
@@ -557,7 +608,7 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
         readonly inputs?: Record<string, { readonly type?: string; readonly required?: boolean }>;
       };
     };
-    readonly concurrency?: { readonly group?: string };
+    readonly concurrency?: { readonly group?: string; readonly 'cancel-in-progress'?: string };
     readonly jobs: Record<string, Job>;
   };
   const shellText = read('.github/workflows/shell-conformance.yml');
@@ -645,6 +696,12 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
       projects: expression('needs.plan.outputs.shell-projects'),
     });
     expect(lane?.permissions).toEqual({ contents: 'read' });
+    // The read token alone, never `inherit`: the called macOS job's `nx-cache-write` environment supplies the write token.
+    expect(lane?.secrets).toEqual(
+      Object.fromEntries([
+        ['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN', expression('secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN')],
+      ]),
+    );
   });
 
   it('should restrict the reusable call to the merge queue and never widen it', () => {
@@ -1009,7 +1066,7 @@ describe('plan lane selection', () => {
       root: 'apps/libs/api-billing',
       type: 'lib',
       tags: ['scope:api'],
-      targets: ['test', 'test:billing-foundation'],
+      targets: ['test', 'test:billing-foundation', 'formal:nightly'],
     },
     ui: {
       root: 'apps/ui',
@@ -1021,10 +1078,21 @@ describe('plan lane selection', () => {
       root: 'packages/cli',
       type: 'lib',
       tags: ['ci:native-hosts'],
-      targets: ['test:scenarios', 'test-geospec', 'test:native-linux'],
+      targets: ['test:scenarios', 'test-geospec', 'test:native-linux', 'test:native-darwin'],
+    },
+    picogk: {
+      root: 'packages/plugins/picogk',
+      type: 'lib',
+      tags: ['ci:native-hosts'],
+      targets: ['test:native-darwin'],
     },
     sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
-    host: { root: 'packages/host', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
+    host: {
+      root: 'packages/host',
+      type: 'lib',
+      tags: ['ci:shell'],
+      targets: ['test:shell-conformance', 'formal:nightly'],
+    },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -1114,6 +1182,7 @@ describe('plan lane selection', () => {
           ['REUSED', ''],
           ['LANE_SELECTORS', selectors],
           ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
+          ['NATIVE_DARWIN_LANE_PATHS', planStep?.env?.['NATIVE_DARWIN_LANE_PATHS'] ?? '[]'],
         ]),
       });
       const outputs = Object.fromEntries(
@@ -1211,10 +1280,59 @@ describe('plan lane selection', () => {
     expect(pullRequest.outputs['shell']).toBe('false');
   });
 
+  it('should run the affected formal nightly projects in the merge queue and none on a pull request', () => {
+    const queue = plan('merge_group', { affected: ['host', 'api'], files: ['packages/host/src/acp/server.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['formal-nightly']).toBe('true');
+    expect(queue.outputs['formal-nightly-projects']).toBe('["host"]');
+    const both = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(both.outputs['formal-nightly-projects']).toBe('["api-billing","host"]');
+    const pullRequest = plan('pull_request', { affected: ['host'], files: ['packages/host/src/acp/server.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['formal-nightly']).toBe('false');
+    expect(pullRequest.outputs['formal-nightly-projects']).toBe('[]');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['formal-nightly']).toBe('false');
+  });
+
   it('should not select the shell lane for a file beside the fixture paths', () => {
     const queue = plan('merge_group', { affected: [], files: ['apps/desktop/scripts/hosted-linux-vm.sh'] });
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['shell']).toBe('false');
+  });
+
+  it('should run the affected native darwin rows in the merge queue and none on a pull request (Q-2)', () => {
+    const queue = plan('merge_group', { affected: ['cli'], files: ['packages/cli/src/index.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['native-darwin']).toBe('true');
+    expect(queue.outputs['native-darwin-projects']).toBe('cli');
+    const pullRequest = plan('pull_request', { affected: ['cli'], files: ['packages/cli/src/index.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['native-darwin']).toBe('false');
+    expect(pullRequest.outputs['native-darwin-projects']).toBe('');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.outputs['native-darwin']).toBe('false');
+  });
+
+  it.each([
+    '.github/workflows/native-darwin.yml',
+    'scripts/src/check-standalone-project.ts',
+    'apps/ui/app/utils/kernel-libraries.ts',
+    'libs/tau-examples/src/standalone/picogk/Program.cs',
+  ])('should select every native darwin row in the merge queue when %s changes', (file) => {
+    const queue = plan('merge_group', { affected: [], files: [file] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['native-darwin']).toBe('true');
+    expect(queue.outputs['native-darwin-projects']).toBe('cli,picogk');
+    const pullRequest = plan('pull_request', { affected: [], files: [file] });
+    expect(pullRequest.outputs['native-darwin']).toBe('false');
+  });
+
+  it('should not select the native darwin lane for a file beside its paths', () => {
+    const queue = plan('merge_group', { affected: [], files: ['libs/tau-examples/src/standalone/picogk-extra.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['native-darwin']).toBe('false');
   });
 
   it('should fail the plan on a pull-request rule it does not know', () => {
@@ -1222,5 +1340,102 @@ describe('plan lane selection', () => {
     const { status, stderr } = plan('merge_group', { affected: everything, files: [], selectors });
     expect(status).not.toBe(0);
     expect(stderr).toContain('lane selectors name a pull-request rule other than queue or touched');
+  });
+});
+
+describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
+  type FormalNightlyWorkflow = {
+    readonly on: Record<string, unknown> & {
+      readonly workflow_call?: {
+        readonly inputs?: Record<string, { readonly type?: string; readonly required?: boolean }>;
+      };
+    };
+    readonly concurrency?: { readonly group?: string; readonly 'cancel-in-progress'?: boolean };
+    readonly jobs: Record<string, Job>;
+  };
+  const nightly = load(read('.github/workflows/formal-nightly.yml')) as FormalNightlyWorkflow;
+  const lane = ci.jobs['formal-nightly'];
+  const condition =
+    "!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.formal-nightly == 'true' && github.event_name == 'merge_group'";
+
+  it('should plan the lane from formal:nightly, in the merge queue only', () => {
+    expect(laneSelectors['formal-nightly']).toEqual({ targets: ['formal:nightly'], pr: 'queue' });
+    expect(planScript).toContain('formal_nightly=$(flag formal-nightly)');
+    expect(planScript).toContain('echo "formal-nightly-projects=$formal_nightly_projects"');
+    expect(ci.jobs['plan']?.outputs?.['formal-nightly-projects']).toBe(
+      expression('steps.plan.outputs.formal-nightly-projects'),
+    );
+    expect(lane?.if).toBe(expression(condition));
+  });
+
+  it('should call the nightly tiers with the planned projects, seeded by the queue commit', () => {
+    expect(lane?.uses).toBe('./.github/workflows/formal-nightly.yml');
+    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.with).toEqual({
+      ref: expression('github.sha'),
+      projects: expression('needs.plan.outputs.formal-nightly-projects'),
+      seed: expression('github.sha'),
+    });
+  });
+
+  it('should require the lane in the required check when the queue planned it', () => {
+    const step = ci.jobs['affected']?.steps?.[0];
+    expect(step?.env?.['FORMAL_NIGHTLY_REQUIRED']).toBe(expression('needs.plan.outputs.formal-nightly'));
+    expect(step?.env?.['FORMAL_NIGHTLY_RESULT']).toBe(expression('needs.formal-nightly.result'));
+    const check = step?.run ?? '';
+    const rule =
+      'if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi';
+    expect(check).toContain(rule);
+    expect(check.indexOf(rule)).toBeGreaterThan(check.indexOf('if [ -n "$REUSED" ]; then'));
+  });
+
+  it('should take ref, projects and seed as workflow_call inputs and give each caller its own group', () => {
+    const inputs = nightly.on.workflow_call?.inputs ?? {};
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed']);
+    expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
+    expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
+    expect(inputs['seed']).toMatchObject({ type: 'string', required: false });
+    expect(nightly.concurrency?.group).toBe(
+      `formal-nightly\${{ inputs.ref && format('-{0}-{1}', inputs.ref, github.run_id) || '' }}`,
+    );
+    expect(nightly.concurrency?.['cancel-in-progress']).toBe(false);
+  });
+
+  it('should narrow the matrix to the requested projects and fail on an unknown or empty list', () => {
+    const step = nightly.jobs['projects']?.steps?.find((candidate) => candidate.id === 'list');
+    expect(step?.env?.['REQUESTED']).toBe(expression("inputs.projects || ''"));
+    const script = step?.run ?? '';
+    expect(script).toContain('type == "array" and length > 0');
+    expect(script).toContain('--argjson requested "$projects"');
+  });
+
+  it('should derive FORMAL_SEED from the seed source and leave it random without one', () => {
+    const run = nightly.jobs['formal-nightly']?.steps?.find((step) => step.run?.includes('nx run-many'));
+    expect(run?.env?.['TAU_FORMAL_SEED']).toBe(expression("inputs.seed || ''"));
+    const derive = /^\s*(FORMAL_SEED=.*)$/mu.exec(run?.run ?? '')?.[1] ?? '';
+    expect(derive).toBe(
+      'FORMAL_SEED=$(( 16#$(printf \'%s\' "$TAU_FORMAL_SEED" | sha256sum | cut -c1-8) % 2147483647 ))',
+    );
+    const seedOf = (source: string): number => {
+      const result = spawnSync('bash', ['-euo', 'pipefail', '-c', `${derive}; echo "$FORMAL_SEED"`], {
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', process.env['PATH'] ?? ''],
+          ['TAU_FORMAL_SEED', source],
+        ]),
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return Number(result.stdout.trim());
+    };
+    const sha = '1f869be2c0ffee00000000000000000000000000';
+    // The same source replays the same seed; a commit sha and a run id both give a seed the tools accept.
+    expect(seedOf(sha)).toBe(seedOf(sha));
+    expect(seedOf(sha)).not.toBe(seedOf('43212287515'));
+    for (const source of [sha, '43212287515']) {
+      expect(Number.isInteger(seedOf(source))).toBe(true);
+      expect(seedOf(source)).toBeGreaterThanOrEqual(0);
+      expect(seedOf(source)).toBeLessThan(2_147_483_647);
+    }
+    expect(run?.run).toContain('if [ -n "$TAU_FORMAL_SEED" ]; then');
   });
 });

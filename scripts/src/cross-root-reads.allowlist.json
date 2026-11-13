@@ -1,0 +1,1027 @@
+[
+  {
+    "file": "apps/api-e2e/src/git/config.ts",
+    "target": "apps/api/.env",
+    "reason": "reads another app's local .env (names only) for its configuration"
+  },
+  {
+    "file": "apps/api-e2e/src/git/global-setup.ts",
+    "target": "packages/cli/dist/bin/tau.mjs",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/api/app/api/billing/billing-estimates.service.test.ts",
+    "target": "infra/billing/development.commercial.json",
+    "reason": "reads the checked-in billing policy under infra/billing; infra/ is not an Nx project"
+  },
+  {
+    "file": "apps/api/app/testing/git-storage-migration.integration.test.ts",
+    "target": "apps/libs/api-database/src/migrations/**",
+    "reason": "copies or reads the api-database migrations to build a test database"
+  },
+  {
+    "file": "apps/api/app/testing/live/board-export-evidence.live.test.ts",
+    "target": "packages/plugins/tscircuit/agent/cad-tscircuit/SKILL.md",
+    "reason": "reads a plugin's bundled agent skill or reference document"
+  },
+  {
+    "file": "apps/api/app/testing/module-graph.ts",
+    "target": "apps/libs",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "apps/cli-e2e/src/cli-distribution.test.ts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/cli-e2e/src/cli-distribution.test.ts",
+    "target": "packages/cli/dist/bin/**",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/cli-e2e/src/cli-distribution.test.ts",
+    "target": "packages/cli/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "apps/cli-e2e/src/cli-distribution.test.ts",
+    "target": "packages/cli/src/runtime.worker.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/cli-e2e/src/cli-distribution.test.ts",
+    "target": "packages/plugins/picogk/tau-plugin.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/cli-e2e/src/cli-scenarios.integration.test.ts",
+    "target": "packages/cli/src/**",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/cli-e2e/src/commands/mcp.integration.test.ts",
+    "target": "packages/cli/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "apps/cli-e2e/src/tail-relay.integration.test.ts",
+    "target": "apps/api/.env",
+    "reason": "reads another app's local .env (names only) for its configuration"
+  },
+  {
+    "file": "apps/desktop-e2e/scripts/run-completed-artifact.mts",
+    "target": "apps/api/dist/**",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-arrange-workbench.spec.ts",
+    "target": "packages/host/src/agent-tools.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-build123d-adoption.spec.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-build123d-adoption.spec.ts",
+    "target": "packages/core/geometry/schema/tau-cad-topology.schema.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-chat-launcher-2.spec.ts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-converter.spec.ts",
+    "target": "apps/ui/public/favicon-96x96.png",
+    "reason": "reads a static asset from another app's public directory"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-first-use-download.spec.ts",
+    "target": "packages/cli/dist/bin/tau.mjs",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-flag-state.spec.ts",
+    "target": "apps/ui-e2e/src/support/flag-state.ts",
+    "reason": "desktop e2e reuses a ui-e2e support module by relative path"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-native-payload.spec.ts",
+    "target": "packages/plugins/gltf/src/fixtures/cube.glb",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/desktop-e2e/src/desktop-picogk-kinematics.spec.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/desktop-e2e/src/filesystem-projection-live.spec.ts",
+    "target": "packages/agent-host/src/launchers/agent-launcher.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "apps/desktop-e2e/src/filesystem-projection-retained.spec.ts",
+    "target": "apps/ui-e2e/src/support/projection-fixture-validation.ts",
+    "reason": "desktop e2e reuses a ui-e2e support module by relative path"
+  },
+  {
+    "file": "apps/desktop-e2e/src/filesystem-projection-retained.spec.ts",
+    "target": "apps/ui/app/workbench-records/view-store.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/desktop-app.ts",
+    "target": "apps/ui-e2e/src/support/flag-state.ts",
+    "reason": "desktop e2e reuses a ui-e2e support module by relative path"
+  },
+  {
+    "file": "apps/desktop/scripts/desktop-package.test.mts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "apps/desktop/scripts/desktop-package.test.mts",
+    "target": "packages/plugins/build123d/tau-plugin.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/package-macos.mts",
+    "target": "apps/www/content/legal/open-source.md",
+    "reason": "reads or copies the open-source notices kept in apps/www"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-build123d-python.mts",
+    "target": "packages/core/geometry/schema/tau-cad-topology.schema.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/core/geometry/schema/tau-cad-topology.schema.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/plugins/picogk/LICENSE",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/plugins/picogk/dotnet/native/licenses/Zstd-LICENSE",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/plugins/picogk/dotnet/native/licenses/Zstd-license-receipt.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/plugins/picogk/dotnet/native/sources.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/plugins/picogk/tau-plugin.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/prepare-picogk-dotnet.mts",
+    "target": "packages/plugins/picogk/tau-plugin.variants.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/desktop/scripts/verify-macos-package.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/desktop/scripts/verify-macos-package.mts",
+    "target": "packages/plugins/brep/src/fixtures/cube.step",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/desktop/scripts/verify-macos-package.mts",
+    "target": "packages/plugins/build123d/tau-plugin.golden.json",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "apps/docs/api-coverage.test.ts",
+    "target": "packages/runtime/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "apps/docs/scripts/verify-deploy.mts",
+    "target": "pnpm-lock.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "apps/libs/api-billing/src/billable-model-evidence.test.ts",
+    "target": "apps/libs/api-llm-gateway/src/provider-account-stream.fixture.sse",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/libs/api-billing/src/billable-model-invocation.test.ts",
+    "target": "apps/libs/api-llm-gateway/src/provider-account-stream.fixture.sse",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/libs/api-billing/src/billable-model-request.test.ts",
+    "target": "packages/agent-host/src/**",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/libs/api-billing/src/billing-policy.readiness.test.ts",
+    "target": "infra/billing/development.commercial.json",
+    "reason": "reads the checked-in billing policy under infra/billing; infra/ is not an Nx project"
+  },
+  {
+    "file": "apps/libs/api-billing/src/billing-policy.sync.foundation.test.ts",
+    "target": "infra/billing/development.commercial.json",
+    "reason": "reads the checked-in billing policy under infra/billing; infra/ is not an Nx project"
+  },
+  {
+    "file": "apps/libs/api-billing/src/billing-policy.sync.test.ts",
+    "target": "infra/billing/development.commercial.json",
+    "reason": "reads the checked-in billing policy under infra/billing; infra/ is not an Nx project"
+  },
+  {
+    "file": "apps/libs/api-billing/src/development-reserve-promise.test.ts",
+    "target": "infra/billing/development.commercial.json",
+    "reason": "reads the checked-in billing policy under infra/billing; infra/ is not an Nx project"
+  },
+  {
+    "file": "apps/libs/api-billing/src/testing/billing-foundation.test.ts",
+    "target": "apps/libs/api-database/src/migrations",
+    "reason": "copies or reads the api-database migrations to build a test database"
+  },
+  {
+    "file": "apps/libs/api-billing/src/testing/billing-load/run.ts",
+    "target": "apps/api/dist/billing-command.js",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/libs/api-email/scripts/generate-email-palette.mts",
+    "target": "packages/ui/src/styles/tokens.css",
+    "reason": "reads the design-system stylesheets from packages/ui"
+  },
+  {
+    "file": "apps/libs/api-email/src/email-templates.test.ts",
+    "target": "apps/ui/public/wordmark.png",
+    "reason": "reads a static asset from another app's public directory"
+  },
+  {
+    "file": "apps/libs/csharp-language/scripts/prepare-csharp-language-server.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/libs/csharp-language/src/csharp-wasm.integration.test.ts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/libs/openscad-language/scripts/benchmark-openscad-language-server.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/libs/openscad-language/scripts/prepare-openscad-language-server.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/libs/openscad-language/src/openscad-wasm.integration.test.ts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/libs/planetary-gearbox/src/manifest.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/react-e2e/apps/**",
+    "target": "apps/react-e2e/support/*",
+    "reason": "framework e2e app imports the shared harness in the parent react-e2e project"
+  },
+  {
+    "file": "apps/runtime-e2e/scripts/benchmark-example-health.mts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/runtime-e2e/scripts/check-runtime-readme-quick-start.mts",
+    "target": "packages/runtime/README.md",
+    "reason": "reads the documented quick start it checks"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/compute-baseline-corpus.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/identity-tracer.mts",
+    "target": "libs/utils/src/hash.utils.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/plugins/build123d/src/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/plugins/esbuild/src/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/plugins/openrscad/src/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/plugins/replicad/src/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/runtime/src/client/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/runtime/src/filesystem/from-node-fs.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/runtime/src/filesystem/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/runtime/src/node.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/runtime/src/transport/in-process.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/compute-baseline/harness/run-arm.mts",
+    "target": "packages/runtime/src/worker/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/runtime-e2e/src/picogk-turbofan-native.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/runtime-e2e/src/picovoxel-kernel.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/runtime-e2e/src/tau-examples-health.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/ui-e2e/src/headless-chat-image-capture.performance.spec.ts",
+    "target": "apps/runtime-e2e/src/benchmarks/measurement-tags.ts",
+    "reason": "ui-e2e shares runtime-e2e benchmark tags, traces and fixtures by relative path"
+  },
+  {
+    "file": "apps/ui-e2e/src/parameters-pane.performance.spec.ts",
+    "target": "apps/runtime-e2e/src/benchmarks/measurement-tags.ts",
+    "reason": "ui-e2e shares runtime-e2e benchmark tags, traces and fixtures by relative path"
+  },
+  {
+    "file": "apps/ui-e2e/src/picovoxel-multi.spec.ts",
+    "target": "libs/tau-examples/src/exact-pin.ts",
+    "reason": "imports tau-examples source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui-e2e/src/stale-deploy-recovery.test.ts",
+    "target": "apps/ui/build/**",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/billing-usage-fixture.ts",
+    "target": "apps/libs/billing/src/index.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/browser-command.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/browser-command.ts",
+    "target": "apps/libs/api-llm-gateway/src/models/model.constants.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/headless-capture-performance.test.ts",
+    "target": "apps/runtime-e2e/src/benchmarks/measurement-tags.ts",
+    "reason": "ui-e2e shares runtime-e2e benchmark tags, traces and fixtures by relative path"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/headless-capture-performance.ts",
+    "target": "apps/runtime-e2e/src/benchmarks/measurement-tags.ts",
+    "reason": "ui-e2e shares runtime-e2e benchmark tags, traces and fixtures by relative path"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/host-fixture.ts",
+    "target": "apps/runtime-e2e/src/fixtures/websocket-runtime.ts",
+    "reason": "ui-e2e shares runtime-e2e benchmark tags, traces and fixtures by relative path"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/host-fixture.ts",
+    "target": "packages/host/src/runtime-host.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/open-to-frame.ts",
+    "target": "apps/runtime-e2e/src/benchmarks/**",
+    "reason": "ui-e2e shares runtime-e2e benchmark tags, traces and fixtures by relative path"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/projection-fixture-validation.ts",
+    "target": "packages/agent-host/src/log/reducer.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/serve-ui-build.test.ts",
+    "target": "apps/ui/serve/build/client/**",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/ui-e2e/src/support/tau-serve-fixture.ts",
+    "target": "apps/ui/serve/build/client/index.html",
+    "reason": "reads another project's build output"
+  },
+  {
+    "file": "apps/ui-e2e/vitest.config.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/ui/app/routes/[__e2e].onshape-render-profile/ablation-transform.test.ts",
+    "target": "packages/viewer/src/graphics/three/utils/section-stencil-caps.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "apps/ui/app/routes/w.$workspace.$project/chat-print.test.tsx",
+    "target": "packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/ui/app/runtime/plugin-source-surface.test.ts",
+    "target": "packages/plugins",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "apps/ui/app/services/chat-session-store.test.ts",
+    "target": "packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl",
+    "reason": "conformance or recorded corpus read from another project's specs"
+  },
+  {
+    "file": "apps/ui/app/styles/global.test.ts",
+    "target": "packages/ui/src/styles/**",
+    "reason": "reads the design-system stylesheets from packages/ui"
+  },
+  {
+    "file": "apps/ui/app/workbench-records/view-record-session.conformance.test.ts",
+    "target": "packages/camera/specs/CameraAuthority/suite.json",
+    "reason": "conformance or recorded corpus read from another project's specs"
+  },
+  {
+    "file": "apps/ui/app/worker-optimize-deps-entries.node.test.ts",
+    "target": "apps/libs",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "apps/ui/app/workers/agent-host.browser.test.ts",
+    "target": "packages/agent-host/src/transport/gateway-wire.fixture.js",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/ui/app/workers/agent-host.vitest.browser.config.ts",
+    "target": "packages/agent-host/src/transport/gateway-wire.fixture.js",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/ui/csharp-language-assets-cache-key.ts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/ui/depth-ownership.vitest.browser.config.ts",
+    "target": "packages/viewer/src/graphics/three/viewer-resize.vitest.browser.config.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui/desktop/vite.config.ts",
+    "target": "apps/desktop/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "apps/ui/scripts/generate-configuration-icons.mts",
+    "target": "packages/runtime/src/configuration/configuration-icons.generated.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "apps/ui/scripts/render-calibration/generate-physical.mts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/ui/scripts/render-calibration/generate-physical.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "apps/ui/scripts/render-calibration/generate.mts",
+    "target": "packages/plugins/replicad/src/utils/replicad-to-gltf.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/ui/scripts/render-calibration/render-nano.mts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "apps/ui/surface-aa.vitest.browser.config.ts",
+    "target": "packages/viewer/src/graphics/three/viewer-resize.vitest.browser.config.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/www/scripts/export-story-assets.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/www/scripts/export-variant-assets.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/www/scripts/metal-hero-entry.ts",
+    "target": "apps/ui/app/components/geometry/loader/**",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "apps/www/scripts/verify-browser.ts",
+    "target": "packages/agent-plugin/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "libs/agent-tools/src/registry/machine-print-planner.test.ts",
+    "target": "packages/plugins/slicer/src/__fixtures__/two-colour-cubes.gcode",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "libs/agent-tools/src/registry/machine-tool-registry.test.ts",
+    "target": "packages/plugins/slicer/src/__fixtures__/cube.glb",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "libs/api-extractor/src/bundle/generate.test.ts",
+    "target": "packages/plugins",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "libs/api-extractor/src/bundle/generate.test.ts",
+    "target": "packages/workbench/agent/workbench/SKILL.md",
+    "reason": "reads a plugin's bundled agent skill or reference document"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-geospec-types.test.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-geospec-types.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-kcl-api.ts",
+    "target": "repos/**",
+    "reason": "reads the optional external checkout under repos/, outside the Nx graph"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-replicad-api.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-replicad-api.ts",
+    "target": "packages/plugins/replicad/src/annotations/interface-declarations.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-replicad-types.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "libs/api-extractor/src/extract-tscircuit-types.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "libs/api-extractor/src/languages/openscad/extract.ts",
+    "target": "repos/**",
+    "reason": "reads the optional external checkout under repos/, outside the Nx graph"
+  },
+  {
+    "file": "libs/api-extractor/src/languages/typescript/extract.test.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "libs/api-extractor/src/languages/typescript/tscircuit.test.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "libs/oxlint/src/private-runtime-packages.js",
+    "target": "packages/runtime/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "libs/tau-examples/scripts/test-geospec.mts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "libs/tau-examples/src/picovoxel-kinematics.test.ts",
+    "target": "packages/plugins/picovoxel/agent/cad-picovoxel/kinematics-reference.md",
+    "reason": "reads a plugin's bundled agent skill or reference document"
+  },
+  {
+    "file": "libs/telemetry/scripts/runtime-registry.mts",
+    "target": "packages/jobs-solvers/src",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "libs/telemetry/scripts/runtime-registry.mts",
+    "target": "packages/plugins",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "libs/types/src/schemas/project-manifest.schema.test.ts",
+    "target": "apps/ui/public/schemas/tau-v1.json",
+    "reason": "reads a static asset from another app's public directory"
+  },
+  {
+    "file": "packages/agent-host/src/browser/provider-event-log.test.ts",
+    "target": "packages/filesystem/src/testing/mock-handle-factory.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "packages/agent-plugin/src/plugin-root.test.ts",
+    "target": "NOTICE",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "packages/host/src/agent-tools.integration.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "packages/plugins/bambu/src/bambu.simulator.test.ts",
+    "target": "packages/plugins/slicer/src/__fixtures__/cube.glb",
+    "reason": "test fixture read from another project"
+  },
+  {
+    "file": "packages/plugins/build123d/scripts/benchmark-native.mts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "packages/plugins/build123d/src/build123d.native.integration.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "packages/plugins/openrscad/e2e/browser-command.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "packages/plugins/openrscad/e2e/browser-command.ts",
+    "target": "out/**",
+    "reason": "reads build or test output under out/, not a source file"
+  },
+  {
+    "file": "packages/plugins/picogk/src/picogk-materials.native.integration.test.ts",
+    "target": "apps/ui/public/textures/matcap-sculpt.jpg",
+    "reason": "reads a static asset from another app's public directory"
+  },
+  {
+    "file": "packages/plugins/picogk/src/picogk-materials.native.integration.test.ts",
+    "target": "infra/seed/default-thumb.webp",
+    "reason": "test fixture: the default thumbnail under infra/seed"
+  },
+  {
+    "file": "packages/plugins/picovoxel/src/picovoxel-materials.integration.test.ts",
+    "target": "apps/ui/public/textures/matcap-sculpt.jpg",
+    "reason": "reads a static asset from another app's public directory"
+  },
+  {
+    "file": "packages/plugins/picovoxel/src/picovoxel-materials.integration.test.ts",
+    "target": "infra/seed/default-thumb.webp",
+    "reason": "test fixture: the default thumbnail under infra/seed"
+  },
+  {
+    "file": "packages/plugins/picovoxel/src/picovoxel.asset-ownership.test.ts",
+    "target": "pnpm-workspace.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "packages/plugins/tscircuit/src/tscircuit.kernel.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "packages/plugins/tscircuit/src/tscircuit.kernel.test.ts",
+    "target": "libs/types/src/constants/kernel.constants.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "packages/revisions/src/chat-ref.test.ts",
+    "target": "packages/agent-host/specs/lean/corpus/**",
+    "reason": "conformance or recorded corpus read from another project's specs"
+  },
+  {
+    "file": "packages/runtime/scripts/assemble-bundled-declarations.test.ts",
+    "target": "libs/units/package.json",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "packages/runtime/src/kernels/registry-structure.test.ts",
+    "target": "packages/plugins",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "packages/runtime/src/plugins/plugin-default-export-surface.test.ts",
+    "target": "packages/plugins",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "packages/skills/src/skill-bundles.test.ts",
+    "target": "packages/plugins",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/spikes/native-deps/**",
+    "target": "packages/**",
+    "reason": "native-deps spike script imports plugin and core source directly instead of through their packages"
+  },
+  {
+    "file": "scripts/spikes/native-deps/fetch-payloads.mts",
+    "target": "apps/desktop/resources/python/manifest.json",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/spikes/native-deps/linux/s11/fixtures-check.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "scripts/src/*.ts",
+    "target": "infra/grafana/**",
+    "reason": "reads the Grafana alerts, dashboards or collector config it checks; infra/ is not an Nx project"
+  },
+  {
+    "file": "scripts/src/*.{ts,mts}",
+    "target": ".github/workflows/**",
+    "reason": "reads the GitHub workflow it checks; .github is not an Nx project"
+  },
+  {
+    "file": "scripts/src/canvas-vite.config.ts",
+    "target": ".",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/check-registry-dependencies.test.ts",
+    "target": "package.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/check-registry-dependencies.test.ts",
+    "target": "packages/plugins/replicad/package.json",
+    "reason": "reads another project's package.json metadata"
+  },
+  {
+    "file": "scripts/src/check-registry-dependencies.test.ts",
+    "target": "pnpm-workspace.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/check-release-projects.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/check-standalone-project.test.ts",
+    "target": "libs/types/src/constants/kernel.constants.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/check-standalone-project.ts",
+    "target": "apps/ui/app/constants/project.constants.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/check-standalone-project.ts",
+    "target": "apps/ui/app/utils/kernel-libraries.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/check-standalone-project.ts",
+    "target": "libs/types/src/constants/kernel.constants.ts",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/ci-affected-lanes.test.ts",
+    "target": "apps/cli-e2e/project.json",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/src/ci-pinned-downloads.test.ts",
+    "target": "apps/libs/openscad-language/scripts/wasi-sdk.json",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/src/deploy-ui-workflow.test.ts",
+    "target": "apps/ui/netlify.toml",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/src/docs-links-workflow.test.ts",
+    "target": "apps/docs/lychee.npmjs.toml",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/src/ensure-vale.test.ts",
+    "target": "pnpm-workspace.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/formal-plugin-target.test.ts",
+    "target": "tools/formal.plugin.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/prepare-geospec-test-consumer.ts",
+    "target": ".",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/prepare-geospec-test-consumer.ts",
+    "target": "pnpm-lock.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/prepare-geospec-test-consumer.ts",
+    "target": "pnpm-workspace.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/readme-hero-capture.ts",
+    "target": "apps/ui/.env",
+    "reason": "reads another app's local .env (names only) for its configuration"
+  },
+  {
+    "file": "scripts/src/readme-hero-chat.ts",
+    "target": ".agents/skills/brep-design/**",
+    "reason": "reads an agent skill under .agents; it is not an Nx project"
+  },
+  {
+    "file": "scripts/src/readme-hero-chat.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "scripts/src/reference-html.test.ts",
+    "target": "**/node_modules/**",
+    "reason": "reads an installed dependency from node_modules, versioned by the lockfile"
+  },
+  {
+    "file": "scripts/src/research-skill-security.test.ts",
+    "target": ".agents/skills/**",
+    "reason": "reads an agent skill under .agents; it is not an Nx project"
+  },
+  {
+    "file": "scripts/src/research-skill-security.test.ts",
+    "target": "AGENTS.md",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/shell-evidence.test.ts",
+    "target": "libs/sandbox/scripts/**",
+    "reason": "reads the sandbox shell-conformance scripts it checks"
+  },
+  {
+    "file": "scripts/src/shell-evidence.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/telemetry-grafana-contract.test.ts",
+    "target": "apps/libs/api-observability/src/otel.ts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "scripts/src/telemetry-release-partition.test.ts",
+    "target": "packages/telemetry",
+    "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/test-shard-dealer.test.ts",
+    "target": "libs/tau-examples/**",
+    "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "scripts/src/tsgo-plugin-target.test.ts",
+    "target": ".",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/tsgo-plugin-target.test.ts",
+    "target": "tools/tsgo.plugin.js",
+    "reason": "imports another project's source by relative path instead of its package"
+  },
+  {
+    "file": "scripts/src/update-license-deps.mts",
+    "target": "docs/licensing/third-party-licenses.md",
+    "reason": "reads the generated licensing document under docs/; it is not an Nx project"
+  },
+  {
+    "file": "scripts/src/update-open-source-notices.mts",
+    "target": "apps/www/content/legal/**",
+    "reason": "reads or copies the open-source notices kept in apps/www"
+  },
+  {
+    "file": "scripts/src/update-open-source-notices.mts",
+    "target": "packages/plugins/**",
+    "reason": "reads another project's plugin manifest, schema, lockfile or licence file"
+  },
+  {
+    "file": "scripts/src/validate-brain-evidence.ts",
+    "target": "repos/**",
+    "reason": "reads the optional external checkout under repos/, outside the Nx graph"
+  },
+  {
+    "file": "scripts/src/validate-quickstart-budget.ts",
+    "target": "apps/docs/content/docs/runtime/getting-started/quick-start.mdx",
+    "reason": "reads the documented quick start it checks"
+  },
+  {
+    "file": "scripts/src/validate-workspace-root.ts",
+    "target": ".",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/vitest-browser-ownership.test.ts",
+    "target": "apps/desktop-e2e/scripts/qualification-renderer.mts",
+    "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "scripts/src/vitest-browser-ownership.test.ts",
+    "target": "pnpm-lock.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/vitest-browser-ownership.test.ts",
+    "target": "pnpm-workspace.yaml",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "tools/workspace-plugin/src/generators/generator-skill-parity.test.ts",
+    "target": ".agents/skills/**",
+    "reason": "reads an agent skill under .agents; it is not an Nx project"
+  },
+  {
+    "file": "tools/workspace-plugin/src/generators/plugin/generator.test.ts",
+    "target": "packages/plugins/image",
+    "reason": "enumerates or probes sibling project directories"
+  }
+]

@@ -124,7 +124,7 @@ export type QualifiedDesktopDownload = {
   readonly href: string;
   /** The primary artifact's kind; only `macos-dmg` is a disk image. */
   readonly primaryKind: string;
-  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on staging Mac routes. */
+  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on Mac routes. */
   readonly cleanHost: 'passed' | 'pending';
   readonly sha256: string;
   readonly size: number;
@@ -248,9 +248,9 @@ const admitDesktopCatalog = (
     seen.add(key);
     const definition = routeDefinitions[key as keyof typeof routeDefinitions];
     const proof = catalogRecord(route['qualification'], ['ci', 'vm', 'trust']);
-    // Clean-host acceptance may be pending only for a staging Mac route the publisher admitted on CI evidence alone.
-    const cleanHostPending =
-      proof['vm'] === 'pending' && options.channel === 'staging' && definition.primary === 'macos-dmg';
+    // Clean-host acceptance may be pending only for a Mac route the publisher admitted on CI evidence alone (the
+    // operator verifies the live DMG by hand); every other route needs its clean-host receipt.
+    const cleanHostPending = proof['vm'] === 'pending' && definition.primary === 'macos-dmg';
     if (proof['ci'] !== true || (proof['vm'] !== true && !cleanHostPending) || proof['trust'] !== 'release') {
       throw new TypeError('Installer route has not passed release qualification');
     }

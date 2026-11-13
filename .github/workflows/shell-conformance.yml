@@ -19,8 +19,17 @@
 # request run ask for reuse; the nightly, `workflow_dispatch` and the candidate gate's call run fresh and still pass
 # `--skip-nx-cache`, `desktop-services-host:test:terminal-conformance` is never cached, and the Linux guests always run fresh. The
 # stamp step then records each macOS receipt as fresh or as a verdict reused from an Nx hash first proven at another
-# commit, and refuses a reused receipt in a fresh run. This workflow has no remote cache env yet (CP-5b follow-up), so
-# until then a reuse run can only hit the runner's local cache, which is empty on a hosted runner.
+# commit, and refuses a reused receipt in a fresh run.
+#
+# Remote cache (CP-5b follow-up to CF-1): only the macOS job of a reuse run gets the Nx remote cache env, so a fresh run
+# (nightly, dispatch, candidate gate) has no cache server at all, on top of its nonce and `--skip-nx-cache`. The merge
+# queue's semantics call runs that job in environment `nx-cache-write` (branch policies `main` and
+# `gh-readonly-queue/main/*`), whose write token replaces the read token `ci.yml` passes, so one queue run's verdict can
+# be reused by a later one with the same fingerprint and inputs. A labelled pull request reads with the repository read
+# token and never writes: no job here has `id-token: write`, so `nx-guard.ts` never trades it for a pull request
+# session. Each target the macOS job runs has no `dependsOn`, so a write stores conformance verdicts only, each keyed on
+# its row's fingerprint. The Linux jobs get no cache env and the guest gets none (`shell-conformance-vm.sh` forwards a
+# fixed list of names), so the guests stay fresh.
 name: Shell conformance
 
 # Placement (CI throughput review, operator decision D3 of 2026-11-08): the five rows run nightly on `main`
@@ -49,6 +58,10 @@ on:
       projects:
         description: JSON array of the projects whose shell targets run (default all seven)
         type: string
+        required: false
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
+        description: Read token of the Nx remote cache, used only by a reuse run (the merge queue's call passes it)
         required: false
   schedule:
     - cron: '17 2 * * *'
@@ -175,12 +188,20 @@ jobs:
       contains(fromJSON(needs.select.outputs.projects), 'desktop-terminal'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    # Writes the remote cache only in `main`'s merge queue, the one producer of a verdict a later queue run reuses (CF-1
+    # design note, section 3). Every other call has no environment and so no write token.
+    environment: ${{ (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') && needs.select.outputs.tier == 'semantics') && 'nx-cache-write' || null }}
     env:
       # Reuse a fingerprinted verdict only in the merge queue's semantics-tier call and on this workflow's own pull
       # request trigger; the candidate gate (no tier, never `merge_group` or `pull_request`), the nightly and a
       # dispatch need fresh evidence (CF-1). Nothing reads a pull request run's verdict: the promotion lookup skips it.
       TAU_SHELL_EVIDENCE: ${{ ((github.event_name == 'merge_group' && needs.select.outputs.tier == 'semantics') || (github.event_name == 'pull_request' && !inputs.ref && needs.select.outputs.tier == 'full')) && 'reuse' || 'fresh' }}
       TAU_SHELL_TIER: ${{ needs.select.outputs.tier }}
+      # Nx remote cache (tau-cloud `tau-ci-cache`), on the same condition as reuse, so a fresh run has no cache server.
+      # The server is set only when a token is present (fork and Dependabot runs get none, and Nx fails on a tokenless
+      # 403). The queue's token is `nx-cache-write`'s; a labelled pull request's is the repository read token.
+      NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ ((github.event_name == 'merge_group' && needs.select.outputs.tier == 'semantics') || (github.event_name == 'pull_request' && !inputs.ref && needs.select.outputs.tier == 'full')) && secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ ((github.event_name == 'merge_group' && needs.select.outputs.tier == 'semantics') || (github.event_name == 'pull_request' && !inputs.ref && needs.select.outputs.tier == 'full')) && secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || '' }}
     strategy:
       fail-fast: false
       matrix:

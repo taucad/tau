@@ -430,6 +430,16 @@
     },
     "test": {
       "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "formal:wide": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The nightly-tier TLA+ configs under specs/ (the wide bounds), run on the schedule by formal-nightly.yml. Not named formal:nightly, which ci.yml runs in the merge queue for every affected project."
+      },
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier nightly apps/ui"
+      }
     }
   }
 }

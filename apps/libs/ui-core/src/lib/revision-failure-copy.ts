@@ -102,6 +102,11 @@ export const revisionFailureCopy: Readonly<
       ],
       /* D15, RV-W7 #7: Undo never reaches past a merge made here; nothing was written. */
       ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier point instead.'],
+      /* The Merged toast's Undo (I11): the branch has a newer entry than the merge, so nothing was written over it. */
+      [
+        'UNDO_MERGE_MOVED',
+        'This branch changed after the merge, so the merge can’t be undone. Restore an earlier point instead.',
+      ],
     ]),
     titles: new Map([
       ['RESTORE_UNRECORDED', 'Files restored'],
@@ -109,6 +114,7 @@ export const revisionFailureCopy: Readonly<
       ['NOTHING_TO_UNDO', 'Nothing to undo here'],
       ['UNDO_CONFLICT', 'That change can’t be undone'],
       ['UNDO_PAST_MERGE', 'A merge can’t be undone'],
+      ['UNDO_MERGE_MOVED', 'That merge can’t be undone'],
     ]),
   },
   branch: {

@@ -25,11 +25,18 @@ export const pushableRefPrefixes = [
 ] as const;
 
 /**
- * Refs the audited removal verb may remove (D24): named versions, and conflict
- * lines (D14). Everything else only ever moves forward (I2).
+ * Refs the audited removal verb may remove (D24): conflict lines only (D14),
+ * `refs/heads/conflicts/<line>`. A version, `refs/tags/v<n>`, is never removed
+ * (a rename rewrites its tag at the same ref), and everything else only ever
+ * moves forward (I2). The API and tau-storage both refuse through this one
+ * predicate.
  */
 export const isRemovableRef = (ref: string): boolean =>
-  /^refs\/(?:tags|heads\/conflicts)\/[\w.\-/]+$/u.test(ref) && !ref.includes('..') && !ref.endsWith('/');
+  /^refs\/heads\/conflicts\/[\w.\-/]+$/u.test(ref) && !ref.includes('..') && !ref.endsWith('/');
+
+/** The `GIT_REF_NOT_REMOVABLE` refusal's message, from the API and tau-storage alike. */
+export const notRemovableMessage =
+  'Only a conflict line (refs/heads/conflicts/*) can be removed; a version is never removed.';
 
 /**
  * DI token for the `RepositoryStore` port.

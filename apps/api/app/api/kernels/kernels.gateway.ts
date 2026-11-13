@@ -3,10 +3,8 @@ import type { OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
 import type { IncomingMessage } from 'node:http';
-import type { Auth } from 'better-auth';
-import { fromNodeHeaders } from 'better-auth/node';
 import { WebSocketServer, WebSocket } from 'ws';
-import { authInstanceKey } from '@taucad/api-auth';
+import { SessionResolver } from '@taucad/api-auth';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { KernelsService } from '#api/kernels/kernels.service.js';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
@@ -42,7 +40,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   public constructor(
     private readonly kernelsService: KernelsService,
     private readonly devWebSocketService: DevWebSocketService,
-    @Inject(authInstanceKey) private readonly auth: Auth,
+    @Inject(SessionResolver) private readonly sessions: SessionResolver,
     @Inject(commercialEntitlementsKey) private readonly entitlements: CommercialEntitlementsService,
     private readonly zooTokens: ZooTokenService,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
@@ -126,11 +124,11 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
        * the session; one that does not verify is refused, never retried as a
        * session, so a forged token cannot ride along with a cookie. */
       const zooToken = request.headers[httpHeader.tauZooToken];
-      const session =
+      const resolution =
         typeof zooToken === 'string'
           ? undefined
-          : await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
-      const userId = typeof zooToken === 'string' ? this.zooTokens.verify(zooToken) : session?.user.id;
+          : await this.sessions.resolve({ headers: request.headers, method: 'GET', authoritative: true });
+      const userId = typeof zooToken === 'string' ? this.zooTokens.verify(zooToken) : resolution?.user?.id;
       if (userId === undefined) {
         return {
           ok: false,

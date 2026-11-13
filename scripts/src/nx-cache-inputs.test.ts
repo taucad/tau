@@ -312,3 +312,17 @@ describe('react event-layer counter input', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('lockfile changes', () => {
+  // With the default `all`, any `pnpm-lock.yaml` change marked every project affected, so a
+  // Dependabot bump ran every lane. `auto` marks the projects whose `importers` entry changed
+  // (and their dependents); a bump of `node-pty` in `libs/sandbox` still selects every shell
+  // project. A change outside `importers` alone selects no project, which did not happen in the
+  // 168 lockfile commits on `main` from 2026-10-10 to 2026-11-13.
+  it('marks only projects whose dependencies changed', () => {
+    const config = JSON.parse(read('nx.json')) as {
+      readonly pluginsConfig?: Record<string, { readonly projectsAffectedByDependencyUpdates?: unknown }>;
+    };
+    expect(config.pluginsConfig?.['@nx/js']?.projectsAffectedByDependencyUpdates).toBe('auto');
+  });
+});

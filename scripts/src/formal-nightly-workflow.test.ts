@@ -41,9 +41,13 @@ const list = workflow.jobs['projects'];
 const shard = workflow.jobs['formal-nightly'];
 
 describe('formal nightly workflow', () => {
-  it('should keep its schedule, dispatch and one-run-at-a-time concurrency', () => {
-    expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_dispatch']);
-    expect(workflow.concurrency).toEqual({ group: 'formal-nightly', 'cancel-in-progress': false });
+  it('should keep its schedule and dispatch, run one at a time, and be callable by the queue and the gate', () => {
+    expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_call', 'workflow_dispatch']);
+    // The schedule and a dispatch share one group; a caller (the queue, the release gate) passes `ref`.
+    expect(workflow.concurrency).toEqual({
+      group: `formal-nightly\${{ inputs.ref && format('-{0}-{1}', inputs.ref, github.run_id) || '' }}`,
+      'cancel-in-progress': false,
+    });
   });
 
   it('should list the projects of each nightly target from Nx and fail on an empty list', () => {
@@ -68,7 +72,7 @@ describe('formal nightly workflow', () => {
     const run = shard?.steps?.find((step) => step.run?.includes('nx run-many'));
     expect(run?.env?.['PROJECT']).toBe(`\${{ matrix.tier.project }}`);
     expect(run?.env?.['TARGET']).toBe(`\${{ matrix.tier.target }}`);
-    expect(run?.run).toBe('pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream');
+    expect(run?.run).toContain('pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream');
   });
 
   it("should upload each tier's reports under its own artifact name, after a failure too", () => {

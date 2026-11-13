@@ -72,6 +72,18 @@ describe('FullscreenViewControl', () => {
     expect(screen.getByLabelText('Model canvas')).toBe(canvas);
   });
 
+  it('should show arrows out to enter and arrows in to exit, never the Fit view brackets', async () => {
+    const user = userEvent.setup();
+    renderViewer();
+
+    const enter = screen.getByRole('button', { name: 'Enter fullscreen' });
+    expect(enter.querySelector('svg')).toHaveClass('lucide-maximize-2');
+    expect(enter.querySelector('.lucide-maximize')).toBeNull();
+    await user.click(enter);
+    const exit = screen.getByRole('button', { name: 'Exit fullscreen' });
+    expect(exit.querySelector('svg')).toHaveClass('lucide-minimize-2');
+  });
+
   it('should report rejected requests and let the user retry', async () => {
     const user = userEvent.setup();
     const { requestFullscreen } = renderViewer();

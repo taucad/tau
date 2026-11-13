@@ -39,6 +39,16 @@
         "command": "node scripts/src/validate-workspace-root.ts"
       }
     },
+    "validate-cross-root-reads": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Rejects fs reads, require calls and relative imports that leave the reading file's Nx project root outside the graph, except entries in scripts/src/cross-root-reads.allowlist.json. Uncached: it scans every tracked source file."
+      },
+      "options": {
+        "command": "node scripts/src/validate-cross-root-reads.ts"
+      }
+    },
     "validate-project-names": {
       "executor": "nx:run-commands",
       "options": {

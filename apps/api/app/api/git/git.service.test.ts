@@ -1294,12 +1294,12 @@ describe('retained packs after a compacting sweep (D18)', () => {
       git(client, 'add', '.');
       git(client, 'commit', '--quiet', '-m', `revision ${String(push)}`);
       if (push === 0) {
-        git(client, 'tag', 'v1');
+        git(client, 'branch', 'conflicts/main/device-b');
       }
       // oxlint-disable-next-line no-await-in-loop -- each push is its own generation, in order.
       const lease = await hydrateLease({ store, locator, parentDirectory: scratch('retained-lease') });
       try {
-        execFileSync('git', ['push', lease.directory, 'main', 'refs/tags/v1'], {
+        execFileSync('git', ['push', lease.directory, 'main', 'refs/heads/conflicts/main/device-b'], {
           cwd: client,
           stdio: ['ignore', 'pipe', 'pipe'],
           env: gitEnvironment,
@@ -1322,7 +1322,7 @@ describe('retained packs after a compacting sweep (D18)', () => {
 
     await service.removeRef({
       access: { ...access, projectId: retainedProject },
-      ref: 'refs/tags/v1',
+      ref: 'refs/heads/conflicts/main/device-b',
       committedBy: ownerId,
     });
     /* The shutdown registry alone, not `settled()`: the post-reply sweep is held open by it. */
@@ -1601,12 +1601,21 @@ describe('GitRepositoryService security floor (W9)', () => {
     git(client, 'tag', '-a', 'v1', '-m', 'v1');
     git(client, 'tag', 'v2');
     git(client, 'branch', 'conflicts/main/device-b');
+    git(client, 'branch', 'conflicts/main/device-c');
 
     const lease = await hydrateLease({ store, locator, parentDirectory: scratch('floor-lease') });
     try {
       execFileSync(
         'git',
-        ['push', lease.directory, 'main', 'refs/tags/v1', 'refs/tags/v2', 'refs/heads/conflicts/main/device-b'],
+        [
+          'push',
+          lease.directory,
+          'main',
+          'refs/tags/v1',
+          'refs/tags/v2',
+          'refs/heads/conflicts/main/device-b',
+          'refs/heads/conflicts/main/device-c',
+        ],
         { cwd: client, stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment },
       );
       const result = await commitLease({ store, lease, committedBy: ownerId });
@@ -1747,9 +1756,9 @@ describe('GitRepositoryService security floor (W9)', () => {
 
     expect(accesses.map((granted) => granted.role)).toEqual(['write', 'write', 'write']);
     await expect(
-      service.removeRef({ access: accesses[2]!, ref: 'refs/tags/v2', committedBy: ownerId }),
+      service.removeRef({ access: accesses[2]!, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId }),
     ).rejects.toMatchObject({ response: { code: 'GIT_REF_REMOVAL_OWNER_ONLY' } });
-    expect(await manifestReferences()).toHaveProperty(['refs/tags/v2']);
+    expect(await manifestReferences()).toHaveProperty(['refs/heads/conflicts/main/device-b']);
   });
 
   it('answers 429 with the wait when a hydrate budget is spent, before hydrating', async () => {
@@ -1905,35 +1914,39 @@ describe('GitRepositoryService security floor (W9)', () => {
   });
 
   describe('the audited ref-removal verb (D24)', () => {
-    const published = { id: 'pub_w9', title: 'Bracket v1', visibility: 'public' };
-
-    it('refuses a collaborator, and any ref that is not a named version or a conflict line', async () => {
+    it('refuses a collaborator, and any ref that is not a conflict line', async () => {
       const service = createService(store, caughtUp());
 
       await expect(
-        service.removeRef({ access: { ...access, role: 'write' }, ref: 'refs/tags/v2', committedBy: 'user-w9-writer' }),
+        service.removeRef({
+          access: { ...access, role: 'write' },
+          ref: 'refs/heads/conflicts/main/device-b',
+          committedBy: 'user-w9-writer',
+        }),
       ).rejects.toMatchObject({ status: 403 });
-      for (const ref of ['refs/heads/main', 'refs/tau/chats/chat_1', 'refs/tags/../heads/main']) {
+      for (const ref of [
+        'refs/heads/main',
+        'refs/tau/chats/chat_1',
+        'refs/heads/conflicts/../main',
+        'refs/tags/v2',
+        'refs/tags/v1',
+      ]) {
         // oxlint-disable-next-line no-await-in-loop -- one refusal per ref
         await expect(service.removeRef({ access, ref, committedBy: ownerId })).rejects.toMatchObject({
           status: 400,
           response: { code: 'GIT_REF_NOT_REMOVABLE' },
         });
       }
+      expect(await manifestReferences()).toHaveProperty(['refs/tags/v1']);
       expect(await manifestReferences()).toHaveProperty(['refs/tags/v2']);
+      expect(await manifestReferences()).toHaveProperty(['refs/heads/conflicts/main/device-b']);
     });
 
-    /* RV-W9 M1: the publication has to reach the client, or it can never be
-       confirmed. Driven over HTTP through the controller and the global
-       exception filter, with the real service deciding. */
-    it('answers DELETE on a published name with 409 whose body carries the publication', async () => {
-      const service = createService(
-        store,
-        databaseStub(
-          { generation: 1, derivedGeneration: 1, storageBytes: 0 },
-          { failTransaction: false, publications: [published] },
-        ),
-      );
+    /* F2: a version is never removed (rule 14), so a tag is refused over HTTP
+       too, through the controller and the global exception filter, before any
+       publication is looked up. */
+    it('answers DELETE on a version tag with 400 GIT_REF_NOT_REMOVABLE and keeps it', async () => {
+      const service = createService(store, caughtUp());
       vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 0, lfsBytes: 0, retainedBytes: 0 });
       const moduleRef = await Test.createTestingModule({
         controllers: [GitController],
@@ -1960,42 +1973,15 @@ describe('GitRepositoryService security floor (W9)', () => {
       try {
         const answer = await app.inject({
           method: 'DELETE',
-          url: `/v1/git/${projectId}.git/refs?name=${encodeURIComponent('refs/tags/v1')}`,
+          url: `/v1/git/${projectId}.git/refs?name=${encodeURIComponent('refs/tags/v1')}&publication=pub_w9`,
         });
 
-        expect(answer.statusCode).toBe(409);
-        expect(answer.json()).toMatchObject({ code: 'GIT_REF_PUBLISHED', publication: published });
+        expect(answer.statusCode).toBe(400);
+        expect(answer.json()).toMatchObject({ code: 'GIT_REF_NOT_REMOVABLE' });
         expect(await manifestReferences()).toHaveProperty(['refs/tags/v1']);
       } finally {
         await app.close();
       }
-    }, 60_000);
-
-    it('retires the publication with the name once confirmed, in the same step (D24, RV-W9 M5)', async () => {
-      const updates: Array<Record<string, unknown>> = [];
-      const service = createService(
-        store,
-        databaseStub(
-          { generation: 1, derivedGeneration: 1, storageBytes: 0 },
-          { failTransaction: false, publications: [published], updates },
-        ),
-      );
-
-      await expect(service.removeRef({ access, ref: 'refs/tags/v1', committedBy: ownerId })).resolves.toStrictEqual({
-        outcome: 'confirm',
-        publication: published,
-      });
-      expect(updates).toStrictEqual([]);
-
-      const removed = await service.removeRef({
-        access,
-        ref: 'refs/tags/v1',
-        committedBy: ownerId,
-        confirmPublicationId: published.id,
-      });
-      expect(removed).toMatchObject({ outcome: 'removed', ref: 'refs/tags/v1', publication: published });
-      expect(updates[0]).toMatchObject({ unpublishedAt: expect.any(Date) as unknown });
-      expect(await manifestReferences()).not.toHaveProperty(['refs/tags/v1']);
     }, 60_000);
 
     it('removes an abandoned conflict line at the owner’s request and records it without a tip (EQ11)', async () => {
@@ -2038,11 +2024,13 @@ describe('GitRepositoryService security floor (W9)', () => {
       const service = createService(store, caughtUp(), { shutdown });
       shutdown.stop();
 
-      await expect(service.removeRef({ access, ref: 'refs/tags/v2', committedBy: ownerId })).rejects.toMatchObject({
+      await expect(
+        service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-c', committedBy: ownerId }),
+      ).rejects.toMatchObject({
         status: 503,
         response: { code: 'GIT_SERVICE_RESTARTING' },
       });
-      expect(await manifestReferences()).toHaveProperty(['refs/tags/v2']);
+      expect(await manifestReferences()).toHaveProperty(['refs/heads/conflicts/main/device-c']);
     }, 60_000);
 
     it('answers a committed removal as removed when its generation write fails, and says so', async () => {
@@ -2056,15 +2044,14 @@ describe('GitRepositoryService security floor (W9)', () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
       try {
-        await expect(service.removeRef({ access, ref: 'refs/tags/v2', committedBy: ownerId })).resolves.toMatchObject({
-          outcome: 'removed',
-          ref: 'refs/tags/v2',
-        });
+        await expect(
+          service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-c', committedBy: ownerId }),
+        ).resolves.toMatchObject({ ref: 'refs/heads/conflicts/main/device-c' });
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({ projectId }),
           expect.stringContaining('A committed manifest could not record its generation'),
         );
-        expect(await manifestReferences()).not.toHaveProperty(['refs/tags/v2']);
+        expect(await manifestReferences()).not.toHaveProperty(['refs/heads/conflicts/main/device-c']);
         await settledBoth(service);
       } finally {
         recordGeneration.mockRestore();

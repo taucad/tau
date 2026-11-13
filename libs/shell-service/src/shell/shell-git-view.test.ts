@@ -369,6 +369,78 @@ describe('createShellGitView', () => {
   });
 });
 
+describe('createShellGitView over a store that uses Git LFS', () => {
+  let scratch = '';
+
+  /** A checkout with one large file, recorded as a pointer, and the index Tau's refresh leaves (stat data zero). */
+  const seedLargeFile = async (): Promise<Uint8Array<ArrayBuffer>> => {
+    await seedRepository();
+    git(checkout, 'lfs', 'install', '--local', '--skip-repo');
+    await writeFile(join(checkout, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+    const bytes = new Uint8Array(4096).fill(7);
+    await writeFile(join(checkout, 'large.bin'), bytes);
+    git(checkout, 'add', '.gitattributes', 'large.bin');
+    git(checkout, 'commit', '--quiet', '-m', 'Add a large file');
+    git(checkout, 'read-tree', 'HEAD');
+    scratch = join(privateRoot, 'tmp');
+    await mkdir(scratch);
+    return bytes;
+  };
+
+  it('should write the LFS filter and a scratch lfs.storage, and copy nothing else of the real config', async () => {
+    await seedLargeFile();
+    const view = await createShellGitView(checkout, privateRoot, scratch);
+
+    expect(await readFile(join(view!.directory, 'config'), 'utf8')).toBe(
+      [
+        '[core]',
+        '\trepositoryformatversion = 0',
+        '\tbare = false',
+        '[filter "lfs"]',
+        '\tprocess = git-lfs filter-process',
+        '\trequired = true',
+        '[lfs]',
+        `\tstorage = "${join(scratch, 'git-lfs')}"`,
+        '',
+      ].join('\n'),
+    );
+    const listed = throughView(shellGitEnvironment(view!), 'config', '--list', '--local');
+    expect(listed).not.toContain(secret);
+    expect(listed).not.toMatch(/remote|credential|extraheader|hookspath|lfs\.url|smudge|clean/iu);
+  });
+
+  it('should list an unchanged large file as clean after an index refresh, and an edit in place as modified', async () => {
+    const bytes = await seedLargeFile();
+    const lfsBefore = await filesUnder(join(checkout, '.git', 'lfs'));
+    const view = await createShellGitView(checkout, privateRoot, scratch);
+    const environment = shellGitEnvironment(view!);
+
+    expect(throughView(environment, 'status', '--porcelain')).toBe('');
+    bytes[0] = 9;
+    await writeFile(join(checkout, 'large.bin'), bytes);
+    expect(throughView(environment, 'status', '--porcelain')).toBe(' M large.bin\n');
+    /* Git-lfs wrote its copies to the scratch folder only: nothing in the view or the real store. */
+    expect(await readdir(view!.directory)).not.toContain('lfs');
+    expect(await filesUnder(join(checkout, '.git', 'lfs'))).toStrictEqual(lfsBefore);
+    const copies = await filesUnder(join(scratch, 'git-lfs'));
+    expect(copies.length).toBeGreaterThan(0);
+  });
+
+  it('should write no filter without a scratch folder, or when the store names any other filter command', async () => {
+    await seedLargeFile();
+    const withoutScratch = await createShellGitView(checkout, privateRoot);
+    expect(await readFile(join(withoutScratch!.directory, 'config'), 'utf8')).toBe(
+      '[core]\n\trepositoryformatversion = 0\n\tbare = false\n',
+    );
+    git(checkout, 'config', 'filter.lfs.clean', `sh -c 'echo ${secret}'`);
+    const config = await readFile(
+      join((await createShellGitView(checkout, privateRoot, scratch))!.directory, 'config'),
+      'utf8',
+    );
+    expect(config).toBe('[core]\n\trepositoryformatversion = 0\n\tbare = false\n');
+  });
+});
+
 describe('shellGitEnvironment', () => {
   it('should point git at the view and the checkout, take no optional lock and read no system config', () => {
     expect(shellGitEnvironment({ directory: '/p/git', objects: '/c/.git/objects', workTree: '/c' })).toStrictEqual({

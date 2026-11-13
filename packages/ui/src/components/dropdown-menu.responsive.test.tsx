@@ -541,7 +541,8 @@ describe('responsive dropdown menu parts in a drawer', () => {
     fireEvent.click(trigger);
     // The sub-view replaces the items in the same drawer: one surface, its Back row named for where it goes.
     const back = within(drawer).getByRole('button', { name: 'Back to View' });
-    expect(back).toHaveTextContent('Export');
+    expect(back).toHaveTextContent(/^Back$/u);
+    expect(within(drawer).getByRole('group', { name: 'Export' })).toBeVisible();
     expect(within(drawer).queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     await waitFor(() => {

@@ -38,7 +38,6 @@
     "./cad/cad-viewer": "./src/cad/cad-viewer.tsx",
     "./cad/fit-view-control": "./src/cad/fit-view-control.tsx",
     "./cad/fullscreen-view-control": "./src/cad/fullscreen-view-control.tsx",
-    "./cad/grid-control": "./src/cad/grid-control.tsx",
     "./cad/kernel-settings": "./src/cad/kernel-settings.tsx",
     "./cad/material-swatch": "./src/cad/material-swatch.tsx",
     "./cad/measure-control": "./src/cad/measure-control.tsx",
@@ -146,11 +145,6 @@
         "types": "./dist/cad/fullscreen-view-control.d.mts",
         "import": "./dist/cad/fullscreen-view-control.mjs",
         "default": "./dist/cad/fullscreen-view-control.mjs"
-      },
-      "./cad/grid-control": {
-        "types": "./dist/cad/grid-control.d.mts",
-        "import": "./dist/cad/grid-control.mjs",
-        "default": "./dist/cad/grid-control.mjs"
       },
       "./cad/kernel-settings": {
         "types": "./dist/cad/kernel-settings.d.mts",

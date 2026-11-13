@@ -14,7 +14,7 @@ import { preparableKernels } from '@taucad/native-process-core/store';
 
 import { openDiagnosticsLog } from '#diagnostics.js';
 import { createServicesHost, refusedRuntimePortMessage } from '#services-host.impl.js';
-import { createDesktopShell } from '#services-host-shell.js';
+import { bundledGitToolchain, createDesktopShell } from '#services-host-shell.js';
 import { desktopNativeDeployments } from '#desktop-native-deployments.js';
 import type { UtilityMessage } from '#services-host.impl.js';
 
@@ -162,6 +162,8 @@ const shell = createDesktopShell({
   bwrapPath: process.env['TAU_DESKTOP_SHELL_BWRAP'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_BWRAP'],
   /* Host-owned, denied to every shell: the stand-ins a crashed services host left behind are swept from here. */
   standInJournal: join(authorityDirectory, 'shell-stand-ins.json'),
+  /* One git for the engine and both shells: the bundled git and its git-lfs first on the shell's PATH. */
+  toolchain: bundledGitToolchain(gitExecutable),
   ...(diagnostics === undefined
     ? {}
     : {

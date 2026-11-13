@@ -214,56 +214,171 @@ export const restoreFromHistory = async (row: Locator, outcome: Locator): Promis
   await answerIfAsked(/^Restore /u, outcome);
 };
 
+/** The pane's last line: where the backup is, its chooser and Manage (C2, C4). */
+export const backupLine = (): Locator => selectors.getByCss(`${visibleRevisionsPanel} section[aria-label="Backup"]`);
+
+/** The Backup line's chooser, *Where to back up*, once it is open. */
+export const backupChooser = (): Locator => backupLine().getByRole('radiogroup', { name: 'Where to back up' });
+
 /**
- * Open the Sync region's chooser through the pane's own offer (A29, canvas
- * round 16): the strip's *Back up*, or More's *Back up…* while the strip's
- * button is *Save*. Nothing offers a backup before the first
- * revision (S1), so a project with none saves one first: from the strip when
- * it has edits, with the save chord when it has none — a fresh, unedited
- * project's strip offers no *Save* at all.
+ * Open the Backup line's chooser through the pane's own offer (C2, C4,
+ * dbee175fd2): the line's *Back up to Tau Cloud* while the project is on this
+ * device only. Nothing offers a backup before the first entry (S1), so a
+ * project with none saves one first: from the strip when it has edits, with
+ * the save chord when it has none. A project that already has a remote shows
+ * its connected line instead, and the helper ends there.
  */
 export const openBackupChooser = async (): Promise<void> => {
-  const sync = selectors.getByCss(`${visibleRevisionsPanel} #revision-sync-heading`);
+  const line = backupLine();
   const strip = revisionStrip();
-  const backUp = strip.getByRole('button', { name: 'Back up', exact: true });
+  const chooser = backupChooser();
+  const connected = line.getByRole('status', { name: /^Backup (?:status|connection progress)$/u });
+  const backUp = line.getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
   const save = strip.getByRole('button', { name: 'Save', exact: true });
   const nothingSaved = strip.getByRole('status', { name: 'History status' }).filter({ hasText: 'Nothing saved yet' });
-  let offer: 'sync' | 'backUp' | 'save' | 'nothingSaved' | undefined;
-  await expect
-    .poll(
-      async () => {
-        offer = (await target.isVisible(sync))
-          ? 'sync'
-          : (await target.isVisible(backUp))
-            ? 'backUp'
-            : (await target.isVisible(save))
-              ? 'save'
+  type Offer = 'chooser' | 'connected' | 'unsaved' | 'nothingSaved' | 'backUp';
+  const offerAmong = async (accepted: readonly Offer[]): Promise<Offer> => {
+    let offer: Offer | undefined;
+    await expect
+      .poll(
+        async () => {
+          offer = (await target.isVisible(chooser))
+            ? 'chooser'
+            : (await target.isVisible(connected))
+              ? 'connected'
               : (await target.isVisible(nothingSaved))
-                ? 'nothingSaved'
-                : undefined;
-        return offer;
-      },
-      { timeout: 120_000 },
-    )
-    .toBeDefined();
-  if (offer === 'nothingSaved') {
+                ? (await target.isVisible(save))
+                  ? 'unsaved'
+                  : 'nothingSaved'
+                : (await target.isVisible(backUp))
+                  ? 'backUp'
+                  : undefined;
+          return offer !== undefined && accepted.includes(offer);
+        },
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    return offer ?? 'chooser';
+  };
+  let offer = await offerAmong(['chooser', 'connected', 'unsaved', 'nothingSaved', 'backUp']);
+  if (offer === 'unsaved') {
+    await target.click(save);
+    offer = await offerAmong(['chooser', 'connected', 'backUp']);
+  } else if (offer === 'nothingSaved') {
     await target.keyboardPress(await saveShortcut());
-    await target.expectVisible(backUp, 120_000);
-    offer = 'backUp';
-  }
-  if (offer === 'save') {
-    const status = await target.textContent(strip.getByRole('status', { name: 'History status' }));
-    if (status?.includes('Nothing saved yet') === true) {
-      await target.click(save);
-      await target.expectVisible(backUp, 120_000);
-      offer = 'backUp';
-    } else {
-      await target.click(strip.getByRole('button', { name: 'More', exact: true }));
-      await target.click(selectors.getByRole('menuitem', { name: 'Back up…' }));
-    }
+    offer = await offerAmong(['chooser', 'connected', 'backUp']);
   }
   if (offer === 'backUp') {
     await target.click(backUp);
   }
-  await target.expectVisible(sync, 60_000);
+  await offerAmong(['chooser', 'connected']);
+};
+
+/** The History header's branch chip, which is the branch menu (C2, 59f8f356a8). */
+export const branchChip = (): Locator => revisionStrip().getByRole('button', { name: /^Branch: .+\. Switch branch$/u });
+
+/**
+ * The branch the files are on, as the header's chip names it.
+ *
+ * @param name - The branch.
+ * @returns The chip while it names `name`.
+ */
+export const branchChipOn = (name: string): Locator =>
+  revisionStrip().getByRole('button', { name: `Branch: ${name}. Switch branch`, exact: true });
+
+/**
+ * Start a branch where the files are, the way a person does: the History
+ * header's chip, its last item *New branch…*, the name, *Create branch* (C2,
+ * D3). The item is offered once the files have an entry to start from, so the
+ * menu is reopened until it is. The files stay where they are, and the new
+ * branch's chip in History's lanes carries its own ⋮, *More for ⟨name⟩*.
+ *
+ * @param name - The new branch's name.
+ */
+export const createBranchHere = async (name: string): Promise<void> => {
+  const chip = branchChip();
+  const newBranch = selectors.getByRole('menuitem', { name: 'New branch…' });
+  const switchBranch = selectors.getByRole('menu').getByText('Switch branch', { exact: true });
+  await target.expectVisible(chip, 60_000);
+  await expect
+    .poll(
+      async () => {
+        if (await target.isVisible(newBranch)) {
+          return true;
+        }
+        if (await target.isVisible(switchBranch)) {
+          await target.keyboardPress('Escape');
+          return false;
+        }
+        await target.click(chip);
+        return false;
+      },
+      { timeout: 60_000, interval: 1000 },
+    )
+    .toBe(true);
+  await target.click(newBranch);
+  const branchName = selectors.getByRole('textbox', { name: 'Branch name' });
+  await target.expectFocused(branchName);
+  await target.fill(branchName, name);
+  await target.click(selectors.getByRole('button', { name: 'Create branch' }));
+  await target.expectVisible(branchMore(name), 60_000);
+};
+
+/**
+ * A branch's own ⋮ on its chip in History's lanes (D3, bee2a79e41).
+ *
+ * @param name - The branch.
+ * @returns The button.
+ */
+export const branchMore = (name: string): Locator =>
+  selectors.getByCss(visibleRevisionsPanel).getByRole('button', { name: `More for ${name}`, exact: true });
+
+/**
+ * Pick one of a branch's verbs from its chip's ⋮. Some verbs (*Run this chat
+ * here*) are offered only once the projection has caught up, so the menu is
+ * reopened until the item is there.
+ *
+ * @param name - The branch.
+ * @param item - The menu item's accessible name.
+ * @param before - Called with the menu open on the item, before it is picked (a screenshot).
+ */
+export const pickBranchVerb = async (name: string, item: string, before?: () => Promise<void>): Promise<void> => {
+  const more = branchMore(name);
+  const verb = selectors.getByRole('menuitem', { name: item, exact: true });
+  const branchMenu = selectors.getByRole('menu').getByText(name, { exact: true });
+  await target.expectVisible(more, 60_000);
+  await expect
+    .poll(
+      async () => {
+        if (await target.isVisible(verb)) {
+          return true;
+        }
+        if (await target.isVisible(branchMenu)) {
+          await target.keyboardPress('Escape');
+          return false;
+        }
+        await target.click(more);
+        return false;
+      },
+      { timeout: 60_000, interval: 1000 },
+    )
+    .toBe(true);
+  await before?.();
+  await target.click(verb);
+};
+
+/**
+ * Put the files on a branch from the History header's chip, which switches at
+ * once (C7), unless they are on it already.
+ *
+ * @param name - The branch.
+ */
+export const switchToBranch = async (name: string): Promise<void> => {
+  await target.expectVisible(branchChip(), 60_000);
+  if (await target.isVisible(branchChipOn(name))) {
+    return;
+  }
+  await target.click(branchChip());
+  await target.click(selectors.getByRole('menuitemradio', { name: new RegExp(`^${name}\\b`, 'u') }));
+  await target.expectVisible(branchChipOn(name), 60_000);
 };

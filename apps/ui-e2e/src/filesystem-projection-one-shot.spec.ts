@@ -41,7 +41,7 @@ test('Fix in chat reads the current rooted source after an independent persisten
     await target.click(composer);
     await target.keyboardPress('ControlOrMeta+Slash');
     await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
-    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-4.5"]'));
+    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-5.5"]'));
     await target.expectVisible(selectors.getByRole('button', { name: /^Model: .*Haiku.*\. Change$/u }));
     await target.keyboardPress('Escape');
   } catch (error) {

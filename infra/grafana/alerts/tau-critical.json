@@ -445,6 +445,42 @@
         "service": "tau-api",
         "component": "database"
       }
+    },
+    {
+      "uid": "agent-replay-rejected",
+      "title": "P0: Model Provider Rejected Replayed Reasoning",
+      "condition": "replay_rejected",
+      "data": [
+        {
+          "refId": "replay_rejected",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "instant": true,
+            "range": false,
+            "expr": "(sum by (app) (increase(tau_agent_errors_total{app=~\".*\",service_name=\"tau-api\",error_code=\"REASONING_REPLAY_REJECTED\"}[15m])) > 0) or (sum by (app) (tau_agent_errors_total{app=~\".*\",service_name=\"tau-api\",error_code=\"REASONING_REPLAY_REJECTED\"} unless tau_agent_errors_total{app=~\".*\",service_name=\"tau-api\",error_code=\"REASONING_REPLAY_REJECTED\"} offset 15m) > 0)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "replay_rejected"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/chat-llm-failing.md",
+        "summary": "A model provider refused a request because of reasoning Tau replayed from earlier in the chat (REASONING_REPLAY_REJECTED, reported by the agent client). The user saw 'This model cannot continue this chat' with no Resume, and that chat cannot continue on that model. Every occurrence is a replay-rule bug. The second leg counts a series first seen in the window, which increase() reads as zero."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "agent"
+      }
     }
   ]
 }

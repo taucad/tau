@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  * Desktop split DS-3. The packaged desktop suite is a candidate gate (operator decision D-DS1 (b)):
  * `release-desktop-staging.yml` calls `desktop-packaged.yml` after the shell gate and tags only when both are
  * green. Intel is packaged only on a dispatch that asks for it, which the promotion gate makes for an Apple
- * silicon-only candidate (D-DS3); the 03:17 full-candidate schedule is gone.
+ * silicon-only candidate (D-DS3); the 03:17 full-candidate schedule is gone. DS-4 deleted the nightly's packaged job.
  */
 const root = resolve(import.meta.dirname, '../..');
 const read = (path: string): string => readFileSync(join(root, path), 'utf8');
@@ -122,7 +122,7 @@ describe('desktop-packaged.yml', () => {
     expect(packaged.concurrency?.['cancel-in-progress']).toBe(false);
   });
 
-  it('should run the packaged suite on hosted Apple silicon with host services, as the nightly does', () => {
+  it('should run the packaged suite on hosted Apple silicon with host services, and be its only runner', () => {
     expect(job['runs-on']).toBe('macos-26');
     const suite = steps[index('Run the packaged desktop suite')];
     expect(suite?.env?.['TAU_E2E_SERVICES']).toBe('host');
@@ -131,12 +131,9 @@ describe('desktop-packaged.yml', () => {
     expect(index('Start PostgreSQL, Redis and MinIO on the host')).toBeLessThan(
       index('Run the packaged desktop suite'),
     );
-    // DS-4 deletes the nightly's job only after this gate has run green twice; both run the same target.
-    const nightlyJob = nightly.jobs['desktop-packaged'];
-    const nightlySuite = nightlyJob?.steps?.find((step) => step.name === 'Run the packaged desktop suite');
-    expect(nightlyJob?.['runs-on']).toBe(job['runs-on']);
-    expect(nightlySuite?.env?.['TAU_E2E_SERVICES']).toBe('host');
-    expect(nightlySuite?.run).toContain('pnpm nx run-many -t test:e2e:packaged');
+    // DS-4 deleted the nightly's copy once this gate had run green twice: the suite runs here and nowhere else.
+    expect(nightly.jobs['desktop-packaged']).toBeUndefined();
+    expect(JSON.stringify(nightly)).not.toContain('test:e2e:packaged');
   });
 
   it('should read the remote cache and nothing more', () => {

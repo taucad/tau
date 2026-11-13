@@ -29,17 +29,27 @@ name: Viewer parity
 # Selection (2026-11-10): `ci.yml` calls this workflow (`workflow_call`) when its plan finds a project with a
 # `test:viewer-parity` target affected (`tau-examples`, whose graph holds the viewer, the image plugin, the render
 # profile, the capture options and the renderer output it compares, and whose target lists this workflow among its
-# inputs), in the merge queue and on a push to `main` the queue did not already prove; never on a pull request. Its
-# required check fails when a job here does. A dispatch runs it directly.
+# inputs), in the merge queue and on a push to `main` the queue did not already prove. Its required check fails when a
+# job here does. A dispatch runs it directly. A pull request runs it only while it carries the `viewer-parity` label,
+# for early signal before it queues (CI throughput review Q-1, the `shell-conformance` label's pattern); every other
+# pull request event starts a run whose jobs all skip.
 on:
   workflow_call:
   workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
-# No concurrency group: called from `ci.yml`, whose own group already holds the run, a group here would let a newer
-# push cancel a `main` run's parity jobs, which `ci.yml` never cancels.
+# A labelled pull request's newer push cancels its outdated run, and another label added to it starts a run whose jobs
+# skip, in a group of its own so it cannot cancel the parity jobs already running. Every other run, called from
+# `ci.yml` or dispatched, gets a group of its own (`github.run_id`) and is never cancelled: a shared group would let a
+# newer push cancel a `main` run's parity jobs, which `ci.yml` never cancels, and the group never names
+# `github.workflow`, which is `CI` in a called workflow and would cancel the call.
+concurrency:
+  group: viewer-parity-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}${{ github.event.action == 'labeled' && github.event.label.name != 'viewer-parity' && '-other-label' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -53,8 +63,15 @@ env:
   PARITY_OUT: out/test-results/viewer-parity/nanoraster
 
 jobs:
+  # The one label guard: `viewer` and `gate` need this job, so they skip with it. `ci.yml` calls this workflow only in
+  # the merge queue and on a push (the plan's `viewer-parity` lane is `pr: queue`), so a call never meets the guard.
   fixtures:
     name: Fixture GLBs from tau-examples
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'viewer-parity') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'viewer-parity') &&
+      github.triggering_actor != 'dependabot[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

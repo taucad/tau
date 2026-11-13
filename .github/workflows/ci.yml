@@ -75,6 +75,8 @@ jobs:
       cli-e2e: ${{ steps.plan.outputs.cli-e2e }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
+      formal-nightly: ${{ steps.plan.outputs.formal-nightly }}
+      formal-nightly-projects: ${{ steps.plan.outputs.formal-nightly-projects }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
@@ -143,6 +145,8 @@ jobs:
           # SHELL_LANE_PATHS select it too (with `sandbox`): the fixture producers and the workflow the graph
           # does not see, checked here rather than as target `inputs`, which would mark `sandbox` and every
           # project that depends on it affected in the ordinary lanes (shell split blueprint rows 15, 17).
+          # Formal nightly lane (`formal-nightly.yml`, CI throughput review Q-4): a project with a `formal:nightly`
+          # target is affected; the deep formal tiers run per project in the merge queue only, seeded by the commit.
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -155,6 +159,7 @@ jobs:
              "cli-e2e": {"targets": ["test:scenarios"], "pr": "queue"},
              "size": {"targets": ["size"]},
              "formal": {"targets": ["formal:tla"], "pr": "queue"},
+             "formal-nightly": {"targets": ["formal:nightly"], "pr": "queue"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
@@ -236,6 +241,8 @@ jobs:
           api=$(flag api)
           billing=$(flag billing)
           formal=$(flag formal)
+          formal_nightly=$(flag formal-nightly)
+          formal_nightly_projects=$(jq -c '."formal-nightly"' <<< "$lanes")
           browser=$(flag browser)
           geospec_examples=$(flag geospec-examples)
           cli_e2e=$(flag cli-e2e)
@@ -264,6 +271,8 @@ jobs:
             echo "cli-e2e=$cli_e2e"
             echo "size=$(flag size)"
             echo "formal=$formal"
+            echo "formal-nightly=$formal_nightly"
+            echo "formal-nightly-projects=$formal_nightly_projects"
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
             echo "native-hosts=$native_hosts"
@@ -701,10 +710,29 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # The formal nightly tiers (`formal-nightly.yml`: mutants, fresh-seed differentials and simulations, nightly
+  # configs), in the merge queue only, one job per affected `formal:nightly` project and target, each with
+  # its own 120-minute budget. The seed source is the queue commit's sha, so each landing explores a fresh
+  # seed and a re-run of the same commit replays it. A pull request leaves the lane to the queue, a push to
+  # `main` reuses the queue verdict, and the release gate (RG-1) runs every project with a seed of its own.
+  # The required check waits for it (CI throughput review, Q-4 step 2).
+  formal-nightly:
+    name: Formal nightly
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.formal-nightly == 'true' && github.event_name == 'merge_group' }}
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    uses: ./.github/workflows/formal-nightly.yml
+    with:
+      ref: ${{ github.sha }}
+      projects: ${{ needs.plan.outputs.formal-nightly-projects }}
+      seed: ${{ github.sha }}
+
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
   # end-to-end, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
-  # rows in the merge queue): a skip of a lane the plan selected fails it. It waits for every
+  # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. It waits for every
   # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
   # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
   # required check of their own as well, so the queue already waited for them; in the ten latest
@@ -725,6 +753,7 @@ jobs:
         api,
         billing-e2e,
         shell,
+        formal-nightly,
       ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -751,6 +780,8 @@ jobs:
           BILLING_RESULT: ${{ needs.billing-e2e.result }}
           SHELL_REQUIRED: ${{ needs.plan.outputs.shell }}
           SHELL_RESULT: ${{ needs.shell.result }}
+          FORMAL_NIGHTLY_REQUIRED: ${{ needs.plan.outputs.formal-nightly }}
+          FORMAL_NIGHTLY_RESULT: ${{ needs.formal-nightly.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -774,6 +805,7 @@ jobs:
           if [ "$API_REQUIRED" = true ]; then test "$API_RESULT" = success; fi
           if [ "$BILLING_REQUIRED" = true ]; then test "$BILLING_RESULT" = success; fi
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
+          if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal:tla` or `formal:lean` target. A known counterexample is an

@@ -75,14 +75,14 @@
 (*                  "together": both settle in one step (ChatReady), or    *)
 (*                  the bound passes first; a reduction for the configs    *)
 (*                  whose question is not the order.                       *)
-(*   RegistryChecksEpoch  TRUE: an open carries focus's library epoch and *)
-(*                  the registry's resume drops a pendingOpen whose epoch  *)
+(*   RegistryChecksEpoch  TRUE: the registry's resume drops a pendingOpen *)
+(*                  whose request's epoch (focus's library epoch) is       *)
 (*                  is stale, the requirement on A5c. FALSE: the registry  *)
 (*                  as built, which resumes it.                            *)
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
-EXTENDS Naturals, FiniteSets, TLC
+EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to
           Chats,             \* opaque chat values a request carries
@@ -143,9 +143,10 @@ AccessValues == {"ready", "held"}
 \* What an open carries (D7): the project of the ready answer it was built from, or None for a bare
 \* open. The workspace, native kernel id and chat of the charter's request travel with it, unmodelled.
 NoOpenReq == None
-OpenReqs == Projects \cup {None}
-\* pendingOpen's epoch is the library epoch its open carried; 0 unless RegistryChecksEpoch.
-NoPending == [project |-> None, req |-> None, epoch |-> 0]
+\* A request names its project and the library epoch of the ready answer it was built from.
+Req(p, e) == [project |-> p, epoch |-> e]
+OpenReqs == {None} \cup [project : Projects, epoch : 0..MaxLibraryChanges]
+NoPending == [project |-> None, req |-> None]
 NoKeep == [proj |-> None, fwd |-> 0, work |-> FALSE]
 FocusStates == {"idle", "resolving", "leaving", "opening", "focused", "held", "flushFailed"}
 SessionStates == {"none", "live", "closing"}
@@ -220,15 +221,15 @@ TypeOK ==
   /\ f.on \in Projects \cup {None} /\ f.from \in Projects \cup {None}
   /\ f.lf \in {"none", "running", "ok", "failed"} /\ f.lfp \in Projects \cup {None}
   /\ f.opened \in BOOLEAN /\ f.blocked \in BOOLEAN /\ f.err \in BOOLEAN /\ f.sup \in BOOLEAN
-  /\ f.kept \in [Projects -> BOOLEAN]
+  /\ f.kept \in [Projects -> (0..MaxLibraryChanges) \cup {None}]
   /\ asks \subseteq [id : 1..MaxRequests, project : Projects, epoch : 0..MaxLibraryChanges]
   /\ lib.access \in [Projects -> AccessValues] /\ lib.epoch \in 0..MaxLibraryChanges
+  /\ Len(lib.hist) = lib.epoch + 1 /\ lib.hist[lib.epoch + 1] = lib.access
   /\ mod \in {"unloaded", "loading", "loaded"}
   /\ sess \in [Projects -> SessionStates] /\ sreq \in [Projects -> OpenReqs]
   /\ fact \in [Projects -> FactStates]
   /\ dirty \subseteq Projects
   /\ pendingOpen.project \in Projects \cup {None} /\ pendingOpen.req \in OpenReqs
-  /\ pendingOpen.epoch \in 0..MaxLibraryChanges
   /\ reg \in Projects \cup {None}
   /\ keep.proj \in Projects \cup {None}
   /\ act \in Labels \cup {"-"}
@@ -238,10 +239,10 @@ Init ==
   /\ nreq = 0
   /\ f = [req |-> NoReq, st |-> "idle", ans |-> "none", ansProj |-> None, ansEpoch |-> 0,
           pend |-> "none", pendEpoch |-> 0, effEpoch |-> 0, on |-> None, from |-> None,
-          lf |-> "none", lfp |-> None, opened |-> FALSE, kept |-> [p \in Projects |-> FALSE],
+          lf |-> "none", lfp |-> None, opened |-> FALSE, kept |-> [p \in Projects |-> None],
           blocked |-> FALSE, err |-> FALSE, sup |-> FALSE]
   /\ asks = {}
-  /\ lib \in [access : [Projects -> AccessValues], epoch : {0}]
+  /\ \E a0 \in [Projects -> AccessValues] : lib = [access |-> a0, epoch |-> 0, hist |-> <<a0>>]
   /\ mod = ModuleAtStart
   /\ sess = [p \in Projects |-> "none"]
   /\ sreq = [p \in Projects |-> NoOpenReq]
@@ -270,8 +271,7 @@ RegistryOpen(p, rq, out, c) ==
   /\ sess' = IF out = "spawn" THEN [sess EXCEPT ![p] = "live"] ELSE sess
   /\ sreq' = IF out = "spawn" THEN [sreq EXCEPT ![p] = rq] ELSE sreq
   /\ fact' = IF out = "spawn" THEN [fact EXCEPT ![p] = Spawned] ELSE fact
-  /\ pendingOpen' = IF out = "wait" THEN [project |-> p, req |-> rq, epoch |-> IF RegistryChecksEpoch THEN lib.epoch ELSE 0]
-                   ELSE NoPending
+  /\ pendingOpen' = IF out = "wait" THEN [project |-> p, req |-> rq] ELSE NoPending
   /\ cnt' = IF out = "failed" THEN [c EXCEPT !.openFails = @ + 1] ELSE c
 
 NoOpen == UNCHANGED <<sess, sreq, fact, pendingOpen>>
@@ -305,7 +305,7 @@ SessionClosed(v) ==
   /\ LET s1 == [sess EXCEPT ![v] = "none"]
          q == pendingOpen.project
          room == Cardinality({p \in Projects : s1[p] # "none"}) < Budget
-         stale == RegistryChecksEpoch /\ pendingOpen.req # NoOpenReq /\ pendingOpen.epoch # lib.epoch
+         stale == RegistryChecksEpoch /\ pendingOpen.req # NoOpenReq /\ pendingOpen.req.epoch # lib.epoch
      IN IF pendingOpen # NoPending /\ s1[q] = "none" /\ room /\ ~stale
           THEN /\ sess' = [s1 EXCEPT ![q] = "live"]
                /\ sreq' = [sreq EXCEPT ![v] = NoOpenReq, ![q] = pendingOpen.req]
@@ -363,7 +363,8 @@ RouteCommitted(p, c) ==
 LibraryChanged(p, v) ==
   /\ lib.epoch < MaxLibraryChanges
   /\ v # lib.access[p]
-  /\ lib' = [access |-> [lib.access EXCEPT ![p] = v], epoch |-> lib.epoch + 1]
+  /\ lib' = LET a2 == [lib.access EXCEPT ![p] = v]
+            IN [access |-> a2, epoch |-> lib.epoch + 1, hist |-> Append(lib.hist, a2)]
   /\ keep' = NoKeep
   /\ UNCHANGED <<route, nreq, f, asks, mod, sess, sreq, fact, dirty, pendingOpen, reg, cnt>>
   /\ act' = Label("LibraryChanged")
@@ -406,20 +407,18 @@ TRouteHeard ==
   /\ UNCHANGED <<route, nreq, asks, lib, sess, sreq, fact, dirty, reg, cnt>>
 
 \* Focus asks access for its request, and again once the epoch moved; it starts the import beside
-\* it (S31). The re-ask is where focus notices the library change: it drops the request it kept for
-\* each project the library now holds, and withdraws (cancelPendingOpen) its open waiting in
-\* pendingOpen for such a project or for the project it is opening, which it asks again only from the
-\* fresh answer.
+\* it (S31). The re-ask is where focus notices the library change: it withdraws (cancelPendingOpen)
+\* any open of its own waiting in pendingOpen with a request from an older epoch, and asks the open
+\* for the project it is opening again only from the fresh answer. A kept request is usable only at
+\* its epoch (PersonOpenAsked), so a library change drops every kept request in any state.
 TAccessAsked ==
   /\ Focus = "target"
   /\ TWaiting /\ f.req.project \in Projects /\ ~Fresh
   /\ ~\E a \in asks : a.id = f.req.id
   /\ asks' = asks \cup {[id |-> f.req.id, project |-> f.req.project, epoch |-> lib.epoch]}
-  /\ LET held == {p \in Projects : lib.access[p] = "held"}
-         withdraw == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq
-                     /\ (pendingOpen.project \in held \/ FocusPending)
-     IN /\ f' = [f EXCEPT !.kept = [p \in Projects |-> f.kept[p] /\ p \notin held],
-                   !.opened = IF FocusPending THEN FALSE ELSE f.opened]
+  /\ LET withdraw == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq
+                     /\ (pendingOpen.req.epoch # lib.epoch \/ FocusPending)
+     IN /\ f' = [f EXCEPT !.opened = IF FocusPending THEN FALSE ELSE f.opened]
         /\ pendingOpen' = IF withdraw THEN NoPending ELSE pendingOpen
   /\ mod' = Warm
   /\ keep' = KeepWork
@@ -441,7 +440,7 @@ TAnswered(a) ==
          IN f' = [f EXCEPT !.ans = v, !.ansProj = a.project, !.ansEpoch = lib.epoch,
                     !.st = st2, !.opened = IF st2 = "held" THEN FALSE ELSE f.opened,
                     !.blocked = f.blocked \/ st2 = "flushFailed",
-                    !.kept = [f.kept EXCEPT ![a.project] = ready /\ PersonCommands]]
+                    !.kept = [f.kept EXCEPT ![a.project] = IF ready /\ PersonCommands THEN lib.epoch ELSE None]]
 
 TLeaveFlushStarted ==
   /\ Focus = "target"
@@ -470,7 +469,7 @@ TOpenAsked ==
   /\ Focus = "target"
   /\ f.st = "opening" /\ ~f.opened /\ f.ans = "ready" /\ Fresh
   /\ \E out \in Outcomes(f.ansProj) :
-       /\ RegistryOpen(f.ansProj, f.ansProj, out, cnt)
+       /\ RegistryOpen(f.ansProj, Req(f.ansProj, f.ansEpoch), out, cnt)
        /\ f' = IF out = "failed" THEN [f EXCEPT !.st = "held", !.ans = "failed"]
                ELSE [f EXCEPT !.opened = TRUE]
   /\ keep' = IF sess[f.ansProj] = "none" THEN KeepWork ELSE keep
@@ -641,12 +640,13 @@ Edit(p) ==
   /\ act' = Label("Edit")
 
 \* The sidebar's open or a notice's reopen (S39) is a handler send to focus, which sends the request it
-\* kept for that project and does not move. A reopen of the focused project joins its facts again.
+\* kept for that project and does not move. A kept request is usable only at the library epoch of
+\* its ready answer. A reopen of the focused project joins its facts again.
 PersonOpenAsked(p) ==
   /\ cnt.pOpens < MaxPersonOpens
-  /\ f.kept[p] /\ sess[p] = "none"
+  /\ f.kept[p] = lib.epoch /\ sess[p] = "none"
   /\ \E out \in Outcomes(p) :
-       /\ RegistryOpen(p, p, out, [cnt EXCEPT !.pOpens = @ + 1])
+       /\ RegistryOpen(p, Req(p, f.kept[p]), out, [cnt EXCEPT !.pOpens = @ + 1])
        /\ f' = IF f.st = "focused" /\ f.ansProj = p /\ out # "failed"
                  THEN [f EXCEPT !.st = "opening", !.opened = TRUE] ELSE f
   /\ UNCHANGED <<route, nreq, asks, lib, mod, dirty, reg, keep>>
@@ -710,9 +710,10 @@ Symmetry == Permutations(Projects) \cup Permutations(Chats)
 FocusFollowsLatestRequest ==
   f.st = "focused" => (f.ansProj = route.project \/ route.id # f.req.id)
 
-\* I3. Not focused or opening on another project while the one being left holds unsaved work.
+\* I3. Not opening or focused on a project while another project holds unsaved work. Stated over the
+\* dirty set, which the person and the flushes own, not over focus's own record of the move.
 FlushBeforeLeave ==
-  (f.st \in {"opening", "focused"} /\ f.from # None /\ f.ansProj # f.from) => f.from \notin dirty
+  (f.st \in {"opening", "focused"} /\ f.ansProj \in Projects) => \A q \in dirty : q = f.ansProj
 
 \* I3. A failed leave flush holds focus in `flushFailed`, which sends no route open, until the person
 \* retries or a newer request for another project arrives.
@@ -723,8 +724,10 @@ FailedFlushBlocks == f.blocked => f.st = "flushFailed"
 FocusNeverCloses == [][FocusStep => \A p \in Projects : sess[p] = "live" => sess'[p] = "live"]_vars
 
 \* I4. A step that opens a session or fills pendingOpen for a route request does so from a ready answer
-\* for the current request's project at the library's current epoch. Sharpened: an answer for an
-\* earlier request of the same project counts, because a chat switch is not a new open (D7).
+\* for the current request's project at the library's current epoch. Ruled: compared by project and by
+\* the current library epoch; an earlier ready answer for the same project counts only if no library
+\* change has happened since that answer was given (D7). Every open focus sends, a person's included,
+\* carries a request for a project the library holds ready at its current epoch.
 RouteOpen == (\E p \in Projects : sess[p] = "none" /\ sess'[p] = "live") \/ (pendingOpen' # NoPending /\ pendingOpen' # pendingOpen)
 \* Extended to the registry's resume of a request focus sent (SessionClosed spawning pendingOpen's
 \* project with its request): focus has not withdrawn it, so it is still opening that project from a
@@ -733,30 +736,50 @@ RouteOpen == (\E p \in Projects : sess[p] = "none" /\ sess'[p] = "live") \/ (pen
 \* registry, which cannot see the epoch, may still resume; focus then does not join (TOpenJoined needs
 \* a fresh answer). target-resume-window shows that window.
 Resumed(q) == pendingOpen.project = q /\ pendingOpen.req # NoOpenReq /\ sess[q] = "none" /\ sess'[q] = "live"
-ResumeStep(q) == (\E v \in Projects : SessionClosed(v)) /\ Resumed(q)
-ResumeStands(q) == (f.st = "opening" /\ f.opened /\ f.ans = "ready" /\ f.ansProj = q) \/ f.kept[q]
+\* Only SessionClosed takes a session from closing to none, so this names its steps cheaply.
+Closed == \E v \in Projects : sess[v] = "closing" /\ sess'[v] = "none"
+ResumeStep(q) == Closed /\ Resumed(q)
+ResumeStands(q) ==
+  \/ f.st = "opening" /\ f.opened /\ f.ans = "ready" /\ f.ansProj = q /\ pendingOpen.req.epoch = f.ansEpoch
+  \/ f.kept[q] = pendingOpen.req.epoch
+\* The requests an open sends in this step: a session it spawns, or the request it leaves in pendingOpen.
+\* Outside SessionClosed only focus's opens, a person's included, do either.
+SentReqs ==
+  {sreq'[q] : q \in {p \in Projects : sess[p] = "none" /\ sess'[p] = "live"}}
+    \cup (IF pendingOpen' # pendingOpen /\ pendingOpen' # NoPending THEN {pendingOpen'.req} ELSE {})
+PersonOpenStep == cnt'.pOpens # cnt.pOpens
 OpenOnlyOnCurrentAccess ==
-  [][/\ ((TOpenAsked \/ DRerun \/ DRetry \/ (\E a \in asks : AccessAnswered(a))
-           \/ (\E ok \in BOOLEAN : LeaveFlushSettled(ok)))
-          /\ RouteOpen)
+  [][/\ (~Closed /\ ~PersonOpenStep /\ RouteOpen)
          => (f'.ans = "ready" /\ f'.ansEpoch = lib.epoch /\ f'.ansProj = f'.req.project)
+     /\ ~Closed => \A rq \in SentReqs \ {NoOpenReq} : rq.epoch = lib.epoch /\ lib.access[rq.project] = "ready"
      /\ \A q \in Projects : ResumeStep(q) => ResumeStands(q)]_vars
 
 \* Witness: the target's registry resumes focus's open after a library change focus has not noticed.
-StaleResumeUnreached ==
-  [][\A q \in Projects : ResumeStep(q) => ((f.ans = "ready" /\ f.ansProj = q /\ f.ansEpoch = lib.epoch) \/ f.kept[q])]_vars
+StaleResumeUnreached == [][\A q \in Projects : ResumeStep(q) => pendingOpen.req.epoch = lib.epoch]_vars
 
-\* I4. Every open carries a request for its project built from a ready answer: each live session's
-\* input, and the request pendingOpen keeps for the open the registry resumes. A person's open carries
-\* the request focus kept for that project.
+\* I4. Every open carries a request for its project built from a ready answer: the library's own
+\* history (`lib.hist`, the access at each epoch) holds that project ready at the epoch the request
+\* names. This covers each live session's input, and the request
+\* pendingOpen keeps for the open the registry resumes. A person's open carries the request focus
+\* kept for that project.
+FromReadyAnswer(p, rq) ==
+  rq # NoOpenReq /\ rq.project = p /\ rq.epoch \in 0..lib.epoch /\ lib.hist[rq.epoch + 1][p] = "ready"
 OpenCarriesRequest ==
-  /\ \A p \in Projects : sess[p] # "none" => sreq[p] = p
-  /\ pendingOpen # NoPending => pendingOpen.req = pendingOpen.project
+  /\ \A p \in Projects : sess[p] # "none" => FromReadyAnswer(p, sreq[p])
+  /\ pendingOpen # NoPending => FromReadyAnswer(pendingOpen.project, pendingOpen.req)
 
 \* I20. The editor only when access is ready, the import loaded, the session live and each session
 \* fact settled or the open bound passed.
 EditorOnlyWhenReady ==
-  View = "editor" => (f.ans = "ready" /\ mod = "loaded" /\ InLive(f.ansProj) /\ FactsOk(f.ansProj))
+  View = "editor" =>
+    /\ f.ans = "ready" /\ mod = "loaded" /\ f.ansProj \in Projects /\ sess[f.ansProj] # "none"
+    /\ fact[f.ansProj] \in {"settled", "bound"}
+
+\* I20. Focus enters `focused` with the editor shown only from a ready answer for the library's
+\* current epoch.
+EditorJoinFresh ==
+  [][(f.st # "focused" /\ f'.st = "focused" /\ View' = "editor")
+       => (lib.access[f'.ansProj] = "ready" /\ f'.ansEpoch = lib.epoch)]_vars
 
 \* I20. Within one open the editor is derived before the first file check settles only after the
 \* open bound passed: the viewer is never followed by a first `filesChecking`.

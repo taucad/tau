@@ -8,7 +8,7 @@
     "ProjectFocus.target-one-project.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "Budget 1 at the target bounds: the registry closes the session being left through its close flush, focus never closes, and every safety property holds."
+      "ref": "Budget 1 at the target bounds with 1 failed session start: the registry closes the session being left through its close flush, a failed start gives held, focus never closes, and every safety property holds."
     },
     "ProjectFocus.target-idle-expiry.cfg": {
       "tier": "pr",
@@ -56,7 +56,7 @@
     "ProjectFocus.today-late-effect.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "Today with the late registration at the target bounds: an edit before the registration lands is still flushed on the next navigation; FlushBeforeLeave and the today properties other than OpenOnlyOnCurrentAccess and FailedFlushBlocks hold."
+      "ref": "Today with the late registration at the target bounds without a library change (today-held-skips-flush takes that): an edit before the registration lands is still flushed on the next navigation; TypeOK, FocusFollowsLatestRequest, FlushBeforeLeave, FocusNeverCloses, CloseAfterFlush and StaleReplyIgnored hold."
     },
     "ProjectFocus.today-late-effect-reachable.cfg": {
       "tier": "pr",
@@ -65,6 +65,15 @@
       },
       "kind": "witness",
       "ref": "Today with the late registration: an edit before ProjectPersistenceGuard registers the flush is reachable, so today-late-effect is not vacuous."
+    },
+    "ProjectFocus.today-held-skips-flush.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "FlushBeforeLeave"
+      },
+      "kind": "defect",
+      "ref": "I3 at the target bounds: today, a held answer drops the flush registration, so leaving the held project for another skips the leave flush of its unsaved work. The target holds FlushBeforeLeave; A5b moves the leave flush to focus.",
+      "fixedBy": "A5b"
     },
     "ProjectFocus.today-superseded-open.cfg": {
       "tier": "pr",

@@ -1,7 +1,9 @@
 import { authQueryKeys } from '@better-auth-ui/core';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import type { ShouldRevalidateFunctionArgs } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { configureSessionQueryDefaults, handleQueryError } from '#root-layout.js';
+import { shouldRevalidate } from '#root.js';
 
 const toastError = vi.hoisted(() => vi.fn());
 
@@ -83,5 +85,44 @@ describe('session query defaults', () => {
     await client.query({ queryKey: authQueryKeys.session, queryFn: queryFunction });
 
     expect(queryFunction).toHaveBeenCalledOnce();
+  });
+});
+
+const rootNavigation = (
+  from: string,
+  to: string,
+  formMethod?: ShouldRevalidateFunctionArgs['formMethod'],
+): ShouldRevalidateFunctionArgs => ({
+  currentUrl: new URL(from, 'https://tau.new'),
+  nextUrl: new URL(to, 'https://tau.new'),
+  currentParams: {},
+  nextParams: {},
+  formMethod,
+  defaultShouldRevalidate: true,
+});
+
+describe('root shouldRevalidate on client navigation', () => {
+  it.fails('C17 (U23): a GET navigation that changes the pathname does not re-run the root loader', () => {
+    expect(shouldRevalidate(rootNavigation('/', '/projects/abc'))).toBe(false);
+  });
+
+  it('keeps the default for a submission', () => {
+    expect(shouldRevalidate(rootNavigation('/', '/projects/abc', 'POST'))).toBe(true);
+    expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc', 'POST'))).toBe(true);
+  });
+
+  it('keeps the default for an explicit revalidation of the same URL', () => {
+    expect(shouldRevalidate(rootNavigation('/projects/abc', '/projects/abc'))).toBe(true);
+    expect(shouldRevalidate(rootNavigation('/community?q=gear', '/community?q=gear'))).toBe(true);
+  });
+
+  it('never revalidates into the offline shell path', () => {
+    expect(shouldRevalidate(rootNavigation('/', '/usage'))).toBe(false);
+    expect(shouldRevalidate(rootNavigation('/', '/usage', 'POST'))).toBe(false);
+  });
+
+  it('keeps the default when leaving the offline shell path, whose neutral document carries no real root data', () => {
+    expect(shouldRevalidate(rootNavigation('/usage', '/projects/abc'))).toBe(true);
+    expect(shouldRevalidate(rootNavigation('/usage/', '/'))).toBe(true);
   });
 });

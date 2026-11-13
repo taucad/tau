@@ -29,7 +29,6 @@ vi.mock('#flags/feature-flags.js', () => ({
 }));
 
 const { ViewerSettings } = await import('#components/settings/viewer/viewer-settings.js');
-const { resetSessionPerspectiveAngleForTesting } = await import('#components/settings/viewer/view-defaults-group.js');
 const { viewerPersonPropertyNames } = await import('#components/settings/viewer/viewer-person-properties.js');
 
 const renderSection = (): ReturnType<typeof render> =>
@@ -41,6 +40,8 @@ const renderSection = (): ReturnType<typeof render> =>
 
 const row = (title: string): HTMLElement => screen.getByRole('group', { name: title });
 const viewDefaults = (): Readonly<Record<string, unknown>> => personRecordStores.viewer.read().viewDefaults;
+const fieldOfView = (): HTMLElement =>
+  within(row('Projection')).getByRole('spinbutton', { name: 'Field of view, 0° is orthographic' });
 
 /* Radix Select opens from the keyboard in jsdom, which models no pointer capture. */
 const choose = async (label: string, option: string): Promise<void> => {
@@ -62,7 +63,6 @@ beforeEach(() => {
   state.capture.mockReset();
   state.os = 'macos';
   state.viewerControls = true;
-  resetSessionPerspectiveAngleForTesting();
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -85,7 +85,8 @@ describe('View defaults (V4)', () => {
     renderSection();
     expect(within(row('Grid')).getByRole('switch', { name: 'Grid' })).toBeChecked();
     expect(within(row('Matcap')).getByRole('switch', { name: 'Matcap' })).not.toBeChecked();
-    expect(within(row('Projection')).getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Perspective');
+    expect(fieldOfView()).toHaveAttribute('aria-valuenow', '60');
+    expect(within(row('Projection')).getByText('Field of view')).toBeInTheDocument();
     expect(within(row('Grid unit')).getByRole('combobox', { name: 'Grid unit' })).toHaveTextContent('Millimeter');
     expect(screen.queryByRole('button', { name: 'Reset to Tau default' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reset all' })).toBeDisabled();
@@ -120,18 +121,27 @@ describe('View defaults (V4)', () => {
     expect(screen.getByRole('button', { name: 'Reset all' })).toBeDisabled();
   });
 
-  it('stores 0 for Orthographic, and Perspective restores the session’s last angle, or 60', async () => {
+  it('uses the editor’s field-of-view slider: typing 0 stores orthographic, and arrow keys step the angle', async () => {
     renderSection();
-    await choose('Projection', 'Orthographic');
+    await userEvent.click(fieldOfView());
+    await userEvent.clear(fieldOfView());
+    await userEvent.type(fieldOfView(), '0{Enter}');
     expect(viewDefaults()).toEqual({ fieldOfView: 0 });
-    await choose('Projection', 'Perspective');
-    expect(viewDefaults()).toEqual({ fieldOfView: 60 });
-    act(() => {
-      personRecordStores.viewer.write({ viewDefaults: { fieldOfView: 35 } });
-    });
-    await choose('Projection', 'Orthographic');
-    await choose('Projection', 'Perspective');
-    expect(viewDefaults()).toEqual({ fieldOfView: 35 });
+    expect(within(row('Projection')).getByText('Orthographic')).toBeInTheDocument();
+    await userEvent.click(fieldOfView());
+    await userEvent.keyboard('{ArrowUp}');
+    expect(viewDefaults()).toEqual({ fieldOfView: 1 });
+  });
+
+  it('ignores a typed angle that matches the shown one, and clamps one past 90°', async () => {
+    renderSection();
+    await userEvent.click(fieldOfView());
+    await userEvent.keyboard('{Enter}');
+    expect(viewDefaults()).toEqual({});
+    await userEvent.click(fieldOfView());
+    await userEvent.clear(fieldOfView());
+    await userEvent.type(fieldOfView(), '120{Enter}');
+    expect(viewDefaults()).toEqual({ fieldOfView: 90 });
   });
 
   it('stores a grid unit', async () => {

@@ -61,7 +61,7 @@ export const linuxAltNote =
 export const viewDefaultCopy: Readonly<Record<ShownViewDefaultLeaf, ViewerRowCopy>> = {
   fieldOfView: {
     title: 'Projection',
-    description: 'Perspective shows depth, orthographic keeps parallel edges parallel',
+    description: 'Drag for the field of view; 0° is orthographic, with parallel edges kept parallel',
   },
   'display.gizmo': { title: 'Show gizmo', description: 'The orientation control in the corner of a view' },
   'display.grid': { title: 'Grid', description: 'A ground grid with a scale label' },

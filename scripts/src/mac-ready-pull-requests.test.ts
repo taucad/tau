@@ -48,7 +48,9 @@ describe.each(workflows)('the pull request trigger of %s', (path) => {
   const { on, concurrency } = workflow(path);
 
   it('should run again when a draft is marked ready for review', () => {
-    expect(on.pull_request?.types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review']);
+    // The native-darwin workflow also starts on its `native-darwin` label, the only way a pull request runs it (Q-2).
+    const label = path === '.github/workflows/native-darwin.yml' ? ['labeled'] : [];
+    expect(on.pull_request?.types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review', ...label]);
   });
 
   it('should cancel an outdated run on pull requests only', () => {

@@ -159,6 +159,7 @@ describe('ci.yml affected-only lanes', () => {
       browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
       'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue' },
       'native-linux': { targets: ['test:native-linux'], pr: 'queue' },
+      'native-darwin': { targets: ['test:native-darwin'], pr: 'queue' },
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue' },
@@ -217,6 +218,7 @@ describe('ci.yml affected-only lanes', () => {
       'geospec-examples',
       'cli-e2e',
       'native-hosts',
+      'native-darwin',
       'viewer-parity',
       'formal',
       'api',
@@ -289,7 +291,12 @@ describe('ci.yml affected-only lanes', () => {
   it('should skip every lane on a reused queue verdict by one rule, naming no lane', () => {
     // The plan reads only the verdict's run id: no per-lane conclusions of the queue run.
     expect(planStep?.env?.['REUSED']).toBe(expression('steps.queue.outputs.run-id'));
-    expect(Object.keys(planStep?.env ?? {}).sort()).toEqual(['LANE_SELECTORS', 'REUSED', 'SHELL_LANE_PATHS']);
+    expect(Object.keys(planStep?.env ?? {}).sort()).toEqual([
+      'LANE_SELECTORS',
+      'NATIVE_DARWIN_LANE_PATHS',
+      'REUSED',
+      'SHELL_LANE_PATHS',
+    ]);
     const reused = planScript.slice(planScript.indexOf('if [ -n "$REUSED" ]; then'));
     const block = reused.slice(0, reused.indexOf('\nfi\n'));
     // Every lane's selection is emptied at once, before any flag is read from it.
@@ -473,6 +480,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     const check = gateStep?.run ?? '';
     for (const [key, job, output] of [
       ['NATIVE_HOSTS', 'native-hosts', 'native-hosts'],
+      ['NATIVE_DARWIN', 'native-darwin', 'native-darwin'],
       ['VIEWER_PARITY', 'viewer-parity', 'viewer-parity'],
       ['FORMAL', 'formal', 'formal'],
       ['API', 'api', 'api'],
@@ -1056,7 +1064,13 @@ describe('plan lane selection', () => {
       root: 'packages/cli',
       type: 'lib',
       tags: ['ci:native-hosts'],
-      targets: ['test:scenarios', 'test-geospec', 'test:native-linux'],
+      targets: ['test:scenarios', 'test-geospec', 'test:native-linux', 'test:native-darwin'],
+    },
+    picogk: {
+      root: 'packages/plugins/picogk',
+      type: 'lib',
+      tags: ['ci:native-hosts'],
+      targets: ['test:native-darwin'],
     },
     sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
     host: {
@@ -1154,6 +1168,7 @@ describe('plan lane selection', () => {
           ['REUSED', ''],
           ['LANE_SELECTORS', selectors],
           ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
+          ['NATIVE_DARWIN_LANE_PATHS', planStep?.env?.['NATIVE_DARWIN_LANE_PATHS'] ?? '[]'],
         ]),
       });
       const outputs = Object.fromEntries(
@@ -1271,6 +1286,39 @@ describe('plan lane selection', () => {
     const queue = plan('merge_group', { affected: [], files: ['apps/desktop/scripts/hosted-linux-vm.sh'] });
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['shell']).toBe('false');
+  });
+
+  it('should run the affected native darwin rows in the merge queue and none on a pull request (Q-2)', () => {
+    const queue = plan('merge_group', { affected: ['cli'], files: ['packages/cli/src/index.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['native-darwin']).toBe('true');
+    expect(queue.outputs['native-darwin-projects']).toBe('cli');
+    const pullRequest = plan('pull_request', { affected: ['cli'], files: ['packages/cli/src/index.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['native-darwin']).toBe('false');
+    expect(pullRequest.outputs['native-darwin-projects']).toBe('');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.outputs['native-darwin']).toBe('false');
+  });
+
+  it.each([
+    '.github/workflows/native-darwin.yml',
+    'scripts/src/check-standalone-project.ts',
+    'apps/ui/app/utils/kernel-libraries.ts',
+    'libs/tau-examples/src/standalone/picogk/Program.cs',
+  ])('should select every native darwin row in the merge queue when %s changes', (file) => {
+    const queue = plan('merge_group', { affected: [], files: [file] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['native-darwin']).toBe('true');
+    expect(queue.outputs['native-darwin-projects']).toBe('cli,picogk');
+    const pullRequest = plan('pull_request', { affected: [], files: [file] });
+    expect(pullRequest.outputs['native-darwin']).toBe('false');
+  });
+
+  it('should not select the native darwin lane for a file beside its paths', () => {
+    const queue = plan('merge_group', { affected: [], files: ['libs/tau-examples/src/standalone/picogk-extra.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['native-darwin']).toBe('false');
   });
 
   it('should fail the plan on a pull-request rule it does not know', () => {

@@ -29,7 +29,7 @@ vi.doMock('#components/dictation/dictation-capture.js', () => ({
 vi.doMock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: () => undefined,
   useChatComposer: () => ({
-    kernel: { kernel: kernelConfigurations.find((kernel) => kernel.id === 'manifold') },
+    kernel: { kernel: kernelConfigurations.find((kernel) => kernel.id === 'manifold'), preference: 'manifold' },
     execution: { execution: { kind: 'tau', model: 'm' } },
     contextUsage: undefined,
   }),
@@ -60,11 +60,7 @@ vi.doMock('#components/chat/chat-agent-sheet.js', () => ({
   ),
 }));
 vi.doMock('#components/chat/chat-kernel-selector.js', () => ({
-  ChatKernelSelector: ({
-    children,
-  }: {
-    readonly children: (props: { selectedKernel: (typeof kernelConfigurations)[number] }) => React.ReactNode;
-  }): React.ReactNode => children({ selectedKernel: kernelConfigurations.find((kernel) => kernel.id === 'manifold')! }),
+  KernelPreferenceSelector: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));
 vi.doMock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span className='size-4' /> }));
 vi.doMock('#components/files/file-link.js', () => ({
@@ -790,7 +786,7 @@ describe('phone composer (D14, D18)', () => {
     await screen.findByRole('button', { name: 'Dictate' });
 
     await page.getByRole('textbox').click();
-    await expect.poll(reachableControls).toEqual(['Add', 'Select kernel (Manifold)', 'Haiku 5.5', 'Dictate', 'Send']);
+    await expect.poll(reachableControls).toEqual(['Add', 'Kernel: Manifold', 'Haiku 5.5', 'Dictate', 'Send']);
     expect(document.querySelector('[data-collapsed]')).toBeNull();
     const [model, dictate, send] = ['Haiku 5.5', 'Dictate', 'Send'].map((name) =>
       screen.getByRole('button', { name }).getBoundingClientRect(),

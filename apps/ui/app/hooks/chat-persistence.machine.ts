@@ -42,7 +42,7 @@ export type ChatPersistenceMachineContext = {
    */
   executionUnwritten?: boolean;
   activeKernel?: KernelId;
-  /** The chat row's kernel preference (blueprint D2); written only while the `autoKernel` flag is on. */
+  /** The chat row's kernel preference (blueprint D2). */
   kernelPreference?: KernelPreference;
   fault?: string;
 };

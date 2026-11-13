@@ -1,7 +1,6 @@
 import { resolveKernel } from '@taucad/types/constants';
 import { KernelPreferenceSelector } from '#components/chat/chat-kernel-selector.js';
 import { AutoKernelGlyph } from '#components/chat/kernel-pill.js';
-import { useFeature } from '#flags/use-feature.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 /**
@@ -10,11 +9,10 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
  * no stored record. It sits under the chat's first turn and leaves once the chat has a manual pick.
  */
 export function ChatAutoKernelRow(): React.JSX.Element | undefined {
-  const isAutoEnabled = useFeature('autoKernel');
   const {
     kernel: { preference, owner },
   } = useChatComposer();
-  if (!isAutoEnabled || preference !== 'auto' || owner === undefined) {
+  if (preference !== 'auto' || owner === undefined) {
     return undefined;
   }
   const { name } = resolveKernel(owner);

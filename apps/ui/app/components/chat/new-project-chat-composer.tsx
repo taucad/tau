@@ -3,8 +3,6 @@ import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
-import { useFeature } from '#flags/use-feature.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -21,11 +19,6 @@ type NewProjectChatComposerProperties = {
   /** An early edit the route already adopted, when the route owns the native input. */
   readonly adoptedEarlyInput?: EarlyChatInput;
   readonly className?: string;
-  /**
-   * Draw the kernel chips above the box. A host that serves the chips itself, before this module
-   * arrives, passes `false` so they are not drawn twice and do not remount on the swap (R2).
-   */
-  readonly enableKernelChips?: boolean;
 };
 
 /** Shared direct-create composer rendered inside an existing chat provider. */
@@ -34,14 +27,11 @@ export function NewProjectChatComposer({
   enableEarlyInput = false,
   adoptedEarlyInput,
   className,
-  enableKernelChips = true,
 }: NewProjectChatComposerProperties): React.JSX.Element {
   const navigate = useNavigate();
-  const { kernel, setKernel, preference } = useKernel();
-  /* With the `autoKernel` flag on the kernel is the bar's pill (D8), so the chips above the box leave. */
-  const isAutoEnabled = useFeature('autoKernel');
-  /* Under Auto the project starts entry-less and the agent picks the kernel from the prompt (blueprint D3). */
-  const creationKernel = isAutoEnabled ? preference : kernel;
+  /* The kernel is the bar's pill (D8). Under Auto the project starts entry-less and the agent picks the kernel from
+   * the prompt (blueprint D3). */
+  const { preference: creationKernel } = useKernel();
   const projectManager = useProjectManager();
   const location = useProjectCreationLocation();
   const presentLocationError = useProjectCreationLocationError();
@@ -157,26 +147,17 @@ export function NewProjectChatComposer({
     ],
   );
 
-  const textarea = (
+  return (
     <ChatTextarea
       enableEarlyInput={enableEarlyInput}
       adoptedEarlyInput={adoptedEarlyInput}
       ref={textareaRef}
       enableAutoFocus={enableAutoFocus}
       enableContextActions={false}
-      enableKernelSelector={isAutoEnabled}
       creationLocationControl={creationLocationControl}
       isSubmitDisabled={!location.canCreate}
       className={className}
       onSubmit={onSubmit}
     />
-  );
-  return enableKernelChips && !isAutoEnabled ? (
-    <div className='space-y-4'>
-      <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />
-      {textarea}
-    </div>
-  ) : (
-    textarea
   );
 }

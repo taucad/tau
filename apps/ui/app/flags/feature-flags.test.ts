@@ -41,7 +41,7 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
   });
 
-  it.each(['webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore', 'autoKernel'] as const)(
+  it.each(['webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
     'should let a stored override turn on the hidden %s flag',
     (flag) => {
       const storage = createMockStorage();
@@ -52,8 +52,8 @@ describe('isFeatureEnabled', () => {
   );
 
   it('should honour a hidden flag written straight to tau:flags from the console', () => {
-    const storage = createMockStorage({ 'tau:flags': JSON.stringify({ autoKernel: true }) });
-    expect(isFeatureEnabled('autoKernel', storage)).toBe(true);
+    const storage = createMockStorage({ 'tau:flags': JSON.stringify({ pluginsStore: true }) });
+    expect(isFeatureEnabled('pluginsStore', storage)).toBe(true);
   });
 
   it('should prefer WebGPU by default and retain an explicit WebGL preference', () => {

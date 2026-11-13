@@ -1,11 +1,11 @@
 /**
  * The sessions registry, handed down from `root.tsx` (S44, A38).
  *
- * The provider is the registry's composition root (MC-R4): it creates the
- * actor with {@link createSessionsActor}, mirrors the app-level handles it
- * needs, and gives readers a selector. Nothing here uses `useActorRef`, so
- * Strict Mode's mount → stop → rehydrate cycle cannot double-start every live
- * project.
+ * The app runtime creates the registry as its `sessions` child (D5); the
+ * provider reads it from the runtime, mirrors the app-level handles it needs,
+ * and gives readers a selector. It creates and starts nothing, so neither
+ * Strict Mode nor a remount below the billing fence makes a second registry
+ * (B9).
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,13 +18,9 @@ import type { ProjectSessionActorRef } from '#machines/project-session.machine.j
 import { Button } from '@taucad/ui/components/button';
 import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
 import { sessionsPendingRevisions } from '#machines/sessions.machine.js';
-import {
-  createSessionsActor,
-  selectProjectLiveness,
-  selectProjectSession,
-  setSharedFileManagerWorker,
-} from '#services/sessions-store.js';
-import { inspect } from '#machines/inspector.js';
+import { selectProjectLiveness, selectProjectSession, setSharedFileManagerWorker } from '#services/sessions-store.js';
+import { selectRuntimeSessions } from '#runtime/app-runtime.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
 import { useSharedFileManagerWorker } from '#hooks/use-file-manager.js';
 import { useFlushProducers } from '#hooks/use-flush-on-close.js';
@@ -35,7 +31,7 @@ type SessionsActor = ActorRefFrom<typeof sessionsMachine>;
 const SessionsContext = createContext<SessionsActor | undefined>(undefined);
 
 /**
- * Create the registry, start it and hand it down.
+ * Hand down the runtime's registry.
  *
  * @param props - The subtree that reads the registry, and a started registry a test composes instead.
  * @returns The provider element.
@@ -47,10 +43,12 @@ export function SessionsProvider({
   readonly children: ReactNode;
   readonly actor?: SessionsActor;
 }): React.JSX.Element {
-  /* Started in the initializer, so routes can send `open` from their first effects. ponytail: StrictMode's
-   * discarded second initializer leaves one idle registry with no sessions for the collector; a module
-   * singleton would break MC-R4. */
-  const [actor] = useState(() => composed ?? createSessionsActor(inspect === undefined ? {} : { inspect }).start());
+  /* The runtime's `sessions` child, fixed for the runtime's life; `AppRuntimeProvider` starts it after hydration. */
+  const runtime = useOptionalAppRuntime();
+  const actor = composed ?? (runtime === undefined ? undefined : selectRuntimeSessions(runtime));
+  if (actor === undefined) {
+    throw new Error('SessionsProvider must be used within <AppRuntimeProvider>');
+  }
   const worker = useSharedFileManagerWorker();
 
   useEffect(() => {

@@ -1,17 +1,23 @@
 {
-  "$comment": "Uncached `formal` plus `formal:lean` task seconds per Nx project for the two `Formal models (<n>/2)` shards of ci.yml, which deal the affected projects with scripts/src/test-shard-dealer.ts. Source: merge-queue job 131090042426 (run 43190779343, 2026-11-12), where a tools/formal change made every formal project affected, timed between consecutive task ends at --parallel=1; ui from job 130913925705 (its only uncached task). A project not listed weighs defaultSeconds. Refresh when a listed project's time moves by more than a quarter or when a project adds a large tier.",
-  "measuredAt": "2026-11-12",
+  "$comment": "Uncached seconds per formal task (`<project>:<target>`) for the three `Formal models (<n>/3)` shards of ci.yml, which deal the affected `formal:tla`, `formal:tla:<family>` and `formal:lean` tasks with scripts/src/test-shard-dealer.ts. Source: merge-queue job 131090042426 (run 43190779343, 2026-11-12), where a tools/formal change made every formal project affected, timed between consecutive task ends at --parallel=1; agent-host's formal:tla and formal:lean rows are that job's 438 s split at the end of its formal:tla task. The family rows of ui and revisions were measured locally on 2026-11-13 (4 cores, the runner's flags) when formal:tla split into families, and api's and sandbox's single family keep their project's time. A task not listed weighs defaultSeconds. Refresh when a listed task's time moves by more than a quarter or when a family adds a large configuration.",
+  "measuredAt": "2026-11-13",
   "defaultSeconds": 30,
   "seconds": {
-    "agent-host": 438,
-    "api": 5,
-    "api-billing": 36,
-    "camera": 21,
-    "chat-ui": 1,
-    "formal": 11,
-    "host": 42,
-    "revisions": 40,
-    "sandbox": 7,
-    "ui": 127
+    "agent-host:formal:lean": 36,
+    "agent-host:formal:tla": 402,
+    "api-billing:formal:tla": 36,
+    "api:formal:tla:project-deletion": 5,
+    "camera:formal:tla": 21,
+    "chat-ui:formal:lean": 1,
+    "formal:formal:tla": 11,
+    "host:formal:tla": 42,
+    "revisions:formal:tla:checkout": 20,
+    "revisions:formal:tla:turn": 12,
+    "sandbox:formal:tla:shell-custody": 7,
+    "ui:formal:tla:layout-apply": 35,
+    "ui:formal:tla:library-catalog": 80,
+    "ui:formal:tla:live-overlay": 2,
+    "ui:formal:tla:message-queue": 17,
+    "ui:formal:tla:record-sync": 155
   }
 }

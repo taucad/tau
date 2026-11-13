@@ -131,6 +131,18 @@ const baseChoices: ProjectChoices = {
   testingEnabled: true,
 };
 
+const loadedCatalog: ProjectChoices['modelCatalog'] = {
+  status: 'loaded',
+  models: [
+    {
+      id: 'fixture-model',
+      name: 'Fixture',
+      provider: { id: 'anthropic', name: 'Anthropic' },
+      details: { family: 'claude' },
+    } as unknown as Extract<ProjectChoices['modelCatalog'], { status: 'loaded' }>['models'][number],
+  ],
+};
+
 type Connector = Parameters<HostConnectorChatStore['publishProjectHostConnector']>;
 
 const createChatStore = (settings: Map<string, Awaited<ReturnType<HostConnectorChatStore['getChatHostSettings']>>>) => {
@@ -354,20 +366,7 @@ describe('host connector', () => {
     const guard = guardActors();
     const chat = createChatStore(new Map());
     const fileManager = createFileManager(readyContext());
-    const choices: ProjectChoices = {
-      ...baseChoices,
-      modelCatalog: {
-        status: 'loaded',
-        models: [
-          {
-            id: 'fixture-model',
-            name: 'Fixture',
-            provider: { id: 'anthropic', name: 'Anthropic' },
-            details: { family: 'claude' },
-          } as unknown as Extract<ProjectChoices['modelCatalog'], { status: 'loaded' }>['models'][number],
-        ],
-      },
-    };
+    const choices: ProjectChoices = { ...baseChoices, modelCatalog: loadedCatalog };
     let current = choices;
     const session = createSession(
       { store: chat.store, choices: () => current, fileManagerRef: fileManager.ref },
@@ -382,6 +381,36 @@ describe('host connector', () => {
     current = baseChoices;
     await connect?.('chat-2');
     expect((agentHost.browserOptions.at(-1) as { model?: unknown }).model).toBeUndefined();
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('should read the choices after the chat settings answer and the catalog after the roots synchronise', async () => {
+    const guard = guardActors();
+    const chat = createChatStore(new Map());
+    let current = baseChoices;
+    /* Each change lands while the connect awaits the step before the read it must see. */
+    const store: HostConnectorChatStore = {
+      ...chat.store,
+      getChatHostSettings: async () => {
+        current = { ...current, defaultKernel: 'replicad' };
+        return undefined;
+      },
+    };
+    const fileManager = createFileManager(readyContext());
+    const syncProjectRoots = async (): Promise<void> => {
+      current = { ...current, modelCatalog: loadedCatalog };
+    };
+    const session = createSession(
+      { store, choices: () => current, fileManagerRef: fileManager.ref, syncProjectRoots },
+      guard,
+    );
+    session.start();
+
+    await chat.published.at(-1)?.[1]('chat-1');
+
+    expect(promptOf()).toContain('replicad');
+    expect((agentHost.browserOptions.at(-1) as { model?: unknown }).model).toBeDefined();
     session.stop();
     expect(guard.take()).toEqual([]);
   });

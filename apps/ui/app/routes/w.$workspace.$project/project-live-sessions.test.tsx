@@ -124,6 +124,9 @@ type RevisionStatus = Readonly<{
 type FixtureRevisionClient = Readonly<{
   focus: ReturnType<typeof vi.fn<(focused: boolean) => void>>;
   quiesce: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  /* The lifecycle's open and close of the client: the I5 row watches these, which outlive the hook (A7b). */
+  open: ReturnType<typeof vi.fn<() => void>>;
+  close: ReturnType<typeof vi.fn<() => void>>;
   status: () => RevisionStatus;
   subscribe: (listener: () => void) => () => void;
   setStatus: (patch: Partial<RevisionStatus>) => void;
@@ -142,6 +145,8 @@ const createRevisionClient = (order: string[], projectId: string): FixtureRevisi
     quiesce: vi.fn(async () => {
       order.push(`quiesce:${projectId}`);
     }),
+    open: vi.fn<() => void>(),
+    close: vi.fn<() => void>(),
     status: () => status,
     subscribe: (listener) => {
       listeners.add(listener);
@@ -376,8 +381,11 @@ vi.mock('#hooks/use-revision-status.js', async () => {
       const { projectId } = useProject();
       useEffect(() => {
         fixtures.lifecycleMounts.push(`mount:${projectId}`);
+        const client = revisionClientOf(projectId);
+        client.open();
         return () => {
           fixtures.lifecycleMounts.push(`close:${projectId}`);
+          client.close();
         };
       }, [projectId]);
       return revisionClientOf(projectId);
@@ -1043,15 +1051,16 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
   /* A0.2 carried this row to A7a: the revision client a live session owns must outlive its binding (row S27). */
   it.fails('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
-    /* StrictMode mounts, closes and mounts once more: the lifecycle is open when the row starts. */
-    expect(fixtures.lifecycleMounts.at(-1)).toBe(`mount:${projectA}`);
-    const settled = fixtures.lifecycleMounts.length;
+    const client = revisionClientOf(projectA);
+    /* StrictMode opens, closes and opens once more: the client is open when the row starts. */
+    expect(client.open.mock.calls.length).toBeGreaterThan(client.close.mock.calls.length);
+    const closesBefore = client.close.mock.calls.length;
 
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
 
     expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
-    expect(fixtures.lifecycleMounts.slice(settled)).toEqual([]);
+    expect(client.close.mock.calls.length - closesBefore).toBe(0);
   });
 
   it.fails('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {

@@ -161,9 +161,11 @@ export const createHostConnectorLogic = (ports: HostConnectorPorts): HostConnect
         if (!connectorActive) {
           throw new Error(`Project ${projectId}'s host connector closed before chat ${chatId} attached.`);
         }
+        /* Resolved against the catalog as it is now, as `resolveModel` reads the query cache at call time. */
+        const { modelCatalog } = ports.choices();
         const resolvedModel = resolveCatalogModel(
           execution.model,
-          choices.modelCatalog.status === 'loaded' ? choices.modelCatalog.models : undefined,
+          modelCatalog.status === 'loaded' ? modelCatalog.models : undefined,
         );
         const options = {
           openFileSystemBridge: openProjectRootBridge,

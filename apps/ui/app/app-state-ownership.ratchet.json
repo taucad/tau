@@ -23,6 +23,7 @@
     "files": [
       "apps/ui/app/runtime/converter-client-options.desktop.ts",
       "apps/ui/app/runtime/converter-client-options.ts",
+      "apps/ui/app/runtime/environment.fixture.ts",
       "apps/ui/app/runtime/image-runtime.definition.ts",
       "apps/ui/app/runtime/image-runtime.worker.ts",
       "apps/ui/app/runtime/observability/observability.middleware.ts",

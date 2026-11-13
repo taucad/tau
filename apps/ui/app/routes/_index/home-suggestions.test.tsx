@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatExamples } from '@taucad/ui-core/constants/chat-prompt-examples';
 import { resetLeaf } from '@taucad/preferences';
 import type * as UseFeatureModule from '#flags/use-feature.js';
+import { connectRemoteFlags, disconnectRemoteFlags, readRemoteFlagStatus } from '#flags/remote-flags.js';
 
 const harness = vi.hoisted(() => ({
   onboarding: true,
@@ -61,8 +62,12 @@ const { HomeSuggestions } = await import('#routes/_index/home-suggestions.js');
 const { personRecordStores } = await import('#preferences/person-record.store.js');
 
 const states: unknown[] = [];
-const renderRow = (): ReturnType<typeof createMemoryRouter> => {
-  const router = createMemoryRouter([{ path: '/', element: <HomeSuggestions /> }], { initialEntries: ['/'] });
+/** `layoutFlags` is what a server-rendered document's root loader read from the cookie; omitted, there is no root data. */
+const renderRow = (layoutFlags?: Readonly<Record<string, boolean>>): ReturnType<typeof createMemoryRouter> => {
+  const router = createMemoryRouter([{ id: 'root', path: '/', element: <HomeSuggestions /> }], {
+    initialEntries: ['/'],
+    ...(layoutFlags === undefined ? {} : { hydrationData: { loaderData: { root: { layoutFlags } } } }),
+  });
   router.subscribe((state) => {
     states.push(state.location.state);
   });
@@ -132,12 +137,33 @@ describe('Home suggestions', () => {
     expect(shown()).toEqual(first);
   });
 
-  it('should leave out a board under a manual pick of a kernel that cannot make one', () => {
+  it('should leave out a board under a manual pick of a kernel that cannot make one, showing general ones instead', () => {
     harness.preference = 'openscad';
     personRecordStores.profile.write({ goals: ['electronics'] });
     renderRow();
 
-    expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
+    // D14: with no example for the stored goals under this kernel, the general examples it can make fill the row.
+    expect(shown().length).toBeGreaterThan(0);
+    expect(shown().every((prompt) => exampleOf(prompt).goals.includes('general'))).toBe(true);
+    expect(shown().some((prompt) => exampleOf(prompt).needs === 'electronics')).toBe(false);
+  });
+
+  it('should fill a held box when no example fits the goals under the picked kernel', () => {
+    harness.preference = 'openscad';
+    personRecordStores.profile.write({ goals: ['electronics'] });
+    renderRow({});
+
+    const held = document.querySelector('[data-slot="home-suggestions"]') ?? undefined;
+    expect(held).toBeDefined();
+    expect(within(held as HTMLElement).getAllByRole('button').length).toBeGreaterThan(0);
+  });
+
+  it('should keep each prompt whole as its name and title, on one line', () => {
+    renderRow();
+    for (const button of within(row()).getAllByRole('button')) {
+      expect(button).toHaveAttribute('title', button.textContent);
+      expect(button.querySelector('.truncate')?.textContent).toBe(button.textContent);
+    }
   });
 
   it('should be absent with onboarding off', () => {
@@ -232,7 +258,7 @@ describe('the suggestions row box, decided once per mount', () => {
 
   it('holds the box while the flag is unknown and fills it in place when the flag turns on', () => {
     harness.layoutFlag = undefined;
-    renderRow();
+    renderRow({});
     const held = box();
     expect(held).toBeDefined();
     expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
@@ -245,19 +271,45 @@ describe('the suggestions row box, decided once per mount', () => {
 
   it('keeps an empty box for the mount when a held flag settles off', () => {
     harness.layoutFlag = undefined;
-    renderRow();
+    renderRow({});
     settleLayoutFlag(false);
 
     expect(box()).toBeDefined();
-    expect(box()?.childElementCount).toBe(0);
+    expect(box()?.textContent).toBe('');
+    expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
   });
 
   it('renders nothing for the mount when the flag starts off, even if it turns on', () => {
     harness.layoutFlag = false;
-    renderRow();
+    renderRow({ onboarding: false });
     settleLayoutFlag(true);
 
     expect(box()).toBeUndefined();
     expect(screen.queryByRole('list', { name: 'Suggestions' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the suggestions row without root loader data (desktop and SPA)', () => {
+  const box = (): Element | undefined => document.querySelector('[data-slot="home-suggestions"]') ?? undefined;
+
+  it('holds no box while the flag is pending, and none once it settles off', () => {
+    harness.layoutFlag = 'real';
+    connectRemoteFlags({ onFeatureFlags: () => () => undefined });
+    expect(readRemoteFlagStatus()).toBe('pending');
+    renderRow();
+    expect(box()).toBeUndefined();
+
+    act(() => {
+      disconnectRemoteFlags();
+    });
+    expect(box()).toBeUndefined();
+  });
+
+  it('shows the row while the flag is on and drops it when it turns off, as on main', () => {
+    harness.layoutFlag = true;
+    renderRow();
+    expect(row()).toBeInTheDocument();
+    settleLayoutFlag(false);
+    expect(box()).toBeUndefined();
   });
 });

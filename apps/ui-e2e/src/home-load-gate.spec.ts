@@ -356,25 +356,65 @@ const expectRowInPlace = (label: string, record: SuggestionsRowRecord): void => 
   expect(moved, `H2 (${label}): these elements under the composer moved (top, ms)`).toEqual({});
 };
 
-for (const viewport of ['wide', 'phone'] as const) {
+/** H-a's loads: the two audit viewports, a tablet whose hero is narrowed by the open sidebar, and stored goals. */
+const suggestionsRowCases = [
+  { name: 'wide', viewport: viewports.wide, title: 'on a wide viewport' },
+  { name: 'phone', viewport: viewports.phone, title: 'on a phone viewport' },
+  {
+    name: 'tablet-sidebar',
+    viewport: { width: 820, height: 1180 },
+    title: 'at 820 x 1180 with the sidebar open',
+  },
+  {
+    name: 'phone-goals',
+    viewport: viewports.phone,
+    goals: ['mechanical'],
+    title: 'on a phone viewport with the goal mechanical stored',
+  },
+] as const satisfies ReadonlyArray<{
+  readonly name: string;
+  readonly viewport: { readonly width: number; readonly height: number };
+  readonly goals?: readonly string[];
+  readonly title: string;
+}>;
+
+/** Store the person's goals on this device, as setup does. */
+const storeGoals = (goals: readonly string[]): void => {
+  globalThis.localStorage.setItem(
+    'tau-person-profile',
+    JSON.stringify({ value: { version: 1, goals, languages: [] } }),
+  );
+};
+
+/** The sidebar is open on a wide layout: the remembered state, and the shell's default. */
+const isSidebarOpen = async (): Promise<boolean> =>
+  target.evaluate(() => document.querySelector('[data-slot="sidebar"][data-state="expanded"]') !== null);
+
+for (const row of suggestionsRowCases) {
   cloudDefectRow(
     {
       api: test,
       expectedFailure: false,
-      title: `H-a: keeps everything under the composer in place with onboarding on, on a ${viewport} viewport, on a first visit and its reload`,
+      title: `H-a: keeps everything under the composer in place with onboarding on, ${row.title}, on a first visit and its reload`,
     },
     async (defect) => {
       await useFlagState('viewer-controls-onboarding');
       await target.addInitScript(dismissSetupInvite, 'tau-device');
-      await target.setViewport(viewports[viewport]);
+      if ('goals' in row) {
+        await target.addInitScript(storeGoals, row.goals);
+      }
+      await target.setViewport(row.viewport);
       await target.installModelCatalogFixture(catalogLatency);
       await target.startModelCatalogApi();
       await target.addInitScript(recordSuggestionsRow, underComposer);
-      const firstVisit = await measureSuggestionsRow(async () => target.navigate('/'), `h-a-${viewport}-first-visit`);
-      const reload = await measureSuggestionsRow(async () => target.reload(), `h-a-${viewport}-reload`);
+      const firstVisit = await measureSuggestionsRow(async () => target.navigate('/'), `h-a-${row.name}-first-visit`);
+      if (row.name === 'tablet-sidebar') {
+        expect(await isSidebarOpen(), 'the sidebar is open beside the hero').toBe(true);
+      }
+      const reload = await measureSuggestionsRow(async () => target.reload(), `h-a-${row.name}-reload`);
       await defect(() => {
-        expectRowInPlace(`${viewport} first visit`, firstVisit);
-        expectRowInPlace(`${viewport} reload`, reload);
+        expectRowInPlace(`${row.name} first visit`, firstVisit);
+        expectRowInPlace(`${row.name} reload`, reload);
       });
     },
   );

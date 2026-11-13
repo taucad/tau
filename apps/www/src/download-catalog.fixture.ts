@@ -1,5 +1,5 @@
 const artifact = (kind: string, name: string) => ({ kind, name, sha256: 'a'.repeat(64), size: 123 });
-/** Clean-host acceptance is `true` or, for a staging Mac route admitted on CI evidence alone, `'pending'`. */
+/** Clean-host acceptance is `true` or, for a Mac route admitted on CI evidence alone, `'pending'`. */
 const qualified = (): { ci: boolean; vm: boolean | 'pending'; trust: string } => ({
   ci: true,
   vm: true,

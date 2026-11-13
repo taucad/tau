@@ -865,11 +865,11 @@ jobs:
   # shards' dealer and its own snapshot (scripts/src/formal-shard-durations.json). A project
   # whose TLA+ specs sit in families below specs/ has one `formal:tla:<family>` task per
   # family and a `formal:tla` that only depends on them (tools/formal.plugin.ts), so its
-  # families are dealt to runners of their own and run in parallel; each stays within the
-  # Java tier's 3 min per target (policy § 6). A change to tools/formal makes every project
-  # affected, and on one runner that ran out of 15 minutes with ui still to go (queue run
-  # 43190779343, job 131090042426: 3.5 min of setup, then 11.7 min of checks).
-  # agent-host's 7.3 min is the floor of one shard.
+  # families are dealt to runners of their own and run in parallel, each held to the Java
+  # tier's 3 min per target (policy § 6, which names agent-host's unsplit `formal:tla` as over
+  # it). A change to tools/formal makes every project affected, and on one runner that ran out
+  # of 15 minutes with ui still to go (queue run 43190779343, job 131090042426: 3.5 min of
+  # setup, then 11.7 min of checks). agent-host's `formal:tla`, about 6.7 min, is the floor of one shard.
   formal:
     name: Formal models (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
@@ -877,7 +877,7 @@ jobs:
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.formal == 'true'
-    # The heaviest shard measures about 11 min (3.5 of setup, agent-host's 7.3); 20 allows
+    # The heaviest shard measures about 10 min (3.5 of setup, agent-host's 6.7); 20 allows
     # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
     timeout-minutes: 20
     strategy:
@@ -903,8 +903,8 @@ jobs:
 
       - name: Deal affected formal tasks
         id: deal
-        # The tasks are `<project>:<target>` ids (scripts/src/formal-tasks.ts). A `formal:tla` that only
-        # depends on family tasks (`nx:noop`, tools/formal.plugin.ts) is left out: its families are dealt instead.
+        # The tasks are `<project>:<target>` ids (scripts/src/formal-tasks.ts). A `formal:tla` that is an
+        # `nx:noop` over family tasks (tools/formal.plugin.ts) is left out: its families are dealt instead.
         env:
           SHARD: ${{ matrix.shard }}
         run: |

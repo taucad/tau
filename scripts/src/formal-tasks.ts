@@ -5,8 +5,8 @@
  * selected task and the tasks it depends on. A project whose TLA+ specs sit in families below `specs/` has one
  * `formal:tla:<family>` task per family and a `formal:tla` that is an `nx:noop` depending on them
  * (tools/formal.plugin.ts). This script keeps every `formal:lean`, `formal:tla` and `formal:tla:<family>` task and
- * drops a `formal:tla` whose project also has family tasks, so the families are dealt to parallel runners and the
- * noop is never dealt as one heavy task (formal verification policy § 6).
+ * drops a `formal:tla` whose project graph node says it is an `nx:noop`, so the families are dealt to parallel
+ * runners and the noop is never dealt (formal verification policy § 6).
  *
  * Usage: node scripts/src/formal-tasks.ts <graph.json>
  * Prints a sorted JSON array of `<project>:<target>` ids, the input of scripts/src/test-shard-dealer.ts.
@@ -17,6 +17,14 @@ import { pathToFileURL } from 'node:url';
 
 /** The part of an Nx `--graph` file this script reads. */
 export type TaskGraphFile = {
+  readonly graph?: {
+    readonly nodes?: Readonly<
+      Record<
+        string,
+        { readonly data?: { readonly targets?: Readonly<Record<string, { readonly executor?: string }>> } }
+      >
+    >;
+  };
   readonly tasks?: {
     readonly tasks?: Readonly<
       Record<string, { readonly target?: { readonly project?: string; readonly target?: string } }>
@@ -35,10 +43,11 @@ export const formalTasks = (graph: TaskGraphFile): string[] => {
       tasks.add(`${target.project}:${target.target}`);
     }
   }
-  const all = [...tasks];
-  return all
-    .filter((task) => !(task.endsWith(':formal:tla') && all.some((other) => other.startsWith(`${task}:`))))
-    .toSorted();
+  // Only the plugin's noop is left out; a `formal:tla` that runs a check is dealt beside any family task.
+  const isNoop = (task: string): boolean =>
+    task.endsWith(':formal:tla') &&
+    graph.graph?.nodes?.[task.slice(0, -':formal:tla'.length)]?.data?.targets?.['formal:tla']?.executor === 'nx:noop';
+  return [...tasks].filter((task) => !isNoop(task)).toSorted();
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

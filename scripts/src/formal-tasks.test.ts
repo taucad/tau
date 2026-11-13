@@ -5,7 +5,12 @@ import { describe, expect, it } from 'vitest';
 import { formalTasks } from '#formal-tasks.js';
 import type { TaskGraphFile } from '#formal-tasks.js';
 
-const graphOf = (ids: readonly string[]): TaskGraphFile => ({
+const graphOf = (ids: readonly string[], noops: readonly string[] = []): TaskGraphFile => ({
+  graph: {
+    nodes: Object.fromEntries(
+      noops.map((project) => [project, { data: { targets: { 'formal:tla': { executor: 'nx:noop' } } } }]),
+    ),
+  },
   tasks: {
     tasks: Object.fromEntries(
       ids.map((id) => {
@@ -20,15 +25,18 @@ describe('formal tasks', () => {
   it('should deal the families of a split project instead of its noop formal:tla', () => {
     expect(
       formalTasks(
-        graphOf([
-          'ui:formal:tla',
-          'ui:formal:tla:record-sync',
-          'ui:formal:tla:layout-apply',
-          'agent-host:formal:tla',
-          'agent-host:formal:lean',
-          'chat-ui:formal:lean',
-          'formal:formal:tla',
-        ]),
+        graphOf(
+          [
+            'ui:formal:tla',
+            'ui:formal:tla:record-sync',
+            'ui:formal:tla:layout-apply',
+            'agent-host:formal:tla',
+            'agent-host:formal:lean',
+            'chat-ui:formal:lean',
+            'formal:formal:tla',
+          ],
+          ['ui'],
+        ),
       ),
     ).toEqual([
       'agent-host:formal:lean',
@@ -41,9 +49,15 @@ describe('formal tasks', () => {
   });
 
   it('should keep a formal:tla whose name only prefixes another project', () => {
-    expect(formalTasks(graphOf(['api:formal:tla', 'api-billing:formal:tla', 'api-billing:formal:tla:x']))).toEqual([
-      'api-billing:formal:tla:x',
-      'api:formal:tla',
+    expect(
+      formalTasks(graphOf(['api:formal:tla', 'api-billing:formal:tla', 'api-billing:formal:tla:x'], ['api-billing'])),
+    ).toEqual(['api-billing:formal:tla:x', 'api:formal:tla']);
+  });
+
+  it('should deal a formal:tla that runs a check even beside a family task of its project', () => {
+    expect(formalTasks(graphOf(['host:formal:tla', 'host:formal:tla:extra']))).toEqual([
+      'host:formal:tla',
+      'host:formal:tla:extra',
     ]);
   });
 

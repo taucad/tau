@@ -3220,7 +3220,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           `Branch ${input.branch} is unborn; a checkout of it needs an explicit base revision.`,
         );
       }
-      const tree = await port.readTree(base);
+      /* Paths are all the check below reads, so a large object that has not arrived stays its pointer. */
+      const tree = await port.readTree(base, { largeObjects: 'local' });
       if (tree === undefined) {
         throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for revision ${base}.`);
       }
@@ -3228,14 +3229,27 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const id = await checkoutIdOf(input.branch);
       await mkdir(directory, { recursive: true });
       const root = join(directory, id);
+      /* Large files are written as their pointers. Git-lfs's download filter
+       * would fetch any object that has not arrived without this port's
+       * credentials, and a refused download aborts the whole checkout; the
+       * host's fill brings those bytes afterwards from the store or the
+       * remote (D16). */
       const add = async (): Promise<void> => {
-        await output([
-          'worktree',
-          'add',
-          ...(head === undefined ? ['-b', input.branch] : []),
-          root,
-          head === undefined ? base : input.branch,
-        ]);
+        await output(
+          [
+            'worktree',
+            'add',
+            ...(head === undefined ? ['-b', input.branch] : []),
+            root,
+            head === undefined ? base : input.branch,
+          ],
+          { env: withVariable(gitEnvironment(), 'GIT_LFS_SKIP_SMUDGE', '1') },
+        );
+        /* The index recorded each pointer's size, and Git reads a size that
+         * differs as modified without asking the filter, so once the fill writes
+         * the bytes `git status` would list every large file. `read-tree` leaves
+         * stat data zero, and Git compares contents on its next refresh (R14). */
+        await run(['-C', root, 'read-tree', 'HEAD'], { env: clearedGitEnvironment() });
       };
       await (withMutationAuthority?.(
         {

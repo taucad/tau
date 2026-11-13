@@ -151,6 +151,36 @@ it('sends a desktop signal as one message event once Sentry is running', async (
   });
 });
 
+it('sends a revision-engine failure redacted, once per window for the same failure', async () => {
+  const { reportRevisionEngineFailure, revisionEngineFailureWindow } = await import('#main/error-reporting.js');
+  isInitialized.mockReturnValue(true);
+  const frame = (path: string) => ({
+    type: 'revision-engine-failed',
+    code: 'ENGINE_FAILED',
+    message: 'Native Git failed worktree.',
+    detail: `fatal: ${path} already exists`,
+  });
+
+  expect(reportRevisionEngineFailure({ type: 'permission-answered' }, 0)).toBe(false);
+  expect(reportRevisionEngineFailure(frame('/home/one/a'), 0)).toBe(true);
+  expect(reportRevisionEngineFailure(frame('/home/two/b'), 1000)).toBe(true);
+  expect(captureMessage).toHaveBeenCalledTimes(1);
+  expect(captureMessage).toHaveBeenCalledWith(
+    'Revision engine ENGINE_FAILED (git worktree): fatal: <path> already exists',
+    {
+      level: 'error',
+      fingerprint: ['desktop-revision-engine-failed', 'ENGINE_FAILED', 'worktree'],
+      tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree' },
+      contexts: {
+        revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: <path> already exists' },
+      },
+    },
+  );
+
+  reportRevisionEngineFailure(frame('/home/one/a'), revisionEngineFailureWindow);
+  expect(captureMessage).toHaveBeenCalledTimes(2);
+});
+
 it('receives renderer events over classic IPC only, without an injected preload', async () => {
   vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
   const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');

@@ -146,3 +146,101 @@ export const updaterFailureSignal = (
     tags: { update_stage: stage, update_channel: update.channel, update_from_version: update.version },
   };
 };
+
+/** Longest line of git's error an event carries. */
+const gitErrorLineLimit = 200;
+
+/**
+ * The redactions a line of git's error goes through, in order. Each removes a kind of text that can name the person,
+ * their machine, their project or a credential; what is left is git's own wording, which is what groups and explains
+ * the failure.
+ */
+const gitErrorRedactions: ReadonlyArray<readonly [RegExp, string]> = [
+  // A header, with everything after its name: `Authorization: Bearer …`, `Cookie: …`, `X-Request-Id: …`.
+  [/\b(?:proxy-)?authorization\s*[:=].*$|\b(?:set-)?cookie\s*[:=].*$|\bx-[a-z\d-]+\s*[:=].*$/giu, '<header>'],
+  // A credential named by its scheme.
+  [/\b(?:bearer|basic|token)\s+\S+/giu, '<credential>'],
+  // Quoted text: git and git-lfs quote paths, refs, remotes and filter commands.
+  [/'[^']*'|"[^"]*"|`[^`]*`/gu, '<redacted>'],
+  // A URL, with any userinfo, host, path or query it carries.
+  [/\b[a-z][a-z\d+.-]*:\/\/\S*/giu, '<url>'],
+  // An scp-style remote or an address: `git@host:owner/repo`, `someone@example.com`.
+  [/\S*@\S+/gu, '<remote>'],
+  // The object git-lfs names right after it says what it is moving.
+  [/\b(downloading|uploading)(\s+object)?(:?)\s+(?!<)\S+/giu, '$1$2$3 <file>'],
+  // Anything with a path separator, absolute or relative, POSIX or Windows.
+  [/\S*[\\/]\S*/gu, '<path>'],
+  // A file or host name: a dot between two name characters.
+  [/\S*[\p{L}\d_-]\.[\p{L}\d_-]\S*/gu, '<name>'],
+  // Object ids, LFS oids, and long tokens that could be a key.
+  [/\b[\da-f]{7,}\b|\b[\w+=-]{24,}/giu, '<id>'],
+];
+
+/**
+ * The first line of git's error, as an event may carry it.
+ *
+ * The line is git's first `fatal:` or `error:` line, else its first line at all, since git-lfs writes progress such
+ * as `Downloading …` before its error. Paths, file and host names, remote addresses, headers, credentials and ids are
+ * replaced by a placeholder, control characters are dropped, and the line is cut to {@link gitErrorLineLimit}.
+ *
+ * @param stderr - Everything the git command wrote to its error stream.
+ * @returns The redacted line, or an empty string when git wrote nothing.
+ */
+export const redactGitErrorLine = (stderr: string): string => {
+  const lines = stderr
+    .split(/\r?\n/u)
+    .map((line) => line.replaceAll(/\p{Cc}/gu, ' ').trim())
+    .filter((line) => line !== '');
+  const line = lines.find((candidate) => /^(?:fatal|error)\b/iu.test(candidate)) ?? lines[0] ?? '';
+  let redacted = line;
+  for (const [pattern, replacement] of gitErrorRedactions) {
+    redacted = redacted.replaceAll(pattern, replacement);
+  }
+  return redacted.replaceAll(/\s+/gu, ' ').trim().slice(0, gitErrorLineLimit);
+};
+
+/** The engine codes the services utility reports; anything else in a frame is ignored. */
+const revisionEngineCodes: ReadonlySet<string> = new Set(['ENGINE_FAILED', 'ENGINE_UNAVAILABLE']);
+
+/**
+ * The git subcommand a port's sentence names: `Native Git failed worktree.`, `Native Git stopped fetch: …`,
+ * `Native Git could not start lfs.`, or the adapter's `Native Git failed the worktree operation.`
+ *
+ * @param message - The port's sentence.
+ * @returns The subcommand, or `unknown` when the sentence names none a git subcommand could be.
+ */
+export const gitSubcommandOf = (message: string): string =>
+  /^Native Git (?:failed|stopped|could not start) (?:the )?([a-z][a-z\d-]{0,31})\b/u.exec(message)?.[1] ?? 'unknown';
+
+/**
+ * The event for a revision-engine failure the services utility reported (`revision-engine-failed`).
+ *
+ * It carries the code, the git subcommand and the first line of git's error after {@link redactGitErrorLine}, and
+ * groups by code and subcommand alone, so one failure seen with many paths or remotes is one issue.
+ *
+ * @param frame - The utility's frame.
+ * @returns The signal, or `undefined` for any other frame.
+ */
+export const revisionEngineFailureSignal = (frame: unknown): DesktopSignal | undefined => {
+  if (typeof frame !== 'object' || frame === null) {
+    return undefined;
+  }
+  const { type, code, message, detail } = frame as {
+    type?: unknown;
+    code?: unknown;
+    message?: unknown;
+    detail?: unknown;
+  };
+  if (type !== 'revision-engine-failed' || typeof code !== 'string' || !revisionEngineCodes.has(code)) {
+    return undefined;
+  }
+  const subcommand = typeof message === 'string' ? gitSubcommandOf(message) : 'unknown';
+  const gitError = typeof detail === 'string' ? redactGitErrorLine(detail) : '';
+  return {
+    message: `Revision engine ${code} (git ${subcommand})${gitError === '' ? '' : `: ${gitError}`}`,
+    level: 'error',
+    fingerprint: ['desktop-revision-engine-failed', code, subcommand],
+    tags: { error_code: code, git_subcommand: subcommand },
+    contexts: { revision_engine: { code, subcommand, ...(gitError === '' ? {} : { git_error: gitError }) } },
+  };
+};

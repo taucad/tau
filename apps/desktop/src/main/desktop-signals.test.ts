@@ -2,9 +2,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   appLoadFailureSignal,
+  gitSubcommandOf,
+  redactGitErrorLine,
   rendererGoneSignal,
   rendererHangSignal,
   rendererHangThreshold,
+  revisionEngineFailureSignal,
   scrubFailureText,
   updaterFailureSignal,
 } from '#main/desktop-signals.js';
@@ -102,5 +105,141 @@ describe('scrubFailureText', () => {
       String.raw`EPERM ~\AppData\Local\tau`,
     );
     expect(scrubFailureText('x'.repeat(500))).toHaveLength(200);
+  });
+});
+
+describe('redactGitErrorLine', () => {
+  it('should keep only the first fatal or error line, after git-lfs progress', () => {
+    expect(
+      redactGitErrorLine(
+        'Downloading parts/bracket.step (5.0 MB)\nError downloading object: bracket (a1b2c3d): Smudge error\nfatal: later',
+      ),
+    ).toBe('Error downloading object: <file> (<id>): Smudge error');
+  });
+
+  it('should fall back to the first line when git names no fatal or error line', () => {
+    expect(redactGitErrorLine('\n  hint: see the docs  \nmore')).toBe('hint: see the docs');
+    expect(redactGitErrorLine('')).toBe('');
+  });
+
+  it('should strip absolute, relative, home and Windows paths', () => {
+    expect(redactGitErrorLine('fatal: /Users/someone/Library/Tau/checkouts/p1 already exists')).toBe(
+      'fatal: <path> already exists',
+    );
+    expect(redactGitErrorLine('error: unable to create file models/part: Permission denied')).toBe(
+      'error: unable to create file <path> Permission denied',
+    );
+    expect(redactGitErrorLine(String.raw`fatal: C:\Users\someone\project is not a repository`)).toBe(
+      'fatal: <path> is not a repository',
+    );
+    expect(redactGitErrorLine('fatal: ~/projects/p1 is not empty')).toBe('fatal: <path> is not empty');
+  });
+
+  it('should strip quoted names, file names and host names', () => {
+    expect(redactGitErrorLine("fatal: 'feature-x' is already checked out at '/tmp/wt'")).toBe(
+      'fatal: <redacted> is already checked out at <redacted>',
+    );
+    expect(redactGitErrorLine('error: bracket.step: smudge filter lfs failed')).toBe(
+      'error: <name> smudge filter lfs failed',
+    );
+    expect(redactGitErrorLine('fatal: Could not resolve host: api.tau.new')).toBe(
+      'fatal: Could not resolve host: <name>',
+    );
+  });
+
+  it('should strip remote addresses and URLs with their credentials', () => {
+    expect(redactGitErrorLine('fatal: repository https://user:secret@git.example.com/o/r.git/ not found')).toBe(
+      'fatal: repository <url> not found',
+    );
+    expect(redactGitErrorLine('fatal: could not read from git@github.com:owner/repo.git')).toBe(
+      'fatal: could not read from <remote>',
+    );
+    expect(redactGitErrorLine('error: author someone@example.com refused')).toBe('error: author <remote> refused');
+  });
+
+  it('should strip headers, credentials and long tokens', () => {
+    expect(redactGitErrorLine('error: batch request failed. Authorization: Bearer abc.def.ghi')).toBe(
+      'error: batch request failed. <header>',
+    );
+    expect(redactGitErrorLine('error: rejected token ghp_abcdefghijklmnopqrstuvwxyz0123')).toBe(
+      'error: rejected <credential>',
+    );
+    expect(redactGitErrorLine('error: key opaque-value-abcdefghijklmnopqrstuvwxyz was refused')).toBe(
+      'error: key <id> was refused',
+    );
+    expect(redactGitErrorLine('error: object 4b825dc642cb6eb9a060e54bf8d69288fbee4904 missing')).toBe(
+      'error: object <id> missing',
+    );
+  });
+
+  it('should drop control characters and cut a long line', () => {
+    expect(redactGitErrorLine('fatal: bad\u0007 thing')).toBe('fatal: bad thing');
+    expect(redactGitErrorLine(`fatal: ${'word '.repeat(80)}`)).toHaveLength(200);
+  });
+});
+
+describe('gitSubcommandOf', () => {
+  it('should read the subcommand from each sentence the engine writes', () => {
+    expect(gitSubcommandOf('Native Git failed worktree.')).toBe('worktree');
+    expect(gitSubcommandOf('Native Git stopped fetch: deadline.')).toBe('fetch');
+    expect(gitSubcommandOf('Native Git could not start lfs.')).toBe('lfs');
+    expect(gitSubcommandOf('Native Git failed the update-ref operation.')).toBe('update-ref');
+  });
+
+  it('should not read a subcommand from any other sentence', () => {
+    expect(gitSubcommandOf('Native Git failed -c.')).toBe('unknown');
+    expect(gitSubcommandOf('The remote could not be reached.')).toBe('unknown');
+  });
+});
+
+describe('revisionEngineFailureSignal', () => {
+  const worktreeFailure = (path: string): Record<string, unknown> => ({
+    type: 'revision-engine-failed',
+    code: 'ENGINE_FAILED',
+    message: 'Native Git failed worktree.',
+    detail: `Downloading big.step (5 MB)\nfatal: ${path} already exists\nhint: more`,
+  });
+
+  it('should report a forced worktree failure with its code, subcommand and redacted line', () => {
+    expect(revisionEngineFailureSignal(worktreeFailure('/home/someone/.tau/checkouts/p1/b1'))).toEqual({
+      message: 'Revision engine ENGINE_FAILED (git worktree): fatal: <path> already exists',
+      level: 'error',
+      fingerprint: ['desktop-revision-engine-failed', 'ENGINE_FAILED', 'worktree'],
+      tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree' },
+      contexts: {
+        revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: <path> already exists' },
+      },
+    });
+  });
+
+  it('should group the same failure on different projects as one issue that names none of them', () => {
+    const first = revisionEngineFailureSignal(worktreeFailure('/home/one/a'));
+    const second = revisionEngineFailureSignal(worktreeFailure('/Users/two/b'));
+
+    expect(first?.fingerprint).toEqual(second?.fingerprint);
+    expect(first?.message).toBe(second?.message);
+    expect(JSON.stringify(first)).not.toMatch(/one|two|big|home|Users/u);
+  });
+
+  it('should report an engine that could not start, without a detail', () => {
+    expect(
+      revisionEngineFailureSignal({
+        type: 'revision-engine-failed',
+        code: 'ENGINE_UNAVAILABLE',
+        message: 'Native Git could not start status.',
+      }),
+    ).toEqual({
+      message: 'Revision engine ENGINE_UNAVAILABLE (git status)',
+      level: 'error',
+      fingerprint: ['desktop-revision-engine-failed', 'ENGINE_UNAVAILABLE', 'status'],
+      tags: { error_code: 'ENGINE_UNAVAILABLE', git_subcommand: 'status' },
+      contexts: { revision_engine: { code: 'ENGINE_UNAVAILABLE', subcommand: 'status' } },
+    });
+  });
+
+  it('should ignore any other frame or code', () => {
+    expect(revisionEngineFailureSignal({ type: 'permission-answered' })).toBeUndefined();
+    expect(revisionEngineFailureSignal({ type: 'revision-engine-failed', code: 'REMOTE_NOT_FOUND' })).toBeUndefined();
+    expect(revisionEngineFailureSignal(undefined)).toBeUndefined();
   });
 });

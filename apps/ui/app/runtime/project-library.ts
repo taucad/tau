@@ -349,13 +349,14 @@ export class ProjectLibrary {
   }
 
   /**
-   * A read through the current binding. A provider that unmounts disposes its reads, so a read that fails once its
-   * binding was released or replaced (a billing-fence remount, B9) is asked once more of the binding that serves
-   * next, whichever came first: the chat store outlives the provider and would otherwise keep a session whose
-   * history never loaded. Only reads are asked again.
+   * A read through the current binding. A provider that unmounts disposes its reads, so a read that fails after its
+   * provider released it (a billing-fence remount, B9, or an effect re-run), whether or not a new binding arrived
+   * first, is asked once more of the binding that serves next: the chat store outlives the provider and would
+   * otherwise keep a session whose history never loaded. Only reads are asked again.
    */
   async #read<T>(call: (chats: ProjectLibraryChatPorts) => Promise<T>): Promise<T> {
-    /* The binding and the release count, read in one step: a provider replaces its binding only around a release. */
+    /* The binding and the release count, read together: only a release marks a read's binding disposed; a render
+     * rebinds the same ports. */
     await this.#bound.promise;
     const binding = this.#binding!;
     const releases = this.#releases;

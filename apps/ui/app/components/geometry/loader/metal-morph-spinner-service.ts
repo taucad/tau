@@ -1,4 +1,4 @@
-import { startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
+import { isWebGpuCanvasLossFailure, startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
 import { metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
@@ -299,12 +299,10 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       try {
         await created.ready;
       } catch (error) {
-        // A renderer that never started holds no frame; release it so the next start builds afresh.
-        if (controller === created) {
-          controller = undefined;
-          source = undefined;
+        if (isWebGpuCanvasLossFailure(backend)) {
+          // The start that follows replaces it on a fresh canvas.
+          created.dispose();
         }
-        created.dispose();
         throw error;
       }
       if (controller !== created) {

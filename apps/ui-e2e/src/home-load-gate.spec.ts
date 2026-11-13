@@ -205,12 +205,18 @@ const knownDefect = (title: string, artifact: string, body: () => Promise<void>)
 };
 
 /** The returning visitor, then one reload of Home with `delays` armed, watched until the late reads answered. */
-const measureReturningReload = async (
-  viewport: ViewportName,
-  delays: readonly WorkerReadDelay[],
-  label: string,
-  prepare?: () => Promise<void>,
-): Promise<ProjectLoadRecord> => {
+const measureReturningReload = async ({
+  viewport,
+  delays,
+  label,
+  prepare,
+}: {
+  readonly viewport: ViewportName;
+  readonly delays: readonly WorkerReadDelay[];
+  readonly label: string;
+  /** What the visitor did on Home before the measured reload. */
+  readonly prepare?: () => Promise<void>;
+}): Promise<ProjectLoadRecord> => {
   await target.setViewport(viewports.wide);
   await target.installModelCatalogFixture(catalogLatency);
   await target.startModelCatalogApi();
@@ -245,7 +251,11 @@ for (const viewport of ['wide', 'phone'] as const) {
     `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
     `h1-${viewport}`,
     async () => {
-      const record = await measureReturningReload(viewport, [projectListingRead], `h1-${viewport}`);
+      const record = await measureReturningReload({
+        viewport,
+        delays: [projectListingRead],
+        label: `h1-${viewport}`,
+      });
       const hydrated = record.hydratedFirstFrame;
       expect(hydrated, 'H1: the rich composer never mounted').toBeDefined();
       const after = record.skeletonFrames.filter((frame) => frame.frame >= (hydrated?.frame ?? 0));
@@ -263,16 +273,21 @@ knownDefect(
   async () => {
     /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's sidebar did. */
     const expanded = seededProjects.at(-1)!;
-    const record = await measureReturningReload('wide', [chatListingRead], 'h5-wide', async () => {
-      const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
-      await target.click(disclosure);
-      await target.expectAttribute(
-        selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
-        'aria-expanded',
-        'true',
-      );
-      /* The disclosure is persisted before the measured load. */
-      await target.delay(settleWindow);
+    const record = await measureReturningReload({
+      viewport: 'wide',
+      delays: [chatListingRead],
+      label: 'h5-wide',
+      prepare: async () => {
+        const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
+        await target.click(disclosure);
+        await target.expectAttribute(
+          selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
+          'aria-expanded',
+          'true',
+        );
+        /* The disclosure is persisted before the measured load. */
+        await target.delay(settleWindow);
+      },
     });
     expect(record.projectRows.length, 'H5: no sidebar project row was on screen').toBeGreaterThan(0);
     const moved = projectRowMoves(record);

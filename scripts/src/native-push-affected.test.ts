@@ -10,8 +10,8 @@ import { afterAll, describe, expect, it } from 'vitest';
  * The push-to-`main` native rows run only for affected work (Wave 0M, AF-1): the plan selects the
  * projects affected since the newest successful push run of the same workflow on `main`, and every
  * project when there is none. Dispatches (and native-hosts' nightly) keep every row; native-darwin's
- * pull requests keep Nx affected against the base `nrwl/nx-set-shas` exported, and native-hosts runs on
- * none (`ci.yml` calls it in the merge queue with its own plan's rows). The scripts run here with `gh`,
+ * pull requests keep Nx affected against the base `nrwl/nx-set-shas` exported. native-hosts has no push
+ * or pull request trigger (Q-3): `ci.yml` calls it with its own plan's rows. The scripts run here with `gh`,
  * `git` and `pnpm` stubbed, so each event's selection is pinned by behaviour, not by text.
  */
 
@@ -126,7 +126,7 @@ const run = (script: string, env: ReadonlyArray<readonly [string, string]>): Run
   }
 };
 
-describe.each([darwinPath, hostsPath])('the push base of %s', (path) => {
+describe.each([darwinPath])('the push base of %s', (path) => {
   const base = step(path, 'push-base');
 
   it('should look up only on a push, through this workflow file', () => {
@@ -270,76 +270,25 @@ describe('native-darwin row selection', () => {
 });
 
 describe('native-hosts row selection', () => {
-  const plan = step(hostsPath, 'plan').run!;
-  /** `affected` is the `--projects tag:ci:native-hosts` answer, then the `test:native-linux` one. */
-  const select = (event: string, pushBase: string, [affectedHosts, affectedNative]: readonly [string, string]) =>
-    run(plan, [
-      ['GITHUB_EVENT_NAME', event],
-      ['PUSH_BASE', pushBase],
-      ['ALL', '["picogk"]'],
-      ['ALL_HOSTS', '["build123d","picogk","cli"]'],
-      ['AFFECTED', affectedNative],
-      ['AFFECTED_HOSTS', affectedHosts],
-    ]);
+  const plan = step(hostsPath, 'plan');
 
-  it('should start the Intel row on a push to main only when a native host project is affected', () => {
-    const affected = select('push', 'older', ['["cli"]', '[]']);
-    expect(affected.outputs).toMatchObject({
-      linux: 'true',
-      intel: 'true',
-      'native-linux': '',
-    });
-    expect(affected.calls).toContain(
-      'nx show projects --affected --base=older --head=head --projects tag:ci:native-hosts',
-    );
-    expect(affected.calls).toContain(
-      'nx show projects --affected --base=older --head=head --with-target test:native-linux',
-    );
-
-    const unaffected = select('push', 'older', ['[]', '[]']);
-    expect(unaffected.outputs).toMatchObject({
-      linux: 'true',
-      intel: 'false',
-      'native-linux': '',
-    });
-  });
-
-  it('should run every row when a push changes this workflow', () => {
-    const result = run(plan, [
-      ['GITHUB_EVENT_NAME', 'push'],
-      ['PUSH_BASE', 'older'],
-      ['DIFF_EXIT', '1'],
-      ['ALL', '["picogk"]'],
-    ]);
+  // The native-hosts workflow has no push trigger (Q-3): `ci.yml` calls it in the merge queue and on a push the queue
+  // did not prove, with its own plan's rows, so the plan here serves the nightly and a dispatch only.
+  it('should run every row and every test:native-linux project', () => {
+    const result = run(plan.run!, [['ALL', '["picogk"]']]);
+    expect(result.status).toBe(0);
     expect(result.outputs).toMatchObject({ linux: 'true', intel: 'true', 'native-linux': 'picogk' });
-    expect(result.calls).toContain(`git diff --quiet older head -- ${hostsPath}`);
+    expect(result.calls).toContain('nx show projects --with-target test:native-linux');
     expect(result.calls).not.toContain('--affected');
   });
 
-  it('should list the affected native-linux projects on a push to main', () => {
-    expect(select('push', 'older', ['["picogk"]', '["picogk"]']).outputs['native-linux']).toBe('picogk');
-  });
-
-  it.each([
-    ['push', ''],
-    ['workflow_dispatch', ''],
-    ['schedule', ''],
-  ])('should run every row on %s with base %j', (event, pushBase) => {
-    const result = select(event, pushBase, ['[]', '[]']);
-    expect(result.outputs).toMatchObject({
-      linux: 'true',
-      intel: 'true',
-      'native-linux': 'picogk',
-    });
-    expect(result.calls).not.toContain('--affected');
-  });
-
-  it('should run on no pull request, and skip its plan when ci.yml calls it in the merge queue', () => {
+  it('should run on no pull request or push, and skip its plan when ci.yml calls it', () => {
     const workflow = load(readFileSync(resolve(root, hostsPath), 'utf8')) as {
       readonly on: Record<string, unknown>;
-      readonly jobs: Record<string, { readonly if?: string }>;
+      readonly jobs: Record<string, { readonly if?: string; readonly steps?: readonly Step[] }>;
     };
-    expect(Object.keys(workflow.on).sort()).toEqual(['push', 'schedule', 'workflow_call', 'workflow_dispatch']);
-    expect(workflow.jobs['plan']?.if).toBe("github.event_name != 'merge_group'");
+    expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_call', 'workflow_dispatch']);
+    expect(workflow.jobs['plan']?.if).toBe("inputs.intel == ''");
+    expect(workflow.jobs['plan']?.steps?.some((candidate) => candidate.id === 'push-base')).toBe(false);
   });
 });

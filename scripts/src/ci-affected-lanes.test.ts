@@ -451,8 +451,15 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(affectedPlanOutputs()).toContain(job);
   });
 
-  it('should pass the affected test:native-linux projects to the native host rows', () => {
-    expect(ci.jobs['native-hosts']?.with).toEqual({ 'native-linux': expression('needs.plan.outputs.native-linux') });
+  it('should pass the affected test:native-linux projects and the Intel row to the native host rows', () => {
+    expect(ci.jobs['native-hosts']?.with).toEqual({
+      'native-linux': expression('needs.plan.outputs.native-linux'),
+      intel: expression('needs.plan.outputs.native-intel'),
+    });
+    // The Intel row runs when a tag:ci:native-hosts project (Build123d, PicoGK, the CLI) is affected (Q-3).
+    expect(ci.jobs['plan']?.outputs?.['native-intel']).toBe(expression('steps.plan.outputs.native-intel'));
+    expect(planScript).toContain('native_intel=$(flag native-hosts)');
+    expect(planScript).toContain('echo "native-intel=$native_intel"');
     expect(ci.jobs['plan']?.outputs?.['native-linux']).toBe(expression('steps.plan.outputs.native-linux'));
     expect(planScript).toContain(`native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")`);
     // The Linux rows run when a native host project or a native-linux project is affected.
@@ -477,11 +484,13 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     }
   });
 
-  it('should leave a push to the native-hosts workflow and skip viewer parity on a reused queue verdict', () => {
+  it('should run the native host rows and viewer parity on a push only when the queue did not prove it', () => {
     expect(planScript).toContain('viewer_parity=$(flag viewer-parity)');
-    const push = planScript.slice(planScript.indexOf('if [ "$GITHUB_EVENT_NAME" = push ]; then'));
-    expect(push.slice(0, push.indexOf('\nfi\n'))).toMatch(/^\s*native_hosts=false$/mu);
-    expect(nativeHosts.on?.push).toBeDefined();
+    // No push override: a push that reuses the queue verdict empties every lane, and any other push runs
+    // the rows from ci.yml, since native-hosts.yml has no push trigger of its own (Q-3).
+    expect(planScript).not.toContain('if [ "$GITHUB_EVENT_NAME" = push ]; then');
+    expect(planScript).toContain(`lanes=$(jq -c 'map_values([])' <<< "$lanes")`);
+    expect(nativeHosts.on?.push).toBeUndefined();
   });
 
   it.each([
@@ -532,17 +541,23 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     ]);
   });
 
-  it('should skip the native-hosts plan in the merge queue and take the rows from ci.yml', () => {
+  it('should skip the native-hosts plan when ci.yml calls it and take the rows from ci.yml', () => {
     expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
-    expect(nativeHosts.jobs['plan']?.if).toBe("github.event_name != 'merge_group'");
+    expect(nativeHosts.on?.workflow_call?.inputs?.['intel']?.type).toBe('string');
+    // `inputs.intel` is set only on a call, so it tells a call from the nightly and a dispatch.
+    expect(nativeHosts.jobs['plan']?.if).toBe("inputs.intel == ''");
     expect(nativeHosts.jobs['linux']?.if).toBe(
-      expression("!cancelled() && (github.event_name == 'merge_group' || needs.plan.outputs.linux == 'true')"),
+      expression("!cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true')"),
     );
     expect(nativeHosts.jobs['linux']?.env?.['NATIVE_LINUX']).toBe(
       expression('inputs.native-linux || needs.plan.outputs.native-linux'),
     );
-    // The Intel row never runs in the queue: a skipped plan leaves its output empty.
-    expect(nativeHosts.jobs['intel']?.if).toBe("needs.plan.outputs.intel == 'true'");
+    // The Intel row joins the queue when ci.yml's plan selects it (Q-3).
+    expect(nativeHosts.jobs['intel']?.if).toBe(
+      expression("!cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true')"),
+    );
+    // A called run gets its own group, so a newer push never replaces a `main` run's rows.
+    expect(nativeHosts.concurrency?.group).toContain("inputs.intel != '' && github.run_id");
   });
 });
 

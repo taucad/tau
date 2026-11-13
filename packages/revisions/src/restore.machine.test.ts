@@ -272,6 +272,58 @@ describe('restoreMachine', () => {
     actor.stop();
   });
 
+  /* I11, rule 10: the Merged toast's Undo is one more entry with the files from before the merge, never a ref move. */
+  it('undoes a merge as a new entry with the files from before it, only while the merge is the head', async () => {
+    const harness = start();
+    const { actor, promises, parent, emitted } = harness;
+
+    actor.send({ type: 'undoMerge', revisionId: 'rev-merge', before: 'rev-12' });
+    mintBefore(harness);
+
+    expect(promises.inputsFor('computePlan')).toEqual([
+      { checkoutId: 'checkout-1', target: 'rev-12', expectHead: 'rev-merge' },
+    ]);
+    promises.settle('computePlan', { output: { planId: 'plan-m', revisionId: 'rev-12', revisionNumber: 12 } });
+    await flush();
+    promises.settle('applyPlan', { output: { revisionId: 'rev-12', treeId: 'tree-12' } });
+    await flush();
+
+    expect(cutsAsked(parent).at(-1)).toMatchObject({ trigger: 'restore', restoredFrom: 'rev-12' });
+    actor.send({ type: 'revisionMinted', ...ours(harness), revisionId: 'rev-14' });
+
+    expect(emitted.findLast((event) => event.type === 'toast.restored')).toEqual({
+      type: 'toast.restored',
+      mode: 'undoMerge',
+      revisionId: 'rev-12',
+      revisionNumber: 12,
+    });
+    expect(actor.getSnapshot().context.expectHead).toBeUndefined();
+    actor.stop();
+  });
+
+  /* The lost race: the branch moved since the merge, so the plan refuses and nothing is written. */
+  it('refuses to undo a merge the branch has moved past, with its code, and writes nothing', async () => {
+    const harness = start();
+    const { actor, promises, emitted } = harness;
+
+    actor.send({ type: 'undoMerge', revisionId: 'rev-merge', before: 'rev-12' });
+    /* Unsaved work since the merge is recorded first: it is the newer entry the plan refuses over. */
+    mintBefore(harness, 'revisionMinted');
+    promises.settle('computePlan', {
+      error: Object.assign(new Error('This branch changed after the merge.'), { code: 'UNDO_MERGE_MOVED' }),
+    });
+    await flush();
+
+    expect(promises.inputsFor('applyPlan')).toEqual([]);
+    expect(emitted.findLast((event) => event.type === 'toast.error')).toMatchObject({
+      type: 'toast.error',
+      code: 'UNDO_MERGE_MOVED',
+    });
+    expect(types(emitted)).not.toContain('toast.restored');
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
+    actor.stop();
+  });
+
   it('refuses undo until a restore has minted, then plans that revision’s first parent (D2)', async () => {
     const harness = start();
     const { actor, promises, parent } = harness;

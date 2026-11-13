@@ -449,7 +449,10 @@ const expectViewerBar = async (): Promise<void> => {
       scale: Number.parseFloat(getComputedStyle(document.documentElement).fontSize) / 16,
     };
   });
-  const tools = layout.tools.slice(layout.tools.findIndex(({ name }) => name.startsWith('Grid ')));
+  // #2022 moved the grid size and units into Viewer settings, so Section starts the tools.
+  const names = layout.tools.map(({ name }) => name);
+  expect(names.filter((name) => name.startsWith('Grid '))).toEqual([]);
+  const tools = layout.tools.slice(names.indexOf('Section view'));
   expect(tools.map(({ name }) => name)).toEqual(
     expect.arrayContaining(['Section view', 'Measure', 'Fit view', 'Viewer settings']),
   );

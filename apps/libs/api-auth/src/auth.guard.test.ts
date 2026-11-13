@@ -66,7 +66,11 @@ describe('AuthGuard', () => {
   let resolve: MockInstance<SessionResolver['resolve']>;
 
   beforeAll(async () => {
-    const auth = { api: { getSession } } as unknown as Auth;
+    const auth = {
+      api: { getSession },
+      options: {},
+      $context: Promise.resolve({ authCookies: { sessionData: { name: 'tau.session_data' } } }),
+    } as unknown as Auth;
     const moduleRef = await Test.createTestingModule({
       controllers: [DoublyGuardedController, MarkedController],
       providers: [

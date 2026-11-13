@@ -13,6 +13,7 @@ describe('package exports', () => {
       './config/better-auth': './src/config/better-auth.config.ts',
       './module': './src/auth.module.ts',
       './testing': './src/testing.ts',
+      './testing/session-cache': './src/testing/session-cache.fixture.ts',
       './package.json': './package.json',
     });
   });

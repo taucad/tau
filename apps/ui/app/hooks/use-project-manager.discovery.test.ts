@@ -201,6 +201,8 @@ vi.mock('#hooks/use-cookie.js', () => ({
 const mockGetPendingProjectOperations = vi.fn<() => Promise<PendingProjectOperation[]>>();
 const mockGetProjectLibraryState = vi.fn<(projectId: string) => Promise<ProjectLibraryState | undefined>>();
 const mockDeleteProjectResources = vi.fn<(projectId: string) => Promise<void>>();
+/** Runs at the next readiness wait for the worker (`getReadiedWorker`), then clears itself. */
+let onWorkerRead: (() => void) | undefined;
 vi.mock('#hooks/project-manager.machine.js', async () => {
   const xstate = await import('xstate');
   return {
@@ -216,20 +218,23 @@ vi.mock('xstate', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    waitFor: vi.fn(async () => ({
-      matches: (state: string) => state === 'ready',
-      context: {
-        wrappedWorker: {
-          getPendingProjectOperations: mockGetPendingProjectOperations,
-          getProjectLibraryState: mockGetProjectLibraryState,
-          getProjectLibraryStates: async (projectIds: readonly string[]) =>
-            projectIds.map((projectId): ProjectLibraryState => ({ projectId, lastActivityAt: 10 })),
-          createProjectLibraryState: async (state: ProjectLibraryState) => state,
-          createProjectLibraryStates: async (states: readonly ProjectLibraryState[]) => [...states],
-          deleteProjectResources: mockDeleteProjectResources,
+    waitFor: vi.fn(async () => {
+      onWorkerRead?.();
+      return {
+        matches: (state: string) => state === 'ready',
+        context: {
+          wrappedWorker: {
+            getPendingProjectOperations: mockGetPendingProjectOperations,
+            getProjectLibraryState: mockGetProjectLibraryState,
+            getProjectLibraryStates: async (projectIds: readonly string[]) =>
+              projectIds.map((projectId): ProjectLibraryState => ({ projectId, lastActivityAt: 10 })),
+            createProjectLibraryState: async (state: ProjectLibraryState) => state,
+            createProjectLibraryStates: async (states: readonly ProjectLibraryState[]) => [...states],
+            deleteProjectResources: mockDeleteProjectResources,
+          },
         },
-      },
-    })),
+      };
+    }),
   };
 });
 
@@ -310,6 +315,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
     mockDeleteProjectFileSystemConfig.mockResolvedValue(undefined);
     mockBuildSuperseded = false;
     projectRootConfigurationListener = undefined;
+    onWorkerRead = undefined;
   });
 
   afterEach(() => {
@@ -320,12 +326,14 @@ describe('useProjectManager discovery (I7, I9)', () => {
 
   describe('a pass superseded by a newer epoch', () => {
     it('I7: should not apply the superseded pass to the listing, the route snapshot or the orphan sweep', async () => {
-      /* The stale pass sees no project under a complete root, so applying it would
-       * prune the project's route as an orphan and list nothing. */
       mockGetAllProjectFileSystemConfigs.mockResolvedValue([projectConfig]);
-      const stale = heldScan(emptyDiscovery);
       const { result } = createHarness();
+      await act(async () => result.current.getProjectListing());
+      expect(mockListProjectManifests).toHaveBeenCalledOnce();
 
+      /* A later listing's pass sees no project under a complete root, so applying
+       * it would list nothing and prune the project's route as an orphan. */
+      const stale = heldScan(emptyDiscovery);
       const listing = result.current.getProjectListing();
       await act(async () => stale.started);
       act(() => {
@@ -336,14 +344,63 @@ describe('useProjectManager discovery (I7, I9)', () => {
       await act(async () => {
         await expect(listing).resolves.toMatchObject({ projects: [{ projectId: fakeProject.id }] });
       });
-      expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+      expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
       expect(mockDeleteProjectResources).not.toHaveBeenCalled();
       expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
 
       // Route access reads the current pass's snapshot, never the superseded one.
-      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+          status: 'ready',
+        });
+      });
       expect(mockVerifyProjectRoute).not.toHaveBeenCalled();
+      expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+    });
+
+    it.fails('I7: should not write route configs from a pass superseded by a newer epoch', async () => {
+      // The stale pass finds the project with no route config, so applying it upserts one.
+      const stale = heldScan(validProjectDiscovery);
+      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+      const { result } = createHarness();
+
+      const listing = result.current.getProjectListing();
+      await act(async () => stale.started);
+      // The project's manifest is deleted while the pass is still scanning.
+      act(() => {
+        emitManifestChange('/test-project/tau.json');
+      });
+      stale.release();
+      await act(async () => {
+        await expect(listing).resolves.toMatchObject({ projects: [] });
+      });
+
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    });
+
+    it.fails('I7: should not prune orphans from a pass whose epoch moved while it readied the worker', async () => {
+      // The first pass holds an orphan; once the epoch moves, the current pass holds none.
+      mockGetAllProjectFileSystemConfigs
+        .mockResolvedValueOnce([projectConfig, orphanConfig])
+        .mockResolvedValue([projectConfig]);
+      // `listWorkspaces` is the pass's last read before its prune: arm the next worker wait.
+      mockListWorkspaces.mockImplementationOnce(async () => {
+        onWorkerRead = () => {
+          onWorkerRead = undefined;
+          emitManifestChange('/test-project/tau.json');
+        };
+        return [];
+      });
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectListing()).resolves.toMatchObject({
+          projects: [{ projectId: fakeProject.id }],
+        });
+      });
       expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
     });
 
     it.fails('I7: should not publish a workspace catalog from a pass superseded by a newer epoch', async () => {
@@ -399,8 +456,15 @@ describe('useProjectManager discovery (I7, I9)', () => {
     });
 
     it('I9: should let a pass still in flight end before redoing the writes it skipped', async () => {
-      mockGetAllProjectFileSystemConfigs.mockResolvedValueOnce([orphanConfig]).mockResolvedValue([]);
-      // A newer tab announces itself while this pass deletes the orphan's resources.
+      mockGetAllProjectFileSystemConfigs
+        .mockResolvedValueOnce([projectConfig])
+        .mockResolvedValueOnce([orphanConfig])
+        .mockResolvedValue([]);
+      const { result } = createHarness();
+      await act(async () => result.current.getProjectListing());
+      expect(mockListProjectManifests).toHaveBeenCalledOnce();
+
+      // A newer tab announces itself while the next pass deletes the orphan's resources.
       mockDeleteProjectResources.mockImplementationOnce(async () => {
         mockBuildSuperseded = true;
       });
@@ -410,9 +474,8 @@ describe('useProjectManager discovery (I7, I9)', () => {
         rootsSyncStarted.resolve();
         await rootsSynced.promise;
       });
-      const { result } = createHarness();
-
-      const listing = result.current.getProjectListing();
+      // A catalog refresh runs one pass and never retries it on an epoch move.
+      const refresh = result.current.refreshWorkspaceCatalog();
       await act(async () => rootsSyncStarted.promise);
       // The pass skipped its upsert and is still applying the deletes when the stop ends.
       expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
@@ -421,15 +484,15 @@ describe('useProjectManager discovery (I7, I9)', () => {
         announceBuildSkew();
       });
       await settle();
-      expect(mockListProjectManifests).toHaveBeenCalledOnce();
+      expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
 
       rootsSynced.resolve();
-      await act(async () => listing);
+      await act(async () => refresh);
       await settle();
 
-      expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+      expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
       expect(mockSetProjectFileSystemConfig).toHaveBeenCalledExactlyOnceWith(projectConfig);
-      expect(mockListProjectManifests.mock.invocationCallOrder[1]).toBeGreaterThan(
+      expect(mockListProjectManifests.mock.invocationCallOrder[2]).toBeGreaterThan(
         mockSyncProjectRoots.mock.invocationCallOrder[0]!,
       );
     });

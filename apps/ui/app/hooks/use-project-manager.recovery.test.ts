@@ -77,6 +77,19 @@ const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
     updatedAt: 10,
   },
 };
+/** The same creation, rooted in a workspace folder this tab can lose and get back. */
+const workspaceId = 'wsp_dead';
+const pendingWorkspaceCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
+  ...pendingCreate,
+  backend: 'webaccess',
+  workspaceId,
+};
+const returnedWorkspace = {
+  workspace: { workspaceId, name: 'Workspace' },
+  handle: { kind: 'directory', name: 'tau-workspace' },
+};
+/** The journal's rows: completing an operation deletes its row, as the worker does. */
+let journal: PendingProjectOperation[] = [];
 const failedRecovery = (reason: string) => ({
   operationId,
   projectId: fakeProject.id,
@@ -160,6 +173,12 @@ const mockSetProjectFileSystemConfig = vi.fn(async (config: ProjectFileSystemCon
 const mockDeleteProjectFileSystemConfig = vi.fn(async (projectId: string) => {
   routeConfigs.delete(projectId);
 });
+const mockListWorkspaces = vi.fn<() => Promise<Array<{ workspaceId: string }>>>();
+/** The retained handle of a workspace: absent while its folder is disconnected. */
+const mockGetWorkspace =
+  vi.fn<
+    (workspaceId: string) => Promise<{ workspace: { workspaceId: string; name: string }; handle: unknown } | undefined>
+  >();
 let projectRootConfigurationListener: (() => void) | undefined;
 vi.mock('#filesystem/handle-store.js', () => ({
   requestHomeStoragePersistence: vi.fn(async () => undefined),
@@ -168,13 +187,13 @@ vi.mock('#filesystem/handle-store.js', () => ({
   getWorkspaceMetadata: vi.fn(async () => undefined),
   isNodeWorkspaceConnected: vi.fn(async () => true),
   isNodeWorkspace: (workspace: { path?: string }) => workspace.path !== undefined,
-  listWorkspaces: vi.fn(async () => []),
+  listWorkspaces: mockListWorkspaces,
   setProjectFileSystemConfig: mockSetProjectFileSystemConfig,
   getProjectFileSystemConfig: vi.fn(async (projectId: string) => routeConfigs.get(projectId)),
   getHomeStorageBackend: vi.fn(async () => 'opfs'),
   getProjectCreationLocation: vi.fn(async () => ({ location: { kind: 'home' }, repaired: undefined })),
   setProjectCreationLocation: vi.fn(async () => undefined),
-  getWorkspace: vi.fn(async () => undefined),
+  getWorkspace: mockGetWorkspace,
   checkHandlePermission: vi.fn(async () => 'granted'),
   requestHandlePermission: vi.fn(async () => true),
   deleteProjectFileSystemConfig: mockDeleteProjectFileSystemConfig,
@@ -204,9 +223,11 @@ vi.mock('#filesystem/build-skew.js', () => ({
   isBuildSuperseded: () => false,
   subscribeBuildSkew: () => () => undefined,
 }));
+/** Whether this browser can hold a workspace folder; only the workspace row turns it on. */
+let mockWebAccessAvailable = false;
 vi.mock('#constants/browser.constants.js', () => ({
   isFileSystemAccessSupported: false,
-  directoryPicker: () => ({ available: false, backend: 'webaccess', pick: async () => undefined }),
+  directoryPicker: () => ({ available: mockWebAccessAvailable, backend: 'webaccess', pick: async () => undefined }),
   webAccessDirectoryPicker: () => undefined,
 }));
 vi.mock('#chat-clients/use-project-name-client.js', () => ({
@@ -324,6 +345,8 @@ describe('useProjectManager recovery (I8)', () => {
       mockCompletePending,
       mockBeginPermanentDeleteProject,
       mockPrepareProjectCreation,
+      mockListWorkspaces,
+      mockGetWorkspace,
     ]) {
       mock.mockReset();
     }
@@ -333,9 +356,15 @@ describe('useProjectManager recovery (I8)', () => {
     mockCommitPendingProjectDirectory.mockResolvedValue({ status: 'committed' });
     mockPermanentlyDeleteProjectDirectory.mockResolvedValue({ status: 'deleted' });
     mockSyncProjectRoots.mockResolvedValue(undefined);
-    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    journal = [pendingCreate];
+    mockGetPendingProjectOperations.mockImplementation(async () => [...journal]);
     mockResumeResources.mockResolvedValue([]);
-    mockCompletePending.mockResolvedValue(undefined);
+    mockCompletePending.mockImplementation(async (completed) => {
+      journal = journal.filter((operation) => operation.operationId !== completed);
+    });
+    mockListWorkspaces.mockResolvedValue([]);
+    mockGetWorkspace.mockResolvedValue(undefined);
+    mockWebAccessAvailable = false;
     mockBeginPermanentDeleteProject.mockResolvedValue('req_bbbbbbbbbbbbbbbbbbbbb');
     mockPrepareProjectCreation.mockRejectedValue(new Error('No creation is prepared in these rows'));
     projectRootConfigurationListener = undefined;
@@ -435,11 +464,52 @@ describe('useProjectManager recovery (I8)', () => {
     });
   });
 
+  // ── Red rows: retryable failures ──────────────────────────────────────────
+
+  describe('a retryable failure before its third attempt', () => {
+    it.fails('I8: should not read as failed after its first workspace-unavailable attempt', async () => {
+      mockCommitPendingProjectDirectory.mockRejectedValueOnce(new WorkspaceDirectoryRequiredError('disconnected'));
+      const { result } = await bootstrap();
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
+      expect(result.current.recoveries).toHaveLength(1);
+
+      // RowAccounted: a row becomes failed only on a terminal reason or on its third settled attempt.
+      expect(result.current.recoveries.map((recovery) => recovery.status)).not.toContain('failed');
+    });
+
+    it.fails('I8: should not spend replay attempts on root changes while the workspace is still gone', async () => {
+      mockWebAccessAvailable = true;
+      journal = [pendingWorkspaceCreate];
+      mockListWorkspaces.mockResolvedValue([{ workspaceId }]);
+      const { result } = await bootstrap();
+      expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('workspace-unavailable'))]);
+
+      // Two changes announced for other reasons: the workspace's folder is still disconnected.
+      for (const _change of [1, 2]) {
+        act(() => {
+          announceRootConfigurationChange();
+        });
+        // oxlint-disable-next-line no-await-in-loop -- each change settles before the next is announced
+        await settle();
+      }
+      // The folder is re-picked, which republishes the route configuration.
+      mockGetWorkspace.mockResolvedValue(returnedWorkspace);
+      act(() => {
+        announceRootConfigurationChange();
+      });
+      await settle();
+
+      // RetryOnlyWhenCleared: the replay after the workspace returned is still allowed, and it settles.
+      expect(mockCompletePending).toHaveBeenCalledExactlyOnceWith(operationId);
+    });
+  });
+
   // ── The person discards a row ─────────────────────────────────────────────
 
   describe('a failed row the person discards', () => {
     it('I8: should keep the failed row until the person discards it, then delete its journal row', async () => {
-      mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
+      // Retryable, so only the discard keeps a later root-configuration change from replaying it.
+      mockCommitPendingProjectDirectory.mockRejectedValue(new WorkspaceDirectoryRequiredError('disconnected'));
       mockListProjectManifests.mockResolvedValue(emptyDiscovery);
       const { result } = await bootstrap();
 
@@ -449,24 +519,27 @@ describe('useProjectManager recovery (I8)', () => {
         announceRootConfigurationChange();
       });
       await settle();
-      expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('filesystem-error'))]);
+      expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('workspace-unavailable'))]);
       expect(mockCompletePending).not.toHaveBeenCalled();
+      // The change replayed it once more (its second of three attempts), and it failed again.
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(2);
 
       await act(async () => result.current.discardRecovery(operationId));
 
       expect(mockCompletePending).toHaveBeenCalledExactlyOnceWith(operationId);
+      expect(journal).toEqual([]);
       expect(result.current.recoveries).toEqual([]);
       await act(async () => {
         await expect(result.current.getProjectListing()).resolves.toMatchObject({ recoveries: [] });
       });
       await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
 
-      // A discarded row is never replayed.
+      // A discarded row is never replayed, though it has an attempt left.
       act(() => {
         announceRootConfigurationChange();
       });
       await settle();
-      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(2);
     });
   });
 

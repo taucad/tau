@@ -348,17 +348,22 @@ describe('shipping installer catalog browser behavior', () => {
     await close();
   }, 60_000);
 
-  it('offers production no Mac file when any Mac route has clean-host testing pending', async () => {
+  it('offers production the same Mac DMG as staging while clean-Mac install testing is pending', async () => {
     const pending = projection();
-    pending.routes[1]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
-    const { page, requests, before, close } = await open({ catalog: pending });
+    for (const route of pending.routes.filter(({ route }) => route === 'macos-zip')) {
+      route.qualification = { ci: true, vm: 'pending', trust: 'release' };
+    }
+    const { page, requests, close } = await open({ catalog: pending });
     expect(requests).toHaveLength(1);
     const after = await surface(page);
-    expect(after).toEqual(before);
-    await expectNoMacFallback(page, after.links);
-    expect(after.text).not.toContain('DMG');
-    expect(after.text).not.toContain('pending');
-    expect(await page.locator('[data-qualified-downloads]').isHidden()).toBe(true);
+    expectTruthfulMacLabels(after.links);
+    expect(await page.locator('a[data-host-download="direct"]').getAttribute('href')).toBe(
+      'https://downloads.tau.new/releases/desktop%400.2.0/Tau-macos-arm64.dmg',
+    );
+    expect(await page.locator('[data-download-detail="host"]').textContent()).toMatch(
+      /^Apple silicon · DMG installer · clean-Mac install testing pending · ZIP: Tau-macos-arm64\.zip$/u,
+    );
+    expect(after.text).not.toMatch(/clean-Mac install (?:tested|passed|verified)/iu);
     await close();
   }, 60_000);
 

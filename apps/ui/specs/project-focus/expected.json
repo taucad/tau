@@ -38,6 +38,11 @@
       "kind": "witness",
       "ref": "At the target bounds the registry may resume focus's pending open after a library change focus has not yet noticed; focus then re-asks before any join. A witness of the window the registry, as environment, leaves."
     },
+    "ProjectFocus.target-registry-epoch.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "At the target bounds with RegistryChecksEpoch (A5c): the registry never resumes focus's open on a stale epoch, and every target safety property holds."
+    },
     "ProjectFocus.liveness.cfg": {
       "tier": "pr",
       "expect": "pass",

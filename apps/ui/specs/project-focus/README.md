@@ -29,6 +29,7 @@ Every config is in tier `pr` except `wide`, which is `nightly`. A passing config
 | `target-same-project`             | pass                              |                                   | 2 projects, 2 chats, 4 requests: a chat switch and the focused-chat replace keep the editor                                                                   |
 | `target-open-facts`               | pass                              |                                   | The chat fact and the first file check settle in either order, before or after the open bound                                                                 |
 | `target-resume-window`            | `StaleResumeUnreached`            | witness                           | The registry resumes focus's pending open after a library change focus has not yet re-asked for                                                               |
+| `target-registry-epoch`           | pass                              |                                   | With `RegistryChecksEpoch` (A5c), the registry drops a stale resumed open, and `StaleResumeUnreached` holds                                                   |
 | `liveness`                        | pass                              |                                   | `RequestEventuallySettles` under weak fairness, budget 1, no symmetry                                                                                         |
 | `liveness-person-commands`        | pass                              |                                   | The same with one person close and one person open: an opening session closed before the join settles focus on `closed`                                       |
 | `export`                          | pass                              |                                   | The labelled graph export (`ProjectFocus/graph.json`, `suite.json`)                                                                                           |
@@ -64,6 +65,10 @@ The target actions are the rules. A machine that keeps them inherits the propert
 11. **A session closed before the join.** If the session focus opened leaves the live set before the join (a person's close or a budget close), focus settles on the project as `focused`, which derives `closed` with the reopen offer. It neither reopens nor closes on its own.
 12. **Focus never closes.** Only `PersonClosed`, `IdleExpired` and `BudgetSwitchClose` close a session (`FocusNeverCloses`). On a one-project device the registry's budget close takes the session being left, through that session's own close flush.
 13. **A person's open goes through focus.** It carries the request focus kept for that project and does not move focus. A reopen of the focused project joins its facts again.
+
+## Inherited risk: the resume window, a requirement on A5c
+
+The registry as built resumes a `pendingOpen` without looking at the library. Between `LibraryChanged` and focus's re-ask it can therefore spawn focus's open on a stale epoch (`target-resume-window`). Programme control accepted the witness and made closing the window a requirement on **A5c**: the open request carries focus's library epoch, and the registry drops a resumed `pendingOpen` of focus's whose epoch is stale. `RegistryChecksEpoch = TRUE` models that registry, and `target-registry-epoch` is A5c's conformance target: `StaleResumeUnreached` holds there with every target safety property. After a drop, focus re-asks access and does not join without a fresh answer.
 
 ## Sharpened statements
 

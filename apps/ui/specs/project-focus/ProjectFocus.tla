@@ -75,6 +75,10 @@
 (*                  "together": both settle in one step (ChatReady), or    *)
 (*                  the bound passes first; a reduction for the configs    *)
 (*                  whose question is not the order.                       *)
+(*   RegistryChecksEpoch  TRUE: an open carries focus's library epoch and *)
+(*                  the registry's resume drops a pendingOpen whose epoch  *)
+(*                  is stale, the requirement on A5c. FALSE: the registry  *)
+(*                  as built, which resumes it.                            *)
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
@@ -94,7 +98,7 @@ CONSTANTS Projects,          \* the projects the person can navigate to
           AllowHome,         \* the router may commit Home
           IdleExpiry,        \* the registry may close any clean session focus is not on
           Focus, IdFence, SelectorRoute, SelectorMatch, LateRegistration, ModuleAtStart,
-          SessionFacts, FactOrder, Labelled
+          SessionFacts, FactOrder, RegistryChecksEpoch, Labelled
 
 ASSUME /\ MaxRequests \in Nat /\ MaxLibraryChanges \in Nat /\ Budget \in Nat \ {0}
        /\ MaxFlushFails \in Nat /\ MaxOpenFails \in Nat /\ MaxRetries \in Nat
@@ -105,7 +109,7 @@ ASSUME /\ MaxRequests \in Nat /\ MaxLibraryChanges \in Nat /\ Budget \in Nat \ {
        /\ SelectorMatch \in {"project", "id"}
        /\ LateRegistration \in BOOLEAN
        /\ ModuleAtStart \in {"unloaded", "loaded"}
-       /\ SessionFacts \in BOOLEAN /\ FactOrder \in {"any", "together"} /\ Labelled \in BOOLEAN
+       /\ SessionFacts \in BOOLEAN /\ FactOrder \in {"any", "together"} /\ RegistryChecksEpoch \in BOOLEAN /\ Labelled \in BOOLEAN
        /\ None \notin Projects /\ Home \notin Projects /\ None # Home
 
 VARIABLES
@@ -140,7 +144,8 @@ AccessValues == {"ready", "held"}
 \* open. The workspace, native kernel id and chat of the charter's request travel with it, unmodelled.
 NoOpenReq == None
 OpenReqs == Projects \cup {None}
-NoPending == [project |-> None, req |-> None]
+\* pendingOpen's epoch is the library epoch its open carried; 0 unless RegistryChecksEpoch.
+NoPending == [project |-> None, req |-> None, epoch |-> 0]
 NoKeep == [proj |-> None, fwd |-> 0, work |-> FALSE]
 FocusStates == {"idle", "resolving", "leaving", "opening", "focused", "held", "flushFailed"}
 SessionStates == {"none", "live", "closing"}
@@ -223,6 +228,7 @@ TypeOK ==
   /\ fact \in [Projects -> FactStates]
   /\ dirty \subseteq Projects
   /\ pendingOpen.project \in Projects \cup {None} /\ pendingOpen.req \in OpenReqs
+  /\ pendingOpen.epoch \in 0..MaxLibraryChanges
   /\ reg \in Projects \cup {None}
   /\ keep.proj \in Projects \cup {None}
   /\ act \in Labels \cup {"-"}
@@ -264,7 +270,8 @@ RegistryOpen(p, rq, out, c) ==
   /\ sess' = IF out = "spawn" THEN [sess EXCEPT ![p] = "live"] ELSE sess
   /\ sreq' = IF out = "spawn" THEN [sreq EXCEPT ![p] = rq] ELSE sreq
   /\ fact' = IF out = "spawn" THEN [fact EXCEPT ![p] = Spawned] ELSE fact
-  /\ pendingOpen' = IF out = "wait" THEN [project |-> p, req |-> rq] ELSE NoPending
+  /\ pendingOpen' = IF out = "wait" THEN [project |-> p, req |-> rq, epoch |-> IF RegistryChecksEpoch THEN lib.epoch ELSE 0]
+                   ELSE NoPending
   /\ cnt' = IF out = "failed" THEN [c EXCEPT !.openFails = @ + 1] ELSE c
 
 NoOpen == UNCHANGED <<sess, sreq, fact, pendingOpen>>
@@ -290,14 +297,16 @@ IdleExpired(v) ==
   /\ act' = Label("IdleExpired")
 
 \* The session's own `closing`: producers and sync flush, or a failure is recorded (I6); then
-\* `sessionClosed` frees the slot and resumes pendingOpen with the request it kept (315 to 334).
+\* `sessionClosed` frees the slot and resumes pendingOpen with the request it kept (315 to 334). With
+\* RegistryChecksEpoch it drops instead a request of focus's whose epoch is stale (A5c).
 SessionClosed(v) ==
   /\ sess[v] = "closing"
   /\ dirty' = dirty \ {v}
   /\ LET s1 == [sess EXCEPT ![v] = "none"]
          q == pendingOpen.project
          room == Cardinality({p \in Projects : s1[p] # "none"}) < Budget
-     IN IF pendingOpen # NoPending /\ s1[q] = "none" /\ room
+         stale == RegistryChecksEpoch /\ pendingOpen.req # NoOpenReq /\ pendingOpen.epoch # lib.epoch
+     IN IF pendingOpen # NoPending /\ s1[q] = "none" /\ room /\ ~stale
           THEN /\ sess' = [s1 EXCEPT ![q] = "live"]
                /\ sreq' = [sreq EXCEPT ![v] = NoOpenReq, ![q] = pendingOpen.req]
                /\ fact' = [fact EXCEPT ![v] = "pending", ![q] = Spawned]
@@ -305,7 +314,7 @@ SessionClosed(v) ==
           ELSE /\ sess' = s1
                /\ sreq' = [sreq EXCEPT ![v] = NoOpenReq]
                /\ fact' = [fact EXCEPT ![v] = "pending"]
-               /\ pendingOpen' = IF pendingOpen # NoPending /\ s1[q] = "live" THEN NoPending ELSE pendingOpen
+               /\ pendingOpen' = IF pendingOpen # NoPending /\ (s1[q] = "live" \/ stale) THEN NoPending ELSE pendingOpen
   /\ keep' = IF keep.proj = v THEN NoKeep ELSE keep
   /\ UNCHANGED <<route, nreq, f, asks, lib, mod, reg, cnt>>
   /\ act' = Label("SessionClosed")

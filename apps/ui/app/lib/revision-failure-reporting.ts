@@ -10,6 +10,7 @@ export const revisionWarningCodes: ReadonlySet<string> = new Set([
   'UNDO_UNAVAILABLE',
   'NOTHING_TO_UNDO',
   'UNDO_PAST_MERGE',
+  'UNDO_MERGE_MOVED',
 ]);
 
 /** A revision verb the tree could not carry out, as its error toast names it. */

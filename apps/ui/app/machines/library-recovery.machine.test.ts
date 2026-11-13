@@ -528,6 +528,17 @@ describe('libraryRecovery', () => {
       expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm1' }]);
     });
 
+    it('should keep a mutation admitted when the loop replay it waited for settles', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1', 'w1')]);
+      harness.send({ type: 'mutationAsked', requestId: 'd1', projectId: 'p1' });
+      await settleReplay(harness, recovered);
+      expect(harness.of('mutationAdmitted').map((event) => event.requestId)).toEqual(['d1']);
+      harness.send({ type: 'mutationAsked', requestId: 'd2', projectId: 'p1' });
+      expect(selectMutationGated(harness.actor.getSnapshot(), 'p1')).toBe(true);
+      expect(harness.of('mutationAdmitted').map((event) => event.requestId)).toEqual(['d1']);
+    });
+
     it("should run a person's replay of one project while another project's mutation holds an earlier replay", async () => {
       const harness = start();
       await ready(harness, []);

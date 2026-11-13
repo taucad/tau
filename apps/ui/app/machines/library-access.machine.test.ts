@@ -457,14 +457,39 @@ describe('libraryAccess', () => {
       expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
     });
 
-    it('should run a failed bootstrap pass again as soon as a question is asked once the journal is read', () => {
+    it('should run a failed bootstrap pass only when a question needs it, and at most once for it', async () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });
       harness.send({ type: 'epochMoved', epoch: 1, current: false });
-      ask(harness, 'q1');
       harness.send({ type: 'discoveryFailed', message: 'boot failed' });
-      ask(harness, 'q2');
+      ask(harness, 'q1');
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(0);
+      harness.send({ type: 'discoveryFailed', message: 'still failing' });
+      await resolve(harness.verify, { status: 'discovery-required' });
       expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      harness.send({ type: 'discoveryFailed', message: 'failing again' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'failing again' }]);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+    });
+
+    it('should run no failed bootstrap pass for a question its verification answers', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      ask(harness, 'q1');
+      await resolve(harness.verify, { status: 'unavailable' });
+      expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(0);
+    });
+
+    it('should keep a read journal when a journal retry is reported', () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      harness.send({ type: 'journalRetrying' });
+      ask(harness);
+      expect(harness.verify.calls).toHaveLength(1);
     });
 
     it('should skip verification while a current listing exists', () => {

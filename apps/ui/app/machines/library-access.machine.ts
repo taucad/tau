@@ -733,26 +733,20 @@ export const libraryAccessMachine = setup({
           cacheHits: 0,
         });
       }
-      // A failed read is run again for the new question (and every open one waits for it), as today's next call does.
-      // A failed bootstrap pass is run again only once the journal is read: until then the query waits, and asks for
-      // the pass itself when the journal is ready, so one question runs it once.
-      const retries: AccessFactEvent[] = [
-        ...(context.facts.journal.status === 'failed' ? [{ type: 'journalRetrying' } as const] : []),
-        ...(context.facts.discoveryError === undefined || context.facts.journal.status !== 'ready'
-          ? []
-          : [{ type: 'discoveryRetrying' } as const]),
-      ];
+      // A failed journal read is run again for the new question (and every open one waits for it), as today's next
+      // call does. A failed bootstrap pass is not: the query asks for it when it needs it (rows pending once the
+      // journal is read, or a `discovery-required` verification), as today's `ensureDiscoveryReady` runs, so one
+      // question runs it at most once.
       let { facts } = context;
-      for (const retry of retries) {
+      if (facts.journal.status === 'failed') {
+        const retry = { type: 'journalRetrying' } as const;
         facts = withFact(facts, retry);
-      }
-      for (const retry of retries) {
         for (const [requestId, open] of Object.entries(context.questions)) {
           if (requestId !== event.requestId) {
             enq.sendTo(open.ref, retry);
           }
         }
-        enq.emit({ type: retry.type === 'journalRetrying' ? 'journalWanted' : 'discoveryWanted' });
+        enq.emit({ type: 'journalWanted' });
       }
       const seen = context.generations[event.requestId];
       const gen = seen === undefined ? 0 : seen + 1;

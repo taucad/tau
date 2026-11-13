@@ -1,0 +1,41 @@
+---
+title: Terminal
+description: Use git in Tau Desktop's Terminal pane, what it can change on macOS and Linux, and what git needs outside Tau.
+docType: reference
+icon: 'lucide:square-terminal text-purple'
+wordBudgetOverride: 450
+---
+
+# Terminal
+
+Tau Desktop's Terminal pane opens your own shell in the active project. It runs in a sandbox: a private home folder, no network unless you grant a host, and no access to other projects or to your credentials.
+
+## Git
+
+The Terminal has git with git-lfs built in. Both ship with Tau Desktop, so the Terminal needs no system git and no Xcode command line tools.
+
+| Platform | What git can do                                                                                                              |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| macOS    | Read the project's history with `status`, `diff`, `log`, `show` and `blame`, and change it: commit, branch, stash and merge. |
+| Linux    | Read only, for now. `.git` is read-only, so `add`, `commit`, `switch -c` and `stash` fail with a permission error.           |
+
+On macOS, `.git/config`, `.git/hooks` and the few other files that make git run a program or follow another path stay read-only, so `git config` and adding a hook fail.
+
+Tau backs up a commit you make in the Terminal like a save made in Tau. History names you, marked "made with git". Tau keeps what you staged, and while a merge, rebase or other git operation is in progress, it waits to save until the operation ends.
+
+## Your identity
+
+The Terminal does not read your `~/.gitconfig`. Commits use your Tau name and your Tau no-reply address, which ends in `@users.noreply.tau.new`. Aliases, editor and pager settings from your own git config do not apply.
+
+## Fetch, pull and push
+
+`git fetch`, `git pull` and `git push` are not available in the Terminal: it has no git credentials and no network for git. Tau backs up the project for you. If the project is linked to a GitHub repository, push to it from your operating system's terminal.
+
+## Use git outside Tau
+
+A Tau project stores large files with Git LFS. To use git on the project outside Tau, install [Git LFS](https://git-lfs.com) first. Without it, git stops with an error on `checkout`, and on `status` when a large file needs checking.
+
+## Related
+
+- [Packages in a Project](./packages) covers running a project outside Tau.
+- [External Agents](./external-agents) describes coding CLIs that run inside a Tau project.

@@ -143,6 +143,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'undo' }>
   /** *Undo*: reverse this device's newest operation on the selected line (D15). */
   | Readonly<{ command: 'undoOperation' }>
+  /** The *Merged* toast's *Undo*: a new entry with `before`'s files, while the merge is still the head (I11). */
+  | Readonly<{ command: 'undoMerge'; revisionId: string; before: string }>
   | Readonly<{ command: 'switch'; branch: string }>
   | Readonly<{ command: 'followChat'; chatId: string }>
   | Readonly<{ command: 'pinTo'; checkoutId: string }>
@@ -336,7 +338,7 @@ export type RevisionToast =
    */
   | Readonly<{
       type: 'restored';
-      mode: 'restore' | 'undoRestore';
+      mode: 'restore' | 'undoRestore' | 'undoMerge';
       revisionId: string;
       revisionNumber: number | undefined;
     }>
@@ -355,6 +357,9 @@ export type RevisionToast =
       from?: string;
       /** A *Switch* saved the unsaved work on `from` before it moved. */
       saved?: true;
+      /** The entry a *Merge* landed and the head it moved from, which its Undo returns to (I11). */
+      revisionId?: string;
+      before?: string;
     }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
@@ -1408,6 +1413,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
       ...(toast.from === undefined ? {} : { from: toast.from }),
       ...(toast.saved === undefined ? {} : { saved: toast.saved }),
+      ...(toast.revisionId === undefined || toast.before === undefined
+        ? {}
+        : { revisionId: toast.revisionId, before: toast.before }),
     });
   });
   branchChild?.on('toast.error', (toast) => {
@@ -1656,6 +1664,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * verbs, so the page reaches it where it lives. */
         case 'restore': {
           actor.getSnapshot().children.restore?.send({ type: 'restore', revisionId: command.revisionId });
+          return;
+        }
+        case 'undoMerge': {
+          actor
+            .getSnapshot()
+            .children.restore?.send({ type: 'undoMerge', revisionId: command.revisionId, before: command.before });
           return;
         }
         /* Routed by the root to its `remote` child, so the page still speaks

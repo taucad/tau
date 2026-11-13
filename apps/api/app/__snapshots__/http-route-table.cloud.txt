@@ -59,7 +59,7 @@ GET /repositories/branches | v1 | - | public | RepositoriesController.listBranch
 GET /revisions/salt | v1 | AuthGuard | required | RevisionSaltController.salt
 GET /streams/:streamId/events | v1 | AuthGuard,AuthGuard | required | DurableEventsController.readEvents
 GET /telemetry-purposes | v1 | CloudHostEvidenceGuard | required | TelemetryPurposeController.getEffectivePurposes
-GET /telemetry/policy | v1 | AuthGuard | optional | TelemetryController.policy
+GET /telemetry/policy | v1 | AuthGuard | public | TelemetryController.policy
 GET /voice/status | v1 | AuthGuard | optional | VoiceController.status
 PATCH /agents/:id | v1 | AuthGuard,AuthGuard | required | HostsController.renameDevice
 PATCH /privacy | v1 | AuthGuard | required | PrivacyController.updatePrivacyPreferences

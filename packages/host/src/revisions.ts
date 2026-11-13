@@ -105,6 +105,8 @@ import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
 import { actorFor, hostRevisionActor, revisionUserActorSchema } from '#revision-actor.js';
+import { observeRevisionEngineFailures } from '#revision-engine-failures.js';
+import type { RevisionEngineFailure } from '#revision-engine-failures.js';
 import type { HostRevisionActorResolver } from '#revision-actor.js';
 
 /**
@@ -170,6 +172,14 @@ export type HostRevisionEvent =
       readonly operation: 'open' | 'add' | 'remove' | 'retire';
       readonly reason: string;
     }
+  | ({
+      /**
+       * A store command failed in the engine itself (`ENGINE_FAILED`, `ENGINE_UNAVAILABLE`), whichever verb ran it.
+       * The verb's caller still gets the error; this is for a field reporter, which redacts `detail` (git's own
+       * stderr) before anything leaves the machine.
+       */
+      readonly type: 'revision.engine-failed';
+    } & RevisionEngineFailure)
   | {
       /**
        * This machine cannot record revisions at all: `git` or `git-lfs` is
@@ -564,7 +574,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
   let channelWriteCredential: NativeGitRemoteCredential | undefined;
   const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
-  const port =
+  const unobservedPort =
     options.port ??
     createProjectRevisionPort({
       workspaceRoot: options.workspaceRoot,
@@ -575,6 +585,15 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
       remoteCredential: () => channelWriteCredential ?? channelRemoteCredential ?? options.remoteCredential?.(),
     });
+  /* Every verb's engine failure, for the host's reporter: the only place a failed `git worktree add` is seen with
+   * git's own words, since the checkout's refusal keeps the port's sentence alone. */
+  const { events } = options;
+  const port =
+    events === undefined
+      ? unobservedPort
+      : observeRevisionEngineFailures(unobservedPort, (failure) => {
+          events({ type: 'revision.engine-failed', ...failure });
+        });
   const channelListeners = new Set<(event: AgentChannelRevisionEvent) => void>();
   const emitChannel = (event: AgentChannelRevisionEvent): void => {
     for (const listener of channelListeners) {

@@ -61,6 +61,7 @@ export type {
   RevisionDivergence,
   RevisionDivergenceInput,
   RevisionEngineDescriptor,
+  RevisionGitOperation,
   RevisionHead,
   RevisionLogEntry,
   RevisionLogInput,

@@ -2,9 +2,11 @@ import { Reflector } from '@nestjs/core';
 import type { ConfigService } from '@nestjs/config';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost, ExecutionContext } from '@nestjs/common';
-import type { Auth } from 'better-auth';
+import type { AuthSession, AuthUser } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type { Environment } from '@taucad/api-core';
 import type { HostsService } from '@taucad/api-hosts';
 import {
@@ -71,19 +73,17 @@ const errorMessage = (error: unknown): string | undefined => {
 
 describe('gateway authentication boundary', () => {
   const createGuard = (input: { sessionUserId?: string; deviceOwnerId?: string }) => {
-    const auth = {
-      api: {
-        getSession: vi.fn(async () =>
-          input.sessionUserId === undefined ? null : { user: { id: input.sessionUserId } },
-        ),
-      },
-    } as unknown as Auth;
+    const sessions = fakeSessionResolver(() =>
+      input.sessionUserId === undefined
+        ? null
+        : { session: mock<AuthSession>(), user: mock<AuthUser>({ id: input.sessionUserId }) },
+    );
     const hosts = {
       authenticateDevice: vi.fn(async () =>
         input.deviceOwnerId === undefined ? undefined : { ownerId: input.deviceOwnerId },
       ),
     } as unknown as HostsService;
-    return { guard: new LlmGatewayAuthGuard(new Reflector(), auth, hosts, config), hosts };
+    return { guard: new LlmGatewayAuthGuard(new Reflector(), sessions, hosts, config), hosts };
   };
 
   it('binds the combined authentication guard to both controller routes', () => {

@@ -880,6 +880,11 @@
     "reason": "reads another project's configuration it checks"
   },
   {
+    "file": "scripts/src/drift-fingerprint.ts",
+    "target": "libs/sandbox/scripts/shell-conformance-guest.sh",
+    "reason": "the drift check fingerprints the packages the shell guest installs, read from the guest script at run time in CI"
+  },
+  {
     "file": "scripts/src/ensure-vale.test.ts",
     "target": "pnpm-workspace.yaml",
     "reason": "reads workspace-root configuration or inventory"
@@ -938,6 +943,11 @@
     "file": "scripts/src/shell-evidence.test.ts",
     "target": "libs/sandbox/scripts/**",
     "reason": "reads the sandbox shell-conformance scripts it checks"
+  },
+  {
+    "file": "scripts/src/shell-evidence.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
   },
   {
     "file": "scripts/src/telemetry-grafana-contract.test.ts",

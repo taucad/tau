@@ -2030,6 +2030,24 @@ export const TauMetrics = {
     attributes: z.object({}),
   }),
 
+  /**
+   * One per session resolution on a Tau route or upgrade (`SessionResolver.resolve`). `credential` is
+   * header presence only; `authorization` + `unauthenticated` includes paired-device calls that the
+   * LLM gateway then admits by device credential, so it is not a failure rate.
+   */
+  authSessionResolutions: defineCounter({
+    name: 'tau.auth.session.resolutions',
+    unit: '{resolution}',
+    description:
+      'Session resolutions on Tau routes and WebSocket upgrades, by read mode, credential header, outcome and whether the request shared an in-flight lookup',
+    attributes: z.object({
+      mode: z.enum(['cached', 'authoritative']),
+      credential: z.enum(['cookie', 'authorization', 'none']),
+      outcome: z.enum(['authenticated', 'unauthenticated', 'error']),
+      coalesced: z.enum(['true', 'false']),
+    }),
+  }),
+
   r2Requests: defineGauge({
     name: 'tau.r2.requests',
     unit: '{request}',

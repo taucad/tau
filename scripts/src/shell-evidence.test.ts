@@ -342,8 +342,21 @@ describe('conformance cache guard', () => {
 });
 
 type Step = { name?: string; run?: string; env?: Record<string, string>; if?: string };
-type Job = { env?: Record<string, string>; steps?: Step[]; uses?: string; with?: Record<string, string> };
-type Workflow = { on: Record<string, unknown>; env?: Record<string, string>; jobs: Record<string, Job> };
+type Job = {
+  env?: Record<string, string>;
+  steps?: Step[];
+  uses?: string;
+  with?: Record<string, string>;
+  secrets?: Record<string, string> | string;
+  environment?: unknown;
+  permissions?: Record<string, string> | string;
+};
+type Workflow = {
+  on: Record<string, unknown>;
+  env?: Record<string, string>;
+  permissions?: Record<string, string> | string;
+  jobs: Record<string, Job>;
+};
 const workflow = (file: string): Workflow =>
   load(readFileSync(resolve(root, '.github/workflows', file), 'utf8')) as Workflow;
 
@@ -455,6 +468,81 @@ describe('shell conformance workflow evidence', () => {
     const gate = Object.values(staging.jobs).filter((job) => job.uses === './.github/workflows/shell-conformance.yml');
     expect(gate).toHaveLength(1);
     expect(gate[0]?.with?.['tier']).toBeUndefined();
+  });
+
+  describe('remote cache (CP-5b follow-up)', () => {
+    const reuse = `((github.event_name == 'merge_group' && needs.select.outputs.tier == 'semantics') || (github.event_name == 'pull_request' && !inputs.ref && needs.select.outputs.tier == 'full'))`;
+    const token = 'secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN';
+    const { macos } = shell.jobs;
+
+    it('sets the cache env on the macOS job only, under the reuse condition, so a fresh run has no server', () => {
+      expect(shell.env?.['NX_SELF_HOSTED_REMOTE_CACHE_SERVER']).toBeUndefined();
+      expect(shell.env?.['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN']).toBeUndefined();
+      expect(macos?.env?.['NX_SELF_HOSTED_REMOTE_CACHE_SERVER']).toBe(
+        `\${{ ${reuse} && ${token} != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}`,
+      );
+      expect(macos?.env?.['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN']).toBe(`\${{ ${reuse} && ${token} || '' }}`);
+      // The same condition as `TAU_SHELL_EVIDENCE`, so the cache never reaches a run that must be fresh.
+      expect(macos?.env?.['TAU_SHELL_EVIDENCE']).toBe(`\${{ ${reuse} && 'reuse' || 'fresh' }}`);
+      for (const [name, job] of Object.entries(shell.jobs)) {
+        const text = JSON.stringify(job);
+        if (name !== 'macos') {
+          expect(text, name).not.toContain('NX_SELF_HOSTED_REMOTE_CACHE');
+          expect(text, name).not.toContain('nx-cache-write');
+        }
+        for (const step of job.steps ?? []) {
+          expect(JSON.stringify(step.env ?? {}), `${name}: ${step.name ?? ''}`).not.toContain('NX_SELF_HOSTED');
+        }
+      }
+    });
+
+    it('writes only from the merge queue semantics call, through nx-cache-write', () => {
+      expect(macos?.environment).toBe(
+        `\${{ (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') && needs.select.outputs.tier == 'semantics') && 'nx-cache-write' || null }}`,
+      );
+      // No pull request session: without `id-token: write`, nx-guard keeps a labelled run on the read token.
+      const grants = [shell.permissions, ...Object.values(shell.jobs).map((job) => job.permissions)];
+      for (const grant of grants) {
+        expect(grant).not.toBe('write-all');
+        expect(typeof grant === 'object' ? grant['id-token'] : undefined).toBeUndefined();
+      }
+      const call = (shell.on['workflow_call'] as { secrets?: Record<string, { required?: boolean }> }).secrets;
+      expect(Object.keys(call ?? {})).toEqual(['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN']);
+      expect(call?.['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN']?.required).toBe(false);
+    });
+
+    it('writes conformance verdicts only: each macOS Nx call is one listed target with no dependencies', () => {
+      const calls = steps.flatMap((step) => [...(step.run ?? '').matchAll(/\bnx (?:run|run-many|affected)\b[^\n]*/gu)]);
+      expect(calls.map(([call]) => call.split(' ')[2] ?? '').toSorted()).toEqual(
+        macTargets.map(({ project, target }) => `${project}:${target}`).toSorted(),
+      );
+      // A dependency would run, and be written, in the same Nx call; neither the target nor a target default adds one.
+      const defaults = (
+        JSON.parse(readFileSync(resolve(root, 'nx.json'), 'utf8')) as { targetDefaults: Record<string, unknown> }
+      ).targetDefaults;
+      for (const { project, target, file } of macTargets) {
+        const configuration = projectTargets(file)[target] as { dependsOn?: unknown } | undefined;
+        expect(configuration?.dependsOn, `${project}:${target}`).toBeUndefined();
+        expect(Object.keys(defaults), `${project}:${target}`).not.toContain(target);
+      }
+    });
+
+    it('passes the candidate gate no cache secret, and the queue call the read token alone', () => {
+      const staging = workflow('release-desktop-staging.yml');
+      const gate = Object.values(staging.jobs).find((job) => job.uses === './.github/workflows/shell-conformance.yml');
+      expect(gate?.secrets).toBeUndefined();
+      const ci = workflow('ci.yml');
+      const lane = Object.values(ci.jobs).find((job) => job.uses === './.github/workflows/shell-conformance.yml');
+      expect(lane?.secrets).toEqual({ NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: `\${{ ${token} }}` });
+    });
+
+    it('forwards no cache env into the Linux guest', () => {
+      for (const script of ['shell-conformance-vm.sh', 'shell-conformance-guest.sh']) {
+        expect(readFileSync(resolve(root, 'libs/sandbox/scripts', script), 'utf8'), script).not.toContain(
+          'NX_SELF_HOSTED',
+        );
+      }
+    });
   });
 
   it('lets only a fresh nightly or dispatch run satisfy the promotion gate', () => {

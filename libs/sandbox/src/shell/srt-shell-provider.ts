@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { channel } from 'node:diagnostics_channel';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -31,6 +31,7 @@ import type { ProcessRow } from '#shell/process-tree.js';
 import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
+import { zshStartupWrappers } from '#shell/shell-zsh-startup.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
 import type { StandInProfile } from '#shell/shell-stand-ins.js';
 import type {
@@ -421,6 +422,46 @@ type Supervisor = Readonly<{
  */
 const createRuntimeDirectory = (): string | undefined =>
   process.platform === 'linux' ? mkdtempSync(join(tmpdir(), 'tau-shell-runtime-')) : undefined;
+
+/** A launch as the sandbox runs it, and how to remove what the provider wrote for it. */
+type ContainedLaunch = Readonly<{ launch: ShellLaunch; remove: () => void }>;
+
+/**
+ * The launch as the sandbox runs it. For the Terminal Zsh, the provider writes its startup wrappers
+ * ({@link zshStartupWrappers}) to a private folder that the sandbox reads but cannot write, and only the provider sets
+ * `ZDOTDIR` to it: a host value stays refused. The folder is removed when the supervisor closes.
+ *
+ * @param launch - The admitted launch.
+ * @param home - The person's home, which holds their own startup files.
+ * @returns The launch to profile and run, and its cleanup.
+ */
+const containedLaunch = (launch: ShellLaunch, home: string): ContainedLaunch => {
+  if (launch.startupFiles !== 'zsh') {
+    return { launch, remove: () => undefined };
+  }
+  const folder = mkdtempSync(join(tmpdir(), 'tau-shell-zsh-'));
+  const remove = (): void => {
+    rmSync(folder, { recursive: true, force: true });
+  };
+  try {
+    const wrappers = zshStartupWrappers({ folder, home, toolchainBins: launch.toolchainBins ?? [] });
+    for (const [name, text] of Object.entries(wrappers)) {
+      writeFileSync(join(folder, name), text, { mode: 0o600, flag: 'wx' });
+    }
+  } catch (error) {
+    remove();
+    throw error;
+  }
+  return {
+    launch: {
+      ...launch,
+      filesystem: { ...launch.filesystem, readOnly: [...(launch.filesystem.readOnly ?? []), folder] },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+      environment: { ...launch.environment, ZDOTDIR: folder },
+    },
+    remove,
+  };
+};
 
 /**
  * The output streams of a child spawned with an extra descriptor, whose typings no longer promise them.
@@ -1035,6 +1076,9 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   ) {
     return unsupported('filesystem-mask', 'only the macOS Terminal running /bin/zsh may read Zsh startup files.');
   }
+  if (launch.toolchainBins !== undefined && launch.startupFiles === undefined) {
+    return unsupported('environment', 'only the Terminal Zsh with its startup files takes toolchain folders.');
+  }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
       return unsupported('terminal', 'the macOS Terminal waits for the own-pty validation run.');
@@ -1166,32 +1210,33 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
     let releaseStandIns: () => void;
     let profile: Record<string, unknown>;
+    let contained: ContainedLaunch | undefined;
     try {
-      profile = shellSandboxProfile(launch, options, runtimeDirectory);
+      contained = containedLaunch(launch, options.home ?? homedir());
+      profile = shellSandboxProfile(contained.launch, options, runtimeDirectory);
       releaseStandIns = holdProtectedStandIns(standInProfile(profile, launch));
     } catch (error) {
       if (runtimeDirectory !== undefined) {
         rmSync(runtimeDirectory, { recursive: true, force: true });
       }
+      contained?.remove();
       return {
         status: 'sandbox-unavailable',
         message: `a protected path could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    const { remove } = contained;
+    const release = (): void => {
+      releaseStandIns();
+      remove();
+    };
     const announcement = announcementFor(launch);
     let started: Supervisor;
     try {
       started = await startSupervisor(
         {
           profile,
-          /* Only the provider sets ZDOTDIR, and only for the Terminal Zsh it admitted: a host value stays refused. */
-          command: shellSandboxCommand(
-            launch.startupFiles === 'zsh'
-              ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
-                { ...launch, environment: { ...launch.environment, ZDOTDIR: options.home ?? homedir() } }
-              : launch,
-            announcement?.command,
-          ),
+          command: shellSandboxCommand(contained.launch, announcement?.command),
           workingDirectory: launch.workingDirectory,
           commandId: launch.commandId,
           guard: launch.network.domains.length > 0,
@@ -1200,7 +1245,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         { runtimeDirectory, lock },
       );
     } catch (error) {
-      releaseStandIns();
+      release();
       throw error;
     }
     const supervisor: Supervisor = {
@@ -1209,7 +1254,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         try {
           await started.close();
         } finally {
-          releaseStandIns();
+          release();
         }
       },
     };

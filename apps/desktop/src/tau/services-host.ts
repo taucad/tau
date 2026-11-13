@@ -14,7 +14,7 @@ import type { HostPrepareKernel } from '@taucad/host';
 import { preparableKernels } from '@taucad/native-process-core/store';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
-import { createDesktopShell } from '#tau/services-host-shell.js';
+import { bundledGitToolchain, createDesktopShell } from '#tau/services-host-shell.js';
 import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 import type { UtilityMessage } from '#tau/services-host.impl.js';
 
@@ -162,6 +162,8 @@ const shell = createDesktopShell({
   bwrapPath: process.env['TAU_DESKTOP_SHELL_BWRAP'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_BWRAP'],
   /* Host-owned, denied to every shell: the stand-ins a crashed services host left behind are swept from here. */
   standInJournal: join(authorityDirectory, 'shell-stand-ins.json'),
+  /* One git for the engine and both shells: the bundled git and its git-lfs first on the shell's PATH. */
+  toolchain: bundledGitToolchain(gitExecutable),
   ...(diagnostics === undefined
     ? {}
     : {
@@ -206,6 +208,10 @@ const host = createServicesHost({
   },
   terminalSessionsAnswered: (requestId, sessions) => {
     parentPort.postMessage({ type: 'terminal-sessions-answered', requestId, sessions });
+  },
+  /* Raw: main's error reporting redacts it before it leaves the machine. */
+  onRevisionEngineFailure: (failure) => {
+    parentPort.postMessage({ type: 'revision-engine-failed', ...failure });
   },
   machineBindingCompleted: (requestId, result) => {
     parentPort.postMessage(

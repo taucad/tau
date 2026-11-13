@@ -119,6 +119,12 @@ export type RevisionLogEntry = Readonly<{
   provenance: RecordedProvenance;
   /** The commit's own git author name, on a commit Tau did not record (B3); absent on one it did. */
   authorName?: string;
+  /**
+   * The Tau account the commit's author address names, on a commit Tau did not
+   * record: one made with git under that person's Tau no-reply address. Absent
+   * on a recorded commit and on any other address.
+   */
+  authorAccountId?: string;
   conflicted: boolean;
 }>;
 
@@ -444,6 +450,24 @@ export type Checkout = Readonly<{
   branch: string | undefined;
   /** The revision its head names, or `undefined` on an unborn branch. */
   baseRevisionId: RevisionId | undefined;
+}>;
+
+/**
+ * A Git operation in progress in one checkout, which Tau waits out instead of recording over.
+ *
+ * - `merge`, `cherryPick`, `revert` and `rebase`: stock Git stopped part-way
+ *   (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `rebase-merge` or
+ *   `rebase-apply`), usually on a conflict the person is resolving.
+ * - `detached`: the checkout's `HEAD` names a commit rather than a branch, so
+ *   no branch could carry a revision. `branch` is the one Git left last, the
+ *   way back, when Git's own log names one.
+ * - `locked`: another Git process holds the checkout's `index.lock`.
+ *
+ * @public
+ */
+export type RevisionGitOperation = Readonly<{
+  kind: 'merge' | 'cherryPick' | 'revert' | 'rebase' | 'detached' | 'locked';
+  branch?: string;
 }>;
 
 /**
@@ -830,6 +854,19 @@ export type RevisionPort = Readonly<{
    * @returns A value that differs whenever those sources do.
    */
   ignoreContext?(root?: string): Promise<string>;
+  /**
+   * The Git operation another process left in progress in one checkout.
+   *
+   * A store shared with stock Git can be mid-merge, mid-rebase or on a
+   * detached head while Tau watches it. A revision cut then would record
+   * conflict markers or move the branch under the person's own operation, so
+   * a checkout waits while this answers anything. A port with no stock Git
+   * beside it leaves it out.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns The operation, or `undefined` when nothing is in progress.
+   */
+  gitOperation?(root?: string): Promise<RevisionGitOperation | undefined>;
   /** Add one linked checkout on its own branch. */
   addCheckout?(input: AddCheckoutInput): Promise<Checkout>;
   /** Remove one linked checkout. Removing the live checkout is refused. */

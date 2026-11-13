@@ -21,6 +21,10 @@ const publish = (next: RemoteComputePlacement): void => {
 export const getRemoteComputePlacement = (): RemoteComputePlacement => placement;
 export const getRemoteComputeSelectionRevision = (): number => selectionRevision;
 
+/** Listen for every published placement, which also carries each change of the selection revision. */
+export const subscribeRemoteComputePlacement = (listener: () => void): (() => void) =>
+  placementTopic.subscribe(listener);
+
 export const setRemoteComputePlacement = (next: RemoteComputePlacement): void => {
   publish(next);
 };

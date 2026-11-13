@@ -8,15 +8,25 @@
  * is a history entry with no number, a named point is a version, `V3`, once per
  * project, and "revision" and "Rev" are reserved for a future release workflow. The glyph family is the header trigger's, most urgent first:
  * `CircleAlert` red when something failed, `GitMerge` and `CloudAlert` amber
- * when a decision or an ask waits on the person, `CircleDashed` while work is in
+ * when a decision or an ask waits on the person, `CirclePause` amber while the
+ * person's own Git holds every save, `CircleDashed` while work is in
  * flight, `FileDiff` amber when the files are modified, `ArrowDownToLine` for
  * work that arrived, and `History` at rest. Purple stays with the chat's own soft
  * errors, which are not revision states (HQ5).
  */
-import { ArrowDownToLine, CircleAlert, CircleDashed, CloudAlert, FileDiff, GitMerge, History } from 'lucide-react';
+import {
+  ArrowDownToLine,
+  CircleAlert,
+  CircleDashed,
+  CirclePause,
+  CloudAlert,
+  FileDiff,
+  GitMerge,
+  History,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { isCeilingRefusal, isGithubRemoteUrl } from '@taucad/revisions';
-import type { RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
+import type { RemoteFacet, RevisionGitOperation, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import type { SidebarMark } from '#hooks/use-sidebar-status.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
@@ -75,6 +85,18 @@ export const undoLabel = 'Undo';
 
 /** What an *Undo restore* says: one more entry on top that put the files back. @public */
 export const undidRestoreSentence = 'Undid the restore';
+
+/** What the *Merged* toast's Undo says: one more entry on top with the files from before the merge (I11). @public */
+export const undidMergeSentence = 'Undid the merge';
+
+/**
+ * What the *Closed* toast's Undo says: the branch has its files on this device again, at the head it kept.
+ *
+ * @param branch - The branch reopened.
+ * @returns The toast's sentence.
+ * @public
+ */
+export const reopenedSentence = (branch: string): string => `Reopened ${branch}`;
 
 /**
  * What a *Switch* says once it has moved: whether it saved unsaved work first,
@@ -490,6 +512,42 @@ export const conflictSentence = (status: RevisionStatusProjection, where: Revisi
   return line === undefined ? needsDecision : `${needsDecision} on ${line}`;
 };
 
+/** The operation each stopped Git command leaves, as the sentence names it. */
+const gitOperationWords: Readonly<Record<'merge' | 'cherryPick' | 'revert' | 'rebase', string>> = {
+  merge: 'merge',
+  cherryPick: 'cherry-pick',
+  revert: 'revert',
+  rebase: 'rebase',
+};
+
+/**
+ * Why saving waits on the person's own Git, and the way on (engine coexistence).
+ *
+ * A save would record conflict markers, or move the branch under the
+ * person's own operation, so every save waits until it ends. The sentence
+ * names the operation and what ends it; a detached head names the branch to
+ * go back to, when Git's own log knows it.
+ *
+ * @param waiting - The operation the checkout waits on.
+ * @returns *Saving paused · Finish or abort the merge in Git*, or the detached head's way back.
+ * @public
+ */
+export const waitingSentence = (waiting: RevisionGitOperation): string => {
+  switch (waiting.kind) {
+    case 'detached': {
+      return waiting.branch === undefined
+        ? 'Not on a branch · Switch to a branch in Git to keep saving'
+        : `Not on a branch · Run git switch ${waiting.branch} to go back`;
+    }
+    case 'locked': {
+      return 'Saving paused · Git is busy';
+    }
+    default: {
+      return `Saving paused · Finish or abort the ${gitOperationWords[waiting.kind]} in Git`;
+    }
+  }
+};
+
 /** Failed, then needs you: the two tiers that interrupt. */
 const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWhere): RevisionFacts | undefined => {
   const { sync } = status;
@@ -500,6 +558,9 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   /* HQ3: an owner's revoke is the calm resting state below, never a red failure. */
   if (where.role !== 'revoked' && sync.state === 'failed' && failedBackupReasons.has(sync.reason ?? 'unknown')) {
     return { icon: CircleAlert, tone: 'text-feature', mark: 'failed', sentence: 'Couldn’t back up' };
+  }
+  if (status.waiting !== undefined) {
+    return { icon: CirclePause, tone: 'text-warning', mark: 'attention', sentence: waitingSentence(status.waiting) };
   }
   if (hasRevisionConflict(status)) {
     return { icon: GitMerge, tone: 'text-warning', mark: 'attention', sentence: conflictSentence(status, where) };
@@ -740,7 +801,8 @@ export const selectStripVerbs = ({
    */
   canUpgrade?: boolean;
 }>): Readonly<{ primary: StripVerb | undefined; secondary: readonly StripVerb[] }> => {
-  if (status === undefined || !canWrite || hasRevisionConflict(status)) {
+  /* While the person's Git holds the files, *Save* would wait too and *Discard* would write under their merge. */
+  if (status === undefined || !canWrite || hasRevisionConflict(status) || status.waiting !== undefined) {
     return { primary: undefined, secondary: [] };
   }
   if (status.attention - status.conflicts.length > 0) {

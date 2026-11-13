@@ -53,6 +53,19 @@ import { completeGithubAuthorization } from './github-identity.ts';
 import { flagStateInitScript, flagStateVariable, resolveFlagState } from './flag-state.ts';
 import type { FlagStateName } from './flag-state.ts';
 import { startLinkedGithubFixture } from './linked-github-fixture.ts';
+import {
+  cloudLoadTierVariable,
+  cloudStandInBody,
+  consentCookieName,
+  cloudStandInPaths,
+  fileManagerWorkerPath,
+} from './cloud-stand-ins.ts';
+import type {
+  CloudRequestCounts,
+  CloudRequestName,
+  CloudStandInDelays,
+  CloudStandInEndpoint,
+} from './cloud-stand-ins.ts';
 import type { LinkedGithubFixture } from './linked-github-fixture.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
 
@@ -153,6 +166,15 @@ type Session = {
 };
 
 const sessions = new Map<string, Session>();
+
+/** The cloud-build tier's stand-in API for one target context: how long each answer is held, and what was asked. */
+type CloudStandIns = {
+  delays: CloudStandInDelays;
+  readonly counts: Record<CloudRequestName, number>;
+  /** The answers parked by a `'held'` delay, each given when the spec releases its endpoint. */
+  readonly parked: Array<{ readonly endpoint: CloudStandInEndpoint; readonly release: (answer: boolean) => void }>;
+};
+const cloudStandIns = new WeakMap<ProviderContext, CloudStandIns>();
 const observedDownloads = new WeakMap<
   TargetPage,
   Array<Promise<{ readonly base64: string; readonly suggestedFilename: string } | Error>>
@@ -303,6 +325,10 @@ const closeServer = async (server: Server): Promise<void> =>
 
 const disposeSession = async (session: Session): Promise<void> => {
   const errors: unknown[] = [];
+  /* A held stand-in answer is let go unanswered, so no route handler outlives its context. */
+  for (const parked of cloudStandIns.get(session.context)?.parked.splice(0) ?? []) {
+    parked.release(false);
+  }
   for (const gate of session.agentHostGatewayGates.splice(0)) {
     gate.release();
   }
@@ -876,6 +902,142 @@ export const uiStartModelCatalogApi: BrowserCommand<[], { readonly serverHasCata
     throw new Error('The API model catalog has no enabled rows.');
   }
   return { serverHasCatalog: await waitForServerCatalog(first.id) };
+};
+
+const cloudStandInEndpoint = (pathname: string): CloudStandInEndpoint | undefined =>
+  (Object.keys(cloudStandInPaths) as CloudStandInEndpoint[]).find((endpoint) =>
+    cloudStandInPaths[endpoint].test(pathname),
+  );
+
+/** Whether this run is the cloud-build load tier (`ui-e2e:test:e2e:cloud-load` sets `TAU_E2E_CLOUD_LOAD`). */
+export const uiIsCloudLoadTier: BrowserCommand<[], boolean> = () => process.env[cloudLoadTierVariable] === 'true';
+
+/**
+ * The cloud-build tier's stand-in API (`cloud-stand-ins.ts`): answer `get-session`, `/v1/projects` and
+ * `/v1/agents` on the API origin for every page the target context opens, as the API would answer the signed-in
+ * stand-in owner, and count each request and each request for the file-manager worker's script. No API runs and
+ * nothing is signed: every other path on the API origin is refused at once, as an absent API refuses it, so an API
+ * that happens to listen locally changes nothing. A route a spec registers later for one path (the model catalog
+ * fixture) still answers that path. Each answer is held for its delay in `delays` (milliseconds, or `'held'` until
+ * `uiReleaseCloudStandIn`), so a spec forces what a slow answer shows. Routing
+ * turns off the context's HTTP cache, so a second request for the worker is a request, not a cache read. Call it
+ * before the first navigation.
+ */
+export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays]> = async (
+  commandContext,
+  delays = {},
+) => {
+  const { context } = sessionFor(commandContext);
+  if (cloudStandIns.has(context)) {
+    throw new Error('The cloud stand-ins are already installed for this target.');
+  }
+  const standIns: CloudStandIns = {
+    delays: { ...delays },
+    counts: { session: 0, projects: 0, agents: 0, fileManagerWorker: 0 },
+    parked: [],
+  };
+  cloudStandIns.set(context, standIns);
+  /* A visitor who has answered the analytics offer: the server renders no banner, so Do Not Track
+     (`uiOpenTarget`) never removes one from `body` after hydration, which a load row would count. */
+  await context.addCookies([
+    {
+      name: consentCookieName,
+      value: encodeURIComponent(JSON.stringify({ status: 'declined', version: 1 })),
+      url: testBaseURL,
+    },
+  ]);
+  const apiOrigin = new URL(tauApiUrl).origin;
+  context.on('request', (request) => {
+    if (fileManagerWorkerPath.test(new URL(request.url()).pathname)) {
+      standIns.counts.fileManagerWorker += 1;
+    }
+  });
+  await context.route(
+    (url) => url.origin === apiOrigin,
+    async (route, request) => {
+      const endpoint = cloudStandInEndpoint(new URL(request.url()).pathname);
+      if (endpoint === undefined) {
+        await route.abort('connectionrefused');
+        return;
+      }
+      const headers = {
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-origin': request.headers()['origin'] ?? new URL(testBaseURL).origin,
+        vary: 'origin',
+      };
+      if (request.method() === 'OPTIONS') {
+        await route.fulfill({
+          status: 204,
+          headers: {
+            ...headers,
+            'access-control-allow-methods': 'GET,POST,OPTIONS',
+            'access-control-allow-headers': request.headers()['access-control-request-headers'] ?? '*',
+          },
+        });
+        return;
+      }
+      standIns.counts[endpoint] += 1;
+      const delay = standIns.delays[endpoint] ?? 0;
+      if (delay === 'held') {
+        const answer = await new Promise<boolean>((resolve) => {
+          standIns.parked.push({ endpoint, release: resolve });
+        });
+        if (!answer) {
+          /* The target is closing: its context drops the request. */
+          return;
+        }
+      } else if (delay > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, delay);
+        });
+      }
+      await route.fulfill({
+        status: 200,
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(cloudStandInBody(endpoint)),
+      });
+    },
+  );
+};
+
+/** Change how long each stand-in answer is held, for the requests that arrive from now on. */
+export const uiSetCloudStandInDelays: BrowserCommand<[delays: CloudStandInDelays]> = (commandContext, delays) => {
+  const standIns = cloudStandIns.get(sessionFor(commandContext).context);
+  if (!standIns) {
+    throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
+  }
+  standIns.delays = { ...delays };
+};
+
+/** Give every held answer for `endpoint` now, and answer its later requests at once. */
+export const uiReleaseCloudStandIn: BrowserCommand<[endpoint: CloudStandInEndpoint]> = (commandContext, endpoint) => {
+  const standIns = cloudStandIns.get(sessionFor(commandContext).context);
+  if (!standIns) {
+    throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
+  }
+  standIns.delays = { ...standIns.delays, [endpoint]: 0 };
+  for (const parked of standIns.parked.filter((entry) => entry.endpoint === endpoint)) {
+    standIns.parked.splice(standIns.parked.indexOf(parked), 1);
+    parked.release(true);
+  }
+};
+
+/** How many times each stand-in answer and the file-manager worker were requested; with `reset`, count from zero. */
+export const uiReadCloudRequestCounts: BrowserCommand<[reset?: boolean], CloudRequestCounts> = (
+  commandContext,
+  reset = false,
+) => {
+  const standIns = cloudStandIns.get(sessionFor(commandContext).context);
+  if (!standIns) {
+    throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
+  }
+  const counts = { ...standIns.counts };
+  if (reset) {
+    for (const name of Object.keys(standIns.counts) as CloudRequestName[]) {
+      standIns.counts[name] = 0;
+    }
+  }
+  return counts;
 };
 
 /** CDP sessions holding a page's CPU throttle; the rate lasts only while its session stays attached. */
@@ -3528,6 +3690,11 @@ export const uiBrowserCommands = {
   uiInstallAgentHostGatewayFixture,
   uiInstallModelCatalogFixture,
   uiStartModelCatalogApi,
+  uiIsCloudLoadTier,
+  uiInstallCloudStandIns,
+  uiSetCloudStandInDelays,
+  uiReleaseCloudStandIn,
+  uiReadCloudRequestCounts,
   uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,
   uiReadLinkedGithubFixture,

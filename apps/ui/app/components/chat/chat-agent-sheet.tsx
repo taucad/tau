@@ -1465,6 +1465,19 @@ function Sheet({
 }
 
 /**
+ * The model name's stand-in while the catalog has not named it: 80px when the bar has room, and cut like the name
+ * when it has not, so the bar's collapse (`useBarCollapse`) measures it as overflowing and lets the kernel, mode and
+ * level labels leave first instead of squeezing the trigger under its own content.
+ */
+function TriggerModelPlaceholder(): React.JSX.Element {
+  return (
+    <span data-slot='trigger-model-placeholder' aria-hidden='true' className='flex h-3 w-20 min-w-0 overflow-hidden'>
+      <span className='h-full w-20 shrink-0 rounded-sm bg-muted' />
+    </span>
+  );
+}
+
+/**
  * The trigger, beside Send, and the sheet it opens — a popover on desktop, a
  * drawer on a phone. ⌘/ opens it. Closing hands focus back to the editor unless
  * the person clicked somewhere else (F14).
@@ -1509,11 +1522,7 @@ export function ChatAgentSheet({
     >
       {sheetModel.glyph}
       {sheetModel.isNamePending ? (
-        <span
-          data-slot='trigger-model-placeholder'
-          aria-hidden='true'
-          className='h-3 w-20 shrink-0 rounded-sm bg-muted'
-        />
+        <TriggerModelPlaceholder />
       ) : (
         <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
           {sheetModel.name}

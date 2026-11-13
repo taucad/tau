@@ -287,6 +287,14 @@ describe('consumerParity', () => {
       'Client-hosted static host',
     ]);
     expect(consumers.every(({ oracles }) => oracles.length > 0)).toBe(true);
+    // DS-4: the packaged suite runs only as the staging candidate gate, so its row reads that gate on `main`.
+    expect(consumers.find(({ name }) => name === 'Packaged desktop')?.oracles).toEqual([
+      expect.objectContaining({
+        workflow: 'release-desktop-staging.yml',
+        job: 'Packaged desktop gate / Packaged desktop end-to-end (darwin-arm64)',
+        scope: 'main',
+      }),
+    ]);
     expect(consumers.flatMap(({ oracles }) => oracles).filter(({ kind }) => kind === 'missing')).toEqual([]);
   });
 });

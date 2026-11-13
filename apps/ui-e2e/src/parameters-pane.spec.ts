@@ -628,8 +628,11 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   const geometryBeforeDisplayChange = await target.evaluateLocator(canvas, (element) =>
     (element as HTMLCanvasElement).toDataURL(),
   );
-  await target.click(selectors.getByRole('button', { name: /^Grid 1 mm, units and grid$/u }).first());
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).first());
+  await target.click(selectors.getByRole('menuitem', { name: 'Grid & units, 1 mm' }));
   await target.click(selectors.getByRole('menuitemradio', { name: /Centimeter\s+cm/u }));
+  // The first Escape steps back from the Grid & units sub-view; the second closes the menu.
+  await target.keyboardPress('Escape');
   await target.keyboardPress('Escape');
   const widthInCentimeters = selectors.getByLabelText('Input for Width').first();
   await expect.poll(async () => fieldNumber(widthInCentimeters)).toBe(2);

@@ -1010,6 +1010,160 @@ describe('ProjectWorkspaceProvider', () => {
     codeContent.remove();
     textArea.remove();
   });
+
+  describe('pane intents before the workbench connects (A0.3)', () => {
+    /** A layout record still in its first read: it takes a pane as a change and may hand it back later. */
+    const readingRecord = () => {
+      const handBacks: Array<() => void> = [];
+      const changes = vi.fn<WorkbenchLayoutController['personWorkbenchChanged']>((_next, unapplied) => {
+        if (unapplied) {
+          handBacks.push(unapplied);
+        }
+      });
+      const controller: WorkbenchLayoutController = {
+        snapshot: () => undefined,
+        subscribe: () => () => undefined,
+        restorePreviousArrangement: async () => true,
+        registerViewer: () => () => undefined,
+        registerWorkbench: () => () => undefined,
+        personViewerChanged: () => undefined,
+        personWorkbenchChanged: changes,
+        ready: () => false,
+      };
+      return {
+        controller,
+        changes,
+        handBack: () => {
+          for (const unapplied of handBacks.splice(0)) {
+            unapplied();
+          }
+        },
+      };
+    };
+
+    // A0.3 row 1a, Y5/I11: an intent the record hands back is applied once, when the workbench connects.
+    it('should apply a handed-back pane intent once when the workbench connects after it', () => {
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      const record = readingRecord();
+      act(() => {
+        workspace.registerLayoutController(record.controller);
+        workspace.openPanel('share');
+      });
+      expect(record.changes).toHaveBeenCalledOnce();
+      act(() => {
+        record.handBack();
+      });
+      const opener = vi.fn();
+      let disconnect = (): void => undefined;
+      act(() => {
+        disconnect = workspace.connectWorkbench(opener);
+      });
+      expect(opener).toHaveBeenCalledExactlyOnceWith('share');
+      act(() => {
+        disconnect();
+        workspace.connectWorkbench(opener);
+      });
+      expect(opener).toHaveBeenCalledOnce();
+    });
+
+    // A0.3 row 1b, Y5/I11 (`routeChanged`): lines 238 to 249 clear a held intent when the route key changes.
+    it.each(['before', 'after'] as const)(
+      'should drop a pane intent when the route key changes %s the record hands it back',
+      (order) => {
+        const view = render(
+          <ProjectWorkspaceProvider>
+            <Probe />
+          </ProjectWorkspaceProvider>,
+        );
+        const record = readingRecord();
+        act(() => {
+          workspace.registerLayoutController(record.controller);
+          workspace.openPanel('share');
+        });
+        if (order === 'after') {
+          act(() => {
+            record.handBack();
+          });
+        }
+        route.key = 'next-route';
+        view.rerender(
+          <ProjectWorkspaceProvider>
+            <Probe />
+          </ProjectWorkspaceProvider>,
+        );
+        if (order === 'before') {
+          act(() => {
+            record.handBack();
+          });
+        }
+        const opener = vi.fn();
+        act(() => {
+          workspace.connectWorkbench(opener);
+        });
+        expect(opener).not.toHaveBeenCalled();
+      },
+    );
+
+    // A0.3 row 1c, Y5/I11: a handed-back pane intent survives a workbench close (only held Files and user-file intents
+    // are cleared there) and is still applied exactly once when a workbench next connects.
+    it('should keep a handed-back pane intent across a workbench close and apply it once on the next connect', () => {
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      const record = readingRecord();
+      act(() => {
+        workspace.registerLayoutController(record.controller);
+        workspace.openPanel('share');
+      });
+      act(() => {
+        record.handBack();
+        workspace.setWorkbenchOpen(false);
+      });
+      const opener = vi.fn();
+      let disconnect = (): void => undefined;
+      act(() => {
+        disconnect = workspace.connectWorkbench(opener);
+      });
+      expect(opener).toHaveBeenCalledExactlyOnceWith('share');
+      act(() => {
+        disconnect();
+        workspace.connectWorkbench(opener);
+      });
+      expect(opener).toHaveBeenCalledOnce();
+    });
+
+    // A0.3 row 6, Y4/Y5 (`target-phone`): on the phone shell a workbench pane intent settles by setting the active
+    // tab; it never waits for a workbench adapter or the layout record.
+    it('should settle a workbench pane intent on the phone by setting mobileActiveTab alone', () => {
+      state.isMobile = true;
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      const record = readingRecord();
+      act(() => {
+        workspace.registerLayoutController(record.controller);
+        workspace.openPanel('share');
+      });
+      expect(send).toHaveBeenCalledExactlyOnceWith({
+        type: 'setPanelState',
+        panelState: { mobileActiveTab: 'share' },
+      });
+      expect(record.changes).not.toHaveBeenCalled();
+      const opener = vi.fn();
+      act(() => {
+        workspace.connectWorkbench(opener);
+      });
+      expect(opener).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('resolveCompactAuxiliary', () => {

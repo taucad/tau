@@ -264,10 +264,73 @@
       "id": 36
     },
     {
+      "title": "Reasoning replay: prefix breaks and refusals",
+      "type": "row",
+      "collapsed": false,
+      "description": "Both headline counts should stay at zero. An unsanctioned break is a changed history that no recorded cause explains, or reasoning the provider reported dropping; a replay rejection is a provider refusing replayed reasoning, which stops that chat on that model. Runbook: docs/handbooks/cloud/playbooks/chat-llm-failing.md",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+      "panels": [],
+      "id": 37
+    },
+    {
+      "title": "Replay Rejections (24h)",
+      "type": "stat",
+      "description": "Turns that failed with REASONING_REPLAY_REJECTED: the user saw 'This model cannot continue this chat'. Pages as agent-replay-rejected.",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_agent_errors_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\",error_code=\"REASONING_REPLAY_REJECTED\"}[24h])) or vector(0)"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 47 },
+      "id": 38
+    },
+    {
+      "title": "Unsanctioned Prefix Breaks (24h)",
+      "type": "stat",
+      "description": "Requests whose prefix changed with no recorded cause, or whose replayed reasoning the provider dropped. Warns as agent-prefix-break-unsanctioned.",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_agent_prefix_breaks_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\",prefix_break_cause=\"unsanctioned\"}[24h])) or vector(0)"
+        }
+      ],
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 47 },
+      "id": 39
+    },
+    {
+      "title": "Prefix Breaks by Cause and Provider",
+      "type": "timeseries",
+      "description": "Every recorded prefix break. Compaction, clearing, attachment eviction, model, definitions, instructions, tools and settings are expected; unsanctioned is not.",
+      "targets": [
+        {
+          "expr": "sum by (prefix_break_cause, gen_ai_provider_name) (increase(tau_agent_prefix_breaks_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\"}[1h]))",
+          "legendFormat": "{{prefix_break_cause}} {{gen_ai_provider_name}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
+      "id": 40
+    },
+    {
+      "title": "Replay Rejections and Reasoning Left Out",
+      "type": "timeseries",
+      "description": "Replay rejections by agent and placement, and the native reasoning blocks Tau left out at a break (expected at any break).",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, agent_placement) (increase(tau_agent_errors_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\",error_code=\"REASONING_REPLAY_REJECTED\"}[1h]))",
+          "legendFormat": "rejected {{agent_id}} {{agent_placement}}"
+        },
+        {
+          "expr": "sum by (prefix_break_cause) (increase(tau_agent_reasoning_omitted_blocks_total{app=~\"$app\",service_name=~\"$service\",agent_id=~\"$agent\"}[1h]))",
+          "legendFormat": "left out at {{prefix_break_cause}}"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
+      "id": 41
+    },
+    {
       "title": "Agent context",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 60 },
       "panels": [],
       "id": 14
     },
@@ -282,7 +345,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 47 },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 61 },
       "id": 15
     },
     {
@@ -296,7 +359,7 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 47 },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 61 },
       "id": 16
     },
     {
@@ -321,7 +384,7 @@
           }
         }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 47 },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 61 },
       "id": 17
     },
     {
@@ -346,7 +409,7 @@
           }
         }
       },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 47 },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 61 },
       "id": 18
     },
     {
@@ -365,7 +428,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 66 },
       "id": 19
     },
     {
@@ -384,7 +447,7 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 66 },
       "id": 20
     },
     {
@@ -405,7 +468,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 74 },
       "id": 21
     },
     {
@@ -421,7 +484,7 @@
       "fieldConfig": {
         "defaults": { "unit": "percentunit", "min": 0, "max": 1 }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 74 },
       "id": 22
     },
     {
@@ -440,7 +503,7 @@
       "fieldConfig": {
         "defaults": { "unit": "bytes" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 82 },
       "id": 23
     },
     {
@@ -455,7 +518,7 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 68 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 82 },
       "id": 24
     },
     {
@@ -476,7 +539,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 76 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 90 },
       "id": 25
     },
     {
@@ -492,7 +555,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 76 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 90 },
       "id": 26
     },
     {
@@ -513,7 +576,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 84 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 98 },
       "id": 27
     },
     {
@@ -528,14 +591,14 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 84 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 98 },
       "id": 28
     },
     {
       "title": "Tau-funded LLM calls through the API gateway, by surface",
       "type": "row",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 92 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 106 },
       "panels": [],
       "id": 29
     },
@@ -552,7 +615,7 @@
       "fieldConfig": {
         "defaults": { "unit": "currencyUSD" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 93 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 107 },
       "id": 30
     },
     {
@@ -567,7 +630,7 @@
       "fieldConfig": {
         "defaults": { "unit": "short" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 93 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 107 },
       "id": 31
     },
     {
@@ -582,7 +645,7 @@
       "fieldConfig": {
         "defaults": { "unit": "ops" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 101 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 115 },
       "id": 32
     },
     {
@@ -601,7 +664,7 @@
       "fieldConfig": {
         "defaults": { "unit": "s" }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 101 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 115 },
       "id": 33
     },
     {
@@ -615,7 +678,7 @@
         }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 109 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 123 },
       "id": 34
     }
   ]

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep } from 'vitest-mock-extended';
 import type { IncomingMessage } from 'node:http';
 import type { HttpAdapterHost } from '@nestjs/core';
 import type { Auth } from 'better-auth';
@@ -11,6 +11,7 @@ import type { DevWebSocketService } from '@taucad/api-lifecycle';
 import type { CommercialEntitlementsService } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
+import { SessionResolver } from '@taucad/api-auth';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 
@@ -36,8 +37,13 @@ const createGateway = (options: {
   const getSession =
     options.sessionError === true
       ? vi.fn().mockRejectedValue(new Error('session backend down'))
-      : vi.fn().mockResolvedValue(options.userId === undefined ? null : { user: { id: options.userId } });
-  const auth = { api: { getSession } } as unknown as Auth;
+      : vi.fn().mockResolvedValue({
+          response:
+            options.userId === undefined ? null : { session: { id: 'session-1' }, user: { id: options.userId } },
+          headers: new Headers(),
+        });
+  // The real resolver over a stub instance, so the upgrade's lookup is the one production makes.
+  const sessions = new SessionResolver({ api: { getSession } } as unknown as Auth, mockDeep<MetricsService>());
 
   const service = mock<KernelsService>();
   service.createZooProxy.mockImplementation((socket) => {
@@ -54,7 +60,7 @@ const createGateway = (options: {
   const gateway = new KernelsGateway(
     service,
     mock<DevWebSocketService>(),
-    auth,
+    sessions,
     entitlements,
     zooTokens,
     mock<HttpAdapterHost>(),

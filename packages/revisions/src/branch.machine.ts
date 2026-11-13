@@ -95,6 +95,8 @@ type BranchMachineContextFields = Readonly<{
   reasonCode: BranchFailureCode | undefined;
   /** Paths a merge could not settle; W10's resolution reads them. */
   conflicts: readonly string[];
+  /** What a landed merge moved `<current>` from and to, which its toast's Undo reverses (I11). */
+  merged: Readonly<{ revisionId: string; before: string | undefined }> | undefined;
   parentRef: AnyActorRef | undefined;
 }>;
 
@@ -173,6 +175,9 @@ export type BranchMachineEmitted =
       from?: string;
       /** A *Switch* recorded the unsaved work on `from` before it moved. */
       saved?: true;
+      /** The entry a *Merge* left `<current>` at, and its head before: what the toast's Undo returns it to (I11). */
+      revisionId?: string;
+      before?: string;
     }>
   /* P4: a refusal crosses as a code; the page owns the words. The verb and its
    * branch ride along, because a caller correlating one *New branch* must not
@@ -227,7 +232,8 @@ export type BranchApplySwitchActorOutput = Readonly<{
  * @public
  */
 export type BranchMergeActorOutput =
-  | Readonly<{ status: 'merged'; revisionId: string }>
+  /** `before`: `<current>`'s head before the merge, absent when it was unborn or nothing moved. */
+  | Readonly<{ status: 'merged'; revisionId: string; before?: string }>
   | Readonly<{ status: 'conflicted'; paths: readonly string[] }>;
 
 /** Output of the injected `rename` actor: the new name, and the checkout whose HEAD it moved, if any (RM-R5). @public */
@@ -268,6 +274,7 @@ const clearTransient = {
   checkoutId: undefined,
   checkoutRoot: undefined,
   conflicts: [],
+  merged: undefined,
 } satisfies Partial<BranchMachineContext>;
 
 /* The registry is one writer (`checkouts.machine`); this asks it through the
@@ -407,6 +414,7 @@ const branchMachineDefinition = setup({
     reason: undefined,
     reasonCode: undefined,
     conflicts: [],
+    merged: undefined,
     parentRef: input.parentRef,
   }),
   on: {
@@ -637,7 +645,10 @@ const branchMachineDefinition = setup({
               if (context.parentRef !== undefined) {
                 enq.sendTo(context.parentRef, fact);
               }
-              return { target: '#branch.applied' };
+              return {
+                target: '#branch.applied',
+                context: { merged: { revisionId: event.output.revisionId, before: event.output.before } },
+              };
             },
             onError: {
               target: '#branch.failed',
@@ -775,6 +786,10 @@ const branchMachineDefinition = setup({
             : { checkoutId: context.checkoutId, checkoutRoot: context.checkoutRoot }),
           ...(context.operation === 'switch' && context.leaving !== undefined ? { from: context.leaving } : {}),
           ...(context.operation === 'switch' && context.saved ? { saved: true } : {}),
+          /* Undo is offered only where the merge moved `<current>` from a head it had (I11). */
+          ...(context.merged?.before !== undefined && context.merged.before !== context.merged.revisionId
+            ? { revisionId: context.merged.revisionId, before: context.merged.before }
+            : {}),
         });
         /* D59: a branch made or renamed here mints nothing, so the scheduler
          * would read *Backed up* over a ref the remote has never seen. */

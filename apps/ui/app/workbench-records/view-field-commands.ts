@@ -19,7 +19,6 @@ import {
   lengthUnits,
   resolveViewSettings,
   tauViewDefaults,
-  viewFieldPaths,
   viewRecordV1Defaults,
   withViewField,
 } from '@taucad/workbench';
@@ -51,7 +50,6 @@ export type ViewFieldCommandPorts = Readonly<{
   exceptionsOf: (projectId: string, viewId: string) => readonly ViewFieldPath[];
   addException: (projectId: string, viewId: string, leaf: ViewFieldPath) => SectionWriteResult;
   removeException: (projectId: string, viewId: string, leaf: ViewFieldPath) => SectionWriteResult;
-  clearExceptions: (projectId: string, viewId: string) => SectionWriteResult;
 }>;
 
 /* One change to a view's exceptions: the write that makes it, and the writes that put the earlier list back. */
@@ -68,8 +66,6 @@ export type ViewFieldCommands = Readonly<{
     value: ViewFieldValues[Leaf],
   ) => Promise<boolean>;
   resetViewField: (view: ViewFieldTarget, leaf: ViewFieldPath) => Promise<boolean>;
-  /** "Reset view": every leaf back to its format value, and the view's exceptions cleared. */
-  resetView: (view: ViewFieldTarget) => Promise<boolean>;
 }>;
 
 /* Runs `run` once `previous` settles; an earlier command's failure is its own caller's to report. */
@@ -162,31 +158,6 @@ export const createViewFieldCommands = (ports: ViewFieldCommandPorts): ViewField
         ),
       );
     },
-    async resetView(view) {
-      return queued(view.viewId, 'view', async () => {
-        const before = ports.exceptionsOf(ports.projectId, view.viewId);
-        const clearing: ExceptionChange | undefined =
-          before.length === 0
-            ? undefined
-            : {
-                apply: () => ports.clearExceptions(ports.projectId, view.viewId),
-                undo: () => {
-                  for (const leaf of before) {
-                    ports.addException(ports.projectId, view.viewId, leaf);
-                  }
-                },
-              };
-        return withExceptions(clearing, async () =>
-          write(view, (record) => {
-            let next = record;
-            for (const leaf of viewFieldPaths) {
-              next = withViewField(next, leaf, viewRecordV1Defaults[leaf]);
-            }
-            return next;
-          }),
-        );
-      });
-    },
   };
 };
 
@@ -207,7 +178,6 @@ export const useViewFieldCommands = (): ViewFieldCommands => {
         exceptionsOf: (project, viewId) => exceptionsForView(viewExceptionsStore.read(), project, viewId),
         addException: viewExceptions.add,
         removeException: viewExceptions.remove,
-        clearExceptions: viewExceptions.clearView,
       }),
     [edit, projectId],
   );
@@ -218,8 +188,8 @@ export const useViewFieldCommands = (): ViewFieldCommands => {
  * record cannot hold is ignored.
  *
  * With `viewerControls` on, the bar also learns where each leaf's value comes from (`sourceOf`, resolved over the view
- * record, the person's defaults and this device's exceptions), what Reset returns a leaf to (`inheritsFrom`) and
- * "Reset view", and each set or reset is reported with `level: 'view'`. With it off the bar shows no marks.
+ * record, the person's defaults and this device's exceptions) and what Reset returns a leaf to (`inheritsFrom`), and
+ * each set or reset is reported with `level: 'view'`. With it off the bar shows no marks.
  *
  * @param view - The view the bar shows, or `undefined` for a bar that keeps changing the live owner (a shared session).
  * @returns The bar's commands.
@@ -278,14 +248,6 @@ export const useViewerViewFieldCommands = (view: ViewFieldTarget | undefined): V
       ...fields,
       sourceOf: (leaf) => sources[leaf],
       inheritsFrom: (leaf) => (leaf !== 'upDirection' && levels.person?.[leaf] !== undefined ? 'person' : 'tau'),
-      resetView: () => {
-        for (const leaf of viewFieldPaths) {
-          if (sources[leaf] === 'view') {
-            reportReset(leaf);
-          }
-        }
-        void commands.resetView(target);
-      },
     } satisfies ViewerViewFields;
   }, [commands, entryPath, levels.person, sources, telemetry, viewId]);
 };

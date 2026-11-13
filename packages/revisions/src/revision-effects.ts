@@ -672,6 +672,12 @@ const holdOf = (error: unknown, revisionId: string): SyncHold | undefined =>
 /* The sentence every verb reads when a turn holds the files it would rewrite (D10, A1). */
 const leasedMessage = 'An agent is working in this project’s files.';
 
+/* A merge's *Undo* refused because the branch has a newer entry: nothing was written over it (rule 10). */
+const mergeMovedError = (): Error => {
+  const code: RestoreFailureCode = 'UNDO_MERGE_MOVED';
+  return Object.assign(new Error('This branch changed after the merge, so the merge can’t be undone here.'), { code });
+};
+
 /** Where leases live, relative to the project. A `records` row in the registry. */
 const leaseDirectory = '.tau/runs';
 
@@ -993,6 +999,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     undo?: Readonly<{ paths: readonly string[]; tree: ImmutableRevisionTree; fillFrom: string | undefined }>;
     /** The operation this plan reverses, when it is an undo (D15) or D2's *Undo restore*. */
     undoes?: string;
+    /** The head the write requires, for the merge toast's *Undo*: the merge entry itself. */
+    expectHead?: string;
   }>('plan');
   const fences = new Map<string, Promise<void>>();
   const activeOperations = new Set<Promise<unknown>>();
@@ -4084,7 +4092,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const mergeBranches = async (
     input: MergeBranchesInput,
   ): Promise<
-    | Readonly<{ status: 'merged'; revisionId: string; checkoutId?: string }>
+    | Readonly<{ status: 'merged'; revisionId: string; checkoutId?: string; before?: string }>
     | Readonly<{ status: 'conflicted'; line: string; paths: readonly string[] }>
   > => {
     await ensureStore();
@@ -4164,7 +4172,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         validate: validateTarget,
         publish: async () => landMerge(ours, theirs),
       });
-      return { status: 'merged', revisionId: theirs, checkoutId: target.id };
+      /* `before` is what the toast's Undo returns `into` to; an unborn target has nothing to return to. */
+      return {
+        status: 'merged',
+        revisionId: theirs,
+        checkoutId: target.id,
+        ...(ours === undefined ? {} : { before: ours }),
+      };
     }
 
     /* By oid diff (D10): a path `theirs` left as the base had it merges to ours, so only what it changed is read. */
@@ -4216,7 +4230,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         publish: async () => landMerge(ours, revisionId(receipt.commitId)),
       },
     );
-    return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id };
+    return { status: 'merged', revisionId: receipt.commitId, checkoutId: target.id, before: ours };
   };
 
   /**
@@ -4882,6 +4896,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return planUndo(input.checkoutId, input.skip);
           }
           const place = await placeOf(input.checkoutId);
+          /* The merge toast's *Undo* (I11): only while `into` still stands where the merge left it. */
+          if (input.expectHead !== undefined && (await headOf(place)) !== input.expectHead) {
+            throw mergeMovedError();
+          }
           /* *Undo restore* is a restore of the restore row's first parent (D2). */
           const restored = input.firstParent === true ? await port.readRevision(revisionId(input.target)) : undefined;
           const target = input.firstParent === true ? restored?.parents[0] : input.target;
@@ -4900,6 +4918,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               checkoutId: input.checkoutId,
               revisionId: target,
               ...(input.firstParent === true ? { undoes: input.target } : {}),
+              /* Undoing a merge undoes that entry, and the head must still be it at the write. */
+              ...(input.expectHead === undefined ? {} : { undoes: input.expectHead, expectHead: input.expectHead }),
             }),
             revisionId: target,
             revisionNumber: await ordinalOnLine(place, target),
@@ -4945,6 +4965,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
              */
             validate: async (before) => {
               const head = await headOf(await placeOf(place.id));
+              /* A merge's Undo writes only over the merge itself: a later entry is never restored over (rule 10). */
+              if (plan.expectHead !== undefined && head !== plan.expectHead) {
+                throw mergeMovedError();
+              }
               const headTreeId = await treeIdOf(head);
               if (headTreeId === undefined || headTreeId !== (await checkoutTreeId(place.id, before))) {
                 throw changedMeanwhile();
@@ -5143,7 +5167,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /* The registry is re-read on `branchMerged`, so the moved checkout stays this module's. */
         const outcome = await mergeBranches(input);
         return outcome.status === 'merged'
-          ? { status: 'merged', revisionId: outcome.revisionId }
+          ? {
+              status: 'merged',
+              revisionId: outcome.revisionId,
+              ...(outcome.before === undefined ? {} : { before: outcome.before }),
+            }
           : { status: 'conflicted', paths: outcome.paths };
       }),
       /* A rename is two ref writes, in the order that cannot lose the head: the

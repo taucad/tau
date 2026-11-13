@@ -2873,6 +2873,40 @@ describe('the checkout registry', () => {
       /not in a revision yet/u,
     );
   }, 30_000);
+
+  /* I11: Close keeps the branch, so the Closed toast's Undo reopens its files at the head it kept. */
+  it('reopens a closed branch at the head it kept, whatever base the reopen names', async () => {
+    const { port, actors } = await fixture({ 'part.ts': 'one\n' });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await port.setHead('main');
+    const write = async (content: string, parents: readonly string[]): Promise<string> => {
+      const receipt = await port.writeRevision({
+        parents: parents.map((parent) => revisionId(parent)),
+        tree: new ImmutableRevisionTree([['part.ts', content]]),
+        provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 0, 1) },
+        summary: { generated: content.trim() },
+      });
+      return receipt.commitId;
+    };
+    const first = await write('one\n', []);
+    await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(first) });
+    const sideHead = await write('side\n', [first]);
+    await port.updateRef({ name: 'side', expectedHead: undefined, head: revisionId(sideHead) });
+    const added = await run<{ checkout: { id: string } }>(actors.checkouts.addCheckout, {
+      projectId: 'project-1',
+      branch: 'side',
+      from: '',
+    });
+
+    await run(actors.checkouts.removeCheckout, { projectId: 'project-1', id: added.checkout.id });
+    await expect(port.readRef('side')).resolves.toBe(sideHead);
+    const reopened = await run<{ checkout: { branch?: string; headRevisionId?: string } }>(
+      actors.checkouts.addCheckout,
+      { projectId: 'project-1', branch: 'side', from: first },
+    );
+
+    expect(reopened.checkout).toMatchObject({ branch: 'side', headRevisionId: sideHead });
+  }, 30_000);
 });
 
 for (const actorSet of actorSets) {
@@ -5218,6 +5252,49 @@ for (const actorSet of actorSets) {
       expect(new TextDecoder().decode(await filesystem.readFile('b.txt'))).toBe('theirs only\n');
     }, 30_000);
 
+    /* I11, rule 10: the Merged toast's Undo writes the files from before the merge, only over the merge itself. */
+    it('undoes a merge by writing the head it moved from, and refuses once the branch has moved past it', async () => {
+      const { port, actors, filesystem, ours, theirs, write } = await twoLines({
+        ours: 'base\n',
+        theirs: 'theirs\n',
+        extra: { 'b.txt': 'theirs only\n' },
+      });
+      const merged = await run<{ status: string; revisionId: string; before?: string }>(actors.branch.merge, {
+        projectId: 'project-1',
+        branch: 'feature',
+        into: 'main',
+      });
+      expect(merged.before).toBe(ours);
+
+      const plan = await run<{ planId: string; revisionId: string }>(actors.restore.computePlan, {
+        checkoutId: 'live',
+        target: ours,
+        expectHead: merged.revisionId,
+      });
+      expect(plan.revisionId).toBe(ours);
+      await run(actors.restore.applyPlan, { checkoutId: 'live', planId: plan.planId });
+      expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('base\n');
+      await expect(filesystem.readFile('b.txt')).rejects.toThrow();
+      /* The merged branch is untouched, and no ref went backwards: the mint that follows is a new entry. */
+      await expect(port.readRef('feature')).resolves.toBe(theirs);
+      await expect(port.readRef('main')).resolves.toBe(merged.revisionId);
+
+      /* The lost race: something newer than the merge is on main, so nothing is planned or written over it. */
+      const stale = await run<{ planId: string }>(actors.restore.computePlan, {
+        checkoutId: 'live',
+        target: ours,
+        expectHead: merged.revisionId,
+      });
+      const later = await write({ 'a.txt': 'later\n' }, [merged.revisionId], 'Later');
+      await port.updateRef({ name: 'main', expectedHead: revisionId(merged.revisionId), head: revisionId(later) });
+      await expect(
+        run(actors.restore.computePlan, { checkoutId: 'live', target: ours, expectHead: merged.revisionId }),
+      ).rejects.toMatchObject({ code: 'UNDO_MERGE_MOVED' });
+      await expect(run(actors.restore.applyPlan, { checkoutId: 'live', planId: stale.planId })).rejects.toMatchObject({
+        code: 'UNDO_MERGE_MOVED',
+      });
+    }, 30_000);
+
     it('restores the target checkout when publishing the merge loses its lease', async () => {
       const context = await twoLines({ ours: 'base\n', theirs: 'theirs\n', extra: { 'b.txt': 'theirs only\n' } });
       const refusingPort: RevisionPort = {
@@ -5269,7 +5346,8 @@ for (const actorSet of actorSets) {
         into: 'main',
       });
 
-      expect(outcome).toStrictEqual({ status: 'merged', revisionId: theirs });
+      /* `before` is the head the Merged toast's Undo returns `main` to (I11). */
+      expect(outcome).toStrictEqual({ status: 'merged', revisionId: theirs, before: base });
       expect(await port.readRef('main')).toBe(theirs);
       expect(new TextDecoder().decode(await filesystem.readFile('a.txt'))).toBe('theirs\n');
     }, 30_000);

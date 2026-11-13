@@ -178,11 +178,19 @@ describe('qualified desktop download catalog', () => {
     expect(
       select(projection())!.every((choice) => choice.cleanHost === 'passed' && !choice.detail.includes('pending')),
     ).toBe(true);
-    // Production never admits pending clean-host acceptance, for any route.
+    // Production admits pending clean-host acceptance only on the Mac routes, and says so on each.
     for (const index of value.routes.keys()) {
       const production = projection();
       production.routes[index]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
-      expect(() => select(production)).toThrow(/release qualification/u);
+      if (production.routes[index]!.route === 'macos-zip') {
+        const admitted = select(production)!;
+        expect(admitted.filter((choice) => choice.cleanHost === 'pending')).toHaveLength(1);
+        expect(admitted.find((choice) => choice.cleanHost === 'pending')?.detail).toContain(
+          'clean-Mac install testing pending',
+        );
+      } else {
+        expect(() => select(production)).toThrow(/release qualification/u);
+      }
     }
     // Staging admits it only on Mac routes, and only as the exact `pending` marker with release CI evidence.
     for (const index of [2, 3, 4]) {

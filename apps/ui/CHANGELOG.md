@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 (2026-11-13)
+
+### Fixes
+
+- fix(ui): Stop clipping the Desktop and Unavailable kernel badges (#1996) (6f6663202)
+- fix(ui): Keep the open Settings section mounted across the phone breakpoint (#1988) (e36bfa049)
+
 ## 0.9.0 (2026-11-13)
 
 ### Features

@@ -4,17 +4,18 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { dictationEventSchema, dictationStatusSchema } from '@taucad/chat/schemas';
-import type { Auth } from 'better-auth';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSession, FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { VoiceController } from '#api/voice/voice.controller.js';
 import { VoiceService } from '#api/voice/voice.service.js';
 import { TranscriptionProviderError, transcriptionProvidersKey } from '#api/voice/voice.types.js';
 import type { TranscriptionEvent, TranscriptionProvider } from '#api/voice/voice.types.js';
 
-type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;
+type Session = NonNullable<FakeSession>;
 type Received = { audio: Uint8Array<ArrayBuffer>; contentType: string };
 
 /** A provider that streams nothing; the route under test never reaches it. */
@@ -46,15 +47,15 @@ const stubProvider = (script: (received: Received) => AsyncIterable<Transcriptio
 
 const apps: NestFastifyApplication[] = [];
 const createApp = async (provider: TranscriptionProvider, signedIn = true) => {
-  const auth = mockDeep<Auth>();
-  auth.api.getSession.mockResolvedValue(signedIn ? mock<Session>({ user: { id: 'user-1' } }) : null);
+  const getSession = vi.fn<FakeSessionLookup>();
+  getSession.mockResolvedValue(signedIn ? mock<Session>({ user: { id: 'user-1' } }) : null);
   const module = await Test.createTestingModule({
     controllers: [VoiceController],
     providers: [
       Reflector,
       AuthGuard,
       VoiceService,
-      { provide: authInstanceKey, useValue: auth },
+      { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
       { provide: transcriptionProvidersKey, useValue: [provider] },
     ],
   }).compile();

@@ -87,7 +87,7 @@ async function openStage(viewport: { width: number; height: number }): Promise<v
   await target.click(navButton('Model'), { touch: true });
   await expect.poll(async () => target.getAttribute(navButton('Model'), 'aria-current')).toBe('page');
   await target.expectVisible(controls(), 60_000);
-  await target.expectVisible(controls().getByRole('button', { name: /^Grid / }), 60_000);
+  await target.expectVisible(controls().getByRole('button', { name: 'Section view' }), 60_000);
 }
 
 test.each([
@@ -99,9 +99,10 @@ test.each([
   const names = layout.buttons.map((button) => button.name);
 
   // The D6 order; fullscreen never shows on a phone, and Chromium cannot launch AR, so AR is absent, not disabled.
-  const tools = names.slice(names.findIndex((name) => name.startsWith('Grid ')));
-  expect(tools[0]).toMatch(/^Grid .+, units and grid$/u);
-  expect(tools.slice(1)).toEqual(expect.arrayContaining(['Section view', 'Measure', 'Fit view', 'Viewer settings']));
+  // The grid size and units moved into Viewer settings, so Section starts the tools.
+  const tools = names.slice(names.indexOf('Section view'));
+  expect(names.filter((name) => name.startsWith('Grid '))).toEqual([]);
+  expect(tools).toEqual(expect.arrayContaining(['Section view', 'Measure', 'Fit view', 'Viewer settings']));
   expect(tools.indexOf('Section view')).toBeLessThan(tools.indexOf('Measure'));
   expect(tools.indexOf('Measure')).toBeLessThan(tools.indexOf('Fit view'));
   expect(tools.indexOf('Fit view')).toBeLessThan(tools.indexOf('Viewer settings'));

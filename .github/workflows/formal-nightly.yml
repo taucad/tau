@@ -7,14 +7,39 @@ name: Formal nightly
 # printed for replay. `host:formal:nightly` runs the two ACP integration suites and
 # validates their captured chat logs against ChatLog.tla (go-live DEL-14), then runs the
 # AcpSessions nightly configs and replays fresh-seed simulations on the real parent.
+#
+# Placement (CI throughput review, Q-4 step 2): `ci.yml` calls this workflow in the merge queue with the
+# affected `formal:nightly` projects and the landing commit's sha as the seed, so each landing explores a
+# fresh, replayable seed for the projects it can break. The release gate (RG-1) calls it with every project.
+# The schedule stays until both have run green (§ 5b of the program's handoff).
+#
+# Seeds: every seeded tool reads `FORMAL_SEED`, a non-negative integer below 2^31 - 1, and picks a random
+# one when it is unset (the schedule and a dispatch). A caller passes `seed`, any string (a commit sha, a
+# run id), as `TAU_FORMAL_SEED`; the run step derives `FORMAL_SEED` from the first 32 bits of its SHA-256,
+# so the same landing commit always replays the same seed, and the log prints it for a local replay.
 
 on:
   schedule:
     - cron: '41 3 * * *' # 03:41 UTC
   workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit the tiers check out (the merge-queue commit, a release candidate)
+        type: string
+        required: true
+      projects:
+        description: JSON array of the `formal:nightly` projects to run (default every one)
+        type: string
+        required: false
+      seed:
+        description: Seed source, any string; FORMAL_SEED is derived from it (default a random seed per tool)
+        type: string
+        required: false
 
+# The schedule and a dispatch run one at a time; each caller's run (the queue, the release gate) has its own group.
 concurrency:
-  group: formal-nightly
+  group: formal-nightly${{ inputs.ref && format('-{0}-{1}', inputs.ref, github.run_id) || '' }}
   cancel-in-progress: false
 
 env:
@@ -43,25 +68,44 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref || '' }}
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: List the projects
         id: list
+        env:
+          REQUESTED: ${{ inputs.projects || '' }}
         run: |
-          # `tail -1` keeps the JSON array and drops Nx's log lines.
+          # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON array and drops Nx's log lines.
+          set -euo pipefail
           projects=$(pnpm nx show projects --with-target formal:nightly --json | tail -1)
           echo "Formal nightly projects: $projects"
           if [ "$(jq 'length' <<< "$projects")" -eq 0 ]; then
             echo "::error::No project has a formal:nightly target."
             exit 1
           fi
+          # A caller's list narrows the matrix; a name without a `formal:nightly` target, or an empty list, fails
+          # rather than runs less than the caller asked for.
+          if [ -n "$REQUESTED" ]; then
+            jq -e --argjson known "$projects" \
+              'type == "array" and length > 0 and all(.[]; type == "string" and (. as $name | $known | index([$name]) != null))' \
+              <<< "$REQUESTED" > /dev/null \
+              || { echo "::error::projects must be a non-empty JSON array of formal:nightly projects: $REQUESTED"; exit 1; }
+            projects=$(jq -c . <<< "$REQUESTED")
+            echo "Requested projects: $projects"
+          fi
           tiers='[]'
           for target in formal:nightly formal:nightly:check; do
             selected=$(pnpm nx show projects --with-target "$target" --json | tail -1)
-            tiers=$(jq -c --arg target "$target" --argjson projects "$selected" \
-              '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$tiers")
+            tiers=$(jq -c --arg target "$target" --argjson projects "$selected" --argjson requested "$projects" \
+              '. + [$projects[] | select(. as $name | $requested | index([$name]) != null)
+                | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$tiers")
           done
           echo "Formal nightly tiers: $tiers"
           echo "tiers=$tiers" >> "$GITHUB_OUTPUT"
@@ -81,9 +125,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref || '' }}
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
 
       - name: Setup formal toolchains
         uses: ./.github/actions/setup-formal
@@ -91,12 +140,20 @@ jobs:
           tools: tlc,lean,apalache
 
       # Streamed, because Nx holds a task's output until it ends and a job that reaches its budget
-      # would lose it.
+      # would lose it. With a caller's seed source, every seeded tool in the tier uses the one derived seed.
       - name: Run the project's formal nightly tier
         env:
           PROJECT: ${{ matrix.tier.project }}
           TARGET: ${{ matrix.tier.target }}
-        run: pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
+          TAU_FORMAL_SEED: ${{ inputs.seed || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAU_FORMAL_SEED" ]; then
+            FORMAL_SEED=$(( 16#$(printf '%s' "$TAU_FORMAL_SEED" | sha256sum | cut -c1-8) % 2147483647 ))
+            export FORMAL_SEED
+            echo "FORMAL_SEED=$FORMAL_SEED from seed source $TAU_FORMAL_SEED"
+          fi
+          pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
 
       - name: Upload formal reports and captured logs
         if: always()
@@ -107,5 +164,47 @@ jobs:
             out/reports/formal
             out/test-results/chat-logs
             out/test-results/formal
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The wide-bound TLA+ configs (app state orchestration A0.6): each `formal:wide` target (today `ui`'s, the
+  # `nightly`-tier configs under `apps/ui/specs`) runs on the schedule and on a dispatch only. A caller (`ci.yml`
+  # in the merge queue) passes `ref`, so a called run never starts it: the queue runs the sized `pr` configs in
+  # `formal:tla`. The target is not `formal:nightly`, which the queue would run on every landing that affects its
+  # project. Selected by target, not project name (scripts/src/validate-workflows.ts). With no `nightly`-tier
+  # config yet it reports 0 runs and passes.
+  formal-wide:
+    name: Formal wide tier
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !inputs.ref }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc,apalache
+
+      - name: Run the wide formal tiers
+        run: pnpm nx run-many -t formal:wide --parallel=1 --outputStyle=stream
+
+      - name: Upload formal reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-nightly-reports-formal-wide
+          path: out/reports/formal
           if-no-files-found: ignore
           retention-days: 14

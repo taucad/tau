@@ -47,6 +47,10 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   removeConflictLine: 'revision_remove_conflict_line_failed',
 };
 
+/** What a refusal's sentence may name: a merge that moved nothing names the branch already in (M1). */
+const failureAbout = (entry: Extract<RevisionToast, { type: 'error' }>): Readonly<{ branch?: string }> =>
+  entry.code === 'MERGE_UP_TO_DATE' && entry.branch !== undefined ? { branch: entry.branch } : {};
+
 /** What a settled branch verb's Undo needs: the inverse verbs, and how to reopen a closed branch. */
 type BranchUndo = Readonly<{
   switchTo: RevisionCommands['switchTo'];
@@ -225,7 +229,7 @@ export function RevisionRestore(): ReactNode {
          * words (P4, Rule 1); the diagnostic — `Buffer is not defined`, a port
          * sentence naming a checkout — goes where someone can act on it, which
          * is not a toast (E5). */
-        const copy = describeRevisionFailure(entry.subject, entry.code);
+        const copy = describeRevisionFailure(entry.subject, entry.code, failureAbout(entry));
         // Outcome fields only: the diagnostic goes to error reporting with these tags (SB4, `reportRevisionToast`).
         analytics.capture(revisionFailureEvent[entry.subject], {
           code: entry.code,

@@ -288,6 +288,60 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
     }
   }, 180_000);
 
+  it.each([
+    { tag: 'v2', next: 3 },
+    { tag: 'v1', next: 2 },
+  ])(
+    'backs up main past a local $tag that is not a version, never offers it, and numbers the next version V$next',
+    async ({ tag, next }) => {
+      const remoteRoot = await temporaryRoot(`remote-foreign-${tag}`);
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const hook = join(remote.repositoryPath, 'hooks', 'pre-receive');
+      await writeFile(hook, versionNumberHook);
+      await chmod(hook, 0o755);
+      try {
+        const one = await device(leg, `foreign-${tag}`, remote.url);
+        const first = await one.port.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(10);\n')]]),
+          provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 9, 0, 0) },
+          summary: { generated: 'Lid' },
+        });
+        await one.port.updateRef({ name: mainRef, expectedHead: undefined, head: revisionId(first.commitId) });
+        await one.sync(first.commitId);
+
+        /* What `git tag <tag>` in the project's folder leaves: a lightweight tag at the head. */
+        const foreign = `refs/tags/${tag}`;
+        await one.port.updateRef({ name: foreign, expectedHead: undefined, head: revisionId(first.commitId) });
+        const second = await one.port.writeRevision({
+          parents: [revisionId(first.commitId)],
+          tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(20);\n')]]),
+          provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 10, 0, 0) },
+          summary: { generated: 'Bigger lid' },
+        });
+        await one.port.updateRef({
+          name: mainRef,
+          expectedHead: revisionId(first.commitId),
+          head: revisionId(second.commitId),
+        });
+        const offeredBefore = one.offers.length;
+        await one.sync(second.commitId);
+        expect(await remote.git(['rev-parse', mainRef])).toBe(second.commitId);
+        expect(one.offers.slice(offeredBefore).flat()).not.toContain(foreign);
+
+        /* The tag stays on the device and keeps its number (T1); the next version is numbered above it. */
+        expect(await one.port.readRef(foreign)).toBe(first.commitId);
+        const version = await one.port.tag({ name: 'Ready for print', revisionId: revisionId(second.commitId) });
+        expect(version.number).toBe(next);
+        await one.sync(second.commitId);
+        expect(await remote.git(['for-each-ref', '--format=%(refname)', 'refs/tags/'])).toBe(`refs/tags/v${next}`);
+      } finally {
+        await remote.close();
+      }
+    },
+    120_000,
+  );
+
   it('finishes a move that stopped after its new tag was written, and takes no other number (R6)', async () => {
     const remoteRoot = await temporaryRoot('remote-r6');
     const remote = await startGitHttpBackend({ root: remoteRoot });

@@ -44,6 +44,10 @@ import {
 } from '#components/view-stack.js';
 import type { ViewStack } from '#components/view-stack.js';
 import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
+import {
+  dropdownMenuDrawerContext as DropdownMenuDrawerContext,
+  useIsDropdownMenuDrawer,
+} from '#hooks/dropdown-menu-drawer.js';
 
 /**
  * Owns the open state and focus lifecycle for a dropdown menu.
@@ -80,16 +84,6 @@ function DropdownMenu({
   );
 }
 
-type DropdownMenuDrawerState = {
-  /** Closes the drawer, as choosing an item closes a menu. */
-  readonly close: () => void;
-  /** The trigger, where focus returns when the drawer closes and nothing else took it. */
-  readonly triggerRef: React.RefObject<HTMLElement | undefined>;
-};
-
-/** A responsive menu's drawer on a phone; absent wherever the menu is a dropdown. */
-const DropdownMenuDrawerContext = React.createContext<DropdownMenuDrawerState | undefined>(undefined);
-
 /**
  * Selects a drawer row as a menu item selects: `onSelect` gets a cancelable select event, and the drawer closes unless
  * it was prevented.
@@ -104,6 +98,9 @@ function selectDrawerRow(onSelect: ((event: Event) => void) | undefined, close: 
 
 /* A checkbox or radio row's text starts past its indicator column (`pl-11`), so its divider does too. */
 const drawerIndicatorRowClass = 'pl-11 [--drawer-row-text-start:2.75rem]';
+
+/* A row that holds its own controls (a toggle group) and does nothing itself: it draws no highlight of its own. */
+const drawerStaticRowClass = 'relative [--drawer-row-highlight:transparent]';
 
 /** Hands a node to a ref the caller passed, as React would: a callback ref is called, an object ref is set. */
 function assignRef<T>(
@@ -913,6 +910,7 @@ function DropdownMenuToggleGroupItem<T extends string>({
   options,
   onValueChange,
 }: DropdownMenuToggleGroupItemProperties<T>): React.JSX.Element {
+  const isInDrawer = useIsDropdownMenuDrawer();
   const handleValueChange = React.useCallback(
     (newValue: string) => {
       if (newValue) {
@@ -925,9 +923,23 @@ function DropdownMenuToggleGroupItem<T extends string>({
   return (
     <div
       data-slot='dropdown-menu-toggle-group-item'
-      className={cn('flex items-center justify-between px-3 py-1.5', className)}
+      {...(isInDrawer ? drawerRowAttributes : {})}
+      className={cn(
+        'flex items-center justify-between',
+        /* In a drawer it is a touch row with the drawer's geometry; the row itself does nothing, so it takes no
+           highlight, and its options are touch-sized. */
+        isInDrawer ? cn(drawerRowClass, drawerStaticRowClass) : 'px-3 py-1.5',
+        className,
+      )}
     >
-      <span className={cn(menuItemLayoutClass, menuItemIconClass, 'text-sm')}>
+      <span
+        className={cn(
+          menuItemLayoutClass,
+          menuItemIconClass,
+          'text-sm',
+          isInDrawer && "[&_svg:not([class*='size-'])]:size-4",
+        )}
+      >
         {children}
         {infoTooltip}
       </span>
@@ -943,7 +955,7 @@ function DropdownMenuToggleGroupItem<T extends string>({
             key={option.value}
             value={option.value}
             aria-label={option.ariaLabel ?? option.value}
-            className='h-7 flex-1'
+            className={cn('flex-1', isInDrawer ? 'h-9 min-w-11' : 'h-7')}
           >
             {option.label}
           </ToggleGroupItem>

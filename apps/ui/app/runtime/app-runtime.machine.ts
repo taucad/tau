@@ -1,22 +1,27 @@
 import { z } from 'zod';
 import { createCallbackLogic, setup, types } from 'xstate';
-import type { ActorRefFrom, EventObject } from 'xstate';
+import type { ActorRefFrom, EventObject, InputFrom } from 'xstate';
 
+import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import { sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineInput } from '#machines/sessions.machine.js';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import type { EnvironmentEvent } from '#runtime/environment.js';
+import { fileManagerHostMachine } from '#runtime/file-manager-host.machine.js';
+import { leasesMachine } from '#runtime/leases.machine.js';
 
 /**
  * The app runtime root (app state orchestration charter D5, D23).
  *
  * One composition root for the app's long-lived actors, created by the entry and started once after hydration by
  * `AppRuntimeProvider` (named boundary 2, D15). Its static children are one list, {@link appRuntimeChildren}; the
- * lanes that own the others attach them here (A1b, A2, A5b, A6b). The project runtime, the revision lifecycle and
+ * lanes that own the others attach them here (A2, A5b, A6b). The project runtime, the revision lifecycle and
  * the host connector are not children of this root: they are a session's lazy children, loaded by dynamic import,
  * and `import-boundary.node.test.ts` keeps them out of this module's graph.
  *
- * Context holds the environment's last reading, the registry's ref (which this root spawned and never replaces, so
- * a reader may take it once) and the first fault. Host objects live in the children's closures (D4).
+ * Context holds the environment's last reading, the refs of the children this root spawned and never replaces (so a
+ * reader may take each once) and the first fault, which it reports once (D23). Host objects live in the children's
+ * closures (D4). `rootFiles` keeps the worker in its own context: accepted debt of `file-manager.machine` (D4).
  */
 
 /**
@@ -41,12 +46,18 @@ export const appRuntimeChildren = [
 export type AppRuntimeChild = (typeof appRuntimeChildren)[number];
 
 /**
- * The children this root attaches today. The rest are named slots: `choices` (A6b), `fileManagerHost`, `rootFiles`
- * and `leases` (A1b), `projectLibrary` and `chatSessions` (A2), and `focus` (A5b).
+ * The children this root attaches today. The rest are named slots: `choices` (A6b), `projectLibrary` and
+ * `chatSessions` (A2), and `focus` (A5b).
  *
  * @public
  */
-export const appRuntimeAttachedChildren = ['environment', 'sessions'] as const satisfies readonly AppRuntimeChild[];
+export const appRuntimeAttachedChildren = [
+  'environment',
+  'fileManagerHost',
+  'rootFiles',
+  'leases',
+  'sessions',
+] as const satisfies readonly AppRuntimeChild[];
 
 /** The page as `environment` last reported it; `undefined` until the runtime starts. @public */
 export type AppRuntimeEnvironment = Readonly<{
@@ -59,11 +70,19 @@ export type AppRuntimeEnvironment = Readonly<{
 export type AppRuntimeInput = Readonly<{
   /** The registry's input, read once by the composition (budget for this host). */
   sessions: SessionsMachineInput;
+  /** The input of `rootFiles`, the file manager for `/`, which the host's composition builds. */
+  rootFiles: InputFrom<typeof fileManagerMachine>;
 }>;
 
 /** Serializable state owned by the runtime root, plus the registry's ref. @public */
 export type AppRuntimeContext = Readonly<{
   environment: AppRuntimeEnvironment;
+  /** The file manager for `/`, which the library and the chat store read in render: spawned with the root. */
+  rootFiles: ActorRefFrom<typeof fileManagerMachine>;
+  /** The file-manager host: Home's backend and the shared worker. Spawned with the root and never replaced. */
+  fileManagerHost: ActorRefFrom<typeof fileManagerHostMachine>;
+  /** The lease store's clock. Spawned with the root and never replaced. */
+  leases: ActorRefFrom<typeof leasesMachine>;
   /** The sessions registry: spawned with the root and never replaced. */
   sessions: ActorRefFrom<typeof sessionsMachine>;
   /** The first effect or child failure no transition modelled; later ones are usually its consequences (D23). */
@@ -105,9 +124,22 @@ const noEnvironment = createCallbackLogic<EventObject>(() => undefined);
 
 const faultMessage = (error: unknown): string => (error instanceof Error ? error.message : 'app runtime fault');
 
-/** Record a fault only if none is recorded yet: the first is kept, later ones are its consequences (D23). */
-const keepFirstFault = ({ context, event }: { context: AppRuntimeContext; event: { error: unknown } }) =>
-  context.fault === undefined ? { context: { fault: faultMessage(event.error) } } : {};
+/**
+ * Record a fault only if none is recorded yet, and report it once through the one hook: the first is kept, later ones
+ * are its consequences (D23).
+ */
+const keepFirstFault = (
+  { context, event }: { context: AppRuntimeContext; event: { error: unknown } },
+  enq: (effect: () => void) => void,
+) => {
+  if (context.fault !== undefined) {
+    return {};
+  }
+  enq(() => {
+    reportAppRuntimeFault(event.error);
+  });
+  return { context: { fault: faultMessage(event.error) } };
+};
 
 /**
  * The app runtime root.
@@ -122,16 +154,29 @@ export const appRuntimeMachine = setup({
     input: types<AppRuntimeInput>(),
     emitted: environmentEventSchemas,
   },
-  actors: { environment: noEnvironment, sessions: sessionsMachine },
+  actors: {
+    environment: noEnvironment,
+    rootFiles: fileManagerMachine,
+    fileManagerHost: fileManagerHostMachine,
+    leases: leasesMachine,
+    sessions: sessionsMachine,
+  },
 }).createMachine({
   id: 'appRuntime',
   /* A fault no transition modelled is recorded once and the root keeps answering: the first is kept (D23). */
   onError: keepFirstFault,
-  context: ({ input, spawn, actors }) => ({
-    environment: { visible: undefined, focused: undefined, constrained: undefined },
-    sessions: spawn(actors.sessions, { id: 'sessions', input: input.sessions }),
-    fault: undefined,
-  }),
+  context: ({ input, spawn, actors }) => {
+    /* `rootFiles` first: the host takes its ref. None of the three is ever replaced, so a reader may take each once. */
+    const rootFiles = spawn(actors.rootFiles, { id: 'rootFiles', input: input.rootFiles });
+    return {
+      environment: { visible: undefined, focused: undefined, constrained: undefined },
+      rootFiles,
+      fileManagerHost: spawn(actors.fileManagerHost, { id: 'fileManagerHost', input: { rootFiles } }),
+      leases: spawn(actors.leases, { id: 'leases' }),
+      sessions: spawn(actors.sessions, { id: 'sessions', input: input.sessions }),
+      fault: undefined,
+    };
+  },
   /* The invoke's own `onError` (MC-R12) records through the same first-fault rule. */
   invoke: { id: 'environment', src: 'environment', onError: keepFirstFault },
   on: {

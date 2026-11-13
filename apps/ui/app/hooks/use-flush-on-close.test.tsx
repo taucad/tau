@@ -28,7 +28,6 @@ vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
     desktopQuit.answers.push(`${attemptId}:${String(forced)}`);
   },
 }));
-vi.mock('#hooks/use-file-manager.js', () => ({ useSharedFileManagerWorker: () => undefined }));
 vi.mock('#components/nav/project-close-dialogs.js', () => ({ BudgetRefusedDialog: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),

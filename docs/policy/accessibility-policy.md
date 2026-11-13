@@ -3,9 +3,10 @@ title: 'Accessibility Policy'
 description: 'Guidelines for accessible UI and ARIA-driven E2E testing across the Tau codebase. Covers semantic HTML, ARIA conventions, Vitest Browser selectors, and screenshot tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-11'
+updated: '2026-11-13'
 related:
   - docs/research/billing-redesign-blueprint.md
+  - docs/research/loading-states-ux-blueprint.md
 ---
 
 # Accessibility Policy
@@ -26,21 +27,33 @@ Accessible UI ensures all users, including those using assistive technology, can
 
 ### Status indicators
 
-| UI State                     | Required Attributes                                             | Example                                                             |
-| ---------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Loading / in-progress        | `role="status"` `aria-label="<description>"` `aria-busy="true"` | `<div role="status" aria-label="Loading preview" aria-busy="true">` |
-| Error                        | `role="alert"` `aria-label="<description>"`                     | `<div role="alert" aria-label="Preview error">`                     |
-| Informational image / canvas | `role="img"` `aria-label="<description>"`                       | `<div role="img" aria-label="3D model preview">`                    |
+| UI State                     | Required Attributes                                                | Example                                                                     |
+| ---------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Loading / in-progress        | `aria-busy="true"` on the region; a `role="status"` indicator slot | `<ul aria-busy="true">` beside `<WaitIndicator label="Loading projects" />` |
+| Error                        | `role="alert"` `aria-label="<description>"`                        | `<div role="alert" aria-label="Preview error">`                             |
+| Informational image / canvas | `role="img"` `aria-label="<description>"`                          | `<div role="img" aria-label="3D model preview">`                            |
 
-A skeleton placeholder is one status region: the wrapper carries `role="status"`, `aria-busy="true"` and the name of the wait (an `aria-label`, or a visually hidden sentence referenced by `aria-labelledby` when the region has other content), and every `Skeleton` bar inside it is `aria-hidden="true"`. Announce the wait once per region, not once per bar.
+A loading region follows [UI Policy](ui-policy.md) §5 Loading and draws no skeleton:
+
+| Concern                    | Rule                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Busy state                 | The region's own container (list, feed, grid, stage, pane) carries `aria-busy="true"` from the start of its wait to arrival, whether or not an indicator is showing                                                                                                                                         |
+| Status region              | The indicator's slot (`WaitIndicator`) is a `role="status"` element that is always in the DOM and empty to assistive technology. Its words enter it only when the indicator is revealed, so a fast load announces nothing (WCAG 4.1.3)                                                                      |
+| One announcement per group | A route open is one group, announced once by the route's existing live region ("Opening project", then the slow text at 10 s). Region indicators inside an open are visible but not live (`live={false}`). A wait started by a gesture after the open (opening History, refetching a list) is its own group |
+| Failure                    | `role="alert"`, inline in the same slot or region, with what failed, the consequence and a Retry button. Announced once. Focus does not move                                                                                                                                                                |
+| Focus                      | Arrival never moves focus or scroll. A composer keeps focus, caret and selection through adoption                                                                                                                                                                                                           |
+| Reduced motion             | No opacity entrance and no spinning glyph; words carry the state, so an indicator always has words                                                                                                                                                                                                          |
+| Targets and contrast       | Retry is at least 24 by 24 px; indicator text meets 4.5:1 on its surface                                                                                                                                                                                                                                    |
 
 ```tsx
-<div role='status' aria-busy='true' aria-labelledby='repositories-loading'>
-  <span id='repositories-loading' className='sr-only'>
-    Loading repositories…
-  </span>
-  <Skeleton aria-hidden='true' className='h-3.5 w-32' />
-</div>
+<>
+  <WaitIndicator active={isLoading} label='Loading projects' slowLabel='Still loading projects' onRetry={retry} />
+  <ul aria-busy={isLoading} aria-labelledby='projects-heading'>
+    {projects.map((project) => (
+      <ProjectRow key={project.id} project={project} />
+    ))}
+  </ul>
+</>
 ```
 
 An icon that carries meaning beside text (the coming-soon icon in a feature list) is `aria-hidden`, and the meaning is given in words: a visually hidden prefix on the item ("Coming soon: ") and a visible legend.

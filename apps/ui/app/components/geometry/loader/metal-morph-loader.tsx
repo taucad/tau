@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
-import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
-import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
+import { startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
 import type {
   MetalMorphLoaderController,
   MetalMorphLoaderQuality,
   MetalMorphSequenceState,
 } from '#components/geometry/loader/metal-morph-controller.js';
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
-import type { ResolvedGraphicsBackend } from '@taucad/viewer/graphics/graphics-settings';
 import { Loader } from '@taucad/ui/components/loader';
 import { useTheme } from '#hooks/use-theme.js';
 
@@ -107,16 +105,6 @@ const loadersInFlight = new Map<string, Promise<PooledLoader>>();
 /** Canvas side, in pixels, a pooled loader warms at before a holder resizes it to its own box. */
 const warmCanvasSide = 96;
 
-const resolveLoaderBackend = async (): Promise<ResolvedGraphicsBackend> => {
-  const override = readGraphicsBackendQueryOverride();
-  const gpuAvailable = await probeWebGpuSupport();
-  // The loader is a showcase surface on the node renderer: WebGPU whenever an adapter exists, otherwise
-  // Three's WebGL 2 backend. The public viewport keeps its own WebGL baseline; see the graphics policy.
-  return override === undefined
-    ? resolveGraphicsBackendPreference('webgpu', gpuAvailable)
-    : resolveGraphicsBackendPreference(override, gpuAvailable);
-};
-
 /**
  * Every renderer draws into a canvas of its own making, pooled or not, and that canvas joins the page only
  * once it holds a frame, which is why it needs no reveal of its own: the stand-in covers the wait and the
@@ -129,24 +117,55 @@ const createLoaderCanvas = (): HTMLCanvasElement => {
   return canvas;
 };
 
+/** A started renderer and the canvas of its own making it draws into. */
+type StartedLoader = Readonly<{ canvas: HTMLCanvasElement; controller: MetalMorphLoaderController }>;
+
+/**
+ * Build a renderer on a fresh canvas and wait for its first frame; a WebGPU canvas that cannot present starts once
+ * more on a fresh canvas, on WebGL ({@link startShowcaseRenderer}).
+ */
+const startLoader = async (
+  options: Readonly<{
+    request: Omit<MetalMorphLoaderPoolRequest, 'poolKey'>;
+    size: () => { width: number; height: number; pixelRatio: number };
+    publishSequence: (state: MetalMorphSequenceState) => void;
+    onCreated?: (controller: MetalMorphLoaderController) => void;
+  }>,
+): Promise<StartedLoader> =>
+  startShowcaseRenderer(async (backend) => {
+    const canvas = createLoaderCanvas();
+    const controller = createMetalMorphLoader({
+      canvas,
+      backend,
+      theme: options.request.theme,
+      quality: options.request.quality,
+      seed: options.request.seed,
+      speed: options.request.speed,
+      initialShape: options.request.initialShape,
+      onSequenceChange: options.publishSequence,
+    });
+    // Registered before the first frame, so a resize while it warms up still reaches it.
+    options.onCreated?.(controller);
+    controller.setSize(options.size());
+    try {
+      await controller.ready;
+    } catch (error) {
+      controller.dispose();
+      throw error;
+    }
+    return { canvas, controller };
+  });
+
 const buildPooledLoader = async (request: MetalMorphLoaderPoolRequest): Promise<PooledLoader> => {
-  const canvas = createLoaderCanvas();
   const sequence: PooledLoader['sequence'] = {};
-  const controller = createMetalMorphLoader({
-    canvas,
-    backend: await resolveLoaderBackend(),
-    theme: request.theme,
-    quality: request.quality,
-    seed: request.seed,
-    speed: request.speed,
-    initialShape: request.initialShape,
-    onSequenceChange: (state) => {
+  const { canvas, controller } = await startLoader({
+    request,
+    // Warm through the first frame: the shader compile and the environment are what a cold mount waits for.
+    size: () => ({ width: warmCanvasSide, height: warmCanvasSide, pixelRatio: 1 }),
+    publishSequence: (state) => {
       sequence.publish?.(state);
     },
   });
-  // Warm through the first frame: the shader compile and the environment are what a cold mount waits for.
-  controller.setSize({ width: warmCanvasSide, height: warmCanvasSide, pixelRatio: 1 });
-  await controller.ready;
   const entry: PooledLoader = { canvas, controller, sequence, holder: { isHeld: false } };
   loaderPool.set(request.poolKey, entry);
   return entry;
@@ -180,33 +199,6 @@ const claimOrBuildPooledLoader = async (request: MetalMorphLoaderPoolRequest): P
   }
   entry.holder.isHeld = true;
   return entry;
-};
-
-/** A renderer of this mount's own, drawn into the canvas React rendered for it and disposed with it. */
-const buildOwnedLoader = async (
-  options: Readonly<{
-    canvas: HTMLCanvasElement;
-    request: Omit<MetalMorphLoaderPoolRequest, 'poolKey'>;
-    size: () => { width: number; height: number; pixelRatio: number };
-    publishSequence: (state: MetalMorphSequenceState) => void;
-    onCreated: (controller: MetalMorphLoaderController) => void;
-  }>,
-): Promise<MetalMorphLoaderController> => {
-  const controller = createMetalMorphLoader({
-    canvas: options.canvas,
-    backend: await resolveLoaderBackend(),
-    theme: options.request.theme,
-    quality: options.request.quality,
-    seed: options.request.seed,
-    speed: options.request.speed,
-    initialShape: options.request.initialShape,
-    onSequenceChange: options.publishSequence,
-  });
-  // Registered before the first frame, so a resize while it warms up still reaches it.
-  options.onCreated(controller);
-  controller.setSize(options.size());
-  await controller.ready;
-  return controller;
 };
 
 /** Canvas box and device pixel ratio a host element asks its renderer for. */
@@ -350,10 +342,8 @@ export function MetalMorphLoader({
           adopt(entry);
           return;
         }
-        // Either no pool was asked for, or another mount holds its renderer; this one gets its own.
-        const canvas = createLoaderCanvas();
-        const controller = await buildOwnedLoader({
-          canvas,
+        // Either no pool was asked for, or another mount holds its renderer; this one gets its own, disposed with it.
+        const { canvas, controller } = await startLoader({
           request,
           size: readSize,
           publishSequence: (state) => {

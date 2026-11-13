@@ -3,6 +3,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { ResponsiveSurfaceProvider } from '@taucad/ui/hooks/use-mobile';
+import { KernelSettings, kernelSettingsGroups } from '#cad/kernel-settings.jsx';
 import { ViewerSettings } from '#cad/viewer-settings.jsx';
 import { ViewerViewFieldsProvider } from '#cad/viewer-view-fields.jsx';
 import type { ViewerViewFieldPath, ViewerViewFieldSource, ViewerViewFields } from '#cad/viewer-view-fields.jsx';
@@ -363,7 +365,7 @@ describe('ViewerSettings', () => {
       const user = userEvent.setup();
       const view = await openGridUnits(user);
 
-      expect(within(view).getByRole('menuitem', { name: 'Back to Options' })).toHaveTextContent(/^Back$/u);
+      expect(within(view).getByRole('menuitem', { name: 'Back to Viewer settings' })).toHaveTextContent(/^Back$/u);
       expect(within(view).getByText('Unit')).toBeVisible();
       const units = within(view).getByRole('group', { name: 'Unit' });
       expect(
@@ -397,7 +399,7 @@ describe('ViewerSettings', () => {
       const user = userEvent.setup();
       const view = await openGridUnits(user);
 
-      await user.click(within(view).getByRole('menuitem', { name: 'Back to Options' }));
+      await user.click(within(view).getByRole('menuitem', { name: 'Back to Viewer settings' }));
       expect(screen.queryByRole('group', { name: 'Grid & units' })).not.toBeInTheDocument();
       await waitFor(() => {
         expect(screen.getByRole('menuitem', { name: 'Grid & units, 1 mm' })).toHaveFocus();
@@ -421,7 +423,7 @@ describe('ViewerSettings', () => {
 
       await user.click(row);
       const view = screen.getByRole('group', { name: 'Timeout' });
-      expect(within(view).getByRole('menuitem', { name: 'Back to Options' })).toHaveTextContent(/^Back$/u);
+      expect(within(view).getByRole('menuitem', { name: 'Back to Viewer settings' })).toHaveTextContent(/^Back$/u);
       expect(within(view).getByText('Timeout')).toBeVisible();
       expect(within(view).getByRole('menuitemradio', { name: '1 min' })).toHaveAttribute('aria-checked', 'true');
     });
@@ -551,5 +553,186 @@ describe('ViewerSettings', () => {
       // The press resets the unit and does not open the sub-view.
       expect(screen.queryByRole('group', { name: 'Grid & units' })).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('ViewerSettings on a phone', () => {
+  /** A kernel option set with a switch, a slider and a preset list, as a kernel's schema declares them. */
+  const kernelSchema = {
+    type: 'object',
+    properties: {
+      quality: { type: 'string', enum: ['draft', 'fine'], default: 'draft' },
+      tolerance: { type: 'number', minimum: 0, maximum: 1, default: 0.1, 'x-tau-unit': 'mm' },
+      smooth: { type: 'boolean', default: false },
+    },
+  };
+  const kernelDefaults = { quality: 'draft', tolerance: 0.1, smooth: false };
+  const kernelChange = vi.fn<(values: Record<string, unknown>) => void>();
+
+  /** Renders the settings at the phone breakpoint, as the shared responsive menu tests do. */
+  const renderOnPhone = (isMobile = true): void => {
+    render(
+      <ResponsiveSurfaceProvider isMobile={isMobile} container={undefined}>
+        <TooltipProvider>
+          <ViewerSettings
+            operationTimeout={{ value: 60_000, defaultValue: 180_000, onChange: mocks.setOperationTimeout }}
+            kernelSettings={
+              <KernelSettings
+                groups={kernelSettingsGroups(kernelSchema, kernelDefaults)}
+                values={{}}
+                defaults={kernelDefaults}
+                onChange={kernelChange}
+                onReset={vi.fn()}
+              />
+            }
+          />
+        </TooltipProvider>
+      </ResponsiveSurfaceProvider>,
+    );
+  };
+
+  /** Opens the drawer from the gear and returns it. */
+  const openDrawer = async (): Promise<HTMLElement> => {
+    renderOnPhone();
+    fireEvent.click(screen.getByRole('button', { name: 'Viewer settings' }));
+    return screen.findByRole('dialog', { name: 'Viewer settings' });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.geometryFormat = 'gltf';
+    mocks.fieldOfView = 42;
+    mocks.smallSize = 0.001;
+    mocks.isGridSizeLocked = false;
+    // Vaul reads the media query when a drawer opens; jsdom has none.
+    vi.stubGlobal(
+      'matchMedia',
+      (query: string): MediaQueryList =>
+        ({
+          matches: false,
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should open the gear as a bottom drawer titled Viewer settings, not a menu', async () => {
+    const drawer = await openDrawer();
+
+    expect(within(drawer).getByRole('heading', { name: 'Viewer settings' })).toBeVisible();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    // Every row kind is in the drawer's one list of touch rows.
+    const list = drawer.querySelector('[data-slot=dropdown-menu-drawer-items]');
+    for (const row of [
+      within(drawer).getByRole('switch', { name: 'Surfaces' }),
+      within(drawer)
+        .getByRole('spinbutton', { name: 'Field of view, 0° is orthographic' })
+        .closest('[data-drawer-row]'),
+      within(drawer).getByRole('radio', { name: 'Y-up' }).closest('[data-drawer-row]'),
+      within(drawer).getByRole('button', { name: 'Grid & units, 1 mm' }),
+      within(drawer).getByRole('button', { name: 'Timeout, 1 min' }),
+      within(drawer).getByRole('button', { name: 'Kernel settings, Defaults' }),
+    ]) {
+      expect(row).toHaveAttribute('data-drawer-row');
+      expect(list).toContainElement(row as HTMLElement);
+    }
+  });
+
+  it('should toggle switches and choose the up direction in the drawer, keeping it open', async () => {
+    const drawer = await openDrawer();
+
+    fireEvent.click(within(drawer).getByRole('switch', { name: 'Edges' }));
+    fireEvent.click(within(drawer).getByRole('radio', { name: 'Y-up' }));
+
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setLinesVisibility', payload: false });
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setUpDirection', payload: 'y' });
+    expect(screen.getByRole('dialog', { name: 'Viewer settings' })).toBeInTheDocument();
+  });
+
+  it('should open Grid & units in the drawer, choose a unit and lock the grid, and step Back', async () => {
+    const drawer = await openDrawer();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Grid & units, 1 mm' }));
+    const view = within(drawer).getByRole('group', { name: 'Grid & units' });
+    expect(within(drawer).queryByRole('switch', { name: 'Surfaces' })).not.toBeInTheDocument();
+    expect(within(view).getByRole('radio', { name: /Millimeter/u })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(view).getByRole('radio', { name: /Inch/u }));
+    fireEvent.click(within(view).getByRole('switch', { name: /Lock grid size/u }));
+
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setGridUnit', payload: { unit: 'in' } });
+    expect(mocks.graphicsSend).toHaveBeenCalledWith({ type: 'setGridSizeLocked', payload: true });
+    // A unit is a setting: the drawer and the sub-view stay open.
+    expect(within(drawer).getByRole('group', { name: 'Grid & units' })).toBeVisible();
+
+    const back = within(view).getByRole('button', { name: 'Back to Viewer settings' });
+    expect(back).toHaveTextContent(/^Back$/u);
+    fireEvent.click(back);
+    expect(within(drawer).queryByRole('group', { name: 'Grid & units' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(drawer).getByRole('button', { name: 'Grid & units, 1 mm' })).toHaveFocus();
+    });
+  });
+
+  it('should choose a timeout in its sub-view and step back to the settings', async () => {
+    const drawer = await openDrawer();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Timeout, 1 min' }));
+    const view = within(drawer).getByRole('group', { name: 'Timeout' });
+    expect(within(view).getByRole('radio', { name: '1 min' })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(within(view).getByRole('radio', { name: '5 min' }));
+
+    expect(mocks.setOperationTimeout).toHaveBeenCalledWith(300_000);
+    // Choosing a timeout steps back to the settings in the same, still open drawer.
+    expect(within(drawer).queryByRole('group', { name: 'Timeout' })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole('switch', { name: 'Surfaces' })).toBeVisible();
+  });
+
+  it('should open Kernel settings with its switch, slider and preset rows, and step Back', async () => {
+    const drawer = await openDrawer();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Kernel settings, Defaults' }));
+    const view = within(drawer).getByRole('group', { name: 'Kernel settings' });
+    fireEvent.click(within(view).getByRole('switch', { name: 'Smooth' }));
+    expect(kernelChange).toHaveBeenLastCalledWith(expect.objectContaining({ smooth: true }));
+    expect(within(view).getByRole('spinbutton', { name: 'Tolerance' })).toBeInTheDocument();
+    expect(within(view).getByRole('button', { name: 'Reset to defaults' })).toBeDisabled();
+
+    // A preset list nests one level deeper, under its own Back row.
+    fireEvent.click(within(view).getByRole('button', { name: 'Quality, Draft' }));
+    const quality = within(drawer).getByRole('group', { name: 'Quality' });
+    fireEvent.click(within(quality).getByRole('radio', { name: 'Fine' }));
+    expect(kernelChange).toHaveBeenLastCalledWith(expect.objectContaining({ quality: 'fine' }));
+    fireEvent.click(within(quality).getByRole('button', { name: 'Back to Kernel settings' }));
+    expect(within(drawer).getByRole('group', { name: 'Kernel settings' })).toBeVisible();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Back to Viewer settings' }));
+    expect(within(drawer).queryByRole('group', { name: 'Kernel settings' })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole('switch', { name: 'Surfaces' })).toBeVisible();
+  });
+
+  it('should close from the drawer’s Close action', async () => {
+    const drawer = await openDrawer();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Viewer settings' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('should keep the dropdown menu on a wide screen', async () => {
+    const user = userEvent.setup();
+    renderOnPhone(false);
+    await user.click(screen.getByRole('button', { name: 'Viewer settings' }));
+
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Viewer settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Grid & units, 1 mm' })).toBeInTheDocument();
   });
 });

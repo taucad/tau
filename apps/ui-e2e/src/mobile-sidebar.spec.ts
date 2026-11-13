@@ -291,11 +291,12 @@ test('opens every sidebar menu in a drawer above the sheet on a real tap, and ea
     chatNames[0],
     { name: 'Rename', role: 'button' },
   );
-  // The seed leaves one project live and the other idle, so the Projects label carries its menu.
-  await expectMenuDrawer(sheet.getByRole('button', { name: 'More actions for projects', exact: true }), 'Projects', {
-    name: 'Close 1 idle project',
-    role: 'button',
-  });
+  // The seed leaves one project live and the other idle, so the Recents label carries its menu (#1595 renamed it).
+  await expectMenuDrawer(
+    sheet.getByRole('button', { name: 'More actions for recent projects', exact: true }),
+    'Recents',
+    { name: 'Close 1 idle project', role: 'button' },
+  );
   // More is marked with vertical dots, like the rows' actions.
   const more = sheet.getByRole('button', { name: 'More', exact: true });
   await target.expectCount(more.getByCss('svg.lucide-ellipsis-vertical'), 1);

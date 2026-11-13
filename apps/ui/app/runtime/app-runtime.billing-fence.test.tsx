@@ -19,7 +19,6 @@ import { createAppRuntime } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { reportRegionReady } from '#services/sessions-store.js';
 
-vi.mock('#hooks/use-file-manager.js', () => ({ useSharedFileManagerWorker: () => undefined }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));

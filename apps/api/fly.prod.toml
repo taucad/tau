@@ -116,9 +116,10 @@ TAU_S3_FORCE_PATH_STYLE = 'false'
 # boot refuses this line without it (`refineFilesService`), so deploy it only
 # after that apply. Remove this line and redeploy to roll back to presigned downloads.
 TAU_FILES_BASE_URL = 'https://files.tau.new'
-# Runtime Observability PR-2: production records no runtime telemetry entries until the operator's
-# activation release (PR-9). Explicit, so the policy probe answers `off` and clients send nothing.
-TAU_RUNTIME_TELEMETRY = 'off'
+# Runtime Observability PR-9: production records runtime telemetry entries (on | off | paused-until:<ISO>),
+# activated by the operator 2026-11-13. Unset means off, so the value stays explicit. Set 'off' and
+# redeploy to stop recording; the policy probe then answers `off` and clients send nothing.
+TAU_RUNTIME_TELEMETRY = 'on'
 
 # No `[[mounts]]`. Charter S3/D1: the durable state of the Hosted Remote is the
 # object store, leases are ephemeral working copies under the Machine's own

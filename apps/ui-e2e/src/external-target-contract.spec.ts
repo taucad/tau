@@ -6,7 +6,6 @@ test('preserves native locator semantics and plain target evidence', async () =>
   await target.navigate('/projects/new');
 
   const nameInput = selectors.getByCss('.container').getByLabelText('Project Name *').first();
-  await target.expectVisible(selectors.getByRole('heading', { name: /create new project/i }));
   await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'New project', exact: true }));
   await target.focus(nameInput);
   await target.expectFocused(nameInput);
@@ -29,7 +28,7 @@ test('preserves the secondary surface when optional command arguments are omitte
   await target.navigate('/__e2e/project-creation-location?fixture=secondary-surface-contract');
   await target.openSecondary('/projects/new');
   try {
-    const heading = selectors.getByRole('heading', { name: /create new project/i });
+    const heading = selectors.getByRole('heading', { level: 1, name: 'New project', exact: true });
     await target.expectVisible(heading, 60_000, 'secondary');
     expect(await target.screenshot(heading, undefined, 'secondary')).toMatch(/^[A-Za-z0-9+/]+=*$/u);
   } finally {

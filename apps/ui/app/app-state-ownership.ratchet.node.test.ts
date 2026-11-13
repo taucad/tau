@@ -11,10 +11,12 @@
  * - `modules`: the non-React modules the programme creates and every other file under `runtime/`. Only the timers
  *   are counted; a runtime root may create and start its children.
  *
- * `counts` holds one line per file and pattern above zero. A measured count above or below its line fails, so a lane
- * that removes a site lowers its line (and deletes it at 0) in the same PR. A listed file that does not exist fails,
- * and so does a non-test file under `apps/ui/app/runtime/` that is in neither set. Test files are never scanned.
- * Lanes edit the manifest, never this test.
+ * `modules` starts with the kernel runtime files that already live under `runtime/`, which hold no timer.
+ *
+ * `counts` holds one line per file and pattern above zero, keyed `<workspace-relative path>#<pattern>`. A measured
+ * count above or below its line fails, so a lane that removes a site lowers its line (and deletes it at 0) in the
+ * same PR. A listed file that does not exist fails, and so does a non-test file under `apps/ui/app/runtime/` that is
+ * in neither set. Test files are never scanned. Lanes edit the manifest, never this test.
  *
  * End state (A10): one line, `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in `components`.
  */

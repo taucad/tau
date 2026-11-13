@@ -2,9 +2,10 @@
  * The app runtime root without React (app state orchestration charter D5, D23, D26; plan § 4 A1a).
  *
  * The root is created unstarted with the clock, `inspect` and `onRejectedEvent` (MC-R4). It holds the static
- * children in one list; A1a attaches `environment` and `sessions`. Starting it starts both, and stopping it stops
- * both and removes every DOM listener `environment` added. `environment` reports document visibility, window focus
- * and the memory class, and never listens for an unload phase: `UnloadProvider` stays the one unload sequencer
+ * children in one list; A1a attaches `environment` and `sessions`, and A1b `fileManagerHost`, `rootFiles` and
+ * `leases`. Starting it starts them, and stopping it stops them and removes every DOM listener `environment` added.
+ * `environment` reports document visibility, window focus and the memory class, and never listens for an unload
+ * phase: `UnloadProvider` stays the one unload sequencer
  * until A5b (D26). The root keeps its first fault (D23).
  */
 import { flush, StepClock } from '@taucad/xstate-testing/clock';
@@ -25,8 +26,12 @@ import type { AppRuntimeEvent } from '#runtime/app-runtime.machine.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import {
   createAppRuntime,
+  noAnalytics,
   selectAppEnvironment,
   selectAppRuntimeFault,
+  selectFileManagerHost,
+  selectRootFiles,
+  selectRuntimeIdleFileManagers,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
@@ -37,8 +42,11 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 
+/* `rootFiles` as a root composed without the host builds it: waiting for Home's backend, never asked to connect. */
+const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
+
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach environment and sessions', () => {
+  it('should list the nine static children once, and attach the five A1a and A1b compose', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -50,7 +58,7 @@ describe('app runtime root', () => {
       'sessions',
       'focus',
     ]);
-    expect(appRuntimeAttachedChildren).toEqual(['environment', 'sessions']);
+    expect(appRuntimeAttachedChildren).toEqual(['environment', 'fileManagerHost', 'rootFiles', 'leases', 'sessions']);
   });
 
   it('should compose unstarted and start and stop its children with no React', () => {
@@ -108,7 +116,7 @@ describe('app runtime root', () => {
           actors: { environment: createEnvironmentLogic(() => host), sessions: sessionsRegistryLogic },
         }),
       ),
-      { input: { sessions: {} } },
+      { input: { sessions: {}, rootFiles: idleRootFiles } },
     );
     const emitted = recordEmitted(runtime);
     runtime.start();
@@ -160,6 +168,41 @@ describe('app runtime root', () => {
     expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped', targetId: 'sessions' }));
   });
 
+  /* Programme control ruling: the client runtime captures workspace telemetry through `admittedAnalytics`; the server
+   * runtime and every test runtime pass none and get the no-op client, so they capture nothing. */
+  it('should capture workspace telemetry through its analytics port, and nothing without one (D15)', () => {
+    const capture = vi.fn();
+    const withPort = createAppRuntime({ environment: () => createFakeEnvironmentHost(), analytics: { capture } });
+    const skipped = { workspaceId: 'w1', reason: 'permission' } as const;
+    selectRootFiles(withPort.getSnapshot()).getSnapshot().context.onRootSkipped?.(skipped);
+    expect(capture).toHaveBeenCalledOnce();
+    expect(capture).toHaveBeenCalledWith(expect.any(String), expect.objectContaining(skipped));
+
+    const noOp = vi.spyOn(noAnalytics, 'capture');
+    const withoutPort = createAppRuntime({ environment: () => createFakeEnvironmentHost() });
+    selectRootFiles(withoutPort.getSnapshot()).getSnapshot().context.onRootSkipped?.(skipped);
+    expect(noOp).toHaveBeenCalledOnce();
+    expect(capture).toHaveBeenCalledOnce();
+    noOp.mockRestore();
+  });
+
+  /* The remote-host harness renders no file manager, so its runtime reads no Home engine and connects no worker. */
+  it('should leave its file managers idle when asked to', async () => {
+    const loadHomeBackend = vi.fn(async (): Promise<'opfs'> => 'opfs');
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      loadHomeBackend,
+      idleFileManagers: true,
+    }).start();
+    await flush();
+    expect(loadHomeBackend).not.toHaveBeenCalled();
+    expect(selectFileManagerHost(runtime.getSnapshot()).getSnapshot().value).toBe('resolving');
+    expect(selectRootFiles(runtime.getSnapshot()).getSnapshot().value).toBe('initializing');
+    expect(selectRuntimeIdleFileManagers(runtime)).toBe(true);
+    expect(selectRuntimeIdleFileManagers(createAppRuntime({ environment: () => undefined }))).toBe(false);
+    runtime.stop();
+  });
+
   it('should keep the first fault and keep answering (D23)', async () => {
     const first = createCallbackLogic<EventObject>(() => {
       throw new Error('environment failed first');
@@ -179,7 +222,7 @@ describe('app runtime root', () => {
         }),
       ),
       {
-        input: { sessions: {} },
+        input: { sessions: {}, rootFiles: idleRootFiles },
         inspect: (inspection) => {
           if (inspection.type === '@xstate.transition' && inspection.event.type === 'xstate.error.actor') {
             errors.push(String((inspection.event as { actorId?: unknown }).actorId));
@@ -224,7 +267,7 @@ describe('app runtime root totality', () => {
     const events: readonly AnyEventObject[] = Object.values(samples).flat();
     expect(
       unansweredEvents(appRuntimeMachine, {
-        input: { sessions: {} },
+        input: { sessions: {}, rootFiles: idleRootFiles },
         events,
         limit: 500,
         ignore: appRuntimeIgnoredEvents,

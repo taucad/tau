@@ -18,11 +18,10 @@ import type { ProjectSessionActorRef } from '#machines/project-session.machine.j
 import { Button } from '@taucad/ui/components/button';
 import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
 import { sessionsPendingRevisions } from '#machines/sessions.machine.js';
-import { selectProjectLiveness, selectProjectSession, setSharedFileManagerWorker } from '#services/sessions-store.js';
+import { selectProjectLiveness, selectProjectSession } from '#services/sessions-store.js';
 import { selectRuntimeSessions } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
-import { useSharedFileManagerWorker } from '#hooks/use-file-manager.js';
 import { useFlushProducers } from '#hooks/use-flush-on-close.js';
 import { BudgetRefusedDialog } from '#components/nav/project-close-dialogs.js';
 
@@ -49,12 +48,6 @@ export function SessionsProvider({
   if (actor === undefined) {
     throw new Error('SessionsProvider must be used within <AppRuntimeProvider>');
   }
-  const worker = useSharedFileManagerWorker();
-
-  useEffect(() => {
-    setSharedFileManagerWorker(worker);
-  }, [worker]);
-
   /* The budget is a visible refusal that names what to close (I28) — never a
    * silent drop, and never a surprise close of somebody else's project. The
    * refusal's surface is `BudgetRefusedDialog` in the sidebar (W20), which

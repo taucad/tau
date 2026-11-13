@@ -1,10 +1,10 @@
 /**
  * The app's one sessions registry (S44, A38).
  *
- * Created by {@link createSessionsActor} at the composition root (MC-R4), never
- * with `useActorRef`, so React Strict Mode's mount → stop → rehydrate cycle
- * cannot double-start every live project. `SessionsProvider` hands it down;
- * every reader is a selector over its snapshot.
+ * Composed here and created by the app runtime as its `sessions` child (D5),
+ * never in React, so neither Strict Mode nor a remount below the billing fence
+ * builds a second one (B9). `SessionsProvider` hands it down; every reader is
+ * a selector over its snapshot.
  *
  * The registry owns *liveness*. Two of a session's four startup regions own a
  * resource outright here — compute admission and the agent-host attachment —
@@ -23,7 +23,11 @@ import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
-import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
+import type {
+  SessionsMachineContext,
+  SessionsMachineInput,
+  SessionsProjectStatus,
+} from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
@@ -269,23 +273,36 @@ const projectSession = projectSessionMachine.provide({
 export type SessionsActorOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
 
 /**
- * Create the app's registry, unstarted (MC-R4, PV-S5).
+ * The registry's logic with its session children provided: the app runtime's `sessions` child (D5).
+ *
+ * @public
+ */
+export const sessionsRegistryLogic = sessionsMachine.provide({ actors: { projectSession } });
+
+/**
+ * The registry's input for this host (PV-S5).
  *
  * Desktop is bounded by memory rather than a count (A35): its budget is the
  * absence of one, and the idle window still applies. A phone or low-memory
  * browser holds one live project (B-08).
+ *
+ * @returns The input the composition reads once, when it creates the registry.
+ * @public
+ */
+export const sessionsRegistryInput = (): SessionsMachineInput => ({
+  budget: liveProjectBudgetFor({ desktop: isDesktopTarget, constrained: isMemoryConstrainedDevice() }),
+});
+
+/**
+ * Create a registry of its own, unstarted (MC-R4). The app's registry is the runtime's `sessions` child; this root
+ * is for compositions that run the registry alone.
  *
  * @param options - The clock, inspector and rejected-event hook for this root.
  * @returns The registry actor; the caller starts it once.
  * @public
  */
 export const createSessionsActor = (options: SessionsActorOptions = {}): Actor<typeof sessionsMachine> =>
-  createActor(sessionsMachine.provide({ actors: { projectSession } }), {
-    ...options,
-    input: {
-      budget: liveProjectBudgetFor({ desktop: isDesktopTarget, constrained: isMemoryConstrainedDevice() }),
-    },
-  });
+  createActor(sessionsRegistryLogic, { ...options, input: sessionsRegistryInput() });
 
 // ---------------------------------------------------------------------------
 // Selectors

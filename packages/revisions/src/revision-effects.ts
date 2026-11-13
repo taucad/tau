@@ -192,6 +192,7 @@ import type {
   RemoteRef,
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
+  RevisionGitOperation,
   RevisionPort,
   RevisionPushResult,
   RevisionPushSession,
@@ -1360,6 +1361,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   const headOf = async (place: Checkout): Promise<string | undefined> =>
     place.baseRevisionId ?? (place.branch === undefined ? undefined : await port.readRef(place.branch));
+
+  /**
+   * The Git operation another process left in progress in one checkout, which
+   * its mints wait out: stock Git mid-merge, mid-rebase, on a detached head or
+   * holding the index lock. A port with no stock Git beside it answers nothing.
+   *
+   * @param place - The checkout.
+   * @returns The operation, or `undefined` when its mints may go on.
+   */
+  const gitOperationOf = async (place: Checkout): Promise<RevisionGitOperation | undefined> =>
+    port.gitOperation?.(place.kind === 'live' ? undefined : place.root);
 
   /**
    * What an open pull would bring to an unborn checkout.
@@ -4507,6 +4519,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * E1 forbids (FX1 M). Read before the first await, as it was published. */
         const running = memosOf(input.checkoutId).comparing;
         const place = await placeOf(input.checkoutId);
+        /* Checked before anything is read: a capture now would hold conflict markers, and its mint would move the
+         * branch under the person's own operation. The checkout waits instead, and says why. */
+        const waitFor = await gitOperationOf(place);
+        if (waitFor !== undefined) {
+          return { treeId: '', cutId: '', waitFor };
+        }
         const own = async (): Promise<ImmutableRevisionTree> =>
           captureCheckout(place, { bypassMemo: false, changed: { paths: input.changedPaths } });
         const captured =
@@ -4678,8 +4696,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       readHead: fromAuthorityPromise<CheckoutHead, CheckoutFenceActorInput>(async ({ input }) => {
         const place = await placeOf(input.checkoutId);
         const head = await headOf(place);
-        /* RM-R5: all three facts the checkout owns, from one read. */
-        return { revisionId: head, treeId: await treeIdOf(head), branch: place.branch };
+        const waitFor = await gitOperationOf(place);
+        /* RM-R5: all three facts the checkout owns, from one read, and the operation a waiting checkout waits on. */
+        return {
+          revisionId: head,
+          treeId: await treeIdOf(head),
+          branch: place.branch,
+          ...(waitFor === undefined ? {} : { waitFor }),
+        };
       }),
 
       /*

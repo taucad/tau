@@ -16,7 +16,11 @@
       "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx",
       "apps/ui/app/routes/w.$workspace.$project/project-workspace-context.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx",
-      "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx"
+      "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx",
+      "apps/ui/app/runtime/app-runtime-provider.tsx",
+      "apps/ui/app/runtime/app-runtime-spa-entry.server.tsx",
+      "apps/ui/desktop/app/entry.server.tsx",
+      "apps/ui/serve/app/entry.server.tsx"
     ]
   },
   "modules": {
@@ -24,10 +28,16 @@
       "apps/ui/app/machines/library-access.machine.ts",
       "apps/ui/app/machines/library-discovery.machine.ts",
       "apps/ui/app/machines/library-recovery.machine.ts",
+      "apps/ui/app/runtime/app-runtime-holder.ts",
+      "apps/ui/app/runtime/app-runtime.machine.ts",
+      "apps/ui/app/runtime/app-runtime.ts",
       "apps/ui/app/runtime/choices-kernel-selection.ts",
       "apps/ui/app/runtime/choices.ts",
       "apps/ui/app/runtime/converter-client-options.desktop.ts",
       "apps/ui/app/runtime/converter-client-options.ts",
+      "apps/ui/app/runtime/environment.fixture.ts",
+      "apps/ui/app/runtime/environment.ts",
+      "apps/ui/app/runtime/host-connector.ts",
       "apps/ui/app/runtime/image-runtime.definition.ts",
       "apps/ui/app/runtime/image-runtime.worker.ts",
       "apps/ui/app/runtime/observability/observability.middleware.ts",
@@ -36,6 +46,7 @@
       "apps/ui/app/runtime/project-runtime.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
+      "apps/ui/app/runtime/session-revisions.ts",
       "apps/ui/app/runtime/ui-runtime.config.ts",
       "apps/ui/app/runtime/ui-runtime.definition.ts",
       "apps/ui/app/runtime/ui-runtime.schema.ts",
@@ -52,7 +63,6 @@
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
     "apps/ui/app/hooks/use-revision-status.ts#useFlushOnClose": 1,
-    "apps/ui/app/hooks/use-sessions.tsx#.start()": 1,
     "apps/ui/app/routes/w.$workspace.$project/chat-viewer-dockview.tsx#queueMicrotask": 1,
     "apps/ui/app/routes/w.$workspace.$project/entries-sync-host.tsx#queueMicrotask": 1,
     "apps/ui/app/routes/w.$workspace.$project/entries-sync-host.tsx#storeMounts": 6,
@@ -62,6 +72,7 @@
     "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx#setTimeout": 1,
     "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx#queueMicrotask": 1,
     "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx#storeMounts": 6,
-    "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx#useFlushOnClose": 1
+    "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx#useFlushOnClose": 1,
+    "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1
   }
 }

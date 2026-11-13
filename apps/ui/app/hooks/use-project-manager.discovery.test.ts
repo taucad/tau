@@ -358,25 +358,38 @@ describe('useProjectManager discovery (I7, I9)', () => {
       expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
     });
 
-    it.fails('I7: should not write route configs from a pass superseded by a newer epoch', async () => {
-      // The stale pass finds the project with no route config, so applying it upserts one.
-      const stale = heldScan(validProjectDiscovery);
-      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
-      const { result } = createHarness();
+    it.fails.each(['scans', 'makes its last read before writing'] as const)(
+      'I7: should not write route configs from a pass superseded by a newer epoch while it %s',
+      async (moment) => {
+        // The stale pass finds the project with no route config, so applying it upserts one.
+        const stale = moment === 'scans' ? heldScan(validProjectDiscovery) : undefined;
+        if (moment === 'makes its last read before writing') {
+          mockListProjectManifests.mockResolvedValueOnce(validProjectDiscovery);
+          // `listWorkspaces` is the pass's last read before its writes.
+          mockListWorkspaces.mockImplementationOnce(async () => {
+            emitManifestChange('/test-project/tau.json');
+            return [];
+          });
+        }
+        mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+        const { result } = createHarness();
 
-      const listing = result.current.getProjectListing();
-      await act(async () => stale.started);
-      // The project's manifest is deleted while the pass is still scanning.
-      act(() => {
-        emitManifestChange('/test-project/tau.json');
-      });
-      stale.release();
-      await act(async () => {
-        await expect(listing).resolves.toMatchObject({ projects: [] });
-      });
+        const listing = result.current.getProjectListing();
+        if (stale) {
+          await act(async () => stale.started);
+          // The project's manifest is deleted while the pass is still scanning.
+          act(() => {
+            emitManifestChange('/test-project/tau.json');
+          });
+          stale.release();
+        }
+        await act(async () => {
+          await expect(listing).resolves.toMatchObject({ projects: [] });
+        });
 
-      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-    });
+        expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+      },
+    );
 
     it.fails('I7: should not prune orphans from a pass whose epoch moved while it readied the worker', async () => {
       // The first pass holds an orphan; once the epoch moves, the current pass holds none.
@@ -403,25 +416,38 @@ describe('useProjectManager discovery (I7, I9)', () => {
       expect(mockDeleteProjectResources).not.toHaveBeenCalled();
     });
 
-    it.fails('I7: should not publish a workspace catalog from a pass superseded by a newer epoch', async () => {
-      const stale = heldScan(validProjectDiscovery);
-      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
-      const { result, publishedListings } = createHarness();
+    it.fails.each(['scans', 'enriches its listing'] as const)(
+      'I7: should not publish a workspace catalog from a pass superseded by a newer epoch while it %s',
+      async (moment) => {
+        const stale = moment === 'scans' ? heldScan(validProjectDiscovery) : undefined;
+        if (moment === 'enriches its listing') {
+          mockListProjectManifests.mockResolvedValueOnce(validProjectDiscovery);
+          // The pass reads workspaces once; the listing's enrichment reads them again before the publish.
+          mockListWorkspaces.mockResolvedValueOnce([]).mockImplementationOnce(async () => {
+            emitManifestChange('/test-project/tau.json');
+            return [];
+          });
+        }
+        mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+        const { result, publishedListings } = createHarness();
 
-      const refresh = result.current.refreshWorkspaceCatalog();
-      await act(async () => stale.started);
-      // The project's manifest is deleted while the pass is still scanning.
-      act(() => {
-        emitManifestChange('/test-project/tau.json');
-      });
-      stale.release();
-      await act(async () => refresh);
-      await settle();
+        const refresh = result.current.refreshWorkspaceCatalog();
+        if (stale) {
+          await act(async () => stale.started);
+          // The project's manifest is deleted while the pass is still scanning.
+          act(() => {
+            emitManifestChange('/test-project/tau.json');
+          });
+          stale.release();
+        }
+        await act(async () => refresh);
+        await settle();
 
-      expect(publishedListings.flatMap((listing) => listing.projects.map(({ projectId }) => projectId))).not.toContain(
-        fakeProject.id,
-      );
-    });
+        expect(
+          publishedListings.flatMap((listing) => listing.projects.map(({ projectId }) => projectId)),
+        ).not.toContain(fakeProject.id);
+      },
+    );
   });
 
   // ── Write stop ────────────────────────────────────────────────────────────

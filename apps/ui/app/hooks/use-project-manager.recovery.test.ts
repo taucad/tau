@@ -427,7 +427,11 @@ describe('useProjectManager recovery (I8)', () => {
 
     it('I8: should stop replaying a retryable failure at its third attempt', async () => {
       /* The folder's handle is held, but write permission on it has lapsed: each attempt stops on the UI thread
-       * before it reaches storage, as resolveWorkspaceForWrite raises workspace-unavailable there. */
+       * before it reaches storage, as resolveWorkspaceForWrite raises workspace-unavailable there.
+       * A lapsed permission ('prompt') counts as the workspace being present (programme control ruling; today's
+       * behaviour, D14): the attempt is counted and fails with workspace-unavailable, and a re-grant arriving as
+       * WorkspaceReturned clears the row for retry. A fix that retries only while the workspace is writable is
+       * therefore not correct. */
       useWorkspaceRow();
       workspaceReturns();
       mockCheckHandlePermission.mockResolvedValue('prompt');
@@ -546,6 +550,7 @@ describe('useProjectManager recovery (I8)', () => {
 
       /* Five changes announced for other reasons while the folder is still disconnected: more than any attempt
        * budget a counting scheme could spend on them and still replay the row below. */
+      const published = result.current.recoveries;
       for (const _change of [1, 2, 3, 4, 5]) {
         act(() => {
           announceRootConfigurationChange();
@@ -553,6 +558,9 @@ describe('useProjectManager recovery (I8)', () => {
         // oxlint-disable-next-line no-await-in-loop -- each change settles before the next is announced
         await settle();
       }
+      // RetryOnlyWhenCleared: no replay started while the workspace was gone. Every replay republishes recoveries.
+      expect(result.current.recoveries).toBe(published);
+
       // The folder is re-picked, which republishes the route configuration.
       workspaceReturns();
       act(() => {

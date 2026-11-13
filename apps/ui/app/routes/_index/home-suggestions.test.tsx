@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- analytics wire names. */
 import { cleanup, render, screen, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,9 +16,13 @@ const harness = vi.hoisted(() => ({
   setPreference: vi.fn(),
   homeSuggestionSelected: vi.fn(),
 }));
-vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (flag: string) => (flag === 'onboarding' ? harness.onboarding : false),
-}));
+vi.mock('#flags/use-feature.js', async (importOriginal) => {
+  const original: Record<string, unknown> = await importOriginal();
+  return {
+    ...original,
+    useFeature: (flag: string) => (flag === 'onboarding' ? harness.onboarding : false),
+  };
+});
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({
     preference: harness.preference,
@@ -153,5 +158,34 @@ describe('Home suggestions', () => {
       example_id: exampleOf(prompt!).id,
       goal_matched: false,
     });
+  });
+});
+
+/*
+ * C16 (loading-states blueprint, H2): the server decides the row's box. It renders Home with the flag only as the
+ * request cookie gives it (`layoutFlags` in the root loader's data): unknown holds the row's box empty, on renders the
+ * box and its list. The buttons themselves fill in on the first client commit.
+ */
+describe('C16: the server render of the suggestions row', () => {
+  const renderOnServer = (layoutFlags: Readonly<Record<string, boolean>>): string => {
+    /* What the real flag hook gives on the server: the registry default. */
+    harness.onboarding = false;
+    const router = createMemoryRouter([{ id: 'root', path: '/', element: <HomeSuggestions /> }], {
+      initialEntries: ['/'],
+      hydrationData: { loaderData: { root: { layoutFlags } } },
+    });
+    return renderToString(<RouterProvider router={router} />);
+  };
+  const box = '<div data-slot="home-suggestions"';
+
+  it.fails('holds the row box with the flag unknown, and renders the box and its list with the cookie on', () => {
+    const unknown = renderOnServer({});
+    expect(unknown, 'H2: the server render with the flag unknown holds no box for the row').toContain(box);
+
+    const on = renderOnServer({ onboarding: true });
+    expect(on, 'H2: the server render with the cookie on renders no box for the row').toContain(box);
+    expect(on, 'H2: the server render with the cookie on renders no list for the row').toContain(
+      'aria-label="Suggestions"',
+    );
   });
 });

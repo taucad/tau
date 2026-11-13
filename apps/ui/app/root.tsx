@@ -78,23 +78,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
+/** The debug page `root-layout.tsx` renders without the product providers, by the loader's `pathname`. */
+const bareDebugPathname = '/__e2e/remote-host';
+
 /**
- * The root loader reads request headers, cookies and the pathname only, so a navigation
- * that changes nothing but the query string (a gallery search, a filter) cannot change its
- * result. Explicit revalidation and submissions keep the default.
+ * A client navigation never waits on the root loader (U23). Framework mode's single fetch
+ * revalidates every loader on a navigation by default, so without this each click from Home
+ * waited for `/<path>.data` before the route committed.
+ *
+ * The loader reads request headers, cookies and the pathname, and every reader takes its live
+ * value from the client after hydration: consent and the project-list shape are
+ * `useSyncExternalStore` server snapshots, `useCookie` preferences and the sidebar hint seed
+ * a client store, the theme seeds provider state that the theme action and its channel keep,
+ * the model catalog hydrates a query that refreshes on the client, and `env` is fixed per
+ * build. The one reader of the loader's `pathname` is the bare debug page, so entering or
+ * leaving it still revalidates. Submissions and explicit revalidation keep the default.
  */
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   currentUrl,
   nextUrl,
   formMethod,
+  actionStatus,
   defaultShouldRevalidate,
 }) => {
   if (isOfflineShellPath(nextUrl.pathname)) {
     return false;
   }
-  const isQueryOnlyNavigation =
-    formMethod === undefined && currentUrl.pathname === nextUrl.pathname && currentUrl.search !== nextUrl.search;
-  return isQueryOnlyNavigation ? false : defaultShouldRevalidate;
+  const isSubmission = formMethod !== undefined || actionStatus !== undefined;
+  const isSameUrl = currentUrl.pathname === nextUrl.pathname && currentUrl.search === nextUrl.search;
+  const touchesBareDebugPage = currentUrl.pathname === bareDebugPathname || nextUrl.pathname === bareDebugPathname;
+  return isSubmission || isSameUrl || touchesBareDebugPage ? defaultShouldRevalidate : false;
 };
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {

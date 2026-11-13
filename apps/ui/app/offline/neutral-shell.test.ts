@@ -80,5 +80,6 @@ it('never revalidates the root server loader for the offline shell route', () =>
 
   expect(revalidate('/usage?range=30d')).toBe(false);
   expect(revalidate('/usage/')).toBe(false);
-  expect(revalidate('/projects')).toBe(true);
+  // An explicit revalidation elsewhere keeps the default; only the offline shell refuses it.
+  expect(revalidate('/')).toBe(true);
 });

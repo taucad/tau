@@ -1,14 +1,14 @@
 {
   "configs": {
     "LayoutApply.target.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": "pass",
-      "ref": "I10 to I14, D14 (an acknowledgement needs every adapter attached), D18 and rule 8 on both adapters: 2 publications, 2 person edits, 2 intents, 1 restore command, 1 attach cycle per adapter (an attach cycle is one AdapterAttaching; detaches are not bounded, so either adapter can detach and stay detached), 1 route key change, 2 arrangements. Narrowed from the plan's 3, 2, 2, 2 and 2 attach cycles to fit the merge queue (programme control ruling); target-phone holds the plan's bounds on a phone. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "I10 to I14, D14 (an acknowledgement needs every adapter attached), D18 and rule 8 on both adapters: 2 publications, 2 person edits, 2 intents, 1 restore command, 1 attach cycle per adapter (an attach cycle is one AdapterAttaching; detaches are not bounded, so either adapter can detach and stay detached), 1 route key change, 2 arrangements. Narrowed from the plan's 3, 2, 2, 2 and 2 attach cycles to fit the merge queue (programme control ruling); target-phone holds the plan's bounds on a phone"
     },
     "LayoutApply.target-detached.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": "pass",
-      "ref": "A0.3 host row 2 (Y3, I12): publications and intents arrive while no adapter is attached, then both adapters attach and a detached publication is acknowledged; 2 publications, 1 person edit, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "A0.3 host row 2 (Y3, I12): publications and intents arrive while no adapter is attached, then both adapters attach and a detached publication is acknowledged; 2 publications, 1 person edit, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters"
     },
     "LayoutApply.target-phone.cfg": {
       "tier": "nightly",
@@ -16,55 +16,55 @@
       "ref": "A phone at the formal plan's target bounds: both adapters (the editor tab mounts the workbench Dockview, chat-interface-mobile.tsx and chat-editor-layout.tsx), no lane close, the workbench detaching and attaching again on a tab switch; a workbench intent switches to the editor tab and is applied on attach (project-workspace-context.tsx 535 to 543, 426 to 432): 3 publications, 2 person edits, 2 intents, 2 restore commands, 2 attach cycles per adapter, 1 route key change; 3,942,528 distinct states in about 235 s, close to the pr watchdog, so it stays nightly"
     },
     "LayoutApply.liveness.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": "pass",
-      "ref": "IntentEventuallyAccounted as the plan states it (antecedent: some adapter stays attached; quiescence IntentsSettled) on a desktop, under weak fairness of Reattach (a detached adapter whose lane is open attaches), AdapterAttached and IntentApplied, with DetachGuard (a detach or lane close only while an attach cycle is left, so the antecedent always holds); a workbench intent opens the lane (rule 7): 1 publication, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "IntentEventuallyAccounted as the plan states it (antecedent: some adapter stays attached; quiescence IntentsSettled) on a desktop, under weak fairness of Reattach (a detached adapter whose lane is open attaches), AdapterAttached and IntentApplied, with DetachGuard (a detach or lane close only while an attach cycle is left, so the antecedent always holds); a workbench intent opens the lane (rule 7): 1 publication, 2 intents, 2 attach cycles per adapter, 1 route key change, both adapters"
     },
     "LayoutApply.liveness-phone.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": "pass",
-      "ref": "IntentEventuallyAccounted on a phone (Phone TRUE, no lane close): assumption B holds there only while a workbench intent is queued, as the intent switched to the editor tab (project-workspace-context.tsx 535 to 543), so Reattach of the workbench is fair only then; DetachGuard; the same bounds as liveness. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "IntentEventuallyAccounted on a phone (Phone TRUE, no lane close): assumption B holds there only while a workbench intent is queued, as the intent switched to the editor tab (project-workspace-context.tsx 535 to 543), so Reattach of the workbench is fair only then; DetachGuard; the same bounds as liveness"
     },
     "LayoutApply.today-store-replaced.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": {
         "violated": "SingleSession"
       },
       "kind": "defect",
-      "ref": "Y3: a remounted host's useMemo creates and starts a second layout store before the old one is disposed in a microtask; the shortest SingleSession trace is HostRemounted alone and needs no write in flight; 1 publication, 1 person edit, 1 attach cycle, 1 remount. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier",
+      "ref": "Y3: a remounted host's useMemo creates and starts a second layout store before the old one is disposed in a microtask; the shortest SingleSession trace is HostRemounted alone and needs no write in flight; 1 publication, 1 person edit, 1 attach cycle, 1 remount",
       "fixedBy": "A8b"
     },
     "LayoutApply.today-orphan-write.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": {
         "violated": "NoWriteAfterDispose"
       },
       "kind": "witness",
-      "ref": "Y3: after a remount, the old store is disposed while its write is in flight, and the write stays in flight: the old store remains a writer of the file after dispose. Guards the OrphanWriteLanded path of today-store-replaced; 1 publication, 1 person edit, 1 attach cycle, 1 remount. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "Y3: after a remount, the old store is disposed while its write is in flight, and the write stays in flight: the old store remains a writer of the file after dispose. Guards the OrphanWriteLanded path of today-store-replaced; 1 publication, 1 person edit, 1 attach cycle, 1 remount"
     },
     "LayoutApply.no-edit-count.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": {
         "violated": "PersonEditNotReverted"
       },
       "kind": "limit",
-      "ref": "Rule 2 is necessary: without the edit count, an apply computed before a person edit lands after it. The checker's shortest trace lands bytes equal to the edit, so it shows the landing the property forbids rather than a visible revert; 1 publication, 1 person edit, 1 attach cycle. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "Rule 2 is necessary: without the edit count, an apply computed before a person edit lands after it. The checker's shortest trace lands bytes equal to the edit, so it shows the landing the property forbids rather than a visible revert; 1 publication, 1 person edit, 1 attach cycle"
     },
     "LayoutApply.no-unwritten.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": {
         "violated": "UnwrittenEditKept"
       },
       "kind": "limit",
-      "ref": "Rule 8 is necessary (A0.3 host I10 row): a publication that arrives after a person edit, at the current edit count, while the edit is unwritten, is applied over it. The property reads the ghost over, not the fence held; 1 publication, 1 person edit, 1 attach cycle. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "Rule 8 is necessary (A0.3 host I10 row): a publication that arrives after a person edit, at the current edit count, while the edit is unwritten, is applied over it. The property reads the ghost over, not the fence held; 1 publication, 1 person edit, 1 attach cycle"
     },
     "LayoutApply.no-expected.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": {
         "violated": "StaleRestoreRefused"
       },
       "kind": "limit",
-      "ref": "Rule 5 is necessary: without its expected arrangement, a restore command whose expected arrangement is not the one shown is applied; 1 person edit, 2 restore commands, 1 attach cycle, 3 arrangements. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "Rule 5 is necessary: without its expected arrangement, a restore command whose expected arrangement is not the one shown is applied; 1 person edit, 2 restore commands, 1 attach cycle, 3 arrangements"
     },
     "LayoutApply.wide.cfg": {
       "tier": "nightly",
@@ -72,9 +72,9 @@
       "ref": "Both adapters, 3 publications, 2 person edits, 2 intents, 2 restore commands, 1 attach cycle per adapter, 1 route key change, 2 arrangements (programme control ruling). Known limit: the plan's 4, 3, 3, 3 and 3, and 3, 2, 2, 2 with 2 attach cycles per adapter, both exceeded the 900 s nightly watchdog at the runner's flags"
     },
     "LayoutApply.export.cfg": {
-      "tier": "nightly",
+      "tier": "pr",
       "expect": "pass",
-      "ref": "The labelled graph export (graphs.LayoutApply): viewer only, 1 publication, 1 person edit, 1 intent, 1 attach cycle, 1 route key change, AdapterDetached unguarded; restore is left out to keep the graph under 1 MB. Nightly pending the operator's ruling on the Java budget; a follow-up restores the pr tier"
+      "ref": "The labelled graph export (graphs.LayoutApply): viewer only, 1 publication, 1 person edit, 1 intent, 1 attach cycle, 1 route key change, AdapterDetached unguarded; restore is left out to keep the graph under 1 MB"
     }
   },
   "graphs": {

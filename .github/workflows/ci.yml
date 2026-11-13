@@ -861,25 +861,29 @@ jobs:
   # expected verdict and never turns this red; a changed verdict, a stale generated
   # file, a missing tool or a watchdog does. Toolchains come from setup-formal,
   # pinned by sha256 in tools/formal/toolchain.lock, never from `pnpm install`.
-  # Two shards deal the affected projects by measured uncached seconds with the test
-  # shards' dealer and its own snapshot (scripts/src/formal-shard-durations.json): a
-  # change to tools/formal makes every project affected, and on one runner that ran out
-  # of 15 minutes with ui still to go (queue run 43190779343, job 131090042426: 3.5 min
-  # of setup, then 11.7 min of checks). agent-host's 7.3 min is the floor of one shard.
+  # Three shards deal the affected formal tasks by measured uncached seconds with the test
+  # shards' dealer and its own snapshot (scripts/src/formal-shard-durations.json). A project
+  # whose TLA+ specs sit in families below specs/ has one `formal:tla:<family>` task per
+  # family and a `formal:tla` that only depends on them (tools/formal.plugin.ts), so its
+  # families are dealt to runners of their own and run in parallel; each stays within the
+  # Java tier's 3 min per target (policy § 6). A change to tools/formal makes every project
+  # affected, and on one runner that ran out of 15 minutes with ui still to go (queue run
+  # 43190779343, job 131090042426: 3.5 min of setup, then 11.7 min of checks).
+  # agent-host's 7.3 min is the floor of one shard.
   formal:
-    name: Formal models (${{ matrix.shard }}/2)
+    name: Formal models (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.formal == 'true'
-    # The heavier shard measures about 11 min (3.5 of setup, agent-host's 7.3); 20 allows
+    # The heaviest shard measures about 11 min (3.5 of setup, agent-host's 7.3); 20 allows
     # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
@@ -897,28 +901,54 @@ jobs:
           save-pnpm-store: 'false'
           affected-base: ${{ needs.plan.outputs.affected-base }}
 
+      - name: Deal affected formal tasks
+        id: deal
+        # The tasks are `<project>:<target>` ids. A `formal:tla` that only depends on family tasks
+        # (`nx:noop`, tools/formal.plugin.ts) is left out: its families are dealt instead.
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm nx affected -t formal:tla formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
+          tasks=$(jq -c '
+            [.tasks.tasks[] | .target
+              | select(.target == "formal:lean" or .target == "formal:tla" or (.target | startswith("formal:tla:")))
+              | "\(.project):\(.target)"] as $all
+            | [$all[] | . as $task | select(($task | endswith(":formal:tla")) and ($all | any(startswith($task + ":"))) | not)]
+            | unique' "$RUNNER_TEMP/formal-graph.json")
+          shard=$(echo "$tasks" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 3 \
+            --durations scripts/src/formal-shard-durations.json)
+          echo "tasks=$shard" >> "$GITHUB_OUTPUT"
+          if [ -z "$shard" ]; then
+            echo "No affected formal tasks in this shard."
+          else
+            echo "Shard tasks: $shard"
+          fi
+
       - name: Setup formal toolchains
+        if: steps.deal.outputs.tasks != ''
         uses: ./.github/actions/setup-formal
         with:
           tools: tlc,lean
 
       - name: Run affected formal tiers
-        # FM-R15: at most two JVMs at once. The runner caps them per process, so one project at a time.
+        if: steps.deal.outputs.tasks != ''
+        # FM-R15: at most two JVMs at once. The runner caps them per process, so one task at a time.
         env:
-          SHARD: ${{ matrix.shard }}
+          TASKS: ${{ steps.deal.outputs.tasks }}
         run: |
-          pnpm nx affected -t formal:tla formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
-          projects=$(jq -c '
-            [.tasks.tasks[] | select(.target.target | IN("formal:tla", "formal:lean")) | .target.project]
-            | unique' "$RUNNER_TEMP/formal-graph.json")
-          shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 2 \
-            --durations scripts/src/formal-shard-durations.json)
-          if [ -z "$shard" ]; then
-            echo "No affected formal projects in this shard."
-            exit 0
+          failed=()
+          IFS=',' read -ra tasks <<< "$TASKS"
+          for task in "${tasks[@]}"; do
+            echo "::group::$task"
+            if ! pnpm nx run "$task"; then
+              failed+=("$task")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "Failed formal tasks: ${failed[*]}"
+            exit 1
           fi
-          echo "Shard projects: $shard"
-          pnpm nx run-many -t formal:tla formal:lean --projects "$shard" --parallel=1
 
       - name: Check workspace root hygiene
         if: always()

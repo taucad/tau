@@ -192,6 +192,58 @@ describe('formal plugin targets', () => {
     });
   });
 
+  it('should give each TLA+ family below specs a target of its own and make formal:tla run them all', async () => {
+    write('packages/f/project.json', { name: 'f' });
+    const files = writeAll({
+      'packages/f/specs/beta/expected.json': tlaExpected,
+      'packages/f/specs/beta/Beta.tla': undefined,
+      'packages/f/specs/alpha/expected.json': tlaExpected,
+      'packages/f/specs/alpha/Alpha.tla': undefined,
+      'packages/f/specs/lean/expected.json': leanExpected,
+      'packages/f/specs/lean/lean-toolchain': undefined,
+    });
+    const context = {
+      workspaceRoot,
+      nxJsonConfiguration: {},
+    } as unknown as CreateNodesContextV2;
+
+    const results = await createNodesV2[1](files, {}, context);
+    const alpha = results.find(([file]) => file === 'packages/f/specs/alpha/expected.json')?.[1].projects?.[
+      'packages/f'
+    ]?.targets;
+
+    expect(await inferredTargets(files)).toEqual({
+      'packages/f': ['formal:lean', 'formal:tla', 'formal:tla', 'formal:tla:alpha', 'formal:tla:beta'],
+    });
+    expect(alpha?.['formal:tla:alpha']).toMatchObject({
+      executor: 'nx:run-commands',
+      options: { command: 'node tools/formal/src/cli.ts check --tier pr --family alpha {projectRoot}' },
+      cache: true,
+      parallelism: false,
+      outputs: ['{workspaceRoot}/out/reports/formal/{projectRoot}/pr/alpha'],
+    });
+    expect(alpha?.['formal:tla:alpha']?.inputs?.[0]).toBe('{projectRoot}/specs/alpha/**/*');
+    // Every family's result carries the same formal:tla, so Nx's merge keeps one that runs both.
+    expect(alpha?.['formal:tla']).toEqual({
+      executor: 'nx:noop',
+      dependsOn: [{ target: 'formal:tla:alpha' }, { target: 'formal:tla:beta' }],
+      cache: false,
+      metadata: { description: 'Every TLA+ family of the project: alpha, beta.' },
+    });
+  });
+
+  it('should keep one formal:tla when a TLA+ spec sits at specs itself beside a family', async () => {
+    write('packages/g/project.json', { name: 'g' });
+    const files = writeAll({
+      'packages/g/specs/expected.json': tlaExpected,
+      'packages/g/specs/Root.tla': undefined,
+      'packages/g/specs/family/expected.json': tlaExpected,
+      'packages/g/specs/family/Family.tla': undefined,
+    });
+
+    expect(await inferredTargets(files)).toEqual({ 'packages/g': ['formal:tla', 'formal:tla'] });
+  });
+
   it('should emit empty targets keyed by expected.json so nx.json targetDefaults stay the one source of their configuration', async () => {
     write('packages/e/project.json', { name: 'e' });
     const files = writeAll({
@@ -258,5 +310,35 @@ describe('tracked formal spec directories', () => {
 
     expect(files.filter((file) => file.endsWith('/expected.json') && !matched.has(file))).toEqual([]);
     expect(matched.size).toBeGreaterThan(0);
+  });
+
+  it('should name only inferred formal tasks in the formal shard snapshot', async () => {
+    const files = trackedSpecFiles();
+    const context = {
+      workspaceRoot: repositoryRoot,
+      nxJsonConfiguration: {},
+    } as unknown as CreateNodesContextV2;
+    const results = await createNodesV2[1](files, {}, context);
+    const names = new Map(
+      [...new Set(results.flatMap(([, result]) => Object.keys(result.projects ?? {})))].map((root) => [
+        root,
+        (JSON.parse(readFileSync(join(repositoryRoot, root, 'project.json'), 'utf8')) as { name: string }).name,
+      ]),
+    );
+    const tasks = new Set(
+      results.flatMap(([, result]) =>
+        Object.entries(result.projects ?? {}).flatMap(([root, project]) =>
+          Object.entries(project.targets ?? {})
+            // The noop `formal:tla` of a project with families is never dealt; its families are.
+            .filter(([, target]) => target.executor !== 'nx:noop')
+            .map(([target]) => `${names.get(root)}:${target}`),
+        ),
+      ),
+    );
+    const { seconds } = JSON.parse(
+      readFileSync(join(repositoryRoot, 'scripts/src/formal-shard-durations.json'), 'utf8'),
+    ) as { seconds: Record<string, number> };
+
+    expect(Object.keys(seconds).filter((task) => !tasks.has(task))).toEqual([]);
   });
 });

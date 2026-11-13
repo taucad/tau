@@ -10,8 +10,9 @@
  */
 
 import { useEffect, useSyncExternalStore } from 'react';
-import type { UseMutationResult } from '@tanstack/react-query';
+import type { QueryClient, QueryState, UseMutationResult } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { authQueryKeys } from '@better-auth-ui/core';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
@@ -409,6 +410,42 @@ export const fetchCloudProjects = async (signal?: AbortSignal): Promise<readonly
   return overlayDeletionReceipts(projects, account);
 };
 
+/** The session query's state in the cache, read without fetching it. */
+const readSessionState = (queryClient: QueryClient): QueryState | undefined =>
+  queryClient.getQueryState(authQueryKeys.session);
+
+/** The account the session query answered with, once it answered: an id, or no id when signed out. */
+const sessionAnswerOf = (state: QueryState | undefined): Readonly<{ account: string | undefined }> | undefined => {
+  if (state?.status !== 'success') {
+    return undefined;
+  }
+  const data = state.data as { readonly user?: { readonly id?: unknown } } | undefined;
+  return { account: typeof data?.user?.id === 'string' ? data.user.id : undefined };
+};
+
+/**
+ * Whether the listing must wait for the session (N2): its first answer is still on its way, or it has answered and the
+ * published account has not caught up. Asked before then, the listing is keyed by no account, and asked again once
+ * the account is published, so a load of Home requested `/v1/projects` twice. The session query is only read here,
+ * never fetched: a tree with no session query (a test, a page with no auth) never waits.
+ *
+ * @param queryClient - The app's query client.
+ * @param account - The published account.
+ * @returns Whether to hold the listing.
+ */
+const useListingAwaitsSession = (queryClient: QueryClient, account: string | undefined): boolean => {
+  const session = useSyncExternalStore(
+    (listener) => queryClient.getQueryCache().subscribe(listener),
+    () => readSessionState(queryClient),
+    () => undefined,
+  );
+  if (session?.status === 'pending' && session.fetchStatus === 'fetching') {
+    return true;
+  }
+  const answer = sessionAnswerOf(session);
+  return answer !== undefined && answer.account !== account;
+};
+
 /**
  * The shared listing query.
  *
@@ -431,6 +468,7 @@ export const useCloudProjects = (
 }> => {
   const account = useRevisionSessionUser()?.id;
   const queryClient = useQueryClient();
+  const awaitsSession = useListingAwaitsSession(queryClient, account);
   useSyncExternalStore(
     (listener) => deletionTopic.subscribe(listener),
     () => deletionRevision,
@@ -461,7 +499,7 @@ export const useCloudProjects = (
       overlayDeletionReceipts(query.state.data ?? [], account).some((entry) => entry.cloudState === 'deleting')
         ? 3000
         : false,
-    enabled: options?.enabled ?? true,
+    enabled: (options?.enabled ?? true) && !awaitsSession,
     /* The set only changes when another device backs something up or an owner
        shares one, and a window focus is when this device is most likely to have
        missed either — which is react-query's `refetchOnWindowFocus` default

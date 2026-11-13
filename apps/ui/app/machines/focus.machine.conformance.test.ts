@@ -168,22 +168,31 @@ const fields = (s: SpecState): SpecView => ({
 
 type Harness = Readonly<{
   focus: ReturnType<typeof createFocusHarness>;
-  stub: { route: Request; sess: Record<string, 'live'>; handled: number };
+  stub: { route: Request; sess: Record<string, 'live'>; handled: number; factsFirst: boolean };
 }>;
 
 const requestId = (id: number): string => `r${id}`;
 
-/** The registry stub answers each open focus sent as the model's `Outcomes` would, reporting the session's facts first. */
+/**
+ * The registry stub answers each open focus sent as the model's `Outcomes` would. The spawn is one step in the model,
+ * so the stub reports the new session's facts before or after the open's reply, as the replay asks.
+ */
 const answerOpens = (harness: Harness): void => {
   const { focus, stub } = harness;
   for (let opens = focus.opens(); stub.handled < opens.length; opens = focus.opens()) {
     const open = opens[stub.handled]!;
     stub.handled += 1;
-    if (stub.sess[open.projectId] === undefined && Object.keys(stub.sess).length < budget) {
+    const spawned = stub.sess[open.projectId] === undefined && Object.keys(stub.sess).length < budget;
+    if (spawned) {
       stub.sess[open.projectId] = 'live';
+    }
+    if (spawned && stub.factsFirst) {
       focus.facts(open.projectId, 'live', { chatReady: false, availability: 'pending' });
     }
     focus.settleOpen(stub.sess[open.projectId] === undefined ? 'waiting' : 'live', open.requestId);
+    if (spawned && !stub.factsFirst) {
+      focus.facts(open.projectId, 'live', { chatReady: false, availability: 'pending' });
+    }
   }
 };
 
@@ -319,7 +328,10 @@ const project = (spec: SpecView): SpecView => fields(closure(spec as unknown as 
 const machine = createFocusMachine({ nativeKernelOf: () => undefined });
 
 describe('focus conforms to ProjectFocus.tla', () => {
-  it('should replay the covering suite without divergence', async () => {
+  it.each([
+    ['before', true],
+    ['after', false],
+  ])('should replay the covering suite without divergence, facts reported %s the reply', async (_order, factsFirst) => {
     const behaviours = suiteBehaviours(graph, suite) as unknown as SpecState[][];
     const divergences = [];
     for (const [index, behaviour] of behaviours.entries()) {
@@ -327,7 +339,7 @@ describe('focus conforms to ProjectFocus.tla', () => {
       const adapter: ConformanceAdapter<Harness> = {
         start: () => ({
           focus: createFocusHarness({ guard: false }),
-          stub: { route: { id: 0, project: none, chat: none }, sess: {}, handled: 0 },
+          stub: { route: { id: 0, project: none, chat: none }, sess: {}, handled: 0, factsFirst },
         }),
         apply: async (harness, [state]) => {
           step += 1;

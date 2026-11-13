@@ -11,7 +11,6 @@
  * It is a module-level helper (MC-R20, MC-R25): React reads it through `useSyncExternalStore` over focus and the
  * registry once A5b wires it.
  */
-import { matchesState } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import type { FocusMachine, FocusSlugs } from '#machines/focus.machine.js';
 import type { SessionsMachineContext } from '#machines/sessions.machine.js';
@@ -39,13 +38,16 @@ export const startErrorMessage = 'Tau could not open this project. Try again.';
 
 const resolving: ProjectRouteState = { kind: 'resolving' };
 
-/** The committed route names what focus's request names: the same project, or the same slugs while neither has one. */
+/**
+ * The committed route names what focus's request names: the same project, or, while the committed slugs have no
+ * project (a renamed directory's retained route, or a slug not resolved yet), the same slugs.
+ */
 const matches = (focus: SnapshotFrom<FocusMachine>, committed: CommittedProjectRoute): boolean => {
   const { request } = focus.context;
   if (request === undefined || request.home) {
     return false;
   }
-  if (committed.projectId !== undefined || request.projectId !== undefined) {
+  if (committed.projectId !== undefined) {
     return committed.projectId === request.projectId;
   }
   return (
@@ -77,11 +79,11 @@ export const selectProjectRouteState = (
     return resolving;
   }
   const { answer } = focus.context;
-  if (focus.matches('flushFailed')) {
+  if (focus.hasTag('flush-failed')) {
     return { kind: 'flush-error', error: new Error(leaveFlushErrorMessage) };
   }
   const projectId = answer?.projectId;
-  if (focus.matches('held') && answer !== undefined) {
+  if (focus.hasTag('held') && answer !== undefined) {
     const held = answer.answer;
     if (held.status === 'missing') {
       return { kind: 'missing', slugs: committed.slugs };
@@ -116,10 +118,9 @@ export const selectProjectRouteState = (
     return resolving;
   }
   const { project } = answer.answer;
-  const opening = matchesState('opening', focus.value);
-  const focused = focus.matches('focused');
+  const focused = focus.hasTag('focused');
   // The project's entry needs a kernel this host does not have: the notice shows over the opening session (A0.2).
-  if ((opening || focused) && answer.kernel !== undefined && !answer.kernel.available) {
+  if (focus.hasTag('on-project') && answer.kernel !== undefined && !answer.kernel.available) {
     return { kind: 'native-kernel', projectId, project, kernelName: answer.kernel.kernelName };
   }
   if (!focused) {

@@ -174,6 +174,8 @@ PersonCommands == MaxPersonOpens > 0
 \* Focus holds an answer for the library's current epoch.
 Fresh == f.ans # "none" /\ f.ansEpoch = lib.epoch
 \* Target: focus's own open waiting in the registry's pendingOpen slot for the project it is opening.
+\* It is by project: a person's open of that project takes the slot in its place, and the machine then
+\* waits for that open's reply (focus.machine.ts, `personOpen`).
 FocusPending == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq /\ pendingOpen.project = f.ansProj
                 /\ f.st = "opening" /\ f.opened
 \* Target: focus withdraws that open (the registry's cancelPendingOpen) in the step it stops opening

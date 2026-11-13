@@ -205,6 +205,13 @@ const {
   };
 });
 
+/* A0.2: a one-project device. Off by default, so the module registry below keeps the browser budget. */
+const deviceMemory = vi.hoisted(() => ({ constrained: false }));
+vi.mock('@taucad/ui-core/lib/device-memory-class', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  isMemoryConstrainedDevice: () => deviceMemory.constrained,
+}));
+
 workerRef.current = mock<Worker>({
   postMessage: (frame: { type: string; projectId?: string }) => {
     workerFrames.push(frame);
@@ -1580,6 +1587,164 @@ describe('sessions composition — the workbench follows the selection (S48(14))
  * revision port; the desktop e2e owns the former and the Node close row owns
  * the latter. Only the sync flush is held open (D31, P49).
  */
+/*
+ * A0.2: the registry steps `ProjectFocus` assumes on a one-project device (B-08), and the only check of
+ * them: no conformance test is claimed for `sessions.machine`. Leaving a project closes it through the
+ * registry — the memory release the route binds (`project-route.tsx` 275 to 276) for a clean project, the
+ * switch close (`sessions.machine.ts` 396) for one the release refused — and the single `pendingOpen`
+ * slot opens the next project only once the close has finished. The route never sends `close` (I3).
+ */
+describe('sessions composition — a one-project device (A0.2 item 6, B-08)', () => {
+  type OneProjectRegistry = Readonly<{
+    actor: ReturnType<typeof createSessionsActor>;
+    /** Every event the registry root processed, by type. */
+    received: string[];
+    /** Every live set the registry announced. */
+    liveSets: Array<readonly string[]>;
+    budgetRefusals: string[];
+  }>;
+
+  const createOneProjectRegistry = (): OneProjectRegistry => {
+    const received: string[] = [];
+    const liveSets: Array<readonly string[]> = [];
+    const budgetRefusals: string[] = [];
+    const root: { current: ReturnType<typeof createSessionsActor> | undefined } = { current: undefined };
+    /* A child never sends `close` to the registry, so a `close` the root processes came from the app. */
+    const actor = createSessionsActor({
+      inspect: (inspection) => {
+        if (
+          inspection.type === '@xstate.transition' &&
+          root.current !== undefined &&
+          inspection.actorRef === root.current
+        ) {
+          received.push(inspection.eventType);
+        }
+      },
+    });
+    root.current = actor;
+    actor.on('liveSetChanged', (event) => liveSets.push(event.projectIds));
+    actor.on('budgetRefused', (event) => budgetRefusals.push(event.projectId));
+    actor.start();
+    return { actor, received, liveSets, budgetRefusals };
+  };
+
+  const renderOn = async (
+    registry: OneProjectRegistry,
+    initialEntry: string,
+  ): Promise<{ navigate: (target: string) => Promise<void>; unmount: () => void }> => {
+    const quiet = (): boolean =>
+      Object.values(registry.actor.getSnapshot().context.refs).every((ref) => {
+        const snapshot = ref.getSnapshot();
+        return !snapshot.matches('opening') && !snapshot.matches('closing');
+      });
+    const view = render(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <NavigationProbe />
+        <QueryClientProvider client={queryClient}>
+          <SessionsProvider actor={registry.actor}>
+            <routeModule.ProjectSessionsHost>
+              <Routes>
+                <Route path='/w/:workspace/:project' element={<RouteStateProbe />} />
+              </Routes>
+            </routeModule.ProjectSessionsHost>
+          </SessionsProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await settle(quiet);
+    return {
+      navigate: async (target) => {
+        await act(async () => {
+          await navigateRoute?.(target);
+        });
+        await settle(quiet);
+        await settle(quiet);
+      },
+      unmount: view.unmount,
+    };
+  };
+
+  const liveOn = (registry: OneProjectRegistry): readonly string[] =>
+    Object.keys(registry.actor.getSnapshot().context.refs);
+
+  beforeEach(() => {
+    deviceMemory.constrained = true;
+  });
+
+  afterEach(() => {
+    deviceMemory.constrained = false;
+  });
+
+  it('closes a clean project being left through the memory release, then opens the next', async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-clean-a');
+    expect(liveOn(registry)).toEqual(['one-clean-a']);
+    mounted.length = 0;
+
+    await view.navigate('/w/workspace/one-clean-b');
+
+    expect(liveOn(registry)).toEqual(['one-clean-b']);
+    expect(registry.actor.getSnapshot().context.closed['one-clean-a']?.reason).toBe('memory');
+    expect(registry.liveSets.every((projectIds) => projectIds.length <= 1)).toBe(true);
+    expect(mounted).toEqual(['unmount:one-clean-a', 'mount:one-clean-b']);
+    expect(registry.received).toEqual(expect.arrayContaining(['open', 'releaseMemory']));
+    expect(registry.received).not.toContain('close');
+    expect(screen.getByTestId('route-state')).toHaveTextContent('editor');
+    view.unmount();
+    registry.actor.stop();
+  });
+
+  it('closes an unpushed project being left as the person’s close, flushes it, then opens the next from the pending slot', async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-unpushed-a');
+    await act(async () => {
+      revision.setSync('checking');
+      await Promise.resolve();
+    });
+    expect(registry.actor.getSnapshot().context.status['one-unpushed-a']?.pushed).toBe(false);
+    mounted.length = 0;
+    serviceCalls.length = 0;
+
+    await view.navigate('/w/workspace/one-unpushed-b');
+
+    /* The memory release refused the unpushed project; the open then took the switch close. */
+    expect(registry.actor.getSnapshot().context.closed['one-unpushed-a']?.reason).toBe('user');
+    expect(liveOn(registry)).toEqual(['one-unpushed-b']);
+    expect(registry.actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    expect(registry.liveSets.every((projectIds) => projectIds.length <= 1)).toBe(true);
+    /* The close took its cut before the next project's subtree mounted. */
+    expect(serviceCalls).toContain('quiesce');
+    expect(mounted).toEqual(['unmount:one-unpushed-a', 'mount:one-unpushed-b']);
+    expect(registry.received).toContain('open');
+    expect(registry.received).not.toContain('close');
+    view.unmount();
+    registry.actor.stop();
+  });
+
+  it('keeps a running project being left and refuses the next open, holding it in the pending slot', async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-running-a');
+    await act(async () => {
+      registry.actor.getSnapshot().context.refs['one-running-a']?.send({
+        type: 'projectedRunsChanged',
+        runs: ['chat-run'],
+        stoppableRuns: ['chat-run'],
+      });
+      await Promise.resolve();
+    });
+
+    await view.navigate('/w/workspace/one-running-b');
+
+    expect(liveOn(registry)).toEqual(['one-running-a']);
+    expect(registry.budgetRefusals).toEqual(['one-running-b']);
+    expect(registry.actor.getSnapshot().context.pendingOpen).toBe('one-running-b');
+    expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
+    expect(registry.received).not.toContain('close');
+    view.unmount();
+    registry.actor.stop();
+  });
+});
+
 describe('sessions composition — the desktop quit hold (S48(17))', () => {
   afterEach(() => {
     vi.unstubAllEnvs();

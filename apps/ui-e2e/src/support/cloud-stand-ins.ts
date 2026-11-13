@@ -127,26 +127,28 @@ export type CloudStandInCommands = {
  */
 export const cloudStandInCommands = (commands: unknown): CloudStandInCommands => commands as CloudStandInCommands;
 
-/** One step of a pinned row that is not its defect's own assertion: a load, a wait, a precondition, evidence. */
-export type CloudArrange = <Result>(step: () => Promise<Result>) => Promise<Result | undefined>;
+/** Runs a row's defect assertion: the one expectation the defect makes fail. */
+export type CloudDefect = (assertion: () => Promise<void> | void) => Promise<void>;
 
 /** The part of Vitest's `test` (or `test.runIf(...)`) a pinned row is declared with. */
-export type CloudRowApi = {
-  (name: string, body: (context: TestContext) => Promise<void>): void;
-  readonly fails: (name: string, body: (context: TestContext) => Promise<void>) => void;
-};
+export type CloudRowApi = (name: string, body: (context: TestContext) => Promise<void>) => void;
 
 /**
- * Declare a row that pins a known defect (D25). While `expectedFailure` is true it is `fails`, and the only throw
- * it may invert is the defect's own assertion: every other step runs through `arrange`, which turns a harness fault,
- * a wait that times out or a failed precondition into an annotation and `undefined`. The row then returns early
- * without throwing, which an expected failure reports as red ("Expect test to fail"). The fixing lane flips the row
- * by setting `expectedFailure` to false and nothing else: the row becomes a plain test, `arrange` rethrows, and the
- * early return is never reached.
+ * Declare a row that pins a known defect (D25). The row is always a plain test, so a fault anywhere in it (a load,
+ * a wait, a precondition, the timeout, setup or teardown) fails it. Only the assertion passed to `defect` is treated
+ * specially, and only while `expectedFailure` is true:
+ *
+ * - it fails, as the defect makes it: the row passes and records the failure as a `notice` annotation that starts
+ *   `<id> stands`, so a standing defect is visible in the report;
+ * - it passes: the row fails with `<id>: defect no longer reproduces: flip expectedFailure`;
+ * - it throws anything but an assertion error: the row fails with that error.
+ *
+ * The fixing lane flips the row by setting `expectedFailure` to false and nothing else: `defect` then runs the
+ * assertion as a plain call.
  *
  * @param row - `api` is `test`, or `test.runIf(...)` for a row that runs in one tier only; `expectedFailure` is whether
- * the defect still stands; `title` starts with the defect id.
- * @param body - The row, given `arrange`.
+ * the defect still stands; `title` starts with the defect id and a colon.
+ * @param body - The row, given `defect`, which it calls once with the defect's assertion, and the test context.
  */
 export const cloudDefectRow = (
   {
@@ -154,24 +156,32 @@ export const cloudDefectRow = (
     expectedFailure,
     title,
   }: { readonly api: CloudRowApi; readonly expectedFailure: boolean; readonly title: string },
-  body: (arrange: CloudArrange) => Promise<void>,
+  body: (defect: CloudDefect, context: TestContext) => Promise<void>,
 ): void => {
-  (expectedFailure ? api.fails : api)(title, async ({ annotate }) => {
-    const arrange: CloudArrange = async (step) => {
+  const id = title.slice(0, title.indexOf(':'));
+  api(title, async (context) => {
+    const reached = { assertion: false };
+    const defect: CloudDefect = async (assertion) => {
+      reached.assertion = true;
+      if (!expectedFailure) {
+        await assertion();
+        return;
+      }
       try {
-        return await step();
+        await assertion();
       } catch (error) {
-        if (!expectedFailure) {
+        if (!(error instanceof Error) || error.name !== 'AssertionError') {
           throw error;
         }
-        await annotate(
-          `Not the defect's assertion, so the row is red: ${error instanceof Error ? error.message : String(error)}`,
-          'warning',
-        );
-        return undefined;
+        await context.annotate(`${id} stands (expected failure): ${error.message}`, 'notice');
+        return;
       }
+      throw new Error(`${id}: defect no longer reproduces: flip expectedFailure`);
     };
-    await body(arrange);
+    await body(defect, context);
+    if (!reached.assertion) {
+      throw new Error(`${id}: the row never reached its defect assertion`);
+    }
   });
 };
 

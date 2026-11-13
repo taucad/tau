@@ -166,6 +166,15 @@ type Session = {
 };
 
 const sessions = new Map<string, Session>();
+
+/** The cloud-build tier's stand-in API for one target context: how long each answer is held, and what was asked. */
+type CloudStandIns = {
+  delays: CloudStandInDelays;
+  readonly counts: Record<CloudRequestName, number>;
+  /** The answers parked by a `'held'` delay, each given when the spec releases its endpoint. */
+  readonly parked: Array<{ readonly endpoint: CloudStandInEndpoint; readonly release: (answer: boolean) => void }>;
+};
+const cloudStandIns = new WeakMap<ProviderContext, CloudStandIns>();
 const observedDownloads = new WeakMap<
   TargetPage,
   Array<Promise<{ readonly base64: string; readonly suggestedFilename: string } | Error>>
@@ -316,6 +325,10 @@ const closeServer = async (server: Server): Promise<void> =>
 
 const disposeSession = async (session: Session): Promise<void> => {
   const errors: unknown[] = [];
+  /* A held stand-in answer is let go unanswered, so no route handler outlives its context. */
+  for (const parked of cloudStandIns.get(session.context)?.parked.splice(0) ?? []) {
+    parked.release(false);
+  }
   for (const gate of session.agentHostGatewayGates.splice(0)) {
     gate.release();
   }
@@ -891,15 +904,6 @@ export const uiStartModelCatalogApi: BrowserCommand<[], { readonly serverHasCata
   return { serverHasCatalog: await waitForServerCatalog(first.id) };
 };
 
-/** The cloud-build tier's stand-in API for one target context: how long each answer is held, and what was asked. */
-type CloudStandIns = {
-  delays: CloudStandInDelays;
-  readonly counts: Record<CloudRequestName, number>;
-  /** The answers parked by a `'held'` delay, each given when the spec releases its endpoint. */
-  readonly parked: Array<{ readonly endpoint: CloudStandInEndpoint; readonly release: () => void }>;
-};
-const cloudStandIns = new WeakMap<ProviderContext, CloudStandIns>();
-
 const cloudStandInEndpoint = (pathname: string): CloudStandInEndpoint | undefined =>
   (Object.keys(cloudStandInPaths) as CloudStandInEndpoint[]).find((endpoint) =>
     cloudStandInPaths[endpoint].test(pathname),
@@ -975,9 +979,13 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
       standIns.counts[endpoint] += 1;
       const delay = standIns.delays[endpoint] ?? 0;
       if (delay === 'held') {
-        await new Promise<void>((resolve) => {
+        const answer = await new Promise<boolean>((resolve) => {
           standIns.parked.push({ endpoint, release: resolve });
         });
+        if (!answer) {
+          /* The target is closing: its context drops the request. */
+          return;
+        }
       } else if (delay > 0) {
         await new Promise((resolve) => {
           setTimeout(resolve, delay);
@@ -1010,7 +1018,7 @@ export const uiReleaseCloudStandIn: BrowserCommand<[endpoint: CloudStandInEndpoi
   standIns.delays = { ...standIns.delays, [endpoint]: 0 };
   for (const parked of standIns.parked.filter((entry) => entry.endpoint === endpoint)) {
     standIns.parked.splice(standIns.parked.indexOf(parked), 1);
-    parked.release();
+    parked.release(true);
   }
 };
 

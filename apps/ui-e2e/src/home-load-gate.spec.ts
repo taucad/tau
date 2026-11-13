@@ -169,7 +169,8 @@ test.each(
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
  * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
- * `cloudDefectRow` `expectedFailure` to `false`; a fault in the load or a precondition leaves the row red.
+ * `cloudDefectRow` `expectedFailure` to `false`. Each is a plain test: only its defect assertion's failure is
+ * recorded as the standing defect, and any other fault, or that assertion passing, fails the row.
  */
 const cloud = cloudStandInCommands(target.commands);
 const cloudLoadTier = await cloud.uiIsCloudLoadTier();
@@ -200,12 +201,11 @@ const loadSignedInHome = async (
 
 cloudDefectRow(
   { api: cloudRow, expectedFailure: true, title: 'N1: removes no child of body on a signed-in load of Home' },
-  async (arrange) => {
-    const record = await arrange(async () => loadSignedInHome('n1-body', {}));
-    if (record === undefined) {
-      return;
-    }
-    expect(record.bodyChildRemovals, 'N1: these children of body were removed').toEqual([]);
+  async (defect) => {
+    const record = await loadSignedInHome('n1-body', {});
+    await defect(() => {
+      expect(record.bodyChildRemovals, 'N1: these children of body were removed').toEqual([]);
+    });
   },
 );
 
@@ -215,15 +215,14 @@ cloudDefectRow(
     expectedFailure: true,
     title: `N1: keeps the sidebar wrapper on Home while get-session is held ${String(sessionHeld)} ms`,
   },
-  async (arrange) => {
-    const record = await arrange(async () => loadSignedInHome('n1-wrapper', { session: sessionHeld }));
-    if (record === undefined) {
-      return;
-    }
-    expect(
-      record.wrapperRemovals,
-      `N1: the sidebar wrapper was removed at these times (ms); get-session was answered at ${JSON.stringify(record.sessionAnsweredAt)} ms`,
-    ).toEqual([]);
+  async (defect) => {
+    const record = await loadSignedInHome('n1-wrapper', { session: sessionHeld });
+    await defect(() => {
+      expect(
+        record.wrapperRemovals,
+        `N1: the sidebar wrapper was removed at these times (ms); get-session was answered at ${JSON.stringify(record.sessionAnsweredAt)} ms`,
+      ).toEqual([]);
+    });
   },
 );
 
@@ -236,25 +235,21 @@ cloudDefectRow(
     title:
       'H7: never puts the plain textarea back after the rich composer upgraded, get-session held until the upgrade',
   },
-  async (arrange) => {
-    const record = await arrange(async () => {
-      const read = await loadSignedInHome('h7-composer', { session: 'held' }, async () => {
-        await target.expectVisible(richComposer, 60_000);
-        await cloud.uiReleaseCloudStandIn('session');
-      });
-      expect(read.composerUpgradedAt, 'the rich composer never upgraded').toBeDefined();
-      expect(
-        read.sessionAnsweredAt.every((answered) => answered > (read.composerUpgradedAt ?? Infinity)),
-        `get-session was answered (${JSON.stringify(read.sessionAnsweredAt)} ms) before the upgrade`,
-      ).toBe(true);
-      return read;
+  async (defect) => {
+    const record = await loadSignedInHome('h7-composer', { session: 'held' }, async () => {
+      await target.expectVisible(richComposer, 60_000);
+      await cloud.uiReleaseCloudStandIn('session');
     });
-    if (record === undefined) {
-      return;
-    }
+    expect(record.composerUpgradedAt, 'the rich composer never upgraded').toBeDefined();
     expect(
-      record.composerReplacements,
-      `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
-    ).toEqual([]);
+      record.sessionAnsweredAt.every((answered) => answered > (record.composerUpgradedAt ?? Infinity)),
+      `get-session was answered (${JSON.stringify(record.sessionAnsweredAt)} ms) before the upgrade`,
+    ).toBe(true);
+    await defect(() => {
+      expect(
+        record.composerReplacements,
+        `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
+      ).toEqual([]);
+    });
   },
 );

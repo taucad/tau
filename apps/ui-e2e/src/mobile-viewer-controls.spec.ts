@@ -137,6 +137,37 @@ test.each([
 test.each([
   { width: 320, height: 640 },
   { width: 390, height: 844 },
+])('opens Viewer settings as a whole bottom drawer with its sub-views at $width×$height', async (viewport) => {
+  await openStage(viewport);
+  await target.click(controls().getByRole('button', { name: 'Viewer settings' }), { touch: true });
+  // On a phone the settings are the responsive menu's drawer, never a menu clipped behind the bar.
+  const drawer = selectors.getByRole('dialog', { name: 'Viewer settings' });
+  await target.expectVisible(drawer);
+  await target.expectCount(selectors.getByRole('menu'), 0);
+  const box = await target.boundingBox(drawer);
+  if (!box) {
+    throw new Error('The settings drawer has no layout box.');
+  }
+  expect(box.x).toBeGreaterThanOrEqual(-0.5);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 0.5);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
+
+  // Grid & units opens in the same drawer under a Back row, and Back returns to the settings.
+  await target.click(drawer.getByRole('button', { name: /^Grid & units, /u }), { touch: true });
+  await target.expectVisible(drawer.getByRole('group', { name: 'Grid & units' }));
+  await target.click(drawer.getByRole('button', { name: 'Back to Viewer settings' }), { touch: true });
+  await target.expectVisible(drawer.getByRole('switch', { name: 'Grid', exact: true }));
+  const layout = await readLayout();
+  expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+
+  await target.click(drawer.getByRole('button', { name: 'Close' }), { touch: true });
+  await target.expectCount(drawer, 0);
+});
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
 ])('keeps running tool rows inside the stage above a whole controls line at $width×$height', async (viewport) => {
   await openStage(viewport);
   await target.click(controls().getByRole('button', { name: 'Section view', exact: true }), { touch: true });

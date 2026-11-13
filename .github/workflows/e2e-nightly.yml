@@ -309,8 +309,9 @@ jobs:
   # The cloud-build load tier (app state orchestration A0.11): the loading rows a self-host
   # build cannot show, on the cloud UI variant with stand-ins answering the API by
   # interception, so it needs no API, database or secret. Each row pins a known defect as
-  # an expected failure: the job is green while the defects stand, and goes red when a fix
-  # lands without flipping its row or when a row stops failing on its own assertion.
+  # an expected failure: the job is green while every row's own assertion fails, and goes
+  # red when one passes (its defect fixed without flipping the row) or when a row's load or
+  # precondition faults before that assertion (`cloudDefectRow` reports it, never inverts it).
   cloud-load:
     name: Cloud-build load tier
     runs-on: ubuntu-latest
@@ -328,6 +329,8 @@ jobs:
 
       - name: Run the cloud-build load tier
         timeout-minutes: 45
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
         run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:cloud-load --parallel=1 --outputStyle=stream
 
       - *root-hygiene

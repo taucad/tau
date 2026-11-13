@@ -60,7 +60,12 @@ import {
   cloudStandInPaths,
   fileManagerWorkerPath,
 } from './cloud-stand-ins.ts';
-import type { CloudRequestName, CloudStandInDelays, CloudStandInEndpoint } from './cloud-stand-ins.ts';
+import type {
+  CloudRequestCounts,
+  CloudRequestName,
+  CloudStandInDelays,
+  CloudStandInEndpoint,
+} from './cloud-stand-ins.ts';
 import type { LinkedGithubFixture } from './linked-github-fixture.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
 
@@ -890,6 +895,8 @@ export const uiStartModelCatalogApi: BrowserCommand<[], { readonly serverHasCata
 type CloudStandIns = {
   delays: CloudStandInDelays;
   readonly counts: Record<CloudRequestName, number>;
+  /** The answers parked by a `'held'` delay, each given when the spec releases its endpoint. */
+  readonly parked: Array<{ readonly endpoint: CloudStandInEndpoint; readonly release: () => void }>;
 };
 const cloudStandIns = new WeakMap<ProviderContext, CloudStandIns>();
 
@@ -905,8 +912,10 @@ export const uiIsCloudLoadTier: BrowserCommand<[], boolean> = () => process.env[
  * The cloud-build tier's stand-in API (`cloud-stand-ins.ts`): answer `get-session`, `/v1/projects` and
  * `/v1/agents` on the API origin for every page the target context opens, as the API would answer the signed-in
  * stand-in owner, and count each request and each request for the file-manager worker's script. No API runs and
- * nothing is signed: every other path on the API origin goes to the network and finds nothing listening. Each
- * answer is held for its delay in `delays` (milliseconds), so a spec forces what a slow answer shows. Routing
+ * nothing is signed: every other path on the API origin is refused at once, as an absent API refuses it, so an API
+ * that happens to listen locally changes nothing. A route a spec registers later for one path (the model catalog
+ * fixture) still answers that path. Each answer is held for its delay in `delays` (milliseconds, or `'held'` until
+ * `uiReleaseCloudStandIn`), so a spec forces what a slow answer shows. Routing
  * turns off the context's HTTP cache, so a second request for the worker is a request, not a cache read. Call it
  * before the first navigation.
  */
@@ -921,6 +930,7 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
   const standIns: CloudStandIns = {
     delays: { ...delays },
     counts: { session: 0, projects: 0, agents: 0, fileManagerWorker: 0 },
+    parked: [],
   };
   cloudStandIns.set(context, standIns);
   /* A visitor who has answered the analytics offer: the server renders no banner, so Do Not Track
@@ -939,11 +949,11 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
     }
   });
   await context.route(
-    (url) => url.origin === apiOrigin && cloudStandInEndpoint(url.pathname) !== undefined,
+    (url) => url.origin === apiOrigin,
     async (route, request) => {
       const endpoint = cloudStandInEndpoint(new URL(request.url()).pathname);
       if (endpoint === undefined) {
-        await route.fallback();
+        await route.abort('connectionrefused');
         return;
       }
       const headers = {
@@ -964,7 +974,11 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
       }
       standIns.counts[endpoint] += 1;
       const delay = standIns.delays[endpoint] ?? 0;
-      if (delay > 0) {
+      if (delay === 'held') {
+        await new Promise<void>((resolve) => {
+          standIns.parked.push({ endpoint, release: resolve });
+        });
+      } else if (delay > 0) {
         await new Promise((resolve) => {
           setTimeout(resolve, delay);
         });
@@ -987,8 +1001,21 @@ export const uiSetCloudStandInDelays: BrowserCommand<[delays: CloudStandInDelays
   standIns.delays = { ...delays };
 };
 
+/** Give every held answer for `endpoint` now, and answer its later requests at once. */
+export const uiReleaseCloudStandIn: BrowserCommand<[endpoint: CloudStandInEndpoint]> = (commandContext, endpoint) => {
+  const standIns = cloudStandIns.get(sessionFor(commandContext).context);
+  if (!standIns) {
+    throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
+  }
+  standIns.delays = { ...standIns.delays, [endpoint]: 0 };
+  for (const parked of standIns.parked.filter((entry) => entry.endpoint === endpoint)) {
+    standIns.parked.splice(standIns.parked.indexOf(parked), 1);
+    parked.release();
+  }
+};
+
 /** How many times each stand-in answer and the file-manager worker were requested; with `reset`, count from zero. */
-export const uiReadCloudRequestCounts: BrowserCommand<[reset?: boolean], Readonly<Record<CloudRequestName, number>>> = (
+export const uiReadCloudRequestCounts: BrowserCommand<[reset?: boolean], CloudRequestCounts> = (
   commandContext,
   reset = false,
 ) => {
@@ -3658,6 +3685,7 @@ export const uiBrowserCommands = {
   uiIsCloudLoadTier,
   uiInstallCloudStandIns,
   uiSetCloudStandInDelays,
+  uiReleaseCloudStandIn,
   uiReadCloudRequestCounts,
   uiInstallPostHogFixture,
   uiReadAgentHostApiRequests,

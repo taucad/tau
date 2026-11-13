@@ -3,6 +3,7 @@ import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { CloudLoadRecord, CloudRequestCounts, CloudStandInDelays } from '#support/cloud-stand-ins.js';
 import {
+  cloudDefectRow,
   cloudLoadProbe,
   cloudStandInCommands,
   cloudStandInOwner,
@@ -19,7 +20,8 @@ import {
  *
  * Each row pins a known defect and is an expected failure, so `main` stays green; the lane that fixes the defect
  * flips its row. Each is forced by holding a stand-in answer, never sampled, and fails on the defect's own
- * assertion: a request count, a removed node or an offset.
+ * assertion: a request count, a removed node or an offset. The load and its preconditions run outside that
+ * inversion (`cloudDefectRow`): a fault there leaves the row red, never green.
  */
 
 const cloud = cloudStandInCommands(target.commands);
@@ -92,65 +94,125 @@ const keep = async (name: string, counts?: CloudRequestCounts): Promise<CloudLoa
 };
 
 describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
-  test.fails('N2: requests get-session, /v1/projects, /v1/agents and the file-manager worker once per load of Home', async () => {
-    await openSignedIn();
-    await target.navigate('/');
-    await waitForSettledHome();
-    const counts = await cloud.uiReadCloudRequestCounts();
-    await keep('n2-home', counts);
-    expect(counts, `N2: requests per load of Home ${JSON.stringify(counts)}`).toEqual({
-      session: 1,
-      projects: 1,
-      agents: 1,
-      fileManagerWorker: 1,
-    });
-  });
+  /* Each row is `cloudDefectRow({ expectedFailure: true, ... })`: the fixing lane flips it by setting `false`. */
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title: 'N2: requests get-session, /v1/projects, /v1/agents and the file-manager worker once per load of Home',
+    },
+    async (arrange) => {
+      const counts = await arrange(async () => {
+        await openSignedIn();
+        await target.navigate('/');
+        await waitForSettledHome();
+        const read = await cloud.uiReadCloudRequestCounts();
+        await keep('n2-home', read);
+        return read;
+      });
+      if (counts === undefined) {
+        return;
+      }
+      expect(counts, `N2: requests per load of Home ${JSON.stringify(counts)}`).toEqual({
+        session: 1,
+        projects: 1,
+        agents: 1,
+        fileManagerWorker: 1,
+      });
+    },
+  );
 
-  test.fails('N2: requests get-session, /v1/agents and the file-manager worker once per load of a project route', async () => {
-    await openSignedIn();
-    const route = await seedLocalProject();
-    await target.delay(settleWindow);
-    await cloud.uiReadCloudRequestCounts(true);
-    await target.navigate(route);
-    await waitForSettledProject();
-    const counts = await cloud.uiReadCloudRequestCounts();
-    await keep('n2-project', counts);
-    /* A project with no Tau remote never asks for the listing (`use-cloud-projects.ts`, `useProjectAccessRole`). */
-    expect(counts, `N2: requests per load of a project route ${JSON.stringify(counts)}`).toEqual({
-      session: 1,
-      projects: 0,
-      agents: 1,
-      fileManagerWorker: 1,
-    });
-  });
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title: 'N2: requests get-session, /v1/agents and the file-manager worker once per load of a project route',
+    },
+    async (arrange) => {
+      const counts = await arrange(async () => {
+        await openSignedIn();
+        const route = await seedLocalProject();
+        await target.delay(settleWindow);
+        await cloud.uiReadCloudRequestCounts(true);
+        await target.navigate(route);
+        await waitForSettledProject();
+        const read = await cloud.uiReadCloudRequestCounts();
+        await keep('n2-project', read);
+        return read;
+      });
+      if (counts === undefined) {
+        return;
+      }
+      /* The route is a project on this device, not the Tau-remote one: the stand-ins do not serve the Tau remote's
+         connect path (the API's git proxy) or the billing entitlements it needs, so no project here is on the Tau
+         remote, and such a project never asks for the listing (`useProjectAccessRole` in `use-cloud-projects.ts`).
+         `projects: 0` is that harness consequence, not a claim about the route. The Tau-remote project route's
+         `/v1/projects` count is a recorded gap of this tier, accepted by programme control. */
+      expect(counts, `N2: requests per load of a project route ${JSON.stringify(counts)}`).toEqual({
+        session: 1,
+        projects: 0,
+        agents: 1,
+        fileManagerWorker: 1,
+      });
+    },
+  );
 
-  test.fails(`U1: keeps the sidebar wrapper on a project route while get-session is held ${String(held)} ms, the chunk undelayed`, async () => {
-    await openSignedIn();
-    const route = await seedLocalProject();
-    await cloud.uiSetCloudStandInDelays({ session: held });
-    await target.navigate(route);
-    await waitForSettledProject();
-    const record = await keep('u1-session-held');
-    expect(
-      await target.evaluate((wrapper) => document.querySelector(wrapper) !== null, cloudLoadProbe.sidebarWrapper),
-      'the settled project route has no sidebar wrapper to keep',
-    ).toBe(true);
-    expect(record.wrapperRemovals, 'U1: the sidebar wrapper was removed at these times (ms)').toEqual([]);
-  });
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title: `U1: keeps the sidebar wrapper on a project route while get-session is held ${String(held)} ms, the chunk undelayed`,
+    },
+    async (arrange) => {
+      const record = await arrange(async () => {
+        await openSignedIn();
+        const route = await seedLocalProject();
+        await cloud.uiSetCloudStandInDelays({ session: held });
+        await target.navigate(route);
+        await waitForSettledProject();
+        const read = await keep('u1-session-held');
+        expect(
+          await target.evaluate((wrapper) => document.querySelector(wrapper) !== null, cloudLoadProbe.sidebarWrapper),
+          'the settled project route has no sidebar wrapper to keep',
+        ).toBe(true);
+        return read;
+      });
+      if (record === undefined) {
+        return;
+      }
+      expect(
+        record.wrapperRemovals,
+        `U1: the sidebar wrapper was removed at these times (ms); get-session was answered at ${JSON.stringify(record.sessionAnsweredAt)} ms`,
+      ).toEqual([]);
+    },
+  );
 
-  test.fails(`H6: holds the project grid's top offset on Home while /v1/projects is held ${String(held)} ms`, async () => {
-    await openSignedIn();
-    await seedLocalProject();
-    await target.navigate('/');
-    await waitForSettledHome();
-    await cloud.uiSetCloudStandInDelays({ projects: held });
-    await target.navigate('/');
-    await waitForSettledHome();
-    const record = await keep('h6-listing-held');
-    expect(record.gridTops.length, 'the project grid was never on screen').toBeGreaterThan(0);
-    const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
-    expect(tops, `H6: the project grid's top offset moved (${JSON.stringify(record.gridTops)})`).toEqual([
-      record.gridTops.at(-1)?.top,
-    ]);
-  });
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title: `H6: holds the project grid's top offset on Home while /v1/projects is held ${String(held)} ms`,
+    },
+    async (arrange) => {
+      const record = await arrange(async () => {
+        await openSignedIn();
+        await seedLocalProject();
+        await target.navigate('/');
+        await waitForSettledHome();
+        await cloud.uiSetCloudStandInDelays({ projects: held });
+        await target.navigate('/');
+        await waitForSettledHome();
+        const read = await keep('h6-listing-held');
+        expect(read.gridTops.length, 'the project grid was never on screen').toBeGreaterThan(0);
+        return read;
+      });
+      if (record === undefined) {
+        return;
+      }
+      const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
+      expect(tops, `H6: the project grid's top offset moved (${JSON.stringify(record.gridTops)})`).toEqual([
+        record.gridTops.at(-1)?.top,
+      ]);
+    },
+  );
 });

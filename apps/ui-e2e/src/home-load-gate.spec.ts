@@ -1,11 +1,12 @@
 /* oxlint-disable no-await-in-loop -- The returning visitor's projects are created through the UI one after another, as a visitor would. */
-import { describe, expect, test } from 'vitest';
+import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
 import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
-import type { CloudLoadRecord } from '#support/cloud-stand-ins.js';
+import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
 import {
+  cloudDefectRow,
   cloudLoadProbe,
   cloudStandInCommands,
   cloudStandInOwner,
@@ -167,19 +168,26 @@ test.each(
 /*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
- * (`#support/cloud-stand-ins.js`). Expected failures until side lane N1 flips them.
+ * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
+ * `cloudDefectRow` `expectedFailure` to `false`; a fault in the load or a precondition leaves the row red.
  */
 const cloud = cloudStandInCommands(target.commands);
 const cloudLoadTier = await cloud.uiIsCloudLoadTier();
-/** How long `get-session` is held, so the shell and the rich composer are on screen before the session resolves. */
+const cloudRow = test.runIf(cloudLoadTier);
+/** How long `get-session` is held for the wrapper case, so the shell is on screen before the session resolves. */
 const sessionHeld = 2000;
 
-/** Load Home as the signed-in stand-in owner and keep the cloud recorder's record as evidence. */
-const loadSignedInHome = async (label: string, sessionDelay?: number): Promise<CloudLoadRecord> => {
+/** Open Home as the signed-in stand-in owner with the cloud recorder; `release` runs before the session is awaited. */
+const loadSignedInHome = async (
+  label: string,
+  delays: CloudStandInDelays,
+  release?: () => Promise<void>,
+): Promise<CloudLoadRecord> => {
   await target.setViewport(viewports.wide);
-  await cloud.uiInstallCloudStandIns(sessionDelay === undefined ? {} : { session: sessionDelay });
+  await cloud.uiInstallCloudStandIns(delays);
   await target.addInitScript(recordCloudLoad, cloudLoadProbe);
   await target.navigate('/');
+  await release?.();
   await target.waitFor((name) => document.body.textContent.includes(name), cloudStandInOwner.name, {
     timeout: 60_000,
   });
@@ -190,23 +198,63 @@ const loadSignedInHome = async (label: string, sessionDelay?: number): Promise<C
   return record;
 };
 
-describe.runIf(cloudLoadTier)('cloud-build tier: Home', () => {
-  test.fails('N1: removes no child of body on a signed-in load of Home', async () => {
-    const record = await loadSignedInHome('n1-body');
+cloudDefectRow(
+  { api: cloudRow, expectedFailure: true, title: 'N1: removes no child of body on a signed-in load of Home' },
+  async (arrange) => {
+    const record = await arrange(async () => loadSignedInHome('n1-body', {}));
+    if (record === undefined) {
+      return;
+    }
     expect(record.bodyChildRemovals, 'N1: these children of body were removed').toEqual([]);
-  });
+  },
+);
 
-  test.fails(`N1: keeps the sidebar wrapper on Home while get-session is held ${String(sessionHeld)} ms`, async () => {
-    const record = await loadSignedInHome('n1-wrapper', sessionHeld);
-    expect(record.wrapperRemovals, 'N1: the sidebar wrapper was removed at these times (ms)').toEqual([]);
-  });
+cloudDefectRow(
+  {
+    api: cloudRow,
+    expectedFailure: true,
+    title: `N1: keeps the sidebar wrapper on Home while get-session is held ${String(sessionHeld)} ms`,
+  },
+  async (arrange) => {
+    const record = await arrange(async () => loadSignedInHome('n1-wrapper', { session: sessionHeld }));
+    if (record === undefined) {
+      return;
+    }
+    expect(
+      record.wrapperRemovals,
+      `N1: the sidebar wrapper was removed at these times (ms); get-session was answered at ${JSON.stringify(record.sessionAnsweredAt)} ms`,
+    ).toEqual([]);
+  },
+);
 
-  test.fails(`H7: never puts the plain textarea back after the rich composer upgraded, get-session held ${String(sessionHeld)} ms`, async () => {
-    const record = await loadSignedInHome('h7-composer', sessionHeld);
-    expect(record.composerUpgradedAt, 'the rich composer never upgraded').toBeDefined();
+/* H7 is forced by holding the session until the rich composer has upgraded, not by a fixed delay: the session's
+   answer then always reaches a page whose composer is already rich. */
+cloudDefectRow(
+  {
+    api: cloudRow,
+    expectedFailure: true,
+    title:
+      'H7: never puts the plain textarea back after the rich composer upgraded, get-session held until the upgrade',
+  },
+  async (arrange) => {
+    const record = await arrange(async () => {
+      const read = await loadSignedInHome('h7-composer', { session: 'held' }, async () => {
+        await target.expectVisible(richComposer, 60_000);
+        await cloud.uiReleaseCloudStandIn('session');
+      });
+      expect(read.composerUpgradedAt, 'the rich composer never upgraded').toBeDefined();
+      expect(
+        read.sessionAnsweredAt.every((answered) => answered > (read.composerUpgradedAt ?? Infinity)),
+        `get-session was answered (${JSON.stringify(read.sessionAnsweredAt)} ms) before the upgrade`,
+      ).toBe(true);
+      return read;
+    });
+    if (record === undefined) {
+      return;
+    }
     expect(
       record.composerReplacements,
       `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
     ).toEqual([]);
-  });
-});
+  },
+);

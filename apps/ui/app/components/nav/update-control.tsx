@@ -95,7 +95,8 @@ export function UpdateControl({
             </div>
             {version ? <p className='text-xs leading-4 text-muted-foreground'>{version}</p> : undefined}
             <p className='mt-2 text-xs leading-4 text-muted-foreground'>{detail}</p>
-            <div className='mt-3 flex items-center justify-between gap-2'>
+            {/* Wraps the action under the link when a narrow sidebar cannot fit both on one line. */}
+            <div className='mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1'>
               {releasePage ? (
                 <Button asChild variant='ghost' size='xs' className='-ml-2'>
                   <a href={releasePage} target='_blank' rel='noopener noreferrer'>
@@ -107,7 +108,13 @@ export function UpdateControl({
                 <span />
               )}
               {action ? (
-                <Button size='xs' variant={action.variant} disabled={action.busy} onClick={action.onClick}>
+                <Button
+                  size='xs'
+                  variant={action.variant}
+                  disabled={action.busy}
+                  className='ml-auto'
+                  onClick={action.onClick}
+                >
                   {action.busy ? <Loader className='size-3' /> : undefined}
                   {action.busy ? 'Please wait…' : action.label}
                 </Button>

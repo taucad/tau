@@ -84,6 +84,6 @@ The target additionally checks unique queue membership, persistence of prepared 
 - Editing, deletion, attachments, admission refusal, loading animations and watch failure are covered by ordinary owner tests, not these safety invariants.
 - No fairness, termination, maximum wait or automatic retry guarantee is claimed. All eight intentional failures are regression witnesses for the named removed safeguard; they are not evidence that the current implementation has those defects.
 
-Run the owner's pinned PR checks with `JAVA_HOME=/opt/homebrew/opt/openjdk pnpm nx formal ui`. The initial weak model preceded implementation; this strengthened model was added after the delivery barrier and replay protocol were refined. Keep that evidence order distinct from the red-first executable runtime tests.
+Run the owner's pinned PR checks with `JAVA_HOME=/opt/homebrew/opt/openjdk pnpm nx formal:tla ui`. The initial weak model preceded implementation; this strengthened model was added after the delivery barrier and replay protocol were refined. Keep that evidence order distinct from the red-first executable runtime tests.
 
 Explicit reorder atomically moves one pending identity before another (or to the end), only while no delivery or steering command is prepared. It changes the saved sequence but preserves command identity, payload and terminal authorization. FIFO is evaluated against this user-selected order. Store tests cover stale targets, concurrent submissions, failed writes, replayed moves and reopening.

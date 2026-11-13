@@ -1645,7 +1645,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (stage) {
             await this.writeFilesAndInvalidate(stage, document.id);
           }
-          await this.revalidateRetainedFiles();
+          await this.revalidateRetainedFiles(document.id);
           if (document.watch) {
             try {
               await this.reconcileObservedPaths();
@@ -2503,8 +2503,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * A filesystem without it (an older or third-party host, or an inline filesystem that
    * offers none) keeps the body path: `readFiles` plus a digest here, and `exists` for
    * paths retained as absent.
+   *
+   * A path found moved is recorded, so the watch event for the same edit dedupes against it.
+   * That event was the watched documents' cue to render the edit, so the documents watching a
+   * moved path are scheduled here instead, as `writeFilesAndInvalidate` does for a staged write.
+   *
+   * @param sourceDocumentId - The document whose own evaluation is revalidating; it already reads the current bytes.
    */
-  private async revalidateRetainedFiles(): Promise<void> {
+  private async revalidateRetainedFiles(sourceDocumentId?: string): Promise<void> {
     /* CDN package artifacts are content-addressed and can be megabytes; `fileContentCache`
      * already draws this boundary for the same reason. */
     const retained = this.retainedObservedPaths().filter((path) => !path.startsWith('node_modules/'));
@@ -2554,6 +2560,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
      * Explicit document operations and watched documents share this observer. */
     const divergent = [...revisions.keys()];
     this._applyObservedRevisions(divergent, revisions);
+    this.scheduleWatchedDocuments(divergent, sourceDocumentId);
   }
 
   /**

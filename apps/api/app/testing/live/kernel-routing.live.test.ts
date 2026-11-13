@@ -19,9 +19,12 @@ import { selectKernelRoutingCases } from '#testing/live/kernel-routing.heldout.j
 import type { KernelRoutingObservation } from '#testing/live/kernel-routing.grader.js';
 import {
   buildFixture,
+  checkpointKey,
+  checkpointedRuns,
   comparePersonArm,
   createRoutingToolHandler,
   exampleRoutingCase,
+  formatSpendProgress,
   isPersonProfileArm,
   kernelTextFor,
   observePromptOnly,
@@ -31,6 +34,7 @@ import {
   perturbedProfile,
   projectReminder,
   promptOnlySystemPrompt,
+  spendProgress,
   summarizeExampleRuns,
   withKernelText,
 } from '#testing/live/kernel-routing.runner.js';
@@ -73,8 +77,6 @@ import { loadWorkspaceKernelRows } from '#testing/live/workspace-modules.js';
  * - `KERNEL_ROUTING_SET=heldout`: the in-turn arm runs the held-out set (AKS-3d) instead of the development set. This is
  *   the AKS-11 gate run, and its summary is checked against D9's gate (`summarizeKernelRoutingGate`).
  * - `TAU_KR_REPEATS`: runs of each case (default 1; the gate uses 3, a case passing when at least two do).
- * - `TAU_KR_RESUME`: comma-separated JSONL files from earlier runs. A row of the same arm and model that was graded (not
- *   a provider failure before any write) counts as one of its case's runs, so only the missing runs call the model.
  */
 
 const gateModel = 'anthropic-claude-sonnet-5.5';
@@ -107,10 +109,8 @@ const repeats = Math.max(1, Number(process.env['TAU_KR_REPEATS'] ?? '1'));
 const inTurnCases = selectKernelRoutingCases();
 const gateRun = inTurnCases !== kernelRoutingDevelopmentCases;
 const maxUsd = Number(process.env['TAU_KR_MAX_USD'] ?? 'Infinity');
-const resumeFiles = (process.env['TAU_KR_RESUME'] ?? '')
-  .split(',')
-  .map((path) => path.trim())
-  .filter(Boolean);
+/** Graded runs already in an arm's JSONL file are kept and not sent again, unless `TAU_KR_FRESH=1` starts over. */
+const fresh = process.env['TAU_KR_FRESH'] === '1';
 /** Milliseconds. */
 const caseTimeout = Number(process.env['TAU_KR_CASE_TIMEOUT_MS'] ?? '360000');
 /** This process's run, stamped on every row so a comparison can tell rows from an earlier run in `TAU_KR_OUT`. */
@@ -180,27 +180,6 @@ type CaseRow = RoutingRunResult & {
   readonly ms: number;
 };
 
-/** A row the summary grades: anything but a provider failure before any write. */
-const isGraded = (row: Pick<CaseRow, 'state' | 'bindingKind'>): boolean =>
-  row.state !== 'failed' || row.bindingKind !== undefined;
-
-/** Graded rows of one arm and model from earlier runs' JSONL files, by case. */
-const resumedRows = async (arm: KernelRoutingArm, modelId: string): Promise<Map<string, CaseRow[]>> => {
-  const byCase = new Map<string, CaseRow[]>();
-  for (const path of resumeFiles) {
-    // oxlint-disable-next-line no-await-in-loop -- a handful of files, read in order
-    const content = await readFile(path, 'utf8');
-    const lines = content.split('\n').filter((line) => line.trim() !== '');
-    for (const line of lines) {
-      const row = JSON.parse(line) as CaseRow;
-      if (row.arm === arm && row.modelId === modelId && isGraded(row)) {
-        byCase.set(row.observation.caseId, [...(byCase.get(row.observation.caseId) ?? []), row]);
-      }
-    }
-  }
-  return byCase;
-};
-
 const pool = async <T>(items: readonly T[], width: number, work: (item: T) => Promise<void>): Promise<void> => {
   let next = 0;
   const lane = async (): Promise<void> => {
@@ -225,6 +204,21 @@ const personOption = (arm: KernelRoutingArm) => {
 
 /** Each case's graded observations from an arm's JSONL rows; failed runs with no write are infrastructure misses. */
 type ArmObservations = Readonly<{ byCase: Map<string, KernelRoutingObservation[]>; runIds: readonly string[] }>;
+
+/** An arm's rows from an earlier process; a line cut off when that process stopped is ignored. */
+const readRows = async (file: string): Promise<readonly CaseRow[]> => {
+  const text = await readFile(file, 'utf8').catch(() => '');
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as CaseRow];
+      } catch {
+        return [];
+      }
+    });
+};
 
 const readObservations = async (file: string): Promise<ArmObservations | undefined> => {
   const text = await readFile(file, 'utf8').catch(() => undefined);
@@ -391,30 +385,29 @@ describe.skipIf(runnable.length === 0)(
         const cases = casesFor(arm);
         it(`${arm} on ${modelId} (${cases.length} cases)`, { timeout: 0 }, async () => {
           const file = join(outDirectory, `${arm}.${modelId}.jsonl`);
-          await writeFile(file, '');
-          const rows: CaseRow[] = [];
-          const skipped: string[] = [];
-          const earlier = await resumedRows(arm, modelId);
-          const resumed: CaseRow[] = cases.flatMap(({ id }) =>
-            (earlier.get(id) ?? [])
-              .slice(0, repeats)
-              .map((row) => ({ ...row, runId: (row as Partial<CaseRow>).runId ?? 'unrecorded' }))
-              .map((row, index) => ({ ...row, repeat: index + 1 })),
-          );
-          for (const row of resumed) {
-            rows.push(row);
-            // oxlint-disable-next-line no-await-in-loop -- keeps the file in case order
-            await appendFile(file, `${JSON.stringify(row)}\n`);
-          }
-          const allRuns = cases.flatMap((testCase) =>
+          const runs = cases.flatMap((testCase) =>
             Array.from({ length: repeats }, (_, repeat) => ({ testCase, repeat: repeat + 1 })),
           );
-          const runs = allRuns.filter(
-            ({ testCase, repeat }) =>
-              !resumed.some((row) => row.observation.caseId === testCase.id && row.repeat === repeat),
+          // Resume: keep every graded run already on disk and send only the rest, so a cut-off or repeated run never
+          // pays for the same turn twice. Rows outside this selection stay in the file but out of this summary.
+          const previous = fresh ? new Map<string, CaseRow>() : checkpointedRuns(await readRows(file));
+          await writeFile(file, [...previous.values()].map((row) => `${JSON.stringify(row)}\n`).join(''));
+          const wanted = new Set(runs.map(({ testCase, repeat }) => checkpointKey(testCase.id, repeat)));
+          const rows: CaseRow[] = [...previous.entries()].filter(([key]) => wanted.has(key)).map(([, row]) => row);
+          const pending = runs.filter(({ testCase, repeat }) => !previous.has(checkpointKey(testCase.id, repeat)));
+          const earlierCosts = rows.map(({ costUsd }) => costUsd);
+          const currentCosts: number[] = [];
+          const progress = () =>
+            spendProgress({
+              earlier: earlierCosts,
+              current: currentCosts,
+              remainingRuns: pending.length - currentCosts.length,
+            });
+          console.log(
+            `[kernel-routing] ${arm} ${modelId}: ${rows.length} of ${runs.length} runs already graded; ${formatSpendProgress(progress())}`,
           );
-          console.log(`[kernel-routing] ${arm} ${modelId}: ${resumed.length} runs resumed, ${runs.length} to run`);
-          await pool(runs, arm === 'prompt-only' ? concurrency * 2 : concurrency, async ({ testCase, repeat }) => {
+          const skipped: string[] = [];
+          await pool(pending, arm === 'prompt-only' ? concurrency * 2 : concurrency, async ({ testCase, repeat }) => {
             if (spend.usd >= maxUsd) {
               skipped.push(testCase.id);
               return;
@@ -424,6 +417,7 @@ describe.skipIf(runnable.length === 0)(
               arm === 'prompt-only' ? await promptOnly(testCase, modelId) : await inTurn(testCase, arm, modelId);
             const usage = runUsage(snapshot);
             spend.usd += usage.costUsd;
+            currentCosts.push(usage.costUsd);
             const grade = gradeKernelRoutingCase(testCase, result.observation);
             const row: CaseRow = {
               ...result,
@@ -442,14 +436,16 @@ describe.skipIf(runnable.length === 0)(
             rows.push(row);
             await appendFile(file, `${JSON.stringify(row)}\n`);
             console.log(
-              `[kernel-routing] ${arm} ${modelId} ${testCase.id}#${repeat}: ${grade.pass ? 'pass' : 'FAIL'} (${grade.reason}) $${usage.costUsd.toFixed(3)} ${Math.round(row.ms / 1000)}s`,
+              `[kernel-routing] ${arm} ${modelId} ${testCase.id}#${repeat}: ${grade.pass ? 'pass' : 'FAIL'} (${grade.reason}) $${usage.costUsd.toFixed(3)} ${Math.round(row.ms / 1000)}s; ${formatSpendProgress(progress())}`,
             );
           });
           const covered = cases.filter(({ id }) =>
             // A run the provider failed before any write is an infrastructure miss, listed in failedRuns, not a grade.
-            rows.some((row) => row.observation.caseId === id && isGraded(row)),
+            rows.some(
+              (row) => row.observation.caseId === id && (row.state !== 'failed' || row.bindingKind !== undefined),
+            ),
           );
-          const graded = rows.filter((row) => isGraded(row));
+          const graded = rows.filter((row) => row.state !== 'failed' || row.bindingKind !== undefined);
           const observations: KernelRoutingObservation[] = covered.map(
             ({ id }) => graded.find((row) => row.observation.caseId === id)!.observation,
           );
@@ -467,10 +463,10 @@ describe.skipIf(runnable.length === 0)(
             repeats,
             cases: cases.length,
             run: rows.length,
-            resumed: resumed.length,
             skipped,
             passed: rows.filter(({ pass }) => pass).length,
             costUsd: rows.reduce((total, { costUsd }) => total + costUsd, 0),
+            spend: progress(),
             p50Duration: durations[Math.floor(durations.length / 2)] ?? 0,
             p95Duration: durations[Math.min(durations.length - 1, Math.floor(durations.length * 0.95))] ?? 0,
             failedRuns: rows
@@ -479,7 +475,7 @@ describe.skipIf(runnable.length === 0)(
                 caseId: observation.caseId,
                 failure,
               })),
-            ...(arm === 'examples' ? { examples: summarizeExampleRuns(cases, byCase) } : {}),
+            ...(arm === 'examples' ? { examples: summarizeExampleRuns(cases, byCase, repeats) } : {}),
             ...(gateRun && arm === 'in-turn'
               ? summarizeKernelRoutingGate(covered, byCase)
               : repeats > 1
@@ -491,7 +487,7 @@ describe.skipIf(runnable.length === 0)(
             `${JSON.stringify(summary, undefined, 2)}\n`,
           );
           console.log(`[kernel-routing] summary ${JSON.stringify(summary)}`);
-          expect(rows.length + skipped.length).toBe(allRuns.length);
+          expect(rows.length + skipped.length).toBe(runs.length);
         });
       }
       if (!gateRun && arms.some((arm) => arm === 'in-turn' || isPersonProfileArm(arm))) {

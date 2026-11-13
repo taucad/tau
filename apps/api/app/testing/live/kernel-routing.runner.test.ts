@@ -21,6 +21,9 @@ import {
   perturbedProfile,
   readKernelSkill,
   routingSkillName,
+  checkpointedRuns,
+  formatSpendProgress,
+  spendProgress,
   summarizeExampleRuns,
   withKernelText,
 } from '#testing/live/kernel-routing.runner.js';
@@ -461,7 +464,7 @@ describe('the examples arm', () => {
       ...(kernel === undefined ? {} : { boundKernel: kernel }),
     });
     const verdict = (observations: readonly KernelRoutingObservation[]) =>
-      summarizeExampleRuns([testCase], new Map([[testCase.id, observations]]))[0];
+      summarizeExampleRuns([testCase], new Map([[testCase.id, observations]]), 5)[0];
     expect(verdict([...Array.from({ length: 4 }, () => bound('tscircuit')), bound()])).toMatchObject({
       resolved: 4,
       misrouted: 0,
@@ -474,5 +477,50 @@ describe('the examples arm', () => {
     expect(verdict([...Array.from({ length: 3 }, () => bound('tscircuit')), bound(), bound()])).toMatchObject({
       met: false,
     });
+  });
+
+  it('should report a suggestion with fewer graded runs than requested as inconclusive', () => {
+    const testCase = exampleRoutingCase({ id: 'shelf', prompt: 'A wall shelf.', goals: ['printing'] });
+    const resolvedRun: KernelRoutingObservation = {
+      caseId: testCase.id,
+      asked: false,
+      boundKernel: testCase.acceptable[0],
+    };
+    const [partial] = summarizeExampleRuns([testCase], new Map([[testCase.id, [resolvedRun, resolvedRun]]]), 5);
+    expect(partial).toMatchObject({ runs: 2, resolved: 2, inconclusive: true, met: false });
+    const [unmeasured] = summarizeExampleRuns([testCase], new Map(), 5);
+    expect(unmeasured).toMatchObject({ runs: 0, inconclusive: true, met: false });
+  });
+});
+
+describe('checkpointedRuns', () => {
+  it('should keep graded runs by case and repeat and drop provider failures so they run again', () => {
+    const row = (caseId: string, repeat: number, state: string) => ({ observation: { caseId }, repeat, state });
+    const kept = checkpointedRuns([
+      row('a', 1, 'completed'),
+      row('a', 2, 'failed'),
+      { ...row('b', 1, 'failed'), bindingKind: 'entry' },
+      { ...row('a', 1, 'completed'), bindingKind: 'entry' },
+    ]);
+    expect([...kept.keys()]).toEqual(['a#1', 'b#1']);
+    expect(kept.get('a#1')).toMatchObject({ bindingKind: 'entry' });
+  });
+});
+
+describe('spendProgress', () => {
+  it('should sum earlier and current spend and project the rest from the mean run cost', () => {
+    const progress = spendProgress({ earlier: [0.2, 0.2], current: [0.1, 0.3], remainingRuns: 10 });
+    expect(progress).toMatchObject({ earlierUsd: 0.4, remainingRuns: 10 });
+    expect(progress.totalUsd).toBeCloseTo(0.8);
+    expect(progress.projectedRemainingUsd).toBeCloseTo(2);
+    expect(formatSpendProgress(progress)).toBe(
+      'spent $0.80 ($0.40 earlier, $0.40 this run); 10 runs left, about $2.00 more',
+    );
+  });
+
+  it('should leave the projection unknown before any run has a cost', () => {
+    const progress = spendProgress({ earlier: [], current: [], remainingRuns: 5 });
+    expect(progress.projectedRemainingUsd).toBeUndefined();
+    expect(formatSpendProgress(progress)).toContain('unknown until a run has a cost');
   });
 });

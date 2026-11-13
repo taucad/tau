@@ -111,6 +111,6 @@ node tools/formal/src/cli.ts update packages/camera
 
 ```bash
 pnpm nx run formal:setup --tools=tlc
-pnpm nx run camera:formal
+pnpm nx run camera:formal:tla
 pnpm nx run camera:formal:nightly
 ```

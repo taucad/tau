@@ -10,7 +10,7 @@ Run from the workspace root, usually through an owner's Nx target:
 | Command                                                 | Nx target              | What it does                                                                                                      |
 | ------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `formal setup --tools tlc,lean,apalache [--from <dir>]` | `formal:setup`         | Provisions each tool into `node_modules/.cache/formal`, refusing bytes whose sha256 differs from `toolchain.lock` |
-| `formal check --tier pr <projectRoot>`                  | `formal`               | SANY, every pull-request config and log case against `expected.json`, graph and suite staleness                   |
+| `formal check --tier pr <projectRoot>`                  | `formal:tla`           | SANY, every pull-request config and log case against `expected.json`, graph and suite staleness                   |
 | `formal check --tier lean <projectRoot>`                | `formal:lean`          | Lean build, `sorry` and axiom audit, goldens current                                                              |
 | `formal nightly [--without-check] <projectRoot>`        | `formal:nightly`       | Nightly configs and Apalache (not with `--without-check`), fresh-seed Lean differential and simulation, mutants   |
 | `formal check --tier nightly <projectRoot>`             | `formal:nightly:check` | The nightly configs and Apalache alone, for an owner that runs them in a job apart from `formal:nightly`          |
@@ -21,7 +21,7 @@ Run from the workspace root, usually through an owner's Nx target:
 
 A tool that is absent prints `SKIPPED` and exits 0 locally and 1 under `CI`.
 
-`tools/formal.plugin.ts` infers `formal` for every project whose `specs/` holds a directory with a
+`tools/formal.plugin.ts` infers `formal:tla` for every project whose `specs/` holds a directory with a
 `*.tla` file beside an `expected.json` without a `lean` section, and `formal:lean` for one with a
 `lean-toolchain` file beside an `expected.json` with it. An `expected.json` without its marker, and
 specs under a `fixtures` directory, are ignored. An owner adds `"formal:nightly": {}` or

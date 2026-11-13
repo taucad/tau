@@ -396,4 +396,46 @@ describe('revalidation keeps the observation ledger coherent', () => {
       });
     });
   });
+
+  it('(l) re-renders a watched document whose input a request revalidated before its watch event arrived', async () => {
+    /* The viewer's parameter edit: the host writes the sidecar, and a describe (the Parameters pane reading the
+     * new values) revalidates the retained closure before the watcher's event for that write arrives. The
+     * revalidation records the new revision, so the event dedupes against it. The watched document must still
+     * render the edit: the revalidation is the evidence that its input moved. */
+    const harness = await createHarness({ 'main.ts': 'v1' });
+    const published: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    harness.worker.onRendered = (event) => {
+      published.push(event);
+    };
+    harness.worker.handleOpenDocument({
+      documentId: 'live',
+      intent: 0,
+      file: createGeometryFile('main.ts'),
+      parameters: {},
+      watch: true,
+    });
+    harness.worker.handleOpenView({
+      documentId: 'live',
+      subscriptionId: 'live-view',
+      requestId: 'initial',
+      view: 'model',
+    });
+    await vi.waitFor(() => {
+      expect(published).toHaveLength(1);
+    });
+
+    harness.files.set('main.ts', 'v2');
+    await harness.worker.describe({ file: createGeometryFile('main.ts') });
+    harness.deliver({ type: 'change', path: 'main.ts' });
+
+    await vi.waitFor(() => {
+      expect(published.at(-1)).toMatchObject({
+        success: true,
+        artifact: {
+          mimeType: 'image/svg+xml',
+          content: '<svg xmlns="http://www.w3.org/2000/svg"><text>v2</text></svg>',
+        },
+      });
+    });
+  });
 });

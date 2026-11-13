@@ -108,7 +108,7 @@
     "nx-release-publish": {
       "dependsOn": ["pkgcheck"]
     },
-    "formal": {
+    "formal:tla": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node tools/formal/src/cli.ts check --tier pr {projectRoot}"

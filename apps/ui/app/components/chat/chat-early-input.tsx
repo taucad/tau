@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { markPageUsed } from '#components/onboarding/home-interaction.js';
 import {
   chatComposerEditorAreaClassName,
   chatComposerEditorTextClassName,
@@ -94,6 +95,8 @@ export function ChatEarlyInput({
         direction: input.selectionDirection,
       };
       if (snapshot.edited) {
+        /* Keys typed before the bundle ran reached no listener: the edit is the only record that home was used. */
+        markPageUsed();
         draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
       }
       setAdopted(snapshot);

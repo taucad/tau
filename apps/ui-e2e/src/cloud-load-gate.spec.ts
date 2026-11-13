@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { CloudLoadRecord, CloudRequestCounts, CloudStandInDelays } from '#support/cloud-stand-ins.js';
+import { waitForOfflineShell } from '#support/billing-usage-fixture.js';
 import {
   cloudDefectRow,
   cloudLoadProbe,
@@ -34,6 +35,23 @@ const held = 2000;
 /** How long a settled load is watched for a late request or change. Milliseconds. */
 const settleWindow = 3000;
 const workspace = selectors.getByCss('[data-project-workspace]');
+/** How long K-f holds the usage document, as the audit's 17 to 19 s stalls held it. Milliseconds. */
+const documentStall = 20_000;
+/** K-f's bound: the 3,000 ms shell fallback plus the paint. Milliseconds. */
+const shellPaintBound = 3500;
+
+/** The browser command K-f forces its stall with (`uiOpenWithStalledDocument` in `#support/browser-command.ts`). */
+type StalledDocumentCommands = {
+  uiOpenWithStalledDocument(
+    path: string,
+    stall: number,
+  ): Promise<{
+    readonly stalledRequests: number;
+    readonly firstContentfulPaint: number;
+    readonly responseStart: number;
+  }>;
+};
+const stalledDocument = (commands: unknown): StalledDocumentCommands => commands as StalledDocumentCommands;
 
 /** Open the target as the signed-in stand-in owner, with the recorder on every document. */
 const openSignedIn = async (delays?: CloudStandInDelays): Promise<void> => {
@@ -202,6 +220,28 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
         expect(tops, `H6: the project grid's top offset moved (${JSON.stringify(record.gridTops)})`).toEqual([
           record.gridTops.at(-1)?.top,
         ]);
+      });
+    },
+  );
+
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title: `U24: paints the usage shell within ${String(shellPaintBound)} ms while its document is stalled ${String(documentStall)} ms, the service worker installed`,
+    },
+    async (defect) => {
+      await openSignedIn();
+      await target.navigate('/usage');
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      const load = await stalledDocument(target.commands).uiOpenWithStalledDocument('/usage', documentStall);
+      await target.writeArtifact('cloud-load-gate/u24-document-stalled.json', `${JSON.stringify(load, null, 2)}\n`);
+      expect(load.stalledRequests, 'the usage document was never held, so nothing forced the stall').toBeGreaterThan(0);
+      await defect(() => {
+        expect(
+          load.firstContentfulPaint,
+          `U24: first contentful paint (ms) with the document held ${String(documentStall)} ms; its response started at ${String(load.responseStart)} ms`,
+        ).toBeLessThanOrEqual(shellPaintBound);
       });
     },
   );

@@ -2193,6 +2193,63 @@ export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (com
   await session.context.setOffline(offline);
 };
 
+/** What a load whose document was held on the network saw (U24, cloud-load row K-f); times from the navigation's origin. */
+export type TargetStalledDocumentLoad = {
+  /** Requests for the document the route held, the service worker's own fetch included. */
+  readonly stalledRequests: number;
+  readonly firstContentfulPaint: number;
+  readonly responseStart: number;
+};
+
+/**
+ * Open `path` on the primary page while every request for that document is held `stall` ms before it goes on to
+ * the server (U24, K-f). Chromium routes a service worker's own fetches through the context, so an installed
+ * offline shell's network-first fetch is held too. Waits for the first contentful paint, however late, so a stall
+ * the page cannot beat is read as a paint time, never as a navigation timeout.
+ */
+export const uiOpenWithStalledDocument: BrowserCommand<
+  [path: string, stall: number],
+  TargetStalledDocumentLoad
+> = async (commandContext, path, stall) => {
+  const session = sessionFor(commandContext);
+  const url = new URL(path, testBaseURL);
+  let stalledRequests = 0;
+  const matches = (candidate: URL): boolean =>
+    candidate.origin === url.origin &&
+    (candidate.pathname === url.pathname || candidate.pathname === `${url.pathname}/`);
+  const hold = async (route: Parameters<Parameters<ProviderContext['route']>[1]>[0]): Promise<void> => {
+    stalledRequests += 1;
+    await new Promise((resolve) => {
+      setTimeout(resolve, stall);
+    });
+    /* The page may be gone by now: a late answer nobody waits for is dropped. */
+    await route.fallback().catch(() => undefined);
+  };
+  await session.context.route(matches, hold);
+  try {
+    const timeout = stall + 30_000;
+    await session.primary.goto(url.href, { waitUntil: 'commit', timeout });
+    const timing = await session.primary.waitForFunction(
+      () => {
+        const [paint] = performance.getEntriesByName('first-contentful-paint');
+        const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+        return paint !== undefined && navigation !== undefined
+          ? { firstContentfulPaint: paint.startTime, responseStart: navigation.responseStart }
+          : false;
+      },
+      undefined,
+      { timeout },
+    );
+    const { firstContentfulPaint, responseStart } = (await timing.jsonValue()) as Omit<
+      TargetStalledDocumentLoad,
+      'stalledRequests'
+    >;
+    return { stalledRequests, firstContentfulPaint, responseStart };
+  } finally {
+    await session.context.unroute(matches, hold);
+  }
+};
+
 /**
  * Route the API origin to a GitHub-linked project's far side for this context
  * (R15): a signed-in session, one GitHub account with one writable empty
@@ -3725,6 +3782,7 @@ export const uiBrowserCommands = {
   uiSampleCameraDuringClick,
   uiScrollTarget,
   uiSetTargetOffline,
+  uiOpenWithStalledDocument,
   uiSetViewport,
   uiStartHostFixture,
   uiStartLinkedGithubFixture,

@@ -162,9 +162,12 @@ describe('ProjectLibrary', () => {
     const call = library.getChat('c1');
     await flush();
 
-    /* The provider unmounts, which disposes its metadata reads, and the remount binds again. */
+    /* The provider's order at a remount: the new render binds, the old cleanup releases and fails its reads, the new
+     * setup resumes. */
     library.bind(bindingNamed('new'));
+    library.release();
     running.reject(new Error('Chat observation was disposed.'));
+    library.resume();
 
     await expect(call).resolves.toMatchObject({ id: 'new:c1' });
   });
@@ -247,6 +250,28 @@ describe('ProjectLibrary', () => {
 
     await expect(call).rejects.toThrow('Chat observation was disposed.');
     expect(replacementPatch).not.toHaveBeenCalled();
+  });
+
+  it('should keep the own failure of a read when a re-render rebound its provider meanwhile', async () => {
+    const library = createLibrary();
+    const running = Promise.withResolvers<Chat | undefined>();
+    let attempts = 0;
+    const ports = {
+      ...bindingNamed('only').chats,
+      getChat: async () => {
+        attempts += 1;
+        return running.promise;
+      },
+    };
+    library.bind(bindingNamed('only', { chats: ports }));
+    const call = library.getChat('c1');
+    await flush();
+
+    library.bind(bindingNamed('only', { chats: ports }));
+    running.reject(new Error('unreadable'));
+
+    await expect(call).rejects.toThrow('unreadable');
+    expect(attempts).toBe(1);
   });
 
   it('should keep the failure of a read whose binding no other replaced', async () => {

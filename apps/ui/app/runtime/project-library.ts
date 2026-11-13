@@ -355,16 +355,18 @@ export class ProjectLibrary {
    * history never loaded. Only reads are asked again.
    */
   async #read<T>(call: (chats: ProjectLibraryChatPorts) => Promise<T>): Promise<T> {
-    const binding = await this.#current();
+    /* The binding and the release count, read in one step: a provider replaces its binding only around a release. */
+    await this.#bound.promise;
+    const binding = this.#binding!;
     const releases = this.#releases;
     try {
       return await call(binding.chats);
     } catch (error) {
-      /* Failed while its provider served it throughout: the read's own failure. */
-      if (this.#binding === binding && !this.#released && this.#releases === releases) {
+      /* No release while it ran: the read's own failure, whatever re-render rebound the same ports meanwhile. */
+      if (!this.#released && this.#releases === releases) {
         throw error;
       }
-      /* Released or replaced, in either order: ask the binding that serves reads next. */
+      /* Released (and replaced or resumed, in any order): ask the binding that serves reads next. */
       const { chats } = await this.#current();
       return call(chats);
     }

@@ -170,25 +170,22 @@ try {
   await navigationContext.close();
   await serial(
     [
-      // A direct Mac file link names the ZIP it serves; page links and other platforms keep their platform label.
+      // A Mac has no archive fallback: without a qualified catalog its direct link keeps pointing at the list.
+      { platform: 'MacIntel', label: 'Mac', direct: 'Choose your download', href: '#downloads' },
       {
-        platform: 'MacIntel',
-        label: 'Mac',
-        direct: 'Download ZIP for Apple silicon',
-        file: 'Tau-macos-arm64.zip',
-        // Intel Macs are unlisted until a qualified catalog publishes an Intel route.
-        intel: false,
+        platform: 'Win32',
+        label: 'Windows',
+        direct: 'Download for Windows',
+        href: 'https://downloads.tau.new/latest/Tau-win32-x64.zip',
       },
-      { platform: 'Win32', label: 'Windows', direct: 'Download for Windows', file: 'Tau-win32-x64.zip', intel: false },
       {
         platform: 'Linux x86_64',
         label: 'Linux',
         direct: 'Download for Linux',
-        file: 'Tau-linux-x64.tar.gz',
-        intel: false,
+        href: 'https://downloads.tau.new/latest/Tau-linux-x64.tar.gz',
       },
     ],
-    async ({ platform, label, direct, file, intel }) => {
+    async ({ platform, label, direct, href }) => {
       const downloadContext = await browser.newContext({ reducedMotion: 'reduce' });
       await downloadContext.addInitScript((hostPlatform: string) => {
         Object.defineProperty(navigator, 'platform', { value: hostPlatform });
@@ -226,8 +223,9 @@ try {
       await downloadPage.waitForURL(`${origin}/download/`);
       const primaryDownload = downloadPage.locator('[data-host-download="direct"]');
       await primaryDownload.filter({ hasText: direct }).waitFor();
-      assert.equal(await primaryDownload.getAttribute('href'), `https://downloads.tau.new/latest/${file}`);
-      assert.equal(await downloadPage.locator('[data-mac-intel="hero"]').isVisible(), intel);
+      assert.equal(await primaryDownload.getAttribute('href'), href);
+      // Mac entries are unlisted until a qualified catalog publishes their DMG.
+      assert.equal(await downloadPage.locator('[data-mac-route]:visible').count(), 0);
       await assertDownloadIcons();
       await primaryDownload.hover();
       await primaryDownload.focus();

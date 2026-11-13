@@ -71,7 +71,6 @@
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rpc": "workspace:*",
-    "@taucad/runtime": "workspace:*",
     "@taucad/shell-service": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
@@ -82,13 +81,14 @@
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "geospec": "catalog:",
-    "geospec-engine": "catalog:",
-    "zod": "catalog:"
+    "geospec-engine": "catalog:"
   },
   "devDependencies": {
+    "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "fflate": "catalog:",
     "vite": "catalog:electron-vite8",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }

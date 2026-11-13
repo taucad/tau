@@ -3437,9 +3437,6 @@ importers:
       '@taucad/rpc':
         specifier: workspace:*
         version: link:../../../packages/rpc
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../../packages/runtime
       '@taucad/shell-service':
         specifier: workspace:*
         version: link:../../../libs/shell-service
@@ -3473,10 +3470,10 @@ importers:
       geospec-engine:
         specifier: 'catalog:'
         version: 0.6.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../../packages/runtime
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../../packages/runtime-testing
@@ -3489,6 +3486,9 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/desktop-terminal:
     dependencies:

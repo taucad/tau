@@ -1354,18 +1354,31 @@ describe('project route session identity', () => {
  * its own mounts, so a shell that moves between tree positions, or waits under
  * a Suspense fallback, shows as a second mount or as an absent node.
  */
-const workspaceImport = vi.hoisted(() => ({ pending: undefined as Promise<unknown> | undefined, calls: 0 }));
+type WorkspaceLoad = ReturnType<typeof ProjectWorkspaceWarmupModule.loadProjectWorkspace>;
+const workspaceImport = vi.hoisted((): { pending: WorkspaceLoad | undefined; calls: number } => ({
+  pending: undefined,
+  calls: 0,
+}));
 vi.mock('#lib/project-workspace-warmup.js', async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectWorkspaceWarmupModule>();
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the promise the row controls.
+  const loadProjectWorkspace = (): WorkspaceLoad => {
+    if (workspaceImport.pending === undefined) {
+      return actual.loadProjectWorkspace();
+    }
+    workspaceImport.calls += 1;
+    return workspaceImport.pending;
+  };
   return {
     ...actual,
-    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the promise the row controls.
-    loadProjectWorkspace: () => {
+    loadProjectWorkspace,
+    /* A warm while a row controls the import starts that import, so no path reaches the module another way. */
+    warmProjectWorkspace: () => {
       if (workspaceImport.pending === undefined) {
-        return actual.loadProjectWorkspace();
+        actual.warmProjectWorkspace();
+        return;
       }
-      workspaceImport.calls += 1;
-      return workspaceImport.pending as ReturnType<typeof actual.loadProjectWorkspace>;
+      void loadProjectWorkspace();
     },
   };
 });
@@ -1410,7 +1423,7 @@ describe('project route shell identity (A0.7)', () => {
   });
 
   it.fails('U1: should keep one shell mounted while the workspace import is pending', async () => {
-    const workspace = deferred<unknown>();
+    const workspace = deferred<Awaited<WorkspaceLoad>>();
     workspaceImport.pending = workspace.promise;
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     try {

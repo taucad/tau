@@ -617,6 +617,7 @@ describe('project open order (A0.7)', () => {
       facts.viewer.mounts - facts.viewer.removals,
       'U13: no viewer content is mounted while the first files check is outstanding',
     ).toBe(0);
+    const waitedInResolving = screen.queryByText('Notice: resolving') !== null;
     await act(async () => {
       revisionStatus.set(statusAt('filled'));
     });
@@ -624,6 +625,9 @@ describe('project open order (A0.7)', () => {
 
     expect(screen.getByTestId('viewer-dock')).toBeInTheDocument();
     expect(facts.viewer).toEqual({ mounts: 1, removals: 0 });
+    expect(waitedInResolving, 'U13: the route waited in resolving while the first files check was outstanding').toBe(
+      true,
+    );
   });
 
   it.fails('U20: should never render "Preparing model" when local files settle 200 ms after live', async () => {
@@ -647,6 +651,7 @@ describe('project open order (A0.7)', () => {
         facts.viewer.mounts - facts.viewer.removals,
         'U20: no viewer content is mounted while the first files check is outstanding',
       ).toBe(0);
+      const waitedInResolving = screen.queryByText('Notice: resolving') !== null;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200);
       });
@@ -654,6 +659,9 @@ describe('project open order (A0.7)', () => {
 
       expect(screen.getByTestId('viewer-dock')).toBeInTheDocument();
       expect(preparing.read().map((node) => node.getAttribute('aria-label'))).toEqual([]);
+      expect(waitedInResolving, 'U20: the route waited in resolving while the first files check was outstanding').toBe(
+        true,
+      );
     } finally {
       unsubscribe.unsubscribe();
       preparing.stop();

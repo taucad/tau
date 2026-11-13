@@ -37,8 +37,6 @@ type ViewerBridgeWindow = Window & {
 
 type BarLayout = Readonly<{
   viewer: Box;
-  /** The line above the bar, holding the issues card and the AR button. */
-  line: Box;
   bar: Box;
   controls: Box;
   section: Box | undefined;
@@ -108,17 +106,18 @@ async function readBarLayout(): Promise<BarLayout> {
       return { left, top, right, bottom };
     };
     const layout = document.querySelector('[data-testid="chat-viewer-layout"]');
-    const bar = layout?.querySelector('[data-slot="viewer-controls"]');
+    // The stage's bottom slot and the bar inside it share `data-slot="viewer-controls"` (#930): the bar is the one
+    // holding the controls row.
+    const controlsRow = layout?.querySelector('[role="group"][aria-label="Viewer controls"]');
+    const bar = controlsRow?.closest('[data-slot="viewer-controls"]');
     const viewerBox = toBox(layout);
-    const line = toBox(bar?.previousElementSibling);
     const barBox = toBox(bar);
-    const controls = toBox(bar?.querySelector('[role="group"][aria-label="Viewer controls"]'));
-    if (!viewerBox || !line || !barBox || !controls) {
+    const controls = toBox(controlsRow);
+    if (!viewerBox || !barBox || !controls) {
       throw new Error('The viewer bar is not rendered.');
     }
     return {
       viewer: viewerBox,
-      line,
       bar: barBox,
       controls,
       section: toBox(bar?.querySelector('[data-tool-bar="section"]')),
@@ -189,7 +188,8 @@ describe('Viewer controls bar', () => {
     await openFixture();
     const idle = await readBarLayout();
     expect(Math.abs(centerX(idle.bar) - centerX(idle.viewer)), 'the bar should be centred').toBeLessThanOrEqual(1);
-    expect(idle.line.bottom, 'the line above should end above the bar').toBeLessThanOrEqual(idle.bar.top);
+    expect(idle.bar.top, 'the bar should sit inside the viewer').toBeGreaterThanOrEqual(idle.viewer.top);
+    expect(idle.bar.bottom, 'the bar should sit inside the viewer').toBeLessThanOrEqual(idle.viewer.bottom);
 
     await target.click(toolToggle('Section view'));
     await target.click(toolToggle('Measure'));
@@ -208,9 +208,7 @@ describe('Viewer controls bar', () => {
     // Section's row, then Measure's, then the controls row, top to bottom and apart.
     expect(section.bottom).toBeLessThanOrEqual(measure.top);
     expect(measure.bottom).toBeLessThanOrEqual(running.controls.top);
-    // The line above moves up by as much as the bar grew, and stays clear of it.
-    expect(running.line.bottom).toBeLessThanOrEqual(running.bar.top);
-    expect(idle.line.bottom - running.line.bottom).toBeCloseTo(idle.bar.top - running.bar.top, 0);
+    expect(running.bar.top, 'the grown bar should stay inside the viewer').toBeGreaterThanOrEqual(running.viewer.top);
     expect(Math.abs(centerX(running.bar) - centerX(running.viewer))).toBeLessThanOrEqual(1);
   });
 

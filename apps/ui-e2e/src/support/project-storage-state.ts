@@ -671,3 +671,52 @@ export const writePendingPermanentDelete = async (row: PendingPermanentDeleteRow
     }
     return operationId;
   }, row);
+
+/** Read one library journal row back as stored, or `undefined` when it is gone. */
+export const readPendingOperation = async (operationId: string): Promise<unknown> =>
+  target.evaluate(async (id) => {
+    const databases = await indexedDB.databases();
+    const handles = databases.find(({ name }) => name?.endsWith('fs-handles'))?.name;
+    const name = handles === undefined ? undefined : `${handles.slice(0, -'fs-handles'.length)}db`;
+    if (name === undefined || !databases.some((database) => database.name === name)) {
+      throw new Error('The library database is missing');
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.addEventListener(
+        'success',
+        () => {
+          resolve(request.result);
+        },
+        { once: true },
+      );
+      request.addEventListener(
+        'error',
+        () => {
+          reject(request.error ?? new Error('Failed to open the library database'));
+        },
+        { once: true },
+      );
+    });
+    try {
+      return await new Promise<unknown>((resolve, reject) => {
+        const request = db.transaction('pendingProjectOperations').objectStore('pendingProjectOperations').get(id);
+        request.addEventListener(
+          'success',
+          () => {
+            resolve(request.result);
+          },
+          { once: true },
+        );
+        request.addEventListener(
+          'error',
+          () => {
+            reject(request.error ?? new Error('Failed to read the library journal'));
+          },
+          { once: true },
+        );
+      });
+    } finally {
+      db.close();
+    }
+  }, operationId);

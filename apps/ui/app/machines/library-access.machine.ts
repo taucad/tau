@@ -391,6 +391,24 @@ const portFailed = settles(
   ) => fencedAnswer(context, ioOf(enq, children), { status: 'error', message: messageOf(event.error) }),
 );
 
+/**
+ * The pass rejected. A pass moves the epoch when it starts, and a rejection carries no epoch to fence on, so only a
+ * recovery that started or a row now held reads again; otherwise the question is answered `error`, as today's
+ * rejection is. Fencing it on the turn's epoch would read again after every failed pass, without end.
+ */
+const passFailed = settles(
+  'AccessReadDone',
+  (
+    { context, event, children }: Readonly<{ context: QueryContext; event: { error: unknown }; children: Children }>,
+    enq,
+  ) => {
+    const io = ioOf(enq, children);
+    return context.started || heldRow(context) !== undefined
+      ? top(context, io)
+      : answer(context, io, { status: 'error', message: messageOf(event.error) });
+  },
+);
+
 /** One request's query. Its ports throw until `createLibraryAccess` provides them. */
 export const libraryAccessQueryMachine = setup({
   schemas: {
@@ -567,7 +585,7 @@ export const libraryAccessQueryMachine = setup({
               }
               return { target: '#library-access-query.classifying', context: patch };
             }),
-            onError: portFailed,
+            onError: passFailed,
           },
         },
       },

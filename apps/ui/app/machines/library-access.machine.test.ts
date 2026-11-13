@@ -434,6 +434,32 @@ describe('libraryAccess', () => {
       expect(harness.verify.calls).toHaveLength(2);
     });
 
+    it('should answer error once when a pass that moved the epoch rejects', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      // The pass moves the epoch when it starts, then fails.
+      harness.send({ type: 'epochMoved', epoch: 2, current: false });
+      harness.discovery.calls[0]?.reject(new Error('scan failed'));
+      await flush();
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'scan failed' }]);
+      expect(harness.verify.calls).toHaveLength(1);
+      expect(harness.discovery.calls).toHaveLength(1);
+    });
+
+    it('should read again when a recovery started during a pass that rejects', async () => {
+      const harness = start();
+      settledLibrary(harness);
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      harness.send({ type: 'recoveryStarted', projectId: 'p1' });
+      harness.discovery.calls[0]?.reject(new Error('scan failed'));
+      await flush();
+      expect(harness.answers('q1')).toEqual([]);
+      expect(harness.verify.calls).toHaveLength(2);
+    });
+
     it('should read again on superseded', async () => {
       const harness = start();
       settledLibrary(harness);

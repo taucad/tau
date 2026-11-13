@@ -128,7 +128,10 @@ export type LibraryRecoveryEvent =
   | { type: 'mutationAbandoned'; requestId: string }
   /** A mutation's own apply settled. */
   | { type: 'mutationSettled'; operationId: string; outcome: ReplayOutcome }
-  /** The workspace is back (a re-pick): its `workspace-unavailable` rows are replayed again. Absent: every one. */
+  /**
+   * The workspace is back (a re-pick): the `workspace-unavailable` rows whose storage cites it are replayed again.
+   * Absent: every one. A row whose storage cites no workspace (a node folder) waits for the absent form or a retry.
+   */
   | { type: 'workspaceReturned'; workspaceId?: string }
   /** A root-configuration message or a catalog refresh: replay a `workspace-unavailable` row whose workspace a check finds present. */
   | { type: 'retryRequested' }
@@ -470,9 +473,7 @@ export const libraryRecoveryMachine = setup({
           return (
             row !== undefined &&
             rearmable(row) &&
-            (event.workspaceId === undefined ||
-              workspaceOf(row) === undefined ||
-              workspaceOf(row) === event.workspaceId)
+            (event.workspaceId === undefined || workspaceOf(row) === event.workspaceId)
           );
         }),
         enq,

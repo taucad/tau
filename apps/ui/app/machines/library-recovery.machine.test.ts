@@ -318,6 +318,16 @@ describe('libraryRecovery', () => {
       expect(harness.replay.calls).toHaveLength(3);
       expect(harness.statusOf('o1')).toEqual(expect.objectContaining({ status: 'failed' }));
     });
+
+    it('should re-arm a row whose storage cites no workspace only on a return that names none', async () => {
+      const harness = start();
+      await ready(harness, [row('o1', 'p1')]);
+      await settleReplay(harness, workspaceGone);
+      harness.send({ type: 'workspaceReturned', workspaceId: 'w2' });
+      expect(harness.replay.calls).toHaveLength(1);
+      harness.send({ type: 'workspaceReturned' });
+      expect(harness.replay.calls).toHaveLength(2);
+    });
   });
 
   describe('recovery gates mutation (I8 RecoveryGatesMutation)', () => {

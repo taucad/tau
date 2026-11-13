@@ -60,9 +60,12 @@
 (*                  with focus's request by project. "id": by request id.  *)
 (*   LateRegistration  today: the gate's flush registration                *)
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
-(*                  of ProjectPersistenceGuard, one step after the session *)
-(*                  it names mounts (project-live-sessions.tsx 795 to      *)
-(*                  810). FALSE: it is current at every step.              *)
+(*                  of ProjectPersistenceGuard after the commit that       *)
+(*                  mounts the session it names (project-live-sessions.tsx *)
+(*                  652, 795 to 810), so the person may edit before it     *)
+(*                  lands; React runs it before the next render, so it has *)
+(*                  landed before the next commit or effect run            *)
+(*                  (RegFlushed). FALSE: it is current at every step.      *)
 (*   ModuleAtStart  "unloaded", or "loaded" when a project link warmed the *)
 (*                  import before the first request.                       *)
 (*   SessionFacts   TRUE: a new session reports its two facts after it is  *)
@@ -145,7 +148,7 @@ FactStates == {"pending", "chatOnly", "checkOnly", "settled", "bound"}
 Label(l) == IF Labelled THEN l ELSE "-"
 Labels == {"Init", "RouteCommitted", "RouteHeard", "ChatForwarded", "AccessAsked", "AccessAnswered",
            "LibraryChanged", "LeaveFlushStarted", "LeaveFlushSettled", "Retry", "ModuleLoaded", "OpenAsked",
-           "OpenJoined", "ChatReady", "FirstCheckSettled", "OpenBoundPassed", "Edit", "PersonOpenAsked",
+           "OpenJoined", "OpenLost", "ChatReady", "FirstCheckSettled", "OpenBoundPassed", "Edit", "PersonOpenAsked",
            "PersonClosed", "IdleExpired", "BudgetSwitchClose", "SessionClosed", "FlushRegistered"}
 
 InLive(p) == p \in Projects /\ sess[p] # "none"
@@ -156,6 +159,14 @@ Spawned == IF SessionFacts THEN "pending" ELSE "settled"
 PersonCommands == MaxPersonOpens > 0
 \* Focus holds an answer for the library's current epoch.
 Fresh == f.ans # "none" /\ f.ansEpoch = lib.epoch
+\* Target: focus's own open waiting in the registry's pendingOpen slot for the project it is opening.
+FocusPending == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq /\ pendingOpen.project = f.ansProj
+                /\ f.st = "opening" /\ f.opened
+\* Target: focus withdraws that open (the registry's cancelPendingOpen) in the step it stops opening
+\* that project from that answer. g is focus's next state.
+PendingAfter(g) ==
+  IF FocusPending /\ ~(g.st = "opening" /\ g.opened /\ g.ans = "ready" /\ g.ansProj = pendingOpen.project)
+    THEN NoPending ELSE pendingOpen
 \* The session being left owes no leave flush: there is none, it flushed, or its close flush ran.
 LeaveDone == f.from = None \/ f.lf = "ok" \/ sess[f.from] = "none"
 Warm == IF mod = "unloaded" THEN "loading" ELSE mod
@@ -190,6 +201,9 @@ View == IF Focus = "target" THEN TargetView ELSE TodayView
 \* project registers once its session subtree has mounted, which needs the live set and the import.
 RegTarget == IF f.ans = "ready" /\ InLive(f.ansProj) /\ mod = "loaded" THEN f.ansProj ELSE None
 RegNow == IF LateRegistration THEN reg ELSE RegTarget
+\* ProjectPersistenceGuard commits no later than the editor, and React runs pending passive effects
+\* before the next render: the registration has landed before the next commit or effect run.
+RegFlushed == ~(Focus = "today" /\ LateRegistration) \/ reg = RegTarget
 
 -----------------------------------------------------------------------------
 
@@ -328,6 +342,7 @@ OpenBoundPassed(p) ==
 \* commit while a library change still owes its re-check starts none: the library change is the cause.
 RouteCommitted(p, c) ==
   /\ nreq < MaxRequests
+  /\ RegFlushed
   /\ route' = [id |-> nreq + 1, project |-> p, chat |-> c]
   /\ nreq' = nreq + 1
   /\ keep' = IF p \in Projects /\ View = "editor" /\ p = f.ansProj /\ Fresh
@@ -378,18 +393,28 @@ TRouteHeard ==
                /\ keep' = keep
                /\ act' = Label("RouteHeard")
   /\ mod' = IF route.project \in Projects THEN Warm ELSE mod
-  /\ UNCHANGED <<route, nreq, asks, lib, sess, sreq, fact, dirty, pendingOpen, reg, cnt>>
+  /\ pendingOpen' = PendingAfter(f')
+  /\ UNCHANGED <<route, nreq, asks, lib, sess, sreq, fact, dirty, reg, cnt>>
 
 \* Focus asks access for its request, and again once the epoch moved; it starts the import beside
-\* it (S31).
+\* it (S31). The re-ask is where focus notices the library change: it drops the request it kept for
+\* each project the library now holds, and withdraws (cancelPendingOpen) its open waiting in
+\* pendingOpen for such a project or for the project it is opening, which it asks again only from the
+\* fresh answer.
 TAccessAsked ==
   /\ Focus = "target"
   /\ TWaiting /\ f.req.project \in Projects /\ ~Fresh
   /\ ~\E a \in asks : a.id = f.req.id
   /\ asks' = asks \cup {[id |-> f.req.id, project |-> f.req.project, epoch |-> lib.epoch]}
+  /\ LET held == {p \in Projects : lib.access[p] = "held"}
+         withdraw == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq
+                     /\ (pendingOpen.project \in held \/ FocusPending)
+     IN /\ f' = [f EXCEPT !.kept = [p \in Projects |-> f.kept[p] /\ p \notin held],
+                   !.opened = IF FocusPending THEN FALSE ELSE f.opened]
+        /\ pendingOpen' = IF withdraw THEN NoPending ELSE pendingOpen
   /\ mod' = Warm
   /\ keep' = KeepWork
-  /\ UNCHANGED <<route, nreq, f, lib, sess, sreq, fact, dirty, pendingOpen, reg, cnt>>
+  /\ UNCHANGED <<route, nreq, lib, sess, sreq, fact, dirty, reg, cnt>>
   /\ act' = Label("AccessAsked")
 
 TAccepts(a) == IF IdFence THEN TWaiting /\ a.id = f.req.id ELSE TWaiting /\ ~Fresh
@@ -407,7 +432,7 @@ TAnswered(a) ==
          IN f' = [f EXCEPT !.ans = v, !.ansProj = a.project, !.ansEpoch = lib.epoch,
                     !.st = st2, !.opened = IF st2 = "held" THEN FALSE ELSE f.opened,
                     !.blocked = f.blocked \/ st2 = "flushFailed",
-                    !.kept = IF ready /\ PersonCommands THEN [f.kept EXCEPT ![a.project] = TRUE] ELSE f.kept]
+                    !.kept = [f.kept EXCEPT ![a.project] = ready /\ PersonCommands]]
 
 TLeaveFlushStarted ==
   /\ Focus = "target"
@@ -454,6 +479,17 @@ TOpenJoined ==
   /\ f' = [f EXCEPT !.st = "focused", !.on = f.ansProj, !.from = None, !.lf = "none", !.lfp = None]
   /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, keep, cnt>>
   /\ act' = Label("OpenJoined")
+
+\* The session focus opened closed before the join: the person's close or a budget close (idle expiry
+\* spares it). Focus never reopens or closes on its own (I3): it settles on the project, whose state
+\* derives `closed` with the reopen offer, a person's open through focus.
+TOpenLost ==
+  /\ Focus = "target"
+  /\ f.st = "opening" /\ f.opened /\ f.ans = "ready"
+  /\ sess[f.ansProj] = "none" /\ pendingOpen.project # f.ansProj
+  /\ f' = [f EXCEPT !.st = "focused", !.on = f.ansProj, !.from = None, !.lf = "none", !.lfp = None]
+  /\ UNCHANGED <<route, nreq, asks, lib, mod, sess, sreq, fact, dirty, pendingOpen, reg, keep, cnt>>
+  /\ act' = Label("OpenLost")
 
 TRetry ==
   /\ Focus = "target"
@@ -504,7 +540,7 @@ DStart(r, retry, c) ==
 
 DRerun ==
   /\ Focus = "today"
-  /\ DDeps
+  /\ DDeps /\ RegFlushed
   /\ DStart(route, FALSE, cnt)
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label(IF route.project # f.req.project THEN "RouteHeard" ELSE "AccessAsked")
@@ -548,7 +584,7 @@ DSettled(ok) ==
 \* The notice's retry bumps the attempt (lines 300 to 303), which re-runs the effect for the route.
 DRetry ==
   /\ Focus = "today"
-  /\ cnt.retries < MaxRetries /\ f.st \in {"flushFailed", "held"} /\ route # NoReq
+  /\ cnt.retries < MaxRetries /\ f.st \in {"flushFailed", "held"} /\ route # NoReq /\ RegFlushed
   /\ DStart(route, TRUE, [cnt EXCEPT !.retries = @ + 1])
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
@@ -568,7 +604,9 @@ RegSync ==
 AccessAnswered(a) ==
   /\ a \in asks
   /\ asks' = asks \ {a}
-  /\ IF Focus = "target" THEN TAnswered(a) /\ NoOpen /\ cnt' = cnt ELSE DAnswered(a)
+  /\ IF Focus = "target"
+       THEN TAnswered(a) /\ pendingOpen' = PendingAfter(f') /\ UNCHANGED <<sess, sreq, fact>> /\ cnt' = cnt
+       ELSE DAnswered(a)
   /\ UNCHANGED <<route, nreq, lib, mod, dirty, reg, keep>>
   /\ act' = Label("AccessAnswered")
 
@@ -619,6 +657,7 @@ PersonClosed(p) ==
 
 FocusStep ==
   \/ TRouteHeard \/ TAccessAsked \/ TLeaveFlushStarted \/ TLeft \/ TOpenAsked \/ TOpenJoined \/ TRetry
+  \/ TOpenLost
   \/ DRerun \/ DRetry \/ RegSync
   \/ \E a \in asks : AccessAnswered(a)
   \/ \E ok \in BOOLEAN : LeaveFlushSettled(ok)
@@ -631,6 +670,7 @@ Next ==
   \/ \E ok \in BOOLEAN : LeaveFlushSettled(ok)
   \/ ModuleLoaded
   \/ TRouteHeard \/ TAccessAsked \/ TLeaveFlushStarted \/ TLeft \/ TOpenAsked \/ TOpenJoined \/ TRetry
+  \/ TOpenLost
   \/ DRerun \/ DRetry \/ RegSync
   \/ \E p \in Projects :
        \/ ChatReady(p) \/ FirstCheckSettled(p) \/ OpenBoundPassed(p) \/ Edit(p)
@@ -643,7 +683,7 @@ Spec == Init /\ [][Next]_vars
 LiveSpec ==
   /\ Spec
   /\ WF_vars(TRouteHeard) /\ WF_vars(TAccessAsked) /\ WF_vars(TLeaveFlushStarted) /\ WF_vars(TLeft)
-  /\ WF_vars(TOpenAsked) /\ WF_vars(TOpenJoined)
+  /\ WF_vars(TOpenAsked) /\ WF_vars(TOpenJoined) /\ WF_vars(TOpenLost)
   /\ WF_vars(\E a \in asks : AccessAnswered(a))
   /\ WF_vars(\E ok \in BOOLEAN : LeaveFlushSettled(ok))
   /\ WF_vars(ModuleLoaded)
@@ -677,10 +717,25 @@ FocusNeverCloses == [][FocusStep => \A p \in Projects : sess[p] = "live" => sess
 \* for the current request's project at the library's current epoch. Sharpened: an answer for an
 \* earlier request of the same project counts, because a chat switch is not a new open (D7).
 RouteOpen == (\E p \in Projects : sess[p] = "none" /\ sess'[p] = "live") \/ (pendingOpen' # NoPending /\ pendingOpen' # pendingOpen)
+\* Extended to the registry's resume of a request focus sent (SessionClosed spawning pendingOpen's
+\* project with its request): focus has not withdrawn it, so it is still opening that project from a
+\* ready answer, or keeps a ready request for it (a person's open). Focus withdraws when it moves, when
+\* it is held and when it re-asks after a library change. Between LibraryChanged and that re-ask the
+\* registry, which cannot see the epoch, may still resume; focus then does not join (TOpenJoined needs
+\* a fresh answer). target-resume-window shows that window.
+Resumed(q) == pendingOpen.project = q /\ pendingOpen.req # NoOpenReq /\ sess[q] = "none" /\ sess'[q] = "live"
+ResumeStep(q) == (\E v \in Projects : SessionClosed(v)) /\ Resumed(q)
+ResumeStands(q) == (f.st = "opening" /\ f.opened /\ f.ans = "ready" /\ f.ansProj = q) \/ f.kept[q]
 OpenOnlyOnCurrentAccess ==
-  [][((TOpenAsked \/ DRerun \/ (\E a \in asks : AccessAnswered(a)) \/ (\E ok \in BOOLEAN : LeaveFlushSettled(ok)))
-        /\ RouteOpen)
-       => (f'.ans = "ready" /\ f'.ansEpoch = lib.epoch /\ f'.ansProj = f'.req.project)]_vars
+  [][/\ ((TOpenAsked \/ DRerun \/ DRetry \/ (\E a \in asks : AccessAnswered(a))
+           \/ (\E ok \in BOOLEAN : LeaveFlushSettled(ok)))
+          /\ RouteOpen)
+         => (f'.ans = "ready" /\ f'.ansEpoch = lib.epoch /\ f'.ansProj = f'.req.project)
+     /\ \A q \in Projects : ResumeStep(q) => ResumeStands(q)]_vars
+
+\* Witness: the target's registry resumes focus's open after a library change focus has not noticed.
+StaleResumeUnreached ==
+  [][\A q \in Projects : ResumeStep(q) => ((f.ans = "ready" /\ f.ansProj = q /\ f.ansEpoch = lib.epoch) \/ f.kept[q])]_vars
 
 \* I4. Every open carries a request for its project built from a ready answer: each live session's
 \* input, and the request pendingOpen keeps for the open the registry resumes. A person's open carries
@@ -725,6 +780,9 @@ Settled ==
 
 \* I2. Once requests stop, focus settles on the last one: focused, held, or a failed leave flush.
 RequestEventuallySettles == <>[]Settled
+
+(* Witness: today, an edit in the window before ProjectPersistenceGuard registers the flush *)
+EditBeforeRegistrationUnreached == ~(\E p \in dirty : reg # p /\ RegTarget = p)
 
 (* Witness: today, a request heard while the leave flush runs, and the newer one then focused *)
 SupersededFlushUnreached == ~(f.sup /\ f.st = "focused" /\ f.req.id = route.id)

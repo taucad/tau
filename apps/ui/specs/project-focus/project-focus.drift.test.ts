@@ -7,8 +7,8 @@ const specs = import.meta.dirname;
 const workspace = path.resolve(specs, '../../../..');
 
 /**
- * The seam's verbs: the model's actions (formal plan, ProjectFocus). No focus machine exists yet;
- * the lane that builds it replaces this list with its machine's alphabet and version.
+ * The seam's verbs: the model's action labels (`Labels` in ProjectFocus.tla, without `Init`). No focus
+ * machine exists yet; the lane that builds it replaces this list with its machine's alphabet and version.
  */
 const alphabet = [
   'AccessAnswered',
@@ -16,7 +16,9 @@ const alphabet = [
   'BudgetSwitchClose',
   'ChatForwarded',
   'ChatReady',
+  'Edit',
   'FirstCheckSettled',
+  'FlushRegistered',
   'IdleExpired',
   'LeaveFlushSettled',
   'LeaveFlushStarted',
@@ -24,13 +26,14 @@ const alphabet = [
   'ModuleLoaded',
   'OpenAsked',
   'OpenBoundPassed',
-  'OpenSettled',
+  'OpenJoined',
+  'OpenLost',
   'PersonClosed',
   'PersonOpenAsked',
   'Retry',
   'RouteCommitted',
   'RouteHeard',
-  'Touch',
+  'SessionClosed',
 ];
 
 describe('ProjectFocus.tla implementation correspondence', () => {

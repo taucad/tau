@@ -30,18 +30,36 @@
       "expect": "pass",
       "ref": "Facts in any order over 2 projects, 3 requests, 1 library change, 1 person open and close; EditorOnlyWhenReady, FirstCheckBeforeEditor and every other safety property hold."
     },
+    "ProjectFocus.target-resume-window.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "StaleResumeUnreached"
+      },
+      "kind": "witness",
+      "ref": "At the target bounds the registry may resume focus's pending open after a library change focus has not yet noticed; focus then re-asks before any join. A witness of the window the registry, as environment, leaves."
+    },
     "ProjectFocus.liveness.cfg": {
       "tier": "pr",
       "expect": "pass",
       "ref": "LiveSpec over 2 projects and Home, 3 requests, 1 library change, budget 1; RequestEventuallySettles holds."
     },
+    "ProjectFocus.liveness-person-commands.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "LiveSpec over 2 projects, 3 requests, 1 library change, budget 1, 1 person open and 1 person close, no Home or flush failure; RequestEventuallySettles holds."
+    },
     "ProjectFocus.today-late-effect.cfg": {
       "tier": "pr",
+      "expect": "pass",
+      "ref": "Today with the late registration at the target bounds: an edit before the registration lands is still flushed on the next navigation; FlushBeforeLeave and the today properties other than OpenOnlyOnCurrentAccess and FailedFlushBlocks hold."
+    },
+    "ProjectFocus.today-late-effect-reachable.cfg": {
+      "tier": "pr",
       "expect": {
-        "violated": "FlushBeforeLeave"
+        "violated": "EditBeforeRegistrationUnreached"
       },
       "kind": "witness",
-      "ref": "Today with the late registration at the target bounds: an edit before ProjectPersistenceGuard registers the flush, then a navigation, leaves without a flush. A witness of the registration window, not of the request fence."
+      "ref": "Today with the late registration: an edit before ProjectPersistenceGuard registers the flush is reachable, so today-late-effect is not vacuous."
     },
     "ProjectFocus.today-superseded-open.cfg": {
       "tier": "pr",
@@ -61,16 +79,18 @@
       "expect": {
         "violated": "OpenOnlyOnCurrentAccess"
       },
-      "kind": "witness",
-      "ref": "Today at the target bounds: returning to the resolved project after a library change opens it on the stale answer. A witness for A5a, whose open needs a ready answer for the current epoch."
+      "kind": "defect",
+      "ref": "I4 at the target bounds: today, returning to the resolved project after a library change opens it on the old epoch's answer. The target holds it; A5b moves the open path to focus.",
+      "fixedBy": "A5b"
     },
     "ProjectFocus.today-library-retry.cfg": {
       "tier": "pr",
       "expect": {
         "violated": "FailedFlushBlocks"
       },
-      "kind": "witness",
-      "ref": "Today at the target bounds: a library change re-runs the access effect after a failed leave flush and leaves flushFailed without Retry. A witness; whether the target keeps that retry is open for A5a."
+      "kind": "defect",
+      "ref": "I3 at the target bounds: today, a library change re-runs the access effect after a failed leave flush and leaves flushFailed without Retry. Programme control ruled a library change does not retry the flush; A5a implements that on purpose.",
+      "fixedBy": "A5a"
     },
     "ProjectFocus.today-module-race.cfg": {
       "tier": "pr",

@@ -103,6 +103,35 @@ const workspaceReturns = (): void => {
   workspaceConnected = true;
   mockGetWorkspace.mockResolvedValue(returnedWorkspace);
 };
+/** Discovery sees the workspace folder only while its handle is held; a replay roots the project there. */
+const discoverWorkspaceWhileConnected = (): void => {
+  mockListProjectManifests.mockImplementation(async () => {
+    if (!workspaceConnected) {
+      return { roots: [], entries: [] };
+    }
+    return {
+      roots: [
+        {
+          status: 'complete',
+          root: { backend: 'webaccess', workspaceId, directoryHandle: returnedWorkspace.handle },
+        },
+      ],
+      entries: [
+        {
+          status: 'valid',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator: {
+            ...fakeLocator,
+            backend: 'webaccess',
+            storageRootKey: `webaccess:${workspaceId}`,
+            workspaceId,
+          },
+        },
+      ],
+    };
+  });
+};
 /** The journal's rows: completing an operation deletes its row, as the worker does. */
 let journal: PendingProjectOperation[] = [];
 const failedRecovery = (reason: string) => ({
@@ -464,33 +493,7 @@ describe('useProjectManager recovery (I8)', () => {
   describe('a workspace-unavailable failure', () => {
     it('I8: should be replayed when the workspace returns, and not before', async () => {
       useWorkspaceRow();
-      // Discovery sees the workspace folder only while its handle is held; the replay roots the project there.
-      mockListProjectManifests.mockImplementation(async () => {
-        if (!workspaceConnected) {
-          return { roots: [], entries: [] };
-        }
-        return {
-          roots: [
-            {
-              status: 'complete',
-              root: { backend: 'webaccess', workspaceId, directoryHandle: returnedWorkspace.handle },
-            },
-          ],
-          entries: [
-            {
-              status: 'valid',
-              projectId: fakeProject.id,
-              manifest: projectToManifest(fakeProject),
-              locator: {
-                ...fakeLocator,
-                backend: 'webaccess',
-                storageRootKey: `webaccess:${workspaceId}`,
-                workspaceId,
-              },
-            },
-          ],
-        };
-      });
+      discoverWorkspaceWhileConnected();
       const { result } = await bootstrap();
       // The first attempt could not reach the folder: the row fails with workspace-unavailable and stays journaled.
       expect(mockCommitPendingProjectDirectory).not.toHaveBeenCalled();
@@ -545,6 +548,7 @@ describe('useProjectManager recovery (I8)', () => {
 
     it.fails('I8: should not spend replay attempts on root changes while the workspace is still gone', async () => {
       useWorkspaceRow();
+      discoverWorkspaceWhileConnected();
       const { result } = await bootstrap();
       expect(result.current.recoveries).toEqual([expect.objectContaining({ operationId, projectId: fakeProject.id })]);
 
@@ -644,21 +648,39 @@ describe('useProjectManager recovery (I8)', () => {
       expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
     });
 
-    it.fails('I8: should not journal a permanent delete of the project while its replay is in flight', async () => {
-      const replay = holdReplayAtResources();
-      const { result } = await bootstrap();
-      await act(async () => replay.reached);
-      expect(result.current.recoveries).toEqual([
-        expect.objectContaining({ operationId, projectId: fakeProject.id, status: 'recovering' }),
-      ]);
+    it.fails.each(['the bootstrap replay', 'a retry after the workspace returns'] as const)(
+      'I8: should not journal a permanent delete of the project while %s is in flight',
+      async (replaying) => {
+        if (replaying === 'a retry after the workspace returns') {
+          // The bootstrap attempt cannot reach the folder; the re-pick below republishes the route configuration.
+          useWorkspaceRow();
+          discoverWorkspaceWhileConnected();
+        }
+        const bootstrapReplay = replaying === 'the bootstrap replay' ? holdReplayAtResources() : undefined;
+        const { result } = await bootstrap();
+        let replay = bootstrapReplay;
+        if (replay === undefined) {
+          expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('workspace-unavailable'))]);
+          replay = holdReplayAtResources();
+          workspaceReturns();
+          act(() => {
+            announceRootConfigurationChange();
+          });
+        }
+        const held = replay;
+        await act(async () => held.reached);
+        expect(result.current.recoveries).toEqual([
+          expect.objectContaining({ operationId, projectId: fakeProject.id, status: 'recovering' }),
+        ]);
 
-      // Its outcome is not this row's question: only when it journals is.
-      const deletion = Promise.allSettled([result.current.permanentlyDeleteProject(fakeProject.id)]);
-      await settle();
+        // Its outcome is not this row's question: only when it journals is.
+        const deletion = Promise.allSettled([result.current.permanentlyDeleteProject(fakeProject.id)]);
+        await settle();
 
-      expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
-      replay.release();
-      await act(async () => deletion);
-    });
+        expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+        held.release();
+        await act(async () => deletion);
+      },
+    );
   });
 });

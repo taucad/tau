@@ -2283,6 +2283,8 @@ describe.runIf(enabled)('shell qualification', () => {
         /* Which git and git-lfs the Terminal resolves, named in any failure below. */
         const where = await terminal.run('command -v git git-lfs');
         const resolved = where.text.trim();
+        /* The toolchain's git, never one a login profile's path_helper put first (Apple's xcrun shim). */
+        expect(bins, `the Terminal's git (${resolved})`).toContain(dirname(resolved.split('\n')[0] ?? ''));
         const expectations: ReadonlyArray<readonly [string, RegExp | string]> = [
           ['git status --porcelain', ''],
           ['git diff HEAD~1 HEAD -- part.scad', /-cube\(1\);\n\+cube\(2\);/u],

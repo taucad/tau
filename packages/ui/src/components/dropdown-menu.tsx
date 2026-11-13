@@ -1117,7 +1117,7 @@ type DropdownMenuSubState = {
   readonly isOpen: boolean;
   /** The sub-view is the one shown. */
   readonly isTop: boolean;
-  /** The sub-view's title, from its trigger: the Back row shows it. */
+  /** The sub-view's title, from its trigger: it names the sub-view's group, and its Back row's `Back to` target. */
   readonly title: string | undefined;
   readonly setTitle: (title: string | undefined) => void;
   readonly setOpen: (open: boolean, origin?: HTMLElement) => void;
@@ -1224,8 +1224,9 @@ const focusFirstRow = (view: HTMLElement | undefined): void => {
 };
 
 /**
- * A submenu's items as a sub-view: while open they replace the menu's items, under a Back row naming the sub-view.
- * Escape and the Back row step back to the row that opened it.
+ * A submenu's items as a sub-view: while open they replace the menu's items, under a Back row that reads "Back" and is
+ * named `Back to <parent>`. The sub-view's group keeps its title, so assistive technology still names the view; a view
+ * whose rows do not say what it is shows its own heading. Escape and the Back row step back to the row that opened it.
  *
  * @public
  * @example <caption>Render nested menu content.</caption>
@@ -1243,7 +1244,7 @@ function DropdownMenuSubContent({
 }: {
   readonly className?: string;
   readonly children?: React.ReactNode;
-  /** The Back row's title; defaults to the trigger's text. */
+  /** The sub-view's title, which names its group for assistive technology; defaults to the trigger's text. */
   readonly title?: string;
 }): React.JSX.Element | undefined {
   const drawer = React.useContext(DropdownMenuDrawerContext);
@@ -1274,7 +1275,7 @@ function DropdownMenuSubContent({
       className={cn(viewStackBackRowClass, drawerRowClass)}
       onClick={back}
     >
-      <ViewStackBackContent title={title} />
+      <ViewStackBackContent />
     </button>
   ) : (
     <DropdownMenuPrimitive.Item
@@ -1287,7 +1288,7 @@ function DropdownMenuSubContent({
         back();
       }}
     >
-      <ViewStackBackContent title={title} />
+      <ViewStackBackContent />
     </DropdownMenuPrimitive.Item>
   );
   return createPortal(

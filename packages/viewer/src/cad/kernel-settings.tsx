@@ -1,16 +1,17 @@
-import { Cpu } from 'lucide-react';
+import { Cpu, RotateCcw } from 'lucide-react';
 import {
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuSwitchItem,
 } from '@taucad/ui/components/dropdown-menu';
-import { DropdownMenuDisclosureItem } from '@taucad/ui/components/menu-disclosure-item';
 import { DropdownMenuSliderItem } from '@taucad/ui/components/menu-slider-item';
-import { MenuSegmentedControl } from '#cad/menu-segmented-control.jsx';
+import { keepMenuOpen, SettingsSubViewRow } from '#cad/settings-sub-view-row.jsx';
 
 /** A JSON Schema node, as far as the kernel settings read one. */
 type SchemaNode = Readonly<{
@@ -69,27 +70,21 @@ type EnumField = Readonly<{
 
 /**
  * A setting that is one of a list of presets or an explicit object, never both: a `oneOf` of a string enum and an
- * object. It shows as two modes, Preset (the presets as one segmented control) and Custom (the object's number rows in
- * their units). Switching modes replaces the whole value; nothing is carried across.
+ * object. It shows as one radio list, the presets then Custom; Custom also shows the object's number rows in their
+ * units. A choice replaces the whole value; nothing is carried across.
  */
 type ChoiceField = Readonly<{
   kind: 'choice';
   path: readonly string[];
   label: string;
   presets: readonly string[];
-  /** The preset a switch from Custom starts with: the view's default preset, else the schema's, else the first. */
-  presetSeed: string;
   explicitFields: readonly NumberField[];
-  /** The explicit object a switch from a preset starts with: each field's example value. */
+  /** The explicit object a choice of Custom starts with: each field's example value. */
   explicitSeed: Readonly<Record<string, number>>;
 }>;
 
-type ChoiceMode = 'preset' | 'custom';
-
-const choiceModes = [
-  { value: 'preset', label: 'Preset' },
-  { value: 'custom', label: 'Custom' },
-] as const satisfies ReadonlyArray<{ value: ChoiceMode; label: string }>;
+/** The radio value that stands for a choice's explicit object; preset names never contain a space. */
+const customChoiceValue = 'custom values';
 
 /**
  * A run of settings under an optional heading: the schema's top-level leaves, or one object's leaves.
@@ -193,10 +188,9 @@ const toField = (
  *
  * @param key - The setting's property name.
  * @param node - The setting's schema.
- * @param defaultValue - The view's default for the setting, which seeds the Preset mode when it is a preset.
  * @returns The choice field, or `undefined` when the schema is not that union.
  */
-const toChoiceField = (key: string, node: SchemaNode, defaultValue: unknown): ChoiceField | undefined => {
+const toChoiceField = (key: string, node: SchemaNode): ChoiceField | undefined => {
   if (!Array.isArray(node.oneOf) || node.oneOf.length !== 2) {
     return undefined;
   }
@@ -206,8 +200,7 @@ const toChoiceField = (key: string, node: SchemaNode, defaultValue: unknown): Ch
   const presets = (presetBranch?.enum as unknown[] | undefined)?.filter(
     (value): value is string => typeof value === 'string',
   );
-  const [firstPreset] = presets ?? [];
-  if (!presets || firstPreset === undefined || !explicitBranch?.properties) {
+  if (!presets || presets.length === 0 || !explicitBranch?.properties) {
     return undefined;
   }
   const explicitFields: NumberField[] = [];
@@ -227,10 +220,6 @@ const toChoiceField = (key: string, node: SchemaNode, defaultValue: unknown): Ch
     path: [key],
     label: typeof node.title === 'string' ? node.title : humanize(key),
     presets,
-    presetSeed:
-      [defaultValue, node.default].find(
-        (value): value is string => typeof value === 'string' && presets.includes(value),
-      ) ?? firstPreset,
     explicitFields,
     explicitSeed,
   };
@@ -247,7 +236,7 @@ export const kernelSettingsGroups = (schema: unknown, defaults: Record<string, u
   const loose: Array<NumberField | BooleanField | EnumField> = [];
   const groups: KernelSettingsGroup[] = [];
   for (const [key, node] of Object.entries(properties)) {
-    const choice = toChoiceField(key, node, defaults[key]);
+    const choice = toChoiceField(key, node);
     if (choice) {
       groups.push({ label: choice.label, fields: [choice] });
       continue;
@@ -329,32 +318,33 @@ type KernelSettingsProps = Readonly<{
   groups: readonly KernelSettingsGroup[];
   values: Record<string, unknown>;
   defaults: Record<string, unknown>;
-  /** Whether the settings start revealed; they start closed in the app. */
-  isDefaultOpen?: boolean;
   onChange: (values: Record<string, unknown>) => void;
   onReset: () => void;
 }>;
 
 /**
- * The viewer settings menu's Kernel settings: the menus' shared disclosure, and while it is open, the current view's
- * options as the menu's own slider and switch rows, full width with their text at the menu's left edge.
- * Advanced, so it starts closed.
+ * The viewer settings menu's Kernel settings: one row reading "Defaults" or how many settings are changed, opening
+ * the current view's options as a sub-view of radio lists, slider rows and switch rows, with Reset to defaults last.
+ * The sub-view stays open on a choice.
  * @public
  */
 export function KernelSettings({
   groups,
   values,
   defaults,
-  isDefaultOpen,
   onChange,
   onReset,
 }: KernelSettingsProps): React.JSX.Element {
   const changedCount = countChangedSettings(groups, values, defaults);
   const valueAt = (path: readonly string[]): unknown => readPath(values, path) ?? readPath(defaults, path);
-  const renderNumber = (field: NumberField, value: unknown, onValue: (next: number) => void): React.JSX.Element => (
+  const renderNumber = (
+    field: NumberField,
+    row: Readonly<{ value: unknown; onValue: (next: number) => void; className?: string }>,
+  ): React.JSX.Element => (
     <DropdownMenuSliderItem
       key={field.path.join('.')}
-      value={Number(value ?? field.shown)}
+      className={row.className}
+      value={Number(row.value ?? field.shown)}
       min={field.min}
       max={field.max}
       hasMinimum={field.hasMinimum}
@@ -370,7 +360,7 @@ export function KernelSettings({
         ) {
           return;
         }
-        onValue(next);
+        row.onValue(next);
       }}
     >
       {field.label}
@@ -391,7 +381,8 @@ export function KernelSettings({
           <span className='ml-auto pl-3 text-muted-foreground'>{shown}</span>
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
-          {/* The sub-view is the group named for the setting; its radio rows need no second name. */}
+          {/* The Back row reads "Back", so the sub-view, the group named for the setting, shows its name. */}
+          <DropdownMenuLabel>{field.label}</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={selected}
             onValueChange={(next) => {
@@ -401,14 +392,7 @@ export function KernelSettings({
             }}
           >
             {options.map((option) => (
-              <DropdownMenuRadioItem
-                key={option.value}
-                value={option.value}
-                onSelect={(event) => {
-                  // Keep the menu open: a value is a setting, not a command.
-                  event.preventDefault();
-                }}
-              >
+              <DropdownMenuRadioItem key={option.value} value={option.value} onSelect={keepMenuOpen}>
                 {option.label}
               </DropdownMenuRadioItem>
             ))}
@@ -419,96 +403,99 @@ export function KernelSettings({
   };
   const renderChoice = (field: ChoiceField): React.JSX.Element => {
     const current = valueAt(field.path);
-    const mode: ChoiceMode = typeof current === 'string' ? 'preset' : 'custom';
+    const isCustom = typeof current !== 'string';
     // The stored explicit object is the whole value: an edit changes one field of it and keeps the rest as they are.
-    const explicit = mode === 'custom' ? (asRecord(current) ?? {}) : {};
+    const explicit = isCustom ? (asRecord(current) ?? {}) : {};
+    const selected = isCustom ? customChoiceValue : current;
     const replace = (next: unknown): void => {
       onChange(withSetting({ values, defaults }, field.path, next));
     };
     return (
-      <div key={field.path.join('.')} className='flex flex-col gap-1'>
-        <MenuSegmentedControl
-          label={`${field.label} mode`}
-          value={mode}
-          segments={choiceModes}
+      <div key={field.path.join('.')} className='flex flex-col gap-0.5'>
+        {/* The setting's group names the list. */}
+        <DropdownMenuRadioGroup
+          value={selected}
           onValueChange={(next) => {
-            replace(next === 'custom' ? { ...field.explicitSeed } : field.presetSeed);
+            if (next !== selected) {
+              replace(next === customChoiceValue ? { ...field.explicitSeed } : next);
+            }
           }}
-        />
-        {mode === 'preset' ? (
-          <MenuSegmentedControl
-            label={`${field.label} preset`}
-            value={typeof current === 'string' ? current : ''}
-            segments={field.presets.map((preset) => ({ value: preset, label: humanize(preset) }))}
-            onValueChange={replace}
-          />
-        ) : (
-          field.explicitFields.map((explicitField) => {
-            const leaf = explicitField.path.at(-1) ?? '';
-            return renderNumber(explicitField, explicit[leaf] ?? field.explicitSeed[leaf], (next) => {
-              replace({ ...explicit, [leaf]: next });
-            });
-          })
-        )}
+        >
+          {field.presets.map((preset) => (
+            <DropdownMenuRadioItem key={preset} value={preset} onSelect={keepMenuOpen}>
+              {humanize(preset)}
+            </DropdownMenuRadioItem>
+          ))}
+          <DropdownMenuRadioItem value={customChoiceValue} onSelect={keepMenuOpen}>
+            Custom
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        {isCustom
+          ? field.explicitFields.map((explicitField) => {
+              const leaf = explicitField.path.at(-1) ?? '';
+              return renderNumber(explicitField, {
+                value: explicit[leaf] ?? field.explicitSeed[leaf],
+                onValue: (next) => {
+                  replace({ ...explicit, [leaf]: next });
+                },
+                // The explicit values belong to Custom: their labels start where the radio labels do.
+                className: 'pl-8',
+              });
+            })
+          : undefined}
       </div>
     );
   };
   return (
-    <DropdownMenuDisclosureItem
+    <SettingsSubViewRow
       icon={<Cpu />}
       label='Kernel settings'
-      description={
-        changedCount === 0
-          ? 'Using kernel defaults'
-          : `${changedCount} changed from ${changedCount === 1 ? 'its default' : 'defaults'}`
-      }
-      isDefaultOpen={isDefaultOpen}
+      value={changedCount === 0 ? 'Defaults' : `${changedCount} changed`}
     >
-      <div role='group' aria-label='Kernel settings' className='flex flex-col gap-1 pt-0.5'>
-        {groups.map((group) => (
-          <div key={group.label ?? ''} role='group' aria-label={group.label} className='flex flex-col gap-1'>
-            {group.label ? (
-              <div aria-hidden='true' className='px-3 pt-1 text-xs font-medium text-muted-foreground'>
-                {group.label}
-              </div>
-            ) : null}
-            {group.fields.map((field) => {
-              if (field.kind === 'boolean') {
-                return (
-                  <DropdownMenuSwitchItem
-                    key={field.path.join('.')}
-                    isChecked={valueAt(field.path) === true}
-                    onIsCheckedChange={(isChecked) => {
-                      onChange(withSetting({ values, defaults }, field.path, isChecked));
-                    }}
-                  >
-                    {field.label}
-                  </DropdownMenuSwitchItem>
-                );
-              }
-              if (field.kind === 'number') {
-                return renderNumber(field, valueAt(field.path), (next) => {
+      {groups.map((group) => (
+        <div key={group.label ?? ''} role='group' aria-label={group.label} className='flex flex-col gap-0.5'>
+          {/* The group is named for assistive technology; its heading is for the eye. */}
+          {group.label ? <DropdownMenuLabel aria-hidden='true'>{group.label}</DropdownMenuLabel> : undefined}
+          {group.fields.map((field) => {
+            if (field.kind === 'boolean') {
+              return (
+                <DropdownMenuSwitchItem
+                  key={field.path.join('.')}
+                  isChecked={valueAt(field.path) === true}
+                  onIsCheckedChange={(isChecked) => {
+                    onChange(withSetting({ values, defaults }, field.path, isChecked));
+                  }}
+                >
+                  {field.label}
+                </DropdownMenuSwitchItem>
+              );
+            }
+            if (field.kind === 'number') {
+              return renderNumber(field, {
+                value: valueAt(field.path),
+                onValue: (next) => {
                   onChange(withSetting({ values, defaults }, field.path, next));
-                });
-              }
-              if (field.kind === 'enum') {
-                return renderEnum(field);
-              }
-              return renderChoice(field);
-            })}
-          </div>
-        ))}
-        <DropdownMenuItem
-          className='text-muted-foreground'
-          disabled={changedCount === 0}
-          onSelect={(event) => {
-            event.preventDefault();
-            onReset();
-          }}
-        >
-          Reset to defaults
-        </DropdownMenuItem>
-      </div>
-    </DropdownMenuDisclosureItem>
+                },
+              });
+            }
+            if (field.kind === 'enum') {
+              return renderEnum(field);
+            }
+            return renderChoice(field);
+          })}
+        </div>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        disabled={changedCount === 0}
+        onSelect={(event) => {
+          event.preventDefault();
+          onReset();
+        }}
+      >
+        <RotateCcw />
+        Reset to defaults
+      </DropdownMenuItem>
+    </SettingsSubViewRow>
   );
 }

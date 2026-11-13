@@ -433,6 +433,40 @@ describe('libraryAccess', () => {
       expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
     });
 
+    it('should ask for no bootstrap pass while the journal loads, however often it fails', () => {
+      const harness = start();
+      ask(harness);
+      for (const message of ['boot failed', 'again', 'and again']) {
+        harness.send({ type: 'discoveryFailed', message });
+      }
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(0);
+      expect(harness.answered()).toEqual([]);
+      harness.send({ type: 'journalReady', pending: 1 });
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+    });
+
+    it('should run a failed bootstrap pass once for a question asked before the journal was read', () => {
+      const harness = start();
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      ask(harness);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(0);
+      harness.send({ type: 'journalReady', pending: 1 });
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      harness.send({ type: 'discoveryFailed', message: 'still failing' });
+      expect(harness.answers('q1')).toEqual([{ status: 'error', message: 'still failing' }]);
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+    });
+
+    it('should run a failed bootstrap pass again as soon as a question is asked once the journal is read', () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      harness.send({ type: 'epochMoved', epoch: 1, current: false });
+      ask(harness, 'q1');
+      harness.send({ type: 'discoveryFailed', message: 'boot failed' });
+      ask(harness, 'q2');
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+    });
+
     it('should skip verification while a current listing exists', () => {
       const harness = start();
       harness.send({ type: 'journalReady', pending: 0 });

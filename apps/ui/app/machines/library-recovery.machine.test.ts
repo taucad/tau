@@ -528,6 +528,24 @@ describe('libraryRecovery', () => {
       expect(harness.of('mutationAdmitted')).toEqual([{ type: 'mutationAdmitted', requestId: 'm1' }]);
     });
 
+    it("should run a person's replay of one project while another project's mutation holds an earlier replay", async () => {
+      const harness = start();
+      await ready(harness, []);
+      harness.send({ type: 'mutationAsked', requestId: 'm1', projectId: 'p1' });
+      harness.send({ type: 'replayAsked', requestId: 'c1', row: row('x1', 'p1') });
+      harness.send({ type: 'replayAsked', requestId: 'c2', row: row('x2', 'p2') });
+      await flush();
+      expect(harness.replay.calls.map((call) => call.input.projectId)).toEqual(['p2']);
+      await settleReplay(harness, recovered);
+      expect(harness.of('replaySettled')).toEqual([{ type: 'replaySettled', requestId: 'c2', held: false }]);
+      harness.send({ type: 'mutationAsked', requestId: 'm2', projectId: 'p2' });
+      expect(harness.of('mutationAdmitted').map((event) => event.requestId)).toEqual(['m1', 'm2']);
+      // The held replay runs once its project's mutation settles.
+      harness.send({ type: 'mutationAbandoned', requestId: 'm1' });
+      await flush();
+      expect(harness.replay.calls.map((call) => call.input.projectId)).toEqual(['p2', 'p1']);
+    });
+
     it('should hold a second mutation of a project until the first settles, and release on abandon', async () => {
       const harness = start();
       await ready(harness, []);

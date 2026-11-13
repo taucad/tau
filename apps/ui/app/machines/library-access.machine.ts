@@ -734,9 +734,13 @@ export const libraryAccessMachine = setup({
         });
       }
       // A failed read is run again for the new question (and every open one waits for it), as today's next call does.
+      // A failed bootstrap pass is run again only once the journal is read: until then the query waits, and asks for
+      // the pass itself when the journal is ready, so one question runs it once.
       const retries: AccessFactEvent[] = [
         ...(context.facts.journal.status === 'failed' ? [{ type: 'journalRetrying' } as const] : []),
-        ...(context.facts.discoveryError === undefined ? [] : [{ type: 'discoveryRetrying' } as const]),
+        ...(context.facts.discoveryError === undefined || context.facts.journal.status !== 'ready'
+          ? []
+          : [{ type: 'discoveryRetrying' } as const]),
       ];
       let { facts } = context;
       for (const retry of retries) {

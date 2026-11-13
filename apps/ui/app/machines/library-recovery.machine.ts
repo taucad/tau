@@ -379,14 +379,19 @@ const nextReplay = (
   if (waiting !== undefined) {
     return { operationId: waiting, requestId: undefined, context };
   }
-  const [person] = context.personReplays;
-  if (person === undefined || admitted.has(person.row.projectId)) {
+  // The first person's replay whose project is free: one held by a mutation does not hold another project's replay.
+  const index = context.personReplays.findIndex((queued) => !admitted.has(queued.row.projectId));
+  const person = context.personReplays[index];
+  if (person === undefined) {
     return undefined;
   }
   return {
     operationId: person.row.operationId,
     requestId: person.requestId,
-    context: { ...withRow(context, person.row), personReplays: context.personReplays.slice(1) },
+    context: {
+      ...withRow(context, person.row),
+      personReplays: context.personReplays.filter((_queued, position) => position !== index),
+    },
   };
 };
 

@@ -118,9 +118,9 @@
   ],
   "sources": {
     "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813",
-    "apps/ui/app/machines/library-access.machine.ts": "a7eb942dafb1bcc230365f81acd501d0058029d75fb2379a9daae741905fff33",
+    "apps/ui/app/machines/library-access.machine.ts": "26957ac8c06a7f2de585c08ab84468432abebd7bc8e83b5bdb026f071f97a11a",
     "apps/ui/app/machines/library-discovery.machine.ts": "714b3a34db66a3aa10f3d78dda143e66c1d3c197c3b832139096b2a77bc7874b",
-    "apps/ui/app/machines/library-recovery.machine.ts": "6438b8c506b04707b3fabcae6906d8671bfe22ccbdba117b1b303992222d8f7e"
+    "apps/ui/app/machines/library-recovery.machine.ts": "41907b4cc6ffe0b3dc6a2ac124c8cc231327c18134a2c0c7ea41d705e0a24367"
   },
   "specs": {
     "LibraryCatalog.tla": "fe8e3005ddd22de077ec5343af081c2a8be319e2d34c864ed8352ea59dc07d0c"

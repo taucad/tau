@@ -551,13 +551,14 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     );
     const project = document.querySelector<HTMLElement>('[data-slot="project-trigger"]');
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')];
-    /* Two `navMain` rows (`route.constants.ts`), which is where the sidebar's
-     * standing destinations live: `navSecondary` — and with it the `Files` row
-     * this used to read — moved into the user dropdown in `be3d0eb6e`, and
-     * `Project Library` has never been a committed label. */
+    /* The sidebar's standing destinations: `Projects`, the one `navMain` row
+     * (`route.constants.ts`), and the `More` row whose menu lists Community and
+     * the other secondary destinations (#817, 8f929d9c8d). `navSecondary` — and
+     * with it the `Files` row this used to read — moved into the user dropdown
+     * in `be3d0eb6e`, and `Project Library` has never been a committed label. */
     const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
-    const community = navButtons.find((button) => button.textContent.trim() === 'Community');
-    if (!search || !newProject || !projects || !project || !projectsNav || !community) {
+    const more = navButtons.find((button) => button.textContent.trim() === 'More');
+    if (!search || !newProject || !projects || !project || !projectsNav || !more) {
       throw new Error('Sidebar controls were not ready.');
     }
     const searchBounds = search.getBoundingClientRect();
@@ -572,7 +573,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     return {
       fontSizes: [getComputedStyle(search).fontSize, getComputedStyle(newProject).fontSize],
       heightDelta: Math.abs(searchBounds.height - newProjectBounds.height),
-      horizontalEdges: [search, newProject, project, projectsNav, community].map((element) => {
+      horizontalEdges: [search, newProject, project, projectsNav, more].map((element) => {
         const bounds = element.getBoundingClientRect();
         return [bounds.left, bounds.right];
       }),

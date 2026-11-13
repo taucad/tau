@@ -53,7 +53,7 @@ const events: readonly FocusEvent[] = Object.values(samples).flat();
 const options = {
   input: { ports },
   events,
-  limit: 400,
+  limit: 600,
   serializeState: (snapshot: AnyMachineSnapshot) => {
     const context = snapshot.context as FocusContext;
     return JSON.stringify([

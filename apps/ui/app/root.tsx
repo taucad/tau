@@ -67,7 +67,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     consentStatus: readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl),
     globalPrivacyControl,
     env: await getClientEnvironment(),
-    pathname,
     // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
     projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
     // R4/R7: sidebar state and request platform, so the shell's first paint is final.
@@ -79,9 +78,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /**
- * The root loader reads request headers, cookies and the pathname only, so a navigation
- * that changes nothing but the query string (a gallery search, a filter) cannot change its
- * result. Explicit revalidation and submissions keep the default.
+ * The root loader reads request headers, cookies and the server environment; none of them
+ * change on a client navigation, and every consumer of its data reads it as the server
+ * snapshot only (the client keeps its own copy of each value after hydration). So a GET
+ * navigation, whether it changes the pathname or the query string, does not re-run it, and a
+ * click never waits for the server before the URL changes (U23).
+ *
+ * Submissions and an explicit revalidation of the same URL keep the default. Leaving the
+ * offline shell path keeps the default too: its neutral prerendered document carries no
+ * cookies' data and no model catalog, so the first page after it loads the real root data.
+ * The offline shell path itself never revalidates the root.
  */
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   currentUrl,
@@ -92,9 +98,11 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   if (isOfflineShellPath(nextUrl.pathname)) {
     return false;
   }
-  const isQueryOnlyNavigation =
-    formMethod === undefined && currentUrl.pathname === nextUrl.pathname && currentUrl.search !== nextUrl.search;
-  return isQueryOnlyNavigation ? false : defaultShouldRevalidate;
+  const isClientNavigation =
+    formMethod === undefined &&
+    !isOfflineShellPath(currentUrl.pathname) &&
+    (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
+  return isClientNavigation ? false : defaultShouldRevalidate;
 };
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {

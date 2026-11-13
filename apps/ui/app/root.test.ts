@@ -102,7 +102,7 @@ const rootNavigation = (
 });
 
 describe('root shouldRevalidate on client navigation', () => {
-  it.fails('C17 (U23): a GET navigation that changes the pathname does not re-run the root loader', () => {
+  it('C17 (U23): a GET navigation that changes the pathname does not re-run the root loader', () => {
     expect(shouldRevalidate(rootNavigation('/', '/projects/abc'))).toBe(false);
   });
 

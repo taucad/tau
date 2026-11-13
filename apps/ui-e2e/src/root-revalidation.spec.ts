@@ -74,7 +74,7 @@ const readRecord = async (): Promise<NavigationRecord> =>
     };
   });
 
-test.fails('F11 (U23, expected failure, S-nav): a click on a project row from Home changes the URL with no root loader request', async ({
+test('F11 (U23, S-nav): a click on a project row from Home changes the URL with no root loader request', async ({
   annotate,
 }) => {
   await target.setViewport({ width: 1440, height: 900 });

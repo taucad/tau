@@ -17,8 +17,11 @@ describe('root shouldRevalidate', () => {
     expect(shouldRevalidate(navigation('/community?q=gea', '/community?q=gear&kernel=replicad'))).toBe(false);
   });
 
-  it('should keep the default for a new pathname, an explicit revalidation and a submission', () => {
-    expect(shouldRevalidate(navigation('/community', '/projects'))).toBe(true);
+  it('should skip the root loader for a new pathname (U23)', () => {
+    expect(shouldRevalidate(navigation('/community', '/projects'))).toBe(false);
+  });
+
+  it('should keep the default for an explicit revalidation and a submission', () => {
     expect(shouldRevalidate(navigation('/community?q=gear', '/community?q=gear'))).toBe(true);
     expect(shouldRevalidate(navigation('/community', '/community?q=gear', 'POST'))).toBe(true);
   });

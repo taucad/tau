@@ -1,6 +1,8 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
+import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
@@ -19,6 +21,11 @@ import type { FileContentService } from '@taucad/fs-client/file-content-service'
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
+import type * as KernelOptionsModule from '#hooks/use-project-kernel-options.js';
+import type * as NoticesModule from '#routes/w.$workspace.$project/project-route-notices.js';
+import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import type * as ProjectWorkspaceWarmupModule from '#lib/project-workspace-warmup.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -45,6 +52,43 @@ const projectProviderChatInputs: Array<{
   requestedChatId: string | undefined;
   createdChatId: string | undefined;
 }> = [];
+/** A0.2: every input a project provider rendered with, by project, in render order. */
+const projectProviderRequests: Array<{
+  projectId: string;
+  requestedChatId: string | undefined;
+  createdChatId: string | undefined;
+}> = [];
+/** The focused-chat callback each project's provider was last handed. */
+const focusedChatResolvers = new Map<string, ((chatId: string) => void) | undefined>();
+/** Mounts of the editor branch's marker (A0.2 same-project rows). */
+const editorMarker = { mounts: 0, unmounts: 0 };
+/** Every notice kind rendered, in render order. */
+const noticeKinds: string[] = [];
+/** The native kernel id every project subtree asked its kernel options for, in render order (S34). */
+const kernelOptionInputs: Array<{ projectId: string; nativeKernelId: string | undefined }> = [];
+/*
+ * The discovery listing slug resolution reads (`useProjects`), as a store a row can change: the real
+ * `use-project-slug-route` resolves slugs and corrects the URL from it.
+ */
+type ListedProject = Readonly<{
+  id: string;
+  locator: { backend: 'opfs' };
+  slugs: { workspaceSlug: string; projectSlug: string };
+}>;
+const listing = {
+  projects: [] as readonly ListedProject[],
+  isLoading: false,
+  listeners: new Set<() => void>(),
+  snapshot: { projects: [] as readonly ListedProject[], isLoading: false },
+  set(projects: readonly ListedProject[], isLoading = false): void {
+    this.projects = projects;
+    this.isLoading = isLoading;
+    this.snapshot = { projects, isLoading };
+    for (const listener of this.listeners) {
+      listener();
+    }
+  },
+};
 const editorSend = vi.fn();
 const projectSend = vi.fn();
 const connectRemote = vi.fn(async () => undefined);
@@ -240,13 +284,17 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId,
     requestedChatId,
     createdChatId,
+    onFocusedChatResolved,
   }: React.PropsWithChildren<{
     projectId: string;
     requestedChatId?: string;
     createdChatId?: string;
+    onFocusedChatResolved?: (chatId: string) => void;
   }>) => {
     projectProviderInputs.push(projectId);
     projectProviderChatInputs.push({ requestedChatId, createdChatId });
+    projectProviderRequests.push({ projectId, requestedChatId, createdChatId });
+    focusedChatResolvers.set(projectId, onFocusedChatResolved);
     return <div>{children}</div>;
   },
   useProject: () => ({
@@ -324,7 +372,16 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({
-  ChatInterface: () => null,
+  /* A0.2: the editor branch's marker. Its mount count is what "the same project keeps its editor" means. */
+  ChatInterface: () => {
+    useEffect(() => {
+      editorMarker.mounts += 1;
+      return () => {
+        editorMarker.unmounts += 1;
+      };
+    }, []);
+    return <span data-testid='editor-marker' />;
+  },
 }));
 /* W10's conflict chat reads `useChats`, which needs the root `QueryClient`
  * this route-level suite does not mount; it has its own tests. */
@@ -349,6 +406,7 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
     ProjectRouteRetryContext,
     ProjectRouteNotice: ({ state }: { readonly state: { kind: string; error?: Error } }) => {
       const retry = useContext(ProjectRouteRetryContext);
+      noticeKinds.push(state.kind);
       return (
         <div>
           <p>Notice: {state.kind}</p>
@@ -358,6 +416,30 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
           </button>
         </div>
       );
+    },
+  };
+});
+
+vi.mock('#hooks/use-projects.js', () => ({
+  useProjects: () =>
+    useSyncExternalStore(
+      (listener: () => void) => {
+        listing.listeners.add(listener);
+        return () => {
+          listing.listeners.delete(listener);
+        };
+      },
+      () => listing.snapshot,
+    ),
+}));
+/* Pass-through: S34's native kernel id is what a retained subtree hands its kernel options. */
+vi.mock('#hooks/use-project-kernel-options.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof KernelOptionsModule>();
+  return {
+    ...actual,
+    useProjectKernelOptions: (options: Parameters<typeof actual.useProjectKernelOptions>[0]) => {
+      kernelOptionInputs.push({ projectId: options.projectId, nativeKernelId: options.nativeKernelId });
+      return actual.useProjectKernelOptions(options);
     },
   };
 });
@@ -468,6 +550,13 @@ beforeEach(() => {
   sharedWorkerState = 'ready';
   editorObservers.clear();
   editorIsIdle = true;
+  projectProviderRequests.length = 0;
+  focusedChatResolvers.clear();
+  editorMarker.mounts = 0;
+  editorMarker.unmounts = 0;
+  noticeKinds.length = 0;
+  kernelOptionInputs.length = 0;
+  listing.set([]);
 });
 
 /**
@@ -1343,5 +1432,875 @@ describe('project route session identity', () => {
     });
 
     expect(mounts).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// A0.2: route gate and session binding rows (app state orchestration charter)
+// ===========================================================================
+
+/** Every route state the gate published, in render order. */
+const publishedKinds: string[] = [];
+
+function RouteStateProbe(): React.JSX.Element {
+  const state: ProjectRouteState | undefined = useProjectRouteState();
+  publishedKinds.push(state?.kind ?? 'none');
+  return <span data-testid='route-state'>{state?.kind ?? 'none'}</span>;
+}
+
+/** What the router last rendered, and a handle to move it. */
+const router: {
+  location: ReturnType<typeof useLocation> | undefined;
+  navigate: ReturnType<typeof useNavigate> | undefined;
+  /** How the router got to `location`: PUSH, REPLACE or POP. */
+  action: ReturnType<typeof useNavigationType> | undefined;
+} = { location: undefined, navigate: undefined, action: undefined };
+
+function RouterProbe(): undefined {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const action = useNavigationType();
+  useEffect(() => {
+    router.location = location;
+    router.navigate = navigate;
+    router.action = action;
+  }, [location, navigate, action]);
+  return undefined;
+}
+
+const listed = (id: string, workspaceSlug: string, projectSlug: string): ListedProject => ({
+  id,
+  locator: { backend: 'opfs' },
+  slugs: { workspaceSlug, projectSlug },
+});
+
+const readyAt = (id: string, entryPath: string): ProjectRouteAccess => ({
+  status: 'ready',
+  project: createProjectFixture({ id, name: id, description: '', tags: [], assets: { main: { entryPath } } }),
+});
+
+/** Render the gate and let its first access answer land inside `act`. */
+const renderAndSettle = async (): Promise<ReturnType<typeof renderRouteProvider>> => {
+  const rendered = renderRouteProvider();
+  await flushTasks();
+  return rendered;
+};
+
+/** Let settled promises and the commits they cause land, without waiting on time. */
+const flushTasks = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
+  });
+};
+
+const navigateTo = async (target: string, options?: NavigateOptions): Promise<void> => {
+  await act(async () => {
+    await router.navigate?.(target, options);
+  });
+  await flushTasks();
+};
+
+/**
+ * The app-owned host over a real router, with the editor's route component below it — exactly as
+ * the root layout mounts `ProjectSessionsHost` around the outlet.
+ */
+const renderHost = (initialEntry: string, shell?: React.ReactNode): ReturnType<typeof render> =>
+  render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <RouterProbe />
+      <SessionsProvider actor={sessionsActor}>
+        <routeModule.ProjectSessionsHost>
+          <Routes>
+            <Route
+              path='/w/:workspace/:project'
+              element={
+                <>
+                  <RouteStateProbe />
+                  <sessionsModule.ProjectChatRoute />
+                  {shell}
+                </>
+              }
+            />
+            <Route path='*' element={<RouteStateProbe />} />
+          </Routes>
+        </routeModule.ProjectSessionsHost>
+      </SessionsProvider>
+    </MemoryRouter>,
+  );
+
+const providerRequestsOf = (projectId: string) =>
+  projectProviderRequests.filter((request) => request.projectId === projectId);
+
+const kernelIdsOf = (projectId: string): ReadonlyArray<string | undefined> =>
+  kernelOptionInputs.filter((input) => input.projectId === projectId).map((input) => input.nativeKernelId);
+
+describe('A0.2 route gate rows', () => {
+  beforeEach(() => {
+    publishedKinds.length = 0;
+    router.location = undefined;
+    router.navigate = undefined;
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  /* One row per `ProjectRouteState` member (`project-route-state.ts` 31 to 48): what the gate
+   * publishes, and which project subtrees exist once it has. */
+  it.each<readonly [ProjectRouteState['kind'], () => Promise<void>, readonly string[]]>([
+    [
+      'resolving',
+      async () => {
+        getProjectRouteAccess.mockReturnValue(deferred<ProjectRouteAccess>().promise);
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'editor',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue(ready(projectA));
+        await renderAndSettle();
+      },
+      [projectA],
+    ],
+    [
+      'closed',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue(ready(projectA));
+        await renderAndSettle();
+        await act(async () => {
+          sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
+          await Promise.resolve();
+        });
+      },
+      [],
+    ],
+    [
+      'trashed',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue(trashed(projectA));
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'missing',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue({ status: 'missing' });
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'conflict',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue({ status: 'conflict' });
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'unavailable',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue({ status: 'unavailable' });
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'recovering',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue({
+          status: 'recovering',
+          recovery: {
+            operationId: 'req_recovery',
+            projectId: projectA,
+            kind: 'create',
+            storage: { backend: 'opfs', providerBasePath: '/pending' },
+            status: 'recovering',
+          },
+        });
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'recovery-failed',
+      async () => {
+        getProjectRouteAccess.mockResolvedValue({
+          status: 'recovery-failed',
+          recovery: {
+            operationId: 'req_recovery',
+            projectId: projectA,
+            kind: 'create',
+            storage: { backend: 'opfs', providerBasePath: '/pending' },
+            status: 'failed',
+            reason: 'filesystem-error',
+          },
+        });
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'native-kernel',
+      async () => {
+        /* `main.py` needs the build123d runtime, which the web build does not carry. */
+        getProjectRouteAccess.mockResolvedValue(readyAt(projectA, 'main.py'));
+        await renderAndSettle();
+      },
+      /* Today the gate still opens a ready project whose kernel this host cannot run: `open`
+       * follows a ready answer (`project-route.tsx` 262 to 273), so its subtree mounts behind the
+       * notice although `editor` is the only state documented to mount resources. */
+      [projectA],
+    ],
+    [
+      'access-error',
+      async () => {
+        getProjectRouteAccess.mockRejectedValue(new Error('discovery failed'));
+        await renderAndSettle();
+      },
+      [],
+    ],
+    [
+      'flush-error',
+      async () => {
+        getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+        const { Provider, view } = await renderAndSettle();
+        setEditorIdle(false);
+        currentProjectId = projectB;
+        view.rerender(<Provider>content</Provider>);
+        await flushTasks();
+        act(() => {
+          failEditorFlush(new Error('storage failed'));
+        });
+      },
+      /* The failed leave flush keeps A and never opens B (I3). */
+      [projectA],
+    ],
+  ])('should publish %s and mount only the subtrees it owns', async (kind, arrange, subtrees) => {
+    await arrange();
+    await flushTasks();
+
+    expect(screen.getByText(kind === 'editor' ? 'content' : `Notice: ${kind}`)).toBeInTheDocument();
+    if (kind === 'editor') {
+      expect(screen.queryByText(/^Notice: /u)).not.toBeInTheDocument();
+      expect(focusedSessionId()).toBe(projectA);
+    }
+    expect(sessionIds()).toEqual(subtrees);
+    /* W2: the shell survives every state. */
+    expect(screen.getByText('content')).toBeInTheDocument();
+  });
+
+  it('should retry a failed leave flush and move once the retry settles', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await flushTasks();
+    setEditorIdle(false);
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+    act(() => {
+      failEditorFlush(new Error('storage failed'));
+    });
+    await flushTasks();
+    expect(screen.getByText('Notice: flush-error')).toBeInTheDocument();
+    expect(editorSend.mock.calls.filter(([event]) => (event as { type: string }).type === 'flushNow')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry project' }));
+    await flushTasks();
+    /* The retry flushes again: a failed flush is never treated as done. */
+    expect(editorSend.mock.calls.filter(([event]) => (event as { type: string }).type === 'flushNow')).toHaveLength(2);
+    expect(focusedSessionId()).toBe(projectA);
+
+    act(() => {
+      setEditorIdle(true);
+    });
+    await flushTasks();
+    expect(focusedSessionId()).toBe(projectB);
+    expect(screen.queryByText('Notice: flush-error')).not.toBeInTheDocument();
+  });
+
+  it('should retry a failed access check with a new request and open on its answer', async () => {
+    getProjectRouteAccess.mockRejectedValueOnce(new Error('discovery failed')).mockResolvedValueOnce(ready(projectA));
+    renderRouteProvider();
+    await flushTasks();
+    expect(screen.getByText('Notice: access-error')).toBeInTheDocument();
+    expect(sessionIds()).toEqual([]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry project' }));
+    await flushTasks();
+
+    expect(getProjectRouteAccess.mock.calls).toEqual([[projectA], [projectA]]);
+    expect(focusedSessionId()).toBe(projectA);
+  });
+
+  it('should open only the latest destination when a second navigation lands during the first leave flush', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await flushTasks();
+    setEditorIdle(false);
+    publishedKinds.length = 0;
+
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+    currentProjectId = projectC;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+
+    /* One flush for the project being left, shared by both requests. */
+    expect(editorSend.mock.calls.filter(([event]) => (event as { type: string }).type === 'flushNow')).toHaveLength(1);
+    expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA]);
+
+    act(() => {
+      setEditorIdle(true);
+    });
+    await flushTasks();
+
+    expect(focusedSessionId()).toBe(projectC);
+    expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA, projectC]);
+    expect(projectProviderInputs).not.toContain(projectB);
+  });
+
+  it('should open nothing when the leave flush settles while the newest destination is still checking access', async () => {
+    const accessC = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockImplementation(async (id) => (id === projectC ? accessC.promise : ready(id)));
+    const { Provider, view } = renderRouteProvider();
+    await flushTasks();
+    setEditorIdle(false);
+
+    /* B's access answers and its effect waits on the flush; C's access is still out. */
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+    currentProjectId = projectC;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+
+    act(() => {
+      setEditorIdle(true);
+    });
+    await flushTasks();
+
+    /* The superseded B request must not open once the flush it waited on settles. */
+    expect(focusedSessionId()).toBe(projectA);
+    expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA]);
+    expect(projectProviderInputs).not.toContain(projectB);
+
+    await act(async () => {
+      accessC.resolve(ready(projectC));
+      await accessC.promise;
+    });
+    await flushTasks();
+
+    expect(focusedSessionId()).toBe(projectC);
+    expect(projectProviderInputs).not.toContain(projectB);
+  });
+
+  it('should drop an access answer that a library revision superseded while it was resolving', async () => {
+    const first = deferred<ProjectRouteAccess>();
+    const second = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { Provider, view } = renderRouteProvider();
+    await flushTasks();
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+
+    projectManager = { ...projectManager, libraryRevision: projectManager.libraryRevision + 1 };
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+    expect(getProjectRouteAccess).toHaveBeenCalledTimes(2);
+
+    /* The superseded check answers ready; its effect was cancelled, so nothing opens. */
+    await act(async () => {
+      first.resolve(ready(projectA));
+      await first.promise;
+    });
+    await flushTasks();
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+    expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([]);
+
+    await act(async () => {
+      second.resolve(trashed(projectA));
+      await second.promise;
+    });
+    await flushTasks();
+    expect(screen.getByText('Notice: trashed')).toBeInTheDocument();
+    expect(sessionIds()).toEqual([]);
+  });
+
+  it('should keep the project being left, open nothing and send no close while a failed leave flush blocks the move (I3)', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await flushTasks();
+    const session = sessionsActor.getSnapshot().context.refs[projectA];
+    setEditorIdle(false);
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await flushTasks();
+    act(() => {
+      failEditorFlush(new Error('storage failed'));
+    });
+    await flushTasks();
+
+    expect(screen.getByText('Notice: flush-error')).toBeInTheDocument();
+    expect(getProjectRouteAccess.mock.calls).toEqual([[projectA], [projectB]]);
+    expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA]);
+    expect(sessionsActor.getSnapshot().context.refs[projectA]).toBe(session);
+    expect(session?.getSnapshot().matches('closing')).toBe(false);
+    expect(focusedSessionId()).toBe(projectA);
+  });
+});
+
+describe('A0.2 the same project keeps its editor (I20, D7)', () => {
+  beforeEach(() => {
+    publishedKinds.length = 0;
+    listing.set([listed(projectA, 'ws', 'alpha'), listed(projectB, 'ws', 'beta')]);
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it('should keep one editor mount and render no notice when the chat in the URL changes', async () => {
+    renderHost('/w/ws/alpha?chat=chat-1');
+    await flushTasks();
+    expect(screen.getByTestId('editor-marker')).toBeInTheDocument();
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+    publishedKinds.length = 0;
+    noticeKinds.length = 0;
+
+    await navigateTo('/w/ws/alpha?chat=chat-2');
+
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-2' });
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+    expect(noticeKinds).toEqual([]);
+    expect(publishedKinds.length).toBeGreaterThan(0);
+    expect(publishedKinds.filter((kind) => kind !== 'editor')).toEqual([]);
+    expect(getProjectRouteAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("should keep one editor mount and render no notice when the editor's focused chat replaces the URL", async () => {
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+    const historyKey = router.location?.key;
+    publishedKinds.length = 0;
+    noticeKinds.length = 0;
+
+    await act(async () => {
+      focusedChatResolvers.get(projectA)?.('chat-3');
+      await Promise.resolve();
+    });
+    await flushTasks();
+
+    expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-3' });
+    expect(router.location?.key).not.toBe(historyKey);
+    expect(router.action).toBe('REPLACE');
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-3' });
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+    expect(noticeKinds).toEqual([]);
+    expect(publishedKinds.length).toBeGreaterThan(0);
+    expect(publishedKinds.filter((kind) => kind !== 'editor')).toEqual([]);
+  });
+});
+
+describe('A0.2 the chat request reaches the provider after open (S12, route half)', () => {
+  beforeEach(() => {
+    listing.set([listed(projectA, 'ws', 'alpha'), listed(projectB, 'ws', 'beta')]);
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it('should hand the focused provider a changed chat and a created chat with its trust marker', async () => {
+    renderHost('/w/ws/alpha?chat=chat-1');
+    await flushTasks();
+    expect(providerRequestsOf(projectA).at(-1)).toEqual({
+      projectId: projectA,
+      requestedChatId: 'chat-1',
+      createdChatId: undefined,
+    });
+
+    await navigateTo('/w/ws/alpha?chat=chat-new', { state: { focusChatComposer: true } });
+
+    expect(providerRequestsOf(projectA).at(-1)).toEqual({
+      projectId: projectA,
+      requestedChatId: 'chat-new',
+      createdChatId: 'chat-new',
+    });
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
+  it('should hand a retained project no chat while it is behind, and the chat it regains focus with', async () => {
+    renderHost('/w/ws/alpha?chat=chat-1');
+    await flushTasks();
+    await navigateTo('/w/ws/beta');
+    expect(focusedSessionId()).toBe(projectB);
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: undefined, createdChatId: undefined });
+
+    await navigateTo('/w/ws/alpha?chat=chat-2');
+
+    expect(focusedSessionId()).toBe(projectA);
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-2', createdChatId: undefined });
+    /* A was never re-opened as a new subtree: I22 retention. */
+    expect(mounts.filter((id) => id === projectA)).toHaveLength(1);
+  });
+});
+
+describe('A0.2 ProjectSessionsHost (S29, S34)', () => {
+  beforeEach(() => {
+    publishedKinds.length = 0;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it('should resolve slugs to the project id before it checks access', async () => {
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+
+    expect(getProjectRouteAccess.mock.calls).toEqual([[projectA]]);
+    expect(focusedSessionId()).toBe(projectA);
+  });
+
+  it('should derive resolving while the listing loads and missing for slugs that name nothing', async () => {
+    listing.set([], true);
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+    expect(screen.getByTestId('route-state')).toHaveTextContent('resolving');
+    expect(getProjectRouteAccess).not.toHaveBeenCalled();
+
+    act(() => {
+      listing.set([listed(projectB, 'ws', 'beta')]);
+    });
+    await flushTasks();
+    expect(screen.getByTestId('route-state')).toHaveTextContent('missing');
+    expect(noticeKinds.at(-1)).toBe('missing');
+    expect(getProjectRouteAccess).not.toHaveBeenCalled();
+  });
+
+  it('should keep the resolved project on its path when its slug is renamed, and correct the address bar', async () => {
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+    expect(globalThis.location.pathname).toBe('/w/ws/alpha');
+    noticeKinds.length = 0;
+
+    act(() => {
+      listing.set([listed(projectA, 'ws', 'alpha-renamed')]);
+    });
+    await flushTasks();
+
+    expect(focusedSessionId()).toBe(projectA);
+    expect(screen.getByTestId('route-state')).toHaveTextContent('editor');
+    expect(noticeKinds).toEqual([]);
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+    expect(globalThis.location.pathname).toBe('/w/ws/alpha-renamed');
+    expect(getProjectRouteAccess.mock.calls).toEqual([[projectA]]);
+  });
+
+  it('should correct an id-addressed URL to its canonical slugs and send the focused chat there', async () => {
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    renderHost(`/w/ws/${projectA}`);
+    await flushTasks();
+    expect(focusedSessionId()).toBe(projectA);
+    expect(globalThis.location.pathname).toBe('/w/ws/alpha');
+
+    await act(async () => {
+      focusedChatResolvers.get(projectA)?.('chat-7');
+      await Promise.resolve();
+    });
+    await flushTasks();
+
+    expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-7' });
+    expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
+  it('should consume the cloudOpen marker once and strip it from the URL', async () => {
+    const lifecycle = deferred<Response>();
+    const fetchProjects = vi.spyOn(globalThis, 'fetch').mockReturnValue(lifecycle.promise);
+    try {
+      listing.set([listed(projectA, 'ws', 'alpha')]);
+      renderHost('/w/ws/alpha?chat=chat-1&cloudOpen=tau');
+      await flushTasks();
+
+      expect(tauCloudIntent.get(projectA)).toBe('open');
+      expect(router.location?.search).toBe('?chat=chat-1');
+
+      tauCloudIntent.set(projectA, undefined);
+      await navigateTo('/w/ws/alpha?chat=chat-2');
+      expect(tauCloudIntent.get(projectA)).toBeUndefined();
+    } finally {
+      tauCloudIntent.set(projectA, undefined);
+      fetchProjects.mockRestore();
+    }
+  });
+
+  it('should keep the native kernel id a retained project was opened with after focus moves on (S34)', async () => {
+    desktopShellBridge = { runtimeKernelIds: ['build123d'] };
+    listing.set([listed(projectA, 'ws', 'alpha'), listed(projectB, 'ws', 'beta')]);
+    getProjectRouteAccess.mockImplementation(async (id) =>
+      id === projectA ? readyAt(projectA, 'main.py') : ready(id),
+    );
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+    expect(focusedSessionId()).toBe(projectA);
+    const beforeLeave = kernelIdsOf(projectA).length;
+
+    await navigateTo('/w/ws/beta');
+
+    expect(focusedSessionId()).toBe(projectB);
+    expect(kernelIdsOf(projectA).length).toBeGreaterThan(beforeLeave);
+    expect(new Set(kernelIdsOf(projectA))).toEqual(new Set(['build123d']));
+    expect(new Set(kernelIdsOf(projectB))).toEqual(new Set([undefined]));
+  });
+});
+
+/* The real handlers, not the stand-in notice above: these rows are about what they send. */
+const actualNotices = await vi.importActual<typeof NoticesModule>(
+  '#routes/w.$workspace.$project/project-route-notices.js',
+);
+const { useSidebarCommands } = await import('#hooks/use-sidebar-status.js');
+
+describe('A0.2 the other senders of open keep what the gate kept (S39)', () => {
+  function ReopenControls(): React.JSX.Element {
+    const run = actualNotices.useProjectRouteNoticeActions(projectA);
+    const { openProject } = useSidebarCommands();
+    return (
+      <>
+        <button
+          type='button'
+          onClick={() => {
+            run('reopen');
+          }}
+        >
+          Notice reopen
+        </button>
+        <button
+          type='button'
+          onClick={() => {
+            openProject(projectA);
+          }}
+        >
+          Sidebar open
+        </button>
+      </>
+    );
+  }
+
+  beforeEach(() => {
+    desktopShellBridge = { runtimeKernelIds: ['build123d'] };
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    getProjectRouteAccess.mockImplementation(async (id) => readyAt(id, 'main.py'));
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it.each(['Notice reopen', 'Sidebar open'])(
+    'should remount a closed project on %s with its kept native kernel id and its chat',
+    async (control) => {
+      renderHost('/w/ws/alpha?chat=chat-1', <ReopenControls />);
+      await flushTasks();
+      expect(focusedSessionId()).toBe(projectA);
+
+      await act(async () => {
+        sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
+        await Promise.resolve();
+      });
+      await flushTasks();
+      expect(screen.getByTestId('route-state')).toHaveTextContent('closed');
+      expect(sessionIds()).toEqual([]);
+      kernelOptionInputs.length = 0;
+      projectProviderRequests.length = 0;
+
+      fireEvent.click(screen.getByRole('button', { name: control }));
+      await flushTasks();
+
+      expect(focusedSessionId()).toBe(projectA);
+      expect(new Set(kernelIdsOf(projectA))).toEqual(new Set(['build123d']));
+      expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-1' });
+    },
+  );
+
+  /*
+   * I4: "a person's open re-sends the one focus kept". The gate kept build123d (main.py) and chat-1 for this
+   * project; the reopened session must carry them as its open request. Today both senders send a bare
+   * project id, so the session holds no request. The row above pins the preconditions (the same session
+   * is spawned and focused), so this one fails only on the request assertion.
+   */
+  it.fails.each(['Notice reopen', 'Sidebar open'])(
+    'I4: should open the session %s spawns with the request focus kept: native kernel build123d and chat-1',
+    async (control) => {
+      renderHost('/w/ws/alpha?chat=chat-1', <ReopenControls />);
+      await flushTasks();
+      await act(async () => {
+        sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
+        await Promise.resolve();
+      });
+      await flushTasks();
+
+      fireEvent.click(screen.getByRole('button', { name: control }));
+      await flushTasks();
+
+      expect(sessionsActor.getSnapshot().context.refs[projectA]?.getSnapshot().context).toMatchObject({
+        request: { nativeKernelId: 'build123d', chatId: 'chat-1' },
+      });
+    },
+  );
+});
+
+/*
+ * A0.7: the route-shell load defects, pinned red until their fix (U1, U2, U22).
+ *
+ * `children` is the app shell (the sidebar and the outlet). The marker counts
+ * its own mounts, so a shell that moves between tree positions, or waits under
+ * a Suspense fallback, shows as a second mount or as an absent node.
+ */
+type WorkspaceLoad = ReturnType<typeof ProjectWorkspaceWarmupModule.loadProjectWorkspace>;
+const workspaceImport = vi.hoisted((): { pending: WorkspaceLoad | undefined; calls: number } => ({
+  pending: undefined,
+  calls: 0,
+}));
+vi.mock('#lib/project-workspace-warmup.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectWorkspaceWarmupModule>();
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the promise the row controls.
+  const loadProjectWorkspace = (): WorkspaceLoad => {
+    if (workspaceImport.pending === undefined) {
+      return actual.loadProjectWorkspace();
+    }
+    workspaceImport.calls += 1;
+    return workspaceImport.pending;
+  };
+  return {
+    ...actual,
+    loadProjectWorkspace,
+    /* A warm while a row controls the import starts that import, so no path reaches the module another way. */
+    warmProjectWorkspace: () => {
+      if (workspaceImport.pending === undefined) {
+        actual.warmProjectWorkspace();
+        return;
+      }
+      void loadProjectWorkspace();
+    },
+  };
+});
+
+describe('project route shell identity (A0.7)', () => {
+  const shell = { mounts: 0 };
+
+  function ShellMarker(): React.JSX.Element {
+    useEffect(() => {
+      shell.mounts += 1;
+    }, []);
+    return <nav data-testid='app-shell' aria-label='App shell' />;
+  }
+
+  function ShellRoute({
+    projectId,
+    isProjectUrl = projectId !== undefined,
+  }: {
+    readonly projectId?: string;
+    readonly isProjectUrl?: boolean;
+  }): React.JSX.Element {
+    return (
+      <SessionsProvider actor={sessionsActor}>
+        <routeModule.ProjectRouteGate
+          requestedProjectId={projectId}
+          slugs={isProjectUrl ? { workspaceSlug: 'live', projectSlug: projectId ?? 'unknown' } : undefined}
+        >
+          <ShellMarker />
+          <sessionsModule.ProjectChatRoute />
+        </routeModule.ProjectRouteGate>
+      </SessionsProvider>
+    );
+  }
+
+  /** The shell nodes in the document now. */
+  const shellNodes = (): readonly HTMLElement[] => screen.queryAllByTestId('app-shell');
+
+  beforeEach(() => {
+    shell.mounts = 0;
+    workspaceImport.pending = undefined;
+    workspaceImport.calls = 0;
+  });
+
+  it.fails('U1: should keep one shell mounted while the workspace import is pending', async () => {
+    const workspace = deferred<Awaited<WorkspaceLoad>>();
+    workspaceImport.pending = workspace.promise;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    try {
+      render(<ShellRoute projectId={projectA} />);
+      await act(async () => {
+        await getProjectRouteAccess.mock.results[0]?.value;
+      });
+
+      /* Access is ready at once; the workspace import is still outstanding, and it is the one the route asked for. */
+      expect(workspaceImport.calls, 'U1: the route asks for the workspace import the row controls').toBeGreaterThan(0);
+      expect(shellNodes()).toHaveLength(1);
+      expect(shell.mounts).toBe(1);
+
+      await act(async () => {
+        workspace.resolve(sessionsModule);
+        await workspace.promise;
+      });
+      await screen.findByTestId('focused-project');
+      expect(shellNodes()).toHaveLength(1);
+      expect(shell.mounts).toBe(1);
+    } finally {
+      /* A red run stops before the import settles; settle it so the drain closes a mounted session. */
+      await act(async () => {
+        workspace.resolve(sessionsModule);
+        await workspace.promise;
+      });
+      workspaceImport.pending = undefined;
+    }
+  });
+
+  it.fails('U2: should mount the shell once across resolving to editor', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    render(<ShellRoute projectId={projectA} />);
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    expect(shell.mounts).toBe(1);
+  });
+
+  it.fails('U2: should mount the shell once across project A to project B', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const view = render(<ShellRoute projectId={projectA} />);
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    /* Counted from the shell on screen in A's editor: what U2 measures is the move to B. */
+    shell.mounts = 1;
+
+    view.rerender(<ShellRoute projectId={projectB} />);
+    await waitFor(() => {
+      expect(focusedSessionId()).toBe(projectB);
+    });
+    expect(shell.mounts).toBe(1);
+  });
+
+  it.fails('U22: should mount the shell once across Home to a project', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const view = render(<ShellRoute />);
+    expect(shellNodes()).toHaveLength(1);
+
+    view.rerender(<ShellRoute projectId={projectA} />);
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    expect(shell.mounts).toBe(1);
   });
 });

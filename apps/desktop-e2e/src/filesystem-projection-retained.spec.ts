@@ -79,7 +79,10 @@ test('adopts independent native layout and view records in the retained document
       }),
     );
     await expectVisible(page.locator(`.dv-tab[data-tab-panel-id="${viewId}"]`));
-    await expectVisible(page.getByRole('button', { name: /Grid .* in, units and grid/iu }));
+    // The grid size and unit read on Viewer settings' Grid & units row.
+    await page.getByRole('button', { name: 'Viewer settings' }).last().click();
+    await expectVisible(page.getByRole('menuitem', { name: /^Grid & units, .* in(?:,|$)/u }));
+    await page.keyboard.press('Escape');
     await expect
       .poll(
         async () =>
@@ -209,9 +212,7 @@ test('adopts independent native layout and view records in the retained document
       )
       .toBe(true);
     await page.getByRole('button', { name: 'Viewer settings' }).last().click();
-    await expectVisible(
-      page.locator('[data-slot="dropdown-menu-select-item"] [role="combobox"]').filter({ hasText: 'Disabled' }),
-    );
+    await expectVisible(page.getByRole('menuitem', { name: 'Timeout, Disabled' }));
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await page.getByPlaceholder('Search projects, chats, and actions…').fill('Export');

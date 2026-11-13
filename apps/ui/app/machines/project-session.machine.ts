@@ -112,6 +112,25 @@ export type ProjectSessionMachineEvent =
       readonly pendingCount?: number;
     };
 
+/**
+ * The project session machine's public alphabet: every {@link ProjectSessionMachineEvent} type, in the union's order.
+ * The totality test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const projectSessionEventTypes = [
+  'close',
+  'confirmClose',
+  'cancelClose',
+  'childReady',
+  'childFailed',
+  'projectedRunsChanged',
+  'activity',
+  'visibilityChanged',
+  'attention',
+  'revisionState',
+] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
+
 /** What a session tells its watchers. @public */
 export type ProjectSessionMachineEmitted =
   | { readonly type: 'sessionState'; readonly projectId: string; readonly state: ProjectSessionState }
@@ -334,13 +353,14 @@ const startupRegion = (region: ProjectSessionRegion) =>
     },
   }) as const;
 
+/* The close steps after `closing.asking` (which answers the dialog's `confirmClose` and `cancelClose`), where those
+ * answers go unanswered. `closing.stopping` is transient (its `always` leaves at once), so no pair
+ * names it: the totality test fails on a pair that names a state no event reaches. */
 const closingSteps = [
   'closing.cancellingRuns',
   'closing.flushingProducers',
   'closing.flushing',
-  'closing.releasing',
   'closing.releasingAgentHost',
-  'closing.stopping',
 ] as const;
 
 /**

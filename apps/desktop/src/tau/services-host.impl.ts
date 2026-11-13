@@ -69,6 +69,7 @@ import {
 import type {
   AcpAdapter,
   HostMcpEndpoint,
+  RevisionEngineFailure,
   MachineHostIdentity,
   HostPreparableKernel,
   HostPrepareKernel,
@@ -348,6 +349,11 @@ export type ServicesHostOptions = {
     workspaceRoot: string,
     event: Readonly<{ reason: string; missing: readonly string[] }>,
   ) => void;
+  /**
+   * Tell main a revision-engine command failed, so its error reporting can send it redacted. The failure is raw: its
+   * `detail` is git's own stderr, which main redacts before anything leaves the machine.
+   */
+  readonly onRevisionEngineFailure?: (failure: RevisionEngineFailure) => void;
 };
 
 /** Result returned to main after a graceful quiesce request. */
@@ -454,6 +460,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     machinesStreaming,
     terminalSessionsAnswered,
     nativeKernels,
+    onRevisionEngineFailure,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -1211,6 +1218,16 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * `git-lfs` the app records no history at all (OQ-B8). */
           log('agent-host.revisions-unavailable', { workspaceRoot, reason: event.reason, missing: event.missing });
           onRevisionsUnavailable?.(workspaceRoot, event);
+          return;
+        }
+        if (event.type === 'revision.engine-failed') {
+          /* The local log keeps the port's sentence; git's stderr goes only to main, which redacts it. */
+          log('agent-host.revision-engine-failed', { workspaceRoot, code: event.code, message: event.message }, 'warn');
+          onRevisionEngineFailure?.({
+            code: event.code,
+            message: event.message,
+            ...(event.detail === undefined ? {} : { detail: event.detail }),
+          });
           return;
         }
         log('agent-host.revision-not-recorded', { workspaceRoot, event: event.type });

@@ -24,14 +24,14 @@ type Step = {
   run?: string;
   uses?: string;
   env?: Record<string, string>;
-  with?: Record<string, string>;
+  with?: Record<string, string | boolean>;
 };
 type Job = {
   name?: string;
   if?: string;
   needs?: string | string[];
   uses?: string;
-  with?: Record<string, string>;
+  with?: Record<string, string | boolean>;
   secrets?: Record<string, string>;
   permissions?: Record<string, string>;
   'runs-on'?: string;
@@ -166,15 +166,27 @@ describe('release-desktop-staging.yml candidate gates', () => {
     expect(gate?.permissions).toEqual({ contents: 'read' });
   });
 
-  it('should tag a candidate only when both gates are green', () => {
+  it('should tag a candidate only when every gate is green', () => {
     const { tag } = staging.jobs;
-    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged']);
+    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks']);
     expect(tag?.if).toBe(
-      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success'",
+      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success'",
     );
     expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
       /^\s*Packaged desktop gate: run \$\{RUN_ID\}$/mu,
     );
+  });
+
+  it('should run the native benchmark gates on the candidate commit beside the shell gate (Q-2)', () => {
+    const { benchmarks } = staging.jobs;
+    expect(benchmarks?.uses).toBe('./.github/workflows/native-darwin.yml');
+    expect(benchmarks?.needs).toEqual(['prerelease']);
+    expect(benchmarks?.if).toBe("needs.prerelease.outputs.release == 'true'");
+    expect(benchmarks?.with).toEqual({
+      ref: ['$', '{{ needs.prerelease.outputs.sha }}'].join(''),
+      projects: '',
+      benchmarks: true,
+    });
   });
 
   it('should have no schedule: Intel is built on dispatch and for the promotion gate only (D-DS3)', () => {

@@ -1,5 +1,5 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { deriveProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState, ProjectRouteStateInput } from '#routes/w.$workspace.$project/project-route-state.js';
@@ -202,6 +202,59 @@ describe('deriveProjectRouteState', () => {
         }),
       );
       expect(state).toMatchObject({ kind: 'native-kernel', kernelName: 'PicoGK' });
+    });
+  });
+});
+
+/*
+ * A0.2 (app state orchestration charter): what the derivation compares by. The route state is a
+ * function of the project and its access answer; a chat switch or a new request for the same
+ * project is not an input, so it cannot derive `resolving` (D7, I20).
+ */
+describe('deriveProjectRouteState — A0.2 rows', () => {
+  it('should derive the same state for the same project whatever chat or request rides along', () => {
+    /* The input type has no chat or request field (I20), so a chat switch cannot reach the derivation. */
+    expectTypeOf<
+      Extract<keyof ProjectRouteStateInput, `${string}${'chat' | 'Chat' | 'request' | 'Request'}${string}`>
+    >().toEqualTypeOf<'requestedProjectId'>();
+    const base = deriveProjectRouteState(input());
+    const withChat = { ...input(), chatId: 'chat-2', requestedChatId: 'chat-2', requestId: 'request-9' };
+
+    expect(deriveProjectRouteState(withChat)).toEqual(base);
+    expect(base).toMatchObject({ kind: 'editor', projectId });
+  });
+
+  it('should ignore an access error recorded for another project', () => {
+    const state = deriveProjectRouteState(
+      input({ error: new Error('discovery failed'), errorKind: 'access', errorProjectId: otherProjectId }),
+    );
+    expect(state).toMatchObject({ kind: 'editor', projectId });
+  });
+
+  it('should show a failed leave flush on the way off every project route as the flush notice', () => {
+    const state = deriveProjectRouteState(
+      input({
+        requestedProjectId: undefined,
+        slugs: undefined,
+        access: undefined,
+        resolvedProjectId: undefined,
+        error: new Error('unsaved'),
+        errorKind: 'flush',
+        errorProjectId: '',
+      }),
+    );
+    expect(state).toMatchObject({ kind: 'flush-error' });
+  });
+
+  it('should carry the addressed slugs into missing when access says the project is gone', () => {
+    expect(deriveProjectRouteState(input({ access: { status: 'missing' } }))).toEqual({ kind: 'missing', slugs });
+  });
+
+  it('should derive closed with no reason for a ready project the registry never opened', () => {
+    expect(deriveProjectRouteState(input({ liveProjectIds: [otherProjectId] }))).toMatchObject({
+      kind: 'closed',
+      projectId,
+      reason: undefined,
     });
   });
 });

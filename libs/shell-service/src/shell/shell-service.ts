@@ -11,7 +11,7 @@
  * checkout and every granted folder are re-identified, so a replaced root is refused (`root-changed`).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -44,7 +44,7 @@ import type {
   ShellRunRequest,
 } from '#shell/shell-contract.js';
 import { shellEnvironment } from '#shell/shell-environment.js';
-import { createShellGitView } from '#shell/shell-git-view.js';
+import { createShellGitView, shellLfsStorageConfig } from '#shell/shell-git-view.js';
 import {
   compileShellFilesystem,
   projectProtected,
@@ -869,7 +869,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
        * the host cannot write (a full disk, a refused folder) leaves the command without git rather than failing it.
        */
       const git =
-        platform === 'win32' ? undefined : await createShellGitView(admitted.root, session.root).catch(() => undefined);
+        platform === 'win32'
+          ? undefined
+          : await createShellGitView(admitted.root, session.root, session.temporary).catch(() => undefined);
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
         checkoutProtected: admitted.checkoutProtected,
@@ -1073,7 +1075,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return refuse('session-limit', 'Too many Terminal sessions are open.', 'Close another Terminal, then try again.');
     }
     const root = identity.real;
-    const checkoutProtected = await projectProtected(root);
+    /* The person reads the project's real git store, read-only (operator ruling 2026-11-12). */
+    const checkoutProtected = await projectProtected(root, { readableGit: true });
     const requested = request.access;
     const access =
       requested === undefined
@@ -1118,6 +1121,15 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     };
     let outcome: ShellLaunchOutcome;
     try {
+      /*
+       * The session HOME's git config sends git-lfs's working copies to the session's own temporary folder: the store
+       * is read-only here, and its clean filter otherwise fails every `git status` on a project with a large file. A
+       * HOME that cannot take it leaves the Terminal as it was.
+       */
+      const lfsStorage = platform === 'win32' ? undefined : shellLfsStorageConfig(session.temporary);
+      if (lfsStorage !== undefined) {
+        await writeFile(join(session.home, '.gitconfig'), lfsStorage, { mode: 0o600 }).catch(() => undefined);
+      }
       const filesystem = await compileShellFilesystem({
         checkout: root,
         checkoutProtected,
@@ -1136,6 +1148,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         filesystem,
         network: { domains: access.domains },
         startupFiles: terminalZsh === undefined ? undefined : 'zsh',
+        /* A login Zsh's path_helper moves the system folders first; the provider puts these back in front. */
+        toolchainBins: terminalZsh === undefined ? undefined : (options.toolchain?.bins ?? []),
         environment: shellEnvironment({
           platform,
           executablePath: terminalZsh?.path ?? executable.path,

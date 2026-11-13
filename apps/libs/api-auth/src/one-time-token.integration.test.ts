@@ -13,6 +13,7 @@ import { fromNodeHeaders } from 'better-auth/node';
 import { AuthGuard } from '#auth.guard.js';
 import { staticAuthConfig } from '#config/auth-static.config.js';
 import { authInstanceKey } from '#auth.constant.js';
+import { SessionResolver } from '#session-resolver.js';
 
 const testEmail = 'one-time-token@example.test';
 const testPassword = 'correct horse battery staple';
@@ -110,7 +111,7 @@ describe('Better Auth one-time-token desktop handoff', () => {
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      providers: [Reflector, AuthGuard, { provide: authInstanceKey, useValue: auth }],
+      providers: [Reflector, AuthGuard, SessionResolver, { provide: authInstanceKey, useValue: auth }],
     }).compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

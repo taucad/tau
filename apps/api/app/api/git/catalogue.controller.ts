@@ -14,7 +14,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
+import { AuthoritativeSession, hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
 import { FileLinksService } from '@taucad/api-object-storage/file-links';
 import { ObjectStorageService, TAU_DEFAULT_STORAGE_ACCOUNT_ID } from '@taucad/api-object-storage';
 import {
@@ -66,6 +66,8 @@ export class GitCatalogueController {
    */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets
   @Get(':projectId/git/catalogue')
+  // Signs a 900 s link for every object: never from a session snapshot.
+  @AuthoritativeSession()
   public async catalogue(
     @Param('projectId') projectId: string,
     @Query('refs') familiesQuery: unknown,

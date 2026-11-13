@@ -157,12 +157,15 @@ const countingProvider = (
     beforeLaunch?: (launch: ShellLaunch) => Promise<void>;
     /** A row that deliberately crashes a host keeps its receipts out of the custody every other row recovers over. */
     custody?: Readonly<{ appData: string; sessions: string }>;
+    /** A row that opens the human Terminal runs it with the shipped macOS own-pty rule, as the desktop does. */
+    terminal?: boolean;
   }> = {},
 ) => {
   const custody = options.custody ?? { appData, sessions };
   const real = createSandboxShellProvider({
     bwrapPath,
     home,
+    ...(options.terminal === true ? { macOSTerminal: true } : {}),
     custody: { directory: join(custody.appData, 'shell-custody'), sessionDirectory: custody.sessions },
     ...(options.supervisor === undefined ? {} : { supervisor: options.supervisor }),
   });
@@ -217,6 +220,9 @@ type ServiceOptions = Readonly<{
   environment?: Record<string, string | undefined>;
   /** Must name the same custody as `counting`'s provider, or recovery reads receipts the service cannot clean up. */
   custody?: Readonly<{ appData: string; sessions: string }>;
+  /** Project roots admitted beside the shared ones, for a row that opens a Terminal on its own fixture. */
+  projectRoots?: readonly string[];
+  toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }>;
 }>;
 
 const serviceOver = async (options: ServiceOptions) => {
@@ -228,8 +234,9 @@ const serviceOver = async (options: ServiceOptions) => {
     permissionModeOf: async (runId) => options.mode?.(runId) ?? 'ask',
     /* `appData` is an ancestor of every row's custody, so one entry denies a crash row's receipts too. */
     appDataRoots: [appData],
-    projectRoots: () => [project, second, candidate],
+    projectRoots: () => [project, second, candidate, ...(options.projectRoots ?? [])],
     home,
+    ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
     sessionDirectory: custody.sessions,
     ...(options.maxExecutions === undefined ? {} : { maxExecutions: options.maxExecutions }),
     environment: options.environment ?? process.env,
@@ -256,6 +263,7 @@ const agentHostOver = async (
     counting?: ReturnType<typeof countingProvider>;
     logPath?: string;
     custody?: Readonly<{ appData: string; sessions: string }>;
+    toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }>;
   }> = {},
 ) => {
   const logPath = options.logPath ?? join(root, `${label}-events.jsonl`);
@@ -268,6 +276,7 @@ const agentHostOver = async (
     ...(options.mode === undefined ? {} : { mode: options.mode }),
     ...(options.counting === undefined ? {} : { counting: options.counting }),
     ...(options.custody === undefined ? {} : { custody: options.custody }),
+    ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
   });
   const responses: ScriptedResponse[] = [
     ...calls.map((call) => ({ toolCalls: [{ id: call.id, name: call.name ?? 'shell', input: call.input }] })),
@@ -2136,6 +2145,224 @@ describe.runIf(enabled)('shell qualification', () => {
         'refs/heads/feature\nrefs/heads/main\nrefs/remotes/origin/tau/ops/device\nrefs/tags/v1\nrefs/tau/chats/c1\n',
       );
       measurements = { writesRefused: failed.length };
+    },
+  );
+
+  /*
+   * Terminal git: the person's Terminal reads the project's real store read-only (operator ruling
+   * 2026-11-12), so git there sees history live, a save made after the session opened included, and every write fails.
+   * The project tracks a large file through Git LFS with the index Tau's refresh leaves after a save (stat data zero),
+   * which makes git run the LFS clean filter: both the Terminal and the agent's view must still answer a clean status.
+   * The host's own git and git-lfs folders are the toolchain, as the desktop passes its bundled ones. Outside bytes
+   * judge: each command's output and exit status land in a granted folder, and the store's digest is compared outside.
+   */
+  qualification(
+    'E14-terminal',
+    'Terminal git: the person reads the real store live, large files included, and every write fails',
+    async () => {
+      const store = join(root, 'projects', 'terminal-git');
+      const pointer = join(root, 'projects', 'terminal-pointer');
+      const elsewhere = join(root, 'terminal-git-elsewhere');
+      const answers = join(root, 'terminal-git-answers');
+      const hostGit = (cwd: string, ...arguments_: string[]): string =>
+        execFileSync('git', arguments_, {
+          cwd,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            HOME: root,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_AUTHOR_NAME: 'Fixture',
+            GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+            GIT_COMMITTER_NAME: 'Fixture',
+            GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+          },
+        });
+      for (const directory of [store, pointer, elsewhere, answers]) {
+        mkdirSync(directory, { recursive: true });
+      }
+      hostGit(store, 'init', '--quiet', '--initial-branch=main');
+      hostGit(store, 'lfs', 'install', '--local', '--skip-repo');
+      writeFileSync(join(store, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+      const large = Buffer.alloc(256 * 1024, 7);
+      writeFileSync(join(store, 'large.bin'), large);
+      writeFileSync(join(store, 'part.scad'), 'cube(1);\n');
+      hostGit(store, 'add', '.gitattributes', 'large.bin', 'part.scad');
+      hostGit(store, 'commit', '--quiet', '-m', 'First part');
+      writeFileSync(join(store, 'part.scad'), 'cube(2);\n');
+      hostGit(store, 'commit', '--quiet', '-am', 'Grow the part');
+      expect(hostGit(store, 'cat-file', '-p', 'HEAD:large.bin')).toMatch(/^version https:\/\/git-lfs/u);
+      /* Tau's derived ignores, as a Tau store carries them, for the records the service creates and the stand-ins. */
+      writeFileSync(join(store, '.git', 'info', 'exclude'), '/.tau/*\n/thumbnail.webp\n/exports/\n');
+      /* What Tau's index refresh leaves after a save: the new head's tree, with no stat data. */
+      hostGit(store, 'read-tree', 'HEAD');
+      /* A checkout whose `.git` is a pointer to a store outside it, which the Terminal cannot read. */
+      hostGit(elsewhere, 'init', '--quiet', '--initial-branch=main');
+      writeFileSync(join(pointer, '.git'), `gitdir: ${join(elsewhere, '.git')}\n`);
+      const folderOf = (tool: string): string =>
+        dirname(realpathSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim()));
+      /*
+       * The real git install, never a launcher in front of it: on macOS `/usr/bin/git` is Apple's xcrun shim, which
+       * writes a cache outside the sandbox, while the desktop bundles a real git. Its exec path sits beside its `bin`.
+       */
+      const execPath = realpathSync(hostGit(store, '--exec-path').trim());
+      const installedBin = join(dirname(dirname(execPath)), 'bin');
+      const gitFolder = existsSync(join(installedBin, 'git')) ? installedBin : folderOf('git');
+      const bins = [...new Set([gitFolder, folderOf('git-lfs')])];
+      const toolchain = { roots: [...new Set([...bins, execPath])], bins };
+
+      /* The agent's view of the same store, right after the save: the large file is not listed, and an edit is. */
+      const agent = await drive(
+        'e14-terminal-agent',
+        [
+          shellCall('e14t-agent-status', { command: 'git status --porcelain' }),
+          shellCall('e14t-agent-edit', {
+            command: "printf 'X' | dd of=large.bin bs=1 count=1 conv=notrunc 2>/dev/null; git status --porcelain",
+          }),
+        ],
+        { cwd: store, toolchain },
+      );
+      expect(ok(agent.outputs[0]).stdout.text).toBe('');
+      expect(ok(agent.outputs[1]).stdout.text).toBe(' M large.bin\n');
+      writeFileSync(join(store, 'large.bin'), large);
+      hostGit(store, 'read-tree', 'HEAD');
+
+      const { shell } = await serviceOver({
+        checkouts: new Map(),
+        counting: countingProvider({ terminal: true }),
+        projectRoots: [store, pointer],
+        toolchain,
+      });
+      let asked = 0;
+      const terminalIn = async (projectRoot: string) => {
+        const opened = await shell.openTerminal({
+          projectRoot,
+          size: { columns: 160, rows: 48 },
+          access: { read: [], write: [answers], domains: [] },
+          signal: new AbortController().signal,
+        });
+        if (opened.status !== 'opened') {
+          throw new Error(`the Terminal did not open: ${JSON.stringify(opened)}`);
+        }
+        const { session } = opened;
+        const reading = (async () => {
+          for await (const _chunk of session.output) {
+            /* Drained so the terminal never blocks; the answers are judged from the granted folder. */
+          }
+        })();
+        /** Type one command; its output and exit status land in the granted folder, written by the shell itself. */
+        const run = async (command: string): Promise<Readonly<{ exitCode: number; text: string }>> => {
+          const name = `answer-${String(asked++)}`;
+          const status = join(answers, `${name}.status`);
+          session.write(
+            new TextEncoder().encode(
+              `{ ${command} ; } > '${join(answers, `${name}.out`)}' 2>&1; printf '%s' "$?" > '${status}'\n`,
+            ),
+          );
+          if (!(await eventually(() => existsSync(status) && readFileSync(status, 'utf8') !== '', 60_000))) {
+            throw new Error(`the Terminal never answered ${command}`);
+          }
+          return {
+            exitCode: Number(readFileSync(status, 'utf8')),
+            text: readFileSync(join(answers, `${name}.out`), 'utf8'),
+          };
+        };
+        const close = async (): Promise<void> => {
+          await session[Symbol.asyncDispose]();
+          await reading;
+        };
+        return { run, close };
+      };
+
+      const terminal = await terminalIn(store);
+      try {
+        const version = await terminal.run('git --version');
+        expect(version.exitCode, version.text).toBe(0);
+        measurements = { git: version.text.trim() };
+        /* Which git and git-lfs the Terminal resolves, named in any failure below. */
+        const where = await terminal.run('command -v git git-lfs');
+        const resolved = where.text.trim();
+        /* The toolchain's git, never one a login profile's path_helper put first (Apple's xcrun shim). */
+        expect(bins, `the Terminal's git (${resolved})`).toContain(dirname(resolved.split('\n')[0] ?? ''));
+        const expectations: ReadonlyArray<readonly [string, RegExp | string]> = [
+          ['git status --porcelain', ''],
+          ['git diff HEAD~1 HEAD -- part.scad', /-cube\(1\);\n\+cube\(2\);/u],
+          ['git log --format=%s', 'Grow the part\nFirst part\n'],
+          ['git show HEAD~1:part.scad', 'cube(1);\n'],
+          ['git blame --porcelain part.scad', /summary Grow the part/u],
+          ['git branch --list', '* main\n'],
+        ];
+        for (const [command, expected] of expectations) {
+          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+          const answer = await terminal.run(command);
+          expect(answer.exitCode, `${command} (${resolved}): ${answer.text}`).toBe(0);
+          if (typeof expected === 'string') {
+            expect(answer.text, `${command} (${resolved})`).toBe(expected);
+          } else {
+            expect(answer.text, `${command} (${resolved})`).toMatch(expected);
+          }
+        }
+
+        /* A save Tau makes after the session opened: the store moves outside, and the open session reads it. */
+        writeFileSync(join(store, 'part.scad'), 'cube(3);\n');
+        hostGit(store, 'commit', '--quiet', '-am', 'Save from Tau');
+        hostGit(store, 'read-tree', 'HEAD');
+        const latest = await terminal.run('git log -1 --format=%s');
+        expect(latest).toStrictEqual({ exitCode: 0, text: 'Save from Tau\n' });
+        const afterSave = await terminal.run('git status --porcelain');
+        expect(afterSave).toStrictEqual({ exitCode: 0, text: '' });
+
+        const before = treeDigestOf(join(store, '.git'));
+        const identity = '-c user.name=Forged -c user.email=forged@example.invalid';
+        const writes = [
+          String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+          `git ${identity} commit --allow-empty -m forged`,
+          'git switch -c forged',
+          `git ${identity} stash`,
+          'git config core.hooksPath forged',
+          'git fetch "$PWD" main:refs/heads/fetched',
+        ];
+        const refused: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+        for (const command of writes) {
+          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+          refused.push({ command, ...(await terminal.run(command)) });
+        }
+        expect(refused.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+        /* Each one that says why names the filesystem refusal; `git stash` can fail without a word. */
+        expect(
+          refused.filter(
+            (entry) =>
+              entry.text.trim() !== '' &&
+              !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
+                entry.text,
+              ),
+          ),
+        ).toStrictEqual([]);
+        /* Outside bytes are the judge: the store is byte for byte what the save left. */
+        expect(treeDigestOf(join(store, '.git'))).toBe(before);
+
+        /* The large file edited in place, same size: listed as modified, and status still succeeds. */
+        const edited = await terminal.run(
+          "printf 'X' | dd of=large.bin bs=1 count=1 conv=notrunc 2>/dev/null; git status --porcelain",
+        );
+        expect(edited.exitCode, edited.text).toBe(0);
+        expect(edited.text).toContain(' M large.bin\n');
+        expect(treeDigestOf(join(store, '.git'))).toBe(before);
+        measurements = { ...measurements, writesRefused: refused.length };
+      } finally {
+        await terminal.close();
+      }
+
+      const pointed = await terminalIn(pointer);
+      try {
+        const status = await pointed.run('git status --porcelain');
+        expect(status.exitCode, status.text).toBe(128);
+        /* Older git calls the unreadable store no repository; newer git names the pointer that leads nowhere. */
+        expect(status.text).toMatch(/not a git repository|gitfile does not point to a valid repository/u);
+      } finally {
+        await pointed.close();
+      }
     },
   );
 

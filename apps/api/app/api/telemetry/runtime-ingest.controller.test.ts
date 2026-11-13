@@ -22,13 +22,14 @@ import {
   jobProviderIds,
   transcoderIds,
 } from '@taucad/telemetry';
-import type { Auth } from 'better-auth';
 import { LoggerModule, PinoLogger } from 'nestjs-pino';
 import type { Params } from 'nestjs-pino';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { mock } from 'vitest-mock-extended';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSession, FakeSessionLookup } from '@taucad/api-auth/testing';
 import { logServiceProvider } from '@taucad/api-core/constants/app';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { useLoggerFactory } from '@taucad/api-observability/logger-factory';
@@ -38,7 +39,7 @@ import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
 import { RuntimeIngestService, networkOf, runtimeIngestLimits } from '#api/telemetry/runtime-ingest.service.js';
 import { RuntimeMetricsService } from '#api/telemetry/runtime-metrics.service.js';
 
-type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;
+type Session = NonNullable<FakeSession>;
 type Stored = { value: string | string[] | Set<string>; expiresAt: number | undefined };
 
 /** The Redis commands the ingest uses, in memory, honouring TTLs against `Date.now()`; `down` makes each one throw. */
@@ -222,9 +223,10 @@ const createApp = async (
   const runtimeMetrics = createMetricsSpy(target);
   const metrics = legacyMetrics();
   const logger = { info: vi.fn(), warn: vi.fn() };
-  const auth = mockDeep<Auth>();
-  auth.api.getSession.mockImplementation(async (context) => {
-    const user = new Headers(context?.headers).get('x-test-user');
+  const getSession = vi.fn<FakeSessionLookup>();
+  getSession.mockImplementation(async (lookup) => {
+    const header = lookup.headers['x-test-user'];
+    const user = typeof header === 'string' ? header : null;
     return user === null ? null : mock<Session>({ user: { id: user } });
   });
   const values: Record<string, unknown> = {
@@ -246,7 +248,7 @@ const createApp = async (
       AuthGuard,
       RuntimeIngestService,
       PublicationRateLimiterService,
-      { provide: authInstanceKey, useValue: auth },
+      { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
       { provide: MetricsService, useValue: metrics },
       { provide: RuntimeMetricsService, useValue: runtimeMetrics },
       { provide: RedisService, useValue: { client: redis } },

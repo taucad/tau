@@ -248,7 +248,7 @@ type DropdownMenuSelectItemProperties<T> = {
   readonly getOptionLabel: (option: T) => string;
   readonly renderOption?: (option: T, isSelected: boolean) => React.ReactNode;
   readonly onValueChange?: (value: string) => void;
-  /** The sub-view's title on its Back row; defaults to the row's text. */
+  /** The sub-view's title, which names its group for assistive technology; defaults to the row's text. */
   readonly title?: string;
   /**
    * Whether choosing a value steps back to the menu. Return false to stay on the options. Defaults to stepping back.

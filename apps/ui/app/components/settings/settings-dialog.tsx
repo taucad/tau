@@ -338,15 +338,18 @@ export function SettingsSurface({
             />
           </SettingsNavigationPane>
         )}
-        {showsDetail && isMobile ? (
-          <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
-            <SettingsSheetHeader close={close} back={showList}>
-              <h2 className={sheetTitleClassName}>{active.label}</h2>
-            </SettingsSheetHeader>
+        {/* One place in the tree for the section at every width, so crossing the phone breakpoint keeps what it
+            holds open (a repository's Manage) instead of mounting it again. */}
+        {showsDetail ? (
+          <div className={isMobile ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'contents'}>
+            {isMobile ? (
+              <SettingsSheetHeader close={close} back={showList}>
+                <h2 className={sheetTitleClassName}>{active.label}</h2>
+              </SettingsSheetHeader>
+            ) : null}
             {region}
           </div>
         ) : null}
-        {isMobile ? null : region}
       </div>
     </Content>
   );

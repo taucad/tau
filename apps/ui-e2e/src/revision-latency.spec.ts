@@ -48,6 +48,8 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import {
   awaitSaved,
+  branchChip,
+  createBranchHere,
   editSource,
   focusSource,
   openFixture,
@@ -243,23 +245,16 @@ const readPageClock = async (): Promise<number> => {
 };
 
 /**
- * Fork one more line off `main` where it is now, from the pane's strip — the
- * product's only *New branch* (C3) — and hand the slot and the caret back to
- * the editor.
+ * Fork one more line off `main` where it is now, from the History header's
+ * branch chip — its *New branch…* (C2, D3) — and hand the slot and the caret
+ * back to the editor.
  *
  * @param name - The new branch's name.
  */
 const forkBranchHere = async (name: string): Promise<void> => {
   await target.click(revisionChip());
-  const panel = selectors.getByCss(visibleRevisionsPanel);
-  await target.click(panel.getByCss('[aria-label="Where you are"]').getByRole('button', { name: 'New branch' }));
-  await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), name);
-  await target.click(selectors.getByRole('button', { name: 'Create branch' }));
-  await target.expectVisible(
-    selectors.getByRole('list', { name: 'Branches' }).getByText(name, { exact: true }),
-    60_000,
-  );
-  await target.click(selectors.getByRole('button', { name: 'Close Revisions' }));
+  await createBranchHere(name);
+  await target.click(selectors.getByRole('button', { name: 'Close History' }));
   await target.expectHidden(selectors.getByCss(visibleRevisionsPanel), 15_000);
   /* Focus, not a click: sixty saves in, the typed line has scrolled the editor
    * sideways and the lines' centre sits under the gutter. The caret stays put. */
@@ -347,16 +342,12 @@ test('records how long the History region takes to open at D11 (B4)', async () =
   const fixtureDuration = performance.now() - startedAt;
 
   /* A new session, so the open below is the pane's first in it — the fixture
-   * opened it seven times. Wait for the header chip's own history read (its
-   * card lists the newest rows), then let the card close again. */
+   * opened it seven times. Wait for the header chip's own read of the line: it
+   * says *Saved* once the projection has the head. The chip has no hover card
+   * to read the newest rows from any more (C6). */
   await target.reload();
   await target.expectVisible(revisionChip(), 120_000);
-  await target.hover(revisionChip());
-  const recent = selectors.getByRole('list', { name: 'Recent changes' });
-  /* An entry has no number (M11): the card's newest row is the read's evidence. */
-  await target.expectVisible(recent.getByRole('listitem').first(), 60_000);
-  await target.mouseMove(8, 450);
-  await target.expectHidden(recent, 15_000);
+  await awaitSaved();
 
   const openHistory = async (): Promise<Readonly<{ page: number; harness: number }>> => {
     await armPageClock('history');
@@ -367,11 +358,15 @@ test('records how long the History region takes to open at D11 (B4)', async () =
     return { page: await readPageClock(), harness };
   };
   const firstOpen = await openHistory();
-  const branchList = await target.read(selectors.getByRole('list', { name: 'Branches' }).getByRole('listitem'));
+  /* The header chip's menu lists every branch to switch to (C2, D3); the Branches card is gone. */
+  await target.click(branchChip());
+  const branchList = await target.read(selectors.getByRole('menu').getByRole('menuitemradio'));
   const branchRows = branchList.count;
+  await target.keyboardPress('Escape');
+  await target.expectCount(selectors.getByRole('menu'), 0, 15_000);
   const openSamples: Array<Readonly<{ page: number; harness: number }>> = [];
   for (let sample = 0; sample < reopens; sample += 1) {
-    await target.click(selectors.getByRole('button', { name: 'Close Revisions' }));
+    await target.click(selectors.getByRole('button', { name: 'Close History' }));
     /* Closed means unmounted: a pane kept in the DOM would hand the next
      * reading a row that is already there. */
     await target.expectCount(selectors.getByCss('[data-slot="revisions-panel-body"]'), 0, 15_000);

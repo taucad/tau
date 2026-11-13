@@ -568,9 +568,9 @@ describe('FileEditor routing', () => {
 
     render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
-    const placeholder = screen.getByRole('status');
+    const placeholder = screen.getByRole('group', { name: 'Loading mystery.dat' });
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
-    expect(placeholder).toHaveTextContent('Loading mystery.dat');
+    expect(placeholder).toHaveAttribute('aria-busy', 'true');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
   });
 
@@ -580,7 +580,7 @@ describe('FileEditor routing', () => {
     render(<FileEditor paneId='hidden-pane' filePath='main.ts' panelApi={api} />);
 
     await act(async () => undefined);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).toHaveAttribute('aria-busy', 'true');
     expect(mockEditorRuntimeImported).not.toHaveBeenCalled();
     expect(mockLoadEditorSyntax).not.toHaveBeenCalled();
     expect(mockEditorViewMounted).not.toHaveBeenCalled();
@@ -591,7 +591,7 @@ describe('FileEditor routing', () => {
     mockUseFileContent.mockImplementation(() => content);
     const pane = render(<FileEditor paneId='source-pane' filePath='main.ts' panelApi={mockPanelApi} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).toHaveAttribute('aria-busy', 'true');
     await waitFor(() => {
       expect(mockEditorRuntimeImported).toHaveBeenCalledOnce();
       expect(mockLoadEditorSyntax).toHaveBeenCalledWith('typescript', expect.any(AbortSignal));

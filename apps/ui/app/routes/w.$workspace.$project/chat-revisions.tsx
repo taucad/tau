@@ -24,7 +24,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Skeleton } from '@taucad/ui/components/skeleton';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitStart } from '#components/code/editor-pane-placeholder.js';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -307,7 +308,8 @@ function WhereYouAre(): React.JSX.Element {
     <section aria-label='Where you are' className='flex shrink-0 flex-col gap-1 border-b bg-sidebar px-3 py-1.5'>
       <div data-slot='where-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
         {isUnknown ? (
-          <Skeleton aria-hidden className='h-6 w-24 rounded-full' />
+          /* The chip's own box, empty until the line is located: nothing is drawn for a branch nobody knows yet. */
+          <span data-slot='branch-chip-pending' aria-hidden className='h-6 w-24' />
         ) : (
           <BranchChip projectId={projectId} branch={line.name} isBranchable={canBranch} />
         )}
@@ -1465,23 +1467,14 @@ function HistoryList(): React.JSX.Element {
 }
 
 /**
- * Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one
- * *Loading history…* sentence, never *No revisions yet*.
+ * Loading is not empty (DESIGN, I6, S20): History's own card, empty and busy, under the strip's one *Loading
+ * history…* sentence, never *No history yet*. Nothing stands for rows that have not arrived (loading states UX
+ * blueprint, U17); the card's header says "Loading history" once the wait passes 1,000 ms.
  *
- * @returns The loading geometry.
+ * @returns The empty, busy card body.
  */
 function HistoryLoading(): React.JSX.Element {
-  return (
-    <div role='status' aria-label='Loading history' aria-busy='true' className='flex flex-col gap-2 px-2 py-1'>
-      {[0, 1, 2].map((row) => (
-        <div key={row} className='flex items-center gap-2'>
-          <Skeleton aria-hidden className='size-2 rounded-full' />
-          <Skeleton aria-hidden className='h-4 flex-1' />
-          <Skeleton aria-hidden className='h-4 w-16' />
-        </div>
-      ))}
-    </div>
-  );
+  return <div data-slot='history-loading' aria-busy='true' />;
 }
 
 /**
@@ -1614,6 +1607,9 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const conflictTexts = useConflictTexts();
   /* M2 (I6): an unlocated line is loading, never an empty History. */
   const isHistoryLoading = isLoading || line.kind === 'unknown';
+  /* Remembered entries are content: the wait is shown only while History has none to show. */
+  const isHistoryWaiting = isHistoryLoading && revisions.length === 0;
+  const historyWaitStart = useWaitStart();
 
   return (
     <div data-slot='revisions-panel-body' className='@container flex size-full min-h-0 flex-col bg-sidebar'>
@@ -1652,8 +1648,23 @@ export function RevisionsPanelBody(): React.JSX.Element {
 
         {/* The pane's host (the Workbench tab, the phone surface) is already the History landmark, so this card is a
             group of that name (#1878 renamed the pane to History). */}
-        <RevisionRegion id='revision-history-heading' title='History' isLandmark={false}>
-          {isHistoryLoading && revisions.length === 0 ? (
+        <RevisionRegion
+          id='revision-history-heading'
+          title='History'
+          isLandmark={false}
+          /* The header's trailing slot is always rendered, so the indicator never changes the header's height. Not live:
+             the strip's status line is the pane's one announcement and already says *Loading history…*. */
+          action={
+            <WaitIndicator
+              active={isHistoryWaiting}
+              label='Loading history'
+              slowLabel='Still loading history'
+              startedAt={historyWaitStart}
+              live={false}
+            />
+          }
+        >
+          {isHistoryWaiting ? (
             <HistoryLoading />
           ) : revisions.length === 0 ? (
             <PanelEmptyState

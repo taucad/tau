@@ -134,7 +134,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
 
   return isExpanded && isArchiveOpen ? (
     <FloatingPanel isOpen side='right' className={props.className} onOpenChange={setIsExpanded}>
-      <FloatingPanelContent className='ph-no-capture min-h-0 overflow-hidden'>
+      <FloatingPanelContent className='min-h-0 overflow-hidden'>
         <ArchivedChats key={projectId} />
       </FloatingPanelContent>
     </FloatingPanel>
@@ -263,8 +263,7 @@ const ExpandedChatHistory = memo(function ({
       <ChatQuestionsProvider>
         <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
           <FloatingPanelContent
-            // `ph-no-capture`: session replay never records chat transcripts.
-            className={cn('ph-no-capture min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
+            className={cn('min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
             errorFallback={(errorProps) => (
               <FloatingPanelErrorContent
                 {...errorProps}

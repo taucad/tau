@@ -5534,6 +5534,58 @@ describe('ChatSessionStore', () => {
       store.release('chat_verified_empty');
     });
 
+    it.fails('reports a loading transcript, never an empty one, before the host log answers for a chat with history (U7)', async () => {
+      const chatId = 'chat_deferred_transcript';
+      const projectId = 'project_deferred_transcript';
+      const runId = 'run_deferred_transcript';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+      store.setDependencies(deps);
+      /* I21: A12 makes the store report `transcript: loading | loaded | empty`. Until then the session reports only its
+       * chat-row load and its messages, and a session out of that load with no messages is what the lane shows as the
+       * empty chat. A12 replaces this reading with its own state. */
+      const reportedTranscript = (session: ReturnType<StoreType['acquire']>): 'loading' | 'loaded' | 'empty' => {
+        if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
+          return 'loading';
+        }
+        return session.messages.length === 0 ? 'empty' : 'loaded';
+      };
+      const session = store.acquire(chatId, projectId);
+      const reports = [reportedTranscript(session)];
+      const record = (): void => {
+        reports.push(reportedTranscript(session));
+      };
+      const unsubscribeChat = store.subscribeChat(chatId, record);
+      const unsubscribeProjection = store.subscribeProjection(chatId, record);
+      const persistence = session.persistenceActorRef.subscribe(record);
+      try {
+        // The transcript is the host log's, and the row holds its answer back: the load has not settled.
+        await settle();
+        record();
+        expect(reports[0]).toBe('loading');
+        expect(reports).not.toContain('empty');
+
+        publishLogRows(store, chatId, [
+          ...runningRows(runId),
+          logRow(2, {
+            runId,
+            type: 'message.appended',
+            message: { id: 'deferred-reply', role: 'assistant', content: 'The bracket is ready.' },
+          }),
+          lifecycleRow(3, 'completed', runId),
+        ]);
+        await vi.waitFor(() => {
+          expect(reportedTranscript(session)).toBe('loaded');
+        });
+      } finally {
+        unsubscribeChat();
+        unsubscribeProjection();
+        persistence.unsubscribe();
+        store.release(chatId);
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();

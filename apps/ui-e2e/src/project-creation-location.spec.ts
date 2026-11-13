@@ -37,8 +37,17 @@ const openHomepage = async (): Promise<void> => {
   await target.expectVisible(editorFor(), 60_000);
 };
 
+/* Home picks its kernel from the composer's Auto-first kernel pill (AKS-11, 00cc5c2e4c): the kernel chips are gone. */
 const selectReplicad = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: 'Replicad', exact: true }));
+  const pill = selectors.getByRole('button', { name: /^Kernel: /u }).first();
+  if (!(await target.isVisible(pill))) {
+    /* A resting phone composer can fold its bar away (D18); focusing the editor unfolds it. */
+    await target.click(editorFor());
+  }
+  await target.click(pill);
+  await target.fill(selectors.getByPlaceholder('Search kernels…'), 'Replicad');
+  await target.click(selectors.getByRole('option', { name: /^Replicad/u }));
+  await target.expectVisible(selectors.getByRole('button', { name: 'Kernel: Replicad', exact: true }).first());
 };
 
 const selectLocation = async (currentLabel: string | RegExp, targetLabel: string): Promise<void> => {

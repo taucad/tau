@@ -74,14 +74,17 @@ describe('tau-plugin.json', () => {
   it.each([
     { key: 'darwin-arm64', asset: 'tau-picogk-layer-darwin-arm64.tar.gz' },
     { key: 'linux-x64-glibc', asset: 'tau-picogk-layer-linux-x64.tar.gz' },
-  ])('addresses the $key Tau layer by its digest on the CDN and on its immutable release', ({ key, asset }) => {
-    const worker = dependencyFile('worker', key);
-    const sha256 = hex(worker.integrity);
+  ])(
+    'addresses the $key Tau layer by its digest on the dependency host and on its immutable release',
+    ({ key, asset }) => {
+      const worker = dependencyFile('worker', key);
+      const sha256 = hex(worker.integrity);
 
-    expect(worker).toMatchObject({ format: 'tar.gz', destination: 'tau-worker' });
-    expect(worker.integrity.startsWith('sha256-')).toBe(true);
-    expect(worker.origin).toEqual({ kind: 'url', urls: layerUrls({ sha256, asset }) });
-  });
+      expect(worker).toMatchObject({ format: 'tar.gz', destination: 'tau-worker' });
+      expect(worker.integrity.startsWith('sha256-')).toBe(true);
+      expect(worker.origin).toEqual({ kind: 'url', urls: layerUrls({ sha256, asset }) });
+    },
+  );
 });
 
 const nearestOf = (target: DependencyTarget | undefined): string => (target === undefined ? 'none' : targetKey(target));

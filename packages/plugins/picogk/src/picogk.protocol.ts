@@ -150,10 +150,17 @@ export const picogkMeshingSchema = z.object({ adaptivity: z.number().gt(0).lt(1)
 /** Adaptive meshing requested of, and echoed by, the worker. */
 export type PicogkMeshing = z.output<typeof picogkMeshingSchema>;
 
-/** Original geometry files captured by a browser build, separate from display artifacts. */
+/**
+ * An authored file's artifact path: the browser's `/artifacts/authored/<id>/files/<name>`, or the native
+ * worker's absolute host path ending in the same `authored/<id>/files/<name>` tail under its session's
+ * artifact directory (the native host then checks containment when it reads the file).
+ */
+const picogkAuthoredArtifactPath = /^\/(?:[^/\0]+\/)*?authored\/[a-f\d]{32}\/files\/(?<name>.+)$/u;
+
+/** Original geometry files captured by a browser or native build, separate from display artifacts. */
 export const picogkAuthoredOutputSchema = z
   .object({
-    artifactPath: z.string().regex(/^\/artifacts\/authored\/[a-f\d]{32}\/files\//u),
+    artifactPath: z.string().regex(picogkAuthoredArtifactPath),
     name: z
       .string()
       .min(1)
@@ -168,11 +175,14 @@ export const picogkAuthoredOutputSchema = z
     mimeType: z.enum(['model/stl', 'application/vnd.openvdb']),
   })
   .strict()
-  .refine(
-    (file) =>
-      file.artifactPath.slice('/artifacts/authored/'.length + 32 + '/files/'.length) === file.name &&
-      file.name.toLowerCase().endsWith(file.mimeType === 'model/stl' ? '.stl' : '.vdb'),
-  );
+  .refine((file) => {
+    const pathName = picogkAuthoredArtifactPath.exec(file.artifactPath)?.groups?.['name'];
+    const extension = file.mimeType === 'model/stl' ? '.stl' : '.vdb';
+    if (pathName !== file.name) {
+      return false;
+    }
+    return file.name.toLowerCase().endsWith(extension);
+  });
 
 export const picogkBuildSchema = z
   .object({

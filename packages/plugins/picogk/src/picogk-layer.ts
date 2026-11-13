@@ -1,9 +1,9 @@
 /**
  * Purpose: The PicoGK layer as the .NET layer rule of `@taucad/dotnet-kernel-core/layer` publishes it, and the names
  *   the compose script, the release job (through it), the manifest tests and the native test fixture use.
- * Why: the layer is addressed by its digest on `cdn.tau.new` (`blobs/sha256/<hex>`, the D25 mirror layout) and by an
- *   immutable GitHub Release named after the digest; deriving both from the record keeps the manifest, the upload
- *   and the test from drifting (I13).
+ * Why: the layer is addressed by its digest on `dependencies.tau.new` (`blobs/sha256/<hex>`, the D25 mirror layout)
+ *   and by an immutable GitHub Release named after the digest; deriving both from the record keeps the manifest, the
+ *   upload and the test from drifting (I13).
  * Environment: none; pure functions.
  * Usage: imported by scripts/compose-tau-plugin.mts, the manifest test and the native test fixture; not exported.
  * Exit codes: none.
@@ -39,7 +39,7 @@ export type PicogkLayerRecord = DotnetLayerRecord;
 /** The GitHub Release that carries one layer, such as `picogk-layer-0123456789abcdef`. @internal */
 export const { releaseTag: layerReleaseTag } = rule;
 
-/** The URLs the manifest pins for a layer: the CDN URL, then the GitHub Release asset URL. @internal */
+/** The URLs the manifest pins for a layer: the dependency host URL, then the GitHub Release asset URL. @internal */
 export const { urls: layerUrls } = rule;
 
 /** The `worker` dependency file of the record target's variant for a layer record. @internal */

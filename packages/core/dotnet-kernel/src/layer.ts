@@ -3,9 +3,9 @@
  * `tau-plugin.json`. A layer is the kernel's framework-dependent worker, its patched library, Roslyn and its native
  * engine, built by a release job into one `tar.gz` that unpacks to `tau-worker/` beside Microsoft's `dotnet/` runtime.
  *
- * Why: the layer is addressed by its digest on `cdn.tau.new` (`blobs/sha256/<hex>`, the D25 mirror layout) and by an
- * immutable GitHub Release named after the digest; deriving both from the record keeps the manifest, the upload and
- * the tests from drifting (I13).
+ * Why: the layer is addressed by its digest on `dependencies.tau.new` (`blobs/sha256/<hex>`, the D25 mirror layout)
+ * and by an immutable GitHub Release named after the digest; deriving both from the record keeps the manifest, the
+ * upload and the tests from drifting (I13).
  *
  * @module
  */
@@ -87,7 +87,7 @@ export type DotnetLayerRule = {
   readonly releaseTag: (sha256: string) => string;
   /**
    * The URLs the manifest pins for a layer, canonical first.
-   * @returns The CDN URL, then the GitHub Release asset URL.
+   * @returns The dependency host URL, then the GitHub Release asset URL.
    */
   readonly urls: (record: Pick<DotnetLayerRecord, 'sha256' | 'asset'>) => [string, string];
   /**
@@ -114,11 +114,15 @@ export type DotnetLayerRule = {
   readonly composeSbom: (manifest: LayerJson) => LayerJson;
 };
 
-/** Digest-addressed public base of Tau-authored dependency files (`tau-prod-content` behind `cdn.tau.new`). @public */
-export const dependencyBaseUrl = 'https://cdn.tau.new/';
+/**
+ * Digest-addressed public base of Tau-authored dependency files: the locked production dependency bucket
+ * (`tau-prod-dependencies`) behind `dependencies.tau.new`, which holds nothing but these files. @public
+ */
+export const dependencyBaseUrl = 'https://dependencies.tau.new/';
 
 /**
- * The bucket key of a dependency file: the D25 mirror layout, so `cdn.tau.new` also serves as a `TAU_DEPENDENCY_MIRROR`.
+ * The bucket key of a dependency file: the D25 mirror layout, so `dependencies.tau.new` also serves as a
+ * `TAU_DEPENDENCY_MIRROR`.
  * @param sha256 - Lowercase hex digest of the bytes.
  * @returns `blobs/sha256/<hex>`.
  * @public
@@ -400,7 +404,7 @@ export const runComposeTauPlugin = async (input: ComposeTauPluginInput): Promise
       await writeFile(sbomPath(target), manifestText(sbom));
     }
     if (values.outputs) {
-      const [cdnUrl, releaseUrl] = rule.urls(record);
+      const [dependencyUrl, releaseUrl] = rule.urls(record);
       console.log(
         [
           `sha256=${record.sha256}`,
@@ -408,7 +412,7 @@ export const runComposeTauPlugin = async (input: ComposeTauPluginInput): Promise
           `asset=${record.asset}`,
           `key=${dependencyKey(record.sha256)}`,
           `tag=${rule.releaseTag(record.sha256)}`,
-          `cdn-url=${cdnUrl}`,
+          `dependency-url=${dependencyUrl}`,
           `release-url=${releaseUrl}`,
         ].join('\n'),
       );

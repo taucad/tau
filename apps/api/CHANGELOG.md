@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.11.0 (2026-11-13)
+
+### Features
+
+- feat(api): Point prod LFS downloads at the files service on files.tau.new (#1979) (f6686dfa3)
+- feat(api): Log each ref's answer in a push's report-status (#1955) (89bf969c5)
+- feat(chat): PR 9 of the onboarding plan, the person block and its switch (#1938) (a5a509d44)
+- feat(revisions): Name version tags by number (T1) (#1923) (668f9cf16)
+- feat(ui): PR 7b of the onboarding plan, setup's live preview and its end-to-end specs (#1926) (ef40512ea)
+- feat(ui): Draw a lane per branch in History (D2) (#1921) (f42cb91a2)
+- feat(ui): PR 4b of the onboarding plan, the agent and the plugin page set view fields as commands (#1916) (c649e2c76)
+- feat(ui): PR 4 of the onboarding plan, view settings inherit from you, then the view (#1911) (5278d2439)
+- feat(revisions): Carry each branch's remote head for the boundary (D4) (#1920) (b2a57c813)
+- feat(revisions): Title an agent turn's History entry by the person's request (Q9) (#1914) (3ee36b240)
+- feat(telemetry): Report how automatic kernel selection resolves, and rank selector search (AKS-10, AKS-9) (#1905) (0f26bbd21)
+- feat(ui): Create entry-less projects from Home Auto and adopt the first model (AKS-6) (#1890) (0bd287354)
+- feat(ui)!: Call a save a history entry and a named point a version (C1, C8) (#1878) (13ae1b6fa)
+- feat(api-email): Alert when Resend refuses an email, and list the sender variables (#1887) (88ca8bccc)
+- feat(revisions)!: Restore and switch at once and offer Undo (C7) (#1864) (54fcb140f)
+- feat(api-git-mirror): Inventory stored LFS checksums for STO-17 (#1856) (ed43e11dc)
+- feat(agent-host): Land compaction at a fifth of the context window (#1780) (59b0d4c5c)
+- feat(agent-host): Carry effort in the transcript, bind replay per model (#1803) (8f3d37c53)
+- feat(api-git-mirror): Give legacy LFS relocation a maintenance command (#1855) (b51629692)
+- feat(revisions)!: Type a history row's who and name its capture (B2) (#1833) (88796b065)
+
+### Fixes
+
+- fix(runtime): Render a watched document's edit that a request revalidated first (#1962) (1ea013741)
+- fix(revisions): Never push over a branch that lacks the remote's head (#1954) (32f5b8a9e)
+- fix(chat): Read an empty question record as no record (#1932) (dbb4a543a)
+- fix(agent-host): Bind transcript effort markers into the prefix stamp (#1893) (eb50e4f46)
+- fix(formal): Make the formal nightly green: simulate every graph, split agent-host's nightly (#1871) (934db8cba)
+- fix(api): Retry the maintenance standby database check briefly (#1886) (df392eb14)
+- fix(desktop): Retry failed update checks and restart from one request (#1847) (9e770caf4)
+- fix(revisions): retry thrown fill checks and keep Try again from filling twice (#1860) (286ad1069)
+- fix(api): give the image build the files CI hashes, so Nx hits the remote cache (#1867) (d4cafb68e)
+- fix(api): Run the storage readiness heads together under one deadline (#1854) (f3760deaf)
+- fix(api): Fit Postgres pools to the session pooler and count them (#1863) (507c65bcc)
+
+### Other changes
+
+- ci(nx): Give the React event-layer counter only to the projects that run it (#1971) (6b8f4ab3c)
+- refactor(formal): Rename the formal Nx target to formal:tla (#1968) (27a0c168f)
+- test(api): resume kernel-routing live runs and report spend (#1976) (d177dc911)
+- refactor(viewer)!: Move the last graphics effects into actors and catch defects at each root (G12, part 2) (#1961) (57d2a258b)
+- refactor(formal): Infer the formal and formal:lean targets from specs (#1891) (19c0fb264)
+- refactor(desktop-terminal): Extract the Terminal concern into a library (#1885) (be5efe706)
+- refactor(shell-service): Extract the host shell service into libs/shell-service (#1876) (769f5bd62)
+- ci(docker): keep Buildx builders and build the API image on CI's Node (#1846) (1e2022f50)
+
 ## 0.10.0 (2026-11-12)
 
 ### Features

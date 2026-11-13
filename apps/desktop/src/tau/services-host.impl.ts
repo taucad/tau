@@ -559,6 +559,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let authToken: string | undefined;
   /** The signed-in account's user id, which main reads from `get-session` and sends with the bearer. */
   let sessionPrincipal: string | undefined;
+  /** The signed-in account's display name, sent with its id; the Terminal's git commits under both. */
+  let sessionPrincipalName: string | undefined;
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
@@ -637,6 +639,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     shell: options.terminalShell,
     isTrustedRoot,
     canonicalRoot: canonicalPath,
+    /* Read at each open: a session opened after a sign-in, a sign-out or an account switch commits as the new state. */
+    account: () =>
+      sessionPrincipal === undefined
+        ? undefined
+        : {
+            id: sessionPrincipal,
+            ...(sessionPrincipalName === undefined ? {} : { name: sessionPrincipalName }),
+          },
     log,
   });
 
@@ -1398,6 +1408,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         authToken = frame['token'] as string | undefined;
         sessionPrincipal =
           authToken !== undefined && typeof frame['principal'] === 'string' ? frame['principal'] : undefined;
+        sessionPrincipalName =
+          sessionPrincipal !== undefined && typeof frame['principalName'] === 'string'
+            ? frame['principalName']
+            : undefined;
         log('credential-updated', { present: authToken !== undefined });
         return;
       }

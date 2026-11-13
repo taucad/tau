@@ -2149,17 +2149,25 @@ describe.runIf(enabled)('shell qualification', () => {
   );
 
   /*
-   * Terminal git: the person's Terminal reads the project's real store read-only (operator ruling
-   * 2026-11-12), so git there sees history live, a save made after the session opened included, and every write fails.
-   * The project tracks a large file through Git LFS with the index Tau's refresh leaves after a save (stat data zero),
-   * which makes git run the LFS clean filter: both the Terminal and the agent's view must still answer a clean status.
-   * The host's own git and git-lfs folders are the toolchain, as the desktop passes its bundled ones. Outside bytes
-   * judge: each command's output and exit status land in a granted folder, and the store's digest is compared outside.
+   * Terminal git: the person's Terminal reaches the project's real store, so git there sees history live, a save made
+   * after the session opened included. On macOS the store is writable except the names through which git runs a
+   * program (`config`, `hooks`, `commondir` and the rest), so `add`, `commit`, `switch -c`, `stash` and `merge` succeed
+   * and commit under the signed-in person's Tau no-reply address, while a `git config` write, a hook, a direct write to
+   * `.git/config`, a lock renamed over it and a planted `commondir` all fail. On Linux the store stays read-only, because
+   * bubblewrap cannot keep an absent `commondir` from being created without leaving a stand-in that breaks git outside,
+   * and every write fails. The project tracks a large file through Git LFS with the index Tau's refresh leaves after a
+   * save (stat data zero), which makes git run the LFS clean filter: both the Terminal and the agent's view must still
+   * answer a clean status. The host's own git and git-lfs folders are the toolchain, as the desktop passes its bundled
+   * ones. Outside bytes judge: each command's output and exit status land in a granted folder, and the store's digests
+   * are compared outside.
    */
   qualification(
     'E14-terminal',
-    'Terminal git: the person reads the real store live, large files included, and every write fails',
+    'Terminal git: the person reads the real store live and writes it where config and hooks stay protected',
     async () => {
+      /* The shell service's rule (`terminalGitAccess`): the store is writable where Seatbelt protects it. */
+      const writable = process.platform === 'darwin';
+      const account = { id: 'user_e14terminal', name: 'Terminal Person' };
       const store = join(root, 'projects', 'terminal-git');
       const pointer = join(root, 'projects', 'terminal-pointer');
       const elsewhere = join(root, 'terminal-git-elsewhere');
@@ -2240,6 +2248,7 @@ describe.runIf(enabled)('shell qualification', () => {
           projectRoot,
           size: { columns: 160, rows: 48 },
           access: { read: [], write: [answers], domains: [] },
+          account,
           signal: new AbortController().signal,
         });
         if (opened.status !== 'opened') {
@@ -2313,34 +2322,98 @@ describe.runIf(enabled)('shell qualification', () => {
         const afterSave = await terminal.run('git status --porcelain');
         expect(afterSave).toStrictEqual({ exitCode: 0, text: '' });
 
-        const before = treeDigestOf(join(store, '.git'));
-        const identity = '-c user.name=Forged -c user.email=forged@example.invalid';
-        const writes = [
-          String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
-          `git ${identity} commit --allow-empty -m forged`,
-          'git switch -c forged',
-          `git ${identity} stash`,
+        const gitDirectory = join(store, '.git');
+        const hooks = join(gitDirectory, 'hooks');
+        /* The names that run a program, judged outside: the config's bytes, the hooks' tree, and no `commondir`. */
+        const executableDigest = (): string =>
+          JSON.stringify({
+            config: readFileSync(join(gitDirectory, 'config'), 'utf8'),
+            hooks: existsSync(hooks) ? treeDigestOf(hooks) : 'absent',
+            commondir: readdirSync(gitDirectory).filter((name) => name.toLowerCase() === 'commondir'),
+            worktree: readdirSync(gitDirectory).filter((name) => name.toLowerCase() === 'config.worktree'),
+          });
+        const executableBefore = executableDigest();
+        /* Every write that would make git outside the sandbox run a program; each one fails on both platforms. */
+        const protectedWrites = [
           'git config core.hooksPath forged',
-          'git fetch "$PWD" main:refs/heads/fetched',
+          `printf '#!/bin/sh\n' > .git/hooks/post-commit`,
+          `printf '[core]\n\thooksPath = forged\n' >> .git/config`,
+          'cp .git/config .git/config.lock && mv -f .git/config.lock .git/config',
+          `printf '%s\n' "$PWD/forged" > .git/commondir`,
+          `printf '%s\n' "$PWD/forged" > .git/COMMONDIR`,
+          `printf '[core]\n\thooksPath = forged\n' > .git/config.worktree`,
         ];
-        const refused: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
-        for (const command of writes) {
-          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
-          refused.push({ command, ...(await terminal.run(command)) });
+        const before = treeDigestOf(gitDirectory);
+        if (writable) {
+          /* The person's own git workflow: each step writes the real store and succeeds. */
+          const workflow = [
+            String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+            'git commit --quiet -m "Grow it again"',
+            'git switch --quiet -c side',
+            String.raw`printf 'sphere(1);\n' > side.scad && git add side.scad && git commit --quiet -m "Side part"`,
+            'git switch --quiet main',
+            String.raw`printf 'cube(5);\n' > part.scad && git stash --quiet && git stash pop --quiet`,
+            'git commit --quiet -am "Grow it once more"',
+            'git merge --quiet --no-edit side',
+          ];
+          for (const command of workflow) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            const answer = await terminal.run(command);
+            expect(answer.exitCode, `${command}: ${answer.text}`).toBe(0);
+          }
+          /* Git outside the sandbox reads what the Terminal wrote, under the person's Tau no-reply address. */
+          expect(hostGit(store, 'log', '-4', '--format=%an <%ae>|%s')).toBe(
+            [
+              `${account.name} <${account.id}@users.noreply.tau.new>|Merge branch 'side'`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Grow it once more`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Side part`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Grow it again`,
+            ].join('\n') + '\n',
+          );
+          expect(hostGit(store, 'status', '--porcelain')).toBe('');
+          /* The store keeps its own LFS objects, so the large file reads as present, as it is. */
+          const lfsFiles = await terminal.run('git lfs ls-files');
+          expect(lfsFiles.exitCode, lfsFiles.text).toBe(0);
+          expect(lfsFiles.text).toMatch(/^[\da-f]+ \* large\.bin\n$/u);
+        } else {
+          const identity = '-c user.name=Forged -c user.email=forged@example.invalid';
+          const writes = [
+            String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+            `git ${identity} commit --allow-empty -m forged`,
+            'git switch -c forged',
+            `git ${identity} stash`,
+            'git fetch "$PWD" main:refs/heads/fetched',
+          ];
+          const refused: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+          for (const command of writes) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            refused.push({ command, ...(await terminal.run(command)) });
+          }
+          expect(refused.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+          /* Each one that says why names the filesystem refusal; `git stash` can fail without a word. */
+          expect(
+            refused.filter(
+              (entry) =>
+                entry.text.trim() !== '' &&
+                !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
+                  entry.text,
+                ),
+            ),
+          ).toStrictEqual([]);
+          measurements = { ...measurements, writesRefused: refused.length };
         }
-        expect(refused.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
-        /* Each one that says why names the filesystem refusal; `git stash` can fail without a word. */
-        expect(
-          refused.filter(
-            (entry) =>
-              entry.text.trim() !== '' &&
-              !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
-                entry.text,
-              ),
-          ),
-        ).toStrictEqual([]);
-        /* Outside bytes are the judge: the store is byte for byte what the save left. */
-        expect(treeDigestOf(join(store, '.git'))).toBe(before);
+        const refusedExecutable: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+        for (const command of protectedWrites) {
+          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+          refusedExecutable.push({ command, ...(await terminal.run(command)) });
+        }
+        expect(refusedExecutable.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+        /* Outside bytes are the judge: config, hooks and the absence of `commondir` are what the store had. */
+        expect(executableDigest()).toBe(executableBefore);
+        if (!writable) {
+          /* A read-only store is byte for byte what the save left. */
+          expect(treeDigestOf(gitDirectory)).toBe(before);
+        }
 
         /* The large file edited in place, same size: listed as modified, and status still succeeds. */
         const edited = await terminal.run(
@@ -2348,8 +2421,15 @@ describe.runIf(enabled)('shell qualification', () => {
         );
         expect(edited.exitCode, edited.text).toBe(0);
         expect(edited.text).toContain(' M large.bin\n');
-        expect(treeDigestOf(join(store, '.git'))).toBe(before);
-        measurements = { ...measurements, writesRefused: refused.length };
+        expect(executableDigest()).toBe(executableBefore);
+        if (!writable) {
+          expect(treeDigestOf(gitDirectory)).toBe(before);
+        }
+        measurements = {
+          ...measurements,
+          store: writable ? 'writable' : 'read-only',
+          executableWritesRefused: refusedExecutable.length,
+        };
       } finally {
         await terminal.close();
       }

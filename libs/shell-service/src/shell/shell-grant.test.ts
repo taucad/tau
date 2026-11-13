@@ -14,9 +14,10 @@ import {
   projectProtected,
   protectedPaths,
   resolveShellAccess,
+  terminalGitAccess,
   within,
 } from '#shell/shell-grant.js';
-import type { ShellGrantHost } from '#shell/shell-grant.js';
+import type { ShellGrantHost, TerminalGitAccess } from '#shell/shell-grant.js';
 
 let base = '';
 let checkout = '';
@@ -108,10 +109,10 @@ describe('compileShellFilesystem with a git view', () => {
 });
 
 describe('projectProtected for the Terminal, which reads the real git store', () => {
-  const terminalPlan = async () =>
+  const terminalPlan = async (terminalGit: TerminalGitAccess = 'read') =>
     compileShellFilesystem({
       checkout,
-      checkoutProtected: await projectProtected(checkout, { readableGit: true }),
+      checkoutProtected: await projectProtected(checkout, { terminalGit }),
       session: [join(session, 'home'), join(session, 'tmp')],
       toolchain: [],
       access: { read: [], write: [], domains: [] },
@@ -170,7 +171,7 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
   it('should still refuse a grant that names a version-control directory', async () => {
     const supplier = join(base, 'supplier');
     await mkdir(join(supplier, '.git'), { recursive: true });
-    const checkoutProtected = await projectProtected(checkout, { readableGit: true });
+    const checkoutProtected = await projectProtected(checkout, { terminalGit: 'write' });
     for (const folder of [join(checkout, '.git'), join(supplier, '.git'), join(checkout, 'vendor', 'lib', '.git')]) {
       // oxlint-disable-next-line no-await-in-loop -- one refusal per folder.
       const answer = await resolveShellAccess(
@@ -180,5 +181,84 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
       );
       expect(answer, folder).toMatchObject({ status: 'refused' });
     }
+  });
+
+  it('should open the store for writing only where the sandbox protects an absent name without creating it', () => {
+    expect(terminalGitAccess('darwin')).toBe('write');
+    expect(terminalGitAccess('linux')).toBe('read');
+    expect(terminalGitAccess('win32')).toBe('read');
+  });
+
+  it('should leave a writable store open except every spelling of the names through which git runs a program', async () => {
+    await mkdir(join(checkout, '.git', 'hooks'), { recursive: true });
+    await mkdir(join(checkout, 'vendor', 'lib', '.git', 'Hooks'), { recursive: true });
+    const terminal = await terminalPlan('write');
+    const store = join(checkout, '.git');
+    const nested = join(checkout, 'vendor', 'lib', '.git');
+    const executable = (directory: string): string[] => [
+      join(directory, 'config'),
+      join(directory, '[cC][oO][nN][fF][iI][gG]'),
+      join(directory, 'hooks'),
+      join(directory, '[hH][oO][oO][kK][sS]'),
+      join(directory, 'commondir'),
+      join(directory, '[cC][oO][mM][mM][oO][nN][dD][iI][rR]'),
+      join(directory, 'config.worktree'),
+      join(directory, '[cC][oO][nN][fF][iI][gG].[wW][oO][rR][kK][tT][rR][eE][eE]'),
+      join(directory, 'worktrees'),
+      join(directory, '[wW][oO][rR][kK][tT][rR][eE][eE][sS]'),
+      join(directory, 'modules'),
+      join(directory, '[mM][oO][dD][uU][lL][eE][sS]'),
+    ];
+
+    expect(terminal.denied.filter((path) => within(host.platform, path, store))).toStrictEqual([]);
+    expect(terminal.denied.filter((path) => within(host.platform, path, nested))).toStrictEqual([]);
+    expect(
+      terminal.readOnly
+        .filter((path) => within(host.platform, path, store) && !within(host.platform, path, nested))
+        .toSorted(),
+    ).toStrictEqual(executable(store).toSorted());
+    /* A nested store's existing spelling is kept as it is, beside the canonical one. */
+    expect(terminal.readOnly.filter((path) => within(host.platform, path, nested)).toSorted()).toStrictEqual(
+      [...executable(nested), join(nested, 'Hooks')].toSorted(),
+    );
+    expect(terminal.readOnly).not.toContain(store);
+    expect(terminal.directories).toStrictEqual(
+      expect.arrayContaining([
+        join(store, 'hooks'),
+        join(store, 'worktrees'),
+        join(store, 'modules'),
+        join(nested, 'Hooks'),
+      ]),
+    );
+    for (const path of ['objects', 'refs', 'index', 'HEAD', 'logs', 'lfs', 'MERGE_HEAD', 'config.lock', 'info']) {
+      expect(terminal.readOnly, path).not.toContain(join(store, path));
+    }
+    /* Every other control path stays denied, as for a read-only store. */
+    expect(terminal.denied).toStrictEqual(
+      expect.arrayContaining([
+        join(checkout, '.hg'),
+        join(checkout, '.tau', 'binding.json'),
+        join(checkout, '.tau-staging'),
+      ]),
+    );
+
+    const agent = await plan();
+    expect(agent.denied).toStrictEqual(expect.arrayContaining([store, nested]));
+  });
+
+  it('should keep a .git pointer file, an absent .git and a store whose path reads as a glob read-only whole', async () => {
+    const pointer = join(checkout, 'vendor', 'pointer');
+    await mkdir(pointer, { recursive: true });
+    await writeFile(join(pointer, '.git'), 'gitdir: ../../.git/worktrees/pointer\n');
+    const globbed = join(checkout, 'vendor', 'lib[1]', '.git');
+    await mkdir(globbed, { recursive: true });
+    await rm(join(checkout, '.git'), { recursive: true, force: true });
+    const terminal = await terminalPlan('write');
+
+    for (const path of [join(checkout, '.git'), join(pointer, '.git'), globbed]) {
+      expect(terminal.readOnly, path).toContain(path);
+      expect(terminal.denied, path).not.toContain(path);
+    }
+    expect(terminal.readOnly.filter((path) => within(host.platform, path, globbed))).toStrictEqual([globbed]);
   });
 });

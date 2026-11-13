@@ -6,8 +6,9 @@
  */
 import { posix, win32 } from 'node:path';
 
-import { shellGitEnvironment, shellGitReadEnvironment } from '#shell/shell-git-view.js';
+import { shellGitEnvironment, shellGitReadEnvironment, shellGitWriteEnvironment } from '#shell/shell-git-view.js';
 import type { ShellGitView } from '#shell/shell-git-view.js';
+import type { TerminalGitAccess } from '#shell/shell-grant.js';
 
 /** A locale or login value safe to pass on: no separators, quotes or control characters. */
 const plainValue = /^[A-Za-z0-9_.@-]{1,64}$/u;
@@ -25,10 +26,15 @@ export type ShellEnvironmentOptions = Readonly<{
   /** The host's environment, read only for locale, login name and Windows system roots. */
   host: Readonly<Record<string, string | undefined>>;
   /**
-   * A pipe launch runs under `TERM=dumb`; a Terminal under a colour terminal. The Terminal also reads the project's real
-   * git store read-only, so it carries the variables every git-reading launch does.
+   * A pipe launch runs under `TERM=dumb`; a Terminal under a colour terminal. The Terminal also reaches the project's
+   * real git store, so it carries the git variables for how it does ({@link terminalGit}).
    */
   terminal: boolean;
+  /**
+   * How a Terminal reaches the project's real store: read-only (the default) without optional locks, or writable with
+   * them. Neither reads the system-wide git config.
+   */
+  terminalGit?: TerminalGitAccess | undefined;
   /** The launch's read-only git view (blueprint E1), which git in the shell then reads instead of finding none. */
   git?: ShellGitView | undefined;
 }>;
@@ -80,7 +86,7 @@ export const shellEnvironment = (options: ShellEnvironmentOptions): Readonly<Rec
     ...(options.terminal ? { COLORTERM: 'truecolor', CLICOLOR: '1' } : {}),
     ...plain('USER'),
     ...plain('LOGNAME'),
-    ...(options.terminal ? shellGitReadEnvironment : {}),
+    ...(options.terminal ? (options.terminalGit === 'write' ? shellGitWriteEnvironment : shellGitReadEnvironment) : {}),
     ...(options.git === undefined ? {} : shellGitEnvironment(options.git)),
   };
 };

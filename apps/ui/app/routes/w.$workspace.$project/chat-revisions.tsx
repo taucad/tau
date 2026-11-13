@@ -1650,7 +1650,9 @@ export function RevisionsPanelBody(): React.JSX.Element {
           </RevisionRegion>
         )}
 
-        <RevisionRegion id='revision-history-heading' title='History'>
+        {/* The pane's host (the Workbench tab, the phone surface) is already the History landmark, so this card is a
+            group of that name (#1878 renamed the pane to History). */}
+        <RevisionRegion id='revision-history-heading' title='History' isLandmark={false}>
           {isHistoryLoading && revisions.length === 0 ? (
             <HistoryLoading />
           ) : revisions.length === 0 ? (

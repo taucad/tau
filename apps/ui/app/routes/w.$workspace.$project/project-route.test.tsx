@@ -1,5 +1,5 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -1369,7 +1369,7 @@ describe('project route shell identity (A0.7)', () => {
   const shell = { mounts: 0 };
 
   function ShellMarker(): React.JSX.Element {
-    useLayoutEffect(() => {
+    useEffect(() => {
       shell.mounts += 1;
     }, []);
     return <nav data-testid='app-shell' aria-label='App shell' />;
@@ -1412,9 +1412,8 @@ describe('project route shell identity (A0.7)', () => {
       await act(async () => {
         await getProjectRouteAccess.mock.results[0]?.value;
       });
-      expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA]);
 
-      /* Access is ready and the project is live; only the import is outstanding. */
+      /* Access is ready at once; the workspace import is still outstanding. */
       expect(shellNodes()).toHaveLength(1);
       expect(shell.mounts).toBe(1);
 

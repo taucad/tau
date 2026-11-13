@@ -10,9 +10,13 @@
  * dock is a stand-in that renders the real `ChatViewer` for one view.
  */
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { mock } from 'vitest-mock-extended';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
@@ -23,6 +27,9 @@ import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
+import type * as ViewerDockviewModule from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
+import type * as UnavailableOverlayModule from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
+import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -55,6 +62,8 @@ const createFact = <T,>(initial: T) => {
 
 const facts = vi.hoisted(() => ({
   isMobile: false,
+  /* The phone rows mount the real viewer dock and unavailable overlay; the others mount a one-panel stand-in. */
+  isRealViewerBox: false,
   /* The viewer content's own lifecycle, read from its file hook: one mount per mounted content. */
   viewer: { mounts: 0, removals: 0 },
 }));
@@ -64,6 +73,7 @@ const revisionStatus = createFact<RevisionStatusProjection | undefined>(undefine
 
 /** A clean, backed-up local checkout; the fact the rows move is its readiness (D10). */
 const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a projection's other facets are absent on purpose: availability reads `largeObjects === undefined` as "no download runs", which a deep mock would answer
   ({
     projectId: projectA,
     checkoutId: 'checkout-main',
@@ -74,7 +84,7 @@ const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection =>
     remote: { phase: 'idle' },
   }) as unknown as RevisionStatusProjection;
 
-type EditorStateValue = Readonly<Record<string, unknown>> | string;
+type EditorStateValue = string | { readonly [state: string]: EditorStateValue };
 
 /** Whether `value` is in `pattern`, as XState matches a state value. */
 const matchesStateValue = (value: EditorStateValue, pattern: EditorStateValue): boolean => {
@@ -84,9 +94,10 @@ const matchesStateValue = (value: EditorStateValue, pattern: EditorStateValue): 
   if (typeof value === 'string') {
     return false;
   }
-  return Object.entries(pattern).every(
-    ([key, child]) => Object.hasOwn(value, key) && matchesStateValue(value[key] as EditorStateValue, child as never),
-  );
+  return Object.entries(pattern).every(([key, child]) => {
+    const region = value[key];
+    return region !== undefined && matchesStateValue(region, child);
+  });
 };
 
 const editorReady = { ready: { operation: 'idle', storing: 'idle' } } as const;
@@ -160,6 +171,36 @@ const projectValue = {
   mainEntryPath,
   setViewEntryPath: () => undefined,
   flushWorkbenchRecordProducers: async () => undefined,
+};
+
+/**
+ * The layout record as the record host serves it (`workbench-record-host.tsx`, `registerViewer`): a viewer that
+ * registers after the record was read is applied at once, and a read that lands later is applied to the registered one.
+ */
+const mainViewer: ViewerNode = { kind: 'group', tabs: [{ kind: 'view', view: 'view-main' }] };
+const layoutRecord: {
+  viewer: ViewerNode | undefined;
+  apply: ((node: ViewerNode, applied: () => void) => void) | undefined;
+} = { viewer: undefined, apply: undefined };
+const layoutController: WorkbenchLayoutController = {
+  snapshot: () => undefined,
+  subscribe: () => () => undefined,
+  restorePreviousArrangement: async () => false,
+  registerViewer(apply) {
+    layoutRecord.apply = apply;
+    if (layoutRecord.viewer) {
+      apply(layoutRecord.viewer, () => undefined);
+    }
+    return () => {
+      if (layoutRecord.apply === apply) {
+        layoutRecord.apply = undefined;
+      }
+    };
+  },
+  registerWorkbench: () => () => undefined,
+  personViewerChanged: () => undefined,
+  personWorkbenchChanged: () => undefined,
+  ready: () => layoutRecord.viewer !== undefined,
 };
 
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
@@ -291,7 +332,7 @@ vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ProjectWorkspaceContextModule>()),
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  useProjectWorkspace: () => ({ setChatOpen: () => undefined, setWorkbenchOpen: () => undefined }),
+  useProjectWorkspace: () => ({ setChatOpen: () => undefined, setWorkbenchOpen: () => undefined, layoutController }),
 }));
 vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
 vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));
@@ -336,13 +377,21 @@ vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
   getWorkbenchTabIcon: () => undefined,
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-toggle.js', () => ({ WorkbenchToggle: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
-  ProjectUnavailableOverlay: () => null,
-  useIsProjectUnavailable: () => false,
-}));
+vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof UnavailableOverlayModule>();
+  return {
+    ...actual,
+    ProjectUnavailableOverlay: (props: React.ComponentProps<typeof actual.ProjectUnavailableOverlay>) =>
+      facts.isRealViewerBox ? <actual.ProjectUnavailableOverlay {...props} /> : null,
+  };
+});
+/* Both layouts put the banner in the viewer box, beside the dock and the overlay: its slot names the box. */
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
-  ProjectManifestIssueBanner: () => null,
+  ProjectManifestIssueBanner: () => <span hidden data-testid='viewer-box-slot' />,
 }));
+/* The dock's header actions; the phone hides the header, and their revision facts have their own suites. */
+vi.mock('#routes/w.$workspace.$project/project-workspace-actions.js', () => ({ ProjectWorkspaceActions: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-lane-toggle.js', () => ({ ViewerChatLaneToggle: () => null }));
 vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => ({ open: true }) }));
 vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -352,18 +401,21 @@ vi.mock('allotment', () => {
   const Allotment = Object.assign(({ children }: React.PropsWithChildren) => <div>{children}</div>, { Pane });
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
 });
-/* The dock stands in for Dockview's one viewer panel; the panel's content is the real `ChatViewer`. */
-vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async () => {
+/* The dock stands in for Dockview's one viewer panel, whose content is the real `ChatViewer`; the phone rows mount the real dock. */
+vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ViewerDockviewModule>();
   const { ChatViewer } = await import('#routes/w.$workspace.$project/chat-viewer.js');
-  const panelApi = { updateParameters: () => undefined, setTitle: () => undefined } as unknown as React.ComponentProps<
-    typeof ChatViewer
-  >['panelApi'];
+  const panelApi = mock<React.ComponentProps<typeof ChatViewer>['panelApi']>();
   return {
-    ViewerDockview: () => (
-      <div data-testid='viewer-dock'>
-        <ChatViewer viewId='view-main' entryPath={mainEntryPath} panelApi={panelApi} profile='editor' />
-      </div>
-    ),
+    ...actual,
+    ViewerDockview: (props: React.ComponentProps<typeof actual.ViewerDockview>) =>
+      facts.isRealViewerBox ? (
+        <actual.ViewerDockview {...props} />
+      ) : (
+        <div data-testid='viewer-dock'>
+          <ChatViewer viewId='view-main' entryPath={mainEntryPath} panelApi={panelApi} profile='editor' />
+        </div>
+      ),
   };
 });
 vi.mock('#workbench-records/view-actions.js', () => ({
@@ -412,11 +464,15 @@ await import('./chat-interface-mobile.js');
 
 const OpenRoute = (): React.JSX.Element => (
   <MemoryRouter>
-    <SessionsProvider actor={sessionsActor}>
-      <routeModule.ProjectRouteGate requestedProjectId={projectA}>
-        <sessionsModule.ProjectChatRoute />
-      </routeModule.ProjectRouteGate>
-    </SessionsProvider>
+    <KeyboardProvider>
+      <TooltipProvider>
+        <SessionsProvider actor={sessionsActor}>
+          <routeModule.ProjectRouteGate requestedProjectId={projectA}>
+            <sessionsModule.ProjectChatRoute />
+          </routeModule.ProjectRouteGate>
+        </SessionsProvider>
+      </TooltipProvider>
+    </KeyboardProvider>
   </MemoryRouter>
 );
 
@@ -424,43 +480,93 @@ const OpenRoute = (): React.JSX.Element => (
 const isSessionLive = (): boolean =>
   sessionsActor.getSnapshot().context.refs[projectA]?.getSnapshot().matches('live') === true;
 
-/** Let the route, the registry and the lazy layout settle under the fake clock. */
+/**
+ * Let the route, the registry and the lazy layout settle under the fake clock: rounds of tasks until the document
+ * stops changing, so a fix that adds asynchronous hops reaches the row's own assertion.
+ */
 const settle = async (): Promise<void> => {
-  for (let step = 0; step < 20; step++) {
-    // oxlint-disable-next-line no-await-in-loop -- each step lets one round of tasks and commits land, in order
+  const quietRounds = 3;
+  const maxRounds = 200;
+  let previous = document.body.innerHTML;
+  let quiet = 0;
+  for (let round = 0; round < maxRounds; round++) {
+    // oxlint-disable-next-line no-await-in-loop -- each round lets one round of tasks and commits land, in order
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
+    const current = document.body.innerHTML;
+    quiet = current === previous ? quiet + 1 : 0;
+    previous = current;
+    if (quiet >= quietRounds) {
+      return;
+    }
   }
+  throw new Error(`settle: the document was still changing after ${maxRounds} rounds of tasks`);
+};
+
+/** The box a layout gives the viewer: the element that holds the viewer-box slot as a child. */
+const isViewerBox = (element: Element): boolean =>
+  [...element.children].some((child) => child.matches('[data-testid="viewer-box-slot"]'));
+
+/** Whether `element`, or an ancestor along its own parent chain, is a viewer box. */
+const climbsIntoViewerBox = (element: Element): { readonly isIn: boolean; readonly top: Element | undefined } => {
+  let top: Element | undefined;
+  for (let current: Element | undefined = element; current; current = current.parentElement ?? undefined) {
+    if (isViewerBox(current)) {
+      return { isIn: true, top: current };
+    }
+    top = current;
+  }
+  return { isIn: false, top };
 };
 
 /**
- * Every node matching `selector` that any commit added to the document, recorded as it lands.
+ * Whether a node a commit added or removed sat in a viewer box, read from its own position. A node still attached
+ * climbs its own ancestors. A detached one climbs what is left of its subtree and, where that ends at the record's own
+ * added or removed root, the parent the root was added to or removed from.
+ */
+const isInViewerBoxAt = (match: Element, record: MutationRecord): boolean => {
+  const own = climbsIntoViewerBox(match);
+  if (own.isIn || match.isConnected) {
+    return own.isIn;
+  }
+  const roots = [...record.addedNodes, ...record.removedNodes];
+  const isRecordRoot = own.top !== undefined && roots.includes(own.top);
+  return isRecordRoot && record.target instanceof Element && climbsIntoViewerBox(record.target).isIn;
+};
+
+/**
+ * Every node matching `selector` that any commit put in the document, recorded as it lands, including one a later
+ * commit in the same task removed again: a removal is recorded too, since the observer starts before the render.
  *
  * @param selector - The nodes to record.
- * @param isWithin - Which parents count; every parent by default.
- * @returns The nodes recorded so far, and a stop.
+ * @param where - Which added nodes count, by their own position; every one by default.
+ * @returns `read` (drains pending records first) and `stop`.
  */
 const recordAdditions = (
   selector: string,
-  isWithin: (parent: Node) => boolean = () => true,
-): { readonly added: Element[]; readonly stop: () => void } => {
-  const added: Element[] = [];
-  const observer = new MutationObserver((records) => {
+  where: (match: Element, record: MutationRecord) => boolean = () => true,
+): { readonly read: () => readonly Element[]; readonly stop: () => void } => {
+  const added = new Set<Element>();
+  const collect = (records: readonly MutationRecord[]): void => {
     for (const record of records) {
-      if (!isWithin(record.target)) {
-        continue;
-      }
-      for (const node of record.addedNodes) {
+      for (const node of [...record.addedNodes, ...record.removedNodes]) {
         if (node instanceof Element) {
-          added.push(...(node.matches(selector) ? [node] : []), ...node.querySelectorAll(selector));
+          const matches = [...(node.matches(selector) ? [node] : []), ...node.querySelectorAll(selector)];
+          for (const match of matches.filter((candidate) => where(candidate, record))) {
+            added.add(match);
+          }
         }
       }
     }
-  });
+  };
+  const observer = new MutationObserver(collect);
   observer.observe(document.body, { childList: true, subtree: true });
   return {
-    added,
+    read: () => {
+      collect(observer.takeRecords());
+      return [...added];
+    },
     stop: () => {
       observer.disconnect();
     },
@@ -470,6 +576,9 @@ const recordAdditions = (
 beforeEach(() => {
   vi.useFakeTimers();
   facts.isMobile = false;
+  facts.isRealViewerBox = false;
+  layoutRecord.viewer = undefined;
+  layoutRecord.apply = undefined;
   facts.viewer.mounts = 0;
   facts.viewer.removals = 0;
   revisionStatus.set(undefined);
@@ -550,34 +659,74 @@ describe('project open order (A0.7)', () => {
       await settle();
 
       expect(screen.getByTestId('viewer-dock')).toBeInTheDocument();
-      expect(preparing.added.map((node) => node.getAttribute('aria-label'))).toEqual([]);
+      expect(preparing.read().map((node) => node.getAttribute('aria-label'))).toEqual([]);
     } finally {
       unsubscribe.unsubscribe();
       preparing.stop();
     }
   });
+});
 
-  it('M2: should render no empty-state panel in the phone viewer box while the focused chat is ensured', async () => {
+describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
+  const emptyState = '[data-slot="panel-empty-state"]';
+
+  /** Render the phone route over the real viewer dock and overlay, with the layout record already read. */
+  const openOnPhone = async (editor: EditorStateValue): Promise<readonly Element[]> => {
     facts.isMobile = true;
-    editorFact.set({ value: editorEnsuring, focusedChatId: 'chat-1' });
-    /* The phone's viewer box is the parent of the viewer dock (`chat-interface-mobile.tsx`). */
-    const isInViewerBox = (parent: Node): boolean =>
-      parent instanceof Element &&
-      (parent.closest('[data-testid="viewer-dock"]') !== null ||
-        parent.querySelector(':scope > [data-testid="viewer-dock"]') !== null);
-    const emptyStates = recordAdditions('[data-slot="panel-empty-state"]', isInViewerBox);
+    facts.isRealViewerBox = true;
+    layoutRecord.viewer = mainViewer;
+    editorFact.set({ value: editor, focusedChatId: 'chat-1' });
+    const emptyStates = recordAdditions(emptyState, isInViewerBoxAt);
     try {
       render(<OpenRoute />);
       await settle();
-      expect(isSessionLive()).toBe(true);
-      /* The chat pane waits on its session below the viewer: the state M2 was seen in. */
-      expect(screen.getByTestId('chat-pane-skeleton-ensuring')).toBeInTheDocument();
-
-      const viewerBox = screen.getByTestId('viewer-dock').parentElement!;
-      expect(viewerBox.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
-      expect(emptyStates.added).toEqual([]);
+      return [...emptyStates.read()];
     } finally {
       emptyStates.stop();
     }
+  };
+
+  const viewerBoxes = (): readonly Element[] =>
+    [...document.querySelectorAll('[data-testid="viewer-box-slot"]')].flatMap((slot) =>
+      slot.parentElement ? [slot.parentElement] : [],
+    );
+
+  it('should record an empty state inserted with its viewer box and removed in the same task, and none outside it', async () => {
+    function TransientBox(): React.JSX.Element {
+      const [isShown, setIsShown] = useState(true);
+      useLayoutEffect(() => {
+        setIsShown(false);
+      }, []);
+      return (
+        <div>
+          <span hidden data-testid='viewer-box-slot' />
+          {isShown ? <div data-slot='panel-empty-state' /> : null}
+        </div>
+      );
+    }
+    const emptyStates = recordAdditions(emptyState, isInViewerBoxAt);
+    try {
+      render(
+        <>
+          <TransientBox />
+          <div data-slot='panel-empty-state' />
+        </>,
+      );
+      expect(document.querySelectorAll(emptyState)).toHaveLength(1);
+      expect(emptyStates.read()).toHaveLength(1);
+    } finally {
+      emptyStates.stop();
+    }
+  });
+
+  it('M2: should render no empty-state panel in the phone viewer box while the focused chat is ensured', async () => {
+    const added = await openOnPhone(editorEnsuring);
+
+    /* Today the layout mounts while the chat is ensured and its pane waits below the viewer; once the open waits for
+     * the chat, nothing of the layout mounts until it is ready. Either way, no viewer box shows an empty state. */
+    const boxes = viewerBoxes();
+    expect(boxes.length === 0 || screen.queryByTestId('chat-pane-skeleton-ensuring') !== null).toBe(true);
+    expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
+    expect(added.map((node) => node.textContent)).toEqual([]);
   });
 });

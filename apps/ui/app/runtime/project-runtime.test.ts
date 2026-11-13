@@ -45,8 +45,26 @@ import type {
 } from '#runtime/project-runtime.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import type * as CadMachineModule from '#machines/cad.machine.js';
+import type * as ParameterSetServiceModule from '@taucad/ui-core/services/parameter-set-service';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
+/* Every parameter service the runtime builds, each with a spied close; `decorate` lets a row stand in for its reads. */
+const services = vi.hoisted(() => ({
+  built: [] as Array<ParameterSetService & { close: ReturnType<typeof vi.fn> }>,
+  decorate: undefined as ((service: ParameterSetService) => ParameterSetService) | undefined,
+}));
+vi.mock('@taucad/ui-core/services/parameter-set-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof ParameterSetServiceModule>();
+  return {
+    ...actual,
+    createParameterSetService: (...args: Parameters<typeof actual.createParameterSetService>) => {
+      const service = actual.createParameterSetService(...args);
+      const spied = { ...(services.decorate?.(service) ?? service), close: vi.fn(service.close) };
+      services.built.push(spied);
+      return spied;
+    },
+  };
+});
 const disposal = vi.hoisted(() => ({ dispose: vi.fn() }));
 vi.mock('#machines/cad.machine.js', async (importOriginal) => {
   const actual = await importOriginal<typeof CadMachineModule>();
@@ -96,20 +114,35 @@ const createContent = () => {
   return { service, watches, watchReady, readManifest };
 };
 
-/** A file manager that is ready at once, with the content service the test hands it. */
+type FileManagerPatch = Readonly<{ rootDirectory?: string; contentService?: unknown }>;
+
+/** A file manager that is ready at once, with the content service the test hands it; `patch` replaces either. */
 const createFileManager = (contentService: unknown) => {
   const machine = setup({
-    schemas: { context: types<{ rootDirectory: string; contentService: unknown }>() },
+    schemas: {
+      context: types<{ rootDirectory: string; contentService: unknown }>(),
+      events: eventSchemas<{ type: 'patch'; patch: FileManagerPatch }>(),
+    },
   }).createMachine({
     id: 'fake-file-manager',
     context: { rootDirectory: `/projects/${project.id}`, contentService },
     initial: 'ready',
-    states: { ready: {} },
+    states: {
+      ready: { on: { patch: ({ context, event }) => ({ context: { ...context, ...event.patch } }) } },
+    },
   });
   const actor = createActor(machine);
   actor.start();
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in for the file-manager actor, read by snapshot only.
   return actor as unknown as ProjectRuntimeFileManager['fileManagerRef'];
+};
+
+const patchFileManager = (fileManagerRef: ProjectRuntimeFileManager['fileManagerRef'], patch: FileManagerPatch) => {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the stand-in takes its own patch event.
+  (fileManagerRef as unknown as { send: (event: { type: 'patch'; patch: FileManagerPatch }) => void }).send({
+    type: 'patch',
+    patch,
+  });
 };
 
 const createLibrary = () => {
@@ -360,6 +393,141 @@ describe('createProjectRuntime', () => {
     guard.take();
   });
 
+  it('should rebuild the parameter service when the file manager root or content service changes', async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const fileManagerRef = createFileManager(content.service);
+    services.built.length = 0;
+    const { actor, parameterService } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef, parameterFiles: fixedPort(mock<ParameterFilesClient>()) },
+      library: createLibrary(),
+      ...profileOptions('editor'),
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    const [initial] = services.built;
+    expect(parameterService.get()).toBe(initial);
+
+    // A root that moved before the runtime started: the owner rebuilds as it starts.
+    patchFileManager(fileManagerRef, { rootDirectory: `/projects/${project.id}-moved` });
+    expect(services.built).toHaveLength(1);
+    actor.start();
+    expect(services.built).toHaveLength(2);
+    expect(parameterService.get()).toBe(services.built[1]);
+    expect(initial?.close).toHaveBeenCalledTimes(1);
+    await settle();
+
+    // A new content service while running.
+    patchFileManager(fileManagerRef, { contentService: createContent().service });
+    expect(services.built).toHaveLength(3);
+    expect(parameterService.get()).toBe(services.built[2]);
+    expect(services.built[1]?.close).toHaveBeenCalledTimes(1);
+    expect(services.built[2]?.close).not.toHaveBeenCalled();
+    actor.stop();
+    await settle(2);
+    guard.take();
+  });
+
+  it('should settle a geometry unit through the rebuilt service', async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const fileManagerRef = createFileManager(content.service);
+    const commits: Array<{ actor: unknown; event: unknown }> = [];
+    const { actor, parameterService } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef, parameterFiles: fixedPort(mock<ParameterFilesClient>()) },
+      library: createLibrary(),
+      ...profileOptions('editor'),
+      kernelSelection: { kernelOptionsFactory: vi.fn() },
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: (event) => {
+        guard.inspect(event);
+        if (event.type === '@xstate.transition' && event.event.type === 'commitParameters') {
+          commits.push({ actor: event.actorRef, event: event.event });
+        }
+      },
+    });
+    actor.start();
+    await settle();
+    const projectRef = selectProjectRef(actor.getSnapshot());
+    projectRef.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+    const unit = projectRef.getSnapshot().context.geometryUnits.get('main.ts');
+    expect(unit).toBeDefined();
+
+    // The rebuilt service has a parameter set for the unit; the one it replaced had none.
+    const settleMachine = setup({
+      schemas: {
+        events: eventSchemas<{ type: 'settle' }>(),
+        emitted: eventSchemas<{ type: 'settled'; outcome: { status: 'committed'; write: 'applied' } }>(),
+      },
+    }).createMachine({
+      on: {
+        settle: (_args, enq) => {
+          enq.emit({ type: 'settled', outcome: { status: 'committed', write: 'applied' } });
+          return {};
+        },
+      },
+    });
+    const set = createActor(settleMachine);
+    set.start();
+    const bytes = new Uint8Array([7]);
+    services.decorate = (service) => ({
+      ...service,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in set actor that only settles.
+      actor: (entryPath) =>
+        entryPath === 'main.ts' ? (set as unknown as ReturnType<ParameterSetService['actor']>) : undefined,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the one field the observers read.
+      snapshot: () => ({ bytes }) as unknown as ReturnType<ParameterSetService['snapshot']>,
+    });
+    try {
+      patchFileManager(fileManagerRef, { contentService: createContent().service });
+    } finally {
+      services.decorate = undefined;
+    }
+    expect(parameterService.get().actor('main.ts')).toBe(set);
+    set.send({ type: 'settle' });
+    expect(commits).toEqual([
+      { actor: unit, event: { type: 'commitParameters', stage: { [parameterEntryPath('main.ts')]: bytes } } },
+    ]);
+    actor.stop();
+    await settle(2);
+    guard.take();
+  });
+
+  it('should close the current service on a shared stop, and the replaced one only once', async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const fileManagerRef = createFileManager(content.service);
+    services.built.length = 0;
+    const { actor, parameterService } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: { fileManagerRef, parameterFiles: fixedPort(mock<ParameterFilesClient>()) },
+      library: createLibrary(),
+      profile: 'shared',
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+      inspect: guard.inspect,
+    });
+    actor.start();
+    await settle();
+    patchFileManager(fileManagerRef, { contentService: createContent().service });
+    const [initial, current] = services.built;
+    expect(parameterService.get()).toBe(current);
+    // A file-manager change while the root stops (here, from inside the close) builds nothing after the close.
+    current?.close.mockImplementation(async () => {
+      patchFileManager(fileManagerRef, { contentService: createContent().service });
+    });
+    actor.stop();
+    await settle(2);
+    expect(current?.close).toHaveBeenCalledTimes(1);
+    expect(initial?.close).toHaveBeenCalledTimes(1);
+    expect(services.built).toHaveLength(2);
+    guard.take();
+  });
+
   it('should follow the manifest, report its observation closing and retry it, on the step clock', async () => {
     const guard = guardActors({ ignore });
     const clock = new StepClock();
@@ -392,7 +560,35 @@ describe('createProjectRuntime', () => {
     expect(content.readManifest.mock.calls.length).toBeGreaterThan(reads);
     expect(selectManifestObservationError(actor.getSnapshot())).toBeUndefined();
     // The healthy manifest was neither reloaded nor reported.
-    expect(selectProjectRef(actor.getSnapshot()).getSnapshot().context.manifestIssue).toBeUndefined();
+    const projectRef = selectProjectRef(actor.getSnapshot());
+    expect(projectRef.getSnapshot().context.manifestIssue).toBeUndefined();
+    const projectStates: string[] = [];
+    const states = projectRef.subscribe((snapshot) => {
+      projectStates.push(JSON.stringify(snapshot.value));
+    });
+
+    // A renamed manifest on disk: the watch re-arms, the observer reads it and the project reloads.
+    const renamed = serializeProjectManifest(projectToManifest({ ...project, name: 'Renamed project' }));
+    content.readManifest.mockImplementation(async () => renamed);
+    content.watches.at(-1)?.reject(new Error('Disconnected'));
+    await settle();
+    actor.send({ type: 'retryManifestObservation' });
+    await settle();
+    expect(projectStates).toContain(JSON.stringify('loading'));
+    expect(projectRef.getSnapshot().matches('ready')).toBe(true);
+    expect(projectRef.getSnapshot().context.project?.name).toBe('Renamed project');
+    expect(projectRef.getSnapshot().context.manifestIssue).toBeUndefined();
+
+    // Bytes that do not parse: the observer reports the issue instead of reloading.
+    projectStates.length = 0;
+    content.readManifest.mockImplementation(async () => new TextEncoder().encode('{ "tau": '));
+    content.watches.at(-1)?.reject(new Error('Disconnected'));
+    await settle();
+    actor.send({ type: 'retryManifestObservation' });
+    await settle();
+    expect(projectRef.getSnapshot().context.manifestIssue).toBeDefined();
+    expect(projectStates).not.toContain(JSON.stringify('loading'));
+    states.unsubscribe();
     actor.stop();
   });
 

@@ -176,7 +176,10 @@ describe('choices', () => {
       [
         'catalog',
         () => {
-          ports.setCatalog({ status: 'loaded', models: [catalogRow('model-a', { default: true })] });
+          ports.setCatalog({
+            status: 'loaded',
+            models: [catalogRow('model-a', { default: true }), catalogRow('model-b')],
+          });
         },
         (c) => c.defaultExecution,
         { kind: 'tau', model: 'model-a' },
@@ -212,6 +215,30 @@ describe('choices', () => {
         },
         (c) => c.computeReuseMode,
         'memory',
+      ],
+      [
+        'model cookie',
+        () => {
+          ports.setCookie(cookieName.chatModel, 'model-b');
+        },
+        (c) => c.defaultExecution,
+        { kind: 'tau', model: 'model-b' },
+      ],
+      [
+        'effort cookie',
+        () => {
+          ports.setCookie(cookieName.chatEffort, 'high');
+        },
+        (c) => c.defaultExecution,
+        { kind: 'tau', model: 'model-b', effort: 'high' },
+      ],
+      [
+        'execution cookie',
+        () => {
+          ports.setCookie(cookieName.chatExecution, { kind: 'acp', hostId: 'loopback:daemon-1', agentId: 'agent-a' });
+        },
+        (c) => c.defaultExecution,
+        { kind: 'acp', hostId: 'loopback:daemon-1', agentId: 'agent-a' },
       ],
     ];
     for (const [index, [, change, read, expected]] of steps.entries()) {

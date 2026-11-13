@@ -16,6 +16,7 @@ const alphabet = [
   'BudgetSwitchClose',
   'ChatForwarded',
   'ChatReady',
+  'CloseFailed',
   'CloseFlushFailed',
   'Edit',
   'FirstCheckSettled',

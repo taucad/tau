@@ -158,7 +158,7 @@ Label(l) == IF Labelled THEN l ELSE "-"
 Labels == {"Init", "RouteCommitted", "RouteHeard", "ChatForwarded", "AccessAsked", "AccessAnswered",
            "LibraryChanged", "LeaveFlushStarted", "LeaveFlushSettled", "Retry", "ModuleLoaded", "OpenAsked",
            "OpenJoined", "OpenLost", "ChatReady", "FirstCheckSettled", "OpenBoundPassed", "Edit", "PersonOpenAsked",
-           "PersonClosed", "PersonDiscarded", "CloseFlushFailed", "IdleExpired", "BudgetSwitchClose", "SessionClosed", "FlushRegistered"}
+           "PersonClosed", "PersonDiscarded", "CloseFlushFailed", "CloseFailed", "IdleExpired", "BudgetSwitchClose", "SessionClosed", "FlushRegistered"}
 
 InLive(p) == p \in Projects /\ sess[p] # "none"
 LiveCount == Cardinality({p \in Projects : sess[p] # "none"})
@@ -336,12 +336,16 @@ SessionClosed(v) ==
   /\ UNCHANGED <<route, nreq, asks, lib, mod, reg, cnt>>
   /\ act' = Label("SessionClosed")
 
-\* The close flush of a dirty session fails (I6): the session is not discarded. It returns to the live set
-\* with its unsaved work, retained until a later close's flush succeeds or the person discards it. An
-\* open waiting in pendingOpen for another project keeps waiting: the registry has no room for it. An
-\* open waiting for the retained session itself is answered by it: the registry reopens the retained
-\* session and clears pendingOpen (sessions.machine.ts 281 to 289, reopenRetained), so focus's own
-\* waiting open goes live.
+\* A dirty session's close fails (I6): the session is not discarded. It stays in the live set with its
+\* unsaved work, retained until a later close's flush succeeds or the person discards it. The two ways
+\* it fails share the MaxCloseFails bound, so each config with a close failure explores both.
+\*
+\* CloseFlushFailed: a producer refuses the flush (flushProducers) and the session returns to `live`
+\* (project-session.machine.ts). An open waiting in pendingOpen for another project keeps waiting: the
+\* registry has no room for it. An open waiting for the retained session itself is answered by it: the
+\* registry reopens the retained session and clears pendingOpen (sessions.machine.ts 281 to 289,
+\* reopenRetained), so focus's own waiting open goes live. The registry emits nothing to focus here;
+\* A5a derives it from the registry snapshot (pendingOpen cleared, status live).
 CloseFlushFailed(v) ==
   /\ sess[v] = "closing" /\ v \in dirty /\ cnt.closeFails < MaxCloseFails
   /\ sess' = [sess EXCEPT ![v] = "live"]
@@ -350,6 +354,20 @@ CloseFlushFailed(v) ==
   /\ cnt' = [cnt EXCEPT !.closeFails = @ + 1]
   /\ UNCHANGED <<route, nreq, asks, lib, mod, sreq, fact, dirty, reg, keep>>
   /\ act' = Label("CloseFlushFailed")
+
+\* CloseFailed: cancelRuns, flushSync or releaseAgentHost fails and the session goes to `failed`
+\* (project-session.machine.ts closeFailed). The failed child stays in the registry's refs and holds its
+\* slot, which the model keeps in the live set. The registry keeps pendingOpen and emits budgetRefused
+\* for it (sessions.machine.ts 281 to 289). A5a rule: on budgetRefused for its own waiting open of a
+\* project still in the live set, focus clears its open and sends it again; as built that open is a
+\* touch, which clears pendingOpen.
+CloseFailed(v) ==
+  /\ sess[v] = "closing" /\ v \in dirty /\ cnt.closeFails < MaxCloseFails
+  /\ sess' = [sess EXCEPT ![v] = "live"]
+  /\ f' = IF FocusPending /\ pendingOpen.project = v THEN [f EXCEPT !.opened = FALSE] ELSE f
+  /\ cnt' = [cnt EXCEPT !.closeFails = @ + 1]
+  /\ UNCHANGED <<route, nreq, asks, lib, mod, sreq, fact, dirty, pendingOpen, reg, keep>>
+  /\ act' = Label("CloseFailed")
 
 (* The opening session's facts. They move only for the project focus holds an answer for: a session
    nobody is opening stays as it was until focus opens it, which still reaches every value it could
@@ -734,7 +752,7 @@ Next ==
   \/ \E p \in Projects :
        \/ ChatReady(p) \/ FirstCheckSettled(p) \/ OpenBoundPassed(p) \/ Edit(p)
        \/ PersonOpenAsked(p) \/ PersonClosed(p) \/ IdleExpired(p)
-       \/ BudgetSwitchClose(p) \/ SessionClosed(p) \/ CloseFlushFailed(p) \/ PersonDiscarded(p)
+       \/ BudgetSwitchClose(p) \/ SessionClosed(p) \/ CloseFlushFailed(p) \/ CloseFailed(p) \/ PersonDiscarded(p)
 
 Spec == Init /\ [][Next]_vars
 
@@ -892,7 +910,7 @@ Settled ==
 RequestEventuallySettles == <>[]Settled
 
 (* Witness: the fifth ruled statement's case. In flushFailed, a person's open waits while the dirty
-   session being left is retained after its close flush failed *)
+   session being left is retained after its close failed *)
 RetainedUnreached ==
   ~(f.st = "flushFailed" /\ pendingOpen # NoPending /\ cnt.closeFails > 0
     /\ \E p \in dirty : sess[p] = "live" /\ p = f.from)

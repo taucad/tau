@@ -5,10 +5,13 @@
  * can plant a `commondir` that re-points git at a config of its choosing
  * (threat cases 3 and 5) or set `core.fsmonitor` to a program git runs on every
  * index read (case 1). Tau's engine pins `GIT_COMMON_DIR` to the real store
- * and `core.fsmonitor=false` on every command, so neither plant changes what
- * the engine reads or runs. Each row plants by hand, drives every kind of
- * command the engine issues — the live checkout and a linked one — against a
- * real repository, and then reads the planted marker and the real store.
+ * and `core.fsmonitor=false` on every command, so neither plant changes the
+ * config the engine reads or runs a program. Git's ref backend reads
+ * `commondir` itself whatever `GIT_COMMON_DIR` says, so a command whose admin
+ * directory names another common directory is refused before git starts. Each
+ * row plants by hand, drives the engine's commands — the live checkout and a
+ * linked one — against a real repository, and then reads the planted marker,
+ * the forged refs and the real store.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -118,35 +121,76 @@ const prepared = async (harness: NativeGitHarness): Promise<Checkout> => {
   return port.addCheckout!({ branch: 'side', from: base });
 };
 
+type Forged = Readonly<{ path: string; before: readonly string[]; heads: () => Promise<readonly string[]> }>;
+
+/**
+ * A complete common directory of the plant's own, outside the work tree, whose
+ * config runs the planted program (threat cases 3 and 5).
+ */
+const forgeCommonDirectory = async (harness: NativeGitHarness, planted: Planted): Promise<Forged> => {
+  const path = join(harness.root, 'forged');
+  await mkdir(path, { recursive: true });
+  await cp(join(planted.store, 'objects'), join(path, 'objects'), { recursive: true });
+  await cp(join(planted.store, 'refs'), join(path, 'refs'), { recursive: true });
+  await writeFile(join(path, 'config'), `[core]\n\trepositoryformatversion = 0\n\tfsmonitor = ${planted.program}\n`);
+  const heads = async (): Promise<readonly string[]> => {
+    const names = await readdir(join(path, 'refs', 'heads'));
+    return Promise.all(
+      names.toSorted().map(async (name) => `${name} ${await readFile(join(path, 'refs', 'heads', name), 'utf8')}`),
+    );
+  };
+  return { path, before: await heads(), heads };
+};
+
 describe.runIf(gitToolchainOnPath)('native-git reads only its own store (LP4)', () => {
-  it('ignores a commondir written into the store and into a linked checkout', async () => {
+  it('refuses every command once a commondir is written into the store, and reads nothing from it', async () => {
     const harness = await nativeHarness(projectId, 'tau-revisions-planted-commondir-');
     try {
       const linked = await prepared(harness);
       const planted = await plantProgram(harness);
-      /* A complete common directory of the plant's own, whose config runs the program (cases 3 and 5). */
-      const forged = join(harness.root, 'forged');
-      await mkdir(forged, { recursive: true });
-      await cp(join(planted.store, 'objects'), join(forged, 'objects'), {
-        recursive: true,
-      });
-      await cp(join(planted.store, 'refs'), join(forged, 'refs'), {
-        recursive: true,
-      });
-      await writeFile(
-        join(forged, 'config'),
-        `[core]\n\trepositoryformatversion = 0\n\tfsmonitor = ${planted.program}\n`,
-      );
+      const forged = await forgeCommonDirectory(harness, planted);
+      const before = await realHead(planted.store);
+      await writeFile(join(planted.store, 'commondir'), `${forged.path}\n`);
+
+      /* Git's ref backend would read and write the forged refs (case 3), so the engine refuses instead. */
+      const refused = { code: 'INVALID_REPOSITORY' };
+      await expect(harness.port.readHead()).rejects.toMatchObject(refused);
+      await expect(harness.reopen().readHead()).rejects.toMatchObject(refused);
+      await expect(harness.port.readRef('main')).rejects.toMatchObject(refused);
+      await expect(mint(harness.port, 'main', { 'a.txt': 'b\n' })).rejects.toMatchObject(refused);
+      await expect(harness.port.ignoredPaths!(linked.root)).rejects.toMatchObject(refused);
+      await expect(harness.port.listCheckouts!()).rejects.toMatchObject(refused);
+      await expect(harness.reopen().init({ author })).rejects.toMatchObject(refused);
+
+      expect(await exists(planted.marker)).toBe(false);
+      expect(await realHead(planted.store)).toBe(before);
+      expect(await forged.heads()).toStrictEqual(forged.before);
+    } finally {
+      await harness.dispose();
+    }
+  }, 120_000);
+
+  it("keeps the live checkout on the real store when a linked checkout's commondir is re-pointed", async () => {
+    const harness = await nativeHarness(projectId, 'tau-revisions-planted-linked-commondir-');
+    try {
+      const linked = await prepared(harness);
+      const planted = await plantProgram(harness);
+      const forged = await forgeCommonDirectory(harness, planted);
       const [admin] = await readdir(join(planted.store, 'worktrees'));
       expect(admin).toBeDefined();
-      await writeFile(join(planted.store, 'commondir'), `${forged}\n`);
-      await writeFile(join(planted.store, 'worktrees', admin!, 'commondir'), `${forged}\n`);
+      await writeFile(join(planted.store, 'worktrees', admin!, 'commondir'), `${forged.path}\n`);
 
-      await exercise(harness.port, linked);
-      await exercise(harness.reopen(), linked);
+      /* The live checkout's commands read the real store, which case 5 cannot reach… */
+      const head = await mint(harness.port, 'main', { 'a.txt': 'a\n', 'c.txt': 'c\n' });
+      expect(await realHead(planted.store)).toBe(head);
+      const [newest] = await harness.reopen().log({ heads: [head] });
+      expect(newest?.id).toBe(head);
+      await harness.port.ignoredPaths!();
+      /* …and a command in the re-pointed checkout is refused before git starts. */
+      await expect(harness.port.ignoredPaths!(linked.root)).rejects.toMatchObject({ code: 'INVALID_REPOSITORY' });
 
-      /* The planted config and its monitor never applied. */
       expect(await exists(planted.marker)).toBe(false);
+      expect(await forged.heads()).toStrictEqual(forged.before);
     } finally {
       await harness.dispose();
     }

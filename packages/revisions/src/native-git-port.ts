@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
@@ -402,7 +402,56 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return classified.code === 'ENGINE_FAILED' ? undefined : classified;
   };
 
+  /**
+   * Refuse a command whose admin directory names a common directory other than the store.
+   *
+   * `GIT_COMMON_DIR` moves config, hooks and objects, but git's files ref
+   * backend reads `<admin>/commondir` for itself and ignores the variable
+   * (stock git 2.43, measured for LP4): a planted file would still send every
+   * branch read and write to the folder it names. The store's own admin
+   * directory never has one, and a linked checkout's must name the store, so
+   * either case is refused before git starts. A file planted between this
+   * check and git's own read is the plant LP4 cannot see; the store policy is
+   * the first line against it.
+   *
+   * @param args - The command, `-C <root>` first when it runs in a linked checkout.
+   * @returns Once the command may run.
+   */
+  const assertOwnCommonDirectory = async (args: readonly string[]): Promise<void> => {
+    const refusal = new RevisionPortError(
+      'INVALID_REPOSITORY',
+      "The project's Git folder names another folder as its common directory; Tau reads and writes only its own.",
+    );
+    const planted = await lstat(join(storePath, 'commondir')).then(
+      () => true,
+      () => false,
+    );
+    if (planted) {
+      throw refusal;
+    }
+    const root = args[0] === '-C' ? args[1] : undefined;
+    if (root === undefined) {
+      return;
+    }
+    const gitFile = await readFile(join(root, gitDirectoryName), 'utf8').catch(() => '');
+    const named = /^gitdir: (?<admin>.+)$/mu.exec(gitFile)?.groups?.['admin']?.trim();
+    if (named === undefined) {
+      /* Not a linked checkout yet: git refuses on its own. */
+      return;
+    }
+    const admin = resolvePath(root, named);
+    const commonFile = await readFile(join(admin, 'commondir'), 'utf8').catch(() => undefined);
+    const common = commonFile === undefined ? admin : resolvePath(admin, commonFile.trim());
+    const [actual, store] = await Promise.all(
+      [common, storePath].map(async (path) => realpath(path).catch(() => path)),
+    );
+    if (actual !== store) {
+      throw refusal;
+    }
+  };
+
   const run = async (args: readonly string[], options: GitRunOptions = {}): Promise<GitCommandResult> => {
+    await assertOwnCommonDirectory(args);
     try {
       return await runGitCommand({
         gitExecutable,

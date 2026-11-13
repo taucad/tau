@@ -321,6 +321,7 @@ describe('host connector', () => {
       defaultExecution: { kind: 'tau', model: 'later-model' },
       defaultKernel: 'replicad',
       computeReuseMode: 'memory',
+      testingEnabled: false,
     };
     await connect?.('chat-2');
 
@@ -329,6 +330,7 @@ describe('host connector', () => {
     expect(promptOf()).toContain('later-model');
     expect(promptOf()).not.toContain('fixture-model');
     expect((agentHost.browserOptions.at(-1) as { computeMode?: unknown }).computeMode).toBe('memory');
+    expect((agentHost.browserOptions.at(-1) as { testingEnabled?: unknown }).testingEnabled).toBe(false);
     session.stop();
     expect(guard.take()).toEqual([]);
   });

@@ -4,7 +4,7 @@
  *
  * 1. `running`: initial; the child owns the lifecycle until the parent stops it
  *
- * Each row names the line of `useRevisionClientLifecycle` (`hooks/use-revision-status.ts` 1531 to 1657) it keeps.
+ * The rows keep what `useRevisionClientLifecycle` (`hooks/use-revision-status.ts` 1531 to 1657) does today.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, setup, types } from 'xstate';
@@ -15,6 +15,7 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionClientTestApi } from '#hooks/use-revision-status.js';
 import type { FlushPhase } from '#hooks/use-flush-on-close.js';
+import { revisionUserActor } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
@@ -411,6 +412,9 @@ describe('session revisions', () => {
     fake.setAnonymous(workspace, true);
     const anonymousDevice = sent(log, 'a', 'setActor').at(-1);
     expect(anonymousDevice).toMatchObject({ actor: { name: 'Anonymous', anonymous: true } });
+    /* B7: the device pseudonym is this workspace's own salt, never another workspace's. */
+    expect(globalThis.localStorage.getItem(`tau-revision-salt:${workspace}`)).not.toBeNull();
+    expect(globalThis.localStorage.getItem('tau-revision-salt:elsewhere')).toBeNull();
 
     fake.setSalt(`elsewhere/usr_1`, 'salt-other');
     expect(sent(log, 'a', 'setActor')).toHaveLength(before + 1);
@@ -420,6 +424,29 @@ describe('session revisions', () => {
     expect(sent(log, 'a', 'setActor')).toHaveLength(before + 2);
     expect(anonymousAccount).toMatchObject({ actor: { name: 'Anonymous', anonymous: true } });
     expect(anonymousAccount).not.toEqual(anonymousDevice);
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it("should drop the previous account's salt from the actor when the account changes", () => {
+    const guard = guardActors();
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts({ user: { id: 'usr_1' } });
+    fake.setSalt(`${workspace}/usr_1`, 'salt-one');
+    fake.setAnonymous(workspace, true);
+    const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
+    const session = createSession(fake.ports, fileManager.ref, { guard });
+    session.start();
+    const first = revisionUserActor({ workspace, user: { id: 'usr_1' }, anonymous: true, salt: 'salt-one' });
+    expect(sent(log, 'a', 'setActor').at(-1)).toEqual({ command: 'setActor', actor: first });
+
+    fake.setUser({ id: 'usr_2' });
+
+    const second = revisionUserActor({ workspace, user: { id: 'usr_2' }, anonymous: true });
+    expect(second).not.toEqual(first);
+    expect(sent(log, 'a', 'setActor').at(-1)).toEqual({ command: 'setActor', actor: second });
     session.stop();
     expect(guard.take()).toEqual([]);
   });

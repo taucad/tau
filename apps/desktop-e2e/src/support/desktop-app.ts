@@ -70,7 +70,7 @@ const isAnyProcessNaming = async (pattern: string): Promise<boolean> => {
  * Remove a throwaway root the app wrote into, once nothing is still writing there.
  *
  * Main's children outlive it: a kernel's first-use preparation unpacks into the dependency store under the profile and
- * runs the package's seal step there (`apps/desktop/src/tau/native-preparation.ts`), and when the fixture stops main
+ * runs the package's seal step there (`apps/libs/desktop-services-host/src/native-preparation.ts`), and when the fixture stops main
  * with `app.exit` or `SIGKILL` a seal step can keep adding files, so a recursive remove meets a directory it has just
  * emptied filled again (`ENOTEMPTY`). Every such process names the root in its arguments. Native workers do too, since
  * a worker runs from the store under the profile, and they clean their own temporary roots once their parent is gone;

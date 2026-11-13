@@ -1,6 +1,6 @@
 # The native shell conformance rows (desktop Bash/Terminal blueprint W2, testing contract
 # `sandbox:test:shell-conformance`, extended by the W3 service rows `shell-service:test:shell-conformance` and `host:test:shell-conformance`, and the
-# W5 desktop Terminal rows `desktop:test:terminal-conformance` and their concern-level mirror
+# W5 desktop Terminal rows `desktop-services-host:test:terminal-conformance` and their concern-level mirror
 # `desktop-terminal:test:terminal-conformance`): the real sandbox provider and the machine's own Bash on each
 # row, positive controls before negatives, network negatives judged by canaries outside the sandbox, and one
 # JSON receipt per row binding source, host, runtime, Bash and node-pty identities (I12).
@@ -17,7 +17,7 @@
 # concern targets are cacheable only under the environment fingerprint of `scripts/src/shell-evidence.ts`, which is a
 # fresh nonce unless `TAU_SHELL_EVIDENCE` is `reuse`. Only the merge queue's semantics-tier call and a labelled pull
 # request run ask for reuse; the nightly, `workflow_dispatch` and the candidate gate's call run fresh and still pass
-# `--skip-nx-cache`, `desktop:test:terminal-conformance` is never cached, and the Linux guests always run fresh. The
+# `--skip-nx-cache`, `desktop-services-host:test:terminal-conformance` is never cached, and the Linux guests always run fresh. The
 # stamp step then records each macOS receipt as fresh or as a verdict reused from an Nx hash first proven at another
 # commit, and refuses a reused receipt in a fresh run. This workflow has no remote cache env yet (CP-5b follow-up), so
 # until then a reuse run can only hit the runner's local cache, which is empty on a hosted runner.
@@ -89,12 +89,12 @@ jobs:
         id: select
         env:
           TIER: ${{ inputs.tier || 'full' }}
-          PROJECTS: ${{ inputs.projects || '["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"]' }}
+          PROJECTS: ${{ inputs.projects || '["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop-services-host","desktop-e2e"]' }}
         run: |
           set -euo pipefail
           case "$TIER" in full|semantics) ;; *) echo "::error::unknown shell tier: $TIER"; exit 1 ;; esac
           jq -e '
-            ["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"] as $known
+            ["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop-services-host","desktop-e2e"] as $known
             | type == "array" and length > 0 and all(.[]; type == "string" and (. as $name | $known | index([$name]) != null))
           ' <<< "$PROJECTS" > /dev/null || { echo "::error::projects must be a non-empty JSON array of shell projects: $PROJECTS"; exit 1; }
           projects=$(jq -c . <<< "$PROJECTS")
@@ -171,7 +171,7 @@ jobs:
       (contains(fromJSON(needs.select.outputs.projects), 'sandbox') ||
       contains(fromJSON(needs.select.outputs.projects), 'shell-service') ||
       contains(fromJSON(needs.select.outputs.projects), 'host') ||
-      contains(fromJSON(needs.select.outputs.projects), 'desktop') ||
+      contains(fromJSON(needs.select.outputs.projects), 'desktop-services-host') ||
       contains(fromJSON(needs.select.outputs.projects), 'desktop-terminal'))
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -248,11 +248,11 @@ jobs:
 
       # The desktop Terminal rows (W5): probe, refusal and PTY rows, on macOS with the shipped own-pty Seatbelt rule.
       - name: Run the desktop terminal conformance target
-        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'desktop')
+        if: (success() || failure()) && contains(fromJSON(needs.select.outputs.projects), 'desktop-services-host')
         env:
           TAU_SHELL_CONFORMANCE_ROW: ${{ matrix.row }}
           TAU_SHELL_CONFORMANCE_RECEIPT: ${{ github.workspace }}/out/test-results/shell-conformance/${{ matrix.row }}/terminal-receipt.json
-        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop:test:terminal-conformance --skip-nx-cache
+        run: GITHUB_SHA="$(git rev-parse HEAD)" pnpm nx run desktop-services-host:test:terminal-conformance --skip-nx-cache
 
       # The Terminal concern's own rows (shell split PR 3): the same probe, refusal and PTY rows over a port into the concern.
       - name: Run the Terminal concern conformance target
@@ -274,7 +274,7 @@ jobs:
           GITHUB_SHA="$(git rev-parse HEAD)" node scripts/src/shell-evidence.ts stamp
           "out/test-results/shell-conformance/$TAU_SHELL_CONFORMANCE_ROW"
           sandbox=receipt.json shell-service=service-receipt.json host=host-receipt.json
-          host=qualification-receipt.json desktop=terminal-receipt.json
+          host=qualification-receipt.json desktop-services-host=terminal-receipt.json
           desktop-terminal=terminal-concern-receipt.json
 
       - name: Upload the receipt

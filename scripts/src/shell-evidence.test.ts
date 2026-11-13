@@ -378,9 +378,9 @@ const macTargets = [
     receipt: 'terminal-concern-receipt.json',
   },
   {
-    project: 'desktop',
+    project: 'desktop-services-host',
     target: 'test:terminal-conformance',
-    file: 'apps/desktop/project.json',
+    file: 'apps/libs/desktop-services-host/project.json',
     receipt: 'terminal-receipt.json',
     fresh: true,
   },

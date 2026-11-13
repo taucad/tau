@@ -155,10 +155,10 @@ if listed host; then
     pnpm nx run host:test:shell-qualification --skip-nx-cache || status=$?
 fi
 # The desktop Terminal's rows through the services host's terminal concern (W5), with their own receipt.
-if listed desktop; then
+if listed desktop-services-host; then
   NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
     TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-conformance-receipt.json" \
-    pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || status=$?
+    pnpm nx run desktop-services-host:test:terminal-conformance --skip-nx-cache || status=$?
 fi
 # The Terminal concern's own rows over a port into the concern (shell split PR 3), with their own receipt.
 if listed desktop-terminal; then

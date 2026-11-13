@@ -212,6 +212,10 @@ const config: KnipConfig = {
       // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
       entry: ['scripts/svg-sprite.d.ts'],
     },
+    'apps/libs/desktop-services-host': {
+      // Ambient `tauCloudBuildEnabled` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
+      entry: ['src/build-environment.d.ts'],
+    },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.
       entry: ['src/graceful-shutdown.signal-fixture.ts'],
@@ -224,9 +228,10 @@ const config: KnipConfig = {
         'src/**/*.test-d.ts',
         'src/main/index.ts',
         'src/preload/**/*.ts',
-        'src/tau/*.entry.ts',
+        // The utility-process entries (`kernel-host`, `services-host`, `geometry-host`) over desktop-services-host.
+        'src/utility/*.entry.ts',
         // Bundled and launched by the native authority-writer Electron test.
-        'src/tau/fixtures/authority-writer-electron*.fixture.ts',
+        'src/main/fixtures/authority-writer-electron*.fixture.ts',
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
@@ -247,6 +252,8 @@ const config: KnipConfig = {
         '@agentclientprotocol/codex-acp',
         '@anthropic-ai/sandbox-runtime',
         'nanoraster',
+        // Externalized too, and imported only by desktop-services-host's kernel runtime, which the app bundles.
+        '@taulabs/openrscad-engine',
         // The `shell-supervisor` input of electron.vite.config.ts is the sandbox's supervisor entry, by path.
         '@taucad/sandbox',
       ],

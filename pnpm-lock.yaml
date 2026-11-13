@@ -2008,108 +2008,42 @@ importers:
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
-      '@taucad/agent-observability':
-        specifier: workspace:*
-        version: link:../../libs/agent-observability
-      '@taucad/agent-tools':
-        specifier: workspace:*
-        version: link:../../libs/agent-tools
-      '@taucad/assimp':
-        specifier: workspace:*
-        version: link:../../packages/plugins/assimp
       '@taucad/bambu':
         specifier: workspace:*
         version: link:../../packages/plugins/bambu
-      '@taucad/brep':
-        specifier: workspace:*
-        version: link:../../packages/plugins/brep
-      '@taucad/build123d':
-        specifier: workspace:*
-        version: link:../../packages/plugins/build123d
       '@taucad/carvera':
         specifier: workspace:*
         version: link:../../packages/plugins/carvera
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
-      '@taucad/desktop-terminal':
+      '@taucad/desktop-services-host':
         specifier: workspace:*
-        version: link:../libs/desktop-terminal
-      '@taucad/esbuild':
-        specifier: workspace:*
-        version: link:../../packages/plugins/esbuild
-      '@taucad/events':
-        specifier: workspace:*
-        version: link:../../libs/events
+        version: link:../libs/desktop-services-host
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
-      '@taucad/gltf':
-        specifier: workspace:*
-        version: link:../../packages/plugins/gltf
       '@taucad/grbl':
         specifier: workspace:*
         version: link:../../packages/plugins/grbl
       '@taucad/host':
         specifier: workspace:*
         version: link:../../packages/host
-      '@taucad/image':
-        specifier: workspace:*
-        version: link:../../packages/plugins/image
-      '@taucad/jscad':
-        specifier: workspace:*
-        version: link:../../packages/plugins/jscad
-      '@taucad/manifold':
-        specifier: workspace:*
-        version: link:../../packages/plugins/manifold
-      '@taucad/middleware':
-        specifier: workspace:*
-        version: link:../../packages/plugins/middleware
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../packages/core/native-process
-      '@taucad/opencascade':
-        specifier: workspace:*
-        version: link:../../packages/plugins/opencascade
-      '@taucad/openrscad':
-        specifier: workspace:*
-        version: link:../../packages/plugins/openrscad
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../../packages/plugins/picogk
-      '@taucad/picovoxel':
-        specifier: workspace:*
-        version: link:../../packages/plugins/picovoxel
-      '@taucad/replicad':
-        specifier: workspace:*
-        version: link:../../packages/plugins/replicad
-      '@taucad/rpc':
-        specifier: workspace:*
-        version: link:../../packages/rpc
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
       '@taucad/sandbox':
         specifier: workspace:*
         version: link:../../libs/sandbox
-      '@taucad/shell-service':
-        specifier: workspace:*
-        version: link:../../libs/shell-service
-      '@taucad/skills':
-        specifier: workspace:*
-        version: link:../../packages/skills
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../../packages/plugins/slicer
-      '@taucad/smlib':
-        specifier: workspace:*
-        version: link:../../packages/plugins/smlib
-      '@taucad/smlibpy':
-        specifier: workspace:*
-        version: link:../../packages/plugins/smlibpy
-      '@taucad/tscircuit':
-        specifier: workspace:*
-        version: link:../../packages/plugins/tscircuit
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -2125,9 +2059,6 @@ importers:
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
-      fflate:
-        specifier: 'catalog:'
-        version: 0.8.3
       geospec-engine:
         specifier: 'catalog:'
         version: 0.6.0
@@ -2168,9 +2099,6 @@ importers:
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
-      '@taucad/runtime-testing':
-        specifier: workspace:*
-        version: link:../../packages/runtime-testing
       '@taucad/xstate-testing':
         specifier: workspace:*
         version: link:../../libs/xstate-testing
@@ -3437,6 +3365,130 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  apps/libs/desktop-services-host:
+    dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../../packages/agent-host
+      '@taucad/agent-observability':
+        specifier: workspace:*
+        version: link:../../../libs/agent-observability
+      '@taucad/agent-tools':
+        specifier: workspace:*
+        version: link:../../../libs/agent-tools
+      '@taucad/assimp':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/assimp
+      '@taucad/brep':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/brep
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/build123d
+      '@taucad/desktop-terminal':
+        specifier: workspace:*
+        version: link:../desktop-terminal
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/esbuild
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../../libs/events
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../../packages/filesystem
+      '@taucad/gltf':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/gltf
+      '@taucad/host':
+        specifier: workspace:*
+        version: link:../../../packages/host
+      '@taucad/image':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/image
+      '@taucad/jscad':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/jscad
+      '@taucad/manifold':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/manifold
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/middleware
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../../../packages/core/native-process
+      '@taucad/opencascade':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/opencascade
+      '@taucad/openrscad':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/openrscad
+      '@taucad/picogk':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/picogk
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/picovoxel
+      '@taucad/replicad':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/replicad
+      '@taucad/rpc':
+        specifier: workspace:*
+        version: link:../../../packages/rpc
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../../packages/runtime
+      '@taucad/shell-service':
+        specifier: workspace:*
+        version: link:../../../libs/shell-service
+      '@taucad/skills':
+        specifier: workspace:*
+        version: link:../../../packages/skills
+      '@taucad/slicer':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/slicer
+      '@taucad/smlib':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/smlib
+      '@taucad/smlibpy':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/smlibpy
+      '@taucad/tscircuit':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/tscircuit
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+      '@taucad/zoo':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/zoo
+      '@taulabs/openrscad-engine':
+        specifier: 'catalog:'
+        version: 0.11.0-beta.5
+      geospec:
+        specifier: 'catalog:'
+        version: 0.6.0(vitest@4.1.11)
+      geospec-engine:
+        specifier: 'catalog:'
+        version: 0.6.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    devDependencies:
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../../packages/runtime-testing
+      fflate:
+        specifier: 'catalog:'
+        version: 0.8.3
+      vite:
+        specifier: catalog:electron-vite8
+        version: 8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
   apps/libs/desktop-terminal:
     dependencies:

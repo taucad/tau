@@ -95,7 +95,7 @@ import {
   createProjectRootRegistry,
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
-} from '#main/project-roots.js';
+} from '@taucad/desktop-services-host/project-roots';
 import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import { registerTerminalRelay } from '#main/terminal-relay.js';
@@ -141,9 +141,9 @@ import {
   moveToApplications,
   offerMoveToApplications,
 } from '#main/app-location.js';
-import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
-import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
-import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
+import { preparableNativeDeployments } from '@taucad/desktop-services-host/desktop-native-deployments';
+import { createDesktopKernelPreparer } from '@taucad/desktop-services-host/native-preparation';
+import { desktopNativeKernelIds, startNativeStore } from '@taucad/desktop-services-host/native-store';
 import {
   appIconThemeChannel,
   telemetryConsentChannel,

@@ -202,8 +202,16 @@ export class ModelInvocationEvidenceRecorder {
     permission: AttemptPermission | undefined,
     captured: CapturedContent | undefined,
   ): Promise<string> {
-    const authority = await (permission?.authority ??
-      this.telemetryPurposes.getAdmissionAuthority(attempt.principal, attempt.project));
+    const started = await permission?.authority;
+    /*
+     * The relay starts its lookup before the call, which can be before a new project's row is committed; that lookup
+     * reads the project as not the account's and refuses. Ask again now the call is done, so the first call of a new
+     * project keeps its generation (and its settlement is not left late). A refusal now is the account's answer.
+     */
+    const authority =
+      started !== undefined && allowed(started, 'summary')
+        ? started
+        : await this.telemetryPurposes.getAdmissionAuthority(attempt.principal, attempt.project);
     if (!allowed(authority, 'summary')) {
       return 'not-permitted';
     }

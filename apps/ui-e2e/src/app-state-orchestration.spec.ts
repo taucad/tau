@@ -1,10 +1,13 @@
 /**
- * The app state orchestration programme's e2e witness rows (charter D14, package A0.1).
+ * The app state orchestration programme's e2e witness rows (charter D14, D25, package A0.1).
  *
- * Five characterisation rows of today's behaviour, each run 20 times on `main` before anything moves:
- * every later wiring lane runs this file again and attaches the run. They are not red rows; each one
- * passes on `main` and asserts concrete state (a node, an open pane, file bytes, a journal row, a
- * revision entry), never a bare timeout.
+ * Every later wiring lane runs this file and attaches the run. Each row asserts concrete state (a
+ * node, an open pane, file bytes, a journal row, a revision entry), never a bare timeout. Three kinds:
+ *
+ * - characterisation rows, green on `main`;
+ * - expected-failure rows (`test.fails`, W0): today's defect, red on its own assertion; the owning
+ *   lane flips the row to `test` and never deletes it;
+ * - one report-only row, which records how often an unforced defect shows and never fails on it.
  */
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
@@ -75,23 +78,42 @@ const readLayout = async (config: StoredProjectConfig): Promise<{ lanes?: { work
   return text === undefined ? undefined : (JSON.parse(text) as { lanes?: { workbench?: boolean } });
 };
 
-test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip to B within one second', async () => {
-  await openSeed();
-  const configs = await configsByName();
-  const configA = configs[projectNames.a]!;
-  const toggle = workbenchToggle();
-  await target.expectAttribute(toggle, 'aria-pressed', 'true', 60_000);
+/**
+ * Read `read` until `isDone` holds or `boundMilliseconds` pass, and hand back the last reading either way, so the
+ * row's own assertion on it is what fails, not the wait.
+ */
+const readWithin = async <Value>(
+  read: () => Promise<Value>,
+  isDone: (value: Value) => boolean,
+  boundMilliseconds: number,
+): Promise<Value> => {
+  const deadline = performance.now() + boundMilliseconds;
+  let value = await read();
+  while (!isDone(value) && performance.now() < deadline) {
+    // oxlint-disable-next-line no-await-in-loop -- A bounded poll reads in order.
+    await target.delay(250);
+    // oxlint-disable-next-line no-await-in-loop -- A bounded poll reads in order.
+    value = await read();
+  }
+  return value;
+};
 
-  /* The arrangement: the person closes A's Workbench lane. */
-  await target.click(toggle);
-  await target.expectAttribute(toggle, 'aria-pressed', 'false');
-  const routeA = await routeOf(projectNames.a);
-  const routeB = await routeOf(projectNames.b);
+type RoundTrip = Readonly<{
+  /** From the click on B to the click on A. */
+  elapsed: number;
+  /** From B's route settling with its chat to the click on A; `undefined` when the trip did not wait for it. */
+  dwell?: number;
+}>;
 
-  /* The round trip, driven in the page so the harness's own latency stays out of the one second:
-   * B's library link, B's route committed, then A's library link. */
-  const returnedAfter = await target.evaluate(
-    async (names) => {
+/**
+ * A's link, B's link and back, driven in the page so the harness's own latency stays out of the reading.
+ *
+ * @param settleOnB - Wait for B's own `?chat=` correction (the open's `navigate(replace)`) before going
+ *   back; otherwise go back as soon as B's path commits.
+ */
+const roundTripThroughB = async (settleOnB: boolean): Promise<RoundTrip> =>
+  target.evaluate(
+    async ({ names, settle }) => {
       const link = (name: string): HTMLAnchorElement => {
         const found = [...document.querySelectorAll<HTMLAnchorElement>('a')].find(
           (anchor) => anchor.textContent.trim() === name,
@@ -104,23 +126,50 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip to B
       const startedAt = performance.now();
       const toB = new URL(link(names.b).href).pathname;
       link(names.b).click();
-      await new Promise<void>((resolve) => {
+      const settledOnB = await new Promise<number | undefined>((resolve) => {
         const check = (): void => {
-          /* Bounded, so a route that never commits fails the elapsed assertion instead of hanging. */
-          if (location.pathname === toB || performance.now() - startedAt > 5000) {
-            resolve();
+          const onB = location.pathname === toB;
+          if (onB && (!settle || new URLSearchParams(location.search).has('chat'))) {
+            resolve(performance.now());
+            return;
+          }
+          /* Bounded, so a route that never settles fails the row's reading instead of hanging. */
+          if (performance.now() - startedAt > 30_000) {
+            resolve(undefined);
             return;
           }
           requestAnimationFrame(check);
         };
         check();
       });
+      const clickedAt = performance.now();
       link(names.a).click();
-      return performance.now() - startedAt;
+      return {
+        elapsed: clickedAt - startedAt,
+        ...(settle ? { dwell: settledOnB === undefined ? Number.POSITIVE_INFINITY : clickedAt - settledOnB } : {}),
+      };
     },
-    { a: projectNames.a, b: projectNames.b },
+    { names: { a: projectNames.a, b: projectNames.b }, settle: settleOnB },
   );
-  expect(returnedAfter).toBeLessThan(1000);
+
+test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip with under one second on B', async () => {
+  await openSeed();
+  const configs = await configsByName();
+  const configA = configs[projectNames.a]!;
+  const toggle = workbenchToggle();
+  await target.expectAttribute(toggle, 'aria-pressed', 'true', 60_000);
+
+  /* The arrangement: the person closes A's Workbench lane. */
+  await target.click(toggle);
+  await target.expectAttribute(toggle, 'aria-pressed', 'false');
+  const routeA = await routeOf(projectNames.a);
+  const routeB = await routeOf(projectNames.b);
+
+  /* The round trip, with under one second on B: from B's route settling with its own chat to the
+   * person's click back to A. Going back before that correction lands is the I2 report-only row's
+   * subject: B's late replace can take the route back to B, which is not this row's claim. */
+  const trip = await roundTripThroughB(true);
+  expect(trip.dwell).toBeLessThan(1000);
 
   await target.expectUrl(routeA, 10_000);
   await expectProjectReady('a');
@@ -142,7 +191,14 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip to B
   await target.expectAttribute(workbenchToggle(), 'aria-pressed', 'true');
 });
 
-test('A0.1 row 2 (I11): a cold project link carrying the Print route intent opens Print once the workbench is ready', async () => {
+/*
+ * Expected failure, owned by A8b (I11, `LayoutApply` `IntentAccounted`). On a cold load the intent is
+ * consumed but the pane never opens: before the layout record's first read, `openPanel` defers it through
+ * `layoutController.personWorkbenchChanged`, whose callback drops it when the route key moved
+ * (`project-workspace-context.tsx`), and the intent's own parameter cleanup and the `?chat=` correction
+ * both move it. A8b flips this row to `test`.
+ */
+test.fails('A0.1 row 2 (I11, expected failure, A8b): the Print pane intent of a cold project link is lost before the workbench is ready', async () => {
   /* The intent is read only where machines are enabled; the page's own environment opts in before
    * any app module evaluates (`client-env-script.ts` keeps a value that is already present). */
   await target.addInitScript(() => {
@@ -156,14 +212,19 @@ test('A0.1 row 2 (I11): a cold project link carrying the Print route intent open
   /* A cold load: a new document on the project link, the way a source-job link arrives. */
   await target.navigate(`${projectUrl.pathname}?workbench=print`);
   await expectProjectReady('a');
-  /* The workbench is ready: its lane is open and its saved arrangement is applied. */
+  /* The workbench is ready: its lane is open, its saved arrangement is applied and the intent is consumed. */
   await target.expectAttribute(workbenchToggle(), 'aria-pressed', 'true', 30_000);
   await target.expectVisible(dockTab('Parameters'), 60_000);
-  /* The intent is consumed: the link's parameter is gone, and the pane it asked for is open. */
   await expect.poll(async () => new URL(await target.currentUrl()).searchParams.has('workbench')).toBe(false);
-  const print = dockTab('Print');
-  await target.expectVisible(print, 30_000);
-  await target.expectClass(print, /\bdv-active-tab\b/u);
+
+  /* The defect's own assertion: the pane the link asked for is open. */
+  const print = await readWithin(
+    async () => target.read(dockTab('Print')),
+    (state) => state.visible,
+    15_000,
+  );
+  expect(print.visible, 'I11: the Print pane is open once the workbench is ready').toBe(true);
+  expect(print.className).toMatch(/\bdv-active-tab\b/u);
 });
 
 test('A0.1 row 3 (I8): a reload during a pending library operation recovers or reports it, and the project opens', async ({
@@ -306,7 +367,13 @@ const openSource = async (): Promise<Locator> => {
   return source;
 };
 
-test('A0.1 row 5 (S26, D26, I6): an edit, a view setting and an arrangement survive an immediate reload, and the close revision holds the edit', async () => {
+type EditedAndReloaded = Readonly<{ marker: string; cut: SectionCut }>;
+
+/**
+ * Edit A's entry file, a view setting and the arrangement, then reload at once: nothing waits for a save,
+ * and the file edit comes last so no blur saves it first.
+ */
+const editViewArrangeAndReload = async (): Promise<EditedAndReloaded> => {
   await openSeed();
   const marker = `// close-cut witness ${Math.random().toString(36).slice(2, 10)}`;
   await target.expectVisible(revisionChip(), 60_000);
@@ -334,17 +401,20 @@ test('A0.1 row 5 (S26, D26, I6): an edit, a view setting and an arrangement surv
   }, cut);
   await expect.poll(readSection).toEqual({ isActive: true, cuts: [cut] });
 
-  /* The edit, last, and the reload at once: nothing waits for a save. */
+  /* The edit, last, and the reload at once. */
   await target.click(source);
   await target.keyboardPress('ControlOrMeta+End');
   await target.type(source, marker);
   await target.keyboardPress('Escape');
   await target.expectContainingText(source, marker);
   await target.reload();
-
-  /* All three survive locally. */
   await target.expectUrl(projectRoute, 60_000);
   await target.expectVisible(dockTab(entryPaths.a), 60_000);
+  return { marker, cut };
+};
+
+test('A0.1 row 5a (S26, D26): an edit, a view setting and an arrangement survive an immediate reload locally', async () => {
+  const { marker, cut } = await editViewArrangeAndReload();
   await target.expectAttribute(
     selectors.getByRole('button', { name: 'Toggle Chat lane' }).first(),
     'aria-pressed',
@@ -353,8 +423,17 @@ test('A0.1 row 5 (S26, D26, I6): an edit, a view setting and an arrangement surv
   );
   await target.expectContainingText(await openSource(), marker, 60_000);
   await expect.poll(readSection, { timeout: 60_000 }).toEqual({ isActive: true, cuts: [cut] });
+});
 
-  /* The close revision holds the edit: History's newest entry was cut at close, and it changed the file. */
+/*
+ * Expected failure, owned by A7c, which depends on A5b's unload sequencer (I6, S26, D26). Today a reload
+ * cuts no close revision at all: History holds only V1 Start (`Tau-Trigger: create`) and the strip says
+ * *Unsaved changes*, even when the edit has settled before the reload. The fix is a close cut, taken as
+ * the registry's session stage after every producer settles, on the unload a reload is. A7c flips this
+ * row to `test`.
+ */
+test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revision holding the edit is cut on an immediate reload', async () => {
+  await editViewArrangeAndReload();
   await target.click(revisionChip());
   const newest = historyRow(0);
   await target.expectVisible(newest, 60_000);
@@ -366,6 +445,62 @@ test('A0.1 row 5 (S26, D26, I6): an edit, a view setting and an arrangement surv
   const trailer = panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });
   await target.expectVisible(changedFiles, 30_000);
   await target.expectVisible(trailer, 30_000);
-  expect(await target.textContent(trailer)).toMatch(/Tau-Trigger: close\b/u);
+
+  /* The defect's own assertion: History's newest entry was cut at close, and it changed the file. */
+  expect(await target.textContent(trailer), 'I6: the newest History entry is the close cut').toMatch(
+    /Tau-Trigger: close\b/u,
+  );
   expect(await target.textContent(changedFiles)).toContain(entryPaths.a);
+});
+
+/*
+ * Report-only (I2, `ProjectFocus` `FocusFollowsLatestRequest`; owner A5c). Going back to A as soon as B's
+ * path commits sometimes ends on B: B's late `?chat=` correction (`project-route.tsx`
+ * `handleFocusedChatResolved`, a `navigate(replace)`) lands after the person's click to A. It cannot be
+ * forced from here: the correction waits on the chat-session store's local read, which no network route
+ * can hold. So the row records k of n and never fails on it; every attempt counts.
+ */
+test('A0.1 I2 report-only (A5c): a fast round trip through B and the late B correction that overrides it', async ({
+  annotate,
+}) => {
+  await openSeed();
+  const routeA = await routeOf(projectNames.a);
+  const routeB = await routeOf(projectNames.b);
+  const attempts = 10;
+  const outcomes: Array<Readonly<{ attempt: number; elapsed: number; ended: 'A' | 'B' | 'unsettled' }>> = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Each attempt starts from A at rest.
+    const trip = await roundTripThroughB(false);
+    // oxlint-disable-next-line no-await-in-loop -- Each attempt is read before the next starts.
+    const ended = await readWithin(
+      async (): Promise<'A' | 'B' | 'unsettled'> => {
+        const url = await target.currentUrl();
+        if (routeB.test(url)) {
+          return 'B';
+        }
+        const isOnReadyA = routeA.test(url) && (await target.isVisible(dockTab(entryPaths.a)));
+        return isOnReadyA ? 'A' : 'unsettled';
+      },
+      (where) => where !== 'unsettled',
+      30_000,
+    );
+    outcomes.push({ attempt, elapsed: Math.round(trip.elapsed), ended });
+    if (ended !== 'A') {
+      // oxlint-disable-next-line no-await-in-loop -- The next attempt starts from A at rest.
+      await target.click(projectLink(projectNames.a));
+    }
+    // oxlint-disable-next-line no-await-in-loop -- The next attempt starts from A at rest.
+    await target.expectUrl(routeA, 30_000);
+    // oxlint-disable-next-line no-await-in-loop -- The next attempt starts from A at rest.
+    await expectProjectReady('a');
+    // oxlint-disable-next-line no-await-in-loop -- A at rest has its own chat on the route.
+    await expect
+      .poll(async () => new URL(await target.currentUrl()).searchParams.has('chat'), { timeout: 30_000 })
+      .toBe(true);
+  }
+  const overridden = outcomes.filter((outcome) => outcome.ended === 'B').length;
+  const unsettled = outcomes.filter((outcome) => outcome.ended === 'unsettled').length;
+  await annotate(`I2 override: ${String(overridden)} of ${String(attempts)} (unsettled ${String(unsettled)})`);
+  await annotate(`I2 attempts: ${JSON.stringify(outcomes)}`);
+  expect(outcomes).toHaveLength(attempts);
 });

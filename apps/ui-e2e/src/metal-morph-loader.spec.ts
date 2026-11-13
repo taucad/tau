@@ -28,7 +28,8 @@ const presentedLoaderBackend = (backend: LoaderBackend): LoaderState['backend'] 
   target.presentedGraphicsBackend(backend) === 'webgpu' ? 'webgpu' : 'webgl2';
 
 /** `test` for a row that proves `backend` itself: a WebGPU row runs where a WebGPU canvas presents. */
-const backendProofTest = (backend: LoaderBackend): typeof test => test.runIf(backend === 'webgl' || presentsWebGpu);
+const backendProofTest = (backend: LoaderBackend): ReturnType<typeof test.runIf> =>
+  test.runIf(backend === 'webgl' || presentsWebGpu);
 
 type LoaderState = Readonly<{
   adaptiveLevel: number;

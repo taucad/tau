@@ -1,5 +1,5 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -19,6 +19,7 @@ import type { FileContentService } from '@taucad/fs-client/file-content-service'
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
+import type * as ProjectWorkspaceWarmupModule from '#lib/project-workspace-warmup.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -1343,5 +1344,130 @@ describe('project route session identity', () => {
     });
 
     expect(mounts).toEqual([]);
+  });
+});
+
+/*
+ * A0.7: the route-shell load defects, pinned red until their fix (U1, U2, U22).
+ *
+ * `children` is the app shell (the sidebar and the outlet). The marker counts
+ * its own mounts, so a shell that moves between tree positions, or waits under
+ * a Suspense fallback, shows as a second mount or as an absent node.
+ */
+const workspaceImport = vi.hoisted(() => ({ pending: undefined as Promise<unknown> | undefined }));
+vi.mock('#lib/project-workspace-warmup.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectWorkspaceWarmupModule>();
+  return {
+    ...actual,
+    // oxlint-disable-next-line @typescript-eslint/promise-function-async -- `use` must receive the promise the row controls.
+    loadProjectWorkspace: () =>
+      (workspaceImport.pending ?? actual.loadProjectWorkspace()) as ReturnType<typeof actual.loadProjectWorkspace>,
+  };
+});
+
+describe('project route shell identity (A0.7)', () => {
+  const shell = { mounts: 0 };
+
+  function ShellMarker(): React.JSX.Element {
+    useLayoutEffect(() => {
+      shell.mounts += 1;
+    }, []);
+    return <nav data-testid='app-shell' aria-label='App shell' />;
+  }
+
+  function ShellRoute({
+    projectId,
+    isProjectUrl = projectId !== undefined,
+  }: {
+    readonly projectId?: string;
+    readonly isProjectUrl?: boolean;
+  }): React.JSX.Element {
+    return (
+      <SessionsProvider actor={sessionsActor}>
+        <routeModule.ProjectRouteGate
+          requestedProjectId={projectId}
+          slugs={isProjectUrl ? { workspaceSlug: 'live', projectSlug: projectId ?? 'unknown' } : undefined}
+        >
+          <ShellMarker />
+          <sessionsModule.ProjectChatRoute />
+        </routeModule.ProjectRouteGate>
+      </SessionsProvider>
+    );
+  }
+
+  /** The shell nodes in the document now. */
+  const shellNodes = (): readonly HTMLElement[] => screen.queryAllByTestId('app-shell');
+
+  beforeEach(() => {
+    shell.mounts = 0;
+    workspaceImport.pending = undefined;
+  });
+
+  it.fails('U1: should keep one shell mounted while the workspace import is pending', async () => {
+    const workspace = deferred<unknown>();
+    workspaceImport.pending = workspace.promise;
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    try {
+      render(<ShellRoute projectId={projectA} />);
+      await act(async () => {
+        await getProjectRouteAccess.mock.results[0]?.value;
+      });
+      expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([projectA]);
+
+      /* Access is ready and the project is live; only the import is outstanding. */
+      expect(shellNodes()).toHaveLength(1);
+      expect(shell.mounts).toBe(1);
+
+      await act(async () => {
+        workspace.resolve(sessionsModule);
+        await workspace.promise;
+      });
+      await screen.findByTestId('focused-project');
+      expect(shellNodes()).toHaveLength(1);
+      expect(shell.mounts).toBe(1);
+    } finally {
+      /* A red run stops before the import settles; settle it so the drain closes a mounted session. */
+      await act(async () => {
+        workspace.resolve(sessionsModule);
+        await workspace.promise;
+      });
+      workspaceImport.pending = undefined;
+    }
+  });
+
+  it.fails('U2: should mount the shell once across resolving to editor', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    render(<ShellRoute projectId={projectA} />);
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    expect(shell.mounts).toBe(1);
+  });
+
+  it.fails('U2: should mount the shell once across project A to project B', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const view = render(<ShellRoute projectId={projectA} />);
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    /* Counted from the shell on screen in A's editor: what U2 measures is the move to B. */
+    shell.mounts = 1;
+
+    view.rerender(<ShellRoute projectId={projectB} />);
+    await waitFor(() => {
+      expect(focusedSessionId()).toBe(projectB);
+    });
+    expect(shell.mounts).toBe(1);
+  });
+
+  it.fails('U22: should mount the shell once across Home to a project', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const view = render(<ShellRoute />);
+    expect(shellNodes()).toHaveLength(1);
+
+    view.rerender(<ShellRoute projectId={projectA} />);
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    expect(shell.mounts).toBe(1);
   });
 });

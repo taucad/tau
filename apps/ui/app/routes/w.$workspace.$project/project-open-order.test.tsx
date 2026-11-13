@@ -1,0 +1,583 @@
+/**
+ * A0.7: the open-order load defects, pinned red until their fix (U13, U20, M2).
+ *
+ * Each row renders the route as the app does — `ProjectRouteGate` with
+ * `ProjectChatRoute` below it, over the real live-session subtree — and scripts
+ * the session's facts: the registry's liveness, the editor's state and the
+ * revision status that model availability reads. The fixes act on the open
+ * order, so a row that rendered one pane could never go green: `ChatViewer`
+ * keeps its swap (`chat-viewer.tsx`, the `ChatViewer` wrapper). The viewer
+ * dock is a stand-in that renders the real `ChatViewer` for one view.
+ */
+import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
+import { useEffect, useSyncExternalStore } from 'react';
+import { act, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
+import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import { SessionsProvider } from '#hooks/use-sessions.js';
+import { createSessionsActor } from '#services/sessions-store.js';
+import type * as AgentHostClientModule from '#services/agent-host-client.js';
+import type * as HandleStoreModule from '#filesystem/handle-store.js';
+import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
+import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor().start();
+
+const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
+const mainEntryPath = 'main.ts';
+
+// ── Scripted facts ─────────────────────────────────────────────────────────
+
+/** A tiny external store: the scripted fact and the React subscribers that read it. */
+const createFact = <T,>(initial: T) => {
+  const listeners = new Set<() => void>();
+  let value = initial;
+  return {
+    get: (): T => value,
+    set(next: T): void {
+      value = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+};
+
+const facts = vi.hoisted(() => ({
+  isMobile: false,
+  /* The viewer content's own lifecycle, read from its file hook: one mount per mounted content. */
+  viewer: { mounts: 0, removals: 0 },
+}));
+
+/** What the revision client has published: `undefined` until its first projection. */
+const revisionStatus = createFact<RevisionStatusProjection | undefined>(undefined);
+
+/** A clean, backed-up local checkout; the fact the rows move is its readiness (D10). */
+const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection =>
+  ({
+    projectId: projectA,
+    checkoutId: 'checkout-main',
+    readiness,
+    projectDirty: false,
+    line: { kind: 'unknown' },
+    sync: { chats: 'ready', online: true, state: 'backedUp', pendingCount: 0 },
+    remote: { phase: 'idle' },
+  }) as unknown as RevisionStatusProjection;
+
+type EditorStateValue = Readonly<Record<string, unknown>> | string;
+
+/** Whether `value` is in `pattern`, as XState matches a state value. */
+const matchesStateValue = (value: EditorStateValue, pattern: EditorStateValue): boolean => {
+  if (typeof pattern === 'string') {
+    return typeof value === 'string' ? value === pattern : Object.hasOwn(value, pattern);
+  }
+  if (typeof value === 'string') {
+    return false;
+  }
+  return Object.entries(pattern).every(
+    ([key, child]) => Object.hasOwn(value, key) && matchesStateValue(value[key] as EditorStateValue, child as never),
+  );
+};
+
+const editorReady = { ready: { operation: 'idle', storing: 'idle' } } as const;
+const editorEnsuring = { ready: { operation: 'ensuringFocusedChat', storing: 'idle' } } as const;
+
+const editorFact = createFact<{ value: EditorStateValue; focusedChatId: string | undefined }>({
+  value: editorReady,
+  focusedChatId: 'chat-1',
+});
+
+const desktopLayout = {
+  chatOpen: true,
+  workbenchOpen: false,
+  chatWidth: 320,
+  workbenchWidth: 420,
+  compactAuxiliary: 'chat',
+};
+
+const editorSnapshot = () => {
+  const { value, focusedChatId } = editorFact.get();
+  return {
+    status: 'active',
+    value,
+    matches: (pattern: EditorStateValue) => matchesStateValue(value, pattern),
+    context: { focusedChatId, focusedChatError: undefined, error: undefined, panelState: { desktopLayout } },
+  };
+};
+/* One snapshot per published fact, so `useSelector` sees a stable value between publications. */
+let editorSnapshotValue = editorSnapshot();
+editorFact.subscribe(() => {
+  editorSnapshotValue = editorSnapshot();
+});
+const editorRef = {
+  send: vi.fn(),
+  getSnapshot: () => editorSnapshotValue,
+  subscribe: (observer: { next?: (snapshot: unknown) => void } | ((snapshot: unknown) => void)) => {
+    const unsubscribe = editorFact.subscribe(() => {
+      const next = typeof observer === 'function' ? observer : observer.next;
+      next?.(editorSnapshotValue);
+    });
+    return { unsubscribe };
+  },
+};
+
+const routeProject = createProjectFixture({
+  id: projectA,
+  name: projectA,
+  description: '',
+  tags: [],
+  assets: { main: { entryPath: mainEntryPath } },
+});
+const projectSnapshot = {
+  context: { project: routeProject, viewGraphics: new Map(), error: undefined },
+  matches: (state: unknown) => state !== 'runtimeCloseFailed' && state !== 'error',
+};
+const projectRef = {
+  send: vi.fn(),
+  on: () => ({ unsubscribe: () => undefined }),
+  getSnapshot: () => projectSnapshot,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+const projectValue = {
+  projectId: projectA,
+  projectRef,
+  editorRef,
+  parameterService: { close: async () => undefined, subscribeUnsavedDrafts: () => () => undefined },
+  viewGraphics: projectSnapshot.context.viewGraphics,
+  viewRecords: new Map(),
+  entriesRecord: undefined,
+  geometryUnits: new Map(),
+  mainEntryPath,
+  setViewEntryPath: () => undefined,
+  flushWorkbenchRecordProducers: async () => undefined,
+};
+
+const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
+const projectManager = { getProjectRouteAccess, restoreProject: vi.fn(), libraryRevision: 0 };
+
+const fileManagerRef = {
+  getSnapshot: () => ({
+    context: { rootDirectory: '/projects/live', openFileSystemBridge: vi.fn(), openRevisionSessionPort: vi.fn() },
+    matches: (state: string) => state === 'ready',
+  }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+
+const chatSessionStore = {
+  get: () => undefined,
+  setProjectSession: () => undefined,
+  setRevisionFacts: () => undefined,
+  setFocusedProject: () => undefined,
+  publishProjectHostConnector: () => () => undefined,
+  getChatHostSettings: async () => undefined,
+  cancelProjectedRun: async () => 'stopped',
+};
+
+// ── Session subtree: the route suite's doubles ─────────────────────────────
+
+vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentHostClientModule>()),
+  noteBrowserRunRated: async () => undefined,
+  createBrowserAgentHostClient: () => ({ close: async () => undefined }),
+  retainBrowserAgentHostProject: () => () => undefined,
+  createAgentHostClient: () => ({ close: async () => undefined }),
+  readBrowserRunStoppability: async () => 'stoppable',
+}));
+vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
+  createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
+}));
+vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof HandleStoreModule>()),
+  getProjectFileSystemConfig: async (projectId: string) => ({
+    projectId,
+    backend: 'opfs',
+    providerBasePath: projectId,
+  }),
+}));
+vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
+vi.mock('#cloud/commercial-features.js', () => ({
+  useCommercialFeatures: () => ({ isResolved: true, canSyncFiles: true }),
+}));
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => projectManager }));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useSharedFileManagerWorker: () => undefined,
+  SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
+    <div data-testid='project-session' data-project-id={projectId}>
+      {children}
+    </div>
+  ),
+  useFileManager: () => ({
+    fileManagerRef,
+    workspace: { syncProjectRoots: async () => undefined },
+    unavailableReason: undefined,
+  }),
+  useOptionalFileManager: () => undefined,
+}));
+vi.mock('#hooks/use-project.js', () => ({
+  ProjectProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  useProject: () => projectValue,
+}));
+vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
+  usePublishCloudProjectPreview: () => () => undefined,
+}));
+vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
+vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
+vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
+vi.mock('#hooks/use-flush-on-close.js', () => {
+  const flushProducers = async (): Promise<void> => undefined;
+  return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
+});
+vi.mock('#services/project-agent-host-registration.js', () => ({
+  registerProjectAgentHost: async () => ({ release: async () => undefined }),
+}));
+/* Model availability reads the revision status; the rows publish it. */
+vi.mock('#hooks/use-revision-status.js', () => {
+  const useStatus = (): RevisionStatusProjection | undefined =>
+    useSyncExternalStore(revisionStatus.subscribe, revisionStatus.get, revisionStatus.get);
+  const revisionClient = {
+    subscribeEvents: () => () => undefined,
+    quiesce: async () => undefined,
+    send: () => undefined,
+  };
+  return {
+    useRevisionClient: () => undefined,
+    useRevisionClientLifecycle: () => revisionClient,
+    useRevisionClientStatus: useStatus,
+    useRevisionStatus: useStatus,
+    useProjectRole: () => 'owner',
+    useRevisionCommands: () => ({ connectRemote: async () => undefined, syncNow: () => undefined }),
+  };
+});
+vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatSessionStore }));
+vi.mock('#hooks/use-models.js', () => ({
+  useModels: () => ({
+    defaultExecution: { kind: 'tau', model: 'fixture-model' },
+    resolveModel: (id: string) => ({ id, name: id, isResolved: false, provider: { id: 'unknown', name: 'Unknown' } }),
+  }),
+}));
+vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
+  RevisionSaveShortcut: () => <span data-testid='focused-project' />,
+}));
+vi.mock('#hooks/use-editor-document-session.js', () => ({
+  EditorDocumentSessionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('@taucad/viewer/hooks/use-webgl-context-tracker', () => ({
+  WebglContextTrackerProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
+  RevisionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
+vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
+vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ ProjectPrintRouteIntent: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
+  ProjectShareRouteIntent: () => null,
+  ProjectShareWorkbenchPanel: () => null,
+}));
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ProjectWorkspaceContextModule>()),
+  ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  useProjectWorkspace: () => ({ setChatOpen: () => undefined, setWorkbenchOpen: () => undefined }),
+}));
+vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
+vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));
+vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
+  ChatWorkspaceAuthorityProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
+}));
+vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
+  const { ProjectRouteRetryContext } = await import('#routes/w.$workspace.$project/project-route-state.js');
+  return {
+    ProjectRouteRetryContext,
+    ProjectRouteNotice: ({ state }: { readonly state: { kind: string } }) => <p>Notice: {state.kind}</p>,
+  };
+});
+
+// ── The editor layout, real down to the viewer ─────────────────────────────
+
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => facts.isMobile }));
+vi.mock('#providers/part-thumbnail-provider.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof PartThumbnailProviderModule>()),
+  PartThumbnailProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#components/geometry/cad/part-gallery.js', () => ({
+  PartGalleryProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#components/tour/tour-host.js', () => ({
+  TourHost: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
+vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
+  WorkspaceSkeleton: () => <div data-testid='workspace-skeleton' />,
+}));
+vi.mock('#hooks/active-chat-provider.js', () => ({
+  ActiveChatProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#chat-clients/chat-turn-host.js', () => ({ ChatTurnHost: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
+  ChatHistory: () => <div data-testid='chat-lane' />,
+}));
+vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
+  WorkbenchDockview: () => <div data-testid='workbench-lane' />,
+  getWorkbenchTabIcon: () => undefined,
+}));
+vi.mock('#routes/w.$workspace.$project/workbench-toggle.js', () => ({ WorkbenchToggle: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
+  ProjectUnavailableOverlay: () => null,
+  useIsProjectUnavailable: () => false,
+}));
+vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
+  ProjectManifestIssueBanner: () => null,
+}));
+vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => ({ open: true }) }));
+vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
+  ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('allotment', () => {
+  const Pane = ({ children }: React.PropsWithChildren) => <div data-pane>{children}</div>;
+  const Allotment = Object.assign(({ children }: React.PropsWithChildren) => <div>{children}</div>, { Pane });
+  return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
+});
+/* The dock stands in for Dockview's one viewer panel; the panel's content is the real `ChatViewer`. */
+vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async () => {
+  const { ChatViewer } = await import('#routes/w.$workspace.$project/chat-viewer.js');
+  const panelApi = { updateParameters: () => undefined, setTitle: () => undefined } as unknown as React.ComponentProps<
+    typeof ChatViewer
+  >['panelApi'];
+  return {
+    ViewerDockview: () => (
+      <div data-testid='viewer-dock'>
+        <ChatViewer viewId='view-main' entryPath={mainEntryPath} panelApi={panelApi} profile='editor' />
+      </div>
+    ),
+  };
+});
+vi.mock('#workbench-records/view-actions.js', () => ({
+  useWorkbenchViewCommands: () => ({ edit: async () => true, remove: async () => true }),
+}));
+vi.mock('#hooks/use-file-tree.js', () => ({
+  useFileTreeSelector: <T,>(selector: (tree: ReadonlyMap<string, unknown>) => T) => selector(new Map()),
+  useFileTreeMap: () => new Map(),
+}));
+/* The viewer content's file read: its effect is the viewer marker's mount and removal. */
+vi.mock('#hooks/use-file-content.js', () => ({
+  useFileContent: () => {
+    useEffect(() => {
+      facts.viewer.mounts += 1;
+      return () => {
+        facts.viewer.removals += 1;
+      };
+    }, []);
+    return { kind: 'loading' };
+  },
+}));
+/* The phone layout's sheet state, as `chat-interface-mobile.test.tsx` drives it: the chat surface is open. */
+vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
+  useChatInterfaceState: () => ({
+    activeTab: 'chat',
+    handleTabChange: () => undefined,
+    drawerOpen: true,
+    handleDrawerChange: () => undefined,
+    snapPoints: [0.5, 1],
+    activeSnapPoint: 0.5,
+    handleSnapChange: () => undefined,
+  }),
+}));
+vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof SidebarStatusModule>()),
+  useProjectSidebarRow: () => ({ attention: 0, conflicted: false, settings: 0, failed: 0 }),
+}));
+vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
+vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
+
+const routeModule = await import('./project-route.js');
+const sessionsModule = await import('./project-live-sessions.js');
+/* Both layouts are lazy chunks; load them before a row runs so a fake clock never waits on a module read. */
+await import('./chat-interface-desktop.js');
+await import('./chat-interface-mobile.js');
+
+const OpenRoute = (): React.JSX.Element => (
+  <MemoryRouter>
+    <SessionsProvider actor={sessionsActor}>
+      <routeModule.ProjectRouteGate requestedProjectId={projectA}>
+        <sessionsModule.ProjectChatRoute />
+      </routeModule.ProjectRouteGate>
+    </SessionsProvider>
+  </MemoryRouter>
+);
+
+/** Whether project A's session has reported live. */
+const isSessionLive = (): boolean =>
+  sessionsActor.getSnapshot().context.refs[projectA]?.getSnapshot().matches('live') === true;
+
+/** Let the route, the registry and the lazy layout settle under the fake clock. */
+const settle = async (): Promise<void> => {
+  for (let step = 0; step < 20; step++) {
+    // oxlint-disable-next-line no-await-in-loop -- each step lets one round of tasks and commits land, in order
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+};
+
+/**
+ * Every node matching `selector` that any commit added to the document, recorded as it lands.
+ *
+ * @param selector - The nodes to record.
+ * @param isWithin - Which parents count; every parent by default.
+ * @returns The nodes recorded so far, and a stop.
+ */
+const recordAdditions = (
+  selector: string,
+  isWithin: (parent: Node) => boolean = () => true,
+): { readonly added: Element[]; readonly stop: () => void } => {
+  const added: Element[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (!isWithin(record.target)) {
+        continue;
+      }
+      for (const node of record.addedNodes) {
+        if (node instanceof Element) {
+          added.push(...(node.matches(selector) ? [node] : []), ...node.querySelectorAll(selector));
+        }
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  return {
+    added,
+    stop: () => {
+      observer.disconnect();
+    },
+  };
+};
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  facts.isMobile = false;
+  facts.viewer.mounts = 0;
+  facts.viewer.removals = 0;
+  revisionStatus.set(undefined);
+  editorFact.set({ value: editorReady, focusedChatId: 'chat-1' });
+  getProjectRouteAccess.mockReset();
+  getProjectRouteAccess.mockImplementation(async (id) => ({
+    status: 'ready',
+    project: createProjectFixture({
+      id,
+      name: id,
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: mainEntryPath } },
+    }),
+  }));
+});
+
+afterEach(async () => {
+  vi.useRealTimers();
+  /* The registry is one app singleton: close what a row left live, as the route suite does. */
+  await act(async () => {
+    for (const projectId of Object.keys(sessionsActor.getSnapshot().context.refs)) {
+      sessionsActor.send({ type: 'close', projectId, reason: 'user' });
+    }
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
+    for (const ref of Object.values(sessionsActor.getSnapshot().context.refs)) {
+      ref.send({ type: 'confirmClose' });
+    }
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
+  });
+  expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([]);
+});
+
+describe('project open order (A0.7)', () => {
+  it.fails('U13: should mount the viewer once and never remove it when the files check follows live', async () => {
+    render(<OpenRoute />);
+    await settle();
+    expect(isSessionLive()).toBe(true);
+
+    /* The revision client's first projection: the fill has not answered for this tree yet. */
+    await act(async () => {
+      revisionStatus.set(statusAt('materialized'));
+    });
+    await settle();
+    await act(async () => {
+      revisionStatus.set(statusAt('filled'));
+    });
+    await settle();
+
+    expect(screen.getByTestId('viewer-dock')).toBeInTheDocument();
+    expect(facts.viewer).toEqual({ mounts: 1, removals: 0 });
+  });
+
+  it.fails('U20: should never render "Preparing model" when local files settle 200 ms after live', async () => {
+    const preparing = recordAdditions('[role="region"][aria-label="Preparing model"]');
+    /* Local files: no Tau Cloud open is owed, and the fill's word on this tree is still out. */
+    revisionStatus.set(statusAt('materialized'));
+    const session = createFact(false);
+    const unsubscribe = sessionsActor.subscribe(() => {
+      if (!session.get() && isSessionLive()) {
+        session.set(true);
+        globalThis.setTimeout(() => {
+          revisionStatus.set(statusAt('filled'));
+        }, 200);
+      }
+    });
+    try {
+      render(<OpenRoute />);
+      await settle();
+      expect(session.get()).toBe(true);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      await settle();
+
+      expect(screen.getByTestId('viewer-dock')).toBeInTheDocument();
+      expect(preparing.added.map((node) => node.getAttribute('aria-label'))).toEqual([]);
+    } finally {
+      unsubscribe.unsubscribe();
+      preparing.stop();
+    }
+  });
+
+  it('M2: should render no empty-state panel in the phone viewer box while the focused chat is ensured', async () => {
+    facts.isMobile = true;
+    editorFact.set({ value: editorEnsuring, focusedChatId: 'chat-1' });
+    /* The phone's viewer box is the parent of the viewer dock (`chat-interface-mobile.tsx`). */
+    const isInViewerBox = (parent: Node): boolean =>
+      parent instanceof Element &&
+      (parent.closest('[data-testid="viewer-dock"]') !== null ||
+        parent.querySelector(':scope > [data-testid="viewer-dock"]') !== null);
+    const emptyStates = recordAdditions('[data-slot="panel-empty-state"]', isInViewerBox);
+    try {
+      render(<OpenRoute />);
+      await settle();
+      expect(isSessionLive()).toBe(true);
+      /* The chat pane waits on its session below the viewer: the state M2 was seen in. */
+      expect(screen.getByTestId('chat-pane-skeleton-ensuring')).toBeInTheDocument();
+
+      const viewerBox = screen.getByTestId('viewer-dock').parentElement!;
+      expect(viewerBox.querySelector('[data-slot="panel-empty-state"]')).toBeNull();
+      expect(emptyStates.added).toEqual([]);
+    } finally {
+      emptyStates.stop();
+    }
+  });
+});

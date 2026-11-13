@@ -434,10 +434,10 @@ export const sessionsMachine = setup({
       if (context.pendingOpen !== undefined) {
         const pending = context.pendingOpen;
         const staleEpoch = staleEpochOf(context, pending);
-        if (staleEpoch !== undefined) {
-          enq.emit({ type: 'pendingOpenDropped', projectId: pending.projectId, epoch: staleEpoch });
-        } else {
+        if (staleEpoch === undefined) {
           enq.raise({ type: 'open', projectId: pending.projectId, request: pending.request });
+        } else {
+          enq.emit({ type: 'pendingOpenDropped', projectId: pending.projectId, epoch: staleEpoch });
         }
         announceLiveSet(liveSessions, enq);
         return { context: { ...patch, pendingOpen: undefined } };

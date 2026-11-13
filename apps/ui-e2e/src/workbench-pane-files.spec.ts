@@ -33,6 +33,8 @@ const readCommandInputVisualState = async (input: Locator) =>
 
 /** A drawer is a touch surface: its filter field takes the 40px touch row height (`--spacing-touch-row`). */
 const touchRowHeight = 40;
+/** A popover's filter field sits 4px in; a drawer moves it to the drawer's 16px edge (`drawer-command-rows`, #1223). */
+const fieldInset = { menu: 4, drawer: 16 } as const;
 
 const expectModernCommandInput = async (input: Locator, surface: 'menu' | 'drawer' = 'menu'): Promise<void> => {
   await target.expectVisible(input);
@@ -45,7 +47,7 @@ const expectModernCommandInput = async (input: Locator, surface: 'menu' | 'drawe
   }
   expect(state.borderRadius).toBeGreaterThan(0);
   expect(state.borderLeftWidth).toBe(1);
-  expect(state.leftInset).toBe(4);
+  expect(state.leftInset).toBe(fieldInset[surface]);
   expect(state.leftInset).toBeCloseTo(state.rightInset, 1);
   expect(state.wrapperBottomBorderWidth).toBe(0);
 };

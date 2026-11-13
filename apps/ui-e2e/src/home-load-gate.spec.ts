@@ -1,9 +1,17 @@
 /* oxlint-disable no-await-in-loop -- The returning visitor's projects are created through the UI one after another, as a visitor would. */
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
 import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
+import type { CloudLoadRecord } from '#support/cloud-stand-ins.js';
+import {
+  cloudLoadProbe,
+  cloudStandInCommands,
+  cloudStandInOwner,
+  readCloudLoadRecord,
+  recordCloudLoad,
+} from '#support/cloud-stand-ins.js';
 
 /**
  * R9 (home page loading audit): a load of Home is steady from its first frame. The target frame sequence's
@@ -155,3 +163,50 @@ test.each(
     );
   },
 );
+
+/*
+ * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
+ * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
+ * (`#support/cloud-stand-ins.js`). Expected failures until side lane N1 flips them.
+ */
+const cloud = cloudStandInCommands(target.commands);
+const cloudLoadTier = await cloud.uiIsCloudLoadTier();
+/** How long `get-session` is held, so the shell and the rich composer are on screen before the session resolves. */
+const sessionHeld = 2000;
+
+/** Load Home as the signed-in stand-in owner and keep the cloud recorder's record as evidence. */
+const loadSignedInHome = async (label: string, sessionDelay?: number): Promise<CloudLoadRecord> => {
+  await target.setViewport(viewports.wide);
+  await cloud.uiInstallCloudStandIns(sessionDelay === undefined ? {} : { session: sessionDelay });
+  await target.addInitScript(recordCloudLoad, cloudLoadProbe);
+  await target.navigate('/');
+  await target.waitFor((name) => document.body.textContent.includes(name), cloudStandInOwner.name, {
+    timeout: 60_000,
+  });
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(settleWindow);
+  const record = await target.evaluate(readCloudLoadRecord);
+  await target.writeArtifact(`home-load-gate/cloud-${label}.json`, `${JSON.stringify(record, null, 2)}\n`);
+  return record;
+};
+
+describe.runIf(cloudLoadTier)('cloud-build tier: Home', () => {
+  test.fails('N1: removes no child of body on a signed-in load of Home', async () => {
+    const record = await loadSignedInHome('n1-body');
+    expect(record.bodyChildRemovals, 'N1: these children of body were removed').toEqual([]);
+  });
+
+  test.fails(`N1: keeps the sidebar wrapper on Home while get-session is held ${String(sessionHeld)} ms`, async () => {
+    const record = await loadSignedInHome('n1-wrapper', sessionHeld);
+    expect(record.wrapperRemovals, 'N1: the sidebar wrapper was removed at these times (ms)').toEqual([]);
+  });
+
+  test.fails(`H7: never puts the plain textarea back after the rich composer upgraded, get-session held ${String(sessionHeld)} ms`, async () => {
+    const record = await loadSignedInHome('h7-composer', sessionHeld);
+    expect(record.composerUpgradedAt, 'the rich composer never upgraded').toBeDefined();
+    expect(
+      record.composerReplacements,
+      `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
+    ).toEqual([]);
+  });
+});

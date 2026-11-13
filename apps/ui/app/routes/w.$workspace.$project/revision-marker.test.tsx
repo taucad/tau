@@ -412,7 +412,7 @@ describe('RevisionRow', () => {
   });
 
   /* From the slow mark the comparison's wait offers Retry, which asks the read again and times a new wait from the Retry. */
-  it('offers Retry on a slow comparison, timing the new wait from the Retry', async () => {
+  it('offers Retry on a slow comparison, reading again and timing the new wait from the Retry', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
     renderRow();
@@ -423,13 +423,43 @@ describe('RevisionRow', () => {
       expect(element).not.toBeNull();
       return element!;
     });
+    const requests = revisionStatusHarness.comparisonRequests.length;
+
     vi.spyOn(performance, 'now').mockReturnValue(60_000);
     // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
     await user.click(within(frame).getByRole('button', { name: 'Retry' }));
     vi.restoreAllMocks();
 
+    // A new read, though the first one is still pending.
+    await waitFor(() => {
+      expect(revisionStatusHarness.comparisonRequests.length).toBe(requests + 1);
+    });
+
     const body = frame.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
     expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
+  /* A Retry while the first comparison is still pending is a second read, not a join onto the first. */
+  it('reads a comparison again on Retry while its first read is pending, and shows the second answer', async () => {
+    const user = userEvent.setup();
+    const first = Promise.withResolvers<never>();
+    revisionStatusHarness.comparisonRead = async () => first.promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(revisionStatusHarness.comparisonRequests).toHaveLength(1);
+
+    revisionStatusHarness.comparisonRead = undefined;
+    revisionStatusHarness.comparison = { original: 'a', modified: 'b', kind: 'text', change: 'modified', notices: [] };
+    await user.click(within(frame).getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
+    expect(revisionStatusHarness.comparisonRequests).toHaveLength(2);
   });
 
   it('restores an entry the files are not at, naming it in the button’s accessible name', async () => {

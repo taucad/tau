@@ -7,7 +7,10 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { FastifyRequest } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { authInstanceKey, hostDeviceOf, UseAuth, User } from '@taucad/api-auth';
+import { mock } from 'vitest-mock-extended';
+import { hostDeviceOf, SessionResolver, UseAuth, User } from '@taucad/api-auth';
+import type { AuthSession, AuthUser } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
 import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { GitBasicAuthMiddleware } from '#api/git/git-transport.js';
@@ -69,14 +72,13 @@ class StubProjectsController {
   controllers: [StubGitController, StubProjectsController],
   providers: [
     {
-      provide: authInstanceKey,
-      useValue: {
-        api: {
-          /* Sessions only: a push credential is nobody to better-auth. */
-          getSession: async ({ headers }: { headers: Headers }) =>
-            headers.get('authorization') === `Bearer ${ownerSession}` ? { user: { id: ownerId }, session: {} } : null,
-        },
-      },
+      provide: SessionResolver,
+      /* Sessions only: a push credential is nobody to better-auth. */
+      useValue: fakeSessionResolver(({ headers }) =>
+        headers.authorization === `Bearer ${ownerSession}`
+          ? { user: mock<AuthUser>({ id: ownerId }), session: mock<AuthSession>() }
+          : null,
+      ),
     },
     {
       provide: DatabaseService,

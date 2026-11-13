@@ -11,6 +11,7 @@ import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#auth.con
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { AuthService } from '#auth.service.js';
 import { BetterAuthService } from '#better-auth.service.js';
+import { SessionResolver } from '#session-resolver.js';
 import type { Environment } from '@taucad/api-core';
 import { EmailModule, EmailService } from '@taucad/api-email';
 import {
@@ -83,8 +84,8 @@ export class AuthModule implements NestModule, OnModuleInit {
       global: true,
       module: AuthModule,
       imports: [DatabaseModule, EmailModule],
-      providers: [authProvider, BetterAuthService],
-      exports: [authInstanceKey, BetterAuthService],
+      providers: [authProvider, BetterAuthService, SessionResolver],
+      exports: [authInstanceKey, BetterAuthService, SessionResolver],
     };
   }
 

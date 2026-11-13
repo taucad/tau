@@ -6,9 +6,8 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
-import { describe, expect, it } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
+import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { wireModelEstimatesSchema } from '@taucad/billing';
 import {
   billableModelRouteIds,
@@ -24,7 +23,9 @@ import {
   registerBillableModelMeterContracts,
 } from '@taucad/api-billing';
 import type { BillableModelProviderAdapter, BillingPolicyService } from '@taucad/api-billing';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import type { Environment } from '@taucad/api-core';
 
@@ -164,15 +165,15 @@ describe('BillingEstimatesService', () => {
 describe('GET /v1/billing/model-estimates', () => {
   it('authenticates before estimating and binds the session owner', async () => {
     const estimates = mock<BillingEstimatesService>();
-    const auth = mockDeep<Auth>();
-    auth.api.getSession.mockResolvedValue(null);
+    const getSession = vi.fn<FakeSessionLookup>();
+    getSession.mockResolvedValue(null);
     estimates.getModelEstimates.mockResolvedValue({ environment: 'development', ownerId: owner.id, routes: [] });
     const module = await Test.createTestingModule({
       controllers: [BillingController],
       providers: [
         Reflector,
         AuthGuard,
-        { provide: authInstanceKey, useValue: auth },
+        { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
         { provide: BillingService, useValue: mock<BillingService>() },
         { provide: BillingUsageService, useValue: mock<BillingUsageService>() },
         { provide: BillingPaymentsService, useValue: mock<BillingPaymentsService>() },
@@ -189,7 +190,7 @@ describe('GET /v1/billing/model-estimates', () => {
       expect(unauthorized.statusCode).toBe(401);
       expect(estimates.getModelEstimates).not.toHaveBeenCalled();
 
-      auth.api.getSession.mockResolvedValue({ user: owner, session });
+      getSession.mockResolvedValue({ user: owner, session });
       const response = await app.inject({ method: 'GET', url: '/v1/billing/model-estimates' });
       expect(response.statusCode).toBe(200);
       expect(response.headers['cache-control']).toBe('private, no-store');

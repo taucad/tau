@@ -53,17 +53,20 @@
 (*   5. A restore is settled against the arrangement at that step, and is *)
 (*      refused while a local edit is unwritten.                          *)
 (*   6. A route key change drops every queued intent in the same step.    *)
-(*   7. A workbench intent while the workbench lane is closed, or on a    *)
-(*      device with none, is dropped `workbenchClosed`.                   *)
+(*   7. On a device with a workbench, a workbench intent opens its lane; *)
+(*      closing the lane drops the queued workbench intents. On a device  *)
+(*      with none, a workbench intent is dropped. Both `workbenchClosed`.  *)
 (*   8. A publication that arrives while a local edit is unwritten does   *)
 (*      not hold the edit, whatever edit count it arrived at: it is       *)
 (*      fenced at arrival (`held`) and its apply never lands. The         *)
 (*      record's rebase of the edit (`recordSync`, not modelled) comes    *)
 (*      back as a later publication, which rule 3 applies.                *)
-(*   9. An apply, and any adapter change event it causes, never counts as *)
+(*                                                                         *)
+(* Environment assumptions (Dockview and the adapters, not the machine):  *)
+(*   A. An apply, and any adapter change event it causes, never counts as *)
 (*      an edit.                                                          *)
-(*   10. An adapter detaches either for a remount, after which it         *)
-(*      attaches again, or because its lane closes.                       *)
+(*   B. A detached adapter whose lane is open attaches again (liveness    *)
+(*      only: `Reattach`, with `DetachGuard`).                            *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                       *)
 (*   EditCount  TRUE: rule 2's count. FALSE: an apply lands whatever was  *)
@@ -81,6 +84,8 @@
 (*              store is disposed in a microtask after the effect cleanup *)
 (*              (`OldStoreDisposed`), and a write it had in flight still  *)
 (*              lands (`OrphanWriteLanded`).                              *)
+(*   DetachGuard  TRUE only in the liveness configuration: a detach or a *)
+(*              lane close leaves an attach cycle for assumption B.       *)
 (*   Labelled   TRUE: `act` names each step, for the graph export and the *)
 (*              covering suite. FALSE: `act` is constant.                 *)
 (***************************************************************************)
@@ -97,13 +102,13 @@ CONSTANTS Bytes,         \* the arrangements a record can hold
           MaxRoutes,     \* route key changes
           MaxRemounts,   \* Today: host remounts
           Unknown,       \* a model value: the applied revision while none is known
-          EditCount, Expected, Unwritten, Today, Labelled
+          EditCount, Expected, Unwritten, Today, DetachGuard, Labelled
 
 ASSUME /\ InitialBytes \in Bytes
        /\ Adapters \subseteq {"workbench", "viewer"} /\ Adapters # {}
        /\ \A n \in {MaxPubs, MaxEdits, MaxIntents, MaxRestores, MaxAttaches, MaxRoutes, MaxRemounts} :
             n \in Nat
-       /\ EditCount \in BOOLEAN /\ Expected \in BOOLEAN /\ Unwritten \in BOOLEAN /\ Today \in BOOLEAN /\ Labelled \in BOOLEAN
+       /\ EditCount \in BOOLEAN /\ Expected \in BOOLEAN /\ Unwritten \in BOOLEAN /\ DetachGuard \in BOOLEAN /\ Today \in BOOLEAN /\ Labelled \in BOOLEAN
        /\ ~Today => MaxRemounts = 0
 
 VARIABLES
@@ -284,11 +289,11 @@ AdapterAttached(a) ==
   /\ act' = Label("AdapterAttached")
   /\ UNCHANGED <<rec, shown, pending, applied, wbOpen, intent, restore, route, sessions, bound>>
 
-\* A remount: the adapter leaves and will attach again, so it detaches only while it has an attach cycle
-\* left. The workbench's last detach is `WorkbenchClosed`; the viewer pane has no lane to close.
+\* A remount. Under `DetachGuard` (the liveness configuration only) the adapter detaches only while it has an
+\* attach cycle left, so that `Reattach` can follow; the safety configurations leave it unguarded.
 AdapterDetached(a) ==
   /\ adapter[a] # "detached"
-  /\ bound.attaches[a] < MaxAttaches
+  /\ DetachGuard => bound.attaches[a] < MaxAttaches
   /\ Leave({a})
   /\ edited' = FALSE
   /\ act' = Label("AdapterDetached")
@@ -300,13 +305,17 @@ AdapterDetached(a) ==
 \* A settled intent keeps only its state and how often it was applied.
 Settle(x, s) == [NoIntent EXCEPT !.state = s, !.applies = x.applies + (IF s = "applied" THEN 1 ELSE 0)]
 
+\* Rule 7: on a device with a workbench, a workbench intent opens the workbench lane (as `openPanel` and the
+\* `fileOpened` listener call `setWorkbenchOpen(true)` today).
 IntentSent(i) ==
   /\ intent[i].state = "unsent"
   /\ \A j \in IntentIds : j < i => intent[j].state # "unsent"
-  /\ \E t \in Targets : intent' = [intent EXCEPT ![i] = [state |-> "queued", target |-> t, applies |-> 0]]
+  /\ \E t \in Targets :
+       /\ intent' = [intent EXCEPT ![i] = [state |-> "queued", target |-> t, applies |-> 0]]
+       /\ wbOpen' = (wbOpen \/ (t = "workbench" /\ "workbench" \in Adapters))
   /\ edited' = FALSE
   /\ act' = Label("IntentSent")
-  /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, restore, route, sessions, bound>>
+  /\ UNCHANGED <<rec, shown, pending, applied, adapter, restore, route, sessions, bound>>
 
 \* Rule 1: an applied intent is a local change of the arrangement.
 IntentApplied(i) ==
@@ -327,11 +336,11 @@ DropUnavailable(i) ==
   /\ act' = Label("IntentDropped")
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, restore, route, sessions, bound>>
 
-\* Rule 7.
+\* Rule 7: a workbench intent on a device with no workbench.
 DropClosed(i) ==
   /\ intent[i].state = "queued"
   /\ intent[i].target = "workbench"
-  /\ ~wbOpen
+  /\ "workbench" \notin Adapters
   /\ intent' = [intent EXCEPT ![i] = Settle(intent[i], "workbenchClosed")]
   /\ edited' = FALSE
   /\ act' = Label("IntentDropped")
@@ -350,11 +359,11 @@ RouteKeyChanged ==
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, restore, sessions, bound>>
 
 \* Rule 7 for the intents queued when the person closes the lane, whether its adapter is attached or
-\* between a remount's detach and attach. Only `AdapterAttaching` reopens the lane, so the workbench's
-\* attach cycles bound the closes.
+\* detached. Under `DetachGuard`, as for `AdapterDetached`, only while the workbench has an attach cycle left.
 WorkbenchClosed ==
   /\ wbOpen
   /\ "workbench" \in Adapters
+  /\ DetachGuard => bound.attaches["workbench"] < MaxAttaches
   /\ wbOpen' = FALSE
   /\ Leave({"workbench"})
   /\ intent' = [i \in IntentIds |->
@@ -392,7 +401,7 @@ RestoreSettled(k) ==
   /\ UNCHANGED <<applied, adapter, wbOpen, intent, route, bound>>
 
 -----------------------------------------------------------------------------
-(* The store's lifetime as built (Today only) *)
+(* The record write *)
 
 \* The store's write of the local edits lands; its echo is one of the `Published` steps.
 EditWritten ==
@@ -401,6 +410,9 @@ EditWritten ==
   /\ edited' = FALSE
   /\ act' = Label("EditWritten")
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, intent, restore, route, bound>>
+
+-----------------------------------------------------------------------------
+(* The store's lifetime as built (Today only) *)
 
 \* The remount's render: `useMemo` creates and starts a new store; the old store keeps any write in flight.
 HostRemounted ==
@@ -442,11 +454,13 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-\* A detached adapter whose lane is open attaches again: the end of a remount (`AdapterDetached`).
+\* Environment assumption: a detached adapter whose lane is open attaches again, the end of a remount
+\* (`AdapterDetached`). With `DetachGuard` every detach leaves a cycle for this, so under `LiveSpec` the
+\* antecedent `<>[]AnyAttached` of IntentEventuallyAccounted always holds.
 Reattach(a) == (a = "viewer" \/ wbOpen) /\ AdapterAttaching(a)
 
 \* Weak fairness of the adapters (an adapter with an open lane attaches) and of the intent queue (an
-\* intent its adapter can take is taken; a workbench intent with the lane closed is dropped).
+\* intent its adapter can take is taken; a workbench intent on a device with no workbench is dropped).
 Fairness ==
   /\ \A a \in Adapters : WF_vars(Reattach(a)) /\ WF_vars(AdapterAttached(a))
   /\ \A i \in IntentIds : WF_vars(IntentApplied(i)) /\ WF_vars(DropClosed(i))
@@ -457,13 +471,14 @@ LiveSpec == Spec /\ Fairness
 \* settled intent or restore ended; a publication's origin, which only `Published` reads; once its apply
 \* is done, everything of a publication but its bytes, since while it can be computed again (rule 4) the
 \* apply in flight holds the same `fresh`, `held` and `same`; and everything of an apply in flight that
-\* can no longer land (`Current` only falls), which is only discarded or replaced. Each dropped part is
-\* read by no enabled action and by a property only in the step that sets it, so two states that differ
-\* only there have the same behaviours. Not used by the liveness configuration.
+\* can no longer land (`Current` only falls), which is only discarded or replaced and is kept as a "dead"
+\* value distinct from every live apply. Each dropped part is read by no enabled action and by a property
+\* only in the step that sets it, so two states with the same view have the same behaviours, with or
+\* without `Symmetry`. Not used by the liveness configuration.
 View == <<IF rec.done THEN [bytes |-> rec.bytes, done |-> TRUE] ELSE [rec EXCEPT !.origin = "own"], shown,
           IF pending.state # "computed" THEN NoApply
           ELSE IF Current THEN pending
-          ELSE [NoApply EXCEPT !.state = "computed", !.latest = pending.latest],
+          ELSE [state |-> "dead", latest |-> pending.latest],
           applied, adapter, wbOpen,
           [i \in IntentIds |-> IF intent[i].state \in Settled THEN "settled" ELSE intent[i]],
           [k \in RestoreIds |-> IF restore[k].state \in {"applied", "refused"} THEN "settled" ELSE restore[k]],

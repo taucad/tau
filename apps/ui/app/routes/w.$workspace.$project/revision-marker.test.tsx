@@ -412,7 +412,7 @@ describe('RevisionRow', () => {
   });
 
   /* From the slow mark the comparison's wait offers Retry, which asks the read again and times a new wait from the Retry. */
-  it('offers Retry on a slow comparison, reading again and timing the new wait from the Retry', async () => {
+  it('offers Retry on a slow comparison, reading again, timing the new wait from the Retry and keeping focus', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
     renderRow();
@@ -434,6 +434,9 @@ describe('RevisionRow', () => {
     await waitFor(() => {
       expect(revisionStatusHarness.comparisonRequests.length).toBe(requests + 1);
     });
+    // The Retry button is replaced by the new wait's words; focus stays in the comparison, never on the page.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(frame).toContainElement(document.activeElement as HTMLElement);
 
     const body = frame.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
     expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');

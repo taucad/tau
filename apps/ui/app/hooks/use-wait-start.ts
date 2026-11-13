@@ -19,7 +19,7 @@ export type WaitStart = Readonly<{
   restart: () => void;
 }>;
 
-type TrackedStart = Readonly<{ active: boolean; waits: number; startedAt: number; isGesture: boolean }>;
+type TrackedStart = Readonly<{ active: boolean; startedAt: number; isGesture: boolean }>;
 
 const subscribeToNothing = (): (() => void) => () => undefined;
 const isClient = (): boolean => true;
@@ -28,33 +28,23 @@ const isServer = (): boolean => false;
 /**
  * Where a wait that starts now begins, and whether a person started it.
  *
- * - On the server and in the hydration pass the region is in the document the route opened with: navigation (0).
+ * - On the server and in the hydration pass the region is in the document the route opened with, whose clock starts
+ *   at navigation (0).
+ * - Every other wait starts now, however the page got there, so its indicator never reveals early.
  * - `navigator.userActivation.isActive` holds for a few seconds after a click or key press, so a wait that starts
- *   with it was started by that gesture: now, and its own announcement group.
- * - With no input since navigation (`hasBeenActive` false) the route is still opening on its own, as when the layout
- *   restores its panes; a region's first wait then belongs to the open: navigation (0). A later wait in the same mount
- *   starts now, so it never reveals early.
- * - Otherwise (an agent opened it, a reconnect, or a browser without user activation): now, not announced.
+ *   with it was started by that gesture and is its own announcement group. A wait nobody asked for (a restored or
+ *   agent-opened pane, a reconnect, a browser without user activation) is seen but not announced.
  *
- * @param input - The wait clock, whether the page runs script yet, and whether this is the region's first wait.
+ * @param input - The wait clock, and whether the page runs script yet.
  * @returns The wait's start and whether a gesture started it.
  */
-function startNow(input: { clock: WaitClock; isOnClient: boolean; isFirstWait: boolean }): {
-  startedAt: number;
-  isGesture: boolean;
-} {
+function startNow(input: { clock: WaitClock; isOnClient: boolean }): { startedAt: number; isGesture: boolean } {
   if (!input.isOnClient) {
     return { startedAt: 0, isGesture: false };
   }
   const { navigator } = globalThis;
   const activation = 'userActivation' in navigator ? navigator.userActivation : undefined;
-  if (activation?.isActive) {
-    return { startedAt: input.clock.now(), isGesture: true };
-  }
-  if (activation !== undefined && !activation.hasBeenActive && input.isFirstWait) {
-    return { startedAt: 0, isGesture: false };
-  }
-  return { startedAt: input.clock.now(), isGesture: false };
+  return { startedAt: input.clock.now(), isGesture: activation?.isActive ?? false };
 }
 
 /**
@@ -71,14 +61,11 @@ export function useWaitStart(active: boolean): WaitStart {
   const isOnClient = useSyncExternalStore(subscribeToNothing, isClient, isServer);
   const [tracked, setTracked] = useState<TrackedStart>(() => ({
     active,
-    waits: active ? 1 : 0,
-    ...startNow({ clock, isOnClient, isFirstWait: true }),
+    ...startNow({ clock, isOnClient }),
   }));
   let current = tracked;
   if (tracked.active !== active) {
-    current = active
-      ? { active, waits: tracked.waits + 1, ...startNow({ clock, isOnClient, isFirstWait: tracked.waits === 0 }) }
-      : { ...tracked, active };
+    current = active ? { active, ...startNow({ clock, isOnClient }) } : { ...tracked, active };
     setTracked(current);
   }
   return {

@@ -102,6 +102,8 @@ export type RevisionsView = {
   /** The checkout has been written to since its head (A19). */
   readonly isDirty: boolean;
   readonly isLoading: boolean;
+  /** Read the history again now, cancelling a first read still in flight (a Retry at a slow wait). */
+  readonly retry?: () => void;
   readonly branchFacts?: ReadonlyMap<
     string,
     Readonly<{ revisionNumber: number | undefined; ahead: number; behind: number }>
@@ -593,6 +595,9 @@ export function useRevisions(): RevisionsView {
       line,
       isDirty: status?.dirty ?? false,
       isLoading: isPending,
+      retry: () => {
+        void retryRead(queryClient, logKey, refetch);
+      },
       branchFacts,
     };
   }, [
@@ -605,8 +610,11 @@ export function useRevisions(): RevisionsView {
     line,
     loadOlder,
     log,
+    logKey,
     otherHeads,
     others,
+    queryClient,
+    refetch,
     rows,
     status,
     who,

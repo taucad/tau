@@ -68,6 +68,7 @@ export type {
   TurnFailedEvent,
   TurnFinalizedEvent,
 } from '#revisions.js';
+export type { RevisionEngineFailure, RevisionEngineFailureCode } from '#revision-engine-failures.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createProjectHost, createProjectHostActor } from '#project-host.js';

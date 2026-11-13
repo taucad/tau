@@ -11,7 +11,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import type { QueryClient, QueryState, UseMutationResult } from '@tanstack/react-query';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { notifyManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
@@ -435,7 +435,8 @@ const sessionAnswerOf = (state: QueryState | undefined): Readonly<{ account: str
  */
 const useListingAwaitsSession = (queryClient: QueryClient, account: string | undefined): boolean => {
   const session = useSyncExternalStore<QueryState | undefined | 'hydrating'>(
-    (listener) => queryClient.getQueryCache().subscribe(listener),
+    /* Batched, as `useIsFetching` does: a session query rebuilt in another component's render notifies after it. */
+    (listener) => queryClient.getQueryCache().subscribe(notifyManager.batchCalls(listener)),
     () => readSessionState(queryClient),
     () => 'hydrating',
   );

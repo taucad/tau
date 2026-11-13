@@ -32,7 +32,7 @@ import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 
 /** What the library takes from the runtime's composition. @public */
-export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect'> &
+export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     /** The browser `QueryClient`, the same instance `QueryClientProvider` hands down. */
     queryClient: QueryClient;

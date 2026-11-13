@@ -179,6 +179,11 @@ describe('app runtime root', () => {
     expect(onRejectedEvent).not.toHaveBeenCalled();
     registry.send({ type: 'touch', projectId: 'p1' });
     expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped', targetId: 'sessions' }));
+
+    /* The library's actors report through the same hook. */
+    onRejectedEvent.mockClear();
+    selectRuntimeProjectLibrary(runtime).workspaceConnection.send({ type: 'beginSelection', operationId: 'op1' });
+    expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped' }));
   });
 
   /* Programme control ruling: the client runtime captures workspace telemetry through `admittedAnalytics`; the server

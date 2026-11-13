@@ -177,6 +177,7 @@ export const createAppRuntime = ({
     queryClient,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
+    ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
   });
   const chatSessions = createChatSessions(projectLibrary, options);
   const runtime = createActor(

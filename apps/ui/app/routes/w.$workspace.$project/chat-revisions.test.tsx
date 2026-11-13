@@ -1233,6 +1233,18 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
   });
 
+  /* Blueprint row C13 (U17): History while it loads is its frame, never bars (frames 9/11). */
+  it.fails('draws no Skeleton in History or the branch chip while History loads (C13)', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(document.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton shapes in the History pane').toHaveLength(0);
+    expect(card.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
+  });
+
   /*
    * B5: with Tau's debug setting off, no 40-character id renders anywhere in
    * the pane, with every row open; with it on, the ids the entry is stored

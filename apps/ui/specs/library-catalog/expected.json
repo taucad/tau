@@ -13,7 +13,7 @@
     "LibraryCatalog.target-workspace.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "The same properties while the workspace goes away and returns three times: a replay fails with workspace-unavailable, the row is failed until the return re-arms it, and a row that failed on its third attempt stays failed. 2 projects, 1 row at start, 1 mutation, no crash, no write stop. To fit the pr queue it drops target's second mutation; with it the configuration takes about 80 s. Nightly under programme control's interim formal-budget ruling, pending its choice of shape; a small follow-up restores the pr tier if another shape is chosen."
+      "ref": "The same properties while the workspace goes away and returns three times: a replay fails with workspace-unavailable, the row is failed until the return re-arms it, and a row that failed on its third attempt stays failed. 2 projects, 1 row at start, 1 mutation, no crash, no write stop. It drops target's second mutation, which takes the configuration to about 80 s. Nightly under programme control's interim formal-budget ruling, pending its choice of shape; a small follow-up restores the pr tier if another shape is chosen."
     },
     "LibraryCatalog.liveness.cfg": {
       "tier": "nightly",

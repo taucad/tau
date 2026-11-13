@@ -618,12 +618,12 @@ Fenced(q) ==
 AccessAnswerFenced ==
   [][\A q \in Questions : (acc[q].st # "answered" /\ acc'[q].st = "answered") => Fenced(q)]_vars
 
-\* I18. A reply changes only its own question, and only while that question is open under the reply's
+\* I18. A reply changes only its own question, and only while that question is reading under the reply's
 \* generation and about the reply's project; an answer is delivered at most once per question {id,
 \* generation}, to the question open under that id and generation.
 AccessMatchedById ==
   [][/\ \A m \in replies \ replies', x \in Questions :
-          acc'[x] # acc[x] => (x = m.id /\ m.gen = acc[x].gen /\ m.p = acc[x].p)
+          acc'[x] # acc[x] => (x = m.id /\ acc[x].st = "reading" /\ m.gen = acc[x].gen /\ m.p = acc[x].p)
      /\ \A q \in Questions, g \in 0..MaxAsks :
           deliveries'[q][g] # deliveries[q][g] =>
             /\ deliveries'[q][g] = 1

@@ -770,6 +770,71 @@ for (const row of ports) {
       abort.abort();
     }, 30_000);
 
+    /* F3 on every host (I11): the Merged toast's Undo the page sends is the restore child's, as in the browser worker. */
+    it('undoes a merge over the host channel, writing the files from before it as a new entry', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      const settlement = await held.settlementFor('run-1');
+      const before = String(settlement.revisionId);
+      const tree = await held.port.readTree(revisionId(before));
+      const feature = await held.port.writeRevision({
+        parents: [revisionId(before)],
+        tree: new ImmutableRevisionTree([
+          ...(tree?.entries() ?? []).map(({ path, content, mode }) => [path, content, mode] as const),
+          ['part.ts', 'export const part = 1;\n'],
+        ]),
+        provenance: {
+          source: 'user',
+          actor: { kind: 'user', id: 'ada' },
+          capture: 'save',
+          via: 'desktop',
+          createdAt: Date.UTC(2026, 10, 13),
+        },
+        summary: { generated: 'Part' },
+      });
+      await held.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(feature.commitId) });
+      const abort = new AbortController();
+      const frames: Array<Readonly<{ kind: string; value: unknown }>> = [];
+      const reading = (async (): Promise<void> => {
+        for await (const frame of held.revisions.channel.events(abort.signal)) {
+          frames.push(frame);
+        }
+      })();
+      const toastOf = (type: string): Record<string, unknown> | undefined =>
+        frames
+          .filter((frame) => frame.kind === 'toast')
+          .map((frame) => frame.value as Record<string, unknown>)
+          .find((value) => value['type'] === type);
+      try {
+        await held.revisions.channel.request({ command: 'mergeBranch', branch: 'feature' });
+        await expect
+          .poll(() => toastOf('branch'), { timeout: 10_000 })
+          .toMatchObject({
+            operation: 'merge',
+            branch: 'feature',
+            revisionId: feature.commitId,
+            before,
+          });
+        expect(await readFile(join(held.workspaceRoot, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
+
+        await held.revisions.channel.request({ command: 'undoMerge', revisionId: feature.commitId, before });
+
+        await expect
+          .poll(() => toastOf('restored'), { timeout: 10_000 })
+          .toMatchObject({ mode: 'undoMerge', revisionId: before });
+        expect(toastOf('error')).toBeUndefined();
+        expect(existsSync(join(held.workspaceRoot, 'part.ts'))).toBe(false);
+        const head = await held.port.readRef('main');
+        const record = head === undefined ? undefined : await held.port.readRevision(head);
+        expect(record?.parents).toEqual([feature.commitId]);
+        expect(record?.provenance).toMatchObject({ source: 'restore', restoredFrom: before });
+        await expect(held.port.readRef('feature')).resolves.toBe(feature.commitId);
+      } finally {
+        abort.abort();
+        await reading.catch(() => undefined);
+      }
+    }, 30_000);
+
     /* L2-F4: linked checkouts live in this host's data directory, outside the
      * workspace, so a watcher on the workspace alone never saw their writes —
      * no dirty state, no idle revision, no write-generation guard. Native only:

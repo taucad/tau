@@ -21,7 +21,9 @@
       "apps/ui/app/runtime/app-runtime-provider.tsx",
       "apps/ui/app/runtime/app-runtime-spa-entry.server.tsx",
       "apps/ui/desktop/app/entry.server.tsx",
-      "apps/ui/serve/app/entry.server.tsx"
+      "apps/ui/serve/app/entry.server.tsx",
+      "packages/ui/src/components/wait-indicator.tsx",
+      "packages/ui/src/hooks/use-wait-clock.ts"
     ]
   },
   "modules": {
@@ -57,7 +59,8 @@
       "apps/ui/app/runtime/ui-runtime.definition.ts",
       "apps/ui/app/runtime/ui-runtime.schema.ts",
       "apps/ui/app/runtime/usdz-runtime.definition.ts",
-      "apps/ui/app/runtime/usdz-runtime.worker.ts"
+      "apps/ui/app/runtime/usdz-runtime.worker.ts",
+      "packages/ui/src/utils/wait-timing.ts"
     ]
   },
   "counts": {

@@ -18,7 +18,7 @@ import {
   sessionsMachine,
 } from './sessions.machine.js';
 import type { SessionsMachineEmitted, SessionsMachineEvent } from './sessions.machine.js';
-import type { ProjectSessionRegion } from './project-session.machine.js';
+import type { ProjectSessionOpenRequest, ProjectSessionRegion } from './project-session.machine.js';
 import { projectSessionIgnoredEvents, projectSessionMachine } from './project-session.machine.js';
 
 const isMachine = (value: unknown): boolean =>
@@ -92,7 +92,7 @@ const harness = (options?: {
     ...(options?.inspect === undefined ? {} : { inspect: options.inspect }),
   });
   const emitted: SessionsMachineEmitted[] = [];
-  for (const type of ['liveSetChanged', 'budgetRefused', 'quiesced'] as const) {
+  for (const type of ['liveSetChanged', 'budgetRefused', 'quiesced', 'pendingOpenDropped'] as const) {
     actor.on(type, (event) => emitted.push(event));
   }
   actor.start();
@@ -180,7 +180,7 @@ describe('sessionsMachine', async () => {
     expect(closeSteps).toEqual(['cancel:projA', 'producers:projA', 'flush:projA']);
     expect(started).toEqual(['projA', 'projB']);
     expect(stopped).toEqual([]);
-    expect(actor.getSnapshot().context.pendingOpen).toBe('projC');
+    expect(actor.getSnapshot().context.pendingOpen?.projectId).toBe('projC');
     expect(sessionsCloseSuggestions(actor.getSnapshot().context)).toEqual(['projB']);
 
     closeFlush.resolve();
@@ -312,7 +312,7 @@ describe('sessionsMachine', async () => {
       expect(started).toEqual(['projA']);
       expect(stopped).toEqual([]);
       expect(flush).toHaveBeenCalledTimes(1);
-      expect(actor.getSnapshot().context.pendingOpen).toBe('projA');
+      expect(actor.getSnapshot().context.pendingOpen?.projectId).toBe('projA');
       expect(emitted.filter((event) => event.type === 'budgetRefused')).toEqual([
         { type: 'budgetRefused', projectId: 'projA', suggestions: ['projA'] },
       ]);
@@ -518,7 +518,7 @@ describe('sessionsMachine', async () => {
       projectId: 'projSecond',
       suggestions: ['projFirst'],
     });
-    expect(actor.getSnapshot().context.pendingOpen).toBe('projSecond');
+    expect(actor.getSnapshot().context.pendingOpen?.projectId).toBe('projSecond');
     actor.stop();
   });
 
@@ -727,6 +727,479 @@ describe('sessionsMachine', async () => {
   });
 });
 
+/** A request as focus will build it (R3-F2): the workspace, the S34 kernel id, the route's chat, the answer's epoch. */
+const requestFor = (projectId: string, extra?: Partial<ProjectSessionOpenRequest>): ProjectSessionOpenRequest => ({
+  workspace: `ws-${projectId}`,
+  nativeKernelId: 'build123d',
+  chatId: `chat-${projectId}`,
+  ...extra,
+});
+
+const sessionRequest = (
+  actor: ReturnType<typeof harness>['actor'],
+  projectId: string,
+): ProjectSessionOpenRequest | undefined => actor.getSnapshot().context.refs[projectId]?.getSnapshot().context.request;
+
+describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('should give the request of an open to the session it spawns', async () => {
+    const { actor } = harness();
+    const request = requestFor('projA', { createdChatId: 'chat-new', epoch: 3 });
+
+    actor.send({ type: 'open', projectId: 'projA', request });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual(request);
+    actor.stop();
+  });
+
+  it('should spawn a bare open with no request, as the sidebar and the notice send it until A5b', async () => {
+    const { actor } = harness();
+
+    await openIdle(actor, 'projA');
+
+    expect(sessionRequest(actor, 'projA')).toBeUndefined();
+    actor.stop();
+  });
+
+  it('should resume a pending open with the request it came with', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started } = harness({ budget: 2, closeFlush: closeFlush.promise });
+    await openIdle(actor, 'projA');
+    await openIdle(actor, 'projB');
+    const request = requestFor('projC');
+
+    actor.send({ type: 'open', projectId: 'projC', request });
+    await settle();
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projC', request });
+    expect(started).toEqual(['projA', 'projB']);
+
+    closeFlush.resolve();
+    await settle();
+    expect(started).toEqual(['projA', 'projB', 'projC']);
+    expect(sessionRequest(actor, 'projC')).toEqual(request);
+    expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    actor.stop();
+  });
+
+  it('should keep only the latest destination and its request in the single slot: A to B to C while A closes', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started, stopped } = harness({
+      budget: constrainedLiveProjectBudget,
+      closeFlush: closeFlush.promise,
+    });
+    await openIdle(actor, 'projA');
+
+    actor.send({ type: 'open', projectId: 'projB', request: requestFor('projB') });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projB', request: requestFor('projB') });
+
+    actor.send({ type: 'open', projectId: 'projC', request: requestFor('projC') });
+    await settle();
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projC', request: requestFor('projC') });
+
+    closeFlush.resolve();
+    await settle();
+    expect(stopped).toEqual(['projA']);
+    expect(started).toEqual(['projA', 'projC']);
+    expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projC']);
+    expect(sessionRequest(actor, 'projC')).toEqual(requestFor('projC'));
+    actor.stop();
+  });
+
+  it('should keep the request of an open that switch-closes an unpushed project on a one-project device (B-08)', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started } = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+    report(actor, 'projA', { pushed: false });
+    const request = requestFor('projB');
+
+    actor.send({ type: 'open', projectId: 'projB', request });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projB', request });
+
+    closeFlush.resolve();
+    await settle();
+    expect(started).toEqual(['projA', 'projB']);
+    expect(sessionRequest(actor, 'projB')).toEqual(request);
+    actor.stop();
+  });
+
+  it('should replace a pending request with a newer open of the same project', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor } = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
+    await openIdle(actor, 'projA');
+
+    actor.send({ type: 'open', projectId: 'projB', request: requestFor('projB') });
+    actor.send({ type: 'open', projectId: 'projB', request: requestFor('projB', { chatId: 'chat-2' }) });
+    await settle();
+    closeFlush.resolve();
+    await settle();
+
+    expect(sessionRequest(actor, 'projB')).toEqual(requestFor('projB', { chatId: 'chat-2' }));
+    actor.stop();
+  });
+
+  it('should resume a budget-refused open with its request once the person closes a project (R8)', async () => {
+    const { actor, started, emitted } = harness({ budget: 2 });
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+    report(actor, 'projA', { runs: 1 });
+    actor.send({ type: 'open', projectId: 'projRun' });
+    await settle();
+    report(actor, 'projRun', { runs: 1 });
+    const request = requestFor('projB');
+
+    actor.send({ type: 'open', projectId: 'projB', request });
+    await settle();
+    expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projB');
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projB', request });
+
+    report(actor, 'projA');
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+
+    expect(started).toEqual(['projA', 'projRun', 'projB']);
+    expect(sessionRequest(actor, 'projB')).toEqual(request);
+    actor.stop();
+  });
+
+  it('should keep a return to a closing project with its request and resume it once the close lands', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started } = harness({ budget: 2, closeFlush: closeFlush.promise });
+    await openIdle(actor, 'projA');
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+    const request = requestFor('projA', { chatId: 'chat-back' });
+
+    actor.send({ type: 'open', projectId: 'projA', request });
+    await settle();
+    expect(actor.getSnapshot().context.pendingOpen).toEqual({ projectId: 'projA', request });
+
+    closeFlush.resolve();
+    await settle();
+    expect(started).toEqual(['projA', 'projA']);
+    expect(sessionRequest(actor, 'projA')).toEqual(request);
+    actor.stop();
+  });
+
+  it('should touch a live project on an open and forward the chat of its request to its session', async () => {
+    const { actor, started } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+    const before = actor.getSnapshot().context.touchOrder['projA'] ?? 0;
+
+    actor.send({
+      type: 'open',
+      projectId: 'projA',
+      request: requestFor('projA', { chatId: 'chat-2', createdChatId: 'chat-2', nativeKernelId: 'replicad' }),
+    });
+    await settle();
+
+    expect(started).toEqual(['projA']);
+    expect(actor.getSnapshot().context.touchOrder['projA']).toBeGreaterThan(before);
+    /* Only the chat fields move: the session keeps the kernel and workspace it opened with. */
+    expect(sessionRequest(actor, 'projA')).toEqual(
+      requestFor('projA', { chatId: 'chat-2', createdChatId: 'chat-2', nativeKernelId: 'build123d' }),
+    );
+    actor.stop();
+  });
+
+  it.each([
+    ['a chat id alone', { chatId: 'chat-9' }, { chatId: 'chat-9', createdChatId: undefined }],
+    ['a created chat id alone', { createdChatId: 'chat-new' }, { chatId: undefined, createdChatId: 'chat-new' }],
+  ])('should forward the chat of a live open whose request carries %s', async (_name, chat, expected) => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: 'ws-projA', ...chat } });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual({ ...requestFor('projA'), ...expected });
+    actor.stop();
+  });
+
+  it('should forward the chat to a closing session, so a return its refused close keeps live holds the new chat', async () => {
+    const producerFlush = Promise.withResolvers<void>();
+    const { actor } = harness({ producerFlush: producerFlush.promise, flushRefuses: true });
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-2' }) });
+    producerFlush.resolve();
+    await settle();
+
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('live');
+    expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    expect(sessionRequest(actor, 'projA')?.chatId).toBe('chat-2');
+
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+    actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-3' });
+    await settle();
+    expect(sessionRequest(actor, 'projA')?.chatId).toBe('chat-3');
+    actor.stop();
+  });
+
+  it('should forward chatRequested from the registry to a session that is closing', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor } = harness({ closeFlush: closeFlush.promise });
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+    actor.send({ type: 'close', projectId: 'projA', reason: 'user' });
+    await settle();
+    expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
+
+    actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-3' });
+
+    expect(sessionRequest(actor, 'projA')?.chatId).toBe('chat-3');
+    closeFlush.resolve();
+    actor.stop();
+  });
+
+  it('should forward a chatRequested that names no chat, clearing both fields', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { createdChatId: 'chat-new' }) });
+    await settle();
+
+    actor.send({ type: 'chatRequested', projectId: 'projA' });
+
+    expect(sessionRequest(actor, 'projA')).toEqual({
+      workspace: 'ws-projA',
+      nativeKernelId: 'build123d',
+      chatId: undefined,
+      createdChatId: undefined,
+    });
+    actor.stop();
+  });
+
+  it('should only touch a live project on an open whose request carries no chat', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: 'ws-projA' } });
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-1' }));
+    actor.stop();
+  });
+
+  it('should forward chatRequested to a live session, an undefined chat clearing its field', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { createdChatId: 'chat-new' }) });
+    await settle();
+
+    actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-2' });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual({
+      workspace: 'ws-projA',
+      nativeKernelId: 'build123d',
+      chatId: 'chat-2',
+      createdChatId: undefined,
+    });
+    actor.stop();
+  });
+
+  it('should forward both chat fields of chatRequested to a live session', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA') });
+    await settle();
+
+    actor.send({ type: 'chatRequested', projectId: 'projA', chatId: 'chat-2', createdChatId: 'chat-3' });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-2', createdChatId: 'chat-3' }));
+    actor.stop();
+  });
+
+  it('should keep the open facts a session reports on its status', async () => {
+    const { actor } = harness();
+    await openIdle(actor, 'projA');
+
+    actor.send({
+      type: 'sessionState',
+      projectId: 'projA',
+      state: 'live',
+      runs: 0,
+      dirty: false,
+      pushed: true,
+      chatReady: false,
+      availability: 'pending',
+    });
+
+    expect(actor.getSnapshot().context.status['projA']).toMatchObject({ chatReady: false, availability: 'pending' });
+    actor.stop();
+  });
+
+  it('should change nothing on chatRequested for a project that is not live (MC-R18)', async () => {
+    const { actor, started, emitted } = harness();
+    await openIdle(actor, 'projA');
+    const before = actor.getSnapshot().context;
+
+    actor.send({ type: 'chatRequested', projectId: 'projGone', chatId: 'chat-1' });
+    await settle();
+
+    expect(actor.getSnapshot().context).toBe(before);
+    expect(started).toEqual(['projA']);
+    expect(emitted.filter((event) => event.type !== 'liveSetChanged')).toEqual([]);
+    actor.stop();
+  });
+
+  it('should report the open facts of a session on its status: chat ready and the first file check settled', async () => {
+    const { actor } = harness();
+
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+
+    expect(actor.getSnapshot().context.status['projA']).toMatchObject({
+      state: 'live',
+      chatReady: true,
+      availability: 'settled',
+    });
+    actor.stop();
+  });
+});
+
+describe('sessionsMachine — the stale-epoch resume (A5c, spec-pf RegistryChecksEpoch)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A one-project device whose open of B waits for A's held close, with B's request built at `epoch`. */
+  const waitingOpen = async (epoch: number | undefined) => {
+    const closeFlush = Promise.withResolvers<void>();
+    const registry = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
+    registry.actor.send({ type: 'libraryEpochChanged', epoch: 1 });
+    await openIdle(registry.actor, 'projA');
+    registry.actor.send({
+      type: 'open',
+      projectId: 'projB',
+      request: epoch === undefined ? { workspace: 'ws-projB' } : requestFor('projB', { epoch }),
+    });
+    await settle();
+    expect(registry.actor.getSnapshot().context.pendingOpen?.projectId).toBe('projB');
+    return { ...registry, release: closeFlush.resolve };
+  };
+
+  it('should drop a resumed open whose epoch a library change made stale, and say so to focus', async () => {
+    const { actor, started, stopped, emitted, release } = await waitingOpen(1);
+
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
+    release();
+    await settle();
+
+    expect(stopped).toEqual(['projA']);
+    expect(started).toEqual(['projA']);
+    expect(actor.getSnapshot().context.refs).toEqual({});
+    expect(actor.getSnapshot().context.pendingOpen).toBeUndefined();
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([
+      { type: 'pendingOpenDropped', projectId: 'projB', epoch: 1 },
+    ]);
+    expect(emitted).toContainEqual({ type: 'liveSetChanged', projectIds: [] });
+    actor.stop();
+  });
+
+  it('should resume a waiting open whose epoch is still current', async () => {
+    const { actor, started, emitted, release } = await waitingOpen(1);
+
+    release();
+    await settle();
+
+    expect(started).toEqual(['projA', 'projB']);
+    expect(sessionRequest(actor, 'projB')).toEqual(requestFor('projB', { epoch: 1 }));
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([]);
+    actor.stop();
+  });
+
+  it('should resume a waiting open whose request names no epoch, which it cannot judge', async () => {
+    const { actor, started, emitted, release } = await waitingOpen(undefined);
+
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
+    release();
+    await settle();
+
+    expect(started).toEqual(['projA', 'projB']);
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([]);
+    actor.stop();
+  });
+
+  it('should drop a waiting open built at an epoch the registry has not heard of, which it cannot judge current', async () => {
+    const { actor, started, emitted, release } = await waitingOpen(5);
+
+    release();
+    await settle();
+
+    expect(started).toEqual(['projA']);
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([
+      { type: 'pendingOpenDropped', projectId: 'projB', epoch: 5 },
+    ]);
+    actor.stop();
+  });
+
+  it('should drop a waiting open that names an epoch while the registry has heard of none', async () => {
+    const closeFlush = Promise.withResolvers<void>();
+    const { actor, started, emitted } = harness({
+      budget: constrainedLiveProjectBudget,
+      closeFlush: closeFlush.promise,
+    });
+    await openIdle(actor, 'projA');
+    actor.send({ type: 'open', projectId: 'projB', request: requestFor('projB', { epoch: 0 }) });
+    await settle();
+
+    closeFlush.resolve();
+    await settle();
+
+    expect(started).toEqual(['projA']);
+    expect(emitted.filter((event) => event.type === 'pendingOpenDropped')).toEqual([
+      { type: 'pendingOpenDropped', projectId: 'projB', epoch: 0 },
+    ]);
+    actor.stop();
+  });
+
+  it('should never move its library epoch back on a late report of an older one', () => {
+    const { actor } = harness();
+
+    actor.send({ type: 'libraryEpochChanged', epoch: 3 });
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
+
+    expect(actor.getSnapshot().context.libraryEpoch).toBe(3);
+    actor.stop();
+  });
+
+  it('should take a fresh open after a drop, so the re-send of focus from its fresh answer goes live', async () => {
+    const { actor, started, release } = await waitingOpen(1);
+    actor.send({ type: 'libraryEpochChanged', epoch: 2 });
+    release();
+    await settle();
+
+    actor.send({ type: 'open', projectId: 'projB', request: requestFor('projB', { epoch: 2 }) });
+    await settle();
+
+    expect(started).toEqual(['projA', 'projB']);
+    expect(sessionRequest(actor, 'projB')).toEqual(requestFor('projB', { epoch: 2 }));
+    actor.stop();
+  });
+});
+
 describe('sessionsMachine — the machine contract (PV-S5, MC-R17)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -746,6 +1219,8 @@ describe('sessionsMachine — the machine contract (PV-S5, MC-R17)', () => {
       { type: 'quitAnyway' },
       { type: 'cancelPendingOpen' },
       { type: 'releaseMemory', keepProjectId: 'a' },
+      { type: 'chatRequested', projectId: 'a', chatId: 'chat-1' },
+      { type: 'libraryEpochChanged', epoch: 1 },
     ] satisfies SessionsMachineEvent[];
     expect(
       unansweredEvents(sessionsMachine, {

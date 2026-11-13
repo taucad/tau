@@ -466,6 +466,8 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     const created = await createRenderer('showcase', options.backend, {
       canvas: options.canvas,
       powerPreference: profile.powerPreference,
+      // The loader shows its canvas, or copies frames out of it, so a WebGPU canvas that cannot present fails here.
+      presented: true,
     });
     if (isDisposed()) {
       created.dispose();

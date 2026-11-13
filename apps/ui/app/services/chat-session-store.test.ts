@@ -5782,6 +5782,32 @@ describe('ChatSessionStore — composer records (W7)', () => {
     second.store.release(chatId);
   });
 
+  /* D9, PV-S8: a legacy mark on a log with no attention row is not unread once the log is read, yet the record keeps
+   * it and a fresh page answers from it until that page reads the log; viewing the chat removes it. */
+  it('keeps a legacy mark a caught-up log no longer reads as unread until the chat is viewed', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    await client.writeFile(
+      unreadPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, unread: { [chatId]: true } })),
+    );
+    const { store } = openStore(client);
+    store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(store.hasUnreadMark(chatId)).toBe(true);
+    });
+    publishLogRows(store, chatId, []);
+    expect(store.isUnread(chatId)).toBe(false);
+    expect(store.hasUnreadMark(chatId)).toBe(true);
+
+    store.markViewed(chatId);
+    expect(store.hasUnreadMark(chatId)).toBe(false);
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({ version: 1 });
+    });
+    store.release(chatId);
+  });
+
   it('should keep multiple queued messages and their promoted attachments across reopen', async () => {
     const client = createMemoryClient();
     const { store } = openStore(client);

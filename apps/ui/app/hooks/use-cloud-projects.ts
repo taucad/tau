@@ -9,7 +9,7 @@
  * three times under three different cache keys.
  */
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { QueryClient, QueryState, UseMutationResult } from '@tanstack/react-query';
 import { notifyManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
@@ -345,6 +345,29 @@ const toCloudProject = (value: unknown): CloudProject | undefined => {
   };
 };
 
+/** Tau Cloud answered the listing with an error status. */
+class CloudListingAnswerError extends Error {
+  public readonly status: number;
+
+  public constructor(status: number) {
+    super(`Tau Cloud answered ${String(status)}`);
+    this.status = status;
+  }
+}
+
+/**
+ * Whether a failed listing is asked again on its own, up to three times as react-query's default: a request that never
+ * reached Tau Cloud, or one it answered with a status that may pass (408, 429, 5xx, such as during a deploy), is; any
+ * other answer is not, because asking again gets the same one.
+ *
+ * @param failureCount - The failures so far.
+ * @param error - The last one.
+ * @returns Whether to ask again.
+ */
+const retryCloudListing = (failureCount: number, error: unknown): boolean =>
+  failureCount < 3 &&
+  (!(error instanceof CloudListingAnswerError) || error.status === 408 || error.status === 429 || error.status >= 500);
+
 /**
  * The caller's projects on Tau Cloud, or none at all.
  *
@@ -373,7 +396,7 @@ export const fetchCloudProjects = async (signal?: AbortSignal): Promise<readonly
        no projects" from "nobody asked" (N1). The library renders no section for
        either; only the role resolver needs the difference, and a silent empty
        list would have told a signed-out tab its access had been revoked. */
-    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
+    throw recordApiRequestId(new CloudListingAnswerError(response.status), response);
   }
   const body: unknown = await response.json();
   if (getRevisionSessionUser()?.id !== account) {
@@ -482,7 +505,8 @@ export const useCloudProjects = (
   isFetching: boolean;
   /** The listing's state, which Home's cloud line reads. */
   cloud: CloudListingState;
-  retry: () => void;
+  /** Ask Tau Cloud once more, as a person's Retry: one request, settled when its answer is in. */
+  retry: () => Promise<void>;
 }> => {
   const account = useRevisionSessionUser()?.id;
   const queryClient = useQueryClient();
@@ -504,6 +528,8 @@ export const useCloudProjects = (
       globalThis.removeEventListener('storage', onStorage);
     };
   }, [account, queryClient]);
+  /* While a person's Retry is in flight, its request is not retried on its own: its answer is said at once (K-c). */
+  const isPersonRetry = useRef(false);
   const {
     data = [],
     isSuccess,
@@ -513,11 +539,15 @@ export const useCloudProjects = (
   } = useQuery({
     queryKey: cloudProjectsQueryKeyFor(account),
     queryFn: async ({ signal }) => fetchCloudProjects(signal),
+    /* A pending deletion is watched every 3 s. A listing that failed with nothing listed is not: polling would turn its
+       failure back into a wait every 3 s, so its notice and Retry stay until the person retries or the window refocuses. */
     refetchInterval: (query) =>
+      !(query.state.status === 'error' && query.state.data === undefined) &&
       overlayDeletionReceipts(query.state.data ?? [], account).some((entry) => entry.cloudState === 'deleting')
         ? 3000
         : false,
     enabled: (options?.enabled ?? true) && !awaitsSession,
+    retry: (failureCount, error) => !isPersonRetry.current && retryCloudListing(failureCount, error),
     /* The set only changes when another device backs something up or an owner
        shares one, and a window focus is when this device is most likely to have
        missed either — which is react-query's `refetchOnWindowFocus` default
@@ -531,8 +561,19 @@ export const useCloudProjects = (
     isFailed: isError,
     isFetching,
     cloud: selectCloudListingState({ isError, isFetching }),
-    retry: () => {
-      void refetch();
+    /* A person's Retry (K-c) is one new request, even while an earlier one hangs: that one is dropped silently, so
+       the listing reads as fetching throughout, and the new one asks with no retries of its own. */
+    retry: async () => {
+      void queryClient
+        .getQueryCache()
+        .find({ queryKey: cloudProjectsQueryKeyFor(account), exact: true })
+        ?.cancel({ silent: true });
+      isPersonRetry.current = true;
+      try {
+        await refetch();
+      } finally {
+        isPersonRetry.current = false;
+      }
     },
   };
 };

@@ -47,12 +47,9 @@
     "apps/ui/app/components/auth/settings/security/github-permissions.tsx": 1,
     "apps/ui/app/components/auth/settings/security/linked-account.tsx": 1,
     "apps/ui/app/components/auth/settings/security/linked-accounts.tsx": 5,
-    "apps/ui/app/components/auth/user/user-avatar.tsx": 1,
-    "apps/ui/app/components/auth/user/user-view.tsx": 2,
     "apps/ui/app/components/billing/auto-reload-settings.tsx": 2,
     "apps/ui/app/components/billing/monthly-credits-meter.tsx": 1,
     "apps/ui/app/components/chat/chat-textarea.tsx": 1,
-    "apps/ui/app/components/project-library/cloud-project-preview.tsx": 1,
     "apps/ui/app/components/settings/billing-settings.tsx": 5,
     "apps/ui/app/components/settings/deferred-settings-content.tsx": 1,
     "apps/ui/app/components/settings/github-repository-settings.tsx": 3,
@@ -72,7 +69,6 @@
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": 2,
     "apps/ui/app/routes/w.$workspace.$project/route.tsx": 1,
     "apps/ui/app/routes/w.$workspace.$project/workspace-skeleton.tsx": 5,
-    "packages/ui/src/components/sidebar.tsx": 3,
     "packages/ui/src/components/skeleton.tsx": 1,
     "packages/workbench-panes/src/model/part-gallery.tsx": 1
   }

@@ -343,7 +343,8 @@ const recordWaitSlots = (): void => {
   Object.defineProperty(globalThis, '__TAU_WAIT_SLOTS__', { value: record });
   const now = (): number => Math.round(performance.now());
   const sample = (): void => {
-    const sidebar = document.querySelector('[data-sidebar="sidebar"]');
+    /* The app sidebar's own slot: other surfaces also mark themselves `data-sidebar="sidebar"`. */
+    const sidebar = document.querySelector('[data-slot="sidebar"]');
     if (
       record.recentsShownAt === undefined &&
       [...(sidebar?.querySelectorAll('[data-slot="wait-indicator"]') ?? [])].some(
@@ -381,18 +382,19 @@ const readWaitSlots = async (): Promise<WaitSlotRecord> =>
 
 /** The indicator delay of the timing ladder (UI Policy § 6). Milliseconds. */
 const indicatorDelay = 1000;
-/** Every project's saved thumbnail, read from this device's record files. */
+/** Every project's saved thumbnail, read from its working copy (the worker sees the path inside the project). */
 const thumbnailRead: WorkerReadDelay = {
   method: 'readFile',
-  path: String.raw`^/projects/[^/]+/thumbnail\.webp$`,
+  path: String.raw`^thumbnail\.webp$`,
   milliseconds: 2000,
 };
 
+/* A guard: main meets it since A15g (#2214), measured 5 of 5 on its base. */
 knownDefect(
   `H-c: Home with nothing stored draws no skeleton, says "Loading projects" in Recents from ${String(indicatorDelay)} ms and keeps the waiting lists busy, with the project listing 3 s late`,
   {
     artifact: 'h-c-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
       await target.setViewport(viewports.wide);
@@ -444,11 +446,12 @@ knownDefect(
   },
 );
 
+/* A guard: main meets it since A15g (#2214), measured 5 of 5 on its base. */
 knownDefect(
   'H-d: a returning visitor\'s Home card draws no "No saved preview" icon before its thumbnail read settles, its media box still, with the read 2 s late',
   {
     artifact: 'h-d-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
       await target.addInitScript(recordWaitSlots);

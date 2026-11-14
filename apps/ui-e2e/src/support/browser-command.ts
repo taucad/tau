@@ -1362,8 +1362,23 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
     const body = request.postDataBuffer();
     if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
       const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
-      const payload: unknown = JSON.parse(decoded);
-      const events: unknown[] = Array.isArray(payload) ? (payload as unknown[]) : [payload];
+      /* The PostHog client also posts form bodies (`data=<base64 JSON>`, `compression=base64`), notably from `sendBeacon` on unload. */
+      const formData = decoded.startsWith('data=') ? new URLSearchParams(decoded).get('data') : null;
+      const json = formData === null ? decoded : Buffer.from(formData, 'base64').toString('utf8');
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(json);
+      } catch {
+        // A body this fixture cannot read records no event; throwing here would reject the route handler and fail the suite.
+      }
+      /* PostHog posts one event, an array of them, or a batch envelope (`{ api_key, batch: [...] }`). */
+      const events: unknown[] = Array.isArray(payload)
+        ? (payload as unknown[])
+        : payload !== null && typeof payload === 'object' && 'batch' in payload && Array.isArray(payload.batch)
+          ? (payload.batch as unknown[])
+          : payload === null
+            ? []
+            : [payload];
       for (const event of events) {
         if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
           const compressed: string[] = [];
@@ -2185,6 +2200,35 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
     content: `(${source})(${JSON.stringify(argument)})`,
   });
 };
+
+/** Each target context's requests that `uiDelayTargetRequests` held, by URL, in the order they were held. */
+const delayedTargetRequests = new WeakMap<object, string[]>();
+
+/**
+ * Holds every request of the target context whose URL matches `pattern` for `milliseconds` before it goes on
+ * (A0.10: a slow chunk). Routing turns the context's HTTP cache off, so a reload fetches the chunk again and is held.
+ * The delay stays for the rest of the session.
+ */
+export const uiDelayTargetRequests: BrowserCommand<[pattern: string, milliseconds: number]> = async (
+  commandContext,
+  pattern,
+  milliseconds,
+) => {
+  const session = sessionFor(commandContext);
+  const held = delayedTargetRequests.get(session.context) ?? [];
+  delayedTargetRequests.set(session.context, held);
+  await session.context.route(new RegExp(pattern, 'u'), async (route) => {
+    held.push(route.request().url());
+    await new Promise((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
+    await route.fallback();
+  });
+};
+
+/** The URLs `uiDelayTargetRequests` held in the target context so far. */
+export const uiReadDelayedTargetRequests: BrowserCommand = async (commandContext) =>
+  delayedTargetRequests.get(sessionFor(commandContext).context) ?? [];
 
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
 export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
@@ -3775,6 +3819,8 @@ export const uiBrowserCommands = {
   uiReadTarget,
   uiReadAgentHostGatewayRequests,
   uiReadTauVertexOperations,
+  uiDelayTargetRequests,
+  uiReadDelayedTargetRequests,
   uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,

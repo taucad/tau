@@ -295,7 +295,8 @@ export const branchChipOn = (name: string): Locator =>
 export const showAllBranches = async (): Promise<void> => {
   const allBranches = selectors
     .getByCss(visibleRevisionsPanel)
-    .getByRole('group', { name: 'Which branches to show' })
+    /* A single-choice Radix toggle group is a `radiogroup` of `radio` items, as *Where to back up* is. */
+    .getByRole('radiogroup', { name: 'Which branches to show' })
     .getByRole('radio', { name: 'All branches' });
   await target.expectVisible(allBranches, 60_000);
   if ((await target.getAttribute(allBranches, 'aria-checked')) !== 'true') {

@@ -320,7 +320,7 @@
     "test:e2e:picogk": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "PicoGK as a clean browser consumer: the built app serving the staged package bundle, opening the shipped C# examples through the ordinary project route. PICOGK_BROWSER_ASSETS_ROOT must name a prepared bundle, which ui:build declares as an input, so this target never reuses a build made against another bundle. Its own PORT keeps it from reusing a server another e2e target started."
+        "description": "PicoGK as a clean browser consumer: the built app serving the staged package bundle, opening the shipped C# examples through the ordinary project route. PICOGK_BROWSER_ASSETS_ROOT must name a prepared bundle, which ui:build declares as an input, so this target never reuses a build made against another bundle. Its own PORT keeps it from reusing a server another e2e target started. TAU_E2E_PICOGK_TIER admits the spec, which every other tier excludes (vitest.config.ts) because none of them is given a bundle."
       },
       "options": {
         "cwd": "{workspaceRoot}",
@@ -331,6 +331,7 @@
         ],
         "env": {
           "PORT": "3019",
+          "TAU_E2E_PICOGK_TIER": "true",
           "TAU_E2E_UI_SNAPSHOT": "true",
           "TAU_CLOUD_ENABLED": "false",
           "TAU_API_URL": "http://localhost:4000",

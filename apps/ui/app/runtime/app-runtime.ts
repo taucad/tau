@@ -15,6 +15,7 @@ import type {
   EventRejection,
   SnapshotFrom,
 } from 'xstate';
+import { hashKey } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 import type { Analytics } from '#hooks/use-analytics.js';
@@ -43,8 +44,18 @@ import { createSessionsRegistryLogic, sessionsRegistryInput } from '#services/se
 import {
   isPlacementOnThisDevice,
   isPlacementOnThisDeviceNow,
+  namesUnhandedLoopbackHost,
+  onLoopbackAgentHostsChanged,
   onPlacementReachabilityChanged,
 } from '#lib/agent-host-placement.js';
+import { createChoicesLogic } from '#runtime/choices.js';
+import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime/choices.js';
+import { store as preferenceStore } from '#hooks/use-cookie.js';
+import { metaConfig } from '#constants/meta.constants.js';
+import { getAllFlags } from '#flags/feature-flags.js';
+import { subscribeFeatureFlags } from '#flags/use-feature.js';
+import { modelsQueryKey } from '#lib/model-catalog.js';
+import type { Model } from '#lib/model-catalog.js';
 
 /** The app runtime root actor. @public */
 export type AppRuntime = Actor<typeof appRuntimeMachine>;
@@ -117,6 +128,9 @@ type AppRuntimeServices = Readonly<{
 /* Each runtime's services, by runtime; the composition writes one per runtime it creates. */
 const runtimeServices = new WeakMap<AppRuntime, AppRuntimeServices>();
 
+/* Each runtime's lease store, by runtime; the composition writes one per runtime it creates. */
+const runtimeLeases = new WeakMap<AppRuntime, LeaseStore>();
+
 /* Development only: a rejected event is a machine that did not expect it (MC-R4). */
 const warnRejectedChatEvent = (rejection: EventRejection): void => {
   console.warn('[ChatSessionStore] an actor rejected an event', rejection);
@@ -157,6 +171,59 @@ const createChatSessions = (
   });
 
 /**
+ * The catalog as the runtime's query cache holds it, as `useModels` reads its query: rows once they arrived, else
+ * unavailable after a failed fetch, else loading.
+ */
+const modelsQueryHash = hashKey(modelsQueryKey);
+
+const readCachedCatalog = (queryClient: QueryClient): ChoicesModelCatalog => {
+  const state = queryClient.getQueryState<Model[]>(modelsQueryKey);
+  if (state?.data !== undefined) {
+    return { status: 'loaded', models: state.data };
+  }
+  return { status: state?.status === 'error' ? 'unavailable' : 'loading' };
+};
+
+/**
+ * The four real ports of `choices` (plan § 4 A6b, D15), each a module store outside React:
+ * - `cookies`: the preference store `useCookie` reads, by its storage name;
+ * - `catalog`: the model catalog in the runtime's query cache, followed through the cache. It never fetches: the
+ *   chat's `useModels` owns the fetch and its five-minute refetch, so attaching `choices` adds no request;
+ * - `flags`: the flag store `useFeature` reads;
+ * - `reachability`: this tab's loopback admissions, as `usePlaceableExecution` reads them.
+ *
+ * @param queryClient - The runtime's query client.
+ * @returns The ports.
+ */
+const createChoicesPorts = (queryClient: QueryClient): ChoicesPorts => ({
+  cookies: {
+    read: (name) => preferenceStore.get(`${metaConfig.cookiePrefix}${name}`),
+    subscribe: (name, listener) => preferenceStore.subscribe(`${metaConfig.cookiePrefix}${name}`, listener),
+  },
+  catalog: {
+    read: () => readCachedCatalog(queryClient),
+    subscribe: (listener) =>
+      queryClient.getQueryCache().subscribe((event) => {
+        /* Only what changes the catalog's data or status: an observer joining or leaving changes neither. */
+        if (
+          event.query.queryHash === modelsQueryHash &&
+          (event.type === 'added' || event.type === 'removed' || event.type === 'updated')
+        ) {
+          listener();
+        }
+      }),
+  },
+  flags: {
+    read: (flag) => getAllFlags()[flag],
+    subscribe: (_flag, listener) => subscribeFeatureFlags(listener),
+  },
+  reachability: {
+    isPlaceable: (execution) => !namesUnhandedLoopbackHost(execution),
+    subscribe: onLoopbackAgentHostsChanged,
+  },
+});
+
+/**
  * Create the app runtime, unstarted (MC-R4).
  *
  * @param options - The clock, inspector and rejected-event hook for the whole tree, and the page to listen to.
@@ -185,6 +252,8 @@ export const createAppRuntime = ({
     appRuntimeMachine.provide({
       actors: {
         environment: createEnvironmentLogic(environment),
+        /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
+        choices: createChoicesLogic(createChoicesPorts(queryClient)),
         /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
          * which mounts no `ProjectManagerProvider`) starts no worker. */
         projectLibrary: createCallbackLogic<EventObject>(() => {
@@ -225,6 +294,7 @@ export const createAppRuntime = ({
     idleFileManagers,
   });
   runtimeServices.set(runtime, { queryClient, projectLibrary, chatSessions });
+  runtimeLeases.set(runtime, store);
   return runtime;
 };
 
@@ -276,6 +346,23 @@ export const selectRuntimeFiles = (runtime: AppRuntime): AppRuntimeFiles => {
     throw new Error('selectRuntimeFiles takes a runtime createAppRuntime made');
   }
   return files;
+};
+
+/**
+ * The runtime's lease store (D6): what a host without a session leases its actors from, in render, idempotent per key
+ * and unstarted until retained. `ProjectProvider` leases its project runtime here (A6b); the file-manager leases go
+ * through {@link selectRuntimeFiles}, which builds them with the host.
+ *
+ * @param runtime - An app runtime {@link createAppRuntime} made.
+ * @returns Its lease store, fixed for its life.
+ * @public
+ */
+export const selectRuntimeLeases = (runtime: AppRuntime): LeaseStore => {
+  const leases = runtimeLeases.get(runtime);
+  if (leases === undefined) {
+    throw new Error('selectRuntimeLeases takes a runtime createAppRuntime made');
+  }
+  return leases;
 };
 
 /**
@@ -333,6 +420,14 @@ export const selectRuntimeSessions = (runtime: AppRuntime): ActorRefFrom<typeof 
 /** The page as `environment` last reported it. @public */
 export const selectAppEnvironment = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): AppRuntimeEnvironment =>
   snapshot.context.environment;
+
+/**
+ * The device's standing choices, as `choices` last reported them; `undefined` before the runtime starts (A6b).
+ *
+ * @public
+ */
+export const selectAppChoices = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): ProjectChoices | undefined =>
+  snapshot.context.choices;
 
 /** The runtime root's first fault, if any (D23). @public */
 export const selectAppRuntimeFault = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): string | undefined =>

@@ -172,16 +172,12 @@ describe('native-darwin row selection', () => {
     expect(result.calls).not.toContain('--base=');
   });
 
-  it('should select no row on the nightly, which runs only the gates', () => {
-    expect(select('schedule').outputs['projects']).toBe('');
-  });
-
   it('should run on no push, and on a pull request only while it carries the native-darwin label', () => {
     const workflow = load(readFileSync(resolve(root, darwinPath), 'utf8')) as {
       readonly on: Record<string, unknown>;
       readonly jobs: Record<string, { readonly if?: string; readonly steps?: readonly Step[] }>;
     };
-    expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'schedule', 'workflow_call', 'workflow_dispatch']);
+    expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'workflow_call', 'workflow_dispatch']);
     expect(workflow.jobs['plan']?.if).toBe(
       "github.event_name != 'pull_request' || " +
         "(contains(github.event.pull_request.labels.*.name, 'native-darwin') && " +
@@ -216,7 +212,7 @@ describe('native-hosts row selection', () => {
   const plan = step(hostsPath, 'plan');
 
   // The native-hosts workflow has no push trigger (Q-3): `ci.yml` calls it in the merge queue and on a push the queue
-  // did not prove, with its own plan's rows, so the plan here serves the nightly and a dispatch only.
+  // did not prove, with its own plan's rows, so the plan here serves a dispatch only (the drift check's or a manual one).
   it('should run every row and every test:native-linux project', () => {
     const result = run(plan.run!, [['ALL', '["picogk"]']]);
     expect(result.status).toBe(0);
@@ -230,7 +226,7 @@ describe('native-hosts row selection', () => {
       readonly on: Record<string, unknown>;
       readonly jobs: Record<string, { readonly if?: string; readonly steps?: readonly Step[] }>;
     };
-    expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_call', 'workflow_dispatch']);
+    expect(Object.keys(workflow.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
     expect(workflow.jobs['plan']?.if).toBe("inputs.intel == ''");
     expect(workflow.jobs['plan']?.steps?.some((candidate) => candidate.id === 'push-base')).toBe(false);
   });

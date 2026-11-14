@@ -599,6 +599,7 @@ describe('createProjectRuntime', () => {
         { type: 'manifestObservationChanged', error: 'closed' },
         { type: 'manifestObservationChanged', error: undefined },
       ],
+      parameterEntryResolved: [{ type: 'parameterEntryResolved', entryPath: 'main.ts' }],
     };
     expect(Object.keys(samples)).toEqual([...projectRuntimeEventTypes]);
     const options = {

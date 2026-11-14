@@ -1693,6 +1693,47 @@ describe('ProjectLibrary', () => {
       ).toEqual([region]);
     });
 
+    /* D21 round 6: the sidebar announces the local listing's wait, not Tau Cloud's, so the slot announces its own. */
+    it.fails("C14: announces the page's first Tau Cloud wait in the slot once the local listing has answered", () => {
+      cloudListing.isFetching = true;
+      const slot = renderSlot();
+      expect(
+        within(slot.header())
+          .queryAllByRole('status')
+          .filter((status) => status.textContent.includes('Loading Tau Cloud projects')),
+      ).toHaveLength(1);
+    });
+
+    /* D21 round 6: a wait that fails right after it shows keeps its indicator for its 500 ms minimum, then the failure. */
+    it.fails('C14: holds a shown Tau Cloud wait for its minimum before saying it failed, keeping its Retry', async () => {
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
+      cloudListing.isFailed = true;
+      const clock = { at: 0 };
+      const slot = renderSlot({ clock });
+      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      await userEvent.click(retry);
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      /* Shown at 1,000 ms, answered with a failure at 1,100 ms. */
+      clock.at = 1100;
+      cloudListing.isFetching = false;
+      cloudListing.isFailed = true;
+      slot.rerender();
+      expect(within(slot.header()).queryByRole('alert')).toBeNull();
+      expect(slot.header().querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'holding');
+      expect(retry).toBeInTheDocument();
+      await waitFor(() => {
+        expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
+      });
+      expect(retry).toBeInTheDocument();
+    });
+
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
     it("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
       /* The Retry's request is still in flight. */

@@ -11,7 +11,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import type { VisibilityState, SortingState } from '@tanstack/react-table';
+import type { ColumnDef, VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -555,9 +555,13 @@ export function ProjectLibrary({
 
   /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
      empty frames alike; the grid itself is busy for as long. */
+  const phoneTopBar = usePhoneTopBar();
+  const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
   const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
+  /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
   const listingWait = (
     <WaitIndicator
+      className='min-w-0 flex-1 basis-0 justify-end overflow-hidden'
       active={isAwaitingListing}
       label='Loading projects'
       slowLabel='Still loading projects'
@@ -575,7 +579,13 @@ export function ProjectLibrary({
           title='Projects'
           className='mb-0'
           action={
-            <div className='flex items-center gap-2'>
+            /* Below `md` the phone bar carries the title and the action, and this row takes no height. */
+            <div
+              className={cn(
+                'flex min-w-0 flex-1 basis-0 items-center justify-end gap-2',
+                isHeaderInPhoneBar && 'max-md:hidden',
+              )}
+            >
               {listingWait}
               <NewProjectLink isDeferredToPhoneBar />
             </div>
@@ -911,48 +921,59 @@ function projectListLayout({
   };
 }
 
+/** The columns a remembered card is sorted and searched by, as the list's own columns define them. */
+const rememberedColumns: Array<ColumnDef<RememberedProject & { readonly description?: string }>> = [
+  { accessorKey: 'name', enableSorting: true },
+  { accessorKey: 'description' },
+  { accessorKey: 'lastActivityAt', sortingFn: 'datetime' },
+];
+
 /**
- * The remembered cards a loading grid draws (P-g): the snapshot's projects in the order and filter the listing will be
- * shown in, so an accurate snapshot moves nothing when the listing answers. Orders the snapshot cannot hold (by
- * description) fall back to the most recent first.
+ * The remembered cards a loading grid draws (P-g): the snapshot's projects through a table with the list's own sort,
+ * search and page size, so an accurate snapshot moves nothing when the listing answers. The snapshot holds no
+ * description, so a search or sort on it alone is settled by the listing.
  *
- * @param input - The remembered projects, the list's sort and search, and its page size.
+ * @param input - The remembered projects, the list's sorting and search, and its page size.
  * @returns The first page of remembered cards.
  */
-function rememberedCards({
+function useRememberedCards({
   projects,
-  sort,
-  query,
+  sorting,
+  globalFilter,
   pageSize,
 }: {
-  readonly projects: readonly RememberedProject[];
-  readonly sort: string;
-  readonly query: string | undefined;
+  readonly projects: readonly RememberedProject[] | undefined;
+  readonly sorting: SortingState;
+  readonly globalFilter: string | undefined;
   readonly pageSize: number;
-}): RememberedProject[] {
-  const needle = query?.trim().toLowerCase() ?? '';
-  const byName = (left: RememberedProject, right: RememberedProject): number => left.name.localeCompare(right.name);
-  const byActivity = (left: RememberedProject, right: RememberedProject): number =>
-    left.lastActivityAt - right.lastActivityAt;
-  const [field, direction] = sort.split(':');
-  const compare = field === 'name' ? byName : byActivity;
-  const sign = field === 'name' || field === 'lastActivityAt' ? (direction === 'asc' ? 1 : -1) : -1;
-  return projects
-    .filter((project) => needle === '' || project.name.toLowerCase().includes(needle))
-    .toSorted((left, right) => sign * compare(left, right))
-    .slice(0, pageSize);
+}): RememberedProject[] | undefined {
+  'use no memo';
+
+  const data = useMemo(() => [...(projects ?? [])], [projects]);
+  // oxlint-disable-next-line react/incompatible-library -- Opted out of the compiler, as the list's own table is.
+  const table = useReactTable({
+    data,
+    columns: rememberedColumns,
+    getRowId: (row) => row.id,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    state: { sorting, globalFilter, pagination: { pageIndex: 0, pageSize } },
+  });
+  return projects === undefined ? undefined : table.getRowModel().rows.map((row) => row.original);
 }
 
 /**
- * A card frame with nothing known yet (P-g): the card's own border, its plain media box and the header and footer at
- * their real heights, so the remembered or listed card that follows fills it without moving. Nothing stands in for
- * the name, the location or the controls.
+ * The room one card takes while nothing about it is known (P-g, the server render and the hydration frame): a card's
+ * box at its real height, drawn invisible, so the grid region has the height the count gives and no card shape is
+ * painted. The remembered or listed card that follows arrives into the room without moving anything.
  *
- * @returns The empty frame, hidden from assistive technology.
+ * @returns The invisible room, hidden from assistive technology.
  */
-function ProjectCardFrame(): React.JSX.Element {
+function ProjectCardRoom(): React.JSX.Element {
   return (
-    <Card aria-hidden className='relative flex h-full flex-col overflow-hidden pt-0'>
+    <Card aria-hidden className='invisible relative flex h-full flex-col overflow-hidden pt-0'>
       <div className='relative aspect-4/3 h-fit w-full bg-muted' />
       <CardHeader>
         <div className='flex flex-col py-1'>
@@ -1041,6 +1062,7 @@ function UnifiedProjectList({
     pageSize,
   });
   const selectedCount = table.getFilteredSelectedRowModel().rows.length;
+  const rememberedCards = useRememberedCards({ projects: rememberedProjects, sorting, globalFilter, pageSize });
 
   return (
     <div className='space-y-4'>
@@ -1096,15 +1118,15 @@ function UnifiedProjectList({
         <DataTable table={table} columns={columns} />
       ) : isAwaitingRows ? (
         /* P-g: the remembered cards are the same list and cards the listing then fills, reconciled by id in place;
-           with only a count, the grid holds that many empty card frames. */
+           with only a count, the grid holds the room for that many cards and draws none. */
         <ul aria-label='Projects' aria-busy='true' className={projectGridClassName}>
-          {rememberedProjects === undefined
+          {rememberedCards === undefined
             ? Array.from({ length: placeholderCount }, (_, index) => (
-                <li key={`frame-${String(index)}`}>
-                  <ProjectCardFrame />
+                <li key={`room-${String(index)}`} aria-hidden>
+                  <ProjectCardRoom />
                 </li>
               ))
-            : rememberedCards({ projects: rememberedProjects, sort, query: globalFilter, pageSize }).map((project) => (
+            : rememberedCards.map((project) => (
                 <li key={project.id}>
                   <ProjectLibraryCard project={project} actions={actions} />
                 </li>
@@ -1177,11 +1199,12 @@ function cardLocation(project: ListedCardProject | RememberedProject): {
     : listed
       ? projectSlugOf(listed.locator)
       : '';
-  const place: RememberedPlace | undefined = listed
-    ? listed.locator.backend === 'webaccess'
-      ? { kind: 'workspace', workspaceName: listed.workspaceName }
-      : { kind: 'home' }
-    : project.place;
+  const place: RememberedPlace | undefined =
+    'locator' in project
+      ? project.locator.backend === 'webaccess'
+        ? { kind: 'workspace', workspaceName: project.workspaceName }
+        : { kind: 'home' }
+      : project.place;
   if (place === undefined) {
     return { LocationIcon: undefined, label: slugPath, slugPath };
   }
@@ -1195,7 +1218,7 @@ function cardLocation(project: ListedCardProject | RememberedProject): {
 export function ProjectLibraryCard({
   project,
   actions,
-  isSelected,
+  isSelected = false,
   isSelecting = false,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
@@ -1288,7 +1311,7 @@ export function ProjectLibraryCard({
           <Tooltip>
             <TooltipTrigger asChild>
               <div
-                className='flex w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
+                className='flex min-h-4 w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
                 role='group'
                 aria-label={`Location: ${locationLabel}`}
               >

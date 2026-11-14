@@ -985,6 +985,44 @@ describe('ProjectLibrary', () => {
     expect(within(items[0]!).getByRole('button', { name: 'Trash Gearbox Alpha' }).closest('[inert]')).toBeNull();
   });
 
+  /* P-g: the order is the list table's own, so a case the locale compare would order differently does not move. */
+  it('keeps the remembered order when the listing answers under a name sort, and warns about nothing', () => {
+    const warn = vi.spyOn(console, 'warn');
+    const error = vi.spyOn(console, 'error');
+    mockRememberedShape = {
+      count: 2,
+      projects: [
+        { id: mockProjects[0]!.id, name: 'alpha', lastActivityAt: 2 },
+        { id: mockProjects[1]!.id, name: 'Zeta', lastActivityAt: 1 },
+      ],
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+    const tree = (): React.JSX.Element => (
+      <TestRouter initialEntries={['/projects?sort=name:asc']}>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>
+    );
+    const view = render(tree());
+    const remembered = within(screen.getByRole('list', { name: 'Projects' })).getAllByRole('listitem');
+
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: [
+        { ...mockProjects[0]!, name: 'alpha', lastActivityAt: 2 },
+        { ...mockProjects[1]!, name: 'Zeta', lastActivityAt: 1 },
+      ],
+    };
+    view.rerender(tree());
+
+    expect(within(screen.getByRole('list', { name: 'Projects' })).getAllByRole('listitem')).toEqual(remembered);
+    const messages = [...warn.mock.calls, ...error.mock.calls].map((call) => String(call[0]));
+    expect(messages.filter((message) => /uncontrolled to controlled/u.test(message))).toEqual([]);
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
   /* P-g: the remembered cards follow the list's sort and search, so the listing moves nothing it agrees with. */
   it('orders and filters the remembered cards as the list will', () => {
     mockRememberedShape = {
@@ -1022,7 +1060,7 @@ describe('ProjectLibrary', () => {
   });
 
   /* C14 (P-g): a count with no remembered names holds the grid's card frames, empty, with no skeleton. */
-  it('C14: holds one empty card frame per remembered project when only the count is known', () => {
+  it('C14: holds the room for each remembered project, drawing no card, when only the count is known', () => {
     mockRememberedShape = { count: 3 };
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
@@ -1037,6 +1075,11 @@ describe('ProjectLibrary', () => {
     const grid = screen.getByRole('list', { name: 'Projects' });
     expect(grid).toHaveAttribute('aria-busy', 'true');
     expect(grid.children).toHaveLength(3);
+    /* The room is held, and no card shape is drawn in it. */
+    for (const room of grid.children) {
+      expect(room).toHaveAttribute('aria-hidden', 'true');
+      expect(room.firstElementChild).toHaveClass('invisible');
+    }
     expect(container.querySelectorAll('[data-slot=skeleton]')).toHaveLength(0);
   });
 

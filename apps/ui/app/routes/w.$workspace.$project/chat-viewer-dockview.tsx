@@ -766,20 +766,24 @@ export const ViewerDockview = memo(function ({
       createViewRecord,
     ],
   );
-  const [factsPort] = useState(() => createViewerAdapterFactsPort(adapterFacts));
-  useLayoutEffect(() => {
-    factsPort.set(adapterFacts);
-  }, [adapterFacts, factsPort]);
-  const adapterPorts = useMemo(
-    (): ViewerAdapterPorts => ({
+  // Each handover gets its own facts port, made from this render's facts: the dock's ref hands the adapter over and
+  // attaches it before this component's layout effects run, so a port fed only from them would attach a re-handed
+  // adapter on the previous commit's facts. The layout effect below then keeps it current.
+  const { ports: adapterPorts, facts: factsPort } = useMemo(() => {
+    const facts = createViewerAdapterFactsPort(adapterFacts);
+    const ports: ViewerAdapterPorts = {
       profile,
       projectId,
       project: projectRef,
       layout: profile === 'shared' ? undefined : adapterLayout,
-      facts: factsPort,
-    }),
-    [adapterLayout, factsPort, profile, projectId, projectRef],
-  );
+      facts,
+    };
+    return { ports, facts };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- New facts feed the port; only a new handover makes one.
+  }, [adapterLayout, api, profile, projectId, projectRef]);
+  useLayoutEffect(() => {
+    factsPort.set(adapterFacts);
+  }, [adapterFacts, factsPort]);
   // The layout runs the adapter on a page with one; elsewhere (a shared embed, a project without a layout) the editor
   // does (programme control, 2026-11-14).
   const dockRef = useViewerDockRef(workspace?.layout ?? editorRef, api, adapterPorts);

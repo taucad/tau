@@ -981,6 +981,8 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
         return;
       }
       standIns.counts[endpoint] += 1;
+      /* Read on arrival: a request held below answers as configured when it arrived, not when it is released. */
+      const failure = standIns.failures[endpoint];
       const delay = standIns.delays[endpoint] ?? 0;
       if (delay === 'held') {
         const answer = await new Promise<boolean>((resolve) => {
@@ -995,7 +997,6 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
           setTimeout(resolve, delay);
         });
       }
-      const failure = standIns.failures[endpoint];
       await route.fulfill(
         failure === undefined
           ? {

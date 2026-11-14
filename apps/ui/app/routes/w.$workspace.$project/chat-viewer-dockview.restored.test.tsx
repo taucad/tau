@@ -8,8 +8,8 @@ import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
-import { createViewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
-import type { ViewerAdapterInput } from '#workbench-records/viewer-adapter.js';
+import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerDockReady } from '#workbench-records/viewer-adapter.js';
 
 const fixture = vi.hoisted(() => ({
   projectSend: vi.fn(),
@@ -50,7 +50,7 @@ vi.mock('#hooks/use-project-availability.js', () => {
 });
 
 /** The viewer adapter the editor double spawned, as the editor does on a page without a layout. */
-const dock: { adapter: Actor<ReturnType<typeof createViewerAdapterLogic>> | undefined } = { adapter: undefined };
+const dock: { adapter: Actor<typeof viewerAdapterLogic> | undefined } = { adapter: undefined };
 
 vi.mock('#hooks/use-project.js', () => {
   const projectSnapshot = { matches: (state: string) => state === 'ready' };
@@ -65,12 +65,10 @@ vi.mock('#hooks/use-project.js', () => {
     projectRef,
     editorRef: {
       // The editor hosts the viewer's adapter on a page without a layout: it spawns it on `dockReady` (A8d).
-      send: (event: { type: string; adapter?: string; api?: unknown; ports?: object }) => {
-        if (event.type === 'dockReady') {
+      send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
+        if ('api' in event) {
           dock.adapter?.stop();
-          dock.adapter = createActor(createViewerAdapterLogic(), {
-            input: { ...event.ports, api: event.api } as ViewerAdapterInput,
-          });
+          dock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
           dock.adapter.start();
           return;
         }
@@ -256,7 +254,7 @@ describe('restored viewer layout admission', () => {
   it('should detach the viewer adapter on unmount and attach again on remount', () => {
     const detach = vi.fn();
     const registerViewer = vi.fn(() => detach);
-    const layoutDock: { adapter: Actor<ReturnType<typeof createViewerAdapterLogic>> | undefined } = {
+    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined } = {
       adapter: undefined,
     };
     fixture.workspace = {
@@ -265,17 +263,15 @@ describe('restored viewer layout admission', () => {
         personViewerChanged: vi.fn(),
         connectViewerIntents: () => () => undefined,
         requestViewerFile: vi.fn(),
-        dockHost: {
-          send: (event: { type: string; api?: unknown; ports?: object }) => {
-            layoutDock.adapter?.stop();
-            layoutDock.adapter = undefined;
-            if (event.type === 'dockReady') {
-              layoutDock.adapter = createActor(createViewerAdapterLogic(), {
-                input: { ...event.ports, api: event.api } as ViewerAdapterInput,
-              });
-              layoutDock.adapter.start();
-            }
-          },
+      },
+      layout: {
+        send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
+          layoutDock.adapter?.stop();
+          layoutDock.adapter = undefined;
+          if ('api' in event) {
+            layoutDock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+            layoutDock.adapter.start();
+          }
         },
       },
     } as unknown as NonNullable<typeof fixture.workspace>;

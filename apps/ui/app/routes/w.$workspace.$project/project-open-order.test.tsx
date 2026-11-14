@@ -33,7 +33,8 @@ import type * as UnavailableOverlayModule from '#routes/w.$workspace.$project/pr
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
-import { createViewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerDockReady } from '#workbench-records/viewer-adapter.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -181,7 +182,7 @@ const layoutRecord: {
   viewer: ViewerNode | undefined;
   applyViewer: ((node: ViewerNode, applied: () => void) => void) | undefined;
   listeners: Set<() => void>;
-  viewerAdapter: Actor<ReturnType<typeof createViewerAdapterLogic>> | undefined;
+  viewerAdapter: Actor<typeof viewerAdapterLogic> | undefined;
 } = { viewer: undefined, applyViewer: undefined, listeners: new Set(), viewerAdapter: undefined };
 /** The record's first read lands: the registered viewer applies it, and the page's readers hear it. */
 const readLayoutRecord = (viewer: ViewerNode): void => {
@@ -217,18 +218,17 @@ const layoutController: WorkbenchLayoutController = {
   ready: () => layoutRecord.viewer !== undefined,
   connectViewerIntents: () => () => undefined,
   requestViewerFile: () => undefined,
-  // The layout spawns the viewer's adapter on `dockReady` and stops it on `dockReleased` (A8d).
-  dockHost: {
-    send(event) {
-      layoutRecord.viewerAdapter?.stop();
-      layoutRecord.viewerAdapter = undefined;
-      if (event.type === 'dockReady' && event.adapter === 'viewer') {
-        layoutRecord.viewerAdapter = createActor(createViewerAdapterLogic(), {
-          input: { ...event.ports, api: event.api },
-        });
-        layoutRecord.viewerAdapter.start();
-      }
-    },
+};
+
+/** The layout as a dock host: it spawns the viewer's adapter on `dockReady` and stops it on `dockReleased` (A8d). */
+const layoutDockHost = {
+  send(event: Readonly<{ type: string }> | ViewerDockReady) {
+    layoutRecord.viewerAdapter?.stop();
+    layoutRecord.viewerAdapter = undefined;
+    if ('api' in event) {
+      layoutRecord.viewerAdapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+      layoutRecord.viewerAdapter.start();
+    }
   },
 };
 
@@ -360,7 +360,12 @@ vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ProjectWorkspaceContextModule>()),
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  useProjectWorkspace: () => ({ setChatOpen: () => undefined, setWorkbenchOpen: () => undefined, layoutController }),
+  useProjectWorkspace: () => ({
+    setChatOpen: () => undefined,
+    setWorkbenchOpen: () => undefined,
+    layoutController,
+    layout: layoutDockHost,
+  }),
 }));
 vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
 vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));

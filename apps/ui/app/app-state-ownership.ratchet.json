@@ -78,6 +78,7 @@
       "apps/ui/app/runtime/usdz-runtime.worker.ts",
       "apps/ui/app/workbench-records/pane-intents.ts",
       "apps/ui/app/workbench-records/viewer-adapter.ts",
+      "apps/ui/app/workbench-records/workbench-adapter.ts",
       "apps/ui/app/workbench-records/workbench-layout.machine.ts",
       "packages/ui/src/utils/wait-timing.ts"
     ]

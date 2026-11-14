@@ -46,6 +46,11 @@ import type {
   WorkbenchLayoutInput,
 } from '#workbench-records/workbench-layout.machine.js';
 import type { LayoutAdapterId, PaneIntentTarget } from '#workbench-records/pane-intents.js';
+import type {
+  WorkbenchAdapterEvent,
+  WorkbenchAdapterInput,
+  WorkbenchDockReady,
+} from '#workbench-records/workbench-adapter.js';
 
 const viewer = (...views: string[]): ViewerNode => ({
   kind: 'group',
@@ -1299,15 +1304,24 @@ describe('totality', () => {
     lanesApplied: { type: 'lanesApplied', lanes: { chat: true, workbench: true } },
     lanesSeeded: { type: 'lanesSeeded', lanes: { chat: true, workbench: false } },
     deviceChanged: { type: 'deviceChanged', device: 'phone' },
-    // The api and ports are the adapter's own: traversal never starts the child it spawns.
-    dockReady: { type: 'dockReady', adapter: 'viewer', api: {}, ports: {} } as unknown as WorkbenchLayoutEvent,
-    dockReleased: { type: 'dockReleased', adapter: 'viewer' },
     routeChanged: { type: 'routeChanged', routeKey: 'route-2' },
     intent: { type: 'intent', intentId: 'i1', source: 'person', target: modelPane },
     intentApplied: { type: 'intentApplied', intentId: 'i1', deliveryId: 1, node: panes('model') },
     intentUnavailable: { type: 'intentUnavailable', intentId: 'i1' },
     restore: { type: 'restore', restoreId: 'r1', expected: 'sha256:x', layout: sample },
+    // A Dockview's adapter, answered at the root in every state (A8c); the run below provides a stub adapter.
+    dockReady: {
+      type: 'dockReady',
+      adapter: 'workbench',
+      dockId: 'dock_1',
+      api: 'dockview' as unknown as WorkbenchDockReady['api'],
+      ports: 'ports' as unknown as WorkbenchDockReady['ports'],
+    },
+    dockReleased: { type: 'dockReleased', adapter: 'workbench', dockId: 'dock_1' },
   };
+  const stubbed = workbenchLayoutMachine.provide({
+    actors: { workbenchAdapter: createCallbackLogic(() => () => undefined) },
+  });
   const events = [
     ...Object.values(samples),
     { type: 'adapterAttaching', adapter: 'workbench' },
@@ -1326,12 +1340,64 @@ describe('totality', () => {
   });
 
   it('should reach every state', () => {
-    expect(unreachedStates(workbenchLayoutMachine, pathOptions)).toEqual([]);
+    expect(unreachedStates(stubbed, pathOptions)).toEqual([]);
   });
 
   it('should answer every sampled event in every state', () => {
-    expect(unansweredEvents(workbenchLayoutMachine, { ...pathOptions, ignore: workbenchLayoutIgnoredEvents })).toEqual(
-      [],
+    expect(unansweredEvents(stubbed, { ...pathOptions, ignore: workbenchLayoutIgnoredEvents })).toEqual([]);
+  });
+});
+
+describe('dock adapters (A8c)', () => {
+  /* A Dockview's adapter, recorded by the `api` it was handed: the machine starts and stops it, and never reads it. */
+  const dockHarness = () => {
+    const running = new Set<string>();
+    const workbenchAdapter = createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input }) => {
+      running.add(input.api as unknown as string);
+      return () => {
+        running.delete(input.api as unknown as string);
+      };
+    });
+    const actor = createActor(
+      workbenchLayoutMachine.provide({
+        actors: { layoutRecord: createCallbackLogic(() => () => undefined), workbenchAdapter },
+      }),
+      { input: { device: 'desktop', adapters: ['workbench', 'viewer'], routeKey: 'route-1', workbenchOpen: true } },
     );
+    actor.start();
+    const ready = (dockId: string, api: string): void => {
+      actor.send({
+        type: 'dockReady',
+        adapter: 'workbench',
+        dockId,
+        api: api as unknown as WorkbenchDockReady['api'],
+        ports: 'ports' as unknown as WorkbenchDockReady['ports'],
+      });
+    };
+    return { actor, running, ready };
+  };
+
+  // I1, D4: the Dockview hands its adapter over and takes it back; the machine runs it as a child, keeping the
+  // `DockviewApi` out of its context.
+  it('should run a Dockview adapter as a child until that Dockview releases it', () => {
+    const { actor, running, ready } = dockHarness();
+    ready('dock-1', 'api-1');
+    expect([...running]).toEqual(['api-1']);
+    expect(JSON.stringify(actor.getSnapshot().context)).not.toContain('api-1');
+    actor.send({ type: 'dockReleased', adapter: 'workbench', dockId: 'dock-1' });
+    expect([...running]).toEqual([]);
+    actor.stop();
+  });
+
+  // A new mount replaces the adapter it had, and a late release of the old mount stops nothing newer.
+  it('should replace an adapter on a new mount and ignore a release of the mount it replaced', () => {
+    const { actor, running, ready } = dockHarness();
+    ready('dock-1', 'api-1');
+    ready('dock-2', 'api-2');
+    expect([...running]).toEqual(['api-2']);
+    actor.send({ type: 'dockReleased', adapter: 'workbench', dockId: 'dock-1' });
+    expect([...running]).toEqual(['api-2']);
+    actor.stop();
+    expect([...running]).toEqual([]);
   });
 });

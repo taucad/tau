@@ -12,16 +12,14 @@ import { tauEditorPanelDragMime, tauFileDragMime } from '@taucad/types/constants
 import {
   createViewerNewTab,
   createViewerFileDataSource,
-  ensureViewerGroup,
   handleViewerDrop,
   listViewerSelectableFiles,
   replaceViewerNewTabWithFile,
   newViewRecordFrom,
   recordNewView,
-  viewSourceOf,
-  adoptViewerRecordNode,
   ViewerEmptyFilePicker,
 } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
+import { adoptViewerRecordNode, ensureViewerGroup, viewSourceOf } from '#workbench-records/viewer-adapter.js';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 import { deleteViewFile } from '#workbench-records/view-actions.js';

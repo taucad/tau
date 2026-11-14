@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type {
   DockviewApi,
@@ -54,19 +54,12 @@ import {
 } from '#workbench-records/viewer-adapter.js';
 import type {
   ViewerAdapterFacts,
-  ViewerAdapterInput,
+  ViewerAdapterPorts,
+  ViewerDockReady,
+  ViewerDockReleased,
   ViewerPanelParameters,
   ViewSource,
 } from '#workbench-records/viewer-adapter.js';
-import type { WorkbenchLayoutRef } from '#runtime/project-runtime.layout.js';
-
-export {
-  adoptViewerRecordNode,
-  ensureViewerGroup,
-  viewerPanelTitle,
-  viewSourceOf,
-} from '#workbench-records/viewer-adapter.js';
-export type { ViewSource } from '#workbench-records/viewer-adapter.js';
 
 type ViewerNewTabParameters = { mode: 'launcher' };
 type ViewerProfile = 'editor' | 'shared';
@@ -444,10 +437,10 @@ function useLayoutReadSettled(): boolean {
  * not arranged it yet, so it shows nothing in place rather than offering a file choice the record is about to make
  * (A8d, staging M2). Once the read settles, an empty group is really empty.
  */
-function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element | null {
+function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element | undefined {
   const isSettled = useLayoutReadSettled();
   if (!isSettled) {
-    return null;
+    return undefined;
   }
   return (
     <ViewerEmptyState
@@ -606,12 +599,12 @@ export type ViewerFileActions = Readonly<{
 }>;
 
 /** What a viewer dock hands itself to: the project's layout, or on a page without one, its editor. */
-type ViewerDockHost = Pick<WorkbenchLayoutRef, 'send'>;
+type ViewerDockHost = Readonly<{ send: (event: ViewerDockReady | ViewerDockReleased) => void }>;
 
 /**
  * Hand the viewer's Dockview to its adapter (D11): the dock's ref callback sends `dockReady` once Dockview's `onReady`
  * gave it an api, and its cleanup sends `dockReleased`, so the host spawns and stops the adapter and the component
- * starts and stops nothing (I1). A new host, project or api hands the dock over again.
+ * starts and stops nothing (I1). A new host, api or port hands the dock over again; a release names its mount.
  *
  * @param host - The project's layout, or its editor on a page without one.
  * @param api - The Dockview api, once `onReady` gave it.
@@ -619,21 +612,24 @@ type ViewerDockHost = Pick<WorkbenchLayoutRef, 'send'>;
  * @returns The ref callback for the dock's box.
  */
 function useViewerDockRef(
-  host: ViewerDockHost | undefined,
+  host: ViewerDockHost,
   api: DockviewApi | undefined,
-  ports: Omit<ViewerAdapterInput, 'api'>,
+  ports: ViewerAdapterPorts,
+  // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
 ): (element: HTMLDivElement | null) => (() => void) | undefined {
+  const dockId = useId();
   return useCallback(
+    // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
     (element: HTMLDivElement | null): (() => void) | undefined => {
-      if (element === null || host === undefined || api === undefined) {
+      if (element === null || api === undefined) {
         return undefined;
       }
-      host.send({ type: 'dockReady', adapter: 'viewer', api, ports });
+      host.send({ type: 'dockReady', adapter: 'viewer', dockId, api, ports });
       return () => {
-        host.send({ type: 'dockReleased', adapter: 'viewer' });
+        host.send({ type: 'dockReleased', adapter: 'viewer', dockId });
       };
     },
-    [api, host, ports],
+    [api, dockId, host, ports],
   );
 }
 
@@ -670,7 +666,9 @@ export const ViewerDockview = memo(function ({
   } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
-  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
+  const workspace = useProjectWorkspace({ enableNoContext: true });
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
+  const layoutController = workspace?.layoutController;
   const components = useMemo(
     () => ({
       viewer: (properties: IDockviewPanelProps<ViewerPanelParameters>) => (
@@ -726,9 +724,7 @@ export const ViewerDockview = memo(function ({
   const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
   const availability = useModelAvailability();
   const layoutPort =
-    layoutController?.connectViewerIntents && layoutController.requestViewerFile && layoutController.dockHost
-      ? layoutController
-      : undefined;
+    layoutController?.connectViewerIntents && layoutController.requestViewerFile ? layoutController : undefined;
   const adapterLayout = useMemo(
     (): ViewerAdapterFacts['layout'] =>
       layoutPort?.connectViewerIntents === undefined || layoutPort.requestViewerFile === undefined
@@ -777,11 +773,9 @@ export const ViewerDockview = memo(function ({
     () => ({ profile, projectId, project: projectRef, facts: factsPort }),
     [factsPort, profile, projectId, projectRef],
   );
-  const dockRef = useViewerDockRef(
-    adapterFacts.layout !== undefined && layoutPort?.dockHost !== undefined ? layoutPort.dockHost : editorRef,
-    api,
-    adapterPorts,
-  );
+  // The layout runs the adapter on a page with one; elsewhere (a shared embed, a project without a layout) the editor
+  // does (programme control, 2026-11-14).
+  const dockRef = useViewerDockRef(workspace?.layout ?? editorRef, api, adapterPorts);
 
   // Track active viewer panel for settings inheritance
   useEffect(() => {

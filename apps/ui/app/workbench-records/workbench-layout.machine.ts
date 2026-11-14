@@ -4,7 +4,8 @@
  * (I11), acknowledges a revision only once it is on screen (I12), holds one record session for the file (I13) and
  * settles restore commands against the arrangement they expected (I14). App state orchestration charter D2, D4, D11,
  * D13, D23; package A8a. It conforms to `specs/layout-apply/LayoutApply.tla`, whose README states the rules it keeps.
- * A8b makes it a child of the project runtime; A8c and A8d write the real adapters. Until then it is unwired.
+ * A8b makes it a child of the project runtime; A8c and A8d write the real adapters, which a Dockview hands to it with
+ * `dockReady` and takes back with `dockReleased`: each runs as its child, so no component starts an actor (I1).
  *
  * ```text
  * workbenchLayout (parallel)
@@ -102,10 +103,12 @@ import { publishRecordIssue, recordIssueState } from '#workbench-records/record-
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
+import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
+import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerDockReady, ViewerDockReleased } from '#workbench-records/viewer-adapter.js';
 import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import { layoutPolicy } from '#workbench-records/layout-policy.js';
-import { createViewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
-import type { ViewerAdapterInput } from '#workbench-records/viewer-adapter.js';
 import {
   intentAdapter,
   intentOf,
@@ -209,18 +212,6 @@ export type WorkbenchLayoutEvent =
   | Readonly<{ type: 'lanesSeeded'; lanes: WorkbenchLayout['lanes'] }>
   /** The shell the layout is shown on changed (the phone breakpoint): intents follow it from the next one (rule 7). */
   | Readonly<{ type: 'deviceChanged'; device: WorkbenchLayoutDevice }>
-  /**
-   * A Dockview is ready (its `onReady`): its adapter is spawned as this actor's child, holding the api in its closure
-   * (D4, D11). A second one for the same adapter replaces the first.
-   */
-  | Readonly<{
-      type: 'dockReady';
-      adapter: 'viewer';
-      api: ViewerAdapterInput['api'];
-      ports: Omit<ViewerAdapterInput, 'api'>;
-    }>
-  /** The Dockview's ref cleanup: its adapter is stopped, which detaches it (rule 4). */
-  | Readonly<{ type: 'dockReleased'; adapter: LayoutAdapterId }>
   /** The route key changed. */
   | Readonly<{ type: 'routeChanged'; routeKey: string }>
   /** A pane intent. */
@@ -234,7 +225,17 @@ export type WorkbenchLayoutEvent =
    */
   | Readonly<{ type: 'intentUnavailable'; intentId: string; deliveryId?: number }>
   /** A restore command: write `layout` over the record bytes `expected` names. */
-  | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>;
+  | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>
+  /**
+   * A Dockview is ready and hands over its adapter (A8c): the adapter runs as this actor's child, holding the
+   * `DockviewApi` in its closure (D4), until the same Dockview's `dockReleased`. Host plumbing outside the spec.
+   */
+  | WorkbenchDockReady
+  /** The viewer Dockview's adapter, the same way (A8d). */
+  | ViewerDockReady
+  /** The Dockview that sent `dockReady` with `dockId` is gone: its adapter stops. */
+  | WorkbenchDockReleased
+  | ViewerDockReleased;
 
 /** Events the machine emits: to the adapters, to the phone's tab port, and to its owner. */
 export type WorkbenchLayoutEmitted =
@@ -674,6 +675,7 @@ type Step<Event extends WorkbenchLayoutEvent['type']> = Readonly<{
   event: Extract<WorkbenchLayoutEvent, { type: Event }>;
   value: StateValue;
   children: Children;
+  actors: Readonly<{ workbenchAdapter: typeof workbenchAdapterLogic; viewerAdapter: typeof viewerAdapterLogic }>;
 }>;
 
 /** A publication (`Published`), with rules 2, 3 and 8. The first one becomes the arrangement and seeds the adapters. */
@@ -829,15 +831,6 @@ const adapterRegion = (adapter: LayoutAdapterId) => {
   } as const;
 };
 
-/** The viewer Dockview's adapter (A8d). */
-const viewerAdapter = createViewerAdapterLogic();
-
-/** Each adapter's child id. */
-const adapterChildIds = { viewer: 'viewerAdapter', workbench: 'workbenchAdapter' } as const satisfies Record<
-  LayoutAdapterId,
-  string
->;
-
 const workbenchLayoutDefinition = setup({
   schemas: {
     context: types<LayoutContext>(),
@@ -846,7 +839,7 @@ const workbenchLayoutDefinition = setup({
     input: types<WorkbenchLayoutInput>(),
     transitionMeta: types<{ tla: WorkbenchLayoutAction }>(),
   },
-  actors: { layoutRecord, viewerAdapter },
+  actors: { layoutRecord, workbenchAdapter: workbenchAdapterLogic, viewerAdapter: viewerAdapterLogic },
 }).createMachine({
   id: 'workbenchLayout',
   version: '4',
@@ -1004,25 +997,34 @@ const workbenchLayoutDefinition = setup({
       };
       return { context: finished(context, settle(next, viewOf(value), enq), enq) };
     }),
-    deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
-      event.device === context.device ? {} : { context: { device: event.device } },
-    ),
-    dockReady: refines('Unmodelled', ({ children, event }: Step<'dockReady'>, enq: LayoutEnqueue) => {
-      const id = adapterChildIds[event.adapter];
-      const prior = children[id];
-      if (prior !== undefined) {
-        enq.stop(prior);
+    // A Dockview's adapter (A8c, I1): the Dockview hands it over and takes it back; its attach to this actor is the
+    // adapter's own `adapterAttaching` and `adapterAttached`, so the spec sees nothing here.
+    dockReady: refines('Unmodelled', ({ actors, children, event }: Step<'dockReady'>, enq: LayoutEnqueue) => {
+      for (const id of dockAdapterIdsOf(children, event.adapter)) {
+        // A new mount of the same Dockview replaces its adapter.
+        const previous = children[id];
+        if (previous !== undefined) {
+          enq.stop(previous);
+        }
       }
-      enq.spawn(viewerAdapter, { id, input: { ...event.ports, api: event.api } });
+      const id = dockAdapterId(event.adapter, event.dockId);
+      if (event.adapter === 'viewer') {
+        enq.spawn(actors.viewerAdapter, { id, input: { api: event.api, ports: event.ports } });
+      } else {
+        enq.spawn(actors.workbenchAdapter, { id, input: { api: event.api, ports: event.ports } });
+      }
       return {};
     }),
     dockReleased: refines('Unmodelled', ({ children, event }: Step<'dockReleased'>, enq: LayoutEnqueue) => {
-      const child = children[adapterChildIds[event.adapter]];
-      if (child !== undefined) {
-        enq.stop(child);
+      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
+      if (adapter !== undefined) {
+        enq.stop(adapter);
       }
       return {};
     }),
+    deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
+      event.device === context.device ? {} : { context: { device: event.device } },
+    ),
     recordHealthChanged: refines(
       'Unmodelled',
       ({ context, event, value }: Step<'recordHealthChanged'>, enq: LayoutEnqueue) => {
@@ -1365,13 +1367,13 @@ export const workbenchLayoutEventTypes = [
   'lanesApplied',
   'lanesSeeded',
   'deviceChanged',
-  'dockReady',
-  'dockReleased',
   'routeChanged',
   'intent',
   'intentApplied',
   'intentUnavailable',
   'restore',
+  'dockReady',
+  'dockReleased',
 ] as const satisfies ReadonlyArray<WorkbenchLayoutEvent['type']>;
 
 type WorkbenchLayoutMachineDefinition = typeof workbenchLayoutDefinition;

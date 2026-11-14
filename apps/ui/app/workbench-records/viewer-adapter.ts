@@ -179,6 +179,8 @@ export type ViewerAdapterFacts = Readonly<{
     edit: (viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) => Promise<boolean>;
     remove: (viewId: string) => Promise<boolean>;
   }>;
+  /** The project's entry path for a view: `null` is a view with no entry, `undefined` forgets it (`useProject`). */
+  // oxlint-disable-next-line typescript/no-restricted-types -- The project's view entry map names an entry-less view with `null`.
   setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
   /** Write a new view's record, made from `source` (V8). */
   createViewRecord: (viewId: string, entryPath: string, source: ViewSource | undefined) => void;
@@ -212,14 +214,29 @@ export function createViewerAdapterFactsPort(initial: ViewerAdapterFacts): Viewe
   };
 }
 
-/** What the adapter is spawned with. */
-export type ViewerAdapterInput = Readonly<{
-  api: DockviewApi;
+/** The viewer adapter's ports: what it sends demand to and reads from, besides the Dockview. */
+export type ViewerAdapterPorts = Readonly<{
   profile: 'editor' | 'shared';
   projectId: string;
   project: Pick<ProjectRef, 'send' | 'on'>;
   facts: ObservablePort<ViewerAdapterFacts>;
 }>;
+
+/** What the adapter is spawned with. The `DockviewApi` lives only here and in the closure built from it (D4). */
+export type ViewerAdapterInput = Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts }>;
+
+/** The viewer Dockview hands its adapter to a host: the project's layout, or the editor on a page without one. */
+export type ViewerDockReady = Readonly<{
+  type: 'dockReady';
+  adapter: 'viewer';
+  /** This Dockview's mount: a release names it, so a late release never stops a newer mount's adapter. */
+  dockId: string;
+  api: DockviewApi;
+  ports: ViewerAdapterPorts;
+}>;
+
+/** The viewer Dockview that made `dockId` is gone (its ref cleanup): its adapter stops. */
+export type ViewerDockReleased = Readonly<{ type: 'dockReleased'; adapter: 'viewer'; dockId: string }>;
 
 /** The adapter takes no events: everything reaches it through Dockview, the project, the layout port and the facts. */
 export type ViewerAdapterEvent = Readonly<{ type: 'never' }>;
@@ -234,7 +251,10 @@ type Panel = DockviewApi['panels'][number];
  */
 export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEvent, ViewerAdapterInput> =>
   createCallbackLogic<ViewerAdapterEvent, ViewerAdapterInput>(({ input }) => {
-    const { api, profile, projectId, project, facts } = input;
+    const {
+      api,
+      ports: { profile, projectId, project, facts },
+    } = input;
     const isEditor = profile === 'editor';
     const disposables: Disposable[] = [];
     const listen = (disposable: Disposable): void => {
@@ -528,3 +548,6 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       visibleGeometryDemand.clear();
     };
   });
+
+/** The viewer adapter's logic, which both hosts spawn. */
+export const viewerAdapterLogic = createViewerAdapterLogic();

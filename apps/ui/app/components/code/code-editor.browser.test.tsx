@@ -1334,6 +1334,31 @@ it.each([
   },
 );
 
+/*
+ * A15f2 (F9's follow-up row): a diagnostic that arrives after the mount, as the language service's does seconds later,
+ * moves no line of text; the lint gutter has its width before any marker is in it.
+ */
+it.fails('keeps the first line in place when the first diagnostic arrives after the mount', async () => {
+  await page.viewport(1000, 600);
+  await document.fonts.ready;
+  const sourceDocument = new EditorDocument('main.kcl', lintSource);
+  const diagnostics = new EditorDiagnostics();
+  const { container } = render(
+    <div className='h-72'>
+      <CodeEditor document={sourceDocument} viewId='late-lint' languageId='kcl' diagnostics={diagnostics} />
+    </div>,
+  );
+  await expect.poll(() => container.querySelector('.cm-line')?.textContent).toContain('postD');
+  const before = firstCharacterRect(container.querySelector('.cm-content')!);
+
+  diagnostics.set(sourceDocument.uri, 'kernel', [lintAt('pinD')]);
+  await expect.poll(() => container.querySelectorAll('.cm-gutter-lint .cm-lint-marker').length).toBe(1);
+
+  const after = firstCharacterRect(container.querySelector('.cm-content')!);
+  expect(after.left).toBeCloseTo(before.left, 1);
+  expect(after.top).toBeCloseTo(before.top, 1);
+});
+
 it('shows kernel and language diagnostics together on their own rows', async () => {
   await page.viewport(1000, 600);
   const sourceDocument = new EditorDocument('main.kcl', lintSource);

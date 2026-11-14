@@ -2520,3 +2520,22 @@ describe('round 11: the project a move leaves keeps its own chat', () => {
     });
   });
 });
+
+describe('round 12: a held answer on the project focus is on', () => {
+  it('should stop focusing the live project whose own access answer comes back held', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    await renderAndSettle();
+    expect(focusedSessionId()).toBe(projectA);
+
+    getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? trashed(id) : ready(id)));
+    await act(async () => {
+      bumpLibraryRevision();
+      await Promise.resolve();
+    });
+    await flushTasks();
+    expect(screen.getByText('Notice: trashed')).toBeInTheDocument();
+    expect(sessionIds()).toEqual([projectA]);
+    /* As on main (`focused` only for a ready answer): the held project's focused providers unmount. */
+    expect(focusedSessionId()).toBeUndefined();
+  });
+});

@@ -103,4 +103,12 @@ describe('focus: the chat a session is given', () => {
 
     expect(harness.sent.route).toEqual([{ type: 'chatShown', projectId: 'a', chatId: 'chat-z' }]);
   });
+
+  it("should take a same-project request's workspace into the request it keeps", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+    harness.route('r2', 'a', { slugs: { workspaceSlug: 'moved', projectSlug: 'a' } });
+
+    expect(harness.context().kept['a']?.workspace).toBe('moved');
+  });
 });

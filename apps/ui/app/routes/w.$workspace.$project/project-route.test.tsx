@@ -2450,3 +2450,27 @@ describe('project route shell identity (A0.7)', () => {
     expect(shell.mounts).toBe(1);
   });
 });
+
+describe('round 9: the editor corrects a chat the URL named but could not focus (I18, gate half)', () => {
+  beforeEach(() => {
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+  });
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it("should show the chat the editor fell back to when the URL's chat does not resolve", async () => {
+    renderHost('/w/ws/alpha?chat=chat-gone');
+    await flushTasks();
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-gone' });
+
+    await act(async () => {
+      focusedChatResolvers.get(projectA)?.('chat-9');
+      await Promise.resolve();
+    });
+    await flushTasks();
+
+    expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-9' });
+  });
+});

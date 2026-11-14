@@ -8,6 +8,7 @@ import { act, render } from '@testing-library/react';
 import { useState } from 'react';
 import { RouterProvider, createMemoryRouter, useLocation, useNavigation, useParams } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import { useRouterRouteSink } from '#routes/w.$workspace.$project/project-route-intent.js';
 
@@ -492,5 +493,67 @@ describe('useRouterRouteSink under a data router (I2)', () => {
     });
 
     expect(router.state.location.search).toBe('?chat=chat-a&via=list');
+  });
+});
+
+describe('the route sink takes the cloudOpen marker (round 9)', () => {
+  it('should latch the cloud intent and drop the marker from the URL at rest', async () => {
+    const router = createMemoryRouter([{ path: '/w/:workspace/:project', element: <Probe /> }], {
+      initialEntries: ['/w/ws/c1?cloudOpen=tau'],
+    });
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+    act(() => {
+      sinks[0]?.({ type: 'cloudOpenTaken', projectId: 'c1' });
+    });
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toBe('');
+    });
+    expect(tauCloudIntent.get('c1')).toBe('open');
+  });
+
+  it("should not cancel the person's move to another project with the marker's removal (I2)", async () => {
+    const loading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ params }) => {
+            if (params['project'] === 'other') {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/c2?cloudOpen=tau'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+    act(() => {
+      void router.navigate('/w/ws/other');
+    });
+    expect(router.state.navigation.state).toBe('loading');
+    act(() => {
+      sinks[0]?.({ type: 'cloudOpenTaken', projectId: 'c2' });
+    });
+    await act(async () => {
+      loading.resolve();
+      await loading.promise;
+    });
+    await vi.waitFor(() => {
+      expect(router.state.navigation.state).toBe('idle');
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+    expect(router.state.location.pathname).toBe('/w/ws/other');
   });
 });

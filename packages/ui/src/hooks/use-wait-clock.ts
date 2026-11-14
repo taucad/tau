@@ -4,6 +4,7 @@ import {
   indicatorDelayMilliseconds,
   indicatorMinimumMilliseconds,
   settledTiming,
+  slowWaitMilliseconds,
   waitingTiming,
 } from '#utils/wait-timing.js';
 import type { ReactNode } from 'react';
@@ -17,7 +18,8 @@ import type { WaitIndicatorTiming } from '#utils/wait-timing.js';
  * `animationNow()`, when given, is the time on the same timeline that a CSS animation started now counts its delay
  * from. In a browser that is the document timeline's current time: it holds still through a task while
  * `performance.now()` runs on, so after a long task a delay measured from `now()` would end early by the task's length.
- * The indicator's delays are measured from it. Clocks without it (tests, hosts with their own clock) use `now()`.
+ * The indicator's delays are measured from it. Clocks without it (tests, hosts with their own clock) use `now()`. Both
+ * must read the same timeline: a reveal's paint is read as the later of the two.
  *
  * @public
  */
@@ -209,14 +211,32 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       ...tracked,
       active,
       /* A seen reveal is on screen, even where the timeline still reads before the paint the reveal recorded. */
-      timing: settledTiming({
-        settledAt: Math.max(now - tracked.startedAt, tracked.isRevealSeen ? tracked.shownAt : Number.NEGATIVE_INFINITY),
-        shownAt: tracked.shownAt,
-      }),
+      timing: heldWords(
+        settledTiming({
+          settledAt: Math.max(
+            now - tracked.startedAt,
+            tracked.isRevealSeen ? tracked.shownAt : Number.NEGATIVE_INFINITY,
+          ),
+          shownAt: tracked.shownAt,
+        }),
+        now - tracked.startedAt,
+      ),
     };
   }
   setTracked(next);
   return { timing: next.timing, wait: next.wait, revealed };
+}
+
+/**
+ * A hold's words: the slow words only if the wait ended after the slow mark on the timeline that swapped them, not
+ * after a reveal the performance clock read later.
+ *
+ * @param timing - The settled timing.
+ * @param settledAt - When the wait ended on the timeline, measured from its start. Milliseconds.
+ * @returns The timing, with the slow words decided by `settledAt`.
+ */
+function heldWords(timing: WaitIndicatorTiming, settledAt: number): WaitIndicatorTiming {
+  return timing.state === 'holding' ? { ...timing, isSlow: settledAt >= slowWaitMilliseconds } : timing;
 }
 
 /**

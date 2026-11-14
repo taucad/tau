@@ -2,7 +2,8 @@
  * A project session's file manager, with no React (app state orchestration charter D4, D6, I5, I23; plan § 4 A6c;
  * rows S17 to S19).
  *
- * The session's `fileManager` child opens one of these when the session opens, and closes it when the child stops. It
+ * The session's `fileManager` child opens one of these once `rootFiles` holds the shared worker, closes it and opens a
+ * fresh one when that worker is lost or replaced, and closes the last one when the child stops. It
  * builds the file manager through the file-manager host for `/projects/<id>`, starts it, and owns what a lease owned
  * before A6c: the actor, the host's release of its resources, the record connections and a signal that a wait on the
  * file manager listens to. The session subtree's provider is a view of it ({@link sessionFileManagerOf}); it creates,

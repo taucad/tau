@@ -285,7 +285,7 @@ export type ProjectLoadProbe = {
   readonly placeholderWorkbenchLane: string;
   /** The chat composer's region: the tray and the textarea. */
   readonly composer: string;
-  /** The empty-chat state. */
+  /** The empty-chat state, inside the chat history only: other panels have empty states of their own. */
   readonly emptyState: string;
   /** The viewer dock's header (Dockview's tab strip inside the viewer container). */
   readonly viewerDockHeader: string;
@@ -306,7 +306,7 @@ export const projectLoadProbe: ProjectLoadProbe = {
   placeholderLanes: '[data-slot="workspace-skeleton-lanes"]',
   placeholderWorkbenchLane: ':scope > .border-l',
   composer: '[role="region"][aria-label="Chat composer"]',
-  emptyState: '[data-slot="panel-empty-state"]',
+  emptyState: '[role="region"][aria-label="Chat history"] [data-slot="panel-empty-state"]',
   viewerDockHeader: String.raw`.\@container\/viewer .dv-tabs-and-actions-container`,
   skeleton: '[data-slot="skeleton"]',
   hydrated: '[aria-label="Ask Tau to build anything..."][contenteditable="true"]',

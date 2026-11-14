@@ -27,8 +27,9 @@ import {
  * self-host tier. The recorder (`recordProjectLoad`) is installed before any page script and samples every
  * animation frame, so a state painted once is caught.
  *
- * Every row that pins a known defect forces it — a delayed workspace chunk, or a file-manager worker reply
- * delivered late — so its defect shows on every run. Its title names the defect; its defect assertion (a removed
+ * Every row that pins a known defect shows it on every run. Most force it: the workspace chunk or the agent host's
+ * script held, or a file-manager worker reply delivered late. U2, U3 and U22 need no forcing: their defect is built
+ * into the load on every run. Its title names the defect; its defect assertion (a removed
  * node, a mount count, a frame) names the frame. Each is a plain test that stands as an expected failure until the
  * fixing lane sets `expectedFailure: false`; it is never deleted. A row measures first (seeding, the load, the check
  * that the forcing happened, its preconditions) and asserts after: an error while measuring, in setup or teardown,
@@ -108,7 +109,7 @@ const keepRecord = async (name: string, extra: Readonly<Record<string, unknown>>
  */
 const seedProjects = async (
   viewport: ViewportName,
-  options: { readonly laneBorders?: boolean; readonly watchText?: string } = {},
+  options: { readonly laneBorders?: boolean; readonly watchText?: string; readonly agentHost?: boolean } = {},
 ): Promise<{ readonly path: string; readonly chatId: string }> => {
   await target.addCookies([
     { domain: 'localhost', name: 'tau-cookie-consent', path: '/', value: cookieValue('declined') },
@@ -116,7 +117,10 @@ const seedProjects = async (
   await target.setViewport(viewports.wide);
   await installProjectLoadRecorder(options);
   await installWorkerReadDelay();
-  await target.installAgentHostGatewayFixture([]);
+  /* The gateway fixture routes the context's requests, which turns its HTTP cache off; U16 needs warm opens. */
+  if (options.agentHost !== false) {
+    await target.installAgentHostGatewayFixture([]);
+  }
   await target.navigate('/__e2e/project-navigation');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?chat=/u, 60_000);
   await target.expectVisible(composer, 60_000);
@@ -222,6 +226,10 @@ for (const viewport of ['wide', 'phone'] as const) {
       await requireChunkDelayed('U1');
       const record = await keepRecord(`u1-${viewport}`);
       precondition(record.wrapperFirstFrame !== undefined, 'U1: the sidebar wrapper never painted');
+      precondition(
+        record.dropped['wrapperAbsentFrames'] === undefined,
+        'U1: the record dropped absent-wrapper frames past its frame limit',
+      );
       return record;
     },
     assert: (record) => {
@@ -543,10 +551,12 @@ test(
   /* A report keeps every sample: a retry would replace a run's samples with another run's. */
   { timeout: loadBudget + warmOpens * warmOpenBudget, retry: 0 },
   async () => {
-    await seedProjects('wide');
+    await seedProjects('wide', { agentHost: false });
     await settleProject();
     const samples: Array<{
       readonly sample: number;
+      /** The workspace chunk came from the HTTP cache: a warm open. A cold sample stays in n, labelled. */
+      readonly warm?: boolean;
       readonly mounts?: number;
       /** Headers in the settled document: a mount count above it is a header built, removed and built again. */
       readonly settled?: number;
@@ -559,8 +569,15 @@ test(
         await target.reload();
         await settleProject();
         const record = await readProjectLoad();
+        const warm = await target.evaluate((pattern) => {
+          const chunk = performance
+            .getEntriesByType('resource')
+            .find((entry) => new RegExp(pattern, 'u').test(entry.name)) as PerformanceResourceTiming | undefined;
+          return chunk?.transferSize === 0 && chunk.decodedBodySize > 0;
+        }, workspaceChunk);
         samples.push({
           sample,
+          warm,
           mounts: record.viewerDockHeaders.length,
           settled: await target.evaluate(
             (selector) => document.querySelectorAll(selector).length,
@@ -577,20 +594,21 @@ test(
     const k = samples.filter((entry) => (entry.mounts ?? 0) > 1).length;
     const rebuilt = samples.filter((entry) => (entry.mounts ?? 0) > Math.max(entry.settled ?? 0, 1)).length;
     const failed = samples.filter((entry) => entry.error !== undefined).length;
+    const warm = samples.filter((entry) => entry.warm === true).length;
     const perSample = samples.map((entry) => ({
       ...entry,
       /* This load mounted more headers than its settled page holds: one was built, removed and built again. */
       rebuilt: entry.mounts !== undefined && entry.mounts > Math.max(entry.settled ?? 0, 1),
     }));
     const statement = [
-      `U16: ${k} of ${samples.length} warm opens mounted a viewer dock header more than once, ${rebuilt} of them rebuilt one the settled page holds, ${failed} failed to sample`,
+      `U16: ${k} of ${samples.length} opens mounted a viewer dock header more than once, ${rebuilt} of them rebuilt one the settled page holds; ${warm} were warm (workspace chunk from the HTTP cache), ${failed} failed to sample`,
       ...perSample.map((entry) =>
         entry.error === undefined
-          ? `sample ${entry.sample}: ${String(entry.mounts)} mounts in frames ${(entry.frames ?? []).join(', ') || 'none'}, ${String(entry.settled)} settled, rebuilt ${String(entry.rebuilt)}`
+          ? `sample ${entry.sample} (${entry.warm === true ? 'warm' : 'not warm'}): ${String(entry.mounts)} mounts in frames ${(entry.frames ?? []).join(', ') || 'none'}, ${String(entry.settled)} settled, rebuilt ${String(entry.rebuilt)}`
           : `sample ${entry.sample}: not sampled (${entry.error})`,
       ),
     ];
-    const report = { defect: 'U16', k, rebuilt, failed, n: samples.length, statement, samples: perSample };
+    const report = { defect: 'U16', k, rebuilt, warm, failed, n: samples.length, statement, samples: perSample };
     await target.writeArtifact('project-load-frames/u16-report.json', `${JSON.stringify(report, null, 2)}\n`);
     expect(samples).toHaveLength(warmOpens);
   },

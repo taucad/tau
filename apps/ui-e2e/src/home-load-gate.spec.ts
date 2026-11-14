@@ -267,6 +267,10 @@ for (const viewport of ['wide', 'phone'] as const) {
           label: `h1-${viewport}`,
         });
         precondition(record.hydratedFirstFrame !== undefined, 'H1: the rich composer never mounted');
+        precondition(
+          record.dropped['skeletonFrames'] === undefined,
+          'H1: the record dropped skeleton frames past its frame limit',
+        );
         return record;
       },
       assert: (record) => {

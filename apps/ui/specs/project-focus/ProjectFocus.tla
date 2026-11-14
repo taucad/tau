@@ -41,8 +41,12 @@
 (* registry's recency order are not modelled: a policy close may take any  *)
 (* candidate.                                                              *)
 (*                                                                         *)
-(* Every configuration but `wide` runs on the pr tier, in this family's    *)
-(* own target, ui:formal:tla:project-focus (README).                       *)
+(* Every configuration but `wide` and the six `-wide` siblings runs on     *)
+(* the pr tier, in this family's own target, ui:formal:tla:project-focus   *)
+(* (README). Each `-wide` sibling holds the full bounds of its narrowed pr *)
+(* form. `target-person-epoch` keeps a person's waiting open with a        *)
+(* library change, in flushFailed too, and `target-start-retry` a retry    *)
+(* after a failed start with a library change, at pr.                      *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                        *)
 (*   Focus          "target": the focus machine (D7).                      *)
@@ -87,6 +91,8 @@
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
+\* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
+\* route gate imports the type from there. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

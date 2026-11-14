@@ -67,6 +67,14 @@
 \* holds no message, so that chat shows empty at once. It is a call to the chat store after the operation
 \* commits, and the creating callback lists the store among its inputs; no root, row or read changes,
 \* so every action is unchanged.
+\* A3b: `ProjectLibrary` runs the three machines and the hook delegates to it. The `today` configurations
+\* keep describing the hook at 7918b118, before that wiring. A discovery `apply` reports a write it
+\* skipped at a write-stop gate, so a stop that ended while the deletes ran redoes the pass at once,
+\* as `WriteStopEnded` would (rule 3), and the listing is refetched as a redo starts, as today's skew
+\* listener did; a `discovery-required` verification, or a question that skips
+\* verification, asks for the bootstrap pass, an `Unmodelled` emission. A mutation's or replay's copy of
+\* its operation is dropped once taken; a later attempt reads the journal. A failed pass, journal read or
+\* discard rejects with the port's own error, which the library keeps. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

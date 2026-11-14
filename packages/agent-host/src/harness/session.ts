@@ -87,6 +87,7 @@ import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery
 import { codedFailureDetail as codedFailure } from '#harness/coded-failure.js';
 import { emptyChatLedger, foldChatLedger, isForeignInvocation, unresolvedInvocations } from '#log/chat-ledger.js';
 import { turnLabelsOf } from '#harness/turn-labels.js';
+import { snapshotKernel } from '#log/snapshot-kernel.js';
 import type { GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
@@ -456,6 +457,8 @@ type CreateTransportStreamOptions = {
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
   /** The next generation step's turn labels (`x-tau-turn-step`, `x-tau-turn-gap`); asked once per generation call. */
   readonly turnLabels?: (() => Promise<GatewayTurnLabels>) | undefined;
+  /** The kernel the run targets (`x-tau-kernel`, LW17), asked once per call; absent when the turn names none. */
+  readonly kernel?: (() => string | undefined) | undefined;
   /** E9: the longest silence between transport events before the call fails `MODEL_STREAM_STALLED`. */
   readonly stallBound?: StreamStallBound | undefined;
 };
@@ -811,6 +814,7 @@ export const createTransportStreamFunction =
         const committedContext = options.committedContext?.();
         const committedTurns = (await options.committedTurns?.()) ?? [];
         const turn = invocationPurpose === 'generation' ? await options.turnLabels?.() : undefined;
+        const kernel = options.kernel?.();
         signal.throwIfAborted();
         const documents = options.documents?.();
         /* The transport's own signal: pi's abort reaches it, and so does the stall bound's. */
@@ -824,6 +828,7 @@ export const createTransportStreamFunction =
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose,
           ...(turn === undefined ? {} : { turn }),
+          ...(kernel === undefined ? {} : { kernel }),
           ...(funded
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) => {
@@ -1213,6 +1218,7 @@ const compactionModelsWithTransport = (options: {
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
+  readonly kernel?: CreateTransportStreamOptions['kernel'];
   /** The session's side table, so a summarised document keeps its name (P32). */
   readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
@@ -1230,10 +1236,12 @@ const compactionModelsWithTransport = (options: {
             : options.createId();
         signal.throwIfAborted();
         const documents = options.documents();
+        const kernel = options.kernel?.();
         const stream = options.transport.stream({
           attemptId,
           ...(options.chatId === undefined ? {} : { chatId: options.chatId }),
           invocationPurpose: 'compaction',
+          ...(kernel === undefined ? {} : { kernel }),
           ...(documents.size === 0 ? {} : { documents: new Map(documents) }),
           ...(funded
             ? {
@@ -1904,6 +1912,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
    * session is a continuation carrying the same turn gap, so one run's steps never straddle a bucket edge.
    */
   let runTurnLabels: GatewayTurnLabels | undefined;
+  /* LW17: the run's kernel, from the snapshot its turn committed (a resumed run reads the same one), else the caller's. */
+  const runKernel = (): string | undefined => snapshotKernel(committedContext?.snapshot ?? options.snapshot);
   const turnLabels = async (): Promise<GatewayTurnLabels> => {
     if (runTurnLabels !== undefined) {
       return { ...runTurnLabels, step: 'continuation' };
@@ -1928,6 +1938,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
     turnLabels,
+    kernel: runKernel,
     systemPromptBlocks: () => options.systemPromptBlocks,
     // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
     prestartTool: async (toolCall, contentIndex, messageId, partial, signal) => {
@@ -2074,6 +2085,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           createId,
           documents: () => documents,
           ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
+          kernel: runKernel,
         }),
     settleDiscardedToolCalls: settlePrestartedTools,
     onCompaction: options.onCompaction,

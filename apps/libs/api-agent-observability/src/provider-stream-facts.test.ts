@@ -107,6 +107,43 @@ describe('ProviderStreamFacts', () => {
     expect(summary).toMatchObject({ stop: 'toolUse', usage: { input: 9, output: 3, missing: 'none' } });
   });
 
+  /*
+   * Vertex's OpenAI-compatible wire bills thinking on top of `completion_tokens`, so output is their sum there, as the
+   * ledger counts it (`billable-model-evidence.ts`); every other supplier on the wire counts it inside (LI4, LA3).
+   */
+  it.each([
+    ['vertexai', 205 + 127],
+    ['openai', 205],
+    [undefined, 205],
+  ] as const)(
+    'should count reasoning as output on the completions wire when the supplier is %s',
+    (provider, output) => {
+      const facts = new ProviderStreamFacts('openai-completions', 0, () => 1);
+      if (provider !== undefined) {
+        facts.routedTo(provider);
+      }
+      facts.accept(
+        new TextEncoder().encode(
+          frames([
+            { id: 'cmpl_1', model: 'gemini-test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+            {
+              id: 'cmpl_1',
+              model: 'gemini-test',
+              choices: [],
+              usage: {
+                prompt_tokens: 1935,
+                completion_tokens: 205,
+                completion_tokens_details: { reasoning_tokens: 127 },
+              },
+            },
+          ]),
+        ),
+      );
+
+      expect(facts.summary().usage).toMatchObject({ input: 1935, output, reasoning: 127, missing: 'none' });
+    },
+  );
+
   it('should report what it cannot read instead of throwing', () => {
     const summary = read('anthropic', 'data: {not json}\n\nevent: ping\n\n');
 

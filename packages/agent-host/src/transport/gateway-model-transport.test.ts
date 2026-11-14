@@ -1273,6 +1273,18 @@ describe('createGatewayModelTransport', () => {
     }
   });
 
+  it("labels a call with the run's kernel, over the composition's, and only once the composition names its host", async () => {
+    /* LW17: the kernel is per run (the turn's snapshot), the other labels per host. */
+    const run = await headersFor({ hostLabels: { kind: 'browser' } }, { kernel: 'openscad' });
+    expect(run.get('x-tau-kernel')).toBe('openscad');
+
+    const both = await headersFor({ hostLabels: { kind: 'browser', kernel: 'replicad' } }, { kernel: 'openscad' });
+    expect(both.get('x-tau-kernel')).toBe('openscad');
+
+    const unnamed = await headersFor({}, { kernel: 'openscad' });
+    expect(unnamed.has('x-tau-kernel')).toBe(false);
+  });
+
   it('drops a host label a header cannot carry rather than failing the call', async () => {
     /* `Headers#set` throws on a control or non-Latin-1 character; a label is never worth a turn. */
     const headers = await headersFor({

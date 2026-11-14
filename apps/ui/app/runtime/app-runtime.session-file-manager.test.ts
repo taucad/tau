@@ -25,7 +25,7 @@ const world = vi.hoisted(() => ({
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
-/* jsdom has no worker: the host reports one a row moves, and its listeners hear each change. */
+/* The jsdom page has no worker: the host reports one a row moves, and its listeners hear each change. */
 vi.mock('#runtime/file-manager-host.js', async (importOriginal) => {
   const actual = await importOriginal<typeof FileManagerHostModule>();
   return {

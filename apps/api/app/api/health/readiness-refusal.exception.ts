@@ -25,10 +25,15 @@ export class ReadinessRefusalException extends ServiceUnavailableException {
  */
 export const readinessFailures = (result: HealthCheckResult): ReadinessFailure[] =>
   Object.entries(result.error ?? {}).map(([indicator, detail]) => {
-    const { message, responseTimeMs } = detail as { message?: unknown; responseTimeMs?: unknown };
+    const { message, responseTimeMs, waitingOn } = detail as {
+      message?: unknown;
+      responseTimeMs?: unknown;
+      waitingOn?: unknown;
+    };
     return {
       indicator,
       ...(typeof message === 'string' ? { message } : {}),
       ...(typeof responseTimeMs === 'number' ? { responseTimeMs } : {}),
+      ...(Array.isArray(waitingOn) && waitingOn.every((head) => typeof head === 'string') ? { waitingOn } : {}),
     };
   });

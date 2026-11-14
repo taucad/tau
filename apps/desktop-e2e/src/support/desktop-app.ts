@@ -444,12 +444,14 @@ export const launchDesktopApp = async (options: {
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const runFlagState = process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined;
   const flagState = options.flagState ?? runFlagState;
-  if (
+  /* A spec that names no flag state of its own, run with auto-open on, is not about onboarding: it starts as an install
+   * that has run before and a device whose setup was already offered. */
+  const settledOnboarding =
     options.flagState === undefined &&
     options.profileRoot === undefined &&
     flagState !== undefined &&
-    flagStateFlags[flagState].onboardingAutoOpen
-  ) {
+    flagStateFlags[flagState].onboardingAutoOpen;
+  if (settledOnboarding) {
     /* Main counts a launch as the first run only while no window-state file exists, whatever the file holds
      * (`apps/desktop/src/main/first-run.ts`); an empty object restores no frame, so the window opens at its default
      * size as before. */
@@ -658,6 +660,16 @@ export const launchDesktopApp = async (options: {
        * the seed only while `TAU_DEBUG` is on, which this launch sets. */
       recordStartupPhase('flag-state.before', page.url());
       await page.addInitScript({ content: flagStateInitScript(flagState) });
+      if (settledOnboarding) {
+        /* A signed-in account the spec just created is new, so home would offer setup to it as well as to a first
+         * run (`shouldOfferSetup`). Record setup as offered and the tour as declined, as an earlier visit leaves them,
+         * unless something already wrote the record. */
+        await page.addInitScript({
+          content: `if (globalThis.localStorage.getItem('tau-onboarding') === null) {
+  globalThis.localStorage.setItem('tau-onboarding', JSON.stringify({ value: { version: 1, setup: { status: 'offered' }, tour: { wanted: false, seen: [] } } }));
+}`,
+        });
+      }
       await page.reload({ waitUntil: 'load' });
       recordStartupPhase('flag-state.after', page.url());
     }

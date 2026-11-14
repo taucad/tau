@@ -7,13 +7,13 @@ import { reply } from '#support/chat-admission.js';
 import { useFlagState } from '#support/flag-state-test.js';
 
 /*
- * The Auto wording, end to end, with every onboarding flag on and the kernel program's Auto on: Home shows the
- * composer's kernel pill reading `Auto` and no row of kernel chips; no onboarding surface says "Automatic"; setup's
+ * The Auto wording, end to end, with every onboarding flag on: Home shows the composer's kernel pill reading `Auto`
+ * and no row of kernel chips; no onboarding surface says "Automatic"; setup's
  * Design card carries the `Auto` badge; and in a first project the pill reads `Auto`, then `Auto · <kernel>` once the
  * model's entry exists, with tip 1 of the tour anchored to that composer.
  *
- * Auto is a stored override (`autoKernel` in `tau:flags`), the way the Home load gate turns it on; the onboarding
- * flags come from the flag-state harness. The chat turn is the scripted gateway fixture, so no provider is called.
+ * Auto is every person's default since AKS-11 (#1982), so nothing turns it on here; the onboarding flags come from
+ * the flag-state harness. The chat turn is the scripted gateway fixture, so no provider is called.
  */
 
 const composer = '[aria-label="Ask Tau to build anything..."]';
@@ -39,15 +39,6 @@ const openSeed = async (): Promise<void> => {
     await target.navigate(href);
     await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   }
-};
-
-/** Turn the kernel program's Auto on for this browser profile, before the app first reads its flags. */
-const turnAutoOn = async (): Promise<void> => {
-  await target.addInitScript(() => {
-    const key = 'tau:flags';
-    const stored = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>;
-    localStorage.setItem(key, JSON.stringify({ ...stored, autoKernel: true }));
-  });
 };
 
 /** The text of the page's main landmark, hidden text for assistive technology included. */
@@ -81,13 +72,7 @@ describe('the Auto wording on onboarding surfaces', () => {
   test('shows the Auto pill on Home and no kernel chip row', async () => {
     await useFlagState('all-on');
     await target.setViewport({ width: 1440, height: 900 });
-    // Without Auto, Home's composer carries the chip row this test then expects gone.
     await target.navigate('/');
-    await target.expectVisible(selectors.getByCss(composer), 60_000);
-    await target.expectVisible(kernelChip('OpenSCAD'), 30_000);
-
-    await turnAutoOn();
-    await target.reload();
     await target.expectVisible(selectors.getByCss(composer), 60_000);
     await target.expectVisible(kernelPill(), 30_000);
     expect(await target.getAttribute(kernelPill(), 'aria-label')).toBe('Kernel: Auto');
@@ -100,7 +85,6 @@ describe('the Auto wording on onboarding surfaces', () => {
 
   test('says Auto, and never "Automatic", on every step of setup', async () => {
     await useFlagState('all-on');
-    await turnAutoOn();
     await target.setViewport({ width: 1280, height: 800 });
     await target.navigate('/welcome?entry=help');
     await target.expectVisible(stepHeading('What do you want to make?'), 60_000);
@@ -124,7 +108,6 @@ describe('the Auto wording on onboarding surfaces', () => {
 
   test('reads Auto in a first project, then Auto · <kernel> once its model exists', async () => {
     await useFlagState('all-on');
-    await turnAutoOn();
     await target.installAgentHostGatewayFixture(firstTurn);
     await target.setViewport({ width: 1600, height: 1000 });
     await target.navigate('/');
@@ -148,7 +131,6 @@ describe('the Auto wording on onboarding surfaces', () => {
 
   test('anchors tip 1 to the composer that carries the Auto pill', async () => {
     await useFlagState('all-on');
-    await turnAutoOn();
     await target.setViewport({ width: 1600, height: 1000 });
     await target.navigate('/');
     await target.expectVisible(selectors.getByCss(composer), 60_000);

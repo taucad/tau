@@ -160,24 +160,14 @@ const seedTranscriptWithTray = async (chatId: string): Promise<void> => {
 };
 
 /**
- * The transcript's event-log listing for one chat. U10 holds it beside the tray file; it does not hold the
- * transcript itself, which waits for the agent host's read answer (U7 holds the host).
+ * The tray's file for one chat. The tray reads it on its own (`useFileContent`), apart from the transcript, which
+ * waits for the agent host (U7).
  */
-const transcriptRead = (chatId: string): WorkerReadDelay => ({
-  method: 'readdir',
-  path: String.raw`^\.tau/chats/${chatId}/events$`,
-  milliseconds: readDelay,
-});
-
-/** The tray's file for one chat. */
 const trayRead = (chatId: string): WorkerReadDelay => ({
   method: 'readFileWithDigest',
   path: String.raw`^\.tau/chats/${chatId}/todo\.yaml$`,
   milliseconds: readDelay,
 });
-
-/** The transcript's event-log listing and the tray's file, for one chat. */
-const transcriptReads = (chatId: string): WorkerReadDelay[] => [transcriptRead(chatId), trayRead(chatId)];
 
 /** The project chat listing: every project's `.tau/chats` directory read. */
 const chatListingRead: WorkerReadDelay = {
@@ -349,19 +339,32 @@ knownDefect('U4: the workspace placeholder node is created at most once per load
 });
 
 /**
- * The lane borders a frame drew that the settled page does not draw, inside the content region (right of the
- * sidebar). Whatever element draws it, a border where the settled two-lane page has none is a lane it lacks.
+ * U8 (class c, no lane fixes it) mounts lanes 1, 17 and 16 px wide beside the sidebar for one unpainted layout before
+ * they snap. A border this close to the content's left edge is that snap, not a lane. Pixels.
  */
-const extraLaneBorders = (
+const laneSnapBand = 24;
+
+/**
+ * The recorded changes that drew more lanes inside the content region than the settled page draws: a third lane on a
+ * two-lane page, whatever element draws it. Each runs until the next change, so its frame span is reported.
+ */
+const extraLanes = (
   record: ProjectLoadRecord,
   settled: readonly number[],
   bounds: { readonly contentLeft: number; readonly windowWidth: number },
-): Array<ProjectLoadFrame & { readonly xs: readonly number[] }> => {
-  const isInside = (x: number): boolean => x > bounds.contentLeft + 2 && x < bounds.windowWidth - 2;
-  const isSettled = (x: number): boolean => settled.some((known) => Math.abs(known - x) <= 2);
-  return record.laneBorders
-    .map((frame) => ({ ...frame, xs: frame.xs.filter((x) => isInside(x) && !isSettled(x)) }))
-    .filter((frame) => frame.xs.length > 0);
+): string[] => {
+  const inside = (xs: readonly number[]): number[] =>
+    xs.filter((x) => x > bounds.contentLeft + laneSnapBand && x < bounds.windowWidth - 2);
+  const settledLanes = inside(settled).length;
+  return record.laneBorders.flatMap((entry, index) => {
+    const lanes = inside(entry.xs);
+    if (lanes.length <= settledLanes) {
+      return [];
+    }
+    const next = record.laneBorders[index + 1];
+    const last = next === undefined ? record.frames : next.frame - 1;
+    return [`frames ${entry.frame} to ${last} (from ${entry.t} ms): x ${lanes.join(', ')}`];
+  });
 };
 
 knownDefect(
@@ -383,12 +386,19 @@ knownDefect(
       await settleProject();
       await requireChunkDelayed('U5');
       await target.expectAttribute(toggle, 'aria-pressed', 'false', 60_000);
+      /* The desktop sidebar is the non-collapsible variant: the shown sidebar's right edge is the content's left. */
       const contentLeft = await target.evaluate(() =>
-        Math.round(document.querySelector('[data-slot="sidebar-container"]')?.getBoundingClientRect().right ?? 0),
+        Math.max(
+          0,
+          ...[...document.querySelectorAll('[data-slot="sidebar"]')]
+            .filter((node) => node.checkVisibility())
+            .map((node) => Math.round(node.getBoundingClientRect().right)),
+        ),
       );
       /* The settled reference is the page as it stands now, not the last frame the record kept. */
       const settled = await readLaneBordersNow();
       const record = await keepRecord('u5-wide', { contentLeft, settled });
+      precondition(contentLeft > 0, 'U5: no shown sidebar marks the content region');
       precondition(settled.length > 0, 'U5: the settled page drew no lane border to compare frames with');
       precondition(
         record.dropped['laneBorders'] === undefined,
@@ -397,10 +407,10 @@ knownDefect(
       return { record, settled, contentLeft };
     },
     assert: ({ record, settled, contentLeft }) => {
-      const extra = extraLaneBorders(record, settled, { contentLeft, windowWidth: viewports.wide.width });
+      const extra = extraLanes(record, settled, { contentLeft, windowWidth: viewports.wide.width });
       expect(
-        extra.slice(0, 5).map((frame) => `${describeFrame(frame)}: x ${frame.xs.join(', ')}`),
-        `U5: a workbench-closed project painted a lane border the settled page lacks (settled: x ${settled.join(', ')}) in ${extra.length} frames`,
+        extra.slice(0, 5),
+        `U5: a workbench-closed project drew more lane borders right of the sidebar (x > ${contentLeft + laneSnapBand}) than the settled page (x ${settled.join(', ')})`,
       ).toEqual([]);
     },
   },
@@ -467,7 +477,7 @@ knownDefect('U7: the largest contentful paint is not the empty-chat state with t
 });
 
 knownDefect(
-  'U10: the composer keeps its height in every frame for a chat with a tray, with the transcript read 3 s late',
+  'U10: the composer keeps its height in every frame for a chat with a tray, with the tray file answered 3 s late',
   {
     artifact: 'u10-wide',
     expectedFailure: true,
@@ -475,7 +485,7 @@ knownDefect(
     measure: async () => {
       const { chatId } = await seedProjects('wide');
       await seedTranscriptWithTray(chatId);
-      await armWorkerReadDelay(transcriptReads(chatId));
+      await armWorkerReadDelay([trayRead(chatId)]);
       await target.reload();
       await settleProject();
       await target.delay(readDelay);
@@ -530,7 +540,8 @@ const warmOpenBudget = 70_000;
 
 test(
   'U16 (report-only): counts viewer dock header mounts on warm opens, k of n',
-  { timeout: loadBudget + warmOpens * warmOpenBudget },
+  /* A report keeps every sample: a retry would replace a run's samples with another run's. */
+  { timeout: loadBudget + warmOpens * warmOpenBudget, retry: 0 },
   async () => {
     await seedProjects('wide');
     await settleProject();

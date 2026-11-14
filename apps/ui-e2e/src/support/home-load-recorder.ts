@@ -995,7 +995,8 @@ export const knownDefectRows =
     cloudDefectRow(
       {
         api: (name, body) => {
-          test(name, { timeout: row.budget + overrunGrace + 60_000 }, body);
+          /* Never retried: a retry would drop a failed sample from the row's denominator (D25). */
+          test(name, { timeout: row.budget + overrunGrace + 60_000, retry: 0 }, body);
         },
         expectedFailure: row.expectedFailure,
         title,

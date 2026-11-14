@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createProjectRootRegistry } from '#main/project-roots.js';
+import { createProjectRootRegistry } from '@taucad/desktop-services-host/project-roots';
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
 
 const fixture = () => {

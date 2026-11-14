@@ -205,6 +205,28 @@ const settle = async (rounds = 10): Promise<void> => {
 };
 
 describe('createProjectRuntime', () => {
+  it('tells the chat store of the chat its focused-chat ensure created empty (A12, I21)', async () => {
+    const content = createContent();
+    const library = createLibrary();
+    const noteCreatedEmpty = vi.fn<(chatId: string) => void>();
+    const { actor } = createProjectRuntime({
+      projectId: project.id,
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
+      library,
+      chatSessions: { noteCreatedEmpty },
+      ...profileOptions('editor'),
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+    });
+    actor.start();
+    await settle();
+    expect(noteCreatedEmpty).toHaveBeenCalledWith('chat_created');
+    actor.stop();
+  });
+
   it.each(['editor', 'shared'] as const)(
     'should compose, start and stop the %s profile with no React',
     async (profile) => {

@@ -40,12 +40,14 @@ export {
   parseRevisionCommitMessage,
   parseRevisionTagMessage,
   revisionAuthorSignature,
+  revisionCommitAuthorSchema,
   revisionCommitMessage,
   revisionCommitterSignature,
   revisionTagMessage,
   taggerSignature,
 } from '#revision-headers.js';
-export type { RevisionTrailer } from '#revision-headers.js';
+export type { RevisionCommitAuthor, RevisionTrailer } from '#revision-headers.js';
+export { withCommitAuthor } from '#commit-author.js';
 export { RevisionPortError, versionTagName, versionTagRef } from '#revision-port.js';
 export type {
   AddCheckoutInput,

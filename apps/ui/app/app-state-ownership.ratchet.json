@@ -29,6 +29,9 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/flags/layout-flags.ts",
+      "apps/ui/app/machines/focus.machine.ts",
+      "apps/ui/app/machines/focus.route-state.ts",
       "apps/ui/app/machines/library-access.machine.ts",
       "apps/ui/app/machines/library-discovery.machine.ts",
       "apps/ui/app/machines/library-recovery.machine.ts",
@@ -46,6 +49,7 @@
       "apps/ui/app/runtime/file-manager-host.machine.ts",
       "apps/ui/app/runtime/file-manager-host.ts",
       "apps/ui/app/runtime/file-manager-host.wait.ts",
+      "apps/ui/app/runtime/file-manager-record-connections.ts",
       "apps/ui/app/runtime/host-connector.ts",
       "apps/ui/app/runtime/image-runtime.definition.ts",
       "apps/ui/app/runtime/image-runtime.worker.ts",
@@ -62,6 +66,8 @@
       "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
+      "apps/ui/app/runtime/session-file-manager.fixture.ts",
+      "apps/ui/app/runtime/session-file-manager.ts",
       "apps/ui/app/runtime/session-revisions.ts",
       "apps/ui/app/runtime/ui-runtime.config.ts",
       "apps/ui/app/runtime/ui-runtime.definition.ts",

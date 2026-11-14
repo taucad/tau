@@ -1610,7 +1610,9 @@ export const FileEditor = memo(function ({
     }
   }
 
-  const requestsFiles = resolvedViewer?.requestsFiles ?? false;
+  /* While no viewer answers (the file is re-read after a move, rename or delete, or is gone), the pane keeps the Files
+   * request its last viewer made: the effect below writes `filesOpen` only for a viewer that requests Files. */
+  const requestsFiles = resolvedViewer?.requestsFiles ?? paneParameters.filesOpen !== undefined;
   const presentation = resolvedViewer?.presentation;
   const normalizedState = normalizeFilePaneState({ parameters: paneParameters, requestsFiles, presentation });
   useEffect(() => {

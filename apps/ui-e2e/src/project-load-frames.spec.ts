@@ -702,6 +702,9 @@ const shownSpans = (
   return spans;
 };
 
+/** One frame at 60 Hz, rounded up: the sampler's resolution. Milliseconds. */
+const frameSlack = 17;
+
 /** Two boxes are the same within 1 px. */
 const sameBox = (left: ProjectLoadRegionEntry, right: ProjectLoadRegionEntry): boolean =>
   left.present === right.present &&
@@ -1432,10 +1435,11 @@ knownDefect(
           spans: shown.length,
           revealAfterClick: first === undefined ? undefined : first.from - click.t >= 1000,
           revealBeforeAnswer: first === undefined ? undefined : first.from <= answeredAt + 20,
-          heldMinimum: first === undefined ? undefined : first.longest >= 500,
+          /* Within one 60 Hz frame: the ladder times its hold from the wait's start, which can lead the painted reveal by a frame. */
+          heldMinimum: first === undefined ? undefined : first.longest >= 500 - frameSlack,
           textAtAnswer: text === undefined ? undefined : text.t - answeredAt < 200,
         },
-        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to}`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms`,
+        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms`,
         { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldMinimum: true, textAtAnswer: true },
       );
     },

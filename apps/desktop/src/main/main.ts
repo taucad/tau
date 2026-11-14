@@ -95,7 +95,7 @@ import {
   createProjectRootRegistry,
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
-} from '#main/project-roots.js';
+} from '@taucad/desktop-services-host/project-roots';
 import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import { registerTerminalRelay } from '#main/terminal-relay.js';
@@ -103,6 +103,7 @@ import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
+  bundledStoreGuardEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -142,9 +143,9 @@ import {
   moveToApplications,
   offerMoveToApplications,
 } from '#main/app-location.js';
-import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
-import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
-import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
+import { preparableNativeDeployments } from '@taucad/desktop-services-host/desktop-native-deployments';
+import { createDesktopKernelPreparer } from '@taucad/desktop-services-host/native-preparation';
+import { desktopNativeKernelIds, startNativeStore } from '@taucad/desktop-services-host/native-store';
 import {
   appIconThemeChannel,
   telemetryConsentChannel,
@@ -571,6 +572,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const logDirectory = join(app.getPath('userData'), 'logs');
   /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
   const gitEnvironment = bundledGitEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+  );
+  /* The store guard the Linux Terminal writes the project's git store through, when this build ships one (LP5). */
+  const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
@@ -1068,6 +1073,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
        */
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
+      ...storeGuardEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

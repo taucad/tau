@@ -5,8 +5,8 @@
 
 import type { IpcRenderer } from 'electron';
 
-import { permissionChannels } from '#shared/permission-channels.js';
-import type { DesktopPermissionMode } from '#shared/permission-channels.js';
+import { permissionChannels } from '@taucad/types/desktop';
+import type { DesktopPermissionMode } from '@taucad/types/desktop';
 
 type ChatInput = Readonly<{ projectRoot: string; chatId: string }>;
 type ModeInput = Readonly<{ mode: DesktopPermissionMode; confirmed?: boolean }>;

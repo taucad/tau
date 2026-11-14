@@ -52,6 +52,7 @@ import type {
   ReadOutcome,
   PublishDraft,
   RevisionCaptureIdentity,
+  RevisionCommitAuthor,
   RevisionDiffEntry,
   RevisionDivergence,
   RevisionGraph,
@@ -78,9 +79,12 @@ import {
   readinessOf,
   registerProjectFailureMessage,
   registerProjectOverHttp,
+  registrationOrigin,
+  revisionCommitAuthorSchema,
   settleReadiness,
   tauRemoteUrl,
   watchRevisionStream,
+  withCommitAuthor,
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
@@ -263,7 +267,12 @@ export type WorkerRevisionCommand =
    * their per-workspace anonymous stand-in. Turning the model of an agent turn
    * into the actor is mechanical and stays here, beside the mint.
    */
-  | Readonly<{ command: 'setActor'; actor: RevisionUserActor }>
+  | Readonly<{
+      command: 'setActor';
+      actor: RevisionUserActor;
+      /** The linked forge's no-reply identity for `actor` (D33), for the git author line alone (I3). */
+      commitAuthor?: RevisionCommitAuthor;
+    }>
   /*
    * Which device this document is (W13, W17).
    *
@@ -817,6 +826,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* The page's latest answer, read per mint so signing in or turning anonymity
    * on changes the next revision and rewrites none of the recorded ones. */
   let person: RevisionUserActor | undefined;
+  /* That person's linked forge identity (D33), for the git author line alone: no record carries it (I3). */
+  let commitAuthor: RevisionCommitAuthor | undefined;
   /* Who every capture in this document is by (B1, I1), read per mint. There is
    * no fallback id: the page names the person (`setActor`) before it opens the
    * project, so a capture with no person is refused rather than recorded under
@@ -912,7 +923,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     checkLargeObjects,
     pullsChats,
   } = createProjectRevisionsActor({
-    port: options.port,
+    port: withCommitAuthor(options.port, (who) => (who.id === person?.id ? commitAuthor : undefined)),
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
@@ -996,12 +1007,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       /* B4c: a project its linked import tied to a GitHub repository says so, so
        * the push check admits the commits Tau did not record (B4). */
-      const remotes = await options.port.listRemotes();
-      const linked = remotes.some((remote) => remote.provider === 'github');
       await registerProjectOverHttp(
         apiBaseUrl,
         { kind: 'cookie' },
-        { id, name, ...(linked ? { origin: 'github' } : {}) },
+        {
+          id,
+          name,
+          ...registrationOrigin(await options.port.listRemotes()),
+        },
       );
     },
     publishPublication: async (input) => {
@@ -1844,6 +1857,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          */
         case 'setActor': {
           person = command.actor;
+          /* Only a forge's no-reply address parses; anything else authors under Tau's (I3). */
+          commitAuthor = revisionCommitAuthorSchema.safeParse(command.commitAuthor).data;
           break;
         }
         case 'setDeviceId': {

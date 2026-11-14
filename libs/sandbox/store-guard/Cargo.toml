@@ -1,0 +1,22 @@
+[package]
+name = "tau-store-guard"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "FUSE name guard over a git store for Tau's Linux Terminal sandbox"
+publish = false
+
+[[bin]]
+name = "tau-store-guard"
+path = "src/main.rs"
+
+[dependencies]
+fuser = { version = "=0.18.0", default-features = false }
+libc = "0.2.177"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

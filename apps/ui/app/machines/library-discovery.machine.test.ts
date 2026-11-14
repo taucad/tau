@@ -28,6 +28,7 @@ import {
   selectEpochCurrent,
 } from '#machines/library-discovery.machine.js';
 import type {
+  DiscoveryApplied,
   DiscoveryPlan,
   DiscoveryWrites,
   LibraryDiscoveryEmitted,
@@ -65,7 +66,7 @@ const start = () => {
   const guard = guardActors({ ignore: { 'library-discovery': libraryDiscoveryIgnoredEvents } });
   const scan = heldPort<{ epoch: number }, ProjectDiscoveryResult>();
   const plan = heldPort<{ epoch: number; result: ProjectDiscoveryResult }, DiscoveryPlan>();
-  const apply = heldPort<{ epoch: number; writes: DiscoveryWrites }, void>();
+  const apply = heldPort<{ epoch: number; writes: DiscoveryWrites }, DiscoveryApplied>();
   const actor = createLibraryDiscovery({
     clock: new StepClock(),
     inspect: guard.inspect,
@@ -108,7 +109,7 @@ const settlePass = async (
   harness.plan.calls.at(-1)?.resolve({ result, writes: planned });
   await flush();
   if (planned.upserts.length > 0 || planned.deletes.length > 0) {
-    harness.apply.calls.at(-1)?.resolve();
+    harness.apply.calls.at(-1)?.resolve(undefined);
     await flush();
   }
 };
@@ -167,7 +168,7 @@ describe('libraryDiscovery', () => {
       harness.plan.calls[0]?.resolve({ result: listing('a'), writes: writes(1) });
       await flush();
       harness.send({ type: 'invalidated' });
-      harness.apply.calls[0]?.resolve();
+      harness.apply.calls[0]?.resolve(undefined);
       await flush();
       expect(selectCurrentListing(harness.actor.getSnapshot())).toBeUndefined();
       expect(harness.answers('r1')).toEqual([]);

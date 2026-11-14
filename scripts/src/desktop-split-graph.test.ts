@@ -5,10 +5,11 @@ import type { ProjectGraph } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
 
 /*
- * The desktop split's graph guards. The services host section is still in its pre-split form (desktop split, DS-0):
- * `apps/desktop/src/tau` is still inside `desktop`, and these assertions pin the import surface the extraction relies
- * on, so a new import cannot quietly widen the closure `desktop-services-host` will have; DS-2 flips it to the
- * project-level form. The renderer section is in its post-cut form (DS-1): `desktop` no longer imports the UI app, so
+ * The desktop split's graph guards. The services host section is in its project-level form (DS-2): the utility hosts
+ * are the app library `desktop-services-host`, which imports nothing from the desktop app (its main process, shared
+ * contracts or utility entries) or the UI app, so its closure stays what its rows test; the app bundles it and passes
+ * it the diagnostics log through a port (D-DS6), and the two IPC contracts both sides share are
+ * `@taucad/types/desktop` (D-DS5). The renderer section is in its post-cut form (DS-1): `desktop` no longer imports the UI app, so
  * a renderer-only change does not affect `desktop`, while `desktop:build` still builds the renderer through a task edge
  * and the payload check that reads the renderer belongs to `ui`.
  */
@@ -29,10 +30,12 @@ const uiPackageName = '@taucad/app';
 
 const isProduction = (path: string): boolean => !/\.(?:test|fixture)\.ts$|\.d\.ts$/u.test(path);
 
-/** The services host tree (desktop split blueprint F1 rows 5–10): what becomes `desktop-services-host`. */
-const tauProductionFiles = globSync(`${desktopRoot}/src/tau/**/*.ts`, { cwd: root })
+/** The services host library (desktop split blueprint F1 rows 5–8 and 10). */
+const servicesHostRoot = 'apps/libs/desktop-services-host';
+const servicesHostProductionFiles = globSync(`${servicesHostRoot}/src/**/*.ts`, { cwd: root })
   .filter((file) => isProduction(file))
   .toSorted();
+const servicesHostFiles = globSync(`${servicesHostRoot}/src/**/*.ts`, { cwd: root }).toSorted();
 
 /** Every source file of the desktop project that can import a module. */
 const desktopSourceFiles = globSync(`${desktopRoot}/**/*.{ts,mts,cts,tsx,js,mjs,cjs}`, {
@@ -66,46 +69,95 @@ const projectGraph = async (): Promise<ProjectGraph> => {
   }
 };
 
-describe('desktop split graph: services host (pre-split)', () => {
-  it('finds the services host tree where the blueprint maps it', () => {
+describe('desktop split graph: services host (extracted)', () => {
+  it('finds the services host tree in the library and none of it left in the app', () => {
     for (const file of [
       'services-host.impl.ts',
       'services-host.ts',
-      'services-host.entry.ts',
       'desktop-runtime.factory.ts',
       'kernel-host.ts',
       'geometry-host.ts',
       'native-preparation.ts',
       'permission-host.ts',
       'permission-store.ts',
+      'project-roots.ts',
+      'services-host.terminal.conformance.test.ts',
     ]) {
-      expect(tauProductionFiles).toContain(`${desktopRoot}/src/tau/${file}`);
+      expect(servicesHostFiles).toContain(`${servicesHostRoot}/src/${file}`);
+    }
+    expect(globSync(`${desktopRoot}/src/tau/**`, { cwd: root })).toEqual([]);
+    // The three utility entries are the app's rollup inputs: they hand the library the diagnostics port, then import it.
+    expect(globSync(`${desktopRoot}/src/utility/*.entry.ts`, { cwd: root }).toSorted()).toEqual([
+      `${desktopRoot}/src/utility/geometry-host.entry.ts`,
+      `${desktopRoot}/src/utility/kernel-host.entry.ts`,
+      `${desktopRoot}/src/utility/services-host.entry.ts`,
+    ]);
+  });
+
+  it('imports nothing from the desktop app, its shared contracts or the UI app', () => {
+    // Tests included: a library test that reached into the app would put the app back in the library's closure.
+    const reaches = servicesHostFiles.flatMap((file) =>
+      specifiers(read(file))
+        .filter(
+          (specifier) =>
+            specifier.startsWith('#main/') ||
+            specifier.startsWith('#shared/') ||
+            specifier.startsWith('#tau/') ||
+            specifier.startsWith('..') ||
+            specifier === '@taucad/desktop' ||
+            specifier === uiPackageName ||
+            specifier.startsWith(`${uiPackageName}/`),
+        )
+        .map((specifier) => `${file} -> ${specifier}`),
+    );
+
+    expect(reaches).toEqual([]);
+  });
+
+  it('inverts the couplings the blueprint names (F2): contracts in types, diagnostics through a port', () => {
+    const imports = new Set(servicesHostProductionFiles.flatMap((file) => specifiers(read(file))));
+    expect(imports).toContain('@taucad/types/desktop');
+    expect(imports).toContain('#diagnostics.js');
+    expect(globSync(`${desktopRoot}/src/shared/{permission-channels,machine-shutdown}.ts`, { cwd: root })).toEqual([]);
+    for (const entry of ['kernel-host', 'services-host']) {
+      expect(specifiers(read(`${desktopRoot}/src/utility/${entry}.entry.ts`)), entry).toEqual(
+        expect.arrayContaining([
+          'node:module',
+          '#main/diagnostics.js',
+          '@taucad/desktop-services-host/diagnostics',
+          `@taucad/desktop-services-host/${entry}`,
+        ]),
+      );
     }
   });
 
-  it('reaches into main and shared from the services host only at the couplings the split inverts', () => {
-    const reaches = tauProductionFiles.flatMap((file) =>
-      [
-        ...new Set(
-          specifiers(read(file)).filter(
-            (specifier) =>
-              specifier.startsWith('#main/') || specifier.startsWith('#shared/') || specifier.startsWith('..'),
-          ),
-        ),
-      ].map((specifier) => `${file.slice(`${desktopRoot}/src/tau/`.length)} -> ${specifier}`),
-    );
+  it('bundles the library into the desktop app from source and depends on it one way', async () => {
+    const graph = await projectGraph();
+    const manifest = JSON.parse(read(`${desktopRoot}/package.json`)) as { dependencies?: Record<string, string> };
+    const library = JSON.parse(read(`${servicesHostRoot}/package.json`)) as {
+      private?: boolean;
+      sideEffects?: unknown;
+    };
+    const bundled = /const bundledWorkspaceDependencies = \[(?<list>[^\]]*)\]/u.exec(
+      read(`${desktopRoot}/electron.vite.config.ts`),
+    )?.groups?.['list'];
 
-    // Blueprint F2: canonicalPath moves into the library, createDiagnosticsLog becomes an injected port, and the
-    // two IPC contracts move to a `libs/types` subpath. Anything else is a new coupling the split would have to carry.
-    expect(reaches.toSorted()).toEqual([
-      'desktop-runtime.factory.ts -> #main/diagnostics.js',
-      'permission-host.ts -> #shared/permission-channels.js',
-      'permission-store.ts -> #main/project-roots.js',
-      'services-host.impl.ts -> #main/project-roots.js',
-      'services-host.impl.ts -> #shared/machine-shutdown.js',
-      'services-host.impl.ts -> #shared/permission-channels.js',
-      'services-host.ts -> #main/diagnostics.js',
-    ]);
+    expect(library.private).toBe(true);
+    // The three bootstraps run on import: without this list the bundler drops them and each utility entry is empty.
+    expect(library.sideEffects).toEqual(['./src/geometry-host.ts', './src/kernel-host.ts', './src/services-host.ts']);
+    expect(manifest.dependencies?.['@taucad/desktop-services-host']).toBe('workspace:*');
+    expect(bundled).toContain("'@taucad/desktop-services-host'");
+    expect(graph.dependencies['desktop']?.map(({ target }) => target)).toContain('desktop-services-host');
+    expect(graph.dependencies['desktop-services-host']?.map(({ target }) => target)).not.toContain('desktop');
+    expect(graph.dependencies['desktop-services-host']?.map(({ target }) => target)).not.toContain('ui');
+  });
+
+  it('keeps fflate a desktop dependency, so electron-vite leaves it external', () => {
+    // It reaches the bundle through `@taucad/bambu` and `@taucad/slicer`. Inlined, its ESM build's own
+    // `var require` collides with the CommonJS shim's `const require` and the main process fails to load.
+    const manifest = JSON.parse(read(`${desktopRoot}/package.json`)) as { dependencies?: Record<string, string> };
+
+    expect(manifest.dependencies?.['fflate']).toBeDefined();
   });
 
   it('keeps the packaged suite a dependent of desktop', async () => {
@@ -115,14 +167,15 @@ describe('desktop split graph: services host (pre-split)', () => {
     expect(graph.dependencies['desktop-e2e']?.map(({ target }) => target)).toContain('desktop');
   });
 
-  it('tags exactly the desktop lane projects with ci:desktop', async () => {
+  it('tags exactly the desktop lane projects with ci:desktop, and the library ci:shell', async () => {
     const graph = await projectGraph();
     const tagged = Object.values(graph.nodes)
       .filter(({ data }) => data.tags?.includes('ci:desktop'))
       .map(({ name }) => name);
 
-    // `desktop-services-host` joins when it is extracted (DS-2).
-    expect(tagged.toSorted()).toEqual(['desktop']);
+    expect(tagged.toSorted()).toEqual(['desktop', 'desktop-services-host']);
+    expect(graph.nodes['desktop-services-host']?.data.tags).toContain('ci:shell');
+    expect(graph.nodes['desktop']?.data.tags).not.toContain('ci:shell');
   });
 });
 

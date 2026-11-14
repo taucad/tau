@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudProjectPreview } from '#hooks/use-cloud-project-preview.js';
@@ -35,7 +34,11 @@ export function CloudProjectPreview({
       observer.disconnect();
     };
   }, []);
+  /* A retried read with nothing cached clears its error while it runs, so its Retry is kept through its own request. */
+  const [isRetrying, setIsRetrying] = useState(false);
   const hasImage = preview.url !== undefined && failedUrl !== preview.url;
+  const isRetryBusy = isRetrying || preview.isLoading;
+  /* P-g: the media box stays plain until the read settles; the icon says it settled with no image (or failed). */
   return (
     <div
       ref={target}
@@ -53,34 +56,45 @@ export function CloudProjectPreview({
             setFailedUrl(preview.url);
           }}
         />
-      ) : preview.isLoading ? (
-        <Skeleton className='size-full' role='status' aria-busy='true' aria-label='Loading saved preview' />
-      ) : (
+      ) : preview.isSettled || isRetrying ? (
+        /* A retried failure has answered once already, so its icon stays until the Retry's own answer. */
         <Box
-          aria-label={preview.isFailed || failedUrl ? 'Saved preview unavailable' : 'No saved preview'}
+          aria-label={
+            preview.isFailed || failedUrl !== undefined || isRetrying ? 'Saved preview unavailable' : 'No saved preview'
+          }
           className={isCompact ? 'size-4' : 'size-8'}
         />
-      )}
+      ) : null}
 
       {!isCompact && preview.isFailed && !preview.canRetry ? (
         <p className='absolute right-2 bottom-2 left-2 text-center text-xs'>
           Preview unavailable. Open the project to view it.
         </p>
       ) : null}
-      {!isCompact && ((preview.isFailed && preview.canRetry) || (preview.url && failedUrl === preview.url)) ? (
+      {!isCompact &&
+      (isRetrying || (preview.isFailed && preview.canRetry) || (preview.url && failedUrl === preview.url)) ? (
         <Button
           size='sm'
           variant='outline'
           className='absolute bottom-2 z-20'
-          disabled={preview.isLoading}
-          aria-busy={preview.isLoading}
+          /* Not `disabled`, which would drop the focus of the person who pressed it. */
+          aria-disabled={isRetryBusy}
+          aria-busy={isRetryBusy}
           onClick={async () => {
+            if (isRetryBusy) {
+              return;
+            }
             setFailedUrl(undefined);
-            await preview.retry();
+            setIsRetrying(true);
+            try {
+              await preview.retry();
+            } finally {
+              setIsRetrying(false);
+            }
           }}
         >
-          {preview.isLoading ? <Loader className='size-3 motion-reduce:animate-none' /> : null}
-          {preview.isLoading ? 'Loading preview…' : 'Retry preview'}
+          {isRetryBusy ? <Loader className='size-3 motion-reduce:animate-none' /> : null}
+          {isRetryBusy ? 'Loading preview…' : 'Retry preview'}
         </Button>
       ) : null}
     </div>

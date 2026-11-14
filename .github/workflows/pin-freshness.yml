@@ -3,8 +3,9 @@
 # pinned. A HEAD per URL compares `Content-Length` with the pinned byte length; PyPI's JSON API
 # reports a wheel's `yanked` flag and sha256, python-build-standalone's release `SHA256SUMS` and
 # Microsoft's `releases.json` the published digests. Drift is a job summary and a red run, never
-# an edit: a pin changes only through its generator and a reviewed pull request (I1). It
-# downloads no payload. A pull request that changes this job or its script runs it once.
+# an edit: a pin changes only through its generator and a reviewed pull request (I1). A .NET
+# runtime pinned by sha256 is downloaded (about 70 MB a week) so its bytes can be checked against
+# both the pin and Microsoft's published sha512; nothing else is downloaded. A pull request that changes this job or its script runs it once.
 name: Pin freshness
 
 on:

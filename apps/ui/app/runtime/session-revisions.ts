@@ -33,7 +33,7 @@ import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh
 import { revisionUserActor } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
-import type { FlushPhase } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 
@@ -160,15 +160,12 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
         return;
       }
       actorSentFor = { user, anonymous, salt };
+      /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
+      const commitAuthor = githubProjectBinding.get(projectId)?.author;
       client.send({
         command: 'setActor',
-        actor: revisionUserActor({
-          workspace,
-          user,
-          anonymous,
-          salt,
-          commitIdentity: githubProjectBinding.get(projectId)?.author,
-        }),
+        actor: revisionUserActor({ workspace, user, anonymous, salt }),
+        ...(commitAuthor === undefined ? {} : { commitAuthor }),
       });
     };
 

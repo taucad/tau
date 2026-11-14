@@ -13,15 +13,12 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { projectLibraryUrl, projectUrl } from '#utils/project-url.utils.js';
 import { toast } from '@taucad/ui/components/sonner';
-import {
-  assertCloudProjectActive,
-  CloudProjectUnavailableError,
-  tauCloudIntent,
-  withNamedLock,
-} from '#hooks/use-cloud-projects.js';
+import { assertCloudProjectActive, CloudProjectUnavailableError } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
+import { withNamedLock } from '#lib/named-lock.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 
 /**
  * What this device creates for a Tau Cloud project before its first pull: the

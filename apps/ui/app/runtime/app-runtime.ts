@@ -22,9 +22,13 @@ import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
-import type { AppRuntimeEnvironment } from '#runtime/app-runtime.machine.js';
-import { createEnvironmentLogic } from '#runtime/environment.js';
-import type { EnvironmentHost } from '#runtime/environment.js';
+import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
+import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
+import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
+import { createFocusComposition } from '#runtime/app-runtime-focus.js';
+import type { FocusHandle } from '#runtime/app-runtime-focus.js';
+import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
   FileManagerActor,
@@ -38,9 +42,16 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
-import { ProjectLibrary } from '#runtime/project-library.js';
+import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.js';
+import { createRootFileFacade } from '#runtime/file-manager-facade.js';
+import type { RootFileFacade } from '#runtime/file-manager-facade.js';
+import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
-import { createSessionsRegistryLogic, sessionsRegistryInput } from '#services/sessions-store.js';
+import {
+  createSessionsRegistryLogic,
+  sessionFileManagerOpener,
+  sessionsRegistryInput,
+} from '#services/sessions-store.js';
 import {
   isPlacementOnThisDevice,
   isPlacementOnThisDeviceNow,
@@ -65,6 +76,10 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
   Readonly<{
     /** The page `environment` listens to, read when the runtime starts; the browser's by default. */
     environment?: () => EnvironmentHost | undefined;
+    /** The desktop quit seam `environment` listens to; the desktop bridge's by default. */
+    desktopQuit?: EnvironmentDesktopQuit;
+    /** The session module's import focus waits for; `loadProjectWorkspace` by default. */
+    loadSessionModule?: () => Promise<unknown>;
     /**
      * The product analytics client the file manager's workspace telemetry captures through (D15). The client entry
      * passes the admitted one; the server and tests get the no-op client.
@@ -118,12 +133,25 @@ export type AppRuntimeFiles = Readonly<{
 /* Each runtime's file closures, by runtime; the composition writes one per runtime it creates. */
 const runtimeFiles = new WeakMap<AppRuntime, AppRuntimeFiles>();
 
-/** The services the runtime's `projectLibrary` and `chatSessions` children hold (A2, D9). */
+/** The services the runtime's `projectLibrary` and `chatSessions` children hold (A2, D9), and what React fills. */
 type AppRuntimeServices = Readonly<{
   queryClient: QueryClient;
   projectLibrary: ProjectLibrary;
   chatSessions: ChatSessionStore;
+  /** The unload registrations `environment` sequences (D26). */
+  unload: UnloadSequencer;
+  /** Focus and the bindings its ports read (A5b). */
+  focus: FocusHandle;
+  rootFileFacade: RootFileFacade;
 }>;
+
+/** The desktop bridge's quit seam: a no-op outside the desktop build. Read when `environment` starts, not on import. */
+const desktopBridgeQuit: EnvironmentDesktopQuit = {
+  onQuitRequested: (listener) => onDesktopQuitRequested(listener),
+  reportQuiesced: (attemptId, forced) => {
+    reportDesktopQuiesced(attemptId, forced);
+  },
+};
 
 /* Each runtime's services, by runtime; the composition writes one per runtime it creates. */
 const runtimeServices = new WeakMap<AppRuntime, AppRuntimeServices>();
@@ -230,8 +258,11 @@ const createChoicesPorts = (queryClient: QueryClient): ChoicesPorts => ({
  * @returns The root actor; its one start is `AppRuntimeProvider`'s.
  * @public
  */
+// oxlint-disable-next-line max-lines-per-function -- The one composition root: every child's closure is built here.
 export const createAppRuntime = ({
   environment,
+  desktopQuit = desktopBridgeQuit,
+  loadSessionModule = loadProjectWorkspace,
   analytics = noAnalytics,
   loadHomeBackend,
   idleFileManagers = false,
@@ -241,35 +272,88 @@ export const createAppRuntime = ({
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
   const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
   const table = createLeaseTable();
+  /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
+  const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore; rootFiles?: RootFileFacade } = {};
+  const workspaceTelemetry = buildWorkspaceTelemetry(analytics);
   const projectLibrary = new ProjectLibrary({
     queryClient,
+    /* A4b: the root file facade over `rootFiles`, which exists once the root is created below. */
+    rootFiles: () => composed.rootFiles,
+    workspaceTelemetry,
+    sessions: () => (composed.runtime === undefined ? undefined : selectRuntimeSessions(composed.runtime)),
+    chatSessions: () => composed.chatSessions,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
   });
   const chatSessions = createChatSessions(projectLibrary, options);
+  composed.chatSessions = chatSessions;
+  const unload = createUnloadSequencer();
+  /* Focus's five ports (A5b): the library's route access at its epoch, the registry, the leave flush React registers,
+   * the session module and the route boundary. */
+  const focusComposition = createFocusComposition({
+    library: {
+      routeAccess: projectLibrary.routeAccess,
+      epoch: () => selectLibraryRevision(projectLibrary.getSnapshot()),
+      onEpochChanged: (listener) =>
+        projectLibrary.onLibraryChanged((event) => {
+          listener(event.revision);
+        }),
+    },
+    loadModule: loadSessionModule,
+  });
+  /* The host the sessions build their file managers through: the root spawns it with itself, so it is read once the
+   * root exists, before any session can open. */
+  const builtHost: { current: FileManagerHostRef | undefined } = { current: undefined };
   const runtime = createActor(
     appRuntimeMachine.provide({
       actors: {
-        environment: createEnvironmentLogic(environment),
+        environment: createEnvironmentLogic(environment, { sequencer: unload, desktopQuit }),
+        focusLibrary: focusComposition.logics.library,
+        focusRegistry: focusComposition.logics.registry,
+        focusFlush: focusComposition.logics.flush,
+        focusModule: focusComposition.logics.module,
+        focusRoute: focusComposition.logics.route,
         /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
         choices: createChoicesLogic(createChoicesPorts(queryClient)),
         /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
          * which mounts no `ProjectManagerProvider`) starts no worker. */
         projectLibrary: createCallbackLogic<EventObject>(() => {
           if (idleFileManagers) {
-            return undefined;
+            /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
+            return () => {
+              composed.rootFiles?.close();
+            };
           }
           projectLibrary.start();
           return () => {
             projectLibrary.stop();
+            composed.rootFiles?.close();
           };
         }),
 
         fileManagerHost: host.logic,
         leases: table.logic,
-        /* S28: the registry admits and releases compute on the host's shared worker. */
-        sessions: createSessionsRegistryLogic(host.sharedWorker),
+        /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
+         * file manager through the host, and waits for it on this runtime's clock. */
+        sessions: createSessionsRegistryLogic({
+          sharedWorker: host.sharedWorker,
+          fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
+          openFileManager: sessionFileManagerOpener({
+            build: (spec) => {
+              if (builtHost.current === undefined) {
+                throw new Error('A session opened its file manager before the app runtime was created');
+              }
+              return host.build(builtHost.current, spec, options);
+            },
+            awaitServices: async (fileManager, gone) =>
+              awaitFileManager(fileManager, 'services', {
+                reason: 'services-timeout',
+                gone,
+                ...(options.clock === undefined ? {} : { clock: options.clock }),
+              }),
+          }),
+        }),
       },
     }),
     {
@@ -277,10 +361,12 @@ export const createAppRuntime = ({
       input: {
         sessions: sessionsRegistryInput(),
         rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
+        focusEpoch: focusComposition.epoch(),
       },
     },
   );
   const { fileManagerHost, leases } = runtime.getSnapshot().context;
+  builtHost.current = fileManagerHost;
   const store: LeaseStore = table.storeFor(leases);
   const buildOptions: FileManagerBuildOptions = options;
   runtimeFiles.set(runtime, {
@@ -293,7 +379,22 @@ export const createAppRuntime = ({
     sharedWorker: host.sharedWorker,
     idleFileManagers,
   });
-  runtimeServices.set(runtime, { queryClient, projectLibrary, chatSessions });
+  const rootFileFacade = createRootFileFacade({
+    fileManagerRef: selectRootFiles(runtime.getSnapshot()),
+    files: runtimeFiles.get(runtime)!,
+    telemetry: workspaceTelemetry,
+  });
+  composed.rootFiles = rootFileFacade;
+  projectLibrary.followRootFiles();
+  runtimeServices.set(runtime, {
+    queryClient,
+    projectLibrary,
+    chatSessions,
+    unload,
+    rootFileFacade,
+    focus: { focus: runtime.getSnapshot().context.focus, bindings: focusComposition.bindings },
+  });
+  composed.runtime = runtime;
   runtimeLeases.set(runtime, store);
   return runtime;
 };
@@ -325,6 +426,16 @@ export const selectRuntimeQueryClient = (runtime: AppRuntime): QueryClient => se
 export const selectRuntimeProjectLibrary = (runtime: AppRuntime): ProjectLibrary => servicesOf(runtime).projectLibrary;
 
 /**
+ * The runtime's root file facade over `rootFiles` (A4b): the one the project library reads and the root layout's scope
+ * views.
+ *
+ * @param runtime - The app runtime.
+ * @returns The facade.
+ * @public
+ */
+export const selectRuntimeRootFileFacade = (runtime: AppRuntime): RootFileFacade => servicesOf(runtime).rootFileFacade;
+
+/**
  * The runtime's chat store, built with its dependencies (A2), which `ChatSessionStoreProvider` hands down.
  *
  * @param runtime - An app runtime {@link createAppRuntime} made.
@@ -332,6 +443,29 @@ export const selectRuntimeProjectLibrary = (runtime: AppRuntime): ProjectLibrary
  * @public
  */
 export const selectRuntimeChatSessions = (runtime: AppRuntime): ChatSessionStore => servicesOf(runtime).chatSessions;
+
+/**
+ * The runtime's unload sequencer (D26): what `UnloadProvider` hands `useFlushOnClose` and `useFlushProducers`.
+ *
+ * @param runtime - An app runtime {@link createAppRuntime} made.
+ * @returns Its sequencer, fixed for its life.
+ * @public
+ */
+export const selectRuntimeUnload = (runtime: AppRuntime): UnloadSequencer => servicesOf(runtime).unload;
+
+/**
+ * The runtime's focus and the bindings its ports read (A5b): the route boundary binds its sink, and each live
+ * project's guard registers its leave flush.
+ *
+ * @param runtime - An app runtime {@link createAppRuntime} made.
+ * @returns Its focus handle, fixed for its life.
+ * @public
+ */
+export const selectRuntimeFocus = (runtime: AppRuntime): FocusHandle => servicesOf(runtime).focus;
+
+/** The desktop quit hold, as `environment` last reported it. @public */
+export const selectQuitHold = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): AppRuntimeQuitHold =>
+  snapshot.context.quitHold;
 
 /**
  * The runtime's file closures: the lease builder, the ready wait and the shared worker.

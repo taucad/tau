@@ -98,6 +98,8 @@ vi.mock('#hooks/use-chat.js', () => ({
       turnGroups: buildTurnGroups(messages),
       agentInvocations: '',
       transcript,
+      // No tray is remembered: these rows are about the transcript; the browser rows cover the trays (U10).
+      rememberedComposerTrays: [],
     });
   },
   useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
@@ -661,9 +663,9 @@ describe('ChatHistory — composer refocus', () => {
 });
 
 /**
- * The list's own container marks its transcript's load state: lane A12 renders `data-transcript-state` on the
+ * The list's own container marks its transcript's load state: A12 renders `data-transcript-state` on the
  * Virtuoso root (passed as a Virtuoso prop), or on its Scroller from the list's `context`. The mock renders both and
- * passes `context` to the Scroller and the empty placeholder, as Virtuoso does. It does not exist yet.
+ * passes `context` to the Scroller and the empty placeholder, as Virtuoso does.
  */
 const transcriptLoadingMarker = '[data-transcript-state="loading"]';
 /** The same marker once the list has left `loading` with the chat's turns. */
@@ -722,7 +724,7 @@ describe('ChatHistory — transcript load (I21)', () => {
     archiveOpen = false;
   });
 
-  it.fails('never shows the empty-chat state for a chat with history while its transcript loads (U7)', () => {
+  it('never shows the empty-chat state for a chat with history while its transcript loads (U7)', () => {
     const load = renderOverDeferredTranscript(history);
     const steps = [readFrame()];
     load.resolve();
@@ -754,7 +756,7 @@ describe('ChatHistory — transcript load (I21)', () => {
     expect(document.querySelector('[data-slot="panel-empty-state"]')).toBeInTheDocument();
   });
 
-  it.fails('has no commit with the list neither loading nor showing a turn, for a chat with history (U19)', () => {
+  it('has no commit with the list neither loading nor showing a turn, for a chat with history (U19)', () => {
     const load = renderOverDeferredTranscript(history);
     load.resolve();
 

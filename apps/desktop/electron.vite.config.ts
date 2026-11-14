@@ -42,6 +42,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/build123d',
   '@taucad/carvera',
   '@taucad/converter',
+  '@taucad/desktop-services-host',
   '@taucad/desktop-terminal',
   '@taucad/esbuild',
   '@taucad/events',
@@ -125,9 +126,9 @@ export default defineConfig(
         rolldownOptions: {
           input: {
             index: resolve(import.meta.dirname, 'src/main/index.ts'),
-            'kernel-host': resolve(import.meta.dirname, 'src/tau/kernel-host.entry.ts'),
-            'services-host': resolve(import.meta.dirname, 'src/tau/services-host.entry.ts'),
-            'geometry-host': resolve(import.meta.dirname, 'src/tau/geometry-host.entry.ts'),
+            'kernel-host': resolve(import.meta.dirname, 'src/utility/kernel-host.entry.ts'),
+            'services-host': resolve(import.meta.dirname, 'src/utility/services-host.entry.ts'),
+            'geometry-host': resolve(import.meta.dirname, 'src/utility/geometry-host.entry.ts'),
             'compute-store.worker': resolve(import.meta.dirname, 'src/main/compute-store.worker.ts'),
             /* One per shell launch, started by the shell provider beside `services-host.js` (desktop shell W4). */
             'shell-supervisor': resolve(import.meta.dirname, '../../libs/sandbox/src/shell/srt-supervisor.ts'),

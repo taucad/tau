@@ -50,7 +50,7 @@
       },
       "kind": "defect",
       "fixedBy": "app-state-orchestration-charter A3a",
-      "ref": "Inventory L8: getProjectRouteAccess (use-project-manager.tsx lines 2419 to 2545) re-checks the epoch after every read but the recovery set only on the found path; a creation of the asked project journaled while the configuration read is pending moves no epoch, and the loop answers missing while the tab holds a recovering row for the project. 2 questions about 2 projects resting on 2 reads, 1 re-ask or cancel, 1 invalidation, 1 mutation and 1 crash; no row at start."
+      "ref": "Inventory L8: getProjectRouteAccess (use-project-manager.tsx at 7918b118, lines 2440 to 2572) re-checks the epoch after every read but the recovery set only on the found path; a creation of the asked project journaled while the configuration read is pending moves no epoch, and the loop answers missing while the tab holds a recovering row for the project. 2 questions about 2 projects resting on 2 reads, 1 re-ask or cancel, 1 invalidation, 1 mutation and 1 crash; no row at start."
     },
     "LibraryCatalog.access-match-by-id.cfg": {
       "tier": "pr",

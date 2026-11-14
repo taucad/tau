@@ -301,6 +301,19 @@ describe.runIf(gitToolchainOnPath)('historyCommand', () => {
       expect(await savedAuthor()).toMatch(/^anon:[\da-f]{8}@users\.noreply\.tau\.new$/u);
     }, 60_000);
 
+    /* K1: a version names the account that made it, as a save does, and never Tau or an address. */
+    it('records the account the token belongs to as a version’s tagger', async () => {
+      await seed();
+      await runCommand(await importVersionCommand(), { rawArgs: ['create', 'Ready for print', '--project', project] });
+
+      const { stdout: tag } = await execute('git', ['-C', project, 'cat-file', 'tag', 'refs/tags/v2']);
+      const tagger = /^tagger .*<(?<address>[^>]+)>/mu.exec(tag)?.groups?.['address'];
+      expect(tagger).toBe('usr_cli_a1@users.noreply.tau.new');
+      for (const forbidden of [accountEmail, environmentEmail, userInfo().username]) {
+        expect(tag).not.toContain(`<${forbidden}`);
+      }
+    }, 60_000);
+
     /*
      * B5: `log --provenance` prints what each entry's trailer recorded — its
      * ids, identity, capture and leg — and never an address, whether the
@@ -439,16 +452,16 @@ describe.runIf(gitToolchainOnPath)('historyCommand', () => {
     const version = await importVersionCommand();
 
     await runCommand(version, { rawArgs: ['create', 'Ready for print', '--project', project] });
-    expect(stdout.join('')).toMatch(/^Created V2 · Ready for print at [\da-f]{7}\.\n$/u);
+    expect(stdout.join('')).toMatch(/^Created V2 · Ready for print at [\da-f]{7}\. Saved on this device\.\n$/u);
     stdout.length = 0;
 
     await runCommand(version, { rawArgs: ['rename', 'V2', 'Fit check', '--project', project] });
-    expect(stdout.join('')).toBe('Renamed V2 to Fit check.\n');
+    expect(stdout.join('')).toBe('Renamed V2 to Fit check. Saved on this device.\n');
     stdout.length = 0;
 
     /* By its current name too. */
     await runCommand(version, { rawArgs: ['rename', 'Fit check', 'Fit check, final', '--project', project] });
-    expect(stdout.join('')).toBe('Renamed V2 to Fit check, final.\n');
+    expect(stdout.join('')).toBe('Renamed V2 to Fit check, final. Saved on this device.\n');
     stdout.length = 0;
 
     await runCommand(version, { rawArgs: ['list', '--project', project] });
@@ -462,6 +475,45 @@ describe.runIf(gitToolchainOnPath)('historyCommand', () => {
     /* The ref is the number, so git itself sees one tag, `v2`. */
     const tags = await execute('git', ['tag', '--list'], { cwd: project });
     expect(tags.stdout).toBe('v2\n');
+  }, 60_000);
+
+  /*
+   * K1: a version and a rename are backed up before the verb exits, as a save
+   * is. Left to the next push from any host, a rename made elsewhere in the
+   * meantime would win. The remote is a bare repository on disk, which native
+   * git speaks to as it speaks to the Tau Hosted Remote.
+   */
+  it('backs up a version and its rename before exiting, as a save does', async () => {
+    await seed();
+    const bare = await mkdtemp(join(tmpdir(), 'tau-cli-revisions-remote-'));
+    try {
+      await execute('git', ['init', '--quiet', '--bare', '--initial-branch=main', bare]);
+      await execute('git', ['-C', project, 'remote', 'add', 'tau', bare]);
+      const version = await importVersionCommand();
+      const remoteVersionName = async (): Promise<string> => {
+        const { stdout: tag } = await execute('git', ['-C', bare, 'cat-file', 'tag', 'refs/tags/v2']);
+        return tag;
+      };
+
+      await runCommand(version, { rawArgs: ['create', 'Ready for print', '--project', project] });
+      expect(stdout.join('')).toMatch(/^Created V2 · Ready for print at [\da-f]{7}\. Backed up\.\n$/u);
+      expect(await remoteVersionName()).toContain('Ready for print');
+      stdout.length = 0;
+
+      await runCommand(version, { rawArgs: ['rename', 'V2', 'Fit check', '--json', '--project', project] });
+      expect(JSON.parse(stdout.join(''))).toMatchObject({
+        kind: 'version',
+        ok: true,
+        version: { number: 2, name: 'Fit check' },
+        renamedFrom: 'Ready for print',
+        backup: 'backedUp',
+      });
+      const renamed = await remoteVersionName();
+      expect(renamed).toContain('Fit check');
+      expect(renamed).not.toContain('Ready for print');
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it('offers no way to remove a version: versions are permanent (Q13)', async () => {

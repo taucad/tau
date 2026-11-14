@@ -27,7 +27,13 @@ function getProjectRoots() {
   for (const [project, { data }] of Object.entries(nodes)) {
     const configPath = join(workspaceRoot, data.root, '.size-limit.json');
     if (existsSync(configPath)) {
-      results.push({ project, root: data.root, configPath });
+      // A budget on an artifact `build` does not make (the sandbox's Rust store guard) names the target that makes it
+      // in its `size` target's `dependsOn`; those run after the builds below.
+      const extra = (data.targets?.size?.dependsOn ?? [])
+        .filter((target) => typeof target === 'string' && !target.startsWith('^'))
+        .map((target) => (target.startsWith(`${project}:`) ? target.slice(project.length + 1) : target))
+        .filter((target) => target !== 'build');
+      results.push({ project, root: data.root, configPath, extra });
     }
   }
 
@@ -55,6 +61,13 @@ execFileSync(
   ['nx', 'run-many', '-t', 'build', `--projects=${projects.map(({ project }) => project).join(',')}`, '--parallel=1'],
   { cwd: workspaceRoot, stdio: 'inherit' },
 );
+
+for (const { project, extra } of projects) {
+  for (const target of extra) {
+    console.log(`Building ${project}:${target} for its size budget...`);
+    execFileSync('pnpm', ['nx', 'run', `${project}:${target}`], { cwd: workspaceRoot, stdio: 'inherit' });
+  }
+}
 
 const merged = [];
 

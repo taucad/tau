@@ -5,12 +5,15 @@
  * pinned URL it sends a HEAD and compares `Content-Length` with the pinned `byteLength`. For each payload it then asks
  * the publisher's own metadata: PyPI's JSON API for a wheel's `yanked` flag and `digests.sha256`, python-build-
  * standalone's release `SHA256SUMS` for an interpreter archive, and Microsoft's `releases.json` for a .NET runtime
- * archive's hash. A payload pinned to the digest of zero bytes is a fail-closed placeholder and is skipped.
+ * archive's hash. Microsoft publishes only sha512, so a .NET runtime archive pinned by sha256 (the digest a locked
+ * `tau prepare` addresses on the dependency hosts) is the one payload downloaded: its bytes must match both the pin and
+ * the published sha512. A payload pinned to the digest of zero bytes is a fail-closed placeholder and is skipped.
  *
  * Usage: node scripts/src/check-pin-freshness.ts [--summary <file>] <tau-plugin.json>…
  *   --summary <file>   Append a Markdown report (for `$GITHUB_STEP_SUMMARY`).
  * Exit codes: 0 every pin is fresh; 1 drift was found or a manifest is unreadable; 2 usage.
  */
+import { createHash } from 'node:crypto';
 import { appendFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -198,7 +201,35 @@ const dotnetPattern =
   /^https:\/\/builds\.dotnet\.microsoft\.com\/dotnet\/Runtime\/(?<major>\d+)\.(?<minor>\d+)\.[^/]+\//u;
 
 /**
- * Compare a .NET runtime archive's pin with the hash Microsoft's `releases.json` publishes for it.
+ * Download a pinned archive and hash it with the pin's algorithm and with sha512.
+ * @param pin - The archive URL and its pin.
+ * @param algorithm - The pin's algorithm.
+ * @param transport - The `fetch` to use.
+ * @returns The hex digests.
+ */
+const digestsOf = async (
+  pin: PinnedUrl,
+  algorithm: string,
+  transport: typeof fetch,
+): Promise<{ readonly pinned: string; readonly sha512: string }> => {
+  const response = await transport(pin.url, { redirect: 'follow' });
+  if (!response.ok || response.body === null) {
+    await response.body?.cancel();
+    throw new Error(`${pin.url} answered HTTP ${String(response.status)}`);
+  }
+  const pinned = createHash(algorithm);
+  const sha512 = createHash('sha512');
+  for await (const chunk of response.body) {
+    pinned.update(chunk);
+    sha512.update(chunk);
+  }
+  return { pinned: pinned.digest('hex'), sha512: sha512.digest('hex') };
+};
+
+/**
+ * Compare a .NET runtime archive's pin with the hash Microsoft's `releases.json` publishes for it. A sha512 pin is
+ * compared directly; a pin in another algorithm is compared on the downloaded bytes, which must also hash to the
+ * published sha512.
  * @param pin - The archive URL and its pin.
  * @param transport - The `fetch` to use.
  * @returns One row.
@@ -232,13 +263,22 @@ export const checkDotnet = async (pin: PinnedUrl, transport: typeof fetch): Prom
       return row('drift', `releases.json for ${channel} does not list ${filename}`);
     }
     const { algorithm, hex } = hexOf(pin.integrity);
-    // Microsoft publishes sha512; a pin in another algorithm cannot be compared, so it is reported, not passed.
-    if (algorithm !== 'sha512') {
-      return row('drift', `pin is ${algorithm}; releases.json publishes sha512`);
+    const published = file.hash.toLowerCase();
+    if (algorithm === 'sha512') {
+      return published === hex ? row('fresh', 'sha512 matches') : row('drift', `published ${published}, pinned ${hex}`);
     }
-    return file.hash.toLowerCase() === hex
-      ? row('fresh', 'sha512 matches')
-      : row('drift', `published ${file.hash.toLowerCase()}, pinned ${hex}`);
+    let digests: { readonly pinned: string; readonly sha512: string };
+    try {
+      digests = await digestsOf(pin, algorithm, transport);
+    } catch (error) {
+      return row('drift', `download failed: ${errorText(error)}`);
+    }
+    if (digests.pinned !== hex) {
+      return row('drift', `served ${algorithm} ${digests.pinned}, pinned ${hex}`);
+    }
+    return digests.sha512 === published
+      ? row('fresh', `${algorithm} and published sha512 match the served bytes`)
+      : row('drift', `served sha512 ${digests.sha512}, published ${published}`);
   } catch (error) {
     return row('drift', `releases.json unreadable: ${errorText(error)}`);
   }

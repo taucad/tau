@@ -8,9 +8,12 @@ import type { EditorDocument } from '#lib/editor-document.js';
 import { readStaticTypePackage } from '#lib/typescript-language/static-types.js';
 import type { DependencyReader, StaticTypeDefinition } from '#lib/typescript-language/static-types.js';
 
-// oxlint-disable eslint/no-await-in-loop -- declaration registration and import acquisition are ordered to bound worker and network work.
+// oxlint-disable eslint/no-await-in-loop -- declaration files reach the worker in order; the network gate, not a serial loop, bounds fetches.
 
 type AcquisitionRequest = { key: string; packageName: string; subpath: string; version?: string };
+
+/** What one request learned: the declaration header, or the body of an `ok` response. */
+type Fetched = Readonly<{ ok: boolean; status: number; types?: string; text?: string }>;
 
 type ProjectReader = (path: string) => Promise<string | undefined>;
 
@@ -31,6 +34,60 @@ type AcquisitionOptions = Readonly<{
 const esmShBase = 'https://esm.sh';
 const retryDelay = 60_000;
 const scanDelay = 500;
+/**
+ * Most declaration requests in flight at once, per project. Independent imports no longer wait for
+ * one another, and a page full of imports still cannot flood the CDN or the worker behind it.
+ */
+const fetchConcurrency = 6;
+const declarationFile = /\.d\.(?:ts|mts|cts)$/u;
+
+/** A counting gate. A finished task hands its slot straight to the next waiter, so the bound is exact. */
+class RequestGate {
+  private active = 0;
+  private readonly waiting: Array<() => void> = [];
+  // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly rejects constructor parameter properties.
+  private readonly limit: number;
+
+  public constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  public async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active < this.limit) {
+      this.active += 1;
+    } else {
+      await new Promise<void>((resolve) => {
+        this.waiting.push(resolve);
+      });
+    }
+    try {
+      return await task();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) {
+        next();
+      } else {
+        this.active -= 1;
+      }
+    }
+  }
+}
+
+/**
+ * The module a `/// <reference types>` directive names. A bare name maps to its DefinitelyTyped
+ * package (`node` to `@types/node`, `@scope/name` to `@types/scope__name`); a URL or a path is
+ * already a location, and CDN declarations reference `https://esm.sh/@types/…` this way.
+ */
+function typesReferenceSpecifier(name: string): string {
+  if (/^[a-z][\d+.a-z-]*:/iu.test(name) || name.startsWith('.') || name.startsWith('/') || name.startsWith('@types/')) {
+    return name;
+  }
+  if (name.startsWith('@')) {
+    const [scope = '', packageName, ...rest] = name.slice(1).split('/');
+    return packageName ? [`@types/${scope}__${packageName}`, ...rest].join('/') : `@types/${scope}`;
+  }
+  return `@types/${name}`;
+}
 
 function packageNameOf(specifier: string): string | undefined {
   if (specifier.startsWith('@')) {
@@ -66,6 +123,10 @@ export class TypeAcquisitionController {
   private retryAttempts = 0;
   private readonly failures = new Map<string, number>();
   private readonly pending = new Map<string, Promise<void>>();
+  private readonly mounting = new Map<string, Promise<void>>();
+  /** One request per URL for the project's life: packages that share a declaration fetch it once. */
+  private readonly fetched = new Map<string, Promise<Fetched>>();
+  private readonly gate = new RequestGate(fetchConcurrency);
   private readonly timers = new Map<EditorDocument, ReturnType<typeof setTimeout>>();
   private readonly subscriptions = new Map<EditorDocument, () => void>();
   private readonly injectedUris = new Set<string>();
@@ -94,9 +155,7 @@ export class TypeAcquisitionController {
         await this.inject(manifestUri, definition.packageJsonContent);
       }
     }
-    for (const definition of this.options.staticTypes) {
-      await this.scan(definition.content);
-    }
+    await Promise.all(this.options.staticTypes.map(async (definition) => this.scan(definition.content)));
   }
 
   public watch(document: EditorDocument): void {
@@ -131,6 +190,8 @@ export class TypeAcquisitionController {
       this.unwatch(document);
     }
     this.pending.clear();
+    this.mounting.clear();
+    this.fetched.clear();
     this.changes.dispose();
   }
 
@@ -182,36 +243,35 @@ export class TypeAcquisitionController {
     }
     await this.mountImplicit(uri);
     const imports = await this.imports(text);
-    for (const entry of imports) {
-      // A `/// <reference path>` names a sibling file (`@types/react`'s `global.d.ts`), never a package.
-      if (entry.reference === 'path') {
-        continue;
-      }
-      const specifier =
-        entry.reference === 'types' ? `@types/${entry.name.replace('@', '').replace('/', '__')}` : entry.name;
-      if (!specifier) {
-        continue;
-      }
-      if (this.isDisposed() || this.knownPackages.has(specifier)) {
-        continue;
-      }
-      const bare = isBareSpecifier(specifier);
-      const cdn = bare ? undefined : extractPackageInfoFromCdnUrl(specifier);
-      const packageName = bare ? packageNameOf(specifier) : cdn?.name;
-      if (!packageName) {
-        continue;
-      }
-      if (bare) {
-        await this.tryMountedTypes(packageName);
-      }
-      if (this.options.dynamicTypes && !(bare && this.mountedPackages.has(packageName))) {
-        await this.acquire({
-          key: specifier,
-          packageName,
-          subpath: bare ? specifier.slice(packageName.length) : (cdn?.path ?? ''),
-          version: cdn?.version,
-        });
-      }
+    // Imports are independent: each starts at once, and the request gate bounds the network.
+    await Promise.all(imports.map(async (entry) => this.admit(entry)));
+  }
+
+  private async admit(entry: DeclarationImport): Promise<void> {
+    // A `/// <reference path>` names a sibling file (`@types/react`'s `global.d.ts`), never a package.
+    if (entry.reference === 'path') {
+      return;
+    }
+    const specifier = entry.reference === 'types' ? typesReferenceSpecifier(entry.name) : entry.name;
+    if (!specifier || this.isDisposed() || this.knownPackages.has(specifier)) {
+      return;
+    }
+    const bare = isBareSpecifier(specifier);
+    const cdn = bare ? undefined : extractPackageInfoFromCdnUrl(specifier);
+    const packageName = bare ? packageNameOf(specifier) : cdn?.name;
+    if (!packageName) {
+      return;
+    }
+    if (bare) {
+      await this.tryMountedTypes(packageName);
+    }
+    if (this.options.dynamicTypes && !(bare && this.mountedPackages.has(packageName))) {
+      await this.acquire({
+        key: specifier,
+        packageName,
+        subpath: bare ? specifier.slice(packageName.length) : (cdn?.path ?? ''),
+        version: cdn?.version,
+      });
     }
   }
 
@@ -230,6 +290,20 @@ export class TypeAcquisitionController {
     if (!reader || this.mountedPackages.has(packageName)) {
       return;
     }
+    const inFlight = this.mounting.get(packageName);
+    if (inFlight) {
+      return inFlight;
+    }
+    const promise = this.mountTypes(reader, packageName);
+    this.mounting.set(packageName, promise);
+    try {
+      await promise;
+    } finally {
+      this.mounting.delete(packageName);
+    }
+  }
+
+  private async mountTypes(reader: DependencyReader, packageName: string): Promise<void> {
     const definitions = await readStaticTypePackage(reader, packageName);
     if (definitions.length === 0) {
       this.scheduleRetry();
@@ -247,8 +321,8 @@ export class TypeAcquisitionController {
     this.mountedPackages.add(packageName);
     for (const definition of definitions) {
       this.declarationSources.set(definition.filePath ?? packageName, definition.content);
-      await this.scan(definition.content);
     }
+    await Promise.all(definitions.map(async (definition) => this.scan(definition.content)));
   }
 
   private async acquire(request: AcquisitionRequest): Promise<void> {
@@ -290,8 +364,55 @@ export class TypeAcquisitionController {
     this.changes.emit(this.revision);
     for (const [path, text] of files) {
       this.declarationSources.set(path, text);
-      await this.scan(text);
     }
+    await Promise.all([...files.values()].map(async (text) => this.scan(text)));
+  }
+
+  /**
+   * Fetch through the project's request gate, once per URL. A failure, or a response without what the
+   * caller needs, is forgotten so the bounded retry asks again.
+   */
+  private async network(url: string, want: 'types' | 'text'): Promise<Fetched> {
+    const key = `${want} ${url}`;
+    const known = this.fetched.get(key);
+    if (known) {
+      return known;
+    }
+    const promise = this.gate.run(async (): Promise<Fetched> => {
+      this.abort.signal.throwIfAborted();
+      const response = await fetch(url, { signal: this.abort.signal });
+      return {
+        ok: response.ok,
+        status: response.status,
+        types: response.headers.get('X-TypeScript-Types') ?? undefined,
+        text: want === 'text' && response.ok ? await response.text() : undefined,
+      };
+    });
+    this.fetched.set(key, promise);
+    // Callers that joined this request share its outcome; only the caller that started it clears the entry.
+    let usable = false;
+    try {
+      const result = await promise;
+      usable = result.ok && result[want] !== undefined;
+      return result;
+    } finally {
+      if (!usable && this.fetched.get(key) === promise) {
+        this.fetched.delete(key);
+      }
+    }
+  }
+
+  /** A `/// <reference types>` URL already names a declaration file; any other module asks the CDN for one. */
+  private async declarationEntry(key: string, moduleUrl: string): Promise<string> {
+    if (declarationFile.test(new URL(moduleUrl).pathname)) {
+      return moduleUrl;
+    }
+    const module = await this.network(moduleUrl, 'types');
+    this.abort.signal.throwIfAborted();
+    if (!module.ok || !module.types) {
+      throw new Error(`No declarations for ${key}: ${module.status}`);
+    }
+    return new URL(module.types, moduleUrl).href;
   }
 
   private async fetchTypes({ key, packageName, subpath, version: explicitVersion }: AcquisitionRequest): Promise<void> {
@@ -328,27 +449,14 @@ export class TypeAcquisitionController {
         }
       }
       const moduleUrl = `${esmShBase}/${packageId}${subpath.startsWith('/') || !subpath ? subpath : `/${subpath}`}`;
-      const moduleResponse = await fetch(moduleUrl, { signal: this.abort.signal });
-      this.abort.signal.throwIfAborted();
-      const header = moduleResponse.headers.get('X-TypeScript-Types');
-      if (!moduleResponse.ok || !header) {
-        throw new Error(`No declarations for ${key}: ${moduleResponse.status}`);
-      }
-      const url = new URL(header, moduleUrl).href;
-      const texts = new Map<string, string>();
+      const url = await this.declarationEntry(key, moduleUrl);
       const read = async (target: string): Promise<string> => {
         this.abort.signal.throwIfAborted();
-        const cached = texts.get(target);
-        if (cached !== undefined) {
-          return cached;
-        }
-        const response = await fetch(target, { signal: this.abort.signal });
-        if (!response.ok) {
+        const response = await this.network(target, 'text');
+        if (!response.ok || response.text === undefined) {
           throw new Error(`Declaration fetch failed: ${target}: ${response.status}`);
         }
-        const text = await response.text();
-        texts.set(target, text);
-        return text;
+        return response.text;
       };
       const graph = await loadDeclarationGraph({
         entry: url,
@@ -359,11 +467,11 @@ export class TypeAcquisitionController {
             specifier = `./${specifier}`;
           }
           if (reference === 'types') {
-            specifier = `@types/${specifier.replace('@', '').replace('/', '__')}`;
+            specifier = typesReferenceSpecifier(specifier);
           }
-          if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('https://')) {
+          if (specifier.startsWith('.') || specifier.startsWith('/') || /^https?:\/\//u.test(specifier)) {
             const target = new URL(specifier, parent);
-            if (/\.d\.(?:ts|mts|cts)$/u.test(target.pathname)) {
+            if (declarationFile.test(target.pathname)) {
               return target.href;
             }
             const base = target.pathname.replace(/\.(?:m?js|cjs)$/u, '');
@@ -401,12 +509,11 @@ export class TypeAcquisitionController {
             dependency && dependencyVersion
               ? `${dependency}@${dependencyVersion}${specifier.slice(dependency.length)}`
               : specifier;
-          const response = await fetch(`${esmShBase}/${request}`, { signal: this.abort.signal });
-          const target = response.headers.get('X-TypeScript-Types');
-          if (!response.ok || !target) {
+          const response = await this.network(`${esmShBase}/${request}`, 'types');
+          if (!response.ok || !response.types) {
             throw new Error(`No declarations for ${specifier}`);
           }
-          return new URL(target, esmShBase).href;
+          return new URL(response.types, esmShBase).href;
         },
       });
       await this.register(key, `file://${declarationPath(url)}`, graph);

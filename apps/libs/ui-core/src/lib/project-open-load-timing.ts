@@ -8,13 +8,14 @@
  * records every Long Animation Frame as a `frame.long` span so a window's blocked time can be set against the spans
  * that overlap it.
  *
- * Inert unless a local harness injected a valid configuration before this module ran: nothing is imported, observed or
- * subscribed otherwise, so an ordinary page pays one property read.
+ * On a deployed page the viewer's spans become `tau.load.*` measures in the page's own timeline and nothing more: long
+ * frames are recorded as spans only for an admitted local harness (any other reader observes them itself, buffered),
+ * and nothing is sent anywhere. Outside a browser page nothing is imported, observed or subscribed.
  *
  * @module
  */
 
-import { pageProjectOpenPerformance, readLocalProjectOpenPerformance } from '#lib/project-open-performance.js';
+import { pageProjectOpenEnvironment, pageProjectOpenPerformance } from '#lib/project-open-performance.js';
 import type { ProjectOpenPerformance, ProjectOpenPhase } from '#lib/project-open-performance.js';
 import type { ViewerLoadPhase, ViewerLoadSpan } from '@taucad/viewer/lib/viewer-load-timing';
 
@@ -78,18 +79,21 @@ const observeLongFrames = (recorder: ProjectOpenPerformance): void => {
 };
 
 /**
- * Install the window probe when a local harness asked for it. Call once, before hydration.
+ * Install the window probe on a browser page. Call once, before hydration.
  *
  * @returns Whether the probe was installed.
  */
 export const installProjectOpenLoadTiming = (): boolean => {
-  if (readLocalProjectOpenPerformance() === undefined) {
+  const environment = pageProjectOpenEnvironment();
+  if (environment === undefined) {
     return false;
   }
   const recorder = pageProjectOpenPerformance();
-  observeLongFrames(recorder);
-  // Loaded only when measuring, so an ordinary page's entry graph does not grow. The viewer mounts long after this
-  // resolves, and a span emitted with no subscriber is simply not built.
+  if (environment === 'local') {
+    observeLongFrames(recorder);
+  }
+  // A dynamic import, so the entry graph does not grow. The viewer mounts long after this resolves, and a span emitted
+  // with no subscriber is simply not built.
   // async-iife: bootstrap -- the entry cannot await a diagnostic import.
   void (async (): Promise<void> => {
     try {

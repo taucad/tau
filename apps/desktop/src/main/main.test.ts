@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
+import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -139,14 +139,14 @@ vi.mock('#main/error-reporting.js', () => ({
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
 }));
 
-vi.mock('#tau/native-preparation.js', () => ({
+vi.mock('@taucad/desktop-services-host/native-preparation', () => ({
   createDesktopKernelPreparer: (options: unknown) => {
     state.nativePreparerOptions = options;
     return { prepare: state.nativePrepare, cancel: state.nativeCancel, dispose: async () => undefined };
   },
 }));
 
-vi.mock('#tau/native-store.js', () => ({
+vi.mock('@taucad/desktop-services-host/native-store', () => ({
   desktopNativeKernelIds: () => ['build123d'],
   startNativeStore: vi.fn(async (options: unknown) => {
     state.nativeStoreOptions = options;
@@ -444,6 +444,7 @@ vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => state.shellApplied),
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
+  bundledStoreGuardEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),

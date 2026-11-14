@@ -3,8 +3,8 @@
  *
  * A locked `tau prepare` (`TAU_ACQUISITION=locked`, `TAU_DEPENDENCY_MIRROR=<host>`) resolves a mirror key only from a
  * sha256 pin, `blobs/sha256/<hex>`, and never falls back to a file's origin URL. A file pinned to a third-party URL (the
- * PicoGK `dotnet` runtime archives, pinned from `builds.dotnet.microsoft.com` by the sha512 Microsoft publishes) is
- * therefore served only once these bytes are written to both dependency buckets: `tau-staging-au-dependencies` behind
+ * PicoGK `dotnet` runtime archives from `builds.dotnet.microsoft.com`, pinned by the sha256 of the bytes whose sha512
+ * Microsoft publishes) is therefore served only once these bytes are written to both dependency buckets: `tau-staging-au-dependencies` behind
  * `https://dependencies.taucad.dev` and `tau-prod-dependencies` behind `https://dependencies.tau.new`. The write itself
  * is `.github/actions/dependency-files-publish`, run by `.github/workflows/dependency-files-publish.yml`.
  *

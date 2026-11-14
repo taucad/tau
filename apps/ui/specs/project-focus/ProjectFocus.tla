@@ -16,8 +16,9 @@
 (*             epoch current when it answers (LibraryCatalog's             *)
 (*             AccessAnswerFenced); the epoch may move again before focus  *)
 (*             acts on the answer                                          *)
-(*   focus     the machine this spec rules or, with Focus = "today", the   *)
-(*             effects of ProjectRouteGate as written                      *)
+(*   focus     the machine this spec rules (machines/focus.machine.ts and  *)
+(*             its selector, focus.route-state.ts; A5a) or, with Focus =   *)
+(*             "today", the effects of ProjectRouteGate as written         *)
 (*   leaving   the session being left (`f.from`), dirty or clean, and its  *)
 (*             leave flush, which completes, fails or is still running     *)
 (*   module    the project runtime import, one for every project           *)
@@ -40,8 +41,12 @@
 (* registry's recency order are not modelled: a policy close may take any  *)
 (* candidate.                                                              *)
 (*                                                                         *)
-(* Every configuration but `wide` runs on the pr tier, in this family's    *)
-(* own target, ui:formal:tla:project-focus (README).                       *)
+(* Every configuration but `wide` and the six `-wide` siblings runs on     *)
+(* the pr tier, in this family's own target, ui:formal:tla:project-focus   *)
+(* (README). Each `-wide` sibling holds the full bounds of its narrowed pr *)
+(* form. `target-person-epoch` keeps a person's waiting open with a        *)
+(* library change, in flushFailed too, and `target-start-retry` a retry    *)
+(* after a failed start with a library change, at pr.                      *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                        *)
 (*   Focus          "target": the focus machine (D7).                      *)
@@ -65,7 +70,7 @@
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
 (*                  of ProjectPersistenceGuard after the commit that       *)
 (*                  mounts the session it names (project-live-sessions.tsx *)
-(*                  652, 795 to 810), so the person may edit before it     *)
+(*                  655, 797 to 812), so the person may edit before it     *)
 (*                  lands; React runs it before the next render, so it has *)
 (*                  landed before the next commit or effect run            *)
 (*                  (RegFlushed). FALSE: it is current at every step.      *)
@@ -86,6 +91,26 @@
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
+\* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
+\* route gate imports the type from there. No action or correspondence changes.
+\* A4b: `tauCloudIntent` and its type moved from `hooks/use-cloud-projects.ts` to
+\* `lib/tau-cloud-intent.ts`; the route gate and the live sessions import them from there. No action or
+\* correspondence changes.
+\* A5b: the route gate's effects are gone. The route reports to focus (`project-route-intent.tsx`) and
+\* the runtime composes focus with the registry, the library epoch and the module import over ordered ports
+\* (`runtime/app-runtime-focus.ts`): registry facts reach focus after the open's answer they follow, every
+\* epoch reaches the registry before an open that names it, and a resume the registry drops as stale is
+\* answered `dropped`. Those ports are the environment this spec assumes, so they join the drift sources.
+\* The route sink applies a `chatShown` only once the router is at rest on the commit focus answered (I2):
+\* the model's route steps are atomic, and the sink's deferral is what keeps the app's ones so.
+\* A held `chatShown` is dropped when the person's move changed the route's chat: focus answers that commit
+\* (I18). The sink's own replace, judged where it lands and used once, is not such a move, so the last chat
+\* shown still wins. Where that replace lands, even while another move loads, a held command is judged against it.
+\* The person's Not now on the budget dialog empties `pendingOpen` and is not modelled (a person step, like
+\* `PersonClosed`, outside the registry's own replies). The port answers focus's waiting open `declined`,
+\* and focus settles on the project as it does for `TOpenOnFailed`, deriving `closed` with the reopen offer,
+\* as main does. No action or verdict changes.
+\* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to
@@ -176,6 +201,8 @@ PersonCommands == MaxPersonOpens > 0
 \* Focus holds an answer for the library's current epoch.
 Fresh == f.ans # "none" /\ f.ansEpoch = lib.epoch
 \* Target: focus's own open waiting in the registry's pendingOpen slot for the project it is opening.
+\* It is by project: a person's open of that project takes the slot in its place, and the machine then
+\* waits for that open's reply (focus.machine.ts, `personOpen`).
 FocusPending == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq /\ pendingOpen.project = f.ansProj
                 /\ f.st = "opening" /\ f.opened
 \* Target: focus withdraws that open (the registry's cancelPendingOpen) in the step it stops opening
@@ -671,8 +698,9 @@ DRetry ==
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
 
-\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 795 to 810, 719): the
+\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 797 to 812, 721): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
+\* ProjectFocus.today-late-effect.cfg cites 655 and 797 to 812 too.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration
   /\ reg # RegTarget

@@ -24,6 +24,11 @@ export type RemoteBootstrapInput = Readonly<{
   sourceRef?: string;
   sourceHead?: RevisionId;
   targetBranch: string;
+  /**
+   * The identity the store is initialized with and, on a GitHub remote, the
+   * setup revision's git author line: the account's GitHub no-reply identity
+   * (D33). Never written into a record (I3).
+   */
   author: Readonly<{ name: string; email: string }>;
   maximumFiles?: number;
   maximumBytes?: number;
@@ -198,6 +203,8 @@ export async function bootstrapRemoteRevisionStore(input: RemoteBootstrapInput):
       tree,
       provenance: setup.provenance,
       summary: setup.summary,
+      /* The forge's no-reply identity, for the author line alone (D33, I3); the record names the Tau person. */
+      ...(input.remote.provider === 'github' ? { commitAuthor: input.author } : {}),
     });
     head = revisionId(receipt.commitId);
     const update = await input.port.updateRef({ name: targetBranch, expectedHead: input.sourceHead, head });

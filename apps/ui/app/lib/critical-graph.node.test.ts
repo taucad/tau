@@ -9,6 +9,9 @@
  * - The compiled skill bodies (D4) are read only when a resolver call or a system skill row needs them,
  *   so the catalog, the RPC handlers and the transcript's skill rows reach them through
  *   `lib/lazy-skill-resolver.ts`.
+ * - The RPC handler stack (LB4d) runs only when a tool call runs: `hooks/rpc-handlers` and the handlers
+ *   behind `@taucad/chat/rpc`, whose `install_packages` handler brings `@taucad/bundler-core`'s package
+ *   resolver and `semver`. The Packages panel's Install action and the debug probes import it on demand.
  *
  * The walk follows the app's own specifiers (`#…` through the package imports map, and relative paths),
  * and each build variant beside a module (`.cloud`, `.self-host`, `.desktop`). A bare package specifier is
@@ -27,6 +30,14 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Modules every route's document evaluates before the route module itself. */
 const shellRoots = ['entry.client.tsx', 'root.tsx'] as const;
+
+/** Modules no route class may reach statically; each one names its owning removal in the header. */
+const onDemandModules = [
+  'lib/system-skills-catalog',
+  'npm:@taucad/skills/resources',
+  'hooks/rpc-handlers',
+  'npm:@taucad/chat/rpc',
+] as const;
 
 /**
  * The route classes: each one's open graph and the modules it must reach only through a dynamic import.
@@ -47,12 +58,12 @@ const routeClasses = [
       'routes/w.$workspace.$project/chat-interface-desktop.tsx',
       'routes/w.$workspace.$project/chat-interface-mobile.tsx',
     ],
-    lazyOnly: ['lib/system-skills-catalog', 'npm:@taucad/skills/resources'],
+    lazyOnly: onDemandModules,
   },
   {
     name: 'Home',
     roots: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
-    lazyOnly: ['lib/system-skills-catalog', 'npm:@taucad/skills/resources'],
+    lazyOnly: onDemandModules,
   },
 ] as const;
 

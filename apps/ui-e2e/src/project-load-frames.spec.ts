@@ -1414,6 +1414,57 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
   },
 });
 
+/*
+ * A15f2: the 500 ms minimum (UI Policy § 5) on History's "Loading history", seen at 164 ms in a local F10 record,
+ * where the load's long tasks painted the reveal 222 ms late. The forcing: a 700 ms long task from 900 ms after the
+ * indicator mounts, across its reveal, and History's read answered just after the first frame that shows it. A span
+ * is measured on screen, from the first frame with the words to the first without.
+ */
+/**
+ * The shortest on-screen span the minimum allows, from the first frame with the words to the first without: 500 ms less
+ * 10 ms, because the recorder reads each frame a few ms into it, and a hold that ends on the 30th frame after the
+ * reveal can be read 1 or 2 ms short. Milliseconds.
+ */
+const shownMinimum = 490;
+
+const historyHold: WorkerReadDelay = {
+  ...historyRead(0),
+  afterShown: historyRegions.historyIndicator,
+  longTask: { selector: historyRegions.historyIndicator, after: 900, milliseconds: 700 },
+};
+
+knownDefect(
+  'History minimum (A15f2): with History open, a long task across its reveal and its read answered as "Loading history" shows, the words stay at least 500 ms',
+  {
+    artifact: 'history-minimum-wide',
+    expectedFailure: true,
+    budget: loadBudget,
+    measure: async () => {
+      await seedProjects('wide', { regions: historyRegions, frameTimes: true });
+      await target.click(historyChip);
+      await target.expectVisible(selectors.getByCss('[data-slot="revisions-panel-body"]'), 60_000);
+      /* History stays open across the measured load. */
+      await target.delay(settleWindow);
+      await armWorkerReadDelay([historyHold]);
+      await target.reload();
+      await settleProject();
+      await target.delay(2000);
+      const record = await keepRecord('history-minimum-wide');
+      await requireReadDelayed('History minimum', historyHold);
+      const shown = shownSpans(regionsOf(record, 'historyIndicator'), record.frameTimes);
+      precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
+      return { record, shown };
+    },
+    assert: ({ shown }) => {
+      expectMeasured(
+        shown.filter((span) => span.to - span.from < shownMinimum).map((span) => `${span.from}-${span.to}`),
+        `History minimum: "Loading history" showed ${shown.map((span) => `${span.from}-${span.to}`).join(', ')}`,
+        [],
+      );
+    },
+  },
+);
+
 /**
  * F12 on a wait a person starts: opening a file from the Files tree with its read held, so the clock starts at the
  * click. The blueprint's F12 names no surface; the "skeleton at 300 ms" it cites is the code pane's placeholder
@@ -1428,8 +1479,9 @@ const openedFileRegions = {
 const measureSourceOpen = async (
   label: string,
   milliseconds: number,
+  hold: Pick<WorkerReadDelay, 'afterShown' | 'busyMilliseconds'> = {},
 ): Promise<{ readonly record: ProjectLoadRecord; readonly click: ProjectLoadFrame; readonly answeredAt: number }> => {
-  const read: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^notes\.ts$`, milliseconds };
+  const read: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^notes\.ts$`, milliseconds, ...hold };
   await seedProjects('wide', { regions: openedFileRegions, frameTimes: true });
   await writeWorkbenchFile(openedFile, 'export const note = "A file no pane has read yet.";\n');
   await armWorkerReadDelay([read]);
@@ -1502,6 +1554,37 @@ knownDefect(
         },
         `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms`,
         { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
+      );
+    },
+  },
+);
+
+/*
+ * A15f2: the 500 ms minimum on the code pane's "Opening file", seen at 468 and 481 ms in 2 of about 10 local F12 runs.
+ * The forcing: the file's read answers in the first frame the indicator shows, at the end of a 300 ms long task.
+ */
+knownDefect(
+  'Opening file minimum (A15f2): a file opened from the tree, its read answered at the end of a long task as "Opening file" shows, keeps the words at least 500 ms',
+  {
+    artifact: 'opening-file-minimum-wide',
+    expectedFailure: true,
+    budget: loadBudget,
+    measure: async () => {
+      const measured = await measureSourceOpen('opening-file-minimum-wide', 0, {
+        afterShown: openedFileRegions.fileIndicator,
+        busyMilliseconds: 300,
+      });
+      const shown = shownSpans(regionsOf(measured.record, 'fileIndicator'), measured.record.frameTimes).filter(
+        (span) => span.from >= measured.click.t,
+      );
+      precondition(shown.length > 0, 'Opening file minimum: "Opening file" never showed');
+      return shown;
+    },
+    assert: (shown) => {
+      expectMeasured(
+        shown.filter((span) => span.to - span.from < shownMinimum).map((span) => `${span.from}-${span.to}`),
+        `Opening file minimum: "Opening file" showed ${shown.map((span) => `${span.from}-${span.to}`).join(', ')}`,
+        [],
       );
     },
   },

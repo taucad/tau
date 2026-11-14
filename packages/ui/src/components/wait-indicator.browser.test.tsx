@@ -1,5 +1,5 @@
 import '#components/select.browser.css';
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { WaitIndicator } from '#components/wait-indicator.js';
 import { WaitClockProvider } from '#hooks/use-wait-clock.js';
@@ -140,4 +140,76 @@ it('should keep a Retry indicator visible through the new wait start', () => {
   seek(0);
   expect(isShown(find('wait-indicator-body'))).toBe(true);
   expect(getComputedStyle(find('wait-indicator-body')).opacity).toBe('1');
+});
+
+/* A15f2: the 500 ms minimum on the page's real clocks. A CSS animation counts its delay from the document timeline's
+   time, which holds still through a task while `performance.now()` runs on, and the reveal paints only at the first
+   frame after a long task. Both rows hold the main thread as a loading page does, and read the delays the indicator
+   wrote, on the document timeline. */
+
+const nextFrame = async (): Promise<number> =>
+  new Promise((resolve) => {
+    requestAnimationFrame(resolve);
+  });
+
+/** The first frame at or after `time` on the document timeline: the one an effect due then paints in. */
+const frameAtOrAfter = async (time: number): Promise<number> => {
+  const frame = await nextFrame();
+  return frame >= time ? frame : frameAtOrAfter(time);
+};
+
+/** Holds the main thread, as a long task on a loading page does. */
+function holdMainThread(milliseconds: number): void {
+  const until = performance.now() + milliseconds;
+  while (performance.now() < until) {
+    // Busy: no frame can run.
+  }
+}
+
+/** When the body's `name` animation takes effect, on the document timeline: its start, once it has one, plus its delay. */
+async function effectTime(name: string): Promise<number> {
+  const animation = find('wait-indicator-body')
+    .getAnimations()
+    .find((candidate) => candidate instanceof CSSAnimation && candidate.animationName === name);
+  expect(animation, `the indicator runs ${name}`).toBeDefined();
+  await animation!.ready;
+  const startDelay = Number(animation!.effect!.getTiming().delay);
+  return Number(animation!.startTime) + Math.max(startDelay, 0);
+}
+
+it.fails('should hold a shown indicator 500 ms from its reveal when its content arrives at the end of a long task', async () => {
+  const startedAt = performance.now() - 1100;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  await nextFrame();
+  await nextFrame();
+  const revealedAt = await effectTime('wait-reveal');
+
+  await act(async () => {
+    holdMainThread(300);
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  });
+  await nextFrame();
+
+  expect((await effectTime('wait-conceal')) - revealedAt).toBeGreaterThanOrEqual(499);
+});
+
+it.fails('should hold an indicator that a long task revealed late 500 ms from the frame it showed in', async () => {
+  const startedAt = performance.now() - 900;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  holdMainThread(300);
+  await nextFrame();
+  const revealedAt = await effectTime('wait-reveal');
+  let shownAt = 0;
+  await act(async () => {
+    shownAt = await frameAtOrAfter(revealedAt);
+    await nextFrame();
+  });
+  /* The reveal was due 1,000 ms into the wait; the long task held it to a later frame. */
+  expect(shownAt - startedAt).toBeGreaterThanOrEqual(1100);
+
+  await act(async () => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  });
+
+  expect((await effectTime('wait-conceal')) - shownAt).toBeGreaterThanOrEqual(499);
 });

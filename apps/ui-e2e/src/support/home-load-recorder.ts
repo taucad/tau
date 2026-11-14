@@ -947,6 +947,22 @@ export type WorkerReadDelay = {
   /** A regular expression source, matched against the call's first argument: a path, or its JSON when not a string. */
   readonly path: string;
   readonly milliseconds: number;
+  /**
+   * A15f2: count `milliseconds` from the first frame this selector's node is visible, not from the send, so the reply
+   * lands a set time into a wait indicator's minimum.
+   */
+  readonly afterShown?: string;
+  /**
+   * A15f2: hold the main thread this long right before the reply is handed over, in the same task, as a long task on
+   * a loading page does: no frame runs between them, so the reply's render reads the animation timeline as it stood
+   * before the task.
+   */
+  readonly busyMilliseconds?: number;
+  /**
+   * A15f2: also hold the main thread `milliseconds` once `after` ms have passed since the first frame this selector
+   * matched a node, whatever the reply does: a long task across a wait indicator's reveal, so the reveal paints late.
+   */
+  readonly longTask?: { readonly selector: string; readonly after: number; readonly milliseconds: number };
 };
 
 /** The `sessionStorage` key the rules are read from when each document starts. */
@@ -978,7 +994,14 @@ type WorkerReadGlobal = typeof globalThis & {
  * @param key - The `sessionStorage` key holding the rules as JSON.
  */
 export const delayWorkerReads = (key: string): void => {
-  let rules: Array<{ method: string; path: RegExp; milliseconds: number }> = [];
+  let rules: Array<{
+    method: string;
+    path: RegExp;
+    milliseconds: number;
+    afterShown?: string;
+    busyMilliseconds?: number;
+    longTask?: { selector: string; after: number; milliseconds: number };
+  }> = [];
   try {
     const raw = sessionStorage.getItem(key);
     rules = (raw ? (JSON.parse(raw) as WorkerReadDelay[]) : []).map((rule) => ({
@@ -988,11 +1011,40 @@ export const delayWorkerReads = (key: string): void => {
   } catch {
     rules = [];
   }
+  const holdMainThread = (milliseconds: number): void => {
+    const until = performance.now() + milliseconds;
+    while (performance.now() < until) {
+      /* A long task: no frame runs until it ends. */
+    }
+  };
+  for (const { longTask } of rules) {
+    if (longTask === undefined) {
+      continue;
+    }
+    const untilPresent = (): void => {
+      if (document.querySelector(longTask.selector) === null) {
+        requestAnimationFrame(untilPresent);
+        return;
+      }
+      setTimeout(() => {
+        holdMainThread(longTask.milliseconds);
+      }, longTask.after);
+    };
+    requestAnimationFrame(untilPresent);
+  }
   const log: Array<{ t: number; method: string; path: string | undefined; delayed: boolean }> = [];
   /* Each held reply as it reached the page's listener: proof the late answer was late, not only that it was held. */
   const delivered: Array<{ t: number; sentAt: number; method: string; path: string | undefined }> = [];
   Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log, delivered } });
-  const held = new Map<string, { milliseconds: number; sentAt: number; method: string; path: string | undefined }>();
+  type Held = {
+    milliseconds: number;
+    sentAt: number;
+    method: string;
+    path: string | undefined;
+    afterShown?: string;
+    busyMilliseconds?: number;
+  };
+  const held = new Map<string, Held>();
 
   const { postMessage } = MessagePort.prototype;
   MessagePort.prototype.postMessage = function (this: MessagePort, message: unknown, ...rest: unknown[]): void {
@@ -1013,7 +1065,14 @@ export const delayWorkerReads = (key: string): void => {
       const method = String(frame.n);
       const rule = rules.find((candidate) => candidate.method === method && candidate.path.test(path ?? ''));
       if (rule) {
-        held.set(frame.i, { milliseconds: rule.milliseconds, sentAt: Math.round(performance.now()), method, path });
+        held.set(frame.i, {
+          milliseconds: rule.milliseconds,
+          sentAt: Math.round(performance.now()),
+          method,
+          path,
+          afterShown: rule.afterShown,
+          busyMilliseconds: rule.busyMilliseconds,
+        });
       }
       if (log.length < 2000) {
         log.push({ t: Math.round(performance.now()), method, path, delayed: rule !== undefined });
@@ -1030,6 +1089,8 @@ export const delayWorkerReads = (key: string): void => {
           sentAt: Math.round(performance.now()),
           method,
           path: undefined,
+          afterShown: rule.afterShown,
+          busyMilliseconds: rule.busyMilliseconds,
         });
       }
       if (log.length < 2000) {
@@ -1085,17 +1146,33 @@ export const delayWorkerReads = (key: string): void => {
         deliver(this, event);
         return;
       }
-      setTimeout(() => {
+      const reply: Held = late;
+      const release = (): void => {
+        holdMainThread(reply.busyMilliseconds ?? 0);
         if (delivered.length < 2000) {
           delivered.push({
             t: Math.round(performance.now()),
-            sentAt: late.sentAt,
-            method: late.method,
-            path: late.path,
+            sentAt: reply.sentAt,
+            method: reply.method,
+            path: reply.path,
           });
         }
         deliver(this, event);
-      }, late.milliseconds);
+      };
+      const { afterShown } = reply;
+      if (afterShown === undefined) {
+        setTimeout(release, reply.milliseconds);
+        return;
+      }
+      const untilShown = (): void => {
+        const node = document.querySelector(afterShown);
+        if (node?.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+          setTimeout(release, reply.milliseconds);
+        } else {
+          requestAnimationFrame(untilShown);
+        }
+      };
+      requestAnimationFrame(untilShown);
     };
     wrappers.set(listener, wrapper);
     return wrapper;

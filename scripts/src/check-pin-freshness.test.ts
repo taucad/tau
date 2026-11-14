@@ -239,4 +239,70 @@ describe('check-pin-freshness', () => {
       ]),
     );
   });
+
+  it.each<{
+    readonly name: string;
+    readonly served: string;
+    readonly published: string;
+    readonly expected: Record<string, string>;
+  }>([
+    {
+      name: 'fresh when the served bytes match the pin and the published sha512',
+      served: 'dotnet',
+      published: hex('sha512', 'dotnet'),
+      expected: { status: 'fresh', detail: 'sha256 and published sha512 match the served bytes' },
+    },
+    {
+      name: 'drift when the served bytes no longer match the sha256 pin',
+      served: 'replaced',
+      published: hex('sha512', 'replaced'),
+      expected: {
+        status: 'drift',
+        detail: `served sha256 ${hex('sha256', 'replaced')}, pinned ${hex('sha256', 'dotnet')}`,
+      },
+    },
+    {
+      name: 'drift when Microsoft publishes another sha512 for the pinned bytes',
+      served: 'dotnet',
+      published: hex('sha512', 'other'),
+      expected: {
+        status: 'drift',
+        detail: `served sha512 ${hex('sha512', 'dotnet')}, published ${hex('sha512', 'other')}`,
+      },
+    },
+  ])(
+    'should download a sha256-pinned .NET runtime archive and report it $name',
+    async ({ served, published, expected }) => {
+      const sha256Manifest = {
+        ...manifest,
+        dependencies: {
+          engine: [
+            {
+              target: { runtime: 'native', os: 'darwin', arch: 'arm64' },
+              files: [payload('dotnet', integrity('sha256', 'dotnet'), [dotnetUrl])],
+            },
+          ],
+        },
+      };
+      await writeFile(path, JSON.stringify(sha256Manifest));
+      const calls: string[] = [];
+
+      const rows = await checkPinFreshness(
+        [path],
+        transportOf(
+          {
+            ...fresh,
+            [`GET ${dotnetUrl}`]: { body: served },
+            'GET https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json': {
+              body: JSON.stringify({ releases: [{ runtime: { files: [{ url: dotnetUrl, hash: published }] } }] }),
+            },
+          },
+          calls,
+        ),
+      );
+
+      expect(rows.find(({ check }) => check === 'dotnet-releases')).toMatchObject(expected);
+      expect(calls).toContain(`GET ${dotnetUrl}`);
+    },
+  );
 });

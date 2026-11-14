@@ -11,9 +11,14 @@
       "ref": "Budget 1 at the target bounds with 1 failed session start: the registry closes the session being left through its close flush, a failed start gives held, focus never closes, and every safety property holds."
     },
     "ProjectFocus.target-idle-expiry.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Idle expiry at any step over 2 projects and Home, 3 requests, 1 library change, budget 2, 1 failed leave flush and 1 retry; every safety property holds. The pr form of target-idle-expiry-wide, narrowed to 2 projects to fit the per-target budget."
+    },
+    "ProjectFocus.target-idle-expiry-wide.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "Idle expiry at any step at the target bounds; every safety property holds. Nightly: about 42 s on the CI runner, moved with the two slowest to keep the family target under the per-target budget."
+      "ref": "Idle expiry at any step at the target bounds (3 projects and Home); every safety property holds. Nightly: about 42 s on the CI runner, which put the family target over the per-target budget; target-idle-expiry is its narrowed pr form."
     },
     "ProjectFocus.target-person-commands.cfg": {
       "tier": "pr",
@@ -31,9 +36,14 @@
       "ref": "Facts in any order over 2 projects, 3 requests, 1 library change, 1 person open and close; EditorOnlyWhenReady, FirstCheckBeforeEditor and every other safety property hold."
     },
     "ProjectFocus.target-retained-session.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Budget 1 over 2 projects, 3 requests, no library change, 2 person opens, 1 person close, 1 failed leave flush, 1 retry, 1 failed close (back to live or to failed), 1 discard, no Home: a session whose close fails is retained with its unsaved work, and DirtyNeverDiscarded and every target safety property hold. The pr form of target-retained-session-wide, narrowed to no library change to fit the per-target budget."
+    },
+    "ProjectFocus.target-retained-session-wide.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "Budget 1 over 2 projects, 3 requests, 1 library change, 2 person opens, 1 person close, 1 failed leave flush, 1 retry, 1 failed close (back to live or to failed), 1 discard, no Home: a session whose close fails is retained with its unsaved work, and DirtyNeverDiscarded and every target safety property hold. Nightly: about 104 s on the CI runner, which put the family target over the per-target budget."
+      "ref": "target-retained-session with 1 library change: budget 1 over 2 projects, 3 requests, 2 person opens, 1 person close, 1 failed leave flush, 1 retry, 1 failed close, 1 discard, no Home; DirtyNeverDiscarded and every target safety property hold. Nightly: about 104 s on the CI runner, which put the family target over the per-target budget."
     },
     "ProjectFocus.target-retained-session-reachable.cfg": {
       "tier": "pr",

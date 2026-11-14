@@ -23,6 +23,15 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 
+/** The session module's import, held until a row lets it settle (U1). */
+const workspaceChunk = vi.hoisted(() => ({ settle: undefined as (() => void) | undefined }));
+vi.mock('#lib/project-workspace-warmup.js', () => ({
+  loadProjectWorkspace: async () =>
+    new Promise<void>((resolve) => {
+      workspaceChunk.settle = resolve;
+    }),
+}));
+
 afterEach(() => {
   document.body.innerHTML = '';
 });
@@ -116,6 +125,29 @@ describe('the app runtime hands its focus, unload sequencer and library epoch do
 
     expect(focus.getSnapshot().context.epoch).toBe(before + 1);
     expect(selectSessionsRegistry(runtime.getSnapshot()).getSnapshot().context.libraryEpoch).toBe(before + 1);
+    runtime.stop();
+  });
+
+  it('should keep focus waiting on the session module until the workspace chunk loads (U1, round 11)', async () => {
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
+    const { focus } = selectRuntimeFocus(runtime);
+    focus.send({
+      type: 'routeRequested',
+      requestId: 'route:1',
+      slugs: { workspaceSlug: 'w', projectSlug: 'a' },
+      projectId: 'proj_a',
+    });
+
+    await vi.waitFor(() => {
+      expect(workspaceChunk.settle).toBeDefined();
+    });
+    expect(focus.getSnapshot().context.module).toBe('loading');
+    workspaceChunk.settle?.();
+
+    await vi.waitFor(() => {
+      expect(focus.getSnapshot().context.module).toBe('loaded');
+    });
     runtime.stop();
   });
 });

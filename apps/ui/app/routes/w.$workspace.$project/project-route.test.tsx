@@ -2474,3 +2474,49 @@ describe('round 9: the editor corrects a chat the URL named but could not focus 
     expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-9' });
   });
 });
+
+describe('round 11: the project a move leaves keeps its own chat', () => {
+  beforeEach(() => {
+    listing.set([listed(projectA, 'ws', 'alpha'), listed(projectB, 'ws', 'beta')]);
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it('should keep handing A its own chat while the move to B is resolving', async () => {
+    const pendingB = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockImplementation(async (id) => (id === projectB ? pendingB.promise : ready(id)));
+    renderHost('/w/ws/alpha?chat=chat-1');
+    await flushTasks();
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-1' });
+
+    await navigateTo('/w/ws/beta');
+
+    expect(focusedSessionId()).toBe(projectA);
+    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    expect(providerRequestsOf(projectA).map((request) => request.requestedChatId)).not.toContain(undefined);
+    await act(async () => {
+      pendingB.resolve(ready(projectB));
+      await pendingB.promise;
+    });
+  });
+
+  it("should not hand the retained A the chat B's URL created", async () => {
+    const pendingB = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockImplementation(async (id) => (id === projectB ? pendingB.promise : ready(id)));
+    renderHost('/w/ws/alpha?chat=chat-1');
+    await flushTasks();
+
+    await navigateTo('/w/ws/beta?chat=chat-b-new', { state: { focusChatComposer: true } });
+
+    expect(focusedSessionId()).toBe(projectA);
+    expect(providerRequestsOf(projectA).map((request) => request.createdChatId)).toEqual(
+      providerRequestsOf(projectA).map(() => undefined),
+    );
+    await act(async () => {
+      pendingB.resolve(ready(projectB));
+      await pendingB.promise;
+    });
+  });
+});

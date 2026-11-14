@@ -101,9 +101,9 @@ describe('prepareLinkedGithubImport', () => {
     ).rejects.toThrow('Track it with Git LFS');
   });
 
-  it('records the setup revision as the signed-in Tau person with the GitHub no-reply author (D33)', async () => {
+  it('records the setup revision as the signed-in Tau person, with the GitHub no-reply author beside it (D33, I3)', async () => {
     vi.mocked(githubConnections.token).mockResolvedValue({ accessToken: 't', expiresAt: '', generation: 4 });
-    setRevisionSessionUser({ id: 'tau-user-1' });
+    setRevisionSessionUser({ id: 'tau-user-1', name: 'Ada' });
 
     const { request, generation } = await prepareLinkedGithubImport({
       selection: { ...selection, files: [] },
@@ -117,9 +117,11 @@ describe('prepareLinkedGithubImport', () => {
     expect(request).toMatchObject({
       author: noreply,
       setup: {
-        provenance: { actor: { kind: 'user', id: 'tau-user-1', ...noreply }, capture: 'import', via: 'browser' },
+        provenance: { actor: { kind: 'user', id: 'tau-user-1', name: 'Ada' }, capture: 'import', via: 'browser' },
       },
     });
+    /* The address is the author line's alone: the record names the Tau person and nothing else. */
+    expect(request.setup.provenance.actor).toStrictEqual({ kind: 'user', id: 'tau-user-1', name: 'Ada' });
     setRevisionSessionUser(undefined);
   });
 

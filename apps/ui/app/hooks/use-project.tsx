@@ -37,7 +37,12 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import { useAppRuntime } from '#runtime/app-runtime-provider.js';
-import { selectRuntimeLeases, selectRuntimeProjectLibrary, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
+import {
+  selectRuntimeChatSessions,
+  selectRuntimeLeases,
+  selectRuntimeProjectLibrary,
+  selectRuntimeQueryClient,
+} from '#runtime/app-runtime.js';
 import type { LeaseEntry } from '#runtime/leases.js';
 import {
   createProjectRuntime,
@@ -322,6 +327,8 @@ export function ProjectProvider({
       projectId,
       fileManager: { fileManagerRef: fileManager.fileManagerRef, parameterFiles },
       library: selectRuntimeProjectLibrary(appRuntime),
+      // A12 (I21): the repair chat it creates empty shows empty at once.
+      chatSessions: selectRuntimeChatSessions(appRuntime),
       ...profileOptions,
       ...(kernelOptionsFactory === undefined ? {} : { kernelSelection: { kernelOptionsFactory } }),
       ...(input === undefined ? {} : { input }),

@@ -470,7 +470,7 @@ knownDefect('U6: no sidebar project row moves on a reload with the chat listing 
 
 knownDefect('U7: the largest contentful paint is not the empty-chat state with the agent host 3 s late', {
   artifact: 'u7-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: turnBudget,
   measure: async () => {
     const { chatId } = await seedProjects('wide', { watchText: finalReply });
@@ -507,7 +507,7 @@ knownDefect(
   'U10: the composer keeps its height in every frame for a chat with a tray, with the tray file answered 3 s late',
   {
     artifact: 'u10-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: turnBudget,
     measure: async () => {
       const { chatId } = await seedProjects('wide');

@@ -285,6 +285,44 @@ describe('restored viewer layout admission', () => {
     expect(detach).toHaveBeenCalledOnce();
   });
 
+  // A8d review round 1: a project switch hands the dock over again, and the new adapter starts on that render's facts,
+  // so it registers with the new project's layout only, never again with the old one's.
+  it('should register the re-handed viewer with the new project layout only', () => {
+    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined } = { adapter: undefined };
+    const workspaceWith = (registerViewer: () => () => void): NonNullable<typeof fixture.workspace> =>
+      ({
+        layoutController: {
+          registerViewer,
+          personViewerChanged: vi.fn(),
+          connectViewerIntents: () => () => undefined,
+          requestViewerFile: vi.fn(),
+        },
+        layout: {
+          send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
+            layoutDock.adapter?.stop();
+            layoutDock.adapter = undefined;
+            if ('api' in event) {
+              layoutDock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+              layoutDock.adapter.start();
+            }
+          },
+        },
+      }) as unknown as NonNullable<typeof fixture.workspace>;
+    const registerA = vi.fn(() => () => undefined);
+    const registerB = vi.fn(() => () => undefined);
+    fixture.workspace = workspaceWith(registerA);
+    render(<ViewerDockview profile='editor' />);
+    expect(registerA).toHaveBeenCalledOnce();
+    fixture.switchProject();
+    fixture.workspace = workspaceWith(registerB);
+    // The viewer is memoised on its props, so the switch reaches it through a hook it reads, as the runtime's does.
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(registerA).toHaveBeenCalledOnce();
+    expect(registerB).toHaveBeenCalledOnce();
+  });
+
   it('should publish the resolved main entry when a viewer starts before its manifest', () => {
     fixture.mainEntryPath = '';
     fixture.emptyMain = true;

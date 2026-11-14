@@ -27,6 +27,7 @@ import type {
 } from '#workbench-records/workbench-layout.machine.js';
 import { createWorkbenchLayoutControllerShim } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
 import type { ProjectLayoutHost } from '#runtime/project-runtime.layout.js';
+import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import {
   createViewerAdapterFactsPort,
   createViewerAdapterLogic,
@@ -118,14 +119,14 @@ function mountLayout(device: WorkbenchLayoutDevice) {
     controller,
     commands,
     received,
-    publish(viewer: ViewerNode) {
+    publish(viewer: ViewerNode, refusal?: RecordRefusal) {
       const next = layoutOf(viewer);
       record.send!({
         type: 'recordPublished',
         layout: next,
         digest: digestOf(next),
         origin: 'foreign',
-        refusal: undefined,
+        refusal,
         owed: false,
       });
     },
@@ -272,6 +273,61 @@ describe('viewer adapter (A8d)', () => {
     expect(
       api.panels.filter((panel) => (panel.params as { entryPath?: string }).entryPath === 'parts/bracket.ts'),
     ).toHaveLength(1);
+  });
+
+  // A8d review round 1: a refused record shows only what is on disk, but a requested file still opens its viewer, as
+  // it did before the request became an intent; the open is not an edit of the refused record.
+  it('should open a requested file on a refused record, with no edit of its own', async () => {
+    const harness = mountLayout('desktop');
+    const api = mountDock();
+    const project = mountProject();
+    const personViewerChanged = vi.spyOn(harness.controller, 'personViewerChanged');
+    const facts = createViewerAdapterFactsPort(baseFacts({ layout: harness.controller }));
+    await act(async () => {
+      startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      harness.publish(group('front'), { code: 'NEWER_RECORD', message: 'newer' });
+    });
+    await act(async () => {
+      project.request('parts/bracket.ts');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
+    expect(
+      api.panels.filter((panel) => (panel.params as { entryPath?: string }).entryPath === 'parts/bracket.ts'),
+    ).toHaveLength(1);
+    expect(personViewerChanged).not.toHaveBeenCalled();
+  });
+
+  // A8d review round 1: a request made while a non-viewer tab (the launcher) is active starts its view from defaults,
+  // as the dock's other creation paths do, not from the last active viewer's record.
+  it('should start a requested view from defaults while a non-viewer tab is active', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const front = newViewRecord('main.ts');
+    const createViewRecord = vi.fn();
+    const facts = createViewerAdapterFactsPort(
+      baseFacts({ viewRecords: new Map([['front', front]]), createViewRecord }),
+    );
+    await act(async () => {
+      startAdapter({ api, ports: { profile: 'shared', projectId: 'p', project: project.project, facts } });
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: 'main.ts' },
+      });
+      api.addPanel({ id: 'launcher', component: 'viewer', title: 'New tab', params: { mode: 'launcher' } });
+    });
+    expect(api.activePanel?.id).toBe('launcher');
+    await act(async () => {
+      project.request('b.ts');
+    });
+    const opened = api.panels.find(
+      (panel) => isViewerPanelParameters(panel.params) && panel.params.entryPath === 'b.ts',
+    );
+    expect(opened).toBeDefined();
+    expect(createViewRecord).toHaveBeenCalledWith(opened!.id, 'b.ts', undefined);
   });
 
   it('should open a requested file at once on a page without a layout', async () => {

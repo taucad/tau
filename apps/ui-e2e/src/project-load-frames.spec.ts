@@ -653,8 +653,8 @@ test(
  * A15a and A15f frame rows (loading states UX blueprint, § Red-first tests, frame level), on A0.10's recorder. They
  * land after A0.10 so later lanes only flip (blueprint, § Hot files). F11 is not here: S-nav took its root-loader
  * half (`root-revalidation.spec.ts`) and A15b adds its destination-frame half (programme control, 2026-11-13T14:40Z).
- * A row whose fix has landed (F9, F10 and F12, through A15f) asserts as a plain passing row; every other row stands as
- * an expected failure, and its title names the lane that flips it. Each watches named regions frame by frame
+ * A row whose fix has landed (F9 to the editor's mount, F10 and F12's source pane, through A15f) asserts as a plain
+ * passing row; every other row stands as an expected failure, and its title names the lane that flips it. Each watches named regions frame by frame
  * (`regions`), so a failure names the frame, the region and what it drew.
  */
 

@@ -466,6 +466,7 @@ knownDefect(
         regions: homeRegions,
       });
       precondition(record.hydratedFirstFrame !== undefined, 'H-b: the rich composer never mounted');
+      precondition(record.projectRows.length > 0, 'H-b: the sidebar drew no project row');
       precondition(
         record.dropped['skeletonFrames'] === undefined,
         'H-b: the record dropped skeleton frames past its frame limit',
@@ -478,9 +479,11 @@ knownDefect(
         record.projectRows.filter((entry) => entry.frame <= hydrated.frame).map((entry) => entry.row),
       );
       const card = regionAt(regionsOf(record, 'firstCard'), hydrated.frame);
+      /* The rows the loaded sidebar draws: it pages, so not every seeded project has a row. */
+      const drawnRows = [...new Set(record.projectRows.map((entry) => entry.row))];
       expectMeasured(
         {
-          missingRows: seededProjects.filter((name) => !rows.has(name)),
+          missingRows: drawnRows.filter((name) => !rows.has(name)),
           firstCardNamed: card?.present === true && seededProjects.some((name) => card.text.includes(name)),
           skeletonFrames: record.skeletonFrames
             .slice(0, 3)

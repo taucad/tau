@@ -13,12 +13,12 @@
     "ProjectFocus.target-idle-expiry.cfg": {
       "tier": "pr",
       "expect": "pass",
-      "ref": "Idle expiry at any step over 2 projects and Home, 3 requests, 1 library change, budget 2, 1 failed leave flush and 1 retry; every safety property holds. The pr form of target-idle-expiry-wide, narrowed to 2 projects to fit the per-target budget."
+      "ref": "Idle expiry at any step over 3 projects and Home, 3 requests, no library change, budget 2, 1 failed leave flush and 1 retry; every safety property holds. The pr form of target-idle-expiry-wide, narrowed to no library change to fit the per-target budget."
     },
     "ProjectFocus.target-idle-expiry-wide.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "Idle expiry at any step at the target bounds (3 projects and Home); every safety property holds. Nightly: about 42 s on the CI runner, which put the family target over the per-target budget; target-idle-expiry is its narrowed pr form."
+      "ref": "Idle expiry at any step at the target bounds (3 projects and Home, 1 library change); every safety property holds. Nightly: about 42 s on the CI runner, which put the family target over the per-target budget; target-idle-expiry is its narrowed pr form."
     },
     "ProjectFocus.target-person-commands.cfg": {
       "tier": "pr",
@@ -77,9 +77,14 @@
       "ref": "LiveSpec over 2 projects and Home, 3 requests, 1 library change, budget 1; RequestEventuallySettles and FailedFlushSendsNoOpen hold."
     },
     "ProjectFocus.liveness-person-commands.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "LiveSpec over 2 projects, 3 requests, no library change, budget 1, 1 person open and 1 person close, no Home or flush failure; RequestEventuallySettles and FailedFlushSendsNoOpen hold. The pr form of liveness-person-commands-wide, narrowed to no library change to fit the per-target budget."
+    },
+    "ProjectFocus.liveness-person-commands-wide.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "LiveSpec over 2 projects, 3 requests, 1 library change, budget 1, 1 person open and 1 person close, no Home or flush failure; RequestEventuallySettles and FailedFlushSendsNoOpen hold. Nightly: about 49 s on the CI runner, which put the family target over the per-target budget."
+      "ref": "LiveSpec over 2 projects, 3 requests, 1 library change, budget 1, 1 person open and 1 person close, no Home or flush failure; RequestEventuallySettles and FailedFlushSendsNoOpen hold. Nightly: about 49 s on the CI runner, which put the family target over the per-target budget; liveness-person-commands is its narrowed pr form."
     },
     "ProjectFocus.liveness-person-budget.cfg": {
       "tier": "pr",

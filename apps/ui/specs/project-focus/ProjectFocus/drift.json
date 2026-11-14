@@ -34,12 +34,13 @@
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "4cea41ab878b3d473d4df2709bd04504409e7bb8f68d329514ae47e798a01685"
   },
   "specs": {
-    "ProjectFocus.tla": "0687a2249a1b0f32129cd26a4c9a25e392a8bd90de075405adfc4ce02ba16b80"
+    "ProjectFocus.tla": "17b386838b97b883b6fa9ad772d155bbde5828e8174df715854666ece881967a"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",
     "ProjectFocus.liveness-person-budget.cfg": "5a29b4637b278b848804bd1457a93cfc39b61293f9c70b563009a648c6bb9ddc",
-    "ProjectFocus.liveness-person-commands.cfg": "097a7525035d556f6c070286c8d8eb860f81404e453213e452657b27f849a81c",
+    "ProjectFocus.liveness-person-commands-wide.cfg": "296a686c158a73c48019e918643ee6b1e000e52ae3ab4357d0b5fcdf0bc027ff",
+    "ProjectFocus.liveness-person-commands.cfg": "531715a21044ac0416606cfad703813351a039528dd1dd7d042dc0e8c998d516",
     "ProjectFocus.liveness-registry-epoch.cfg": "f0e3b8f5781b99b389070395eedc2e579bf38acb060b006e3bb51de349494352",
     "ProjectFocus.liveness-retained-reopen.cfg": "5c7d6fd07842b92be60b6ea31315e255a4aa174befdafa5a2d99b5686a08136c",
     "ProjectFocus.liveness.cfg": "1937ef3f61f77ed83ca1bfb0341bdedbd9ff70a4904051624a72df137de11d9a",
@@ -47,8 +48,8 @@
     "ProjectFocus.no-request-id.cfg": "6f790b295691761bdc4626c21e83395cc11838e3d33b4082c64cecfc8156c90d",
     "ProjectFocus.no-route-in-selector.cfg": "3b3dc5ab020b6c03639420ab3efa74d5fdca96942a4bff8c30e05c8ecdc71dfc",
     "ProjectFocus.target-failed-close-withdraw.cfg": "31f1423a375ffb2df785847fb84184b7fde6d100bbf89fa168cc2a6a10de506f",
-    "ProjectFocus.target-idle-expiry-wide.cfg": "308ce66618bcdc7157c289d61d225655f582c2d244845e9adb63915aa5ba7ddc",
-    "ProjectFocus.target-idle-expiry.cfg": "7b502860822ca6d0cc0760565841859bb21aaf208b3cd39164d771c03572190c",
+    "ProjectFocus.target-idle-expiry-wide.cfg": "8d0438f169599fcefda72172d11479bd1685c65754589971b3d15589d0aef7b3",
+    "ProjectFocus.target-idle-expiry.cfg": "50dcf3a066a3c8b5c1d75917d2c80e5daf12e960abb2f19a6eb48028bba8e542",
     "ProjectFocus.target-one-project.cfg": "53d58544d4a4835bcd17f02f3f43f1ae3c8f0bc52f61dc2d76311b4a1bd475e6",
     "ProjectFocus.target-open-facts.cfg": "5ca99fd73d022eeefed9a5da394f57c9bfebb2cca7edfdf930d718f64ad1e966",
     "ProjectFocus.target-person-commands.cfg": "67582016258ed61c5c6a5e8be1ba03b0a80c39bbfc72449db2e5f555a9684689",
@@ -69,6 +70,6 @@
     "ProjectFocus.today-superseded-open-reachable.cfg": "1680a7a1c62b8a13b187a3ec45984506e12b3d5a3842b375c756a1e5c47823ef",
     "ProjectFocus.today-superseded-open.cfg": "bb79efb47575e428d1b6c1e59b4020593c27e8f76a49cd5c58719591933b9e13",
     "ProjectFocus.wide.cfg": "89b78eb0662313104defd5ab54306da66b63a2d96b1eec2fdc53f899d1b9e4f4",
-    "expected.json": "fc1eb447ae17709bfeefb1b37465c23abb101359bba904c64404b6d996de442c"
+    "expected.json": "7b3b3bf2f13f8927df93b3657a4dcf5ddd1a0123beb9cbe6d42e5f723acbd016"
   }
 }

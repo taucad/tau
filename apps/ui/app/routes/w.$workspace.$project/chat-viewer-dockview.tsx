@@ -23,6 +23,7 @@ import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
@@ -55,6 +56,7 @@ import {
 } from '#workbench-records/viewer-adapter.js';
 import type {
   ViewerAdapterFacts,
+  ViewerAdapterFactsPort,
   ViewerAdapterPorts,
   ViewerDockReady,
   ViewerDockReleased,
@@ -612,31 +614,83 @@ type ViewerDockHost = Readonly<{
  * and stops nothing (I1). A new host, api or port hands the dock over again; a release names its mount.
  *
  * @param host - The project's layout, or its editor on a page without one.
- * @param api - The Dockview api, once `onReady` gave it.
- * @param ports - The adapter's ports.
+ * @param handover - The Dockview api, once `onReady` gave it, with the adapter's ports.
  * @returns The ref callback for the dock's box.
  */
 function useViewerDockRef(
   host: ViewerDockHost,
-  api: DockviewApi | undefined,
-  ports: ViewerAdapterPorts,
+  handover: Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts }> | undefined,
   // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
 ): (element: HTMLDivElement | null) => (() => void) | undefined {
   const dockId = useId();
   return useCallback(
     // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
     (element: HTMLDivElement | null): (() => void) | undefined => {
-      if (element === null || api === undefined) {
+      if (element === null || handover === undefined) {
         return undefined;
       }
+      const { api, ports } = handover;
       host.send({ type: 'dockReady', adapter: 'viewer', dockId, api, ports });
       selectViewerDockAdapter(host, dockId)?.send({ type: 'attach' });
       return () => {
         host.send({ type: 'dockReleased', adapter: 'viewer', dockId });
       };
     },
-    [api, dockId, host, ports],
+    [dockId, handover, host],
   );
+}
+
+/**
+ * The layout port the viewer adapter speaks to: the page's controller, on the editor profile of a page whose controller
+ * offers viewer intents.
+ *
+ * @param controller - The page's layout controller, if the viewer speaks to one.
+ * @returns The port, stable while the controller is.
+ */
+function useViewerLayoutPort(controller: WorkbenchLayoutController | undefined): ViewerAdapterPorts['layout'] {
+  return useMemo(() => {
+    const connectViewerIntents = controller?.connectViewerIntents;
+    const requestViewerFile = controller?.requestViewerFile;
+    if (controller === undefined || connectViewerIntents === undefined || requestViewerFile === undefined) {
+      return undefined;
+    }
+    return {
+      registerViewer: controller.registerViewer,
+      personViewerChanged: controller.personViewerChanged,
+      connectViewerIntents,
+      requestViewerFile,
+    };
+  }, [controller]);
+}
+
+/**
+ * The handover a viewer dock makes once Dockview gave it an api: the api and the adapter's ports. Each handover gets
+ * its own facts port, made from this render's facts: the dock's ref hands the adapter over and attaches it before the
+ * component's layout effects run, so a port fed only from them would attach a re-handed adapter on the previous
+ * commit's facts. A layout effect then keeps it current.
+ *
+ * @param api - The Dockview api, once `onReady` gave it.
+ * @param facts - What the page's tree owns, this render.
+ * @param ports - The adapter's other ports.
+ * @returns The handover, or `undefined` before Dockview is ready.
+ */
+function useViewerHandover(
+  api: DockviewApi | undefined,
+  facts: ViewerAdapterFacts,
+  { profile, projectId, project, layout }: Omit<ViewerAdapterPorts, 'facts'>,
+): Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts; facts: ViewerAdapterFactsPort }> | undefined {
+  const handover = useMemo(() => {
+    if (api === undefined) {
+      return undefined;
+    }
+    const port = createViewerAdapterFactsPort(facts);
+    return { api, ports: { profile, projectId, project, layout, facts: port }, facts: port };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- New facts feed the port; only a new handover makes one.
+  }, [api, layout, profile, project, projectId]);
+  useLayoutEffect(() => {
+    handover?.facts.set(facts);
+  }, [facts, handover]);
+  return handover;
 }
 
 /**
@@ -729,20 +783,7 @@ export const ViewerDockview = memo(function ({
    * The adapter, a child of the project's layout, holds the Dockview and does everything over time. */
   const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
   const availability = useModelAvailability();
-  const layoutPort =
-    layoutController?.connectViewerIntents && layoutController.requestViewerFile ? layoutController : undefined;
-  const adapterLayout = useMemo(
-    (): ViewerAdapterPorts['layout'] =>
-      layoutPort?.connectViewerIntents === undefined || layoutPort.requestViewerFile === undefined
-        ? undefined
-        : {
-            registerViewer: layoutPort.registerViewer,
-            personViewerChanged: layoutPort.personViewerChanged,
-            connectViewerIntents: layoutPort.connectViewerIntents,
-            requestViewerFile: layoutPort.requestViewerFile,
-          },
-    [layoutPort],
-  );
+  const adapterLayout = useViewerLayoutPort(profile === 'editor' ? layoutController : undefined);
   const adapterFacts = useMemo(
     (): ViewerAdapterFacts => ({
       admitsDemand: projectIsReady && availability === 'ready',
@@ -766,27 +807,15 @@ export const ViewerDockview = memo(function ({
       createViewRecord,
     ],
   );
-  // Each handover gets its own facts port, made from this render's facts: the dock's ref hands the adapter over and
-  // attaches it before this component's layout effects run, so a port fed only from them would attach a re-handed
-  // adapter on the previous commit's facts. The layout effect below then keeps it current.
-  const { ports: adapterPorts, facts: factsPort } = useMemo(() => {
-    const facts = createViewerAdapterFactsPort(adapterFacts);
-    const ports: ViewerAdapterPorts = {
-      profile,
-      projectId,
-      project: projectRef,
-      layout: profile === 'shared' ? undefined : adapterLayout,
-      facts,
-    };
-    return { ports, facts };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- New facts feed the port; only a new handover makes one.
-  }, [adapterLayout, api, profile, projectId, projectRef]);
-  useLayoutEffect(() => {
-    factsPort.set(adapterFacts);
-  }, [adapterFacts, factsPort]);
+  const handover = useViewerHandover(api, adapterFacts, {
+    profile,
+    projectId,
+    project: projectRef,
+    layout: adapterLayout,
+  });
   // The layout runs the adapter on a page with one; elsewhere (a shared embed, a project without a layout) the editor
   // does (programme control, 2026-11-14).
-  const dockRef = useViewerDockRef(workspace?.layout ?? editorRef, api, adapterPorts);
+  const dockRef = useViewerDockRef(workspace?.layout ?? editorRef, handover);
 
   // Track active viewer panel for settings inheritance
   useEffect(() => {

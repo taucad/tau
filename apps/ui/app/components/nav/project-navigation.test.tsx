@@ -817,6 +817,24 @@ describe('ProjectNavigation', () => {
     });
 
     /*
+     * The open project counts as live only while the remembered rows stand in
+     * for the listing. Once the listing answers, a session that never opened
+     * (an open the live budget refused, a route that cannot open it) is not
+     * drawn as live.
+     */
+    it.fails('R1: once the listing answers, an open project whose session never opened sorts with the rest', () => {
+      pathname = '/w/home/one';
+      liveProjectIds = ['proj_two'];
+      mockUseProjects.mockReturnValue({
+        ...projectsResult,
+        projects: [{ ...firstProject, lastActivityAt: 30 }, secondProject],
+      });
+      render(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'Earlier', 'One']);
+    });
+
+    /*
      * U6/H5 for project rows while nothing is live: the rows are reserved from
      * the remembered listing (R5), so this is a guard, not an expected failure.
      * It covers Home reloads, where no session is live; the sidebar is the root

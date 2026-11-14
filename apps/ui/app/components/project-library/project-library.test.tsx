@@ -1546,6 +1546,36 @@ describe('ProjectLibrary', () => {
       expect(retry).toHaveFocus();
     });
 
+    /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
+    it.fails("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
+      cloudListing.isFailed = true;
+      const slot = renderSlot();
+      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      await userEvent.click(retry);
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      expect(retry).toBeInTheDocument();
+      expect(retry).toHaveFocus();
+    });
+
+    /* D21 round 2: a Retry that ends without a wait (a failed refresh over listed projects) leaves nothing behind. */
+    it.fails('C14: does not announce a later first wait after a Retry that started none', async () => {
+      cloudListing.isFailed = true;
+      cloudListing.retry.mockImplementation(async () => undefined);
+      const slot = renderSlot();
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      cloudListing.isFailed = false;
+      slot.rerender();
+      cloudListing.isFetching = true;
+      slot.rerender();
+      expect(
+        within(slot.header())
+          .queryAllByRole('status')
+          .filter((status) => status.textContent.includes('Tau Cloud')),
+      ).toEqual([]);
+    });
+
     /* D21 round 1: the local listing's own wait keeps the slot while it runs; Tau Cloud's notice waits its turn. */
     it("C14: keeps the local listing's wait in the slot while Tau Cloud has failed", () => {
       mockRememberedShape = { count: 2, projects: [] };

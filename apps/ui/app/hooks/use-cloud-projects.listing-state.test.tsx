@@ -19,8 +19,9 @@ vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test
 
 const fetchMock = vi.fn<typeof fetch>();
 
+let client: QueryClient;
 const createWrapper = () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Wrapper({ children }: PropsWithChildren): React.JSX.Element {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
@@ -130,5 +131,56 @@ describe('H6: the cloud listing state', () => {
       setTimeout(resolve, 1500);
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  /* D21 round 2 (guard): a person's Retry is one request, and later refreshes keep the listing's own retries. */
+  it("H6: still asks again on its own for a later refresh after a person's Retry", async () => {
+    fetchMock.mockResolvedValue(new Response(undefined, { status: 400 }));
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('failed');
+    });
+    fetchMock.mockResolvedValue(Response.json([]));
+    await act(async () => {
+      await result.current.retry();
+    });
+    await waitFor(() => {
+      expect(result.current.isSettled).toBe(true);
+    });
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(new Response(undefined, { status: 503 }));
+    fetchMock.mockResolvedValue(Response.json([]));
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    await waitFor(
+      () => {
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(cloudOf(result)).toBe('ready');
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  /* D21 round 2: Retry beside the slow words asks again even while the first request hangs. */
+  it.fails('H6: asks again for a Retry while the first listing request hangs', async () => {
+    fetchMock.mockImplementation(
+      async () =>
+        new Promise<Response>(() => {
+          /* Never answers. */
+        }),
+    );
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('fetching');
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    act(() => {
+      void result.current.retry();
+    });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(cloudOf(result)).toBe('fetching');
   });
 });

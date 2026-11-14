@@ -29,7 +29,10 @@ export type WaitClock = Readonly<{ now: () => number; animationNow?: () => numbe
  * @returns Milliseconds on the performance timeline.
  */
 function documentTimelineNow(): number {
-  const time = globalThis.document?.timeline?.currentTime;
+  if (typeof document === 'undefined' || !('timeline' in document)) {
+    return performance.now();
+  }
+  const time = document.timeline.currentTime;
   return typeof time === 'number' ? time : performance.now();
 }
 

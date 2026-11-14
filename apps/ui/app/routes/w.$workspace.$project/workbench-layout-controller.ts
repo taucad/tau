@@ -51,6 +51,13 @@ export type WorkbenchLayoutController = Readonly<{
   /** The person changed the workbench arrangement. */
   personWorkbenchChanged: (node: WorkbenchLaneNode) => void;
   /**
+   * Connect the viewer adapter's opener for delivered viewer intents (A8d). Absent where no layout actor runs: the
+   * viewer then opens a requested file at once.
+   */
+  connectViewerIntents?: (open: (entryPath: string) => ViewerNode | undefined) => () => void;
+  /** Ask the layout to show an entry in the viewer, as a pane intent (A8d). Present with `connectViewerIntents`. */
+  requestViewerFile?: (entryPath: string) => void;
+  /**
    * Whether the record's first read has settled: it was read, or it stopped retrying. Until then a pane intent waits in
    * the layout (A8b), and the viewer shows no empty state, since the record has not yet arranged it (A8d, M2).
    */

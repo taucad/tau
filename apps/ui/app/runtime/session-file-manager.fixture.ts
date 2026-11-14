@@ -45,8 +45,10 @@ export function openSessionFileManagerStandIn(
     actor.send({ type: 'ready' });
   }
   const drop = new AbortController();
+  /* No row reads the working copy through the stand-in: an inert client keeps the port's shape. */
+  const inertClient: RootedContentClient = Object.create(null) as RootedContentClient;
   const workingCopyFiles: SessionFilesPort<RootedContentClient> = {
-    get: () => ({}) as RootedContentClient,
+    get: () => inertClient,
     subscribe: () => () => undefined,
   };
   return {

@@ -124,7 +124,7 @@ import {
 import type {
   WorkbenchPanelId,
   WorkbenchUtilityPanelId,
-} from '#routes/w.$workspace.$project/project-workspace-context.js';
+} from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { OpenFile } from '@taucad/ui-core/types/editor.types';
@@ -594,6 +594,36 @@ export function openFilesFromPlaceholder({ placeholder }: { readonly placeholder
   placeholder.api.updateParameters({ mode: 'open-file', filesOpen: true });
   placeholder.api.setTitle('Open file');
 }
+
+/** The file paths a workbench node's tabs show. */
+const workbenchFilePaths = (node: WorkbenchLaneNode): string[] =>
+  node.kind === 'group'
+    ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
+    : node.children.flatMap(workbenchFilePaths);
+
+/**
+ * A workbench node without the tabs of the file at `path`. Only a group that held the file changes: its active tab
+ * stays active, and only a removed active tab leaves the group to Dockview's choice.
+ */
+const withoutFileTab = (node: WorkbenchLaneNode, path: string): WorkbenchLaneNode => {
+  if (node.kind !== 'group') {
+    return { ...node, children: node.children.map((child) => withoutFileTab(child, path)) };
+  }
+  const removed = (index: number): boolean => {
+    const tab = node.tabs[index];
+    return tab?.kind === 'file' && tab.path === path;
+  };
+  const tabs = node.tabs.filter((_tab, index) => !removed(index));
+  if (tabs.length === node.tabs.length) {
+    return node;
+  }
+  const { active, ...rest } = node;
+  if (active === undefined || removed(active)) {
+    return { ...rest, tabs };
+  }
+  const shift = node.tabs.slice(0, active).filter((_tab, index) => removed(index)).length;
+  return { ...rest, tabs, active: active - shift };
+};
 
 export function openWorkbenchFiles({
   api,
@@ -1932,14 +1962,19 @@ export const WorkbenchDockview = memo(function ({
     };
   }, [api, layoutController, profile]);
 
-  const pendingRecordAppliedRef = useRef<(() => void) | undefined>(undefined);
+  const pendingRecordAppliedRef = useRef<((shown?: WorkbenchLaneNode) => void) | undefined>(undefined);
+  /* The node the layout handed the held apply: one that lands without a tab reports what it shows instead. */
+  const pendingRecordRequestedRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const applyRecordNode = useCallback(
-    (node: WorkbenchLaneNode, applied?: () => void) => {
+    (node: WorkbenchLaneNode, applied?: (shown?: WorkbenchLaneNode) => void) => {
       if (!api || profile === 'shared') {
         return;
       }
       pendingRecordNodeRef.current = node;
-      pendingRecordAppliedRef.current = applied ?? pendingRecordAppliedRef.current;
+      if (applied !== undefined) {
+        pendingRecordAppliedRef.current = applied;
+        pendingRecordRequestedRef.current = node;
+      }
       const device = editorRef.getSnapshot().context;
       const files = Object.fromEntries(
         device.openFiles.map((file) => [
@@ -1964,6 +1999,9 @@ export const WorkbenchDockview = memo(function ({
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       // Launchers are window-local, so a record carries none; keep the open one beside the record's tabs.
       const launcherId = api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id;
+      const landed = pendingRecordAppliedRef.current;
+      const requested = pendingRecordRequestedRef.current;
+      let shown: WorkbenchLaneNode | undefined;
       isRestoringLayout.current = true;
       try {
         // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
@@ -1976,18 +2014,24 @@ export const WorkbenchDockview = memo(function ({
           }),
           { reuseExistingPanels: true },
         );
-        adoptedProjectionRef.current = JSON.stringify(fromDockview('workbench', api.toJSON()));
+        shown = fromDockview('workbench', api.toJSON());
+        adoptedProjectionRef.current = JSON.stringify(shown);
         pendingRecordNodeRef.current = undefined;
-        pendingRecordAppliedRef.current?.();
         pendingRecordAppliedRef.current = undefined;
+        pendingRecordRequestedRef.current = undefined;
       } finally {
         isRestoringLayout.current = false;
         active?.focus({ preventScroll: true });
       }
+      // Answered once the restore is over: what the answer opens (a held pane or file intent) is not taken for it. An
+      // apply that lost a tab reports what the Dockview shows, so the arrangement the layout records is the one on screen.
+      landed?.(requested === undefined || requested === node ? undefined : shown);
     },
     [api, editorRef, profile],
   );
 
+  // Registered before the opener connects below (effects run in order): an intent delivered at attach waits until the
+  // opener connects, and then opens on what the attach showed.
   useEffect(() => {
     if (!api || profile === 'shared') {
       return;
@@ -1995,16 +2039,25 @@ export const WorkbenchDockview = memo(function ({
     return layoutController.registerWorkbench(applyRecordNode);
   }, [api, applyRecordNode, layoutController, profile]);
 
+  /* The files open at the last render: a held apply's file that was open and is not now was closed by the person. */
+  const previousOpenPathsRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    const pending = pendingRecordNodeRef.current;
+    const open = new Set(openFiles.map((file) => file.path));
+    const before = previousOpenPathsRef.current;
+    previousOpenPathsRef.current = open;
+    let pending = pendingRecordNodeRef.current;
     if (!pending) {
       return;
     }
-    const filePaths = (node: WorkbenchLaneNode): string[] =>
-      node.kind === 'group'
-        ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
-        : node.children.flatMap(filePaths);
-    if (filePaths(pending).every((path) => openFiles.some((file) => file.path === path))) {
+    // A tab the person closed before the rest of the held apply's files opened is no longer wanted: the apply lands
+    // without it, as without a file that failed to open, rather than waiting for it forever.
+    for (const path of workbenchFilePaths(pending)) {
+      if (before.has(path) && !open.has(path)) {
+        pending = withoutFileTab(pending, path);
+      }
+    }
+    pendingRecordNodeRef.current = pending;
+    if (workbenchFilePaths(pending).every((path) => open.has(path))) {
       applyRecordNode(pending);
     }
   }, [applyRecordNode, openFiles]);
@@ -2063,11 +2116,17 @@ export const WorkbenchDockview = memo(function ({
       if (pendingPlacement?.placeholderId) {
         pendingFilePlacementRef.current.delete(event.path);
       }
+      // A record apply held for this file would wait for it forever, and the layout holds every pane intent until the
+      // apply lands: it lands now without the file's tab.
+      const pending = pendingRecordNodeRef.current;
+      if (pending !== undefined && workbenchFilePaths(pending).includes(event.path)) {
+        applyRecordNode(withoutFileTab(pending, event.path));
+      }
     });
     return () => {
       failureSubscription.unsubscribe();
     };
-  }, [editorRef]);
+  }, [applyRecordNode, editorRef]);
 
   // ─────────────────────────────────────────────────────────────────
   // Reverse channel: user-initiated Dockview events → machine intents
@@ -2242,25 +2301,37 @@ export const WorkbenchDockview = memo(function ({
     if (!api) {
       return;
     }
+    /* What the Dockview shows now, read as its layout report reads it: its model changes synchronously, and only the
+     * report is deferred, so an intent's answer carries the pane it opened. */
+    const shownNode = (): WorkbenchLaneNode | undefined => {
+      try {
+        return fromDockview('workbench', api.toJSON());
+      } catch {
+        // Dockview can hold a temporary unsupported group mid-drag: the layout falls back to its arrangement.
+        return undefined;
+      }
+    };
     return connectWorkbench(
       (panelId) => {
+        // A pane this view does not offer is refused: its intent is unavailable, not applied.
         if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
-          return;
+          return false;
         }
         if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
-          return;
+          return false;
         }
         pendingUserFilePathRef.current = undefined;
         if (panelId === 'files') {
           openWorkbenchFiles({ api });
-          return;
+        } else {
+          openWorkbenchUtility(api, panelId);
         }
-        openWorkbenchUtility(api, panelId);
+        return shownNode();
       },
       (path) => {
         pendingUserFilePathRef.current = path;
         if (isRestoringLayout.current) {
-          return;
+          return undefined;
         }
         // Connection can follow the first reconcile: consume the retained user intent against the current state.
         const snapshot = editorRef.getSnapshot().context;
@@ -2272,6 +2343,7 @@ export const WorkbenchDockview = memo(function ({
           pendingUserFilePath: path,
           pendingFilePlacements: pendingFilePlacementRef.current,
         });
+        return shownNode();
       },
     );
   }, [api, connectWorkbench, editorRef, isMobile, isTauDebugEnabled, profile]);

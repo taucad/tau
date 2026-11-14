@@ -263,6 +263,20 @@ const parameterService = {
  * every render. A test that needs a live view puts it in `viewGraphicsOf(projectId)`. */
 const projectContexts = new Map<string, unknown>();
 const viewGraphicsByProject = new Map<string, Map<string, ActorRefFrom<typeof graphicsMachine>>>();
+/* Every close callback a live project's persistence guard registered, and each project's runtime producer flush. */
+const { closeFlushes, producerFlushes } = vi.hoisted(() => ({
+  closeFlushes: new Set<(phase: 'hidden' | 'pagehide') => Promise<void>>(),
+  producerFlushes: new Map<string, () => Promise<void>>(),
+}));
+const producerFlushOf = (projectId: string): (() => Promise<void>) => {
+  const existing = producerFlushes.get(projectId);
+  if (existing) {
+    return existing;
+  }
+  const created = vi.fn(async () => undefined);
+  producerFlushes.set(projectId, created);
+  return created;
+};
 const viewGraphicsOf = (projectId: string): Map<string, ActorRefFrom<typeof graphicsMachine>> => {
   const existing = viewGraphicsByProject.get(projectId);
   if (existing) {
@@ -300,7 +314,7 @@ const projectContextOf = (projectId: string): unknown => {
     projectId: 'unused',
     parameterService,
     viewGraphics: viewGraphicsOf(projectId),
-    flushWorkbenchRecordProducers: async () => undefined,
+    flushWorkbenchRecordProducers: producerFlushOf(projectId),
     projectRef: {
       send: (event: { type: string }) => {
         if (event.type === 'closeRuntime') {
@@ -424,10 +438,21 @@ vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
   },
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatStore }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({
-  useFlushOnClose: () => undefined,
-  useFlushProducers: () => flushProducers,
-}));
+vi.mock('#hooks/use-flush-on-close.js', async () => {
+  const { useEffect } = await import('react');
+  return {
+    // A guard's flush is registered while it is mounted and removed when it unmounts, as the real hook does.
+    useFlushOnClose: (callback: (phase: 'hidden' | 'pagehide') => Promise<void>) => {
+      useEffect(() => {
+        closeFlushes.add(callback);
+        return () => {
+          closeFlushes.delete(callback);
+        };
+      }, [callback]);
+    },
+    useFlushProducers: () => flushProducers,
+  };
+});
 vi.mock('#hooks/use-editor-document-session.js', () => ({
   EditorDocumentSessionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -634,6 +659,7 @@ const renderRouteFamily = async (
 };
 
 beforeEach(() => {
+  closeFlushes.clear();
   runtimeShutdown.mockReset();
   runtimeShutdown.mockResolvedValue(undefined);
   workerFrames.length = 0;
@@ -983,6 +1009,22 @@ describe('sessions composition', () => {
       screen.getAllByTestId('view-settings-host').some((element) => element.dataset['projectId'] === 'pin-unfocused-1'),
     ).toBe(true);
     graphicsRef.stop();
+    view.unmount();
+  });
+
+  /* A8b exit: a live project that is not focused keeps its persistence guard, whose `hidden` flush walks its
+   * runtime's producers, the layout child's among them (the runtime registers it; `project-runtime.test.ts` shows
+   * the layout's write). */
+  it("flushes a live project's runtime producers on hidden while it is not focused", async () => {
+    const view = await renderRoute('pin-hidden-1');
+    await view.rerender('pin-hidden-2');
+    expect(liveProjectIds()).toEqual(['pin-hidden-1', 'pin-hidden-2']);
+    const unfocused = producerFlushOf('pin-hidden-1');
+    vi.mocked(unfocused).mockClear();
+    for (const flushAtClose of closeFlushes) {
+      void flushAtClose('hidden');
+    }
+    expect(unfocused).toHaveBeenCalled();
     view.unmount();
   });
 

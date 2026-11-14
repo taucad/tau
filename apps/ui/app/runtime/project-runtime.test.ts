@@ -33,6 +33,7 @@ import {
   selectManifestObservationError,
   selectProjectRef,
   selectProjectRuntimeFault,
+  selectWorkbenchLayoutRef,
 } from '#runtime/project-runtime.js';
 import type {
   ProjectChildInput,
@@ -44,6 +45,14 @@ import type {
   ObservablePort,
 } from '#runtime/project-runtime.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
+import { createViewRecordPorts } from '#workbench-records/view-record-session.js';
+import { workbenchRecords } from '@taucad/workbench';
+import type { CheckedFileWriteResult } from '@taucad/types';
+import type { WorkbenchLayout } from '@taucad/workbench';
+import { selectArrangement, selectIntentOutcome } from '#workbench-records/workbench-layout.machine.js';
+import { sendPaneIntent } from '#runtime/project-runtime.layout.js';
+import type { EditorState, PanelState } from '@taucad/ui-core/types/editor.types';
+import type { PartialDeep } from 'type-fest';
 import type * as CadMachineModule from '#machines/cad.machine.js';
 import type * as ParameterSetServiceModule from '@taucad/ui-core/services/parameter-set-service';
 
@@ -150,7 +159,7 @@ const createLibrary = () => {
     touchProject: vi.fn(async () => undefined),
     getChatRecordsForResource: vi.fn(async () => []),
     createNavigationRepairChat: vi.fn(async () => mock<Chat>({ id: 'chat_created' })),
-    getEditorState: vi.fn(async () => undefined),
+    getEditorState: vi.fn(async (): Promise<EditorState | undefined> => undefined),
     updateEditorState: vi.fn(async () => undefined),
     invalidateProjectListing: vi.fn(async () => undefined),
     invalidateChatListing: vi.fn(async () => undefined),
@@ -269,6 +278,227 @@ describe('createProjectRuntime', () => {
       expect(selectProjectRuntimeFault(actor.getSnapshot())).toBeUndefined();
     },
   );
+
+  /* A8b exit: the layout is the runtime's child, not the focused page's. A project that is not focused is flushed
+   * through its runtime's producers (its persistence guard's `hidden` flush), and the runtime's stop (a session's
+   * close or leave) writes an edit still in its debounce. */
+  it('should flush its layout through its producers and write an owed edit when it stops', async () => {
+    const stored: WorkbenchLayout = {
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] },
+    };
+    const encoder = new TextEncoder();
+    let bytes = encoder.encode(workbenchRecords.layout.serialize(stored));
+    const writes: string[] = [];
+    const files = {
+      exists: async () => true,
+      readFile: async () => bytes,
+      writeFileChecked: async ({ data }: { path: string; data: string }): Promise<CheckedFileWriteResult> => {
+        writes.push(data);
+        bytes = encoder.encode(data);
+        return { status: 'applied', content: bytes };
+      },
+    };
+    const viewRecordPorts = createViewRecordPorts({
+      projectId: project.id,
+      root: `/projects/${project.id}`,
+      host: {
+        files,
+        watch: () => ({
+          ready: Promise.resolve(),
+          closed: new Promise<void>(() => {
+            /* Stays open: the watch is never closed by its host. */
+          }),
+          dispose: () => undefined,
+        }),
+      },
+      setViewRecord: () => undefined,
+      setViewEntryPath: () => undefined,
+      setAppliedWorkbenchRevision: () => undefined,
+    });
+    const content = createContent();
+    const clock = new StepClock();
+    const runtime = createProjectRuntime({
+      projectId: project.id,
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
+      library: createLibrary(),
+      profile: 'editor',
+      viewRecordPorts,
+      input: { shouldLoadModelOnStart: false },
+      clock,
+    });
+    runtime.actor.start();
+    await settle();
+    const layout = selectWorkbenchLayoutRef(runtime.actor.getSnapshot())!;
+    expect(selectArrangement(layout.getSnapshot())).toEqual(stored);
+    // No page shows the project: its adapters attach and the person's edit is owed, as a page left behind it.
+    for (const adapter of ['workbench', 'viewer'] as const) {
+      layout.send({ type: 'adapterAttaching', adapter });
+      layout.send({ type: 'adapterAttached', adapter });
+    }
+    const edited = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] } as const;
+    layout.send({ type: 'personEdited', adapter: 'workbench', node: edited });
+    for (const adapter of ['workbench', 'viewer'] as const) {
+      layout.send({ type: 'adapterDetached', adapter });
+    }
+    // The hidden flush walks the producers: the edit is written before its debounce.
+    await runtime.producers.flushAll();
+    expect(writes).toHaveLength(1);
+    expect(workbenchRecords.layout.read(bytes)).toMatchObject({ record: { ...stored, workbench: edited } });
+    // A second edit, then the session closes within its debounce: the stop writes it.
+    layout.send({ type: 'adapterAttaching', adapter: 'workbench' });
+    layout.send({ type: 'adapterAttached', adapter: 'workbench' });
+    layout.send({ type: 'personEdited', adapter: 'workbench', node: stored.workbench });
+    runtime.actor.stop();
+    await settle();
+    expect(writes).toHaveLength(2);
+    expect(workbenchRecords.layout.read(bytes)).toMatchObject({ record: stored });
+  });
+
+  /* A8b review: the layout starts with the runtime, before the editor has loaded its lanes, and the editor takes no
+   * panel change until it is ready. The bridge seeds the layout with the lanes the editor loaded once it is ready; the
+   * intents sent before then wait for the seed, so the lane they open and the phone tab they show reach an editor that
+   * takes them, and the editor's loading is neither a lane close (rule 7) nor a person's lane edit (rule 1). */
+  describe('layout intents sent before the editor is ready', () => {
+    const storedWith = (lanes: WorkbenchLayout['lanes']): WorkbenchLayout => ({
+      version: 1,
+      lanes,
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] },
+    });
+    /** A runtime over a layout record holding `stored`, whose editor loads `saved` panel state once `loaded` settles. */
+    const start = (
+      stored: WorkbenchLayout,
+      saved: PartialDeep<PanelState>,
+      loaded: Promise<void> = Promise.resolve(),
+    ) => {
+      const encoder = new TextEncoder();
+      const writes: string[] = [];
+      const files = {
+        exists: async () => true,
+        readFile: async () => encoder.encode(workbenchRecords.layout.serialize(stored)),
+        writeFileChecked: async ({ data }: { path: string; data: string }): Promise<CheckedFileWriteResult> => {
+          writes.push(data);
+          return { status: 'applied', content: encoder.encode(data) };
+        },
+      };
+      const viewRecordPorts = createViewRecordPorts({
+        projectId: project.id,
+        root: `/projects/${project.id}`,
+        host: {
+          files,
+          watch: () => ({
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              /* Stays open: the watch is never closed by its host. */
+            }),
+            dispose: () => undefined,
+          }),
+        },
+        setViewRecord: () => undefined,
+        setViewEntryPath: () => undefined,
+        setAppliedWorkbenchRevision: () => undefined,
+      });
+      const library = createLibrary();
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- the editor merges a saved panel state over its defaults.
+      library.getEditorState.mockImplementation(async () => {
+        await loaded;
+        return { panelState: saved } as unknown as EditorState;
+      });
+      const runtime = createProjectRuntime({
+        projectId: project.id,
+        fileManager: {
+          fileManagerRef: createFileManager(createContent().service),
+          parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+        },
+        library,
+        profile: 'editor',
+        viewRecordPorts,
+        input: { shouldLoadModelOnStart: false },
+        clock: new StepClock(),
+      });
+      runtime.actor.start();
+      const editor = selectEditorRef(runtime.actor.getSnapshot());
+      const layout = selectWorkbenchLayoutRef(runtime.actor.getSnapshot())!;
+      return { runtime, editor, layout, writes };
+    };
+
+    it('should open a lane the editor loaded closed for a pane intent sent while it loads, and not drop it', async () => {
+      const { runtime, editor, layout } = start(storedWith({ chat: true, workbench: false }), {
+        desktopLayout: { workbenchOpen: false },
+      });
+      expect(editor.getSnapshot().matches('ready')).toBe(false);
+      // A cold `?workbench=files` on a desktop: the intent is sent before the editor has loaded its lanes.
+      const intentId = sendPaneIntent(layout, runtime.layout!.facts(), {
+        source: 'route',
+        target: { kind: 'pane', adapter: 'workbench', pane: 'files' },
+      });
+      await settle();
+      expect(editor.getSnapshot().matches('ready')).toBe(true);
+      expect(editor.getSnapshot().context.panelState.desktopLayout.workbenchOpen).toBe(true);
+      // The editor's loading is not a lane close: the Files intent still waits for the workbench to attach.
+      expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toBeUndefined();
+      runtime.actor.stop();
+    });
+
+    it('should drop a phone tab asked for while the editor loads when the shell leaves its route first', async () => {
+      const { runtime, editor, layout } = start(storedWith({ chat: true, workbench: true }), {});
+      runtime.layout!.setFacts({ routeKey: 'r1', device: 'phone' });
+      const intentId = sendPaneIntent(layout, runtime.layout!.facts(), {
+        source: 'route',
+        target: { kind: 'pane', adapter: 'workbench', pane: 'parameters' },
+      });
+      // A push navigation before the editor is ready: the shell's facts move, and nothing is sent yet (rule 6).
+      runtime.layout!.setFacts({ routeKey: 'r2', device: 'phone' });
+      await settle();
+      expect(editor.getSnapshot().matches('ready')).toBe(true);
+      expect(editor.getSnapshot().context.panelState.mobileActiveTab).toBe('viewer');
+      expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toEqual({
+        outcome: 'dropped',
+        reason: 'routeChanged',
+      });
+      runtime.actor.stop();
+    });
+
+    it("should show the record's lanes once the editor is ready, without counting its loaded lanes as an edit", async () => {
+      const stored = storedWith({ chat: true, workbench: true });
+      const loaded = Promise.withResolvers<void>();
+      const { runtime, editor, layout, writes } = start(stored, { desktopLayout: { chatOpen: false } }, loaded.promise);
+      // The record is read first; the editor then loads its own lanes.
+      await settle();
+      expect(selectArrangement(layout.getSnapshot())).toEqual(stored);
+      loaded.resolve();
+      await settle();
+      expect(editor.getSnapshot().matches('ready')).toBe(true);
+      // The lanes the record holds are shown, and nothing is written over them.
+      expect(editor.getSnapshot().context.panelState.desktopLayout.chatOpen).toBe(true);
+      expect(selectArrangement(layout.getSnapshot())).toEqual(stored);
+      await runtime.producers.flushAll();
+      expect(writes).toEqual([]);
+      runtime.actor.stop();
+    });
+
+    it('should show a phone tab asked for while the editor loads once it is ready, and settle the intent then', async () => {
+      const { runtime, editor, layout } = start(storedWith({ chat: true, workbench: true }), {});
+      // The phone shell feeds its facts, as the workspace provider does.
+      runtime.layout!.setFacts({ ...runtime.layout!.facts(), device: 'phone' });
+      const intentId = sendPaneIntent(layout, runtime.layout!.facts(), {
+        source: 'route',
+        target: { kind: 'pane', adapter: 'workbench', pane: 'parameters' },
+      });
+      // The editor would ignore the tab now: the intent is not applied before it can be shown.
+      expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toBeUndefined();
+      await settle();
+      expect(editor.getSnapshot().context.panelState.mobileActiveTab).toBe('parameters');
+      expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toEqual({ outcome: 'applied' });
+      runtime.actor.stop();
+    });
+  });
 
   it("should release each geometry unit's kernel runtime when it stops", async () => {
     const guard = guardActors({ ignore });

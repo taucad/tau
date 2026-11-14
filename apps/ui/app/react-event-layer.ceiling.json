@@ -86,11 +86,9 @@
   "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": 2,
   "apps/ui/app/routes/w.$workspace.$project/project-share-action.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/project-workspace-context.tsx": 4,
   "apps/ui/app/routes/w.$workspace.$project/record-issues-action.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/revision-save-shortcut.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/use-chat-interface-state.ts": 1,
   "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx": 8,
   "apps/ui/app/routes/w.$workspace.$project/workbench-toggle.tsx": 1
 }

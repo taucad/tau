@@ -19,6 +19,7 @@ import { chromium } from 'playwright';
 import type { Browser, Frame, Locator, Page } from 'playwright';
 import { build } from 'vite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { getCurrentTest } from 'vitest/suite';
 
 import type { TauViewerReadResult, TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
 import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
@@ -158,7 +159,7 @@ let browser: Browser | undefined;
 const clients: Client[] = [];
 
 /**
- * Start `tau mcp` as a plugin host does, serving the built page.
+ * Start `tau mcp` as a plugin host does, serving the built page. A test's server stops when that test finishes.
  *
  * @param name - The client name the host sends.
  * @param capabilities - The client's `initialize` capabilities.
@@ -184,7 +185,15 @@ const connect = async (name: string, capabilities: Record<string, unknown>): Pro
   });
   const client = new Client({ name, version: '1.0.0' }, { capabilities });
   await client.connect(transport);
-  clients.push(client);
+  /*
+   * Each server holds a node process with its kernels loaded. A test's own server stops when the test finishes,
+   * so they do not pile up beside Chromium for the whole file; a suite's server stops in `afterAll`.
+   */
+  if (getCurrentTest()) {
+    onTestFinished(async () => client.close());
+  } else {
+    clients.push(client);
+  }
   return client;
 };
 

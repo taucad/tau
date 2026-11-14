@@ -93,6 +93,9 @@ const viewSeed = (): WorkbenchView =>
     name: 'Other',
   });
 
+/** What a Dockview shows before anything is applied to it. */
+const emptyGroup = (): WorkbenchLaneNode => ({ kind: 'group', tabs: [] });
+
 /** The group a Dockview shows after opening `pane` (the workbench's opener, as Dockview answers it). */
 const withPane = (node: WorkbenchLaneNode, pane: string): WorkbenchLaneNode =>
   node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane }] } : node;
@@ -117,11 +120,15 @@ function mount(
     onLayoutWriteStarted?: () => void;
     strict?: boolean;
     lanes?: WorkbenchLayout['lanes'];
+    /** The project has no layout record yet. */
+    missing?: boolean;
+    /** Every read of the layout record fails, so its first read stops retrying. */
+    failAllReads?: boolean;
   } = {},
 ) {
-  let bytes: Uint8Array<ArrayBuffer> | undefined = encoder.encode(
-    workbenchRecords.layout.serialize(options.layout ?? first()),
-  );
+  let bytes: Uint8Array<ArrayBuffer> | undefined = options.missing
+    ? undefined
+    : encoder.encode(workbenchRecords.layout.serialize(options.layout ?? first()));
   let viewBytes: Uint8Array<ArrayBuffer> | undefined =
     options.viewExists === false ? undefined : encoder.encode(workbenchRecords.view.serialize(viewSeed()));
   const liveWatches = new Set<() => void>();
@@ -194,6 +201,9 @@ function mount(
         failNextRead = false;
         throw new Error('offline');
       }
+      if (options.failAllReads && path.endsWith(workbenchPaths.layout)) {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      }
       return path.endsWith(workbenchPaths.layout) ? bytes! : viewBytes!;
     },
     writeFileChecked: writes,
@@ -264,10 +274,12 @@ function mount(
   /* What the layout hears, in order: the adapter protocol the shim speaks for the Dockview. */
   const received: Array<{ type: string; node?: WorkbenchLaneNode }> = [];
   const layout = createActor(layoutHost.logic, {
+    // As the runtime spawns it: before the editor's lanes are known, which the bridge seeds once the editor is ready.
     input: {
       ...layoutHost.input,
       workbenchOpen: desktopLayout.workbenchOpen,
       lanes: { chat: desktopLayout.chatOpen, workbench: desktopLayout.workbenchOpen },
+      awaitsLanes: true,
     },
     inspect: (event) => {
       if (event.type === '@xstate.transition' && event.actorRef === layout) {
@@ -333,10 +345,8 @@ function mount(
       });
       const disconnect = shim.connectIntents({
         openPanel: (panel: WorkbenchPanelId) => {
-          const showing = workbenchShows ?? layout.getSnapshot().context.arrangement?.workbench;
-          if (showing === undefined) {
-            return undefined;
-          }
+          // Before anything is applied, Dockview shows its starting group.
+          const showing = workbenchShows ?? emptyGroup();
           // Dockview's model changes at once: the opener answers with it, and the layout report follows.
           workbenchShows = withPane(showing, panel);
           reportLayoutChange();
@@ -862,9 +872,10 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
-  /* A8b review: a pane an intent opens while the record is refused has no arrangement to join. It shows, the intent is
-   * unavailable, and nothing becomes an edit the refused record owes, so a flush still settles. */
-  it('opens a pane intent on a refused record without owing an edit, so a flush settles', async () => {
+  /* A8b review: while the record is refused the workbench shows only what is on disk, as the record host did. A pane
+   * intent opens nothing, is unavailable and owes no edit, so a flush settles; and when the record comes back with the
+   * same bytes, the revision acknowledged is the one on screen (I12). */
+  it('opens nothing for a pane intent on a refused record, and acknowledges the record once it is back', async () => {
     const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
@@ -881,7 +892,7 @@ describe('live workbench record host', () => {
     await act(async () => {
       intentId = host.intent('details');
     });
-    expect(host.dockview.shows).toEqual(withPane(first().workbench, 'details'));
+    expect(host.dockview.shows).toEqual(first().workbench);
     expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({
       outcome: 'dropped',
       reason: 'unavailable',
@@ -889,6 +900,127 @@ describe('live workbench record host', () => {
     expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([]);
     await expect(host.producer()).resolves.toBeUndefined();
     expect(host.writes).not.toHaveBeenCalled();
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(first())));
+    await waitFor(() => {
+      expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
+    });
+    expect(host.dockview.shows).toEqual(first().workbench);
+    host.unmount();
+  });
+
+  /* A8b review: a project with no layout record yet is not refused. A pane intent opens on what the Dockview shows and
+   * starts the record's arrangement, which is written. */
+  it('opens a pane intent on a project with no layout record and writes it', async () => {
+    const host = mount({ missing: true });
+    await waitFor(() => {
+      expect(host.layout.getSnapshot().value).toMatchObject({ record: 'ready' });
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(landAtOnce());
+    });
+    let intentId = '';
+    await act(async () => {
+      intentId = host.intent('details');
+    });
+    const opened = withPane(emptyGroup(), 'details');
+    expect(host.dockview.shows).toEqual(opened);
+    expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({ outcome: 'applied' });
+    await act(async () => {
+      await host.producer();
+    });
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ record: { workbench: opened } });
+    host.unmount();
+  });
+
+  /* A8b review: on a project with no layout record the arrangement starts with an intent, not a read. A foreign
+   * arrangement applied later is a lane change like any other, not the record's baseline: a lane it closes is
+   * reported closed (rule 7). */
+  it('reports a lane a later foreign arrangement closes on a project that started with no layout record', async () => {
+    const host = mount({ missing: true });
+    await waitFor(() => {
+      expect(host.layout.getSnapshot().value).toMatchObject({ record: 'ready' });
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(landAtOnce());
+    });
+    await act(async () => {
+      host.intent('details');
+    });
+    await act(async () => {
+      await host.producer();
+    });
+    await host.set(
+      encoder.encode(workbenchRecords.layout.serialize({ ...first(), lanes: { chat: true, workbench: false } })),
+    );
+    await waitFor(() => {
+      expect(host.layout.getSnapshot().context.arrangement?.lanes.workbench).toBe(false);
+    });
+    expect(host.received).toContainEqual({ type: 'workbenchLaneChanged', open: false });
+    expect(host.layout.getSnapshot().context.workbenchOpen).toBe(false);
+    host.unmount();
+  });
+
+  /* A8b review: a record whose first read fails for good has nothing to wait for. A pane intent opens straight into the
+   * workbench, as the record host did, without becoming an edit of a record that cannot be read. */
+  it('opens a pane intent once the first read has stopped retrying, without an edit', async () => {
+    const host = mount({ failAllReads: true });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(landAtOnce());
+    });
+    await waitFor(() => {
+      expect(host.layout.getSnapshot().context.health?.read).toBe('unavailable');
+    });
+    let intentId = '';
+    await act(async () => {
+      intentId = host.intent('details');
+    });
+    expect(host.layout.getSnapshot().value).toMatchObject({ record: 'reading' });
+    expect(host.dockview.shows).toEqual(withPane(emptyGroup(), 'details'));
+    expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({
+      outcome: 'dropped',
+      reason: 'unavailable',
+    });
+    expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([]);
+    expect(host.appliedDigest).toBeUndefined();
+    host.unmount();
+  });
+
+  /* A8b review: Dockview holds an apply until its files open. A newer show of what is already on screen replaces the
+   * held one, so it never lands later over the newer arrangement, and intents are not held behind it. */
+  it('replaces a held apply with a newer show of what is on screen', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    let land: (() => void) | undefined;
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((node, applied) => {
+        // An arrangement with the kernel pane waits, as one whose file must open first.
+        if (node.kind === 'group' && node.tabs.some((tab) => tab.kind === 'pane' && tab.pane === 'kernel')) {
+          land = applied;
+          return;
+        }
+        applied();
+      });
+    });
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(first())));
+    await waitFor(() => {
+      expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
+    });
+    expect(land).toBeTypeOf('function');
+    // The held apply was replaced, as Dockview replaces a held node, so it never lands; the intent is not held behind it.
+    await act(async () => {
+      host.intent('details');
+    });
+    const opened = withPane(first().workbench, 'details');
+    expect(host.dockview.shows).toEqual(opened);
+    expect(host.layout.getSnapshot().context.arrangement?.workbench).toEqual(opened);
     host.unmount();
   });
 

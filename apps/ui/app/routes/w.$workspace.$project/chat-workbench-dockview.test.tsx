@@ -240,8 +240,21 @@ const publishOpenFiles = (openFiles: typeof editorMachineSnapshot.context.openFi
   }
 };
 
+/* The editor's emitted events, by type: a row emits one with `emitEditor`. */
+const editorEventListeners = new Map<string, Set<(event: { type: string }) => void>>();
+const emitEditor = (event: { type: string; path?: string; error?: Error }): void => {
+  for (const listener of editorEventListeners.get(event.type) ?? []) {
+    listener(event);
+  }
+};
+
 const mockEditorRef = {
-  on: () => ({ unsubscribe: () => undefined }),
+  on: (type: string, listener: (event: { type: string }) => void) => {
+    const listeners = editorEventListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    editorEventListeners.set(type, listeners);
+    return { unsubscribe: () => listeners.delete(listener) };
+  },
   send: vi.fn(),
   getSnapshot: () => currentEditorSnapshot,
   subscribe: (listener: EditorListener) => {
@@ -1549,6 +1562,63 @@ describe('workbench adapter record apply (A0.3)', () => {
     render(<WorkbenchDockview />);
     expect(mockLayoutController.registerWorkbench).toHaveBeenCalledTimes(2);
     expect(detach).toHaveBeenCalledOnce();
+  });
+
+  // A8b review: a record apply waits for its files to open, and the layout holds every pane intent until the apply
+  // lands. A file that fails to open (deleted since) would hold them forever: the apply lands without its tab.
+  it('should land a held record apply without the tab of a file that failed to open', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    let shown: SerializedDockview | undefined;
+    Object.assign(dockview.api, {
+      width: 900,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview API spelling
+      toJSON: () => shown,
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    dockview.restoreJson.mockImplementation((json: SerializedDockview) => {
+      shown = json;
+    });
+    readyDockviewApi = dockview.api;
+    type ApplyRecord = (node: WorkbenchLaneNode, applied: () => void) => void;
+    let applyRecord: ApplyRecord | undefined;
+    mockLayoutController.registerWorkbench.mockImplementation((...registered: unknown[]) => {
+      applyRecord = registered[0] as ApplyRecord;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      editorEventListeners.clear();
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+    });
+
+    render(<WorkbenchDockview />);
+    const applied = vi.fn();
+    act(() => {
+      applyRecord!(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'file', path: 'gone.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    expect(dockview.restoreJson).not.toHaveBeenCalled();
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(applied).toHaveBeenCalledOnce();
+    expect(fromDockview('workbench', shown!)).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
   });
 
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges

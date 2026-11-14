@@ -339,8 +339,6 @@ export const createLayoutBridgeLogic = (
     };
     /* The lanes last reported to the layout; `undefined` until the editor is ready and they are seeded. */
     let lanes: WorkbenchLayout['lanes'] | undefined;
-    /* Whether the layout has arranged anything yet: its first arrangement is the record's first read. */
-    let arranged = false;
     /* Show `shown` lanes on the editor, unless it shows them already. */
     const showLanes = (shown: WorkbenchLayout['lanes']): void => {
       if (!sameLanes(selectEditorLanes(editor.getSnapshot()), shown)) {
@@ -365,16 +363,14 @@ export const createLayoutBridgeLogic = (
         });
       }),
       // An applied arrangement brings its lanes; a lane the person changed since is theirs (rule 8 fences it).
-      layout.on('arranged', ({ layout: arrangement }) => {
-        const first = !arranged;
-        arranged = true;
+      layout.on('arranged', ({ layout: arrangement, baseline }) => {
         if (lanes === undefined) {
           // The editor would ignore them before it is ready: the seed shows the arrangement's lanes then.
           return;
         }
-        if (first) {
-          // The record's first read: the layout holds its lanes as the baseline, so showing them is neither a closed
-          // lane (rule 7) nor a person's edit (rule 1), only lanes on screen (rule 4).
+        if (baseline) {
+          // The record's first arrangement: the layout holds its lanes as the baseline, so showing them is neither a
+          // closed lane (rule 7) nor a person's edit (rule 1), only lanes on screen (rule 4).
           lanes = arrangement.lanes;
           showLanes(arrangement.lanes);
           layout.send({ type: 'lanesApplied', lanes: arrangement.lanes });

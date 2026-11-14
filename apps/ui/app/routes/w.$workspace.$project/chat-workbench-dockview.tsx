@@ -595,6 +595,18 @@ export function openFilesFromPlaceholder({ placeholder }: { readonly placeholder
   placeholder.api.setTitle('Open file');
 }
 
+/** The file paths a workbench node's tabs show. */
+const workbenchFilePaths = (node: WorkbenchLaneNode): string[] =>
+  node.kind === 'group'
+    ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
+    : node.children.flatMap(workbenchFilePaths);
+
+/** A workbench node without the tabs of the file at `path`. */
+const withoutFileTab = (node: WorkbenchLaneNode, path: string): WorkbenchLaneNode =>
+  node.kind === 'group'
+    ? { ...node, tabs: node.tabs.filter((tab) => tab.kind !== 'file' || tab.path !== path), active: undefined }
+    : { ...node, children: node.children.map((child) => withoutFileTab(child, path)) };
+
 export function openWorkbenchFiles({
   api,
   group,
@@ -1986,6 +1998,8 @@ export const WorkbenchDockview = memo(function ({
     [api, editorRef, profile],
   );
 
+  // Registered before the opener connects below (effects run in order): an intent delivered at attach waits until the
+  // opener connects, and then opens on what the attach showed.
   useEffect(() => {
     if (!api || profile === 'shared') {
       return;
@@ -2061,11 +2075,17 @@ export const WorkbenchDockview = memo(function ({
       if (pendingPlacement?.placeholderId) {
         pendingFilePlacementRef.current.delete(event.path);
       }
+      // A record apply held for this file would wait for it forever, and the layout holds every pane intent until the
+      // apply lands: it lands now without the file's tab.
+      const pending = pendingRecordNodeRef.current;
+      if (pending !== undefined && workbenchFilePaths(pending).includes(event.path)) {
+        applyRecordNode(withoutFileTab(pending, event.path));
+      }
     });
     return () => {
       failureSubscription.unsubscribe();
     };
-  }, [editorRef]);
+  }, [applyRecordNode, editorRef]);
 
   // ─────────────────────────────────────────────────────────────────
   // Reverse channel: user-initiated Dockview events → machine intents

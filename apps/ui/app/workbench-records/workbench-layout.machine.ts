@@ -235,8 +235,11 @@ export type WorkbenchLayoutEmitted =
   | Readonly<{ type: 'mobileTabRequested'; intentId: string; target: PaneIntentTarget }>
   /** Open the workbench lane for a workbench intent (desktop). */
   | Readonly<{ type: 'workbenchOpenRequested'; intentId: string }>
-  /** The arrangement changed by an apply or a restore, not by a person: lanes follow `layout.lanes`. */
-  | Readonly<{ type: 'arranged'; layout: WorkbenchLayout }>
+  /**
+   * The arrangement changed by an apply or a restore, not by a person: lanes follow `layout.lanes`. `baseline` marks the
+   * record's first arrangement, whose lanes are the device's baseline rather than a change of them.
+   */
+  | Readonly<{ type: 'arranged'; layout: WorkbenchLayout; baseline: boolean }>
   /** The applied revision changed: the acknowledged digest, or `undefined` while unknown. */
   | Readonly<{ type: 'appliedRevisionChanged'; digest: LayoutDigest | undefined }>
   /** An intent settled. */
@@ -400,6 +403,18 @@ const appliedDigestOf = (context: LayoutContext): LayoutDigest | undefined =>
     ? context.latest.digest
     : undefined;
 
+/**
+ * The record's first read failed for good (its retries stopped): there is no record to wait for, so intents are routed
+ * and delivered as after a read, and the adapters answer them without an arrangement to join (nothing is acknowledged
+ * without a publication, rule 4).
+ */
+const unreadable = (context: LayoutContext): boolean =>
+  context.latest === undefined && context.health?.read === 'unavailable';
+
+/** Whether intents may reach their adapters: after the first read (or once it stopped retrying) and the seeded lanes. */
+const deliverable = (context: LayoutContext, view: View): boolean =>
+  (view.ready || unreadable(context)) && context.lanesKnown;
+
 /** Rule 2: the apply in flight may still land. */
 const isCurrent = (context: LayoutContext, pending: PendingApply): boolean =>
   pending.revision === context.latest?.revision && pending.editCount === context.editCount;
@@ -479,7 +494,7 @@ const settle = (context: LayoutContext, view: View, enq: LayoutEnqueue): LayoutC
     }
   }
   next = routeWaiting(next, view, enq);
-  if (view.ready && next.lanesKnown) {
+  if (deliverable(next, view)) {
     next = deliver(next, attached, enq);
   }
   if (acknowledgeable(next, view) && reported(next)) {
@@ -566,7 +581,7 @@ const routed = (context: LayoutContext, intent: PaneIntent, enq: LayoutEnqueue):
  * opens is not closed again by them.
  */
 const routable = (context: LayoutContext, view: View): boolean =>
-  context.lanesKnown && (context.device === 'phone' || view.ready || !context.checksLanes);
+  context.lanesKnown && (context.device === 'phone' || view.ready || unreadable(context) || !context.checksLanes);
 
 /** Route the intents that waited, once they can be: in the order they were sent, each once. */
 const routeWaiting = (context: LayoutContext, view: View, enq: LayoutEnqueue): LayoutContext => {
@@ -679,7 +694,7 @@ const published = ({ context, event, value }: Step<'recordPublished'>, enq: Layo
       workbenchOpen: next.checksLanes ? event.layout.lanes.workbench : next.workbenchOpen,
     };
     next = show(next, attachedIn(next, view), event.layout, enq);
-    enq.emit({ type: 'arranged', layout: event.layout });
+    enq.emit({ type: 'arranged', layout: event.layout, baseline: true });
   } else if (
     context.restoring !== undefined &&
     event.origin === 'own' &&
@@ -902,7 +917,7 @@ const workbenchLayoutDefinition = setup({
         arrangementDigest: context.latest?.digest,
         moves: context.moves + 1,
       };
-      enq.emit({ type: 'arranged', layout: pending.layout });
+      enq.emit({ type: 'arranged', layout: pending.layout, baseline: false });
       return {
         context: finished(context, settle(show(landed, attachedIn(landed, view), pending.layout, enq), view, enq), enq),
       };
@@ -964,9 +979,14 @@ const workbenchLayoutDefinition = setup({
     deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
       event.device === context.device ? {} : { context: { device: event.device } },
     ),
-    recordHealthChanged: refines('Unmodelled', ({ event }: Step<'recordHealthChanged'>) => ({
-      context: { health: event.health },
-    })),
+    recordHealthChanged: refines(
+      'Unmodelled',
+      ({ context, event, value }: Step<'recordHealthChanged'>, enq: LayoutEnqueue) => {
+        const next: LayoutContext = { ...context, health: event.health };
+        // A first read that stopped retrying releases the intents that waited for it.
+        return { context: unreadable(next) ? finished(context, settle(next, viewOf(value), enq), enq) : next };
+      },
+    ),
     recordFailed: refines('Unmodelled', ({ context, event }: Step<'recordFailed'>, enq: LayoutEnqueue) => ({
       // The record's health carries the failure; nothing on screen is known to match the record.
       context: finished(context, { ...context, recordError: event.message, acknowledged: undefined }, enq),
@@ -1242,7 +1262,7 @@ const workbenchLayoutDefinition = setup({
                 // Written already: counted (rule 1) without a second write. The record's echo names the bytes.
                 const restored = counted(settled, restoring.layout, children, enq, true);
                 const echo = sameLayout(context.latest?.layout, restoring.layout) ? context.latest?.digest : undefined;
-                enq.emit({ type: 'arranged', layout: restoring.layout });
+                enq.emit({ type: 'arranged', layout: restoring.layout, baseline: false });
                 const shown = show(
                   { ...restored, arrangementDigest: echo },
                   attachedIn(restored, view),

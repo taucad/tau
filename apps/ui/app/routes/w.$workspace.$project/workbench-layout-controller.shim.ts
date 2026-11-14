@@ -155,10 +155,17 @@ export function createWorkbenchLayoutControllerShim(
     }>,
     target: WorkbenchIntentTarget,
   ): void {
-    // Rule 6: an intent queued under a route the shell has left is dropped, not applied.
+    // Rule 6: an intent delivered under a route the shell has left opens nothing; telling the layout the route drops
+    // it, and its late answer never comes.
     const facts = host.facts();
     if (layout.getSnapshot().context.routeKey !== facts.routeKey) {
       syncLayoutFacts(layout, facts);
+      return;
+    }
+    const { latest, arrangement } = layout.getSnapshot().context;
+    if (latest?.refused === true) {
+      // A refused record: the workbench shows only what is on disk, as the record host did, so nothing opens.
+      layout.send({ type: 'intentUnavailable', intentId: delivery.intentId });
       return;
     }
     let answer: WorkbenchLaneNode | false | undefined = false;
@@ -168,16 +175,16 @@ export function createWorkbenchLayoutControllerShim(
       // A file the editor holds is shown; one it closed since is not reopened by its old intent.
       answer = target.activateFile(delivery.target.path);
     }
-    const { latest, arrangement } = layout.getSnapshot().context;
     const node = answer === false ? undefined : (answer ?? arrangement?.workbench);
     if (node !== undefined) {
       // Dockview reports this change later (its layout event is deferred): the report then matches what is on screen
       // and is not sent again as the person's edit.
       onScreen.set('workbench', JSON.stringify(node));
     }
-    if (node === undefined || latest === undefined || latest.refused || arrangement === undefined) {
-      // The opener refused the pane, the file closed before its intent arrived, or the record is refused or unread and
-      // holds no arrangement to open the pane in: whatever shows is not an edit.
+    if (node === undefined || latest === undefined) {
+      // The opener refused the pane, the file closed before its intent arrived, or the record could not be read at all
+      // (the pane opens, but there is no record to hold it): nothing becomes an edit. A record that is missing is
+      // not refused: the intent's node starts its arrangement.
       layout.send({ type: 'intentUnavailable', intentId: delivery.intentId });
       return;
     }
@@ -219,8 +226,9 @@ export function createWorkbenchLayoutControllerShim(
         }
         const node = (adapter === 'viewer' ? event.layout.viewer : event.layout.workbench) as Node;
         const shown = JSON.stringify(node);
-        if (onScreen.get(adapter) === shown) {
-          // Already on screen (a change to the other adapter's tree or the lanes): not applied again.
+        if (onScreen.get(adapter) === shown && !(adapter === 'workbench' && workbenchApplying !== undefined)) {
+          // Already on screen (a change to the other adapter's tree or the lanes): not applied again. While an older
+          // apply is still held, it is applied anyway, so the Dockview replaces the held node and does not land it later.
           layout.send({ type: 'adapterShown', adapter, showId: event.showId });
           return;
         }

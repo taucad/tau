@@ -99,7 +99,8 @@
 \* (app state orchestration A12, I21): read-only derivations of the applied transcript and a
 \* per-device memory, latched once the load settles (a refused read, or a chat this tab created
 \* empty, noted by the create paths); an empty log waits for the scan of other devices' history before
-\* it settles, or latches if that scan fails. Admission, delivery, persistence and the queue barrier are unchanged.
+\* it settles, and a refused or failed read waits for it too; a scan that fails or never reads
+\* latches. Admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 const editorRef = { kind: 'editor' };
 const projectRef = { kind: 'project' };
 const createChat = vi.fn();
+const mockNoteCreatedEmpty = vi.fn<(chatId: string) => void>();
 const updateChatName = vi.fn();
 const navigate = vi.fn();
 const exportTranscript = vi.fn();
@@ -37,7 +38,7 @@ vi.mock('#hooks/use-chat-records.js', () => ({
 }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatSelector: () => undefined }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ noteCreatedEmpty: vi.fn() }),
+  useChatSessionStore: () => ({ noteCreatedEmpty: mockNoteCreatedEmpty }),
 }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { readonly kind: string }, selector: (state: { context: Record<string, unknown> }) => unknown) =>
@@ -235,6 +236,8 @@ describe('ChatTitleBar', () => {
 
       await keybindingHandler?.();
       expect(createChat).toHaveBeenCalledWith({ name: 'New chat', messages: [] });
+      // Created empty, so the chat store shows it empty at once (A12, I21).
+      expect(mockNoteCreatedEmpty).toHaveBeenCalledWith('chat_new');
       expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_new', {
         state: { focusChatComposer: true },
       });

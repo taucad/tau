@@ -5797,6 +5797,138 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    it('settles against the scan of other devices whatever order it ends in, and keeps the tray when it read nothing (I21, U10)', async () => {
+      const projectId = 'project_foreign_order';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      await client.writeFile(`${eventsOf('chat_refused_pending')}/other-device.jsonl`, new TextEncoder().encode(rows));
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === eventsOf('chat_refused_pending')) {
+          return scan.promise;
+        }
+        if (path === eventsOf('chat_scan_failed_first')) {
+          throw Object.assign(new Error('EIO'), { code: 'EIO' });
+        }
+        return readDirectory(path);
+      });
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_scan_failed_first', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const failedFirst = store.acquire('chat_scan_failed_first', projectId);
+      const refused = store.acquire('chat_refused_pending', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const unsubscribe = store.subscribeChat('chat_refused_pending', () => {
+        reports.push(refused.transcript);
+      });
+      try {
+        await settle();
+        // The scan failed before the local log answered: the load settles, and nothing was read to forget the tray by.
+        publishLogPage(store, 'chat_scan_failed_first', [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(failedFirst.transcript).toBe('empty');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_scan_failed_first')).toBe('todo');
+
+        // A refused local read does not show the chat empty while the turns that ran elsewhere are on their way.
+        store.receiveHostReadAnswer('chat_refused_pending', { status: 'refused', reason: 'unreadable' });
+        await settle();
+        expect(refused.transcript).toBe('loading');
+        scan.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(refused.transcript).toBe('loaded');
+        });
+        expect(reports).not.toContain('empty');
+      } finally {
+        unsubscribe();
+        store.release('chat_scan_failed_first');
+        store.release('chat_refused_pending');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('waits for the watched scan of other devices, and keeps the tray when that watch closes unread (I21, U10)', async () => {
+      const projectId = 'project_foreign_watch';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      await client.writeFile(`${eventsOf('chat_watched')}/other-device.jsonl`, new TextEncoder().encode(rows));
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === eventsOf('chat_watched') ? scan.promise : readDirectory(path),
+      );
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path) => ({
+        ready: path === eventsOf('chat_watch_closed') ? Promise.reject(new Error('watch refused')) : Promise.resolve(),
+        closed: new Promise<void>(() => {
+          /* Owner-controlled watch. */
+        }),
+        dispose: vi.fn(),
+      });
+      const memory = new Map<string, string>([
+        ['tau:chat-composer-trays:chat_watched', 'todo'],
+        ['tau:chat-composer-trays:chat_watch_closed', 'todo'],
+      ]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const watched = store.acquire('chat_watched', projectId);
+      const closed = store.acquire('chat_watch_closed', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const unsubscribe = store.subscribeChat('chat_watched', () => {
+        reports.push(watched.transcript);
+      });
+      try {
+        await settle();
+        publishLogPage(store, 'chat_watched', [], { cursor: 0, endCursor: 0 });
+        publishLogPage(store, 'chat_watch_closed', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        expect(watched.transcript).toBe('loading');
+        expect(memory.get('tau:chat-composer-trays:chat_watched')).toBe('todo');
+        scan.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(watched.transcript).toBe('loaded');
+        });
+        expect(reports).not.toContain('empty');
+
+        // A watch that closed before it read anything settles the load without forgetting the tray.
+        expect(closed.transcript).toBe('empty');
+        expect(memory.get('tau:chat-composer-trays:chat_watch_closed')).toBe('todo');
+      } finally {
+        unsubscribe();
+        store.release('chat_watched');
+        store.release('chat_watch_closed');
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();

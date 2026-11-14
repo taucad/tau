@@ -19,6 +19,7 @@ import {
   selectIntentOutcome,
   workbenchLayoutMachine,
 } from '#workbench-records/workbench-layout.machine.js';
+import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
 import type {
   WorkbenchAdapterEditor,
   WorkbenchAdapterPorts,
@@ -246,9 +247,11 @@ function hosted(record: WorkbenchLayout, open: readonly string[], options: Reado
     connectBrowser: undefined,
   };
   const mountDock = (): void => {
+    // As the Dockview's ref callback: hand the adapter over, then attach it once the layout's step is over.
     layout.send({ type: 'dockReady', adapter: 'workbench', dockId: 'dock-1', api: dock.api, ports });
+    selectDockAdapter(layout, 'dock-1')?.send({ type: 'attach' });
   };
-  return { layout, editor, dock, mountDock };
+  return { layout, editor, dock, mountDock, publish: publish! };
 }
 
 describe('workbench adapter hosted by the layout (A8c)', () => {
@@ -264,6 +267,30 @@ describe('workbench adapter hosted by the layout (A8c)', () => {
     expect(editor.sent.filter((event) => event.type === 'closeFile')).toEqual([]);
     expect(editor.openPaths()).toEqual(['a.ts', 'x.ts']);
     expect(dock.paths()).toEqual(['a.ts', 'x.ts']);
+  });
+
+  // D21 round 2: a record published while no Dockview was attached is offered at attach, and the adapter takes it
+  // in a later step of the layout than the attach's seed. The reconciler must still wait for it: run first, it put
+  // every open file on the Dockview, and the taken apply then removed and closed the ones the newer record lacks.
+  it('should keep an open file the arrangement lacks when the newer record is offered at attach', () => {
+    const { editor, dock, mountDock, publish } = hosted(recordOf('a.ts'), ['a.ts', 'x.ts']);
+    publish({
+      type: 'recordPublished',
+      layout: {
+        ...recordOf('a.ts'),
+        workbench: { kind: 'group', tabs: [fileTab('a.ts'), { kind: 'pane', pane: 'model' }] },
+      },
+      digest: 'sha256:2',
+      origin: 'foreign',
+      refusal: undefined,
+      owed: false,
+    });
+
+    mountDock();
+
+    expect(editor.sent.filter((event) => event.type === 'closeFile')).toEqual([]);
+    expect(editor.openPaths()).toEqual(['a.ts', 'x.ts']);
+    expect(dock.paths()).toEqual(expect.arrayContaining(['a.ts', 'x.ts']));
   });
 
   // D21 round 1, A2: a held apply that lands inside the editor's own step drops a panel whose `closeFile` the editor

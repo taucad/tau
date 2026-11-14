@@ -104,11 +104,7 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
-import type {
-  WorkbenchDockReady,
-  WorkbenchDockReleased,
-  WorkbenchDockSettled,
-} from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
 import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import { layoutPolicy } from '#workbench-records/layout-policy.js';
 import {
@@ -234,12 +230,7 @@ export type WorkbenchLayoutEvent =
    */
   | WorkbenchDockReady
   /** The Dockview that sent `dockReady` with `dockId` is gone: its adapter stops. */
-  | WorkbenchDockReleased
-  /**
-   * The adapter has started: answered with `settled` once the attach its start sent has been handled, so its reconciler
-   * and opener follow the attach's apply. Host plumbing outside the spec.
-   */
-  | WorkbenchDockSettled;
+  | WorkbenchDockReleased;
 
 /** Events the machine emits: to the adapters, to the phone's tab port, and to its owner. */
 export type WorkbenchLayoutEmitted =
@@ -1013,15 +1004,8 @@ const workbenchLayoutDefinition = setup({
       }
       enq.spawn(actors.workbenchAdapter, {
         id: dockAdapterId(event.adapter, event.dockId),
-        input: { api: event.api, dockId: event.dockId, ports: event.ports },
+        input: { api: event.api, ports: event.ports },
       });
-      return {};
-    }),
-    dockSettled: refines('Unmodelled', ({ children, event }: Step<'dockSettled'>, enq: LayoutEnqueue) => {
-      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
-      if (adapter !== undefined) {
-        enq.sendTo(adapter, { type: 'settled' });
-      }
       return {};
     }),
     dockReleased: refines('Unmodelled', ({ children, event }: Step<'dockReleased'>, enq: LayoutEnqueue) => {
@@ -1383,7 +1367,6 @@ export const workbenchLayoutEventTypes = [
   'restore',
   'dockReady',
   'dockReleased',
-  'dockSettled',
 ] as const satisfies ReadonlyArray<WorkbenchLayoutEvent['type']>;
 
 type WorkbenchLayoutMachineDefinition = typeof workbenchLayoutDefinition;

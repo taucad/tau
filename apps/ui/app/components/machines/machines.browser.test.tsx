@@ -10,7 +10,10 @@ import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { createFixture, entry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 
 let enabled = true;
-vi.doMock('#flags/use-feature.js', () => ({ useFeature: () => enabled }));
+vi.doMock('#flags/use-feature.js', async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  useFeature: () => enabled,
+}));
 let machines: RuntimeTransportFacet<MachineClient>;
 vi.doMock('#hooks/use-machines.js', async (original) => ({
   ...(await original<Record<string, unknown>>()),

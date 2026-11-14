@@ -84,7 +84,10 @@ export type SessionProjectRuntimeInput = Readonly<{
   request: ProjectSessionOpenRequest | undefined;
 }>;
 
-type HotData = { sessionProjectRuntimes?: WeakMap<AnyActorRef, SessionProjectRuntimeSource> };
+type HotData = {
+  sessionProjectRuntimes?: WeakMap<AnyActorRef, SessionProjectRuntimeSource>;
+  sessionProjectRuntimeBuilds?: { count: number };
+};
 
 const hotData = import.meta.hot?.data as HotData | undefined;
 /* Each runtime a session's child built, by its root: the provider over the session reads it here. */
@@ -93,7 +96,11 @@ const sessionProjectRuntimes: WeakMap<AnyActorRef, SessionProjectRuntimeSource> 
 if (hotData !== undefined) {
   hotData.sessionProjectRuntimes = sessionProjectRuntimes;
 }
-let builds = 0;
+/* Each build's number, for the provider's key: kept beside the map, so a key is never reused after a Fast Refresh. */
+const builds: { count: number } = hotData?.sessionProjectRuntimeBuilds ?? { count: 0 };
+if (hotData !== undefined) {
+  hotData.sessionProjectRuntimeBuilds = builds;
+}
 
 /**
  * The runtime a session's child built, behind its root's ref, for the provider over the session.
@@ -177,8 +184,13 @@ export function openSessionProjectRuntime(
     entriesRecord.replaceHost(next);
   });
   runtime.actor.start();
-  builds += 1;
-  sessionProjectRuntimes.set(runtime.actor, { runtime, viewRecords, entriesRecord, key: `${projectId}:${builds}` });
+  builds.count += 1;
+  sessionProjectRuntimes.set(runtime.actor, {
+    runtime,
+    viewRecords,
+    entriesRecord,
+    key: `${projectId}:${String(builds.count)}`,
+  });
 
   /* The root spawned both with itself and never replaces them. */
   const projectRef = selectProjectRef(runtime.actor.getSnapshot());

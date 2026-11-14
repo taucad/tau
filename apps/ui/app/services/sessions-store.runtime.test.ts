@@ -170,6 +170,68 @@ describe('the session builds its project runtime as a child (A6d)', () => {
     expect(focused).toEqual([{ type: 'chatFocused', projectId, requestedChatId: 'chat-1', chatId: 'chat-1' }]);
   });
 
+  it('should ask the editor for the chat it showed itself, so its next focus change is reported (D21 round 1)', async () => {
+    const { registry, opener } = harness();
+    const focused: unknown[] = [];
+    registry.on('chatFocused', (event) => {
+      focused.push(event);
+    });
+    await open(registry);
+    opener.built[0]?.set({ focusedChat: { requestedChatId: undefined, chatId: 'chat-y' } });
+    await flush();
+    expect(opener.built[0]?.chats.at(-1)).toEqual({ chatId: 'chat-y', createdChatId: undefined });
+
+    /* The editor moves to another chat on its own: its request is still the chat it was asked for. */
+    opener.built[0]?.set({ focusedChat: { requestedChatId: 'chat-y', chatId: 'chat-n' } });
+    await flush();
+
+    expect(focused).toEqual([
+      { type: 'chatFocused', projectId, chatId: 'chat-y' },
+      { type: 'chatFocused', projectId, requestedChatId: 'chat-y', chatId: 'chat-n' },
+    ]);
+  });
+
+  it('should tell the route its chat when a live project is opened again with no chat (A0.1 I2 witness)', async () => {
+    const { registry, opener } = harness();
+    const focused: unknown[] = [];
+    registry.on('chatFocused', (event) => {
+      focused.push(event);
+    });
+    await open(registry, { workspace: 'ws' });
+    opener.built[0]?.set({ focusedChat: { requestedChatId: undefined, chatId: 'chat-x' } });
+    await flush();
+
+    /* Focus opens the retained project again through a link with no chat. */
+    registry.send({ type: 'open', projectId, request: { workspace: 'ws' } });
+    await flush();
+
+    expect(focused).toEqual([
+      { type: 'chatFocused', projectId, chatId: 'chat-x' },
+      { type: 'chatFocused', projectId, chatId: 'chat-x' },
+    ]);
+  });
+
+  it('should report the focused chat again when the route asks for no chat while the editor shows one (I2 witness)', async () => {
+    const { registry, opener } = harness();
+    const focused: unknown[] = [];
+    registry.on('chatFocused', (event) => {
+      focused.push(event);
+    });
+    await open(registry);
+    /* The editor ensured a chat for a route that named none; focus shows it on the route. */
+    opener.built[0]?.set({ focusedChat: { requestedChatId: undefined, chatId: 'chat-x' } });
+    await flush();
+
+    /* The person comes back to the project through a link with no chat: the route must be told again. */
+    registry.send({ type: 'chatRequested', projectId });
+    await flush();
+
+    expect(focused).toEqual([
+      { type: 'chatFocused', projectId, chatId: 'chat-x' },
+      { type: 'chatFocused', projectId, chatId: 'chat-x' },
+    ]);
+  });
+
   it('should build the next runtime and then stop this one when the choices select another kernel, with no flush (D14)', async () => {
     const { registry, opener, closes } = harness();
     await open(registry, { workspace: 'ws', chatId: 'chat-1' });

@@ -297,10 +297,6 @@ const touchProject = (context: SessionsMachineContext, projectId: string): Parti
   touchOrder: { ...context.touchOrder, [projectId]: context.sequence + 1 },
 });
 
-/** The request carries a chat to forward to a live session: a chat id or a created chat id (R3-F1). */
-const carriesChat = (request: ProjectSessionOpenRequest | undefined): request is ProjectSessionOpenRequest =>
-  request?.chatId !== undefined || request?.createdChatId !== undefined;
-
 /**
  * The epoch of a waiting open whose request was not built at the library epoch the registry last heard of (A5c), or
  * `undefined` when the open stands.
@@ -482,9 +478,10 @@ export const sessionsMachine = setup({
            * intent. A live project itself only needs a touch (I22). */
           const pendingOpen: SessionsPendingOpen = { projectId: event.projectId, request: event.request };
           if (guards.isLive(context, event.projectId)) {
-            /* A request with a chat reaches the session beside the touch (R3-F1). */
+            /* A request's chat reaches the session beside the touch (R3-F1), a request with none too: the route then
+             * names no chat, and the session answers with the one its editor shows (A6d, I2). */
             const ref = context.refs[event.projectId];
-            if (ref !== undefined && carriesChat(event.request)) {
+            if (ref !== undefined && event.request !== undefined) {
               enq.sendTo(ref, {
                 type: 'chatRequested',
                 chatId: event.request.chatId,

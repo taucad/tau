@@ -1765,6 +1765,22 @@ describe('ProjectLibrary', () => {
       expect(within(slot.header()).queryByRole('button', { name: 'Retry Tau Cloud' })).toBeNull();
     });
 
+    /* D21 round 8: a Tau Cloud wait that began under the local listing's wait shows its Retry with its slow words. */
+    it.fails("C14: reveals Retry with the slow words of a Tau Cloud wait that began during the local listing's wait", () => {
+      mockRememberedShape = { count: 2, projects: [] };
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      cloudListing.isFetching = true;
+      const clock = { at: 0 };
+      const slot = renderSlot({ clock });
+      clock.at = 3000;
+      mockUseProjectsResult = createUseProjectsResult();
+      slot.rerender();
+      const body = slot.header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud', hidden: true });
+      expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('7000ms');
+      expect(retry.style.getPropertyValue('--wait-slow-delay')).toBe('7000ms');
+    });
+
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
     it("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
       /* The Retry's request is still in flight. */

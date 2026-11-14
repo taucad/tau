@@ -41,7 +41,6 @@ export const onboardingEventName = {
   viewerGizmoSelected: 'viewer_gizmo_selected',
   viewerDefaultChanged: 'viewer_default_changed',
   viewerOverrideReset: 'viewer_override_reset',
-  homeSuggestionSelected: 'home_suggestion_selected',
   setupAnswersSwitchChanged: 'setup_answers_switch_changed',
   setupAnswersCleared: 'setup_answers_cleared',
   tourStarted: 'tour_started',
@@ -126,11 +125,6 @@ export type OnboardingEventProperties = {
     readonly level: ViewerSettingLevel;
     readonly field: string;
   };
-  /** `example_id` is a `ChatExample` id, never its text. */
-  home_suggestion_selected: {
-    readonly example_id: string;
-    readonly goal_matched: boolean;
-  };
   setup_answers_switch_changed: { readonly enabled: boolean };
   setup_answers_cleared: Readonly<Record<never, never>>;
   tour_started: { readonly mode: TourMode };
@@ -160,7 +154,6 @@ export const onboardingEventProperties = {
   viewer_gizmo_selected: ['style', 'suggested', 'source'],
   viewer_default_changed: ['level', 'field'],
   viewer_override_reset: ['level', 'field'],
-  home_suggestion_selected: ['example_id', 'goal_matched'],
   setup_answers_switch_changed: ['enabled'],
   setup_answers_cleared: [],
   tour_started: ['mode'],
@@ -214,7 +207,6 @@ export type OnboardingTelemetry = {
   readonly viewerGizmoSelected: (input: OnboardingEventProperties['viewer_gizmo_selected']) => void;
   readonly viewerDefaultChanged: (input: OnboardingEventProperties['viewer_default_changed']) => void;
   readonly viewerOverrideReset: (input: OnboardingEventProperties['viewer_override_reset']) => void;
-  readonly homeSuggestionSelected: (input: OnboardingEventProperties['home_suggestion_selected']) => void;
   readonly setupAnswersSwitchChanged: (input: OnboardingEventProperties['setup_answers_switch_changed']) => void;
   readonly setupAnswersCleared: () => void;
   readonly tourStarted: (input: OnboardingEventProperties['tour_started']) => void;
@@ -265,9 +257,6 @@ export const buildOnboardingTelemetry = (
     },
     viewerOverrideReset: (input) => {
       emit(capture, onboardingEventName.viewerOverrideReset, input);
-    },
-    homeSuggestionSelected: (input) => {
-      emit(capture, onboardingEventName.homeSuggestionSelected, input);
     },
     setupAnswersSwitchChanged: (input) => {
       emit(capture, onboardingEventName.setupAnswersSwitchChanged, input);

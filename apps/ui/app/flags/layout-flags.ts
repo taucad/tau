@@ -1,9 +1,9 @@
 /**
  * Layout-affecting flags, mirrored to a request cookie (loading-states blueprint, H2).
  *
- * A flag marked `affectsLayout` in the registry decides first-paint geometry (Home's suggestions row). Its value
- * comes from PostHog after hydration, which the server cannot see, so the client mirrors each such flag's settled
- * value into the `layout-flags` cookie and the root loader reads it on the next document request. The server then
+ * A flag marked `affectsLayout` in the registry decides first-paint geometry. No surface reads one at present: the
+ * first, Home's suggestions row, was removed. Its value comes from PostHog after hydration, which the server cannot
+ * see, so the client mirrors each such flag's settled value into the `layout-flags` cookie and the root loader reads it on the next document request. The server then
  * renders the flagged surface, omits it, or, with no cookie, holds its box.
  *
  * The cookie value is `<name>.<0|1>` entries joined by `_`, such as `onboarding.1`: only letters, digits, `.` and

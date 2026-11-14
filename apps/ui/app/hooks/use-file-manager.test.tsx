@@ -1,4 +1,5 @@
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 import type { WatchRequest, WatchEvent, ProjectRootConfiguration } from '@taucad/filesystem';
 import { RootedFileSystemError } from '@taucad/filesystem';
 // @vitest-environment jsdom
@@ -307,7 +308,7 @@ const { createAppRuntime, selectRuntimeFileManagerHost, selectRuntimeFiles, sele
   await import('#runtime/app-runtime.js');
 const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
 const { leaseGraceMilliseconds } = await import('#runtime/leases.machine.js');
-const { openSessionFileManager } = await import('#runtime/session-file-manager.js');
+const { openSessionFileManager, trackSessionFileManager } = await import('#runtime/session-file-manager.js');
 
 /*
  * A1b: every file manager is the app runtime's, so each case renders under one. The runtime's `rootFiles` reads
@@ -1974,9 +1975,10 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
     mockWaitForWorkerReady.mockResolvedValue(undefined);
   });
 
-  /* What the session's `fileManager` child opens: the real module, over a file manager built for the project. */
-  const openForSession = (projectId = 'p') =>
-    openSessionFileManager(projectId, {
+  /* What the session's `fileManager` child opens and records for the provider: the real module, over a file manager
+   * built for the project. The returned `close` untracks it first, as the child does. */
+  const openForSession = (projectId = 'p') => {
+    const opened = openSessionFileManager(projectId, {
       build: (spec) => ({
         actor: createActor(fileManagerMachine, {
           clock: testClock,
@@ -1990,6 +1992,15 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
           gone,
         }),
     });
+    const untrack = trackSessionFileManager(opened);
+    return {
+      ...opened,
+      close: () => {
+        untrack();
+        opened.close();
+      },
+    };
+  };
 
   it("refuses a record read with machine-error once the session's file manager is in error, as the scope did", async () => {
     mockWaitForWorkerReady.mockReturnValue(
@@ -2009,6 +2020,53 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
     await expect(
       opened.owner.workingCopyFiles.get().exists('/projects/p/.tau/workbench/layout.json'),
     ).rejects.toMatchObject({ name: 'FileManagerNotReadyError', code: 'machine-error' });
+    opened.close();
+  });
+
+  it("serves the subtree the client the session's port holds, and follows each one the port announces", async () => {
+    const opened = openForSession();
+    /* A port whose clients are sentinels: the scope's own connections could never hand these out. */
+    let current = { name: 'first' } as unknown as RootedContentClient;
+    const listeners: Array<() => void> = [];
+    const announce = (next: RootedContentClient): void => {
+      current = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    };
+    const untrackOpened = trackSessionFileManager({
+      ...opened,
+      owner: {
+        ...opened.owner,
+        workingCopyFiles: {
+          get: () => current,
+          subscribe: (listener) => {
+            listeners.push(listener);
+            return () => {
+              listeners.splice(listeners.indexOf(listener), 1);
+            };
+          },
+        },
+      },
+    });
+    const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <SessionFileManagerProvider fileManagerRef={opened.fileManagerRef} projectId='p' rootDirectory='/projects/p'>
+        {children}
+      </SessionFileManagerProvider>
+    );
+    const { result, unmount } = renderHook(() => useFileManager(), { wrapper });
+
+    expect(result.current.parameterFiles).toBe(current);
+    const second = { name: 'second' } as unknown as RootedContentClient;
+    act(() => {
+      announce(second);
+    });
+    expect(result.current.parameterFiles).toBe(second);
+    expect(result.current.recordFiles).toBe(second);
+
+    unmount();
+    expect(listeners).toHaveLength(0);
+    untrackOpened();
     opened.close();
   });
 

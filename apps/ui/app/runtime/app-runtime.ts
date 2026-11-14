@@ -278,7 +278,10 @@ export const createAppRuntime = ({
          * which mounts no `ProjectManagerProvider`) starts no worker. */
         projectLibrary: createCallbackLogic<EventObject>(() => {
           if (idleFileManagers) {
-            return undefined;
+            /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
+            return () => {
+              composed.rootFiles?.close();
+            };
           }
           projectLibrary.start();
           return () => {

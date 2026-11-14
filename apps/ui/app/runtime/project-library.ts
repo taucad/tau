@@ -260,7 +260,7 @@ export class ProjectLibrary {
   public readonly recovery: LibraryRecoveryActor;
   /** Route access (row L8). */
   public readonly access: LibraryAccessActor;
-  /** The root file facade's record client and watch, from the binding; `undefined` until the first one. */
+  /** The root file facade's record client and watch; `undefined` until the first one. */
   public readonly files: ProjectLibraryObservable<ProjectLibraryFiles | undefined>;
   /** The project commands (A4a): create, duplicate, delete, restore, adopt, repair and rename. */
   public readonly commands: ProjectCommands;
@@ -279,6 +279,7 @@ export class ProjectLibrary {
   /** The root facade's current value, once the library follows it. */
   #fileManager: ProjectLibraryFileManager | undefined;
   #unfollowRootFiles: (() => void) | undefined;
+  #stopped = false;
   readonly #bound = Promise.withResolvers<void>();
   /** Counts record replacements, so a read can tell the records it ran on were replaced while it ran. */
   #replacements = 0;
@@ -600,6 +601,7 @@ export class ProjectLibrary {
     for (const unsubscribe of this.#subscriptions.splice(0)) {
       unsubscribe();
     }
+    this.#stopped = true;
     this.#unfollowRootFiles?.();
     this.#unfollowRootFiles = undefined;
     this.access.stop();
@@ -627,10 +629,11 @@ export class ProjectLibrary {
    * Follow the root file facade, once the runtime has built it: adopt its value now and each one it publishes. The
    * runtime calls it as soon as the facade exists, so a chat store built before it gets its record client with no
    * port called and no provider mounted; the constructor, `start` and each port that needs it call it too. A second
-   * call does nothing.
+   * call, or one after `stop`, does nothing.
    */
   public readonly followRootFiles = (): void => {
-    if (this.#unfollowRootFiles !== undefined) {
+    /* A stopped library follows nothing again: a late port call must not leave a subscription nothing removes. */
+    if (this.#stopped || this.#unfollowRootFiles !== undefined) {
       return;
     }
     const rootFiles = this.#rootFiles();

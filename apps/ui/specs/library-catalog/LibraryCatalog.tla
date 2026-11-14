@@ -88,7 +88,8 @@
 \* unmount no longer releases a held read. The library is the listing's only writer: the hook's
 \* refetches after a mutation are the commands' own, a query refetch that moves no epoch, as before. A
 \* connection the workspace machine's root `onError` caught a defect on rejects, so the next starts afresh;
-\* the workspace machine is outside this model. No action or correspondence changes.
+\* the workspace machine is outside this model. A stopped library follows no facade again. No action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

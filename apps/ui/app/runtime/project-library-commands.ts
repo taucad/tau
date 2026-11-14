@@ -716,7 +716,7 @@ export class ProjectCommands {
     const chats = await this.#host.readChats(
       async (source) => source.getChatsForResource(projectId, { includeDeleted: true }),
       projectId,
-      /* The person's read ends with the provider that serves it, as the hook's own read did: it is not asked again. */
+      /* The person's read is not asked again when its records are replaced, as the hook's own read was not. */
       { retry: false },
     );
     if (chats.length > 0) {

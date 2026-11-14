@@ -68,7 +68,10 @@ const sameRecord = (
   right: Readonly<Record<string, string | undefined>>,
 ): boolean => {
   const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length && keys.every((key) => left[key] === right[key]);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.hasOwn(right, key) && left[key] === right[key])
+  );
 };
 
 /**

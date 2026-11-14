@@ -6,7 +6,7 @@
  */
 import { act, render } from '@testing-library/react';
 import { useState } from 'react';
-import { RouterProvider, createMemoryRouter, useParams } from 'react-router';
+import { RouterProvider, createMemoryRouter, useLocation, useNavigation, useParams } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import { useRouterRouteSink } from '#routes/w.$workspace.$project/project-route-intent.js';
@@ -18,9 +18,14 @@ vi.mock('#hooks/use-project-slug-route.js', () => ({
 
 /** The sink the project page's probe exposes, over the route's own project. */
 const sinks: Array<(command: FocusRouteCommand) => void> = [];
+/** Each render's search and navigation state, as `?chat=…|loading`. */
+const shown: string[] = [];
 
 function Probe(): React.JSX.Element {
   const { workspace = '', project = '' } = useParams();
+  const { search } = useLocation();
+  const { state } = useNavigation();
+  shown.push(`${search}|${state}`);
   const sink = useRouterRouteSink({
     committed: { slugs: { workspaceSlug: workspace, projectSlug: project }, projectId: project, chatId: undefined },
     createdChatId: undefined,
@@ -36,6 +41,7 @@ function Probe(): React.JSX.Element {
 
 afterEach(() => {
   sinks.length = 0;
+  shown.length = 0;
 });
 
 const deferred = () => {
@@ -49,6 +55,15 @@ const deferred = () => {
       settle();
     },
   };
+};
+
+/** Steps microtasks only, so React's scheduled render of a router change has not run yet. */
+const microtasksUntil = async (done: () => boolean, turns = 50): Promise<void> => {
+  if (turns === 0 || done()) {
+    return;
+  }
+  await Promise.resolve();
+  await microtasksUntil(done, turns - 1);
 };
 
 describe('useRouterRouteSink under a data router (I2)', () => {
@@ -413,5 +428,69 @@ describe('useRouterRouteSink under a data router (I2)', () => {
     });
 
     expect(router.state.location.search).toBe('?chat=chat-1');
+  });
+
+  it("should drop a held correction when the person moves off the sink's own replace committed mid-move (I18, round 6)", async () => {
+    const replaceLoading = deferred();
+    const personLoading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            const parameters = new URL(request.url).searchParams;
+            if (parameters.get('chat') === 'chat-t') {
+              await replaceLoading.promise;
+            }
+            if (parameters.has('via')) {
+              await personLoading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/b?chat=chat-a'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-t' });
+    });
+    expect(router.state.navigation.state).toBe('loading');
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-x' });
+    });
+    /* The replace lands in the router; the person picks chat A in the list before React commits it. */
+    replaceLoading.resolve();
+    await microtasksUntil(() => router.state.location.search === '?chat=chat-t');
+    expect(router.state.location.search).toBe('?chat=chat-t');
+    void router.navigate('/w/ws/b?chat=chat-a&via=list');
+    await microtasksUntil(() => router.state.navigation.state === 'loading');
+    expect(router.state.navigation.state).toBe('loading');
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+    /* React commits the sink's replace while the person's move loads. */
+    expect(shown).toContain('?chat=chat-t|loading');
+    await act(async () => {
+      personLoading.resolve();
+      await personLoading.promise;
+    });
+    await vi.waitFor(() => {
+      expect(router.state.navigation.state).toBe('idle');
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+
+    expect(router.state.location.search).toBe('?chat=chat-a&via=list');
   });
 });

@@ -446,16 +446,19 @@ const routeModule = await import('./project-route.js');
 const sessionsModule = await import('./project-live-sessions.js');
 const { startFocusHost } = await import('#runtime/app-runtime-focus.fixture.js');
 
-/* Focus and its ports over the registry, as the runtime root composes them (A5b). */
-const focusHost = startFocusHost({
-  sessions: sessionsActor,
-  library: {
-    routeAccess: async (projectId) => getProjectRouteAccess(projectId),
-    epoch: () => projectManager.libraryRevision,
-    onEpochChanged: () => () => undefined,
-  },
-  loadModule: async () => undefined,
-});
+/* Focus and its ports over the registry, as the runtime root composes them (A5b). One host per row, so a focus a row
+ * left on a project never answers the next row's request. */
+const startRowFocus = () =>
+  startFocusHost({
+    sessions: sessionsActor,
+    library: {
+      routeAccess: async (projectId) => getProjectRouteAccess(projectId),
+      epoch: () => projectManager.libraryRevision,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+let focusHost = startRowFocus();
 /* Both layouts are lazy chunks; load them before a row runs so a fake clock never waits on a module read. */
 await import('./chat-interface-desktop.js');
 await import('./chat-interface-mobile.js');
@@ -573,6 +576,7 @@ const recordAdditions = (
 
 beforeEach(() => {
   vi.useFakeTimers();
+  focusHost = startRowFocus();
   facts.isMobile = false;
   facts.isRealViewerBox = false;
   layoutRecord.viewer = undefined;
@@ -595,6 +599,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.useRealTimers();
+  focusHost.stop();
   /* The registry is one app singleton: close what a row left live, as the route suite does. */
   await act(async () => {
     for (const projectId of Object.keys(sessionsActor.getSnapshot().context.refs)) {

@@ -7,11 +7,14 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useCanonicalProjectUrlCorrection } from '#hooks/use-project-slug-route.js';
 
-const listing = vi.hoisted(() => ({ projectSlug: 'p' }));
+const listing = vi.hoisted(() => ({ projectSlug: 'p', secondSlug: 'two' }));
 
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => ({
-    projects: [{ id: 'proj_1', slugs: { workspaceSlug: 'home', projectSlug: listing.projectSlug } }],
+    projects: [
+      { id: 'proj_1', slugs: { workspaceSlug: 'home', projectSlug: listing.projectSlug } },
+      { id: 'proj_2', slugs: { workspaceSlug: 'home', projectSlug: listing.secondSlug } },
+    ],
     isLoading: false,
   }),
 }));
@@ -22,6 +25,7 @@ const showPath = (path: string): void => {
 
 afterEach(() => {
   listing.projectSlug = 'p';
+  listing.secondSlug = 'two';
   showPath('/');
 });
 
@@ -48,5 +52,24 @@ describe('useCanonicalProjectUrlCorrection with the route path it resolved from'
     renderHook(() => useCanonicalProjectUrlCorrection('proj_1', '', '/w/home/p'));
 
     expect(globalThis.location.pathname).toBe('/w/home/other');
+  });
+
+  it("should not take a bar showing another project's corrected address for this project's own write (round 6)", () => {
+    showPath('/w/home/p');
+    listing.projectSlug = 'q';
+    const { rerender } = renderHook(({ id, from }) => useCanonicalProjectUrlCorrection(id, '', from), {
+      initialProps: { id: 'proj_1', from: '/w/home/p' },
+    });
+    expect(globalThis.location.pathname).toBe('/w/home/q');
+    /* The route moves to project 2 at its current path. */
+    showPath('/w/home/two');
+    rerender({ id: 'proj_2', from: '/w/home/two' });
+    expect(globalThis.location.pathname).toBe('/w/home/two');
+    /* The person goes Back to project 1's corrected entry; before the route commits it, project 2 is renamed. */
+    showPath('/w/home/q');
+    listing.secondSlug = 'two-renamed';
+    rerender({ id: 'proj_2', from: '/w/home/two' });
+
+    expect(globalThis.location.pathname).toBe('/w/home/q');
   });
 });

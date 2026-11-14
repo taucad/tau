@@ -235,6 +235,11 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
       ownCommit = pendingOwn.current !== undefined && latest.current.currentUrl === pendingOwn.current;
       pendingOwn.current = undefined;
     }
+    if (ownCommit && deferred.current !== undefined) {
+      /* The sink's own replace is the chat the person now sees, even while another move loads: a held command is
+       * judged against it, so the person's move off it counts as theirs (I18). */
+      deferred.current = { ...deferred.current, chatId: chatOf(latest.current.currentUrl) };
+    }
     const held = deferred.current;
     if (held === undefined || navigationState === 'loading' || navigationState === 'submitting') {
       return;

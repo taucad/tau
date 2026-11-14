@@ -137,7 +137,14 @@ export const createUnloadSequencer = (): UnloadSequencer => {
         if (registration.stage === 'session') {
           /* Synchronous by contract: pagehide can only emit data prepared by hidden and cannot wait for a fresh
            * producer flush. */
-          void registration.callback('pagehide');
+          try {
+            void Promise.resolve(registration.callback('pagehide')).catch((error: unknown) => {
+              console.error('A session could not flush on pagehide.', error);
+            });
+          } catch (error) {
+            /* One registrant's throw must not skip the rest, nor the memory release after them. */
+            console.error('A session could not flush on pagehide.', error);
+          }
         }
       }
     },

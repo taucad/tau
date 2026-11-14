@@ -7,7 +7,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import { createEnvironmentLogic } from '#runtime/environment.js';
+import { mock } from 'vitest-mock-extended';
+import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 
 type FocusRequest = Readonly<{ projectId?: string; home?: boolean }> | undefined;
@@ -16,19 +17,25 @@ type FocusRequest = Readonly<{ projectId?: string; home?: boolean }> | undefined
 const createFakeFocus = (initial: FocusRequest) => {
   let request = initial;
   const listeners = new Set<() => void>();
-  const ref = {
-    getSnapshot: () => ({ context: { request } }),
-    subscribe: (listener: () => void) => {
-      listeners.add(listener);
-      return {
-        unsubscribe: () => {
-          listeners.delete(listener);
-        },
-      };
-    },
-  };
+  const ref = mock<AnyActorRef>();
+  ref.getSnapshot.mockImplementation(() => ({ context: { request } }));
+  ref.subscribe.mockImplementation((listener) => {
+    /* `environment` subscribes with a plain listener; it reads the request from the snapshot itself. */
+    const notify =
+      typeof listener === 'function'
+        ? listener
+        : (): void => {
+            listener.next?.(undefined);
+          };
+    listeners.add(notify);
+    return {
+      unsubscribe: () => {
+        listeners.delete(notify);
+      },
+    };
+  });
   return {
-    ref: ref as unknown as AnyActorRef,
+    ref,
     route: (next: FocusRequest) => {
       request = next;
       for (const listener of listeners) {
@@ -45,19 +52,20 @@ afterEach(() => {
   }
 });
 
-const start = ({ coarse, projectId }: Readonly<{ coarse: boolean; projectId?: string }>) => {
+const start = ({
+  coarse,
+  projectId,
+  sequencer,
+}: Readonly<{ coarse: boolean; projectId?: string; sequencer?: ReturnType<typeof createUnloadSequencer> }>) => {
   const host = createFakeEnvironmentHost({ coarse });
-  const send = vi.fn();
+  const registry = mock<AnyActorRef>();
+  /* The quit hold listens for `quiesced`; these rows never quit. */
+  registry.on.mockReturnValue({ unsubscribe: () => undefined });
+  const { send } = registry;
   const focus = createFakeFocus(projectId === undefined ? undefined : { projectId });
   const actor = createActor(
-    createEnvironmentLogic(() => host),
-    {
-      input: {
-        /* The quit hold listens for `quiesced`; these rows never quit. */
-        registry: { send, on: () => ({ unsubscribe: () => undefined }) } as unknown as AnyActorRef,
-        focus: focus.ref,
-      },
-    },
+    createEnvironmentLogic(() => host, { sequencer }),
+    { input: { registry, focus: focus.ref } },
   ).start();
   stops.push(() => {
     actor.stop();
@@ -106,5 +114,22 @@ describe('environment: the memory release (B-08)', () => {
     host.window.dispatchEvent(new Event('pagehide'));
 
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('should run every session flush and still release memory on pagehide when one registrant throws', () => {
+    const sequencer = createUnloadSequencer();
+    const later = vi.fn();
+    sequencer.register('session', () => {
+      throw new Error('flush failed');
+    });
+    sequencer.register('session', later);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { host, send } = start({ coarse: true, projectId: 'projA', sequencer });
+
+    host.window.dispatchEvent(new Event('pagehide'));
+
+    expect(later).toHaveBeenCalledWith('pagehide');
+    expect(send).toHaveBeenCalledWith({ type: 'releaseMemory', keepProjectId: 'projA' });
+    errors.mockRestore();
   });
 });

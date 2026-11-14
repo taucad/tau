@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, use, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
-import { shallowEqual, useSelector } from '@xstate/react';
+import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '@taucad/ui/components/loader';
@@ -52,23 +52,11 @@ const sameRegistryView = (left: FocusRegistryView, right: FocusRegistryView): bo
   left.status === right.status && left.closed === right.closed;
 
 /**
- * The native kernel id each live session was opened with (S34): read off the open request the session keeps, which
- * replaced the route's `retainedKernels`. A session's request is its input, so the id is fixed for its life.
- */
-const selectSessionNativeKernels = (context: SessionsMachineContext): Readonly<Record<string, string | undefined>> =>
-  Object.fromEntries(
-    Object.entries(context.refs).map(([projectId, ref]) => [
-      projectId,
-      ref.getSnapshot().context.request?.nativeKernelId,
-    ]),
-  );
-
-/**
- * The project whose session holds focus's props, whether it is kept behind the route's state, and whether the route is
+ * The project whose session is the focused one, whether it is kept behind the route's state, and whether the route is
  * on its way somewhere else.
  *
- * Focus opening or on a project gives that project the props. While focus resolves, leaves, is blocked by a failed
- * leave flush or holds another project's answer, the project it was on keeps them, inert, until the move settles
+ * Focus opening or on a project makes that project's session the focused one. While focus resolves, leaves, is blocked
+ * by a failed leave flush or holds another project's answer, the project it was on stays focused, inert, until the move settles
  * (today's `resolved`/`pending`); a project the route has not settled on never supplies providers to the one being
  * opened. Only a move in progress shows the overlay: a held answer is the notice the person reads.
  */
@@ -108,7 +96,6 @@ export function ProjectRouteGate({
   const sessions = useSessions();
   const focusSnapshot = useSelector(focus, (snapshot) => snapshot);
   const registry = useSelector(sessions, (snapshot) => selectFocusRegistryView(snapshot.context), sameRegistryView);
-  const nativeKernels = useSelector(sessions, (snapshot) => selectSessionNativeKernels(snapshot.context), shallowEqual);
   const liveProjectIds = useLiveProjectIds();
 
   /*
@@ -117,26 +104,6 @@ export function ProjectRouteGate({
    */
   const state = selectProjectRouteState(focusSnapshot, registry, committed);
   const { target, retained, moving } = selectFocusTarget(focusSnapshot);
-  const { request, forwarded } = focusSnapshot.context;
-  const onRequest = !retained && request?.projectId === target;
-  const requestedChatId = onRequest ? request?.chatId : target === undefined ? undefined : forwarded[target]?.chatId;
-  const createdChatId = onRequest ? request?.createdChatId : undefined;
-
-  /* The editor reports the chat it focused for the route's chat (`requestedChatId`); focus shows it (I18). */
-  const handleFocusedChatResolved = useCallback(
-    (chatId: string): void => {
-      if (target === undefined) {
-        return;
-      }
-      focus.send({
-        type: 'focusedChatResolved',
-        projectId: target,
-        ...(requestedChatId === undefined ? {} : { requestedChatId }),
-        chatId,
-      });
-    },
-    [focus, requestedChatId, target],
-  );
   /* Memoised because it is a context value: a new identity on every render would re-render every notice. */
   const handleRetryLoad = useCallback((): void => {
     focus.send({ type: 'retry' });
@@ -154,8 +121,6 @@ export function ProjectRouteGate({
       ? undefined
       : {
           projectId: target,
-          requestedChatId,
-          createdChatId,
           children: isShellHostedByFocusedSession ? children : undefined,
         };
 
@@ -189,9 +154,7 @@ export function ProjectRouteGate({
                   <LiveProjectSessions
                     focused={focused}
                     liveProjectIds={liveProjectIds}
-                    onFocusedChatResolved={retained ? undefined : handleFocusedChatResolved}
                     onFlushRegistration={bindings.registerLeaveFlush}
-                    retainedKernels={nativeKernels}
                   />
                 </Suspense>
               </div>

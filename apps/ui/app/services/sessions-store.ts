@@ -6,19 +6,18 @@
  * builds a second one (B9). `SessionsProvider` hands it down; every reader is
  * a selector over its snapshot.
  *
- * The registry owns *liveness*. Three of a session's four startup regions own a
- * resource outright here: the project's file manager (A6c), compute admission
- * and the agent-host attachment. The fourth, the runtime, is still reported by
- * the subtree that holds the project and editor actors, until A6d makes it a
- * child too. The session still decides when they exist: the project route
- * renders a project's resources iff the registry says it is live, and
- * `closing` completes — flush, lease release — before the registry drops it.
+ * The registry owns *liveness*. Each of a session's four startup regions owns a
+ * resource outright here: the project's file manager (A6c), its project runtime,
+ * built behind a dynamic import (A6d, D5), compute admission and the agent-host
+ * attachment. The session decides when they exist: the project route renders a
+ * project's resources iff the registry says it is live, its providers are views
+ * of the session's children, and `closing` completes — flush, release — before
+ * the registry drops it.
  */
 
-import { Topic } from '@taucad/events';
 import { randomUuid } from '@taucad/utils/id';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
-import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
+import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
@@ -28,7 +27,11 @@ import type {
   SessionsProjectStatus,
 } from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
+import type {
+  ProjectSessionActorRef,
+  ProjectSessionMachineEvent,
+  ProjectSessionOpenRequest,
+} from '#machines/project-session.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
@@ -83,73 +86,237 @@ export const registerProjectSessionServices = (
 const servicesFor = (projectId: string): ProjectSessionServices => services.get(projectId) ?? noServices;
 
 // ---------------------------------------------------------------------------
-// Region readiness
+// The project runtime (A6d)
 // ---------------------------------------------------------------------------
 
-type RegionOutcome = Readonly<{ ready: true } | { ready: false; reason: string }>;
-
-/** The one region the subtree still reports: the project and editor actors, until A6d (A6c made `views` a child). */
-type RelayedRegion = 'runtime';
-
-const regionKey = (projectId: string, region: RelayedRegion): string => `${projectId}:${region}`;
-const regionOutcomes = new Map<string, RegionOutcome>();
-/* One fan-out for every region of every project; the key rides on the event so
- * a session's relay child filters to its own (event-fanout policy). */
-const regionTopic = new Topic<{
-  readonly key: string;
-  readonly outcome: RegionOutcome;
-}>({
-  name: 'sessions.regions',
-});
-
-const publishRegion = (projectId: string, region: RelayedRegion, outcome: RegionOutcome): void => {
-  const key = regionKey(projectId, region);
-  regionOutcomes.set(key, outcome);
-  regionTopic.emit({ key, outcome });
-};
-
-/** The project's runtime (project + editor) is up. @public */
-export const reportRegionReady = (projectId: string, region: RelayedRegion): void => {
-  publishRegion(projectId, region, { ready: true });
-};
-
-/** That region could not come up, with the reason the failed row shows. @public */
-export const reportRegionFailed = (projectId: string, region: RelayedRegion, reason: string): void => {
-  publishRegion(projectId, region, { ready: false, reason });
-};
-
-/** Forget what a closed project's subtree last said. @public */
-export const forgetProjectRegions = (projectId: string): void => {
-  regionOutcomes.delete(regionKey(projectId, 'runtime'));
-};
-
-/*
- * The runtime region's relay, until A6d builds the runtime in the session.
+/**
+ * What a session's runtime child reads off the project runtime it built (A6d): the facts it turns into the runtime
+ * region's report, the chat session's readiness and the chat the editor focused.
  *
- * The subtree reports through `reportRegionReady`; this child turns that report
- * into the machine event and holds the region open for the session's life, so
- * stopping the child is what ends it.
+ * @public
  */
-const relayRegion = (region: RelayedRegion) =>
-  createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
-    const key = regionKey(input.projectId, region);
-    const deliver = (outcome: RegionOutcome): void => {
-      sendBack(
-        outcome.ready ? { type: 'childReady', region } : { type: 'childFailed', region, reason: outcome.reason },
-      );
-    };
-    const unsubscribe = regionTopic.subscribe({
-      handler: (event) => {
-        deliver(event.outcome);
-      },
-      interestedIn: (event) => event.key === key,
-    });
-    const known = regionOutcomes.get(key);
-    if (known !== undefined) {
-      deliver(known);
-    }
-    return unsubscribe;
-  });
+export type SessionRuntimeFacts = Readonly<{
+  /** The project loaded, so the runtime region is up unless its kernel was refused. */
+  loaded: boolean;
+  /** Why this project has no kernel, from the machine that owns its units (R4). */
+  kernelRefusal: string | undefined;
+  /** The editor has left `ensuringFocusedChat`: a chat is focused, the focus failed, or the chats are still arriving. */
+  chatReady: boolean;
+  /** The chat the editor focused, and the chat it was asked for, once its operation settled. */
+  focusedChat: Readonly<{ requestedChatId: string | undefined; chatId: string }> | undefined;
+}>;
+
+/**
+ * A project runtime a session's child built and started (A6d). Every member is a host object, so it lives in the
+ * child's closure, never in the session's context (D4); the session keeps only the root's ref.
+ *
+ * @public
+ */
+export type SessionRuntime = Readonly<{
+  /** The runtime's root, started: what the session subtree's provider is a view of. */
+  runtimeRef: AnyActorRef;
+  /** The facts now. */
+  facts: () => SessionRuntimeFacts;
+  /** Hear each change of the facts. @returns The unsubscribe. */
+  subscribe: (listener: () => void) => () => void;
+  /** Ask the editor for the open request's chat, as the provider's effect asked it before A6d. */
+  requestChat: (chat: SessionRuntimeChat) => void;
+  /** Whether the device's choices still select the kernel this runtime was built with. */
+  kernelIsCurrent: () => boolean;
+  /** Stop the runtime and release what it holds. Calling it twice closes once. */
+  close: () => void;
+}>;
+
+/** The chat fields of a session's open request. @public */
+export type SessionRuntimeChat = Readonly<{ chatId?: string; createdChatId?: string }>;
+
+/**
+ * How a session builds its project runtime (A6d): behind a dynamic import (D5), from its file manager, the library,
+ * `choices` and its open request. The app runtime composes it; a registry composed alone has none.
+ *
+ * @public
+ */
+export type SessionRuntimeOpener = Readonly<{
+  /** Load the runtime module and build and start the project's runtime. Rejects when it cannot be built. */
+  open: (
+    input: Readonly<{
+      projectId: string;
+      fileManagerRef: FileManagerRef;
+      request: ProjectSessionOpenRequest | undefined;
+    }>,
+  ) => Promise<SessionRuntime>;
+  /** Hear each change of the device's choices, after which a runtime may no longer be current. @returns The unsubscribe. */
+  onChoicesChanged: (listener: () => void) => () => void;
+}>;
+
+type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefined }>;
+
+/**
+ * The `project` child: it builds the project runtime once the session has a file manager, owns it for the session's
+ * life and stops it when the session stops the child (I5, I23). It reports the runtime region from the runtime's facts
+ * rather than from a mount: a refused kernel fails it with the refusal, a loaded project readies it, each time either
+ * moves (R4). It tells the session the runtime's ref (`runtimeChanged`), that the chat session is ready (`chatReady`,
+ * M2), and each chat the editor focused (`chatFocused`).
+ *
+ * The session forwards it each file manager its `fileManager` child reports and each `chatRequested`. A new file manager
+ * (a rebuilt shared worker) builds a new runtime; none closes the runtime, which reads the closed one. A change of the
+ * device's choices that selects another kernel builds the next runtime and then stops this one, with no flush, as the
+ * React key on the provider did before A6d (A6e makes it `replaceRuntime`). Building the next first lets the entries
+ * record session yield, flushing what it owes (I13).
+ */
+const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
+  createCallbackLogic<EventObject, { projectId: string; request?: ProjectSessionOpenRequest }>(
+    ({ input, sendBack, receive }) => {
+      const { projectId } = input;
+      let fileManagerRef: FileManagerRef | undefined;
+      let chat: SessionRuntimeChat = { chatId: input.request?.chatId, createdChatId: input.request?.createdChatId };
+      let current: Readonly<{ runtime: SessionRuntime; unsubscribe: () => void }> | undefined;
+      let reported: RegionReport = { loaded: false, kernelRefusal: undefined };
+      let chatReady = false;
+      let focused: SessionRuntimeFacts['focusedChat'];
+      /* Each build's identity: a build a newer one or the stop overtook closes what it made. */
+      let generation = 0;
+      let stopped = false;
+
+      const observe = (runtime: SessionRuntime): void => {
+        const facts = runtime.facts();
+        if (facts.kernelRefusal !== reported.kernelRefusal || facts.loaded !== reported.loaded) {
+          reported = { loaded: facts.loaded, kernelRefusal: facts.kernelRefusal };
+          if (facts.kernelRefusal !== undefined) {
+            sendBack({ type: 'childFailed', region: 'runtime', reason: facts.kernelRefusal });
+          } else if (facts.loaded) {
+            sendBack({ type: 'childReady', region: 'runtime' });
+          }
+        }
+        if (facts.chatReady && !chatReady) {
+          chatReady = true;
+          sendBack({ type: 'chatReady' });
+        }
+        const next = facts.focusedChat;
+        if (next?.chatId !== focused?.chatId || next?.requestedChatId !== focused?.requestedChatId) {
+          focused = next;
+          /* Only a resolution of the chat this session was asked for, as the provider guarded it before A6d. */
+          if (next !== undefined && next.requestedChatId === chat.chatId) {
+            sendBack({
+              type: 'chatFocused',
+              chatId: next.chatId,
+              ...(next.requestedChatId === undefined ? {} : { requestedChatId: next.requestedChatId }),
+            });
+            /* Focus now holds this chat as the one the session was given, so a later request for it is no change. */
+            chat = { ...chat, chatId: next.chatId };
+          }
+        }
+      };
+
+      const closeCurrent = (): void => {
+        if (current === undefined) {
+          return;
+        }
+        const { runtime, unsubscribe } = current;
+        current = undefined;
+        unsubscribe();
+        runtime.close();
+      };
+
+      const build = (): void => {
+        generation += 1;
+        const attempt = generation;
+        const builtOn = fileManagerRef;
+        if (builtOn === undefined) {
+          return;
+        }
+        const settle = async (): Promise<void> => {
+          let runtime: SessionRuntime;
+          try {
+            runtime = await opener.open({
+              projectId,
+              fileManagerRef: builtOn,
+              request: input.request === undefined ? undefined : { ...input.request, ...chat },
+            });
+          } catch (error) {
+            if (!stopped && attempt === generation) {
+              sendBack({
+                type: 'childFailed',
+                region: 'runtime',
+                reason: error instanceof Error ? error.message : String(error),
+              });
+            }
+            return;
+          }
+          if (stopped || attempt !== generation) {
+            runtime.close();
+            return;
+          }
+          /* The next runtime is up before the one it replaces stops (I13); the session's readers move to it at once. */
+          const previous = current;
+          current = {
+            runtime,
+            unsubscribe: runtime.subscribe(() => {
+              observe(runtime);
+            }),
+          };
+          reported = { loaded: false, kernelRefusal: undefined };
+          focused = undefined;
+          sendBack({ type: 'runtimeChanged', runtimeRef: runtime.runtimeRef });
+          runtime.requestChat(chat);
+          if (previous !== undefined) {
+            previous.unsubscribe();
+            previous.runtime.close();
+          }
+          observe(runtime);
+        };
+        // async-iife: bootstrap -- `createCallbackLogic` is synchronous; the build settles through `sendBack`.
+        void settle();
+      };
+
+      const unsubscribeChoices = opener.onChoicesChanged(() => {
+        if (current !== undefined && !current.runtime.kernelIsCurrent()) {
+          build();
+        }
+      });
+
+      receive((event) => {
+        if (event.type === 'fileManagerChanged') {
+          const next = (event as Extract<ProjectSessionMachineEvent, { type: 'fileManagerChanged' }>).fileManagerRef;
+          if (next === fileManagerRef) {
+            return;
+          }
+          fileManagerRef = next;
+          /* The runtime reads the file manager it was built on, which its child has closed. */
+          if (current !== undefined) {
+            closeCurrent();
+            sendBack({ type: 'runtimeChanged', runtimeRef: undefined });
+          }
+          build();
+          return;
+        }
+        if (event.type === 'chatRequested') {
+          const requested = event as Extract<ProjectSessionMachineEvent, { type: 'chatRequested' }>;
+          if (requested.chatId === chat.chatId && requested.createdChatId === chat.createdChatId) {
+            return;
+          }
+          chat = { chatId: requested.chatId, createdChatId: requested.createdChatId };
+          current?.runtime.requestChat(chat);
+        }
+      });
+
+      return () => {
+        stopped = true;
+        unsubscribeChoices();
+        closeCurrent();
+      };
+    },
+  );
+
+/**
+ * The runtime region of a registry composed with no runtime opener (rows that run the registry alone): no runtime is
+ * built, and the region and the chat session are up at once, as the subtree's report made them before A6d.
+ */
+const withoutRuntime = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+  sendBack({ type: 'childReady', region: 'runtime' });
+  sendBack({ type: 'chatReady' });
+  return undefined;
+});
 
 // ---------------------------------------------------------------------------
 // The project's file manager (A6c)
@@ -361,7 +528,7 @@ const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(
 // The registry actor
 // ---------------------------------------------------------------------------
 
-const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker }: SessionsRegistryFiles) =>
+const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker, openRuntime }: SessionsRegistryFiles) =>
   projectSessionMachine.provide({
     actors: {
       cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
@@ -392,7 +559,7 @@ const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker }: 
       }),
       fileManager:
         openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager, fileManagerWorker),
-      project: relayRegion('runtime'),
+      project: openRuntime === undefined ? withoutRuntime : runtimeRegionOn(openRuntime),
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
     },
@@ -414,6 +581,8 @@ export type SessionsRegistryFiles = Readonly<{
    * holds a worker and rebuilt when the worker is replaced; without it, at once.
    */
   fileManagerWorker?: SessionFileManagerWorker;
+  /** Builds each session's project runtime (A6d). Without it the runtime region and the chat session are up at once. */
+  openRuntime?: SessionRuntimeOpener;
 }>;
 
 /**
@@ -463,6 +632,7 @@ export const createSessionsActor = ({
   sharedWorker,
   openFileManager,
   fileManagerWorker,
+  openRuntime,
   ...options
 }: SessionsActorOptions & Partial<SessionsRegistryFiles> = {}): Actor<typeof sessionsMachine> =>
   createActor(
@@ -470,6 +640,7 @@ export const createSessionsActor = ({
       sharedWorker: sharedWorker ?? (() => undefined),
       ...(openFileManager === undefined ? {} : { openFileManager }),
       ...(fileManagerWorker === undefined ? {} : { fileManagerWorker }),
+      ...(openRuntime === undefined ? {} : { openRuntime }),
     }),
     { ...options, input: sessionsRegistryInput() },
   );
@@ -492,6 +663,18 @@ export const selectLiveProjectIds = (context: SessionsMachineContext): readonly 
 export const selectProjectSessionFileManager = (
   snapshot: ReturnType<ProjectSessionActorRef['getSnapshot']>,
 ): FileManagerRef | undefined => snapshot.context.fileManagerRef;
+
+/**
+ * A session's project runtime, as its `project` child reported it (A6d): what the session subtree's `ProjectProvider` is
+ * a view of.
+ *
+ * @param snapshot - The session's snapshot.
+ * @returns The runtime's root, or `undefined` before the child built it, while it rebuilds it, or with no opener.
+ * @public
+ */
+export const selectProjectSessionRuntime = (
+  snapshot: ReturnType<ProjectSessionActorRef['getSnapshot']>,
+): AnyActorRef | undefined => snapshot.context.runtimeRef;
 
 /** One project's session actor, or `undefined` when it is closed. @public */
 export const selectProjectSession = (

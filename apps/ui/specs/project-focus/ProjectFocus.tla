@@ -111,6 +111,11 @@
 \* and focus settles on the project as it does for `TOpenOnFailed`, deriving `closed` with the reopen offer,
 \* as main does. No action or verdict changes.
 \* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
+\* A6d: the session's `project` child builds the project runtime, so the session reports `chatReady` once
+\* the editor has left ensuring its focused chat (M2) rather than at once, which is the `ChatReady` step
+\* after `live` the model already has. The editor's focused chat reaches focus through the registry
+\* (`chatFocused`, the port's `focusedChatResolved`), not through a prop the route handed the subtree, and
+\* the route no longer passes the subtree a chat or a native kernel id. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

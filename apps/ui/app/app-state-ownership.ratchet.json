@@ -68,6 +68,8 @@
       "apps/ui/app/runtime/project-library.ts",
       "apps/ui/app/runtime/project-runtime.helpers.ts",
       "apps/ui/app/runtime/project-runtime.layout.ts",
+      "apps/ui/app/runtime/project-runtime.session.fixture.ts",
+      "apps/ui/app/runtime/project-runtime.session.ts",
       "apps/ui/app/runtime/project-runtime.ts",
       "apps/ui/app/runtime/project-runtime.view-records.ts",
       "apps/ui/app/runtime/root-query-client.ts",

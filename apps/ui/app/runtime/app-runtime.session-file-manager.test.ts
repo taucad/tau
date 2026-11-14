@@ -14,7 +14,6 @@ import { sessionFileManagerOf, sessionFileManagerSpec } from '#runtime/session-f
 import type * as SessionFileManagerModule from '#runtime/session-file-manager.js';
 import type { SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
-import { reportRegionReady } from '#services/sessions-store.js';
 
 const world = vi.hoisted(() => ({
   worker: undefined as Worker | undefined,
@@ -68,6 +67,12 @@ vi.mock('#runtime/session-file-manager.js', async (importOriginal) => {
   };
 });
 
+/* A6d: the session's runtime is a stand-in; these rows read the session's other regions. */
+vi.mock('#runtime/project-runtime.session.js', async () => {
+  const { openSessionRuntimeStandIn } = await import('#runtime/project-runtime.session.fixture.js');
+  return { openSessionProjectRuntime: openSessionRuntimeStandIn, sessionProjectRuntimeOf: () => undefined };
+});
+
 const projectId = 'proj_a6c_runtime';
 const inertWorker = (name: string) => ({ name, postMessage: () => undefined }) as unknown as Worker;
 
@@ -86,13 +91,15 @@ describe("the app runtime's sessions build their file managers through its host 
     const fileManagerOf = () => registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.fileManagerRef;
 
     registry.send({ type: 'open', projectId });
-    reportRegionReady(projectId, 'runtime');
     await flush();
 
     expect(world.opened).toHaveLength(1);
     expect(fileManagerOf()).toBe(world.opened[0]?.fileManagerRef);
     expect(sessionFileManagerOf(world.opened[0]!.fileManagerRef)).toBe(world.opened[0]);
-    expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().matches('live')).toBe(true);
+    /* The session's runtime loads by dynamic import (A6d), so it goes live a few ticks later. */
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().matches('live')).toBe(true);
+    });
 
     world.setWorker(inertWorker('b'));
 

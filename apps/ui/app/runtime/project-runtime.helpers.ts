@@ -18,10 +18,44 @@ import type { FileContentService } from '@taucad/fs-client/file-content-service'
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
+import type { QueryClient } from '@tanstack/react-query';
+import type { Chat } from '@taucad/chat';
 import type { ChatStorage } from '#types/storage.types.js';
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Parameter operation failed.';
+
+/**
+ * Whether `chatId` is a chat the client already holds — freshly created here, or
+ * present in a current non-deleted chat list. Such a chat needs no async
+ * ensure round trip, so the editor can focus it synchronously. Deleted-inclusive
+ * and invalidated lists cannot authorize a stale route.
+ *
+ * @returns True when the chat is already known.
+ */
+export function isKnownChatId({
+  chatId,
+  createdChatId,
+  projectId,
+  queryClient,
+}: {
+  readonly chatId: string;
+  readonly createdChatId: string | undefined;
+  readonly projectId: string;
+  readonly queryClient: QueryClient;
+}): boolean {
+  if (chatId === createdChatId) {
+    return true;
+  }
+  const visibleChatKeys = [
+    ['chats', projectId, { includeDeleted: false }],
+    ['chats', projectId, 'records', { includeDeleted: false }],
+  ];
+  return visibleChatKeys.some((queryKey) => {
+    const state = queryClient.getQueryState<Array<Pick<Chat, 'id'>>>(queryKey);
+    return state !== undefined && !state.isInvalidated && state.data?.some((chat) => chat.id === chatId) === true;
+  });
+}
 
 /** Settlements that prove this actor wrote the bytes now held in its snapshot. */
 export const shouldDispatchParameterSettlement = (outcome: ParameterSetOutcome | undefined): boolean =>

@@ -18,8 +18,12 @@ import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type * as FileManagerHostModule from '#runtime/file-manager-host.js';
-import { reportRegionReady } from '#services/sessions-store.js';
 
+/* A6d: the session's runtime is a stand-in; these rows read the session's other regions. */
+vi.mock('#runtime/project-runtime.session.js', async () => {
+  const { openSessionRuntimeStandIn } = await import('#runtime/project-runtime.session.fixture.js');
+  return { openSessionProjectRuntime: openSessionRuntimeStandIn, sessionProjectRuntimeOf: () => undefined };
+});
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
@@ -89,7 +93,6 @@ describe('B9: the runtime survives an owner change below the billing fence', () 
     const registryA = seen.registry as ReturnType<typeof useSessions>;
     await act(async () => {
       registryA.send({ type: 'open', projectId: 'p1' });
-      reportRegionReady('p1', 'runtime');
       await Promise.resolve();
     });
     /* The agent-host double settles after a microtask; one macrotask lets every region report. */

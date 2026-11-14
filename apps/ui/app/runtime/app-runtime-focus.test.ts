@@ -16,14 +16,13 @@ import { createActor } from 'xstate';
 import type { InspectionEvent } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import type { FocusAccessAnswer } from '#machines/focus.machine.js';
+import type { FocusAccessAnswer, FocusRouteCommand } from '#machines/focus.machine.js';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
-import {
-  createSessionsRegistryLogic,
-  registerProjectSessionServices,
-  reportRegionReady,
-} from '#services/sessions-store.js';
+import { createSessionsRegistryLogic, registerProjectSessionServices } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener } from '#services/sessions-store.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -52,11 +51,26 @@ type Composition = Readonly<{
   route: (projectId: string, chatId?: string) => void;
 }>;
 
-const createRegistry = (budget: number) =>
-  createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
-    input: { budget },
-    clock: new StepClock(),
-  }).start();
+/* A session runtime that is never built: with no file manager its `project` child waits, so the runtime region stays
+ * `starting` until a row reports it (A6d). */
+const heldRuntime: SessionRuntimeOpener = {
+  open: async () => Promise.withResolvers<never>().promise,
+  onChoicesChanged: () => () => undefined,
+};
+
+/** A registry whose sessions build no runtime, hold it, or build one on a stand-in file manager (A6d). */
+const createRegistry = (budget: number, runtime: 'none' | 'held' | SessionRuntimeOpener) =>
+  createActor(
+    createSessionsRegistryLogic({
+      sharedWorker: () => undefined,
+      ...(runtime === 'none' ? {} : runtime === 'held' ? { openRuntime: heldRuntime } : { openRuntime: runtime }),
+      ...(typeof runtime === 'object' ? { openFileManager: (id: string) => openSessionFileManagerStandIn(id) } : {}),
+    }),
+    {
+      input: { budget },
+      clock: new StepClock(),
+    },
+  ).start();
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -68,10 +82,19 @@ afterEach(() => {
 const compose = ({
   budget = 8,
   access = async (projectId: string) => ready(projectId),
-}: Readonly<{ budget?: number; access?: (projectId: string) => Promise<FocusAccessAnswer> }> = {}): Composition => {
+  holdRuntime = false,
+  runtime,
+}: Readonly<{
+  budget?: number;
+  access?: (projectId: string) => Promise<FocusAccessAnswer>;
+  /** Keep each session opening until the row reports its runtime region. */
+  holdRuntime?: boolean;
+  /** Build each session's runtime through this opener, on a stand-in file manager. */
+  runtime?: SessionRuntimeOpener;
+}> = {}): Composition => {
   const registryEvents: Array<Readonly<{ type: string } & Record<string, unknown>>> = [];
   const focusEvents: Array<Readonly<{ type: string } & Record<string, unknown>>> = [];
-  const registry = createRegistry(budget);
+  const registry = createRegistry(budget, runtime ?? (holdRuntime ? 'held' : 'none'));
   let epoch = 0;
   const listeners = new Set<(next: number) => void>();
   /* `unknown`: an inspection's ref is an `ActorRefLike`, compared by identity. */
@@ -133,7 +156,7 @@ const compose = ({
   };
 };
 
-/** A session's services, so its close settles; the runtime region reports ready when a row says so. */
+/** A session's services, so its close settles. */
 const servicesFor = (projectId: string): void => {
   cleanups.push(
     registerProjectSessionServices(projectId, {
@@ -178,7 +201,6 @@ describe('focus and the registry, wired (A5b)', () => {
     await vi.waitFor(() => {
       expect(Object.keys(registry.getSnapshot().context.refs)).toEqual(['p1']);
     });
-    reportRegionReady('p1', 'runtime');
     await flushTasks();
 
     route('p2');
@@ -225,7 +247,6 @@ describe('focus and the registry, wired (A5b)', () => {
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
     });
-    reportRegionReady('p1', 'runtime');
     /* Project p1 is running, so the budget cannot close it: p2 waits in the pending slot. */
     registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
     await flushTasks();
@@ -261,16 +282,17 @@ describe('focus and the registry, wired (A5b)', () => {
   });
 
   it('should hand the session a chat the route switched to while the open was out, once the session is live', async () => {
-    const { registry, route } = compose();
+    const { registry, route } = compose({ holdRuntime: true });
     servicesFor('p1');
     route('p1', 'chat-1');
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
     });
     /* Still opening: the runtime region has not reported. */
+    expect(registry.getSnapshot().context.status['p1']?.state).toBe('opening');
     route('p1', 'chat-2');
     await flushTasks();
-    reportRegionReady('p1', 'runtime');
+    registry.getSnapshot().context.refs['p1']?.send({ type: 'childReady', region: 'runtime' });
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
     });
@@ -279,6 +301,46 @@ describe('focus and the registry, wired (A5b)', () => {
       expect(registry.getSnapshot().context.refs['p1']?.getSnapshot().context.request).toMatchObject({
         chatId: 'chat-2',
       });
+    });
+  });
+});
+
+describe("focus and the session's runtime (A6d)", () => {
+  it("should show the chat the session's editor focused for the chat the route asked for", async () => {
+    const opener = sessionRuntimeOpenerStandIn();
+    const { registry, host, route } = compose({ runtime: opener });
+    const commands: FocusRouteCommand[] = [];
+    cleanups.push(host.bindings.bindRoute((command) => commands.push(command)));
+    servicesFor('p1');
+    route('p1', 'chat-1');
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
+    });
+
+    opener.built[0]?.set({ focusedChat: { requestedChatId: 'chat-1', chatId: 'chat-1' } });
+
+    await vi.waitFor(() => {
+      expect(commands).toContainEqual({ type: 'chatShown', projectId: 'p1', chatId: 'chat-1' });
+    });
+  });
+
+  it("M2: should hold the open until the session's chat is ready, then settle on the project", async () => {
+    const opener = sessionRuntimeOpenerStandIn({ chatReady: false });
+    const { registry, host, route } = compose({ runtime: opener });
+    servicesFor('p1');
+    route('p1');
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
+    });
+    await flushTasks();
+
+    /* Within the one-second patience: the open joins the chat session, not just the live session. */
+    expect(host.focus.getSnapshot().matches('opening')).toBe(true);
+
+    opener.built[0]?.set({ chatReady: true });
+
+    await vi.waitFor(() => {
+      expect(host.focus.getSnapshot().hasTag('focused')).toBe(true);
     });
   });
 });

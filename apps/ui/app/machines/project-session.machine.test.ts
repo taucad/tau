@@ -439,8 +439,8 @@ describe('projectSessionMachine', () => {
       'flushProducers',
       'flushSync',
       'releaseAgentHost',
-      'stop:fileManager',
       'stop:project',
+      'stop:fileManager',
       'stop:agentHost',
       'stop:compute',
     ]);
@@ -647,18 +647,26 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it('should report its open facts to the registry with every state: chat ready and the first check settled', async () => {
+  it('should report its open facts to the registry with every state: chat ready once its runtime says so (M2), the first check settled', async () => {
     const parent = recordingParent();
     const { actor } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'revisionState', dirty: true, pushed: false });
     await settle();
 
-    const reports = parent.received.filter((event) => event.type === 'sessionState');
-    expect(reports.length).toBeGreaterThanOrEqual(3);
-    for (const report of reports) {
-      expect(report).toMatchObject({ chatReady: true, availability: 'settled' });
+    const before = parent.received.filter((event) => event.type === 'sessionState');
+    expect(before.length).toBeGreaterThanOrEqual(3);
+    for (const report of before) {
+      expect(report).toMatchObject({ chatReady: false, availability: 'settled' });
     }
+
+    actor.send({ type: 'chatReady' });
+    await settle();
+    expect(parent.received.findLast((event) => event.type === 'sessionState')).toMatchObject({
+      state: 'live',
+      chatReady: true,
+      availability: 'settled',
+    });
     actor.stop();
   });
 

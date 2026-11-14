@@ -64,6 +64,13 @@ const samples: Samples = {
     { type: 'fileManagerChanged', fileManagerRef: undefined },
   ],
   childFailed: [{ type: 'childFailed', region: 'runtime', reason: 'refused' }],
+  /* The `project` child's reports (A6d): the session keeps the runtime's ref and passes the chat facts on. */
+  runtimeChanged: [
+    { type: 'runtimeChanged', runtimeRef: createActor(createCallbackLogic(() => undefined)) },
+    { type: 'runtimeChanged', runtimeRef: undefined },
+  ],
+  chatReady: [{ type: 'chatReady' }],
+  chatFocused: [{ type: 'chatFocused', requestedChatId: 'chat-1', chatId: 'chat-1' }],
   projectedRunsChanged: [
     { type: 'projectedRunsChanged', runs: ['chat_1'], stoppableRuns: ['chat_1'] },
     { type: 'projectedRunsChanged', runs: [], stoppableRuns: [] },

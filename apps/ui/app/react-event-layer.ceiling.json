@@ -47,7 +47,6 @@
   "apps/ui/app/hooks/use-machine-control.ts": 2,
   "apps/ui/app/hooks/use-machines-selection.ts": 1,
   "apps/ui/app/hooks/use-project-availability.ts": 1,
-  "apps/ui/app/hooks/use-project.tsx": 3,
   "apps/ui/app/hooks/use-revision-status.ts": 2,
   "apps/ui/app/hooks/use-sidebar-status.ts": 2,
   "apps/ui/app/hooks/use-thumbnail-generator.ts": 3,

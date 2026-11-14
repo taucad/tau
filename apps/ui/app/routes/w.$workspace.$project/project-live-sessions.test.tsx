@@ -26,14 +26,15 @@ import type { ProjectRuntimeOptions } from '#runtime/project-runtime.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import type * as CloudProjectsModule from '#hooks/use-cloud-projects.js';
-import type * as SessionsStoreModule from '#services/sessions-store.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import { createSessionsActor, forgetProjectRegions } from '#services/sessions-store.js';
+import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener } from '#services/sessions-store.js';
+import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
@@ -491,10 +492,6 @@ vi.mock('#hooks/use-kernel.js', () => ({
   resolveRememberedKernel: () => ({ kernel: 'openscad' }),
   useKernel: () => ({ kernel: useSyncExternalStore(choiceStore.subscribe, choiceStore.get).kernel }),
 }));
-vi.mock('#services/sessions-store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof SessionsStoreModule>();
-  return { ...actual, forgetProjectRegions: vi.fn(actual.forgetProjectRegions) };
-});
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -593,12 +590,31 @@ const projectB = 'proj_live_bbbbbbbbbbbbbbb';
 let visibility: DocumentVisibilityState = 'visible';
 let clock: StepClock;
 let registry: Actor<typeof sessionsMachine>;
+
+/** The session runtime opener the app composes, over the rows' query cache and a local kernel. */
+const sessionRuntimeOpener = (client: QueryClient): SessionRuntimeOpener => ({
+  open: async (input) =>
+    openSessionProjectRuntime(input, {
+      library: mock(),
+      chatSessions: { noteCreatedEmpty: () => undefined },
+      queryClient: client,
+      choices: () => ({
+        computePlacement: { state: 'local' },
+        computeSelectionRevision: 0,
+        computeReuseMode: 'durable',
+        computeReuseRevision: 0,
+      }),
+      awaitServices: async () => Promise.withResolvers<never>().promise,
+      clock,
+    }),
+  onChoicesChanged: () => () => undefined,
+});
 let queryClient: QueryClient;
 /* The app runtime `ProjectProvider` leases its project runtime from; the rows' query client is its own (A6b). */
 let appRuntime: ReturnType<typeof createAppRuntime>;
 const flushRegistrations: Array<ProjectSessionFlushRegistration | undefined> = [];
 
-type Focus = Readonly<{ projectId: string; requestedChatId?: string; createdChatId?: string }> | undefined;
+type Focus = Readonly<{ projectId: string }> | undefined;
 
 function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
   const liveProjectIds = useLiveProjectIds();
@@ -609,8 +625,6 @@ function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
           ? undefined
           : {
               projectId: focus.projectId,
-              requestedChatId: focus.requestedChatId,
-              createdChatId: focus.createdChatId,
               children: undefined,
             }
       }
@@ -618,7 +632,6 @@ function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
       onFlushRegistration={(registration) => {
         flushRegistrations.push(registration);
       }}
-      retainedKernels={{}}
     />
   );
 }
@@ -673,9 +686,17 @@ const closeThroughRegistry = async (projectIds: readonly string[]): Promise<void
 };
 
 /** Open projects through the registry, render the subtrees and let every region report. */
-const openAndRender = async (projectIds: readonly string[], focus: Focus): Promise<ReturnType<typeof render>> => {
+const openAndRender = async (
+  projectIds: readonly string[],
+  focus: Focus,
+  chat?: Readonly<{ chatId?: string; createdChatId?: string }>,
+): Promise<ReturnType<typeof render>> => {
   for (const projectId of projectIds) {
-    registry.send({ type: 'open', projectId });
+    registry.send({
+      type: 'open',
+      projectId,
+      ...(chat === undefined || projectId !== focus?.projectId ? {} : { request: { workspace: 'ws', ...chat } }),
+    });
   }
   const view = render(tree(focus));
   await flushTasks();
@@ -699,8 +720,13 @@ beforeEach(() => {
   clock = new StepClock();
   fixtures.providedFileManagers.clear();
   /* Each session opens a stand-in file manager, ready at once, so the provider is handed a real session's ref. */
-  registry = createSessionsActor({ clock, openFileManager: (id) => openSessionFileManagerStandIn(id) }).start();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  /* A6d: each session's child builds its runtime through the real session module, over the stand-in project runtime. */
+  registry = createSessionsActor({
+    clock,
+    openFileManager: (id) => openSessionFileManagerStandIn(id),
+    openRuntime: sessionRuntimeOpener(queryClient),
+  }).start();
   appRuntime = createAppRuntime({
     clock,
     environment: () => createFakeEnvironmentHost(),
@@ -870,13 +896,14 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(browserLease).toEqual({ retained: [projectA], released: [projectA] });
   });
 
-  it("should forget the project's region reports when the registry closes it (S7)", async () => {
+  it("should stop the project's runtime when the registry closes it (S7, A6d)", async () => {
     await openAndRender([projectA], { projectId: projectA });
-    vi.mocked(forgetProjectRegions).mockClear();
+    const runtimeRef = selectProjectSessionRuntime(sessionOf(projectA)!.getSnapshot());
+    expect(runtimeRef === undefined ? undefined : sessionProjectRuntimeOf(runtimeRef)).toBeDefined();
 
     await closeThroughRegistry([projectA]);
 
-    expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([[projectA]]);
+    expect(sessionProjectRuntimeOf(runtimeRef!)).toBeUndefined();
   });
 
   it('should relay the revision facts to the session and to the chat store (S3)', async () => {
@@ -1101,15 +1128,17 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(unpublishConnector.mock.calls.length - withdrawnBefore).toBe(0);
   });
 
-  it.fails("I5: should keep a live session's region reports after its binding unmounted", async () => {
+  /* A6d: the runtime region is the session's own child, so it no longer depends on the binding being mounted. */
+  it("I5: should keep a live session's runtime after its binding unmounted", async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
-    vi.mocked(forgetProjectRegions).mockClear();
+    const runtimeRef = selectProjectSessionRuntime(sessionOf(projectA)!.getSnapshot());
 
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
 
     expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
-    expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([]);
+    expect(sessionOf(projectA)?.getSnapshot().context.failures).toEqual({});
+    expect(sessionProjectRuntimeOf(runtimeRef!)).toBeDefined();
   });
 
   it.fails('I5: should keep a live session registered with the chat store after its binding unmounted', async () => {
@@ -1216,15 +1245,26 @@ describe('cancelRuns on close (A0.2 item 8, D18)', () => {
 });
 
 describe("the chat request after open reaches the project's editor (A0.2 item 3, S12)", () => {
+  /* A6d: focus's `chatRequested` reaches the session, whose `project` child asks the editor; no prop carries it. */
+  const requestChat = async (projectId: string, chatId?: string, createdChatId?: string): Promise<void> => {
+    act(() => {
+      registry.send({
+        type: 'chatRequested',
+        projectId,
+        ...(chatId === undefined ? {} : { chatId }),
+        ...(createdChatId === undefined ? {} : { createdChatId }),
+      });
+    });
+    await flushTasks();
+  };
+
   it('should send an unknown chat as setRequestedChatId and a created chat as focusKnownChat', async () => {
-    const view = await openAndRender([projectA], { projectId: projectA, requestedChatId: 'chat-1' });
+    await openAndRender([projectA], { projectId: projectA }, { chatId: 'chat-1' });
     const editor = actorFor(`editor:${projectA}`);
     const send = vi.spyOn(editor, 'send');
 
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-2' }));
-    await flushTasks();
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-new', createdChatId: 'chat-new' }));
-    await flushTasks();
+    await requestChat(projectA, 'chat-2');
+    await requestChat(projectA, 'chat-new', 'chat-new');
 
     expect(send.mock.calls.map(([event]) => event)).toEqual([
       { type: 'setRequestedChatId', chatId: 'chat-2' },
@@ -1234,28 +1274,24 @@ describe("the chat request after open reaches the project's editor (A0.2 item 3,
 
   it('should send a listed chat as focusKnownChat', async () => {
     queryClient.setQueryData(['chats', projectA, { includeDeleted: false }], [{ id: 'chat-listed' }]);
-    const view = await openAndRender([projectA], { projectId: projectA, requestedChatId: 'chat-1' });
+    await openAndRender([projectA], { projectId: projectA }, { chatId: 'chat-1' });
     const send = vi.spyOn(actorFor(`editor:${projectA}`), 'send');
 
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-listed' }));
-    await flushTasks();
+    await requestChat(projectA, 'chat-listed');
 
     expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'focusKnownChat', chatId: 'chat-listed' }]);
   });
 
-  it('should clear the request while the project is retained, and send the chat it regains focus with', async () => {
-    const view = await openAndRender([projectA, projectB], { projectId: projectA, requestedChatId: 'chat-1' });
+  it('should keep the request while the project is retained (D14), and send the chat it regains focus with', async () => {
+    const view = await openAndRender([projectA, projectB], { projectId: projectA }, { chatId: 'chat-1' });
     const send = vi.spyOn(actorFor(`editor:${projectA}`), 'send');
 
     view.rerender(tree({ projectId: projectB }));
     await flushTasks();
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-2' }));
-    await flushTasks();
+    view.rerender(tree({ projectId: projectA }));
+    await requestChat(projectA, 'chat-2');
 
-    expect(send.mock.calls.map(([event]) => event)).toEqual([
-      { type: 'setRequestedChatId', chatId: undefined },
-      { type: 'setRequestedChatId', chatId: 'chat-2' },
-    ]);
+    expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'setRequestedChatId', chatId: 'chat-2' }]);
   });
 });
 

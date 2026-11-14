@@ -11,6 +11,10 @@ import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener } from '#services/sessions-store.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
+import type { SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
 import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ActorRefFrom } from 'xstate';
@@ -22,14 +26,50 @@ import type { FileContentService } from '@taucad/fs-client/file-content-service'
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
-import type * as KernelOptionsModule from '#hooks/use-project-kernel-options.js';
 import type * as NoticesModule from '#routes/w.$workspace.$project/project-route-notices.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type * as ProjectWorkspaceWarmupModule from '#lib/project-workspace-warmup.js';
 
+/*
+ * A6d: each session's `project` child builds its runtime; a stand-in records what the session handed it: the chat
+ * the editor was asked for (as the provider's props were before A6d) and the native kernel id the runtime was built
+ * with (as the subtree's kernel options were).
+ */
+const runtimes: SessionRuntimeStandIn[] = [];
+const runtimeOpener: SessionRuntimeOpener = {
+  open: async (input) => {
+    const standIn = openSessionRuntimeStandIn(input);
+    const { requestChat } = standIn;
+    kernelOptionInputs.push({ projectId: input.projectId, nativeKernelId: input.request?.nativeKernelId });
+    runtimes.push({
+      ...standIn,
+      requestChat: (chat) => {
+        projectProviderChatInputs.push({ requestedChatId: chat.chatId, createdChatId: chat.createdChatId });
+        projectProviderRequests.push({
+          projectId: input.projectId,
+          requestedChatId: chat.chatId,
+          createdChatId: chat.createdChatId,
+        });
+        requestChat(chat);
+      },
+    });
+    return runtimes.at(-1)!;
+  },
+  onChoicesChanged: () => () => undefined,
+};
+
+/** The editor of a project's live runtime focused `chatId`, for the chat it was last asked for. */
+const resolveFocusedChat = (projectId: string, chatId: string): void => {
+  const runtime = runtimes.findLast((candidate) => candidate.input.projectId === projectId && !candidate.isClosed());
+  runtime?.set({ focusedChat: { requestedChatId: runtime.chats.at(-1)?.chatId, chatId } });
+};
+
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor().start();
+const sessionsActor = createSessionsActor({
+  openFileManager: (projectId) => openSessionFileManagerStandIn(projectId),
+  openRuntime: runtimeOpener,
+}).start();
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -59,13 +99,11 @@ const projectProviderRequests: Array<{
   requestedChatId: string | undefined;
   createdChatId: string | undefined;
 }> = [];
-/** The focused-chat callback each project's provider was last handed. */
-const focusedChatResolvers = new Map<string, ((chatId: string) => void) | undefined>();
 /** Mounts of the editor branch's marker (A0.2 same-project rows). */
 const editorMarker = { mounts: 0, unmounts: 0 };
 /** Every notice kind rendered, in render order. */
 const noticeKinds: string[] = [];
-/** The native kernel id every project subtree asked its kernel options for, in render order (S34). */
+/** The native kernel id each project's runtime was built with, in build order (S34). */
 const kernelOptionInputs: Array<{ projectId: string; nativeKernelId: string | undefined }> = [];
 /*
  * The discovery listing slug resolution reads (`useProjects`), as a store a row can change: the real
@@ -284,22 +322,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({
-    children,
-    projectId,
-    requestedChatId,
-    createdChatId,
-    onFocusedChatResolved,
-  }: React.PropsWithChildren<{
-    projectId: string;
-    requestedChatId?: string;
-    createdChatId?: string;
-    onFocusedChatResolved?: (chatId: string) => void;
-  }>) => {
+  SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     projectProviderInputs.push(projectId);
-    projectProviderChatInputs.push({ requestedChatId, createdChatId });
-    projectProviderRequests.push({ projectId, requestedChatId, createdChatId });
-    focusedChatResolvers.set(projectId, onFocusedChatResolved);
     return <div>{children}</div>;
   },
   useProject: () => ({
@@ -436,18 +460,6 @@ vi.mock('#hooks/use-projects.js', () => ({
       () => listing.snapshot,
     ),
 }));
-/* Pass-through: S34's native kernel id is what a retained subtree hands its kernel options. */
-vi.mock('#hooks/use-project-kernel-options.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof KernelOptionsModule>();
-  return {
-    ...actual,
-    useProjectKernelOptions: (options: Parameters<typeof actual.useProjectKernelOptions>[0]) => {
-      kernelOptionInputs.push({ projectId: options.projectId, nativeKernelId: options.nativeKernelId });
-      return actual.useProjectKernelOptions(options);
-    },
-  };
-});
-
 const routeModule = await import('./project-route.js');
 const intentModule = await import('./project-route-intent.js');
 const sessionsModule = await import('./project-live-sessions.js');
@@ -615,7 +627,6 @@ beforeEach(() => {
   editorObservers.clear();
   editorIsIdle = true;
   projectProviderRequests.length = 0;
-  focusedChatResolvers.clear();
   editorMarker.mounts = 0;
   editorMarker.unmounts = 0;
   noticeKinds.length = 0;
@@ -2038,7 +2049,7 @@ describe('A0.2 the same project keeps its editor (I20, D7)', () => {
     noticeKinds.length = 0;
 
     await act(async () => {
-      focusedChatResolvers.get(projectA)?.('chat-3');
+      resolveFocusedChat(projectA, 'chat-3');
       await Promise.resolve();
     });
     await flushTasks();
@@ -2046,7 +2057,8 @@ describe('A0.2 the same project keeps its editor (I20, D7)', () => {
     expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-3' });
     expect(router.location?.key).not.toBe(historyKey);
     expect(router.action).toBe('REPLACE');
-    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-3' });
+    /* A6d: the editor focused chat-3 itself, so the URL that now names it asks it for nothing again. */
+    expect(providerRequestsOf(projectA).map((request) => request.requestedChatId)).not.toContain('chat-3');
     expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
     expect(noticeKinds).toEqual([]);
     expect(publishedKinds.length).toBeGreaterThan(0);
@@ -2083,12 +2095,13 @@ describe('A0.2 the chat request reaches the provider after open (S12, route half
     expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
   });
 
-  it('should hand a retained project no chat while it is behind, and the chat it regains focus with', async () => {
+  it('should keep a retained project on its chat while it is behind, and hand it the chat it regains focus with', async () => {
     renderHost('/w/ws/alpha?chat=chat-1');
     await flushTasks();
     await navigateTo('/w/ws/beta');
     expect(focusedSessionId()).toBe(projectB);
-    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: undefined, createdChatId: undefined });
+    /* A6d (D14): the session holds its chat; the editor is no longer reset to no chat when focus leaves. */
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-1', createdChatId: undefined });
 
     await navigateTo('/w/ws/alpha?chat=chat-2');
 
@@ -2162,7 +2175,7 @@ describe('A0.2 ProjectSessionsHost (S29, S34)', () => {
     expect(globalThis.location.pathname).toBe('/w/ws/alpha');
 
     await act(async () => {
-      focusedChatResolvers.get(projectA)?.('chat-7');
+      resolveFocusedChat(projectA, 'chat-7');
       await Promise.resolve();
     });
     await flushTasks();
@@ -2200,14 +2213,15 @@ describe('A0.2 ProjectSessionsHost (S29, S34)', () => {
     renderHost('/w/ws/alpha');
     await flushTasks();
     expect(focusedSessionId()).toBe(projectA);
-    const beforeLeave = kernelIdsOf(projectA).length;
+    expect(kernelIdsOf(projectA)).toEqual(['build123d']);
 
     await navigateTo('/w/ws/beta');
 
     expect(focusedSessionId()).toBe(projectB);
-    expect(kernelIdsOf(projectA).length).toBeGreaterThan(beforeLeave);
-    expect(new Set(kernelIdsOf(projectA))).toEqual(new Set(['build123d']));
-    expect(new Set(kernelIdsOf(projectB))).toEqual(new Set([undefined]));
+    /* A6d: the session built A's runtime once, with its open request's kernel, and leaving it rebuilds nothing. */
+    expect(kernelIdsOf(projectA)).toEqual(['build123d']);
+    expect(runtimes.filter((runtime) => runtime.input.projectId === projectA && !runtime.isClosed())).toHaveLength(1);
+    expect(kernelIdsOf(projectB)).toEqual([undefined]);
   });
 });
 
@@ -2465,7 +2479,7 @@ describe('round 9: the editor corrects a chat the URL named but could not focus 
     expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-gone' });
 
     await act(async () => {
-      focusedChatResolvers.get(projectA)?.('chat-9');
+      resolveFocusedChat(projectA, 'chat-9');
       await Promise.resolve();
     });
     await flushTasks();

@@ -22,7 +22,7 @@
  * @module
  */
 import { createCallbackLogic } from 'xstate';
-import type { CallbackActorLogic, EventObject } from 'xstate';
+import type { CallbackActorLogic } from 'xstate';
 import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import type { OpenFile } from '@taucad/ui-core/types/editor.types';
@@ -580,8 +580,3 @@ export const workbenchAdapterLogic: CallbackActorLogic<WorkbenchAdapterEvent, Wo
   createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input, receive }) =>
     runWorkbenchAdapter(input, receive),
   );
-
-/** Narrow a host's event to a workbench dock event. */
-export const isWorkbenchDockEvent = (event: EventObject): event is WorkbenchDockReady | WorkbenchDockReleased =>
-  (event.type === 'dockReady' || event.type === 'dockReleased') &&
-  (event as Partial<WorkbenchDockReady>).adapter === 'workbench';

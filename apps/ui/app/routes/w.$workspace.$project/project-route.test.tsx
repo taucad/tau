@@ -1412,6 +1412,25 @@ describe('project route session identity', () => {
     expect(unmounts).not.toContain(projectA);
   });
 
+  it('should keep a held notice for another project usable while the project it left stays inert (round 2)', async () => {
+    getProjectRouteAccess.mockImplementation(async (projectId: string) =>
+      projectId === projectA ? ready(projectA) : trashed(projectB),
+    );
+    const { Provider, view } = renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+
+    currentProjectId = projectB;
+    view.rerender(
+      <Provider>
+        <div>content</div>
+      </Provider>,
+    );
+
+    const notice = await screen.findByText('Notice: trashed');
+    expect(notice.closest('[inert]')).toBeNull();
+    expect(screen.getByTestId('project-session').closest('[inert]')).not.toBeNull();
+  });
+
   it('should re-resolve access when the library revision changes (W2)', async () => {
     /*
      * Finding 2: deleting the open project closes its session and writes

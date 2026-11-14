@@ -8,8 +8,14 @@
  * Slugs are resolved in render by the library's slug selector, and a renamed project keeps its path's project until
  * the listing names it again (the retained route). Everything else about the route belongs to focus.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useLocation, useMatch, useNavigate } from 'react-router';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  UNSAFE_DataRouterContext,
+  UNSAFE_DataRouterStateContext,
+  useLocation,
+  useMatch,
+  useNavigate,
+} from 'react-router';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
@@ -143,19 +149,53 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
   const navigate = useNavigate();
   const [, setCloudOpen] = useSearchParameter(searchParameterName.cloudOpen, cloudOpenParameter);
   const projectId = route.committed?.projectId;
-  const canonicalSlugs = useCanonicalProjectUrlCorrection(projectId);
+  /* The app's data router, read live when a command arrives; a test's plain router has none. */
+  const router = useContext(UNSAFE_DataRouterContext)?.router;
+  /* Under the app's router, which drives the address bar, the canonical correction writes only while the bar still
+   * shows this commit's path (I2). */
+  const canonicalSlugs = useCanonicalProjectUrlCorrection(
+    projectId,
+    '',
+    router === undefined ? undefined : location.pathname,
+  );
   const slugs = route.committed?.slugs;
   const currentUrl = `${location.pathname}${location.search}`;
-  const latest = useRef({ canonicalSlugs, currentUrl, navigate, projectId, setCloudOpen, slugs });
+  const navigationState = useContext(UNSAFE_DataRouterStateContext)?.navigation.state;
+  const latest = useRef({
+    canonicalSlugs,
+    currentUrl,
+    navigate,
+    pathname: location.pathname,
+    projectId,
+    setCloudOpen,
+    slugs,
+  });
+  /* A command that arrives while the router is moving waits for the commit that ends the move, then is checked again. */
+  const deferred = useRef<FocusRouteCommand | undefined>(undefined);
   /* A layout effect: every one runs before any passive effect, so the commit's report to focus, and the commands
    * focus answers it with, find this commit's route here. */
   useLayoutEffect(() => {
-    latest.current = { canonicalSlugs, currentUrl, navigate, projectId, setCloudOpen, slugs };
-  }, [canonicalSlugs, currentUrl, navigate, projectId, setCloudOpen, slugs]);
+    latest.current = {
+      canonicalSlugs,
+      currentUrl,
+      navigate,
+      pathname: location.pathname,
+      projectId,
+      setCloudOpen,
+      slugs,
+    };
+  }, [canonicalSlugs, currentUrl, navigate, location.pathname, projectId, setCloudOpen, slugs]);
   const [sink] = useState(() => (command: FocusRouteCommand): void => {
     const { current } = latest;
     if (command.projectId !== current.projectId) {
       // MC-R18: a command about a project the route has left.
+      return;
+    }
+    /* I2: a navigation the person started (a click to another project) is in flight, or has moved the router past the
+     * commit this sink last saw. A replace now would cancel it and land the person back here, so the command waits. */
+    const live = router?.state;
+    if (live !== undefined && (live.navigation.state !== 'idle' || live.location.pathname !== current.pathname)) {
+      deferred.current = command;
       return;
     }
     if (command.type === 'cloudOpenTaken') {
@@ -173,5 +213,13 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
       void current.navigate(target, { replace: true });
     }
   });
+  /* After the latest-route effect above: the replay reads the commit that ended the move. */
+  useLayoutEffect(() => {
+    const command = deferred.current;
+    if (command !== undefined && navigationState !== 'loading' && navigationState !== 'submitting') {
+      deferred.current = undefined;
+      sink(command);
+    }
+  }, [currentUrl, navigationState, projectId, sink]);
   return sink;
 }

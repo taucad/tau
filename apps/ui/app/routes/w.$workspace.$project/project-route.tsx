@@ -178,7 +178,9 @@ export function ProjectRouteGate({
   return (
     <ProjectRouteStateContext.Provider value={state}>
       <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
-        <div className='contents' inert={retained || undefined} aria-busy={moving}>
+        {/* A move in progress holds the whole page; a held answer only the project it left, so its notice and the
+            page around it stay usable (round 2). */}
+        <div className='contents' inert={moving || undefined} aria-busy={moving}>
           <SharedWorkerGate
             shouldReportFailure={isProjectRoute}
             withShellFrame={isProjectRoute}
@@ -190,15 +192,17 @@ export function ProjectRouteGate({
             {/* The shell is inside the boundary below once the editor is live, so a null fallback
                 would blank the window while the workspace chunk loads. */}
             {liveProjectIds.length > 0 ? (
-              <Suspense fallback={isShellHostedByFocusedSession ? <WorkspaceSkeleton withShellFrame /> : null}>
-                <LiveProjectSessions
-                  focused={focused}
-                  liveProjectIds={liveProjectIds}
-                  onFocusedChatResolved={retained ? undefined : handleFocusedChatResolved}
-                  onFlushRegistration={bindings.registerLeaveFlush}
-                  retainedKernels={nativeKernels}
-                />
-              </Suspense>
+              <div className='contents' inert={retained || undefined}>
+                <Suspense fallback={isShellHostedByFocusedSession ? <WorkspaceSkeleton withShellFrame /> : null}>
+                  <LiveProjectSessions
+                    focused={focused}
+                    liveProjectIds={liveProjectIds}
+                    onFocusedChatResolved={retained ? undefined : handleFocusedChatResolved}
+                    onFlushRegistration={bindings.registerLeaveFlush}
+                    retainedKernels={nativeKernels}
+                  />
+                </Suspense>
+              </div>
             ) : null}
             {isProjectRoute && !isShellHostedByFocusedSession ? children : undefined}
           </SharedWorkerGate>

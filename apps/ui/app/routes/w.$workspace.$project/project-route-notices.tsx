@@ -259,7 +259,6 @@ const restoreFromTrash = async (
   }
 };
 
-/** Whether the project's session failed to close and holds its slot (read when the person asks to reopen it). */
 /** The project's session child when its close failed: it holds its slot until a reopen closes it again. */
 const selectFailedSession = (sessions: SessionsActorRef, projectId: string): ProjectSessionActorRef | undefined => {
   const { status, refs } = sessions.getSnapshot().context;

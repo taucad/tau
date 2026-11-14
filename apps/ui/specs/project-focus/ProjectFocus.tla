@@ -98,6 +98,8 @@
 \* (`runtime/app-runtime-focus.ts`): registry facts reach focus after the open's answer they follow, every
 \* epoch reaches the registry before an open that names it, and a resume the registry drops as stale is
 \* answered `dropped`. Those ports are the environment this spec assumes, so they join the drift sources.
+\* The route sink applies a `chatShown` only once the router is at rest on the commit focus answered (I2):
+\* the model's route steps are atomic, and the sink's deferral is what keeps the app's ones so.
 \* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 

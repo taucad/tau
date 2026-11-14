@@ -92,12 +92,21 @@ export function useProjectUrl(projectId: string | undefined): string {
  *
  * @param projectId - The open project, once resolved.
  * @param suffix - Path appended to the canonical project URL (e.g. `/preview`).
+ * @param from - The path the project was resolved from. When given, the correction writes only while the address
+ * bar still shows it: a person who navigated on before the slugs resolved keeps the URL they went to (I2).
  */
-export function useCanonicalProjectUrlCorrection(projectId: string | undefined, suffix = ''): ProjectSlugs | undefined {
+export function useCanonicalProjectUrlCorrection(
+  projectId: string | undefined,
+  suffix = '',
+  from?: string,
+): ProjectSlugs | undefined {
   const canonical = useProjectSlugs(projectId);
   const canonicalSlugs = canonical.status === 'resolved' ? canonical.value : undefined;
   const target = canonicalSlugs ? `${projectUrl(canonicalSlugs)}${suffix}` : undefined;
   useEffect(() => {
+    if (from !== undefined && globalThis.location.pathname !== from) {
+      return;
+    }
     if (target !== undefined && globalThis.location.pathname !== target) {
       globalThis.history.replaceState(
         globalThis.history.state,
@@ -105,7 +114,7 @@ export function useCanonicalProjectUrlCorrection(projectId: string | undefined, 
         `${target}${globalThis.location.search}${globalThis.location.hash}`,
       );
     }
-  }, [target]);
+  }, [target, from]);
 
   return canonicalSlugs;
 }

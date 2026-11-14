@@ -123,6 +123,10 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         if: steps.cache.outputs.cache-hit != 'true'
+        # A private install: the runner image's shared /usr/share/dotnet now carries a newer SDK and
+        # muxer, which a bare `dotnet --version` and the toolchain identity would otherwise resolve.
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
         with:
           dotnet-version: '11.0.100-rc.3.26522.148'
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

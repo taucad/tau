@@ -60,12 +60,13 @@ describe('packaged Terminal smoke', () => {
     /*
      * The Terminal reads the project's real git store, read-only, with the git the app bundles: `git status` answers
      * once Tau has created the store. The packaged bundle's own `bin` folder leads the launch's `PATH`; on Linux the
-     * shell runs that git, while a macOS login Zsh lets `/etc/zprofile` move the system folders ahead of it.
+     * shell runs that git, while a macOS login Zsh lets `/etc/zprofile` move the system folders ahead of it. The exit
+     * file is written last, so every file the row reads exists once it appears.
      */
     await expect.poll(() => existsSync(join(root, '.git', 'HEAD')), { timeout: 30_000 }).toBe(true);
     await typeTerminalCommand(
       session.page,
-      `git status --porcelain > git-status.txt 2>&1; printf '%s' "$?" > git-status-exit.txt; git --version > git-version.txt 2>&1; command -v git > git-path.txt; printf '%s' "$PATH" > git-search-path.txt`,
+      `git status --porcelain > git-status.txt 2>&1; statusCode=$?; git --version > git-version.txt 2>&1; command -v git > git-path.txt; printf '%s' "$PATH" > git-search-path.txt; printf '%s' "$statusCode" > git-status-exit.txt`,
     );
     await expectTerminalFile(root, 'git-status-exit.txt', '0');
     expect(await readFile(join(root, 'git-status.txt'), 'utf8')).not.toMatch(/fatal|error/iu);

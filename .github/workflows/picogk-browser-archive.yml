@@ -37,15 +37,15 @@ env:
   # native timed on the same runner, and #40, which judges only threaded paths against the 2x ceiling. `dotnet/inputs.json` pins the
   # archive's own picovoxel sources to a commit on main, and every checkout that reads the pinned tree
   # fetches full history.
-  PICOVOXEL_REF: 9440db9a52109efbc5a4481cb25022328d9eaf31
+  PICOVOXEL_REF: 1731db54e0a871f63a8949de46b56c203cc4f6cc
   PACKAGE_VERSION: 0.2.1
   # Gyroid proves every run; the scheduled run, or a dispatch that asks for it, proves HeatX.
   SUBJECT: ${{ github.event_name == 'schedule' && 'heatx' || inputs.subject || 'gyroid' }}
 jobs:
   archive:
-    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@9440db9a52109efbc5a4481cb25022328d9eaf31
+    uses: taucad/picovoxel/.github/workflows/dotnet-archive.yml@1731db54e0a871f63a8949de46b56c203cc4f6cc
     with:
-      picovoxel-ref: 9440db9a52109efbc5a4481cb25022328d9eaf31
+      picovoxel-ref: 1731db54e0a871f63a8949de46b56c203cc4f6cc
       adapter-path: packages/plugins/picogk/dotnet/native
 
   # Everything a parity run measures or compares against, built once: the two browser apps and the

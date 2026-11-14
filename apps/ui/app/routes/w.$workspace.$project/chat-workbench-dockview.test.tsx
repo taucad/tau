@@ -568,9 +568,9 @@ describe('FileEditor routing', () => {
 
     render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
-    const placeholder = screen.getByRole('status');
+    const placeholder = screen.getByRole('group', { name: 'Loading mystery.dat' });
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
-    expect(placeholder).toHaveTextContent('Loading mystery.dat');
+    expect(placeholder).toHaveAttribute('aria-busy', 'true');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
   });
 
@@ -580,7 +580,7 @@ describe('FileEditor routing', () => {
     render(<FileEditor paneId='hidden-pane' filePath='main.ts' panelApi={api} />);
 
     await act(async () => undefined);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).toHaveAttribute('aria-busy', 'true');
     expect(mockEditorRuntimeImported).not.toHaveBeenCalled();
     expect(mockLoadEditorSyntax).not.toHaveBeenCalled();
     expect(mockEditorViewMounted).not.toHaveBeenCalled();
@@ -591,7 +591,7 @@ describe('FileEditor routing', () => {
     mockUseFileContent.mockImplementation(() => content);
     const pane = render(<FileEditor paneId='source-pane' filePath='main.ts' panelApi={mockPanelApi} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).toHaveAttribute('aria-busy', 'true');
     await waitFor(() => {
       expect(mockEditorRuntimeImported).toHaveBeenCalledOnce();
       expect(mockLoadEditorSyntax).toHaveBeenCalledWith('typescript', expect.any(AbortSignal));
@@ -609,6 +609,130 @@ describe('FileEditor routing', () => {
       />,
     );
     expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
+  });
+
+  /* Loading states UX blueprint P-i: the pane owns one "Opening file" wait, in its header's slot (the first child of
+     its file actions), which survives the body's move from the loading branch to the routed viewer and keeps its
+     500 ms minimum there. */
+  it('keeps one Opening file wait in the header slot across the move from loading to the file’s text', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    let content: FileContentResult = { kind: 'loading' };
+    mockUseFileContent.mockImplementation(() => content);
+    const pane = render(<FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).toHaveAttribute('data-state', 'waiting');
+    expect(slot).toHaveTextContent('Opening file…');
+    // In the header's actions group, first, as the inline skin: nothing overlays the code area.
+    const actions = screen.getByRole('group', { name: 'File actions for main.ts' });
+    expect(actions.firstElementChild).toContainElement(slot as HTMLElement);
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).not.toContainElement(slot as HTMLElement);
+    expect(slot?.closest('.absolute')).toBeNull();
+
+    now.mockReturnValue(1300);
+    content = { kind: 'text', content: new TextEncoder().encode('let ready = true;') };
+    pane.rerender(
+      <FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} parameters={{ filePath: 'main.ts' }} />,
+    );
+    expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
+    // The same node, still first in the actions: shown at 1,100 ms, it holds until 1,600 ms, 300 ms after the text.
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(screen.getByRole('group', { name: 'File actions for main.ts' }).firstElementChild).toContainElement(
+      slot as HTMLElement,
+    );
+    expect(slot).toHaveAttribute('data-state', 'holding');
+    expect(
+      slot
+        ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+        ?.style.getPropertyValue('--wait-hide-delay'),
+    ).toBe('300ms');
+  });
+
+  it('reads the file again on Retry, times a new wait from it, and keeps focus in the pane', async () => {
+    const user = userEvent.setup();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    const retry = vi.fn();
+    mockUseFileContent.mockReturnValue({ kind: 'loading', retry });
+    const pane = render(<FileEditor paneId='retry-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    now.mockReturnValue(20_000);
+    // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toContainElement(pane.container.querySelector('[data-slot="wait-indicator"]'));
+    const body = pane.container.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
+  /* A wait that starts late in an untouched page (a record apply opening a file) starts now, never at navigation. */
+  it('times a pane wait that starts late without a gesture from its own start, and does not announce it', () => {
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, {
+        userActivation: { isActive: false, hasBeenActive: false },
+      }),
+    );
+    const now = vi.spyOn(performance, 'now').mockReturnValue(30_000);
+    onTestFinished(() => {
+      now.mockRestore();
+      vi.unstubAllGlobals();
+    });
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    const pane = render(<FileEditor paneId='late-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    const revealDelay = slot
+      ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+      ?.style.getPropertyValue('--wait-reveal-delay');
+    expect(Number.parseFloat(revealDelay ?? '')).toBeGreaterThanOrEqual(1000);
+    expect(slot).not.toHaveAttribute('role');
+  });
+
+  /* A Retry is a gesture: the new wait is its own announcement group even in a pane restored without one. */
+  it('announces the wait a Retry starts in a pane restored without a gesture', async () => {
+    const user = userEvent.setup();
+    const activation = { isActive: false, hasBeenActive: false };
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator) as Navigator, { userActivation: activation }));
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+      vi.unstubAllGlobals();
+    });
+    const retry = vi.fn();
+    mockUseFileContent.mockReturnValue({ kind: 'loading', retry });
+    const pane = render(<FileEditor paneId='restored-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).not.toHaveAttribute('role');
+
+    now.mockReturnValue(10_100);
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('role', 'status');
+  });
+
+  it('announces the wait of a pane a person opened', () => {
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, {
+        userActivation: { isActive: true, hasBeenActive: true },
+      }),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    const pane = render(<FileEditor paneId='opened-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
   });
 
   it('does not rerender for unrelated or unchanged open file entries', () => {

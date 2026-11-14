@@ -1,27 +1,37 @@
 import path from 'node:path';
 import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { driftManifestProblems, hashFiles } from '@taucad/formal/drift';
+import { driftManifestProblems, hashFiles, machineActions, machineAlphabet } from '@taucad/formal/drift';
+import { libraryAccessMachine, libraryAccessQueryMachine } from '#machines/library-access.machine.js';
+import { libraryDiscoveryMachine } from '#machines/library-discovery.machine.js';
+import { libraryRecoveryMachine } from '#machines/library-recovery.machine.js';
 
 const specs = import.meta.dirname;
 const workspace = path.resolve(specs, '../../../..');
 const configs = readdirSync(specs)
   .filter((file) => file.endsWith('.cfg'))
   .sort();
+const machines = [libraryDiscoveryMachine, libraryRecoveryMachine, libraryAccessMachine, libraryAccessQueryMachine];
 
 /*
- * LibraryCatalog.tla has no machine yet: A3a adds `library-discovery`, `library-recovery` and
- * `library-access`, their alphabets, versions and `meta.tla` actions, and a conformance replay of
- * `LibraryCatalog/suite.json`. Until then the manifest ties the model to the code its `today`
- * configurations describe.
+ * The manifest ties the model to the machines that refine it (their alphabets, versions and `meta.tla` actions, and
+ * their files) and to the code its `today` configurations describe. The conformance replay of
+ * `LibraryCatalog/suite.json` is `library-catalog.conformance.test.ts`.
  */
 describe('LibraryCatalog.tla implementation correspondence', () => {
-  it('should require review of the model when the library code it describes changes', () => {
+  it('should require review of the model when the library machines or the code it describes change', () => {
     expect(
       driftManifestProblems(path.join(specs, 'LibraryCatalog/drift.json'), {
-        alphabet: [],
+        alphabet: machineAlphabet(machines),
+        versions: Object.fromEntries(machines.map((machine) => [machine.id, String(machine.version)])),
+        actions: machineActions(machines),
         tables: hashFiles(specs, ['expected.json', ...configs]),
-        sources: hashFiles(workspace, ['apps/ui/app/hooks/use-project-manager.tsx']),
+        sources: hashFiles(workspace, [
+          'apps/ui/app/hooks/use-project-manager.tsx',
+          'apps/ui/app/machines/library-discovery.machine.ts',
+          'apps/ui/app/machines/library-recovery.machine.ts',
+          'apps/ui/app/machines/library-access.machine.ts',
+        ]),
         specs: hashFiles(specs, ['LibraryCatalog.tla']),
       }),
     ).toEqual([]);

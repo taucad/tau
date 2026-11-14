@@ -36,6 +36,27 @@ export const WaitClockProvider = (properties: {
   readonly children?: ReactNode;
 }): React.JSX.Element => createElement(waitClockContext.Provider, { value: properties.clock }, properties.children);
 
+/**
+ * The clock waits are measured on here: the nearest {@link WaitClockProvider}'s, or the performance timeline. For a
+ * region that records when its own wait started (a gesture, a Retry) on the same clock its indicator reads.
+ *
+ * @returns The provider's clock, or one that reads `performance.now()`.
+ * @public
+ *
+ * @example <caption>Record a Retry's time on the wait clock</caption>
+ * ```typescript
+ * import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+ *
+ * export const useRetryTime = (): (() => number) => {
+ *   const clock = useWaitClockSource();
+ *   return () => clock.now();
+ * };
+ * ```
+ */
+export function useWaitClockSource(): WaitClock {
+  return useContext(waitClockContext);
+}
+
 const subscribeToNothing = (): (() => void) => () => undefined;
 const isClient = (): boolean => true;
 const isServer = (): boolean => false;

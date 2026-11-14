@@ -2,8 +2,8 @@
  * `libraryAccess`: the library's answer to a route's question "may this project open, and as what?" (app state
  * orchestration charter D2, D3, D4, D10, D13, D23; invariants I4, I17, I18; plan § 4 A3a; inventory L8).
  *
- * Route access is not a function of state. Today's `getProjectRouteAccess` (`use-project-manager.tsx` lines 2440 to
- * 2566) awaits up to three storage reads and a discovery pass, and starts over when the discovery epoch moved under
+ * Route access is not a function of state. Today's `getProjectRouteAccess` (`use-project-manager.tsx` at `7918b118`, lines
+ * 2440 to 2572) awaits up to three storage reads and a discovery pass, and starts over when the discovery epoch moved under
  * one. This machine ports it step for step, one query child per request id, and keeps the
  * `apps/ui/specs/library-catalog/LibraryCatalog.tla` README's rules 8 and 9:
  *
@@ -35,8 +35,8 @@
  * current, the journal's readiness, the recovery set and each row start) are owned by the discovery and recovery
  * machines and reach this one as events, which the library service relays as they happen (A3b); this machine keeps
  * the latest of each only to compare against, and they are rebuilt from those owners on every reload (MC-R5). The
- * storage reads, the discovery pass and the access span are injected ports, so tests need no worker. Nothing in the
- * app runs this machine yet: A3b wires it.
+ * storage reads, the discovery pass and the access span are injected ports, so tests need no worker. `ProjectLibrary`
+ * runs it (A3b).
  *
  * @module
  */
@@ -107,7 +107,7 @@ export type LibraryAccessEvent =
   | { type: 'accessCancelled'; requestId: string }
   /** A query's report; matched by `requestId` and `gen` (rule 9). */
   | { type: 'queryAnswered'; requestId: string; gen: number; epoch: number; answer: AccessAnswer; cacheHits: number }
-  /** A query reached its pass after the bootstrap pass failed: run that pass again, as today's next call does. */
+  /** A query needs the bootstrap pass: it has not run (A3b), or it failed and runs again, as today's next call does. */
   | { type: 'queryWantsDiscovery'; requestId: string; gen: number }
   | AccessFactEvent;
 
@@ -550,6 +550,15 @@ export const libraryAccessQueryMachine = setup({
           if (verification.status === 'verified') {
             return { target: 'ensuring', context: { project: verification.project } };
           }
+          // The question goes on to a pass, which waits for the bootstrap pass: the parent runs it now, as today's
+          // `ensureDiscoveryReady` after a `discovery-required` verification.
+          if (!context.facts.discoveryReady && context.facts.discoveryError === undefined) {
+            enq.sendTo(context.parentRef, {
+              type: 'queryWantsDiscovery',
+              requestId: context.requestId,
+              gen: context.gen,
+            });
+          }
           return { target: 'discovering' };
         }),
         onError: portFailed,
@@ -791,10 +800,17 @@ export const libraryAccessMachine = setup({
       const { [event.requestId]: _answered, ...questions } = context.questions;
       return { context: { questions } };
     }),
-    /* The question's query reached its pass after the bootstrap pass failed: run it again for every open question. */
+    /*
+     * The question's query needs the bootstrap pass: it has not run (a `discovery-required` verification), or it failed
+     * before the query reached its pass, when it runs again for every open question.
+     */
     queryWantsDiscovery: refines('Unmodelled', ({ context, event }, enq: Emit & SendTo) => {
       const question = context.questions[event.requestId];
-      if (question?.gen !== event.gen || context.facts.discoveryError === undefined) {
+      if (question?.gen !== event.gen || context.facts.discoveryReady) {
+        return {};
+      }
+      if (context.facts.discoveryError === undefined) {
+        enq.emit({ type: 'discoveryWanted' });
         return {};
       }
       const retry = { type: 'discoveryRetrying' } as const;

@@ -2,10 +2,9 @@
 /**
  * Discovery rows of the library (charter I7, I9; app-state orchestration A0.4).
  *
- * Characterisation of `ProjectManagerProvider` as it is today, except where a
- * row is written `it.fails`: there today's code breaks the invariant its title
- * names, and the failure is that invariant's own assertion. The fixing lane
- * flips the row and never deletes it.
+ * Characterisation of `ProjectManagerProvider`. A0.4 wrote the rows where the
+ * pre-A3b code broke the invariant its title names as `it.fails`; A3b, which
+ * wired the library machines, flipped them to `it`.
  *
  * Ordering is held by deferred promises. `settle` drains every pending
  * continuation through the fake clock, which fires nothing: none of these
@@ -29,7 +28,7 @@ import type { Project } from '@taucad/types';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
-import type { ProjectListing } from '#hooks/use-project-manager.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -378,7 +377,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
       expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
     });
 
-    it.fails.each(['scans', 'makes its last read before writing'] as const)(
+    it.each(['scans', 'makes its last read before writing'] as const)(
       'I7: should not write route configs from a pass superseded by a newer epoch while it %s',
       async (moment) => {
         // The stale pass finds the project with no route config, so applying it upserts one.
@@ -411,7 +410,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
       },
     );
 
-    it.fails('I7: should not prune orphans from a pass whose epoch moved while it readied the worker', async () => {
+    it('I7: should not prune orphans from a pass whose epoch moved while it readied the worker', async () => {
       // The first pass holds an orphan; once the epoch moves, the current pass holds none.
       mockGetAllProjectFileSystemConfigs
         .mockResolvedValueOnce([projectConfig, orphanConfig])
@@ -436,7 +435,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
       expect(mockDeleteProjectResources).not.toHaveBeenCalled();
     });
 
-    it.fails.each(['scans', 'enriches its listing'] as const)(
+    it.each(['scans', 'enriches its listing'] as const)(
       'I7: should not publish a workspace catalog from a pass superseded by a newer epoch while it %s',
       async (moment) => {
         const stale = moment === 'scans' ? heldScan(validProjectDiscovery) : undefined;

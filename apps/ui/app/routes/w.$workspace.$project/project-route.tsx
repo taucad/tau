@@ -19,7 +19,7 @@ import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { Loader } from '@taucad/ui/components/loader';
 import {
   deriveProjectRouteState,

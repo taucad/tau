@@ -2,10 +2,9 @@
 /**
  * Recovery rows of the library (charter I8; app-state orchestration A0.4).
  *
- * Characterisation of `ProjectManagerProvider` as it is today, except where a
- * row is written `it.fails`: there today's code breaks the invariant its title
- * names, and the failure is that invariant's own assertion. The fixing lane
- * flips the row and never deletes it.
+ * Characterisation of `ProjectManagerProvider`. A0.4 wrote the rows where the
+ * pre-A3b code broke the invariant its title names as `it.fails`; A3b, which
+ * wired the library machines, flipped them to `it`.
  *
  * Ordering is held by deferred promises. `settle` drains every pending
  * continuation through the fake clock, which fires nothing: none of these
@@ -566,7 +565,7 @@ describe('useProjectManager recovery (I8)', () => {
       });
     });
 
-    it.fails('I8: should not spend replay attempts on root changes while the workspace is still gone', async () => {
+    it('I8: should not spend replay attempts on root changes while the workspace is still gone', async () => {
       useWorkspaceRow();
       discoverWorkspaceWhileConnected();
       const { result } = await bootstrap();
@@ -668,7 +667,7 @@ describe('useProjectManager recovery (I8)', () => {
       expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
     });
 
-    it.fails.each(['the bootstrap replay', 'a retry after the workspace returns'] as const)(
+    it.each(['the bootstrap replay', 'a retry after the workspace returns'] as const)(
       'I8: should not journal a permanent delete of the project while %s is in flight',
       async (replaying) => {
         if (replaying === 'a retry after the workspace returns') {
@@ -702,5 +701,96 @@ describe('useProjectManager recovery (I8)', () => {
         await act(async () => deletion);
       },
     );
+  });
+
+  describe('the recovery projection', () => {
+    it('I8: should hold each row as plain data: its storage keys, never the operation it stands for (MC-R5)', async () => {
+      useWorkspaceRow();
+      const bytes = new Uint8Array([1, 2, 3]);
+      journal = [{ ...pendingWorkspaceCreate, files: { 'main.ts': { content: bytes } } }];
+      const { result } = await bootstrap();
+
+      const [recovery] = result.current.recoveries;
+      expect(recovery).toEqual({
+        ...failedRecovery('workspace-unavailable'),
+        storage: { backend: 'webaccess', workspaceId, providerBasePath: fakeLocator.relativeDirectory },
+      });
+      // Exactly those keys, and it survives a structured clone as machine context must.
+      expect(structuredClone(recovery)).toEqual(recovery);
+    });
+  });
+
+  describe('a bootstrap pass that fails twice on a quiet device', () => {
+    /** A call's outcome, once it has one. */
+    const outcomeOf = async (promise: Promise<unknown>): Promise<PromiseSettledResult<unknown>> => {
+      const [outcome] = await Promise.allSettled([promise]);
+      return outcome;
+    };
+    /** Whether each call has settled by now: nothing else on a quiet device would wake one that has not. */
+    const settledNow = async (outcomes: ReadonlyArray<Promise<PromiseSettledResult<unknown>>>): Promise<string[]> =>
+      Promise.all(
+        outcomes.map(async (outcome) => {
+          const settled = await Promise.race([outcome, Promise.resolve(undefined)]);
+          if (settled === undefined) {
+            return 'pending';
+          }
+          return settled.status === 'fulfilled'
+            ? `answered ${(settled.value as { status: string }).status}`
+            : `rejected: ${(settled.reason as Error).message}`;
+        }),
+      );
+
+    it('I8: should leave no waiter stranded: every caller settles, and the next caller runs the pass again', async () => {
+      // A pending row makes route access wait for the bootstrap pass; no watch event or timer runs another one.
+      mockListProjectManifests
+        .mockRejectedValueOnce(new Error('scan failed'))
+        .mockRejectedValueOnce(new Error('scan failed again'));
+      const { result } = createHarness();
+      await settle();
+
+      const first = [
+        outcomeOf(result.current.getProjectRouteAccess(fakeProject.id)),
+        outcomeOf(result.current.getProjectListing()),
+        outcomeOf(
+          result.current.createProject({
+            id: fakeProject.id,
+            chat: false,
+            project: fakeProject,
+            files: {},
+            location: { kind: 'home' },
+          }),
+        ),
+        outcomeOf(result.current.permanentlyDeleteProject(fakeProject.id)),
+      ];
+      await settle();
+      // Route access answers the row it holds (A3a); every other caller learns the pass failed.
+      expect(await settledNow(first)).toEqual([
+        'answered recovering',
+        'rejected: scan failed',
+        'rejected: scan failed',
+        'rejected: scan failed',
+      ]);
+
+      const second = [
+        outcomeOf(result.current.getProjectRouteAccess(fakeProject.id)),
+        outcomeOf(result.current.getProjectListing()),
+      ];
+      await settle();
+      expect(await settledNow(second)).toEqual(['answered recovering', 'rejected: scan failed again']);
+
+      // The scan reads again: the next callers run the bootstrap pass, the row replays, and both answer.
+      await act(async () => result.current.getProjectListing());
+      await settle();
+      // The replayed row no longer quarantines its directory.
+      let listing: Awaited<ReturnType<typeof result.current.getProjectListing>> | undefined;
+      await act(async () => {
+        listing = await result.current.getProjectListing();
+      });
+      expect(listing?.projects.map(({ projectId }) => projectId)).toEqual([fakeProject.id]);
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+      });
+      expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    });
   });
 });

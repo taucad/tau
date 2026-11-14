@@ -29,7 +29,8 @@ import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace, CreateProjectOptions } from '#hooks/use-project-manager.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -3655,8 +3656,11 @@ describe('useProjectManager.createProject', () => {
       expect(mockCompletePending).not.toHaveBeenCalled();
       mockGetPendingProjectOperations.mockResolvedValue([persisted]);
       mockResumeResources.mockResolvedValueOnce([persisted.chat!]);
+      /* A3b named change (rule 5): a terminal failure is never replayed again in the tab that saw it, as a tab that
+       * had already read its journal behaved before; the next page load replays the row. */
+      const reloaded = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
       await act(async () => {
-        await result.current.getProjectListing();
+        await reloaded.result.current.getProjectListing();
       });
       await vi.waitFor(() => {
         expect(mockCompletePending).toHaveBeenCalledWith(operationId);

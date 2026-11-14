@@ -266,6 +266,19 @@ const heldRegistrations = (sequence: string[]) =>
     };
   });
 
+/** A producer an actor registers straight on the sequencer, outside React (plan § 4 A5b order row). */
+const actorProducer = (sequence: string[]) => {
+  const gate = Promise.withResolvers<void>();
+  return {
+    release: gate.resolve,
+    callback: async (phase: 'hidden' | 'pagehide'): Promise<void> => {
+      sequence.push(`producer:actor:${phase}:start`);
+      await gate.promise;
+      sequence.push(`producer:actor:${phase}:done`);
+    },
+  };
+};
+
 describe('UnloadProvider — the unload order over the S26 registrations (A0.2 item 9)', () => {
   beforeEach(() => {
     visibility = 'visible';
@@ -329,6 +342,48 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
       'session:hooks/use-revision-status.ts:pagehide:start',
       'session:hooks/use-revision-status.ts:pagehide:done',
     ]);
+  });
+  it('should settle an actor-registered producer with the React ones on hidden before any session stage (round 15)', async () => {
+    const sequence: string[] = [];
+    const registrations = heldRegistrations(sequence);
+    const actor = actorProducer(sequence);
+    const unregister = environment.sequencer.register('producer', actor.callback);
+    render(
+      <UnloadProvider sequencer={environment.sequencer}>
+        {registrations.map(({ site, stage, callback }) => (
+          <Registration key={site} stage={stage} callback={callback} />
+        ))}
+      </UnloadProvider>,
+    );
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sequence).toContain('producer:actor:hidden:start');
+    for (const producer of registrations.filter(({ stage }) => stage === 'producer')) {
+      // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
+      await act(async () => {
+        producer.release();
+        await Promise.resolve();
+      });
+    }
+    /* Every React producer is done; the actor's still holds the session stage back. */
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sequence.some((entry) => entry.startsWith('session:'))).toBe(false);
+    await act(async () => {
+      actor.release();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(sequence.at(-1)).toBe('session:hooks/use-revision-status.ts:hidden:done');
+    });
+    const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
+    expect(sequence.slice(0, firstSession)).toContain('producer:actor:hidden:done');
+    unregister();
   });
 });
 
@@ -411,5 +466,67 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     /* Quit runs the producer stage itself; the session stage is the registry's close, not `hidden`'s. */
     expect(sequence.filter((entry) => entry.startsWith('session:'))).toEqual([]);
     expect(started.getSnapshot().matches('quiesced')).toBe(true);
+  });
+  it('should settle an actor-registered producer with the React ones before the close cut on quit (round 15)', async () => {
+    const sequence: string[] = [];
+    const registrations = heldRegistrations(sequence);
+    const { registry: started } = startEnvironment({
+      registry: true,
+      desktopQuit: desktopQuit.seam,
+      clock: new StepClock(),
+    });
+    if (started === undefined) {
+      throw new Error('the environment host spawns a registry');
+    }
+    const actor = actorProducer(sequence);
+    const unregister = environment.sequencer.register('producer', actor.callback);
+    releaseServices = registerProjectSessionServices(projectId, {
+      cancelRuns: async () => undefined,
+      flushProducers: async () => undefined,
+      flushSync: async () => {
+        sequence.push('session-service:close-cut');
+      },
+      closeRuntime: async () => undefined,
+    });
+    started.send({ type: 'open', projectId });
+    render(
+      <UnloadProvider sequencer={environment.sequencer}>
+        {registrations.map(({ site, stage, callback }) => (
+          <Registration key={site} stage={stage} callback={callback} />
+        ))}
+        <SessionsProvider actor={started}>
+          <span>app</span>
+        </SessionsProvider>
+      </UnloadProvider>,
+    );
+
+    await act(async () => {
+      desktopQuit.ask?.('quit-attempt');
+      await Promise.resolve();
+    });
+    expect(sequence).toContain('producer:actor:hidden:start');
+    for (const producer of registrations.filter(({ stage }) => stage === 'producer')) {
+      // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
+      await act(async () => {
+        producer.release();
+        await Promise.resolve();
+      });
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sequence).not.toContain('session-service:close-cut');
+    expect(started.getSnapshot().matches('ready')).toBe(true);
+    await act(async () => {
+      actor.release();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(desktopQuit.answers).toEqual(['quit-attempt:false']);
+    });
+    const cut = sequence.indexOf('session-service:close-cut');
+    expect(sequence.indexOf('producer:actor:hidden:done')).toBeGreaterThan(-1);
+    expect(sequence.indexOf('producer:actor:hidden:done')).toBeLessThan(cut);
+    unregister();
   });
 });

@@ -10,8 +10,8 @@ import type { FileManagerActor } from '#runtime/file-manager-host.js';
 import { openSessionFileManager } from '#runtime/session-file-manager.js';
 
 type ProbeContext = {
-  contentService: object | undefined;
-  treeService: object | undefined;
+  contentService: Record<string, unknown> | undefined;
+  treeService: Record<string, unknown> | undefined;
   error: Error | undefined;
   openFileSystemBridge: (() => never) | undefined;
 };

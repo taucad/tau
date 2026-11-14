@@ -368,7 +368,7 @@ vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
 });
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  SessionFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     useEffect(() => {
       fixtures.order.push(`mount:${projectId}`);
       return () => {

@@ -23,6 +23,14 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: async () => undefined }));
+/* A6c: the session builds its file manager through the runtime's host; jsdom has no worker, so a ready stand-in opens. */
+vi.mock('#runtime/session-file-manager.js', async (importOriginal) => {
+  const { openSessionFileManagerStandIn } = await import('#runtime/session-file-manager.fixture.js');
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    openSessionFileManager: (projectId: string) => openSessionFileManagerStandIn(projectId),
+  };
+});
 
 type Seen = { registry: unknown; session: unknown; mounts: number };
 
@@ -67,7 +75,6 @@ describe('B9: the runtime survives an owner change below the billing fence', () 
     const registryA = seen.registry as ReturnType<typeof useSessions>;
     await act(async () => {
       registryA.send({ type: 'open', projectId: 'p1' });
-      reportRegionReady('p1', 'views');
       reportRegionReady('p1', 'runtime');
       await Promise.resolve();
     });

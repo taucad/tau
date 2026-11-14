@@ -19,11 +19,7 @@ import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
-import type {
-  WorkbenchDockReady,
-  WorkbenchDockReleased,
-  WorkbenchDockSettled,
-} from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
 import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
 import type { ViewerDockReady, ViewerDockReleased } from '#workbench-records/viewer-adapter.js';
 
@@ -205,7 +201,6 @@ export type EditorStateEvent =
    * to run it, so the editor, whose open files it places, runs it as a child until the same Dockview releases it. */
   | WorkbenchDockReady
   | WorkbenchDockReleased
-  | WorkbenchDockSettled
   /* The viewer Dockview's adapter on a layout-less page, the same way (A8d). */
   | ViewerDockReady
   | ViewerDockReleased;
@@ -241,7 +236,6 @@ export const editorEventTypes = [
   'retryEnsureFocusedChat',
   'dockReady',
   'dockReleased',
-  'dockSettled',
 ] as const satisfies ReadonlyArray<EditorStateEvent['type']>;
 
 /** The events only `ready` answers: tab, chat, panel and flush verbs, and the focused-chat retry. */
@@ -543,15 +537,7 @@ export const editorMachine = setup({
       if (event.adapter === 'viewer') {
         enq.spawn(actors.viewerAdapter, { id, input: { api: event.api, ports: event.ports } });
       } else {
-        enq.spawn(actors.workbenchAdapter, { id, input: { api: event.api, dockId: event.dockId, ports: event.ports } });
-      }
-      return {};
-    },
-    // The adapter has started: it finishes its start after what its start sent has been handled.
-    dockSettled: ({ children, event }, enq) => {
-      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
-      if (adapter !== undefined) {
-        enq.sendTo(adapter, { type: 'settled' });
+        enq.spawn(actors.workbenchAdapter, { id, input: { api: event.api, ports: event.ports } });
       }
       return {};
     },

@@ -1960,6 +1960,9 @@ export const WorkbenchDockview = memo(function ({
         return undefined;
       }
       dockHost.send({ type: 'dockReady', adapter: 'workbench', dockId, api, ports });
+      // The host has spawned the adapter and finished its step: the adapter attaches now, with the layout idle, so
+      // the record applies before the reconciler adds the open files (see the adapter's `attach`).
+      selectDockAdapter(dockHost, dockId)?.send({ type: 'attach' });
       return () => {
         dockHost.send({ type: 'dockReleased', adapter: 'workbench', dockId });
       };

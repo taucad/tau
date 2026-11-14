@@ -1190,31 +1190,4 @@ describe('dock adapters on a layout-less page (A8c)', () => {
     expect([...running]).toEqual([]);
     actor.stop();
   });
-
-  // The adapter finishes its start once what its start sent has been handled: the editor answers its `dockSettled`.
-  it('should tell a started adapter to finish its start', () => {
-    const received: string[] = [];
-    const workbenchAdapter = createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(
-      ({ input, receive, sendBack }) => {
-        receive((event) => {
-          received.push(event.type);
-        });
-        sendBack({ type: 'dockSettled', adapter: 'workbench', dockId: input.dockId });
-        return () => undefined;
-      },
-    );
-    const actor = createActor(editorMachine.provide({ actors: { workbenchAdapter } }), {
-      input: { projectId: 'dock-host', requestedChatId: undefined },
-    });
-    actor.start();
-    actor.send({
-      type: 'dockReady',
-      adapter: 'workbench',
-      dockId: 'dock-1',
-      api: 'api-1' as unknown as WorkbenchDockReady['api'],
-      ports: 'ports' as unknown as WorkbenchDockReady['ports'],
-    });
-    expect(received).toEqual(['settled']);
-    actor.stop();
-  });
 });

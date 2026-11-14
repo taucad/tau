@@ -151,7 +151,7 @@ export type WorkbenchAdapterPorts = Readonly<{
 }>;
 
 /** A workbench adapter's input. The `DockviewApi` lives only here and in the closure built from it (D4). */
-export type WorkbenchAdapterInput = Readonly<{ api: DockviewApi; dockId: string; ports: WorkbenchAdapterPorts }>;
+export type WorkbenchAdapterInput = Readonly<{ api: DockviewApi; ports: WorkbenchAdapterPorts }>;
 
 /** What the workbench's own handlers tell its adapter. */
 export type WorkbenchAdapterEvent =
@@ -159,8 +159,15 @@ export type WorkbenchAdapterEvent =
   | Readonly<{ type: 'openFile'; path: string; readOnly?: boolean; placement?: PendingFilePlacement }>
   /** Something was dropped on the workbench from outside it. */
   | Readonly<{ type: 'dropped'; event: DockviewDidDropEvent }>
-  /** The host has handled what the adapter sent it at start (its attach): the rest of the start runs now. */
-  | Readonly<{ type: 'settled' }>;
+  /**
+   * The Dockview attaches its adapter once its host has spawned it (the ref callback, after `dockReady` returns). The
+   * adapter starts inside its host's `dockReady` step, where what it sends a layout host waits for that step: attached
+   * there, the layout would apply the record only after the reconciler had put every open file on the Dockview, and the
+   * apply would close the files it lacks. Attached after the step, the layout is idle and the attach's applies (the
+   * seed, and a newer record offered at attach) land inside the attach, before the reconciler runs, as when each was
+   * a component effect.
+   */
+  | Readonly<{ type: 'attach' }>;
 
 /** The Dockview hands its adapter to a host (`onReady`, through its ref callback). */
 export type WorkbenchDockReady = Readonly<{
@@ -174,13 +181,6 @@ export type WorkbenchDockReady = Readonly<{
 
 /** The Dockview that made `dockId` is gone (its ref cleanup): its adapter stops. */
 export type WorkbenchDockReleased = Readonly<{ type: 'dockReleased'; adapter: 'workbench'; dockId: string }>;
-
-/**
- * The adapter has started (`sendBack`): its host answers with `settled`, after the events the adapter's start sent it.
- * An adapter starts inside its host's `dockReady` step, so a layout host hears the adapter's attach only after that
- * step: the reconciler and the opener wait for the attach's apply, as they did when each was a component effect.
- */
-export type WorkbenchDockSettled = Readonly<{ type: 'dockSettled'; adapter: 'workbench'; dockId: string }>;
 
 /** The child id a host spawns a Dockview's adapter under. */
 export const dockAdapterId = (adapter: string, dockId: string): string => `${adapter}Adapter:${dockId}`;
@@ -250,7 +250,6 @@ type HeldApply = {
 function runWorkbenchAdapter(
   input: WorkbenchAdapterInput,
   receive: (listener: (event: WorkbenchAdapterEvent) => void) => void,
-  started: () => void,
 ): () => void {
   const { api, ports } = input;
   const { editor, dock, profile } = ports;
@@ -394,46 +393,13 @@ function runWorkbenchAdapter(
     }
   };
 
-  if (ports.connectBrowser !== undefined) {
-    disposers.push(ports.connectBrowser(api, () => isRestoring));
-  }
-
-  // Only a person-edited semantic projection writes layout.json.
-  if (writesLayout) {
-    const layoutChange = api.onDidLayoutChange(() => {
-      if (isRestoring) {
-        return;
-      }
-      try {
-        const node = dock.shownNode(api);
-        if (JSON.stringify(node) === adoptedProjection) {
-          return;
-        }
-        adoptedProjection = undefined;
-        ports.controller.personWorkbenchChanged(node);
-      } catch {
-        // Dockview can emit while a drag has a temporary unsupported intermediate group.
-      }
-    });
-    disposers.push(() => {
-      layoutChange.dispose();
-    });
-    // Registered before the opener connects below: an intent delivered at attach waits until the opener connects,
-    // and then opens on what the attach showed.
-    disposers.push(
-      ports.controller.registerWorkbench((node, applied) => {
-        applyRecordNode(node, { applied, requested: node });
-      }),
-    );
-  }
-
   const openFile = (path: string, readOnly: boolean | undefined): void => {
     closing.delete(path);
     editor.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || readOnly });
   };
   let attached = false;
   receive((event) => {
-    if (event.type === 'settled') {
+    if (event.type === 'attach') {
       if (!attached) {
         attached = true;
         attach();
@@ -457,11 +423,43 @@ function runWorkbenchAdapter(
   });
 
   /**
-   * The rest of the start, once the host has handled the attach the start sent (`settled`): the attach's apply shows
-   * first, and the reconciler then adds the open files it lacks. Run at once, the reconciler would put every open file on
-   * the Dockview, and the apply would remove the ones it lacks and close them.
+   * The adapter's subscriptions, made on `attach`, in the order the component effects made them: the registration's
+   * applies land before the reconciler adds the open files they lack.
    */
   function attach(): void {
+    if (ports.connectBrowser !== undefined) {
+      disposers.push(ports.connectBrowser(api, () => isRestoring));
+    }
+
+    // Only a person-edited semantic projection writes layout.json.
+    if (writesLayout) {
+      const layoutChange = api.onDidLayoutChange(() => {
+        if (isRestoring) {
+          return;
+        }
+        try {
+          const node = dock.shownNode(api);
+          if (JSON.stringify(node) === adoptedProjection) {
+            return;
+          }
+          adoptedProjection = undefined;
+          ports.controller.personWorkbenchChanged(node);
+        } catch {
+          // Dockview can emit while a drag has a temporary unsupported intermediate group.
+        }
+      });
+      disposers.push(() => {
+        layoutChange.dispose();
+      });
+      // Registered before the opener connects below: an intent delivered at attach waits until the opener connects,
+      // and then opens on what the attach showed.
+      disposers.push(
+        ports.controller.registerWorkbench((node, applied) => {
+          applyRecordNode(node, { applied, requested: node });
+        }),
+      );
+    }
+
     // The reconciler: the editor is the one source of the open tabs and the active one, and the Dockview converges on it.
     // It is idempotent, so a change it causes (a removed panel closing its file) finds the panels already in step.
     const editorSubscription = editor.subscribe((snapshot) => {
@@ -570,8 +568,6 @@ function runWorkbenchAdapter(
     );
   }
 
-  started();
-
   return () => {
     for (const dispose of disposers.toReversed()) {
       dispose();
@@ -581,15 +577,11 @@ function runWorkbenchAdapter(
 
 /** The workbench adapter's logic. A host spawns it with the Dockview's `dockReady` and stops it on `dockReleased`. */
 export const workbenchAdapterLogic: CallbackActorLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput> =
-  createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input, receive, sendBack }) =>
-    runWorkbenchAdapter(input, receive, () => {
-      sendBack({ type: 'dockSettled', adapter: 'workbench', dockId: input.dockId } satisfies WorkbenchDockSettled);
-    }),
+  createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input, receive }) =>
+    runWorkbenchAdapter(input, receive),
   );
 
 /** Narrow a host's event to a workbench dock event. */
-export const isWorkbenchDockEvent = (
-  event: EventObject,
-): event is WorkbenchDockReady | WorkbenchDockReleased | WorkbenchDockSettled =>
-  (event.type === 'dockReady' || event.type === 'dockReleased' || event.type === 'dockSettled') &&
+export const isWorkbenchDockEvent = (event: EventObject): event is WorkbenchDockReady | WorkbenchDockReleased =>
+  (event.type === 'dockReady' || event.type === 'dockReleased') &&
   (event as Partial<WorkbenchDockReady>).adapter === 'workbench';

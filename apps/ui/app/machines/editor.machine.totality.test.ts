@@ -83,7 +83,6 @@ const samples: Samples = {
   // A layout-less page's workbench adapter, answered at the root in every state (A8c).
   dockReady: [{ type: 'dockReady', adapter: 'workbench', dockId: 'dock_1', api: dockviewStub, ports: portsStub }],
   dockReleased: [{ type: 'dockReleased', adapter: 'workbench', dockId: 'dock_1' }],
-  dockSettled: [{ type: 'dockSettled', adapter: 'workbench', dockId: 'dock_1' }],
 };
 
 /** Every effect settles only when the traversal delivers its built-in answer. */

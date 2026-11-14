@@ -268,13 +268,9 @@ const hostDock = (event: { type: string }): void => {
       adapter.stop();
       dockAdapters.delete(id);
     }
-    const adapter = createActor(workbenchAdapterLogic, {
-      input: { api: ready.api, dockId: ready.dockId, ports: ready.ports },
-    });
+    const adapter = createActor(workbenchAdapterLogic, { input: { api: ready.api, ports: ready.ports } });
     dockAdapters.set(dockAdapterId('workbench', ready.dockId), adapter);
     adapter.start();
-    // As a host answers the adapter's `dockSettled`: nothing it sent at start is waiting here.
-    adapter.send({ type: 'settled' });
   } else if (event.type === 'dockReleased') {
     const id = dockAdapterId('workbench', (event as WorkbenchDockReleased).dockId);
     dockAdapters.get(id)?.stop();
@@ -1638,7 +1634,17 @@ describe('workbench adapter record apply (A0.3)', () => {
       onDidAddPanel: subscribe,
     });
     readyDockviewApi = dockview.api;
-    const layout = { send: vi.fn() };
+    // The layout spawns the adapter on `dockReady`; the Dockview then attaches it, once the layout's step is over.
+    const spawned = { send: vi.fn() };
+    let spawnedId: string | undefined;
+    const layout = {
+      send: vi.fn((event: { type: string; dockId?: string }) => {
+        if (event.type === 'dockReady') {
+          spawnedId = dockAdapterId('workbench', event.dockId!);
+        }
+      }),
+      getSnapshot: () => ({ children: spawnedId === undefined ? {} : { [spawnedId]: spawned } }),
+    };
     workspaceLayout.value = withLayout ? layout : undefined;
     onTestFinished(() => {
       readyDockviewApi = undefined;
@@ -1654,6 +1660,9 @@ describe('workbench adapter record apply (A0.3)', () => {
     expect(dockEvents()).toEqual([
       expect.objectContaining({ type: 'dockReady', adapter: 'workbench', api: dockview.api }),
     ]);
+    if (withLayout) {
+      expect(spawned.send.mock.calls).toEqual([[{ type: 'attach' }]]);
+    }
     view.unmount();
     expect(dockEvents().map((event) => event.type)).toEqual(['dockReady', 'dockReleased']);
     if (withLayout) {

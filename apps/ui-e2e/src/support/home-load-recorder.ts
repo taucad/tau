@@ -954,17 +954,20 @@ export const requireFrameTimes = (label: string, record: ProjectLoadRecord): voi
 export type ShownSpan = { readonly from: number; readonly to: number };
 
 /**
- * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or still on
- * screen 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it served; and
- * any span with no frame stamp, which no check could read.
+ * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or drawn in
+ * a frame more than 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it
+ * served; and any span with no frame stamp, which no check could read. Lingering is read from frames, as the span is:
+ * a long task after the hold ended delays the first frame without the words, but draws no frame with them.
  *
  * @param shown - The indicator's spans (`shownOnFrames`).
  * @param answeredAt - When the wait's answer reached the page. Milliseconds.
+ * @param frameStamps - The record's frame stamps.
  * @returns Each breaking span as `from-to`, by kind.
  */
 export const minimumBreaches = (
   shown: readonly ShownSpan[],
   answeredAt: number,
+  frameStamps: readonly number[],
 ): { readonly short: string[]; readonly lingering: string[]; readonly unstamped: string[] } => {
   const describe = (span: ShownSpan): string => `${Math.round(span.from)}-${Math.round(span.to)}`;
   return {
@@ -972,7 +975,10 @@ export const minimumBreaches = (
     unstamped: shown.filter((span) => Number.isNaN(span.from) || Number.isNaN(span.to)).map((span) => describe(span)),
     short: shown.filter((span) => span.to - span.from < 500).map((span) => describe(span)),
     lingering: shown
-      .filter((span) => span.to - Math.max(span.from + 500, answeredAt) > 1000)
+      .filter((span) => {
+        const overdue = Math.max(span.from + 500, answeredAt) + 1000;
+        return frameStamps.some((stamp) => stamp > overdue && stamp < span.to);
+      })
       .map((span) => describe(span)),
   };
 };

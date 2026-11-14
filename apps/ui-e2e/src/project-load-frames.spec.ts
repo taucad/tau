@@ -1432,9 +1432,13 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
  * from the first frame with the words to the first without.
  */
 /** A15f2's assertion for both minimums (`minimumBreaches`). */
-const expectMinimum = (label: string, shown: readonly ShownSpan[], answeredAt: number): void => {
+const expectMinimum = (
+  label: string,
+  measured: { shown: readonly ShownSpan[]; answeredAt: number; stamps: readonly number[] },
+): void => {
+  const { shown, answeredAt, stamps } = measured;
   expectMeasured(
-    minimumBreaches(shown, answeredAt),
+    minimumBreaches(shown, answeredAt, stamps),
     `${label} showed ${shown.map((span) => `${Math.round(span.from)}-${Math.round(span.to)}`).join(', ')}; the read was answered at ${answeredAt} ms`,
     { short: [], lingering: [], unstamped: [] },
   );
@@ -1479,10 +1483,11 @@ knownDefect(
       const shown = regionShownOnFrames(record, 'historyIndicator');
       precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
       const deliveries = await readWorkerDeliveries();
-      return { shown, answeredAt: deliveries.find((delivery) => delivery.method === 'revision:log')!.t };
+      const answeredAt = deliveries.find((delivery) => delivery.method === 'revision:log')!.t;
+      return { shown, answeredAt, stamps: record.frameStamps };
     },
-    assert: ({ shown, answeredAt }) => {
-      expectMinimum('History minimum: "Loading history"', shown, answeredAt);
+    assert: (measured) => {
+      expectMinimum('History minimum: "Loading history"', measured);
     },
   },
 );
@@ -1626,10 +1631,10 @@ knownDefect(
       const clickedAt = measured.record.frameStamps[measured.clicked.frame - 1]!;
       const shown = regionShownOnFrames(measured.record, 'fileIndicator', clickedAt);
       precondition(shown.length > 0, 'Opening file minimum: "Opening file" never showed');
-      return { shown, answeredAt: measured.answeredAt };
+      return { shown, answeredAt: measured.answeredAt, stamps: measured.record.frameStamps };
     },
-    assert: ({ shown, answeredAt }) => {
-      expectMinimum('Opening file minimum: "Opening file"', shown, answeredAt);
+    assert: (measured) => {
+      expectMinimum('Opening file minimum: "Opening file"', measured);
     },
   },
 );

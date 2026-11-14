@@ -338,13 +338,36 @@ impl Guard {
         if self.policy.protects(path) { refused() } else { Ok(()) }
     }
 
+    /// Refuse a name that would be created or opened for writing: a protected name, or a protected name's lock, which
+    /// git outside renames over the protected name with whatever its writer left in it.
+    fn guard_write(&self, path: &Path) -> Outcome<()> {
+        self.guard(path)?;
+        if self.policy.locks(path) { refused() } else { Ok(()) }
+    }
+
+    /// Refuse a write through a descriptor whose file is now a protected entry of the store. A descriptor opened on an
+    /// ordinary name stays open while git outside renames that file over `config`, so each write, allocation and
+    /// truncation through a held descriptor compares the file with what each protected name holds at that moment.
+    fn writable(&self, fd: RawFd) -> Outcome<()> {
+        let status = sys::stat_fd(fd).map_err(errno)?;
+        for name in self.policy.names() {
+            if let Ok(entry) = sys::stat_at(self.root.as_raw_fd(), name)
+                && entry.st_dev == status.st_dev
+                && entry.st_ino == status.st_ino
+            {
+                return refused();
+            }
+        }
+        Ok(())
+    }
+
     /// Open an existing regular file for `flags` through a path descriptor, so the object is checked before it is
     /// opened for writing: a protected name, a second name or anything but a regular file is refused, and `O_TRUNC`
     /// is applied only after the check.
     fn open_file(&self, path: &Path, flags: i32) -> Outcome<OwnedFd> {
         let writes = write_access(flags);
         if writes {
-            self.guard(path)?;
+            self.guard_write(path)?;
         }
         let (parent, name) = split(path)?;
         let directory = self.directory(parent)?;
@@ -356,7 +379,9 @@ impl Guard {
         if writes && aliased(&status) {
             return refused();
         }
-        let reopen = flags & !(libc::O_CREAT | libc::O_EXCL | libc::O_NOCTTY | libc::O_TRUNC);
+        // The magic link is followed by design, so O_NOFOLLOW (checked above: the leaf was opened without following)
+        // must not turn it into ELOOP.
+        let reopen = flags & !(libc::O_CREAT | libc::O_EXCL | libc::O_NOCTTY | libc::O_TRUNC | libc::O_NOFOLLOW);
         let proc = sys::proc_path(&object);
         // SAFETY: `proc` outlives the call. The magic link names exactly the object checked above.
         let fd = sys::check(unsafe { libc::open(proc.as_ptr(), reopen | libc::O_CLOEXEC) }).map_err(errno)?;
@@ -414,6 +439,7 @@ impl Guard {
             }
             let length = libc::off_t::try_from(size).map_err(|_| Errno::EFBIG)?;
             let truncate = |fd: RawFd| -> Outcome<()> {
+                self.writable(fd)?;
                 // SAFETY: plain call on a live descriptor.
                 sys::check(unsafe { libc::ftruncate(fd, length) }).map(|_| ()).map_err(errno)
             };
@@ -449,7 +475,7 @@ impl Guard {
         operation: impl FnOnce(RawFd, &OsStr) -> io::Result<()>,
     ) -> Outcome<FileAttr> {
         let path = self.child(parent, name)?;
-        self.guard(&path)?;
+        self.guard_write(&path)?;
         let (directory_path, leaf) = split(&path)?;
         let directory = self.directory(directory_path)?;
         operation(directory.as_raw_fd(), leaf).map_err(errno)?;
@@ -474,7 +500,10 @@ impl Guard {
         let source = self.child(from.0, from.1)?;
         let target = self.child(to.0, to.1)?;
         self.guard(&source)?;
-        self.guard(&target)?;
+        self.guard_write(&target)?;
+        if flags.contains(RenameFlags::RENAME_EXCHANGE) && self.policy.locks(&source) {
+            return refused();
+        }
         if flags.contains(RenameFlags::RENAME_WHITEOUT) {
             return refused();
         }
@@ -511,7 +540,7 @@ impl Guard {
         let target = self.child(parent, name)?;
         // No second name for a protected file, and no protected name for any file.
         self.guard(&source)?;
-        self.guard(&target)?;
+        self.guard_write(&target)?;
         let (source_parent, source_name) = split(&source)?;
         let (target_parent, target_name) = split(&target)?;
         let source_directory = self.directory(source_parent)?;
@@ -541,7 +570,7 @@ impl Guard {
         flags: i32,
     ) -> Outcome<(FileAttr, FileHandle)> {
         let path = self.child(parent, name)?;
-        self.guard(&path)?;
+        self.guard_write(&path)?;
         let (directory_path, leaf) = split(&path)?;
         let directory = self.directory(directory_path)?;
         let open = (flags | libc::O_CREAT | libc::O_NONBLOCK) & !(libc::O_TRUNC | libc::O_NOCTTY);
@@ -851,6 +880,7 @@ impl Filesystem for Guard {
         reply: ReplyWrite,
     ) {
         let result = self.with_file(fh, |fd| {
+            self.writable(fd)?;
             let offset = libc::off_t::try_from(offset).map_err(|_| Errno::EINVAL)?;
             // SAFETY: `data` outlives the call.
             sys::check_ssize(unsafe { libc::pwrite(fd, data.as_ptr().cast(), data.len(), offset) }).map_err(errno)
@@ -967,6 +997,7 @@ impl Filesystem for Guard {
         reply: ReplyEmpty,
     ) {
         let result = self.with_file(fh, |fd| {
+            self.writable(fd)?;
             let offset = libc::off_t::try_from(offset).map_err(|_| Errno::EINVAL)?;
             let length = libc::off_t::try_from(length).map_err(|_| Errno::EINVAL)?;
             // SAFETY: plain call on a live descriptor.

@@ -2345,6 +2345,10 @@ describe.runIf(enabled)('shell qualification', () => {
         expect(latest).toStrictEqual({ exitCode: 0, text: 'Save from Tau\n' });
         const afterSave = await terminal.run('git status --porcelain');
         expect(afterSave).toStrictEqual({ exitCode: 0, text: '' });
+        /* Git outside rewrites `config` mid-session: the open session reads it, and the writes below stay refused. */
+        hostGit(store, 'config', 'branch.main.remote', 'origin');
+        const rewritten = await terminal.run('git config branch.main.remote');
+        expect(rewritten).toStrictEqual({ exitCode: 0, text: 'origin\n' });
 
         const gitDirectory = join(store, '.git');
         /*
@@ -2391,6 +2395,8 @@ describe.runIf(enabled)('shell qualification', () => {
           `printf '[core]\n\thooksPath = forged\n' > .git/config.worktree`,
           `mkdir .git/remotes && printf 'URL: %s\nPush: refs/heads/main\n' "$PWD/forged" > .git/remotes/backup`,
           `mkdir .git/branches && printf '%s\n' "$PWD/forged" > .git/branches/mirror`,
+          /* The store never moves aside, so no other store can be planted where git outside looks. */
+          'mv .git .git-moved',
         ];
         /*
          * The macOS residuals (blueprint T14, T15, LP6). A case-folding APFS volume reads U+017F as `s`, U+212A as `k`
@@ -2501,6 +2507,7 @@ describe.runIf(enabled)('shell qualification', () => {
          * store had, `config` has no second name, and nothing the residual cases named was left in the work tree.
          */
         expect(existsSync(join(store, 'config-link'))).toBe(false);
+        expect(existsSync(join(store, '.git-moved'))).toBe(false);
         expect(executableDigest()).toBe(executableBefore);
         if (!writable) {
           /* A read-only store is byte for byte what the save left. */
@@ -2595,7 +2602,26 @@ describe.runIf(enabled)('shell qualification', () => {
         writeFileSync(join(store, 'a.txt'), 'one\n');
         hostGit('add', 'a.txt');
         hostGit('commit', '--quiet', '-m', 'First');
-        const configBefore = digestOf(join(gitDirectory, 'config'));
+        /* A nested store the Terminal also writes through the guard, whose folders must not move aside (B2). */
+        const nested = join(store, 'vendor', 'lib');
+        mkdirSync(nested, { recursive: true });
+        execFileSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: nested, stdio: 'ignore' });
+        const nestedConfig = digestOf(join(nested, '.git', 'config'));
+        const policy = new Set([
+          'config',
+          'hooks',
+          'commondir',
+          'config.worktree',
+          'worktrees',
+          'modules',
+          'remotes',
+          'branches',
+        ]);
+        const policyNames = (): string[] =>
+          readdirSync(gitDirectory)
+            .filter((name) => policy.has(name.normalize('NFD').toUpperCase().toLowerCase()))
+            .toSorted();
+        const namesBefore = policyNames();
         const execPath = realpathSync(hostGit('--exec-path').trim());
         const gitBin = dirname(realpathSync(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()));
         const toolchain = { roots: [...new Set([gitBin, execPath])], bins: [gitBin] };
@@ -2630,6 +2656,27 @@ describe.runIf(enabled)('shell qualification', () => {
           const config = await terminal.run(String.raw`printf '[core]\n\tfsmonitor = forged\n' >> .git/config`);
           expect(config.exitCode, config.text).not.toBe(0);
           expect(config.text).toMatch(/operation not permitted/iu);
+          /* The store and every folder above a nested one stay where they are: nothing is moved aside and replanted. */
+          for (const command of [
+            'mv .git .git-moved',
+            'mv vendor vendor-moved',
+            'mv vendor/lib vendor/lib-moved',
+            String.raw`printf '[core]
+	fsmonitor = forged
+' >> vendor/lib/.git/config`,
+          ]) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            const moved = await terminal.run(command);
+            expect(moved.exitCode, `${command}: ${moved.text}`).not.toBe(0);
+          }
+          /* Git outside rewrites config mid-session: the Terminal reads it, and still cannot write it. */
+          hostGit('config', 'branch.main.remote', 'origin');
+          const rewritten = await terminal.run('git config branch.main.remote');
+          expect(rewritten).toStrictEqual({ exitCode: 0, text: 'origin\n' });
+          const after = await terminal.run(String.raw`printf '[core]
+	fsmonitor = forged
+' >> .git/config`);
+          expect(after.exitCode, after.text).not.toBe(0);
           const hidden = await terminal.run('pgrep -x tau-store-guard');
           expect(hidden, 'the shell sees no guard process').toStrictEqual({ exitCode: 1, text: '' });
           expect(servers(), 'one guard server per Terminal').toHaveLength(1);
@@ -2638,7 +2685,11 @@ describe.runIf(enabled)('shell qualification', () => {
           await terminal.close();
         }
         expect(hostGit('log', '--format=%s')).toBe('Through the guard\nFirst\n');
-        expect(digestOf(join(gitDirectory, 'config'))).toBe(configBefore);
+        expect(readFileSync(join(gitDirectory, 'config'), 'utf8')).not.toContain('fsmonitor');
+        const configRewritten = digestOf(join(gitDirectory, 'config'));
+        expect(policyNames(), 'the store gained or lost no policy name').toStrictEqual(namesBefore);
+        expect(digestOf(join(nested, '.git', 'config'))).toBe(nestedConfig);
+        expect(['.git-moved', 'vendor-moved'].filter((name) => existsSync(join(store, name)))).toStrictEqual([]);
         expect(await eventually(() => guardProcesses().length === 0, 20_000), JSON.stringify(guardProcesses())).toBe(
           true,
         );
@@ -2658,7 +2709,7 @@ describe.runIf(enabled)('shell qualification', () => {
         } finally {
           await killed.close();
         }
-        expect(digestOf(join(gitDirectory, 'config'))).toBe(configBefore);
+        expect(digestOf(join(gitDirectory, 'config'))).toBe(configRewritten);
         hostGit('fsck', '--no-progress');
         expect(await eventually(() => guardProcesses().length === 0, 20_000), JSON.stringify(guardProcesses())).toBe(
           true,
@@ -2678,15 +2729,71 @@ describe.runIf(enabled)('shell qualification', () => {
         } finally {
           await orphaned.close();
         }
-        expect(digestOf(join(gitDirectory, 'config'))).toBe(configBefore);
+        expect(digestOf(join(gitDirectory, 'config'))).toBe(configRewritten);
         expect(leftovers()).toStrictEqual(scratchBefore);
+
+        /*
+         * The host killed while the guard serves the store (E11's shape): a separate host process opens a Terminal, the
+         * row SIGKILLs it, and no guard, bubblewrap or mount outlives it, through the launch's custody.
+         */
+        const crash = { appData: join(appData, 'e14-guard'), sessions: join(root, 'e14-guard-sessions') } as const;
+        mkdirSync(crash.sessions, { recursive: true });
+        mkdirSync(crash.appData, { recursive: true });
+        const host = spawn(
+          process.execPath,
+          [
+            '--import',
+            '@oxc-node/core/register',
+            fileURLToPath(new URL('shell-guard-crash.fixture.ts', import.meta.url)),
+          ],
+          {
+            cwd: fileURLToPath(new URL('../..', import.meta.url)),
+            env: {
+              ...process.env,
+              TAU_GUARD_CRASH_PROJECT: store,
+              TAU_GUARD_CRASH_APP_DATA: crash.appData,
+              TAU_GUARD_CRASH_SESSIONS: crash.sessions,
+              TAU_GUARD_CRASH_HOME: home,
+              TAU_GUARD_CRASH_BWRAP: bwrapPath,
+              TAU_GUARD_CRASH_GUARD: guardPath,
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
+        let hostOutput = '';
+        host.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+          hostOutput += chunk;
+        });
+        host.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+          hostOutput += chunk;
+        });
+        try {
+          expect(await eventually(() => servers().length === 1, 60_000), hostOutput).toBe(true);
+        } finally {
+          host.kill('SIGKILL');
+        }
+        await new Promise((resolve) => {
+          host.once('exit', resolve);
+        });
+        expect(
+          await eventually(() => guardProcesses().length === 0, 20_000),
+          `${JSON.stringify(guardProcesses())}\n${hostOutput}`,
+        ).toBe(true);
+        expect(readFileSync('/proc/self/mountinfo', 'utf8')).not.toContain('tau-store-guard');
+        expect(digestOf(join(gitDirectory, 'config'))).toBe(configRewritten);
+        expect(leftovers()).toStrictEqual(scratchBefore);
+        hostGit('fsck', '--no-progress');
 
         /* The agent's launches never carry guarded stores: its argv is the runtime's own, with .git denied. */
         const terminalLaunches = counting.launches.filter((launch) => launch.stdio.kind === 'terminal');
         expect(terminalLaunches.length).toBeGreaterThanOrEqual(3);
-        expect(terminalLaunches.every((launch) => launch.filesystem.guardedStores?.stores.includes(gitDirectory))).toBe(
-          true,
-        );
+        expect(
+          terminalLaunches.every(
+            (launch) =>
+              launch.filesystem.guardedStores?.stores.includes(gitDirectory) === true &&
+              launch.filesystem.guardedStores.stores.includes(join(nested, '.git')),
+          ),
+        ).toBe(true);
         const agent = await drive('e14-guard-agent', [shellCall('e14g-agent', { command: 'true' })], {
           cwd: store,
           counting,

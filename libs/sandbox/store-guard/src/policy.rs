@@ -39,6 +39,25 @@ impl Policy {
             _ => false,
         }
     }
+
+    /// Whether `relative` is a protected name's lock file (`config.lock`, `hooks.lock` and their folded spellings),
+    /// which git renames over the protected name. The guard never lets one be created or opened for writing.
+    pub fn locks(&self, relative: &Path) -> bool {
+        match relative.components().next() {
+            Some(Component::Normal(first)) => {
+                let folded = fold(first.as_bytes());
+                folded
+                    .strip_suffix(b".lock")
+                    .is_some_and(|stem| self.names.iter().any(|name| fold(name.as_bytes()) == stem))
+            }
+            _ => false,
+        }
+    }
+
+    /// The protected names, as the host passed them.
+    pub fn names(&self) -> &[OsString] {
+        &self.names
+    }
 }
 
 /// `bytes` as a case-folding volume compares it, for the policy's ASCII names: ASCII letters lowered and the three
@@ -84,6 +103,19 @@ mod tests {
         assert!(!policy.protects(Path::new(std::ffi::OsStr::from_bytes(b"conf\xffig"))));
         assert!(!policy.protects(Path::new("refs/heads/config")));
         assert!(!policy.protects(Path::new("index")));
+    }
+
+    #[test]
+    fn knows_each_protected_name_s_lock_under_any_spelling() {
+        let policy = policy();
+        assert!(policy.locks(Path::new("config.lock")));
+        assert!(policy.locks(Path::new("CONFIG.LOCK")));
+        assert!(policy.locks(Path::new("con\u{FB01}g.lock")));
+        assert!(policy.locks(Path::new("hooks.lock")));
+        assert!(!policy.locks(Path::new("config")));
+        assert!(!policy.locks(Path::new("index.lock")));
+        assert!(!policy.locks(Path::new("refs/heads/config.lock")));
+        assert!(!policy.locks(Path::new(".lock")));
     }
 
     #[test]

@@ -850,6 +850,34 @@ describe('shellSandboxProfile read-only roots', () => {
   });
 });
 
+describe('shellSandboxProfile guarded stores', () => {
+  it('should pin every ancestor of a nested guarded store on Linux, so it cannot be moved aside and replanted', () => {
+    const profile = shellSandboxProfile(
+      {
+        filesystem: {
+          readable: [],
+          writable: ['/srv/project'],
+          denied: [],
+          guardedStores: {
+            stores: ['/srv/project/.git', '/srv/project/vendor/lib/.git'],
+            protect: ['config', 'hooks'],
+          },
+        },
+        network: { domains: [] },
+      },
+      { home: '/home/person' },
+    ) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['allowWrite']).toStrictEqual(
+      process.platform === 'linux'
+        ? ['/srv/project', '/srv/project/vendor', '/srv/project/vendor/lib']
+        : ['/srv/project'],
+    );
+    /* The store itself is the guard's mount, never denied or read-only here: the guard decides by name. */
+    expect(profile.filesystem['denyWrite']).not.toContain('/srv/project/vendor/lib/.git');
+  });
+});
+
 describe('seatbeltReadDenies', () => {
   it('should spell a denied directory that holds a readable path as the glob of its own name', () => {
     expect(

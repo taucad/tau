@@ -161,6 +161,61 @@ const linkedCrates = (): readonly CargoPackage[] => {
   return crates.sort(byNameAndVersion);
 };
 
+/**
+ * What the static executable links from the toolchain itself: the Rust standard library (`std`, `core`, `alloc`, with
+ * the notices the toolchain ships for it), LLVM's libunwind, and musl libc with its C runtime objects.
+ */
+const toolchainNotice = async (): Promise<string[]> => {
+  const sysroot = execFileSync('rustc', ['--print', 'sysroot'], { cwd: crateRoot, encoding: 'utf8' }).trim();
+  const documents = join(sysroot, 'share/doc/rust');
+  const html = await readFile(join(documents, 'COPYRIGHT-library.html'), 'utf8');
+  const library = html
+    .replaceAll(/<[^>]*>/gu, '')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line, index, lines) => line !== '' || lines[index - 1] !== '')
+    .join('\n')
+    .trim();
+  const licence = async (name: string): Promise<string> => {
+    const text = await readFile(join(documents, 'licenses', name), 'utf8');
+    return text.trimEnd();
+  };
+  const mit = await licence('MIT.txt');
+  return [
+    '',
+    '===== Toolchain components linked into the executable =====',
+    '',
+    '- Rust standard library (std, core, alloc): Apache-2.0 OR MIT, with the exceptions listed below.',
+    '- libunwind (LLVM), from the Rust toolchain: Apache-2.0 WITH LLVM-exception.',
+    '- musl libc and its C runtime objects, from the Rust toolchain for x86_64-unknown-linux-musl: MIT.',
+    '',
+    '===== Rust standard library: COPYRIGHT-library =====',
+    '',
+    library,
+    '',
+    '===== musl libc =====',
+    '',
+    'Copyright © 2005-2020 Rich Felker, et al.',
+    '',
+    mit.replace('Copyright (c) <year> <copyright holders>\n\n', ''),
+    '',
+    '===== Apache-2.0 =====',
+    '',
+    await licence('Apache-2.0.txt'),
+    '',
+    '===== LLVM-exception =====',
+    '',
+    await licence('LLVM-exception.txt'),
+    '',
+    '===== Unicode-3.0 =====',
+    '',
+    await licence('Unicode-3.0.txt'),
+  ];
+};
+
 /** The NOTICE: every crate with its licence expression, then the licence and notice texts each crate ships. */
 const notice = async (crates: readonly CargoPackage[]): Promise<string> => {
   const sections = [
@@ -186,10 +241,17 @@ const notice = async (crates: readonly CargoPackage[]): Promise<string> => {
       }
     }
   }
+  sections.push(...(await toolchainNotice()));
   return `${sections.join('\n')}\n`;
 };
 
 const { test, resources } = parseArguments();
+/* The guard is Linux-only code: its checks run wherever `test` runs on Linux (CI's affected lanes), and a macOS or
+ * Windows workstation's `nx test sandbox` says why it has none rather than failing on a crate it cannot compile. */
+if (test && process.platform !== 'linux') {
+  console.log(`The store guard's Rust checks run on Linux; ${process.platform} has no store guard to check.`);
+  process.exit(0);
+}
 if (process.platform !== 'linux' || process.arch !== 'x64') {
   throw new Error(
     `The store guard is built on linux-x64 for linux-x64; this host is ${process.platform}-${process.arch}.`,

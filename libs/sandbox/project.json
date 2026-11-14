@@ -36,6 +36,9 @@
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --test"
       }
     },
+    "test": {
+      "dependsOn": ["test:store-guard"]
+    },
     "test:shell-conformance": {
       "executor": "nx:run-commands",
       "cache": true,

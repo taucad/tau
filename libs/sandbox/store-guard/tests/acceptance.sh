@@ -149,9 +149,17 @@ set -u
 sync="$1"
 rc() { "$@" > /dev/null 2>&1; printf '%s\n' "$?"; }
 printf 'before-append=%s\n' "$(rc sh -c 'printf x >> .git/config')"
+# A protected name's lock is never opened for writing: git outside would rename it over the name.
+printf 'lock-open=%s\n' "$(rc sh -c 'exec 3>> .git/config.lock')"
+# A descriptor held on an ordinary name, whose file git outside then renames over config.
+exec 3>> .git/held
+printf 'held-open=%s\n' "$?"
 : > "$sync/inside-ready"
 for _ in $(seq 300); do [[ -e "$sync/outside-done" ]] && break; sleep 0.1; done
 printf 'outside-seen=%s\n' "$([[ -e "$sync/outside-done" ]] && echo 0 || echo 1)"
+printf '[core]\n\tfsmonitor = forged\n' >&3 2> /dev/null
+printf 'held-write=%s\n' "$?"
+exec 3>&-
 printf 'after-append=%s\n' "$(rc sh -c 'printf "[core]\n\tfsmonitor = forged\n" >> .git/config')"
 printf 'after-replace=%s\n' "$(rc sh -c 'cp .git/config .git/config.lock && mv -f .git/config.lock .git/config')"
 rm -f .git/config.lock
@@ -165,16 +173,23 @@ session=$!
 for _ in $(seq 300); do [[ -e "$sync_dir/inside-ready" ]] && break; sleep 0.1; done
 {
   git -C "$project" config branch.main.remote origin &&
+    cp "$project/.git/config" "$project/.git/held" && mv -f "$project/.git/held" "$project/.git/config" &&
     git -C "$project" worktree add -q "$work/two-linked" -b linked &&
     git -C "$project" worktree remove "$work/two-linked" &&
     printf 'outside\n' > "$project/b.txt" && git -C "$project" add b.txt && git -C "$project" commit -qm Outside
 } > /dev/null 2>&1
-expect 'git outside: config, worktree add and remove, commit during the session' 0 "$?"
+expect 'git outside: config, a file renamed over config, worktree add and remove, commit during the session' 0 "$?"
 : > "$sync_dir/outside-done"
 wait "$session" || true
 transcript="$(cat "$work/two.out")"
 printf '%s\n' "$transcript" >> "$evidence"
 [[ "$(value before-append)" != 0 ]] && pass 'config refused before the rewrite' || fail 'config written before'
+[[ "$(value lock-open)" != 0 && -n "$(value lock-open)" ]] && pass "config.lock refused for writing (rc $(value lock-open))" ||
+  fail "config.lock opened for writing: rc $(value lock-open)"
+expect 'a descriptor held on an ordinary name' 0 "$(value held-open)"
+[[ "$(value held-write)" != 0 && -n "$(value held-write)" ]] &&
+  pass "the held descriptor cannot write once its file is config (rc $(value held-write))" ||
+  fail "the held descriptor wrote into config: rc $(value held-write)"
 expect 'the session saw git outside finish' 0 "$(value outside-seen)"
 for case in after-append after-replace after-worktrees; do
   [[ "$(value "$case")" != 0 && -n "$(value "$case")" ]] && pass "$case refused after git outside rewrote config" ||

@@ -236,7 +236,7 @@ const deniedVariants = (paths: readonly string[]): string[] => {
  * ancestors. Binding a directory that is already writable onto itself widens nothing.
  *
  * @param writable - The launch's writable roots.
- * @param protectedPaths - Its read-only and denied paths.
+ * @param protectedPaths - Its read-only, denied and guarded paths.
  * @param denied - Its denied paths, every spelling: no ancestor inside one is bound.
  * @returns The ancestors to bind, outermost first.
  */
@@ -316,9 +316,10 @@ export const shellSandboxProfile = (
     ),
   ]);
   const readOnly = [...(launch.filesystem.readOnly ?? []), ...startupFiles];
+  /* A guarded store is protected too: its ancestors never move away, so no store can be planted where it was. */
   const pinned = pinnedAncestors(
     launch.filesystem.writable,
-    [...readOnly, ...launch.filesystem.denied],
+    [...readOnly, ...launch.filesystem.denied, ...(launch.filesystem.guardedStores?.stores ?? [])],
     physicalVariants(launch.filesystem.denied),
   );
   const { domains } = launch.network;

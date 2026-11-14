@@ -385,7 +385,11 @@ const unavailableOf = (outcome: Exclude<ShellLaunchOutcome, { status: 'started' 
   }
 };
 
-/** A counting gate: at most `limit` holders, later ones wait in order; a waiter whose signal aborts leaves the line. */
+/**
+ * A counting gate: at most `limit` holders, later ones wait in order; a waiter whose signal aborts leaves the line. A
+ * signal that aborted before `enter` gets no slot at all: an `abort` listener added after the abort never fires, so it
+ * would otherwise wait for a slot and launch a command its caller had withdrawn (E09).
+ */
 const createGate = (limit: number) => {
   let held = 0;
   const waiting: Array<() => void> = [];
@@ -394,6 +398,9 @@ const createGate = (limit: number) => {
     waiting.shift()?.();
   };
   const enter = async (signal: AbortSignal): Promise<(() => void) | undefined> => {
+    if (signal.aborted) {
+      return undefined;
+    }
     if (held < limit) {
       held++;
       return release;

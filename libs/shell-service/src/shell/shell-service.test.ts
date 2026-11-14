@@ -463,6 +463,35 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     expect(outputs.map((output) => output.status)).toEqual(['cancelled', 'cancelled', 'cancelled', 'cancelled']);
     expect(provider.launches).toHaveLength(2);
   });
+  it('a call whose signal aborted before it reached a full admission limit leaves at once and is never staged (E09)', async () => {
+    const { service, provider } = harness(() => ({ status: 'started' }), { maxExecutions: 1 });
+    const prepare = provider.prepare.bind(provider);
+    let prepared = 0;
+    vi.spyOn(provider, 'prepare').mockImplementation(async (request) => {
+      prepared += 1;
+      return prepare(request);
+    });
+    const holding = new AbortController();
+    const holder = service.run({
+      ...call({ command: 'sleep 300' }, { signal: holding.signal }),
+      toolCallId: 'call-holder',
+    });
+    await vi.waitFor(() => {
+      expect(provider.launches).toHaveLength(1);
+    });
+    const late = new AbortController();
+    late.abort();
+    const queued = service.run({
+      ...call({ command: 'echo queued' }, { signal: late.signal }),
+      toolCallId: 'call-late',
+    });
+    /* It settles while the holder still has the slot: it never waits for a slot it would refuse to use. */
+    await expect(queued).resolves.toMatchObject({ status: 'cancelled' });
+    holding.abort();
+    await expect(holder).resolves.toMatchObject({ status: 'cancelled' });
+    expect(prepared).toBe(1);
+    expect(provider.launches).toHaveLength(1);
+  });
 });
 
 describe('access requests (D5, D20, A26)', () => {

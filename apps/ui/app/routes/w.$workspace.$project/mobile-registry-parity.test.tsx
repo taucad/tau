@@ -68,20 +68,29 @@ const editorRef = {
 };
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1' }),
+  useProject: () => ({
+    editorRef,
+    mainEntryPath: 'main.ts',
+    projectId: 'project-1',
+    /* No layout record: the phone settles its panes through the active tab alone. */
+    projectRuntime: { layout: undefined, shell: { set: () => undefined, release: () => undefined } },
+  }),
 }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),
   useLocation: () => route,
+  useNavigationType: () => 'PUSH',
 }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: 'machines' | 'tauDebug') => flags[flag],
 }));
 
 const { workbenchSurfaces } = await import('#routes/w.$workspace.$project/chat-workbench-dockview.js');
-const { ProjectWorkspaceProvider, mobilePanelByWorkbenchPanel, useProjectWorkspace } =
+const { ProjectWorkspaceProvider, useProjectWorkspace } =
   await import('#routes/w.$workspace.$project/project-workspace-context.js');
+const { mobilePanelByWorkbenchPanel } =
+  await import('#routes/w.$workspace.$project/project-workspace-context.panels.js');
 const { ChatInterfaceNav, surfaceTitle } = await import('#routes/w.$workspace.$project/chat-interface-nav.js');
 const { useChatInterfaceState } = await import('#routes/w.$workspace.$project/use-chat-interface-state.js');
 

@@ -67,6 +67,28 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
+/* Since A3b the library builds its chat store over the binding's record client: here it is the harness's double. */
+vi.mock('#db/chat-file-storage.js', () => ({
+  createChatFileStore: () => ({
+    ...harness.projectManager,
+    adoptLegacyChatPlacement: async () => undefined,
+    getChatRecordsForResource: async () => [],
+  }),
+}));
+
+/* A read owner that admits every read at once: no observation runs while the file managers are idle. */
+vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createMetadataReadOwner: (source: unknown) => ({
+    connect: () => () => undefined,
+    hold: () => undefined,
+    ready: () => undefined,
+    fail: () => undefined,
+    read: async <Value,>(operation: (store: unknown) => Promise<Value>) => operation(source),
+    settle: async () => undefined,
+  }),
+}));
+
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
@@ -80,17 +102,13 @@ const notCalled = async (): Promise<never> => {
   throw new Error('not called in this test');
 };
 
-/** The provider's binding as `ProjectManagerProvider` supplies it, over the harness's doubles. */
-const bindingOf = (client: Binding['files']['client'] = harness.client): Binding => ({
-  files: { client, watchRecordFile: harness.watchRecordFile },
-  chats: {
-    ...harness.projectManager,
-    adoptLegacyChatPlacement: async () => undefined,
-    getChatRecordsForResource: async () => [],
-    createNavigationRepairChat: notCalled,
-  },
-  touchProject: async () => undefined,
-  connection: { registerWorkspace: notCalled, mountWorkspace: notCalled, prepareWorkspaceCatalog: notCalled },
+/** The provider's binding as `ProjectManagerProvider` supplies it: the root file facade, over the harness's doubles. */
+const bindingOf = (client: Record<string, unknown> = harness.client): Binding => ({
+  fileManager: {
+    recordFiles: client,
+    watchRecordFile: harness.watchRecordFile,
+    workspace: { syncProjectRoots: notCalled },
+  } as unknown as Binding['fileManager'],
 });
 
 let runtime: Runtime;

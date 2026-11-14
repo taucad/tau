@@ -39,7 +39,8 @@ const isAdopted = (
     Boolean(layoutRevision && current && project) &&
     layoutRevision?.digest !== 'missing' &&
     layoutRevision?.digest === current?.layoutDigest &&
-    project?.appliedWorkbenchRevisions.get(workbenchPaths.layout) === layoutRevision?.digest;
+    // The layout's own acknowledgement (rule 4), unknown while no adapter is attached (A8b).
+    current?.appliedDigest === layoutRevision?.digest;
   const openViewPaths = current ? new Set(viewPathsIn(current.layout.viewer)) : undefined;
   return (
     layoutApplied &&

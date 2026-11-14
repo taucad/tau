@@ -29,7 +29,9 @@ import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace } from '#hooks/use-project-manager.js';
+import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -253,6 +255,16 @@ const mockFileManager = {
   scopedStorage: { readShallowDirectory: mockReadScopedShallowDirectory },
 };
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
+/* A12: the app runtime's chat store hears of a first chat created empty. Since A4a the library reads the store the
+ * runtime built it with. Rows run with no runtime unless one sets it. */
+const appRuntime = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | undefined,
+  notedEmpty: [] as string[],
+}));
+vi.mock('#runtime/app-runtime-provider.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useOptionalAppRuntime: () => appRuntime.current,
+}));
 
 const recordConfigWrite = async (_config: ProjectFileSystemConfig): Promise<void> => {
   phaseOrder.push('locator');
@@ -582,10 +594,20 @@ const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-p
 const { ProjectLibrary } = await import('#runtime/project-library.js');
 /* A2: the provider is over a library the runtime builds with its query client; each wrapper's client gets one here. */
 const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>();
+/* The chat store the A12 row reads: it notes each chat created empty. */
+const notingChatStore: Pick<ProjectLibraryChatSessions, 'noteCreatedEmpty'> = {
+  noteCreatedEmpty: (chatId: string) => {
+    appRuntime.notedEmpty.push(chatId);
+  },
+};
 const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
   let library = libraries.get(queryClient);
   if (library === undefined) {
-    library = new ProjectLibrary({ queryClient });
+    library = new ProjectLibrary({
+      queryClient,
+      chatSessions: () =>
+        appRuntime.current === undefined ? undefined : (notingChatStore as ProjectLibraryChatSessions),
+    });
     library.start();
     libraries.set(queryClient, library);
     startedLibraries.push(library);
@@ -3534,6 +3556,35 @@ describe('useProjectManager.createProject', () => {
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
   });
 
+  it('tells the chat store of a first chat created with no prompt, so it shows empty at once (A12, I21)', async () => {
+    appRuntime.current = {};
+    appRuntime.notedEmpty = [];
+    try {
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await act(async () =>
+        result.current.createProject({
+          project: fakeProject,
+          files: pendingCreate.files,
+          location: { kind: 'home' },
+        }),
+      );
+      expect(appRuntime.notedEmpty).toEqual([pendingCreate.chat!.id]);
+
+      // A first chat that carries the person's prompt is not empty.
+      appRuntime.notedEmpty = [];
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'auto',
+          initialMessage: { content: 'a bracket', attachments: [] },
+          location: { kind: 'home' },
+        }),
+      );
+      expect(appRuntime.notedEmpty).toEqual([]);
+    } finally {
+      appRuntime.current = undefined;
+    }
+  });
+
   it('creates an entry-less project under Auto: no main, no model file, and a first chat on Auto (D3)', async () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -3655,8 +3706,11 @@ describe('useProjectManager.createProject', () => {
       expect(mockCompletePending).not.toHaveBeenCalled();
       mockGetPendingProjectOperations.mockResolvedValue([persisted]);
       mockResumeResources.mockResolvedValueOnce([persisted.chat!]);
+      /* A3b named change (rule 5): a terminal failure is never replayed again in the tab that saw it, as a tab that
+       * had already read its journal behaved before; the next page load replays the row. */
+      const reloaded = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
       await act(async () => {
-        await result.current.getProjectListing();
+        await reloaded.result.current.getProjectListing();
       });
       await vi.waitFor(() => {
         expect(mockCompletePending).toHaveBeenCalledWith(operationId);

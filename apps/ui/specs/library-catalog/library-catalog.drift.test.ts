@@ -15,7 +15,8 @@ const machines = [libraryDiscoveryMachine, libraryRecoveryMachine, libraryAccess
 
 /*
  * The manifest ties the model to the machines that refine it (their alphabets, versions and `meta.tla` actions, and
- * their files) and to the code its `today` configurations describe. The conformance replay of
+ * their files), to the service that runs them (`ProjectLibrary`, since A3b), to the commands that journal and apply
+ * mutations (`ProjectCommands`, since A4a) and to the code its `today` configurations describe. The conformance replay of
  * `LibraryCatalog/suite.json` is `library-catalog.conformance.test.ts`.
  */
 describe('LibraryCatalog.tla implementation correspondence', () => {
@@ -31,6 +32,8 @@ describe('LibraryCatalog.tla implementation correspondence', () => {
           'apps/ui/app/machines/library-discovery.machine.ts',
           'apps/ui/app/machines/library-recovery.machine.ts',
           'apps/ui/app/machines/library-access.machine.ts',
+          'apps/ui/app/runtime/project-library.ts',
+          'apps/ui/app/runtime/project-library-commands.ts',
         ]),
         specs: hashFiles(specs, ['LibraryCatalog.tla']),
       }),

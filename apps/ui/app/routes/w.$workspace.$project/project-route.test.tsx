@@ -6,7 +6,7 @@ import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
@@ -256,7 +256,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     }
     return sharedWorkerState === 'ready' ? <div>{children}</div> : placeholder;
   },
-  HomeFileManagerProvider: ({
+  SessionFileManagerProvider: ({
     children,
     projectId,
     rootDirectory,

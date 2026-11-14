@@ -13,6 +13,7 @@ const mockUseProjects = vi.fn();
 const mockCloudIntent = vi.fn();
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => mockCloudIntent() as string | undefined }));
 const mockCreateChat = vi.fn();
+const mockNoteCreatedEmpty = vi.fn<(chatId: string) => void>();
 const mockIsProjectExpanded = vi.fn();
 const mockSetProjectDisclosure = vi.fn();
 const mockNavigate = vi.fn();
@@ -185,7 +186,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
   };
 });
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan }),
+  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan, noteCreatedEmpty: mockNoteCreatedEmpty }),
 }));
 
 const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => ({
@@ -376,6 +377,8 @@ describe('ProjectNavigation', () => {
     fireEvent.click(newChatButton);
     await vi.waitFor(() => {
       expect(mockCreateChat).toHaveBeenCalledWith('proj_two', { name: 'New chat', messages: [] });
+      // Created empty, so the chat store shows it empty at once (A12, I21).
+      expect(mockNoteCreatedEmpty).toHaveBeenCalledWith('chat/two');
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo', {
         state: { focusChatComposer: true },
       });

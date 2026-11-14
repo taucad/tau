@@ -40,7 +40,11 @@ import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { ProjectLibrary } from '#runtime/project-library.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
-import { createSessionsRegistryLogic, sessionsRegistryInput } from '#services/sessions-store.js';
+import {
+  createSessionsRegistryLogic,
+  sessionFileManagerOpener,
+  sessionsRegistryInput,
+} from '#services/sessions-store.js';
 import {
   isPlacementOnThisDevice,
   isPlacementOnThisDeviceNow,
@@ -241,13 +245,21 @@ export const createAppRuntime = ({
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
   const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
   const table = createLeaseTable();
+  /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
+  const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore } = {};
   const projectLibrary = new ProjectLibrary({
     queryClient,
+    sessions: () => (composed.runtime === undefined ? undefined : selectRuntimeSessions(composed.runtime)),
+    chatSessions: () => composed.chatSessions,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
   });
   const chatSessions = createChatSessions(projectLibrary, options);
+  composed.chatSessions = chatSessions;
+  /* The host the sessions build their file managers through: the root spawns it with itself, so it is read once the
+   * root exists, before any session can open. */
+  const builtHost: { current: FileManagerHostRef | undefined } = { current: undefined };
   const runtime = createActor(
     appRuntimeMachine.provide({
       actors: {
@@ -268,8 +280,26 @@ export const createAppRuntime = ({
 
         fileManagerHost: host.logic,
         leases: table.logic,
-        /* S28: the registry admits and releases compute on the host's shared worker. */
-        sessions: createSessionsRegistryLogic(host.sharedWorker),
+        /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
+         * file manager through the host, and waits for it on this runtime's clock. */
+        sessions: createSessionsRegistryLogic({
+          sharedWorker: host.sharedWorker,
+          fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
+          openFileManager: sessionFileManagerOpener({
+            build: (spec) => {
+              if (builtHost.current === undefined) {
+                throw new Error('A session opened its file manager before the app runtime was created');
+              }
+              return host.build(builtHost.current, spec, options);
+            },
+            awaitServices: async (fileManager, gone) =>
+              awaitFileManager(fileManager, 'services', {
+                reason: 'services-timeout',
+                gone,
+                ...(options.clock === undefined ? {} : { clock: options.clock }),
+              }),
+          }),
+        }),
       },
     }),
     {
@@ -281,6 +311,7 @@ export const createAppRuntime = ({
     },
   );
   const { fileManagerHost, leases } = runtime.getSnapshot().context;
+  builtHost.current = fileManagerHost;
   const store: LeaseStore = table.storeFor(leases);
   const buildOptions: FileManagerBuildOptions = options;
   runtimeFiles.set(runtime, {
@@ -294,6 +325,7 @@ export const createAppRuntime = ({
     idleFileManagers,
   });
   runtimeServices.set(runtime, { queryClient, projectLibrary, chatSessions });
+  composed.runtime = runtime;
   runtimeLeases.set(runtime, store);
   return runtime;
 };

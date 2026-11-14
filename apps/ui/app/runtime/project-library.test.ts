@@ -1,11 +1,14 @@
 /**
- * The project library service (app state orchestration charter D9; plan § 4 A2; inventory L3, L6).
+ * The project library service (app state orchestration charter D9; plan § 4 A2, A3b; inventory L3, L5, L6).
  *
- * The library owns the project-manager and workspace-connection actors, starts them and the worker once, publishes a
- * snapshot React reads, and exposes the ports the chat store and the project runtime call. In this cut the ports that
- * still need React reach it through one transitional binding `ProjectManagerProvider` supplies in render (D15 ruling):
- * a port called before the first binding waits for it and is delivered, never dropped, and a replaced binding leaves
- * no waiter behind.
+ * The library owns its actors, starts them and the worker once, publishes a snapshot React reads, and exposes the
+ * ports the chat store and the project runtime call. Since A3b the chat ports run over the library's own chat store,
+ * built over the record client of the one transitional binding `ProjectManagerProvider` supplies in render (D15
+ * ruling): a port called before the first binding waits for it and is delivered, never dropped, and a replaced binding
+ * leaves no waiter behind.
+ *
+ * The chat store and the metadata read owner are doubles here, keyed by the binding's record client: these rows are
+ * about which binding serves a call, and the observations they would wait on are the hook suites' subject.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
@@ -21,11 +24,15 @@ import {
 } from '#runtime/project-library.js';
 import type { ProjectLibraryBinding } from '#runtime/project-library.js';
 import { projectListCountCookieName, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import type { ChatStorage } from '#types/storage.types.js';
 
 const worker = vi.hoisted(() => ({
   getEditorState: vi.fn(async (projectId: string) => ({ projectId, openFiles: [] })),
   updateEditorState: vi.fn(async () => undefined),
 }));
+
+/** The chat store each record client stands for. */
+const stores = vi.hoisted(() => new WeakMap<WeakKey, unknown>());
 
 vi.mock('#hooks/object-store.worker.js?worker', () => ({
   default: class MockWorker {
@@ -35,40 +42,76 @@ vi.mock('#hooks/object-store.worker.js?worker', () => ({
 
 vi.mock('comlink', () => ({ wrap: vi.fn(() => worker) }));
 
+vi.mock('#db/chat-file-storage.js', () => ({
+  createChatFileStore: ({ client }: { client: WeakKey }) => stores.get(client),
+}));
+
+/* A read owner that admits every read at once: no observation runs in these rows. */
+vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createMetadataReadOwner: (source: ChatStorage) => ({
+    connect: () => () => undefined,
+    hold: () => undefined,
+    ready: () => undefined,
+    fail: () => undefined,
+    read: async <Value>(operation: (store: ChatStorage) => Promise<Value>) => operation(source),
+    settle: async () => undefined,
+  }),
+}));
+
+vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createNodeWorkspace: vi.fn(async (path: string) => ({
+    workspaceId: 'wsp_node',
+    backend: 'node',
+    path,
+    name: 'workspace',
+    slug: 'workspace',
+    minted: false,
+  })),
+}));
+
 const notCalled = async (): Promise<never> => {
   throw new Error('not called in this test');
 };
 
 const chatOf = (id: string): Chat => ({ id, resourceId: 'p1', name: id, messages: [], createdAt: 0, updatedAt: 0 });
 
-/** A binding whose every port records the binding it came from. */
-const bindingNamed = (name: string, overrides: Partial<ProjectLibraryBinding> = {}): ProjectLibraryBinding => ({
-  files: {
-    client: {
-      readFile: notCalled,
-      writeFile: notCalled,
-      exists: notCalled,
-      readdir: notCalled,
-      unlink: notCalled,
-      rmdir: notCalled,
-    },
-    watchRecordFile: () => {
-      throw new Error('not called in this test');
-    },
-  },
-  chats: {
+type ChatPorts = Pick<ChatStorage, 'getChat' | 'patchChat'>;
+
+/** A binding whose record client stands for a chat store that records the binding it came from. */
+const bindingNamed = (
+  name: string,
+  { chats, syncProjectRoots }: Readonly<{ chats?: Partial<ChatPorts>; syncProjectRoots?: () => Promise<void> }> = {},
+): ProjectLibraryBinding => {
+  const recordFiles = {
+    readFile: notCalled,
+    writeFile: notCalled,
+    exists: notCalled,
+    readdir: notCalled,
+    unlink: notCalled,
+    rmdir: notCalled,
+  };
+  const store: ChatPorts = {
     getChat: async (chatId) => chatOf(`${name}:${chatId}`),
     patchChat: notCalled,
-    adoptLegacyChatPlacement: notCalled,
-    touchChatRecency: async (chatId) => chatOf(`${name}:${chatId}`),
-    consumeChatStartupRequest: notCalled,
-    commitCancelledDraftRestore: notCalled,
-    getChatRecordsForResource: async () => [],
-    createNavigationRepairChat: notCalled,
-  },
-  touchProject: async () => undefined,
-  connection: { registerWorkspace: notCalled, mountWorkspace: notCalled, prepareWorkspaceCatalog: notCalled },
-  ...overrides,
+    ...chats,
+  };
+  stores.set(recordFiles, store);
+  return {
+    fileManager: {
+      recordFiles,
+      watchRecordFile: () => {
+        throw new Error('not called in this test');
+      },
+      workspace: { syncProjectRoots: syncProjectRoots ?? notCalled },
+    } as unknown as ProjectLibraryBinding['fileManager'],
+  };
+};
+
+/** The same facade, as a re-render hands it over again. */
+const rebound = (binding: ProjectLibraryBinding): ProjectLibraryBinding => ({
+  fileManager: { ...binding.fileManager },
 });
 
 const libraries: ProjectLibrary[] = [];
@@ -144,22 +187,20 @@ describe('ProjectLibrary', () => {
 
   it('should resume a waiting call on the binding current when it resumes, so a replaced binding leaves no waiter', async () => {
     const library = createLibrary();
-    const waiting = library.touchChatRecency('c1', 1);
+    const waiting = library.getChat('c1');
 
     /* A provider remount in one pass: the first mount's binding, then the remount's, before the waiter resumes. */
     library.bind(bindingNamed('unmounted'));
     library.bind(bindingNamed('remounted'));
 
     await expect(waiting).resolves.toMatchObject({ id: 'remounted:c1' });
-    await expect(library.touchChatRecency('c2', 2)).resolves.toMatchObject({ id: 'remounted:c2' });
+    await expect(library.getChat('c2')).resolves.toMatchObject({ id: 'remounted:c2' });
   });
 
   it('should ask a read again of the binding that replaced the one whose provider disposed it (B9)', async () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();
-    library.bind(
-      bindingNamed('old', { chats: { ...bindingNamed('old').chats, getChat: async () => running.promise } }),
-    );
+    library.bind(bindingNamed('old', { chats: { getChat: async () => running.promise } }));
     const call = library.getChat('c1');
     await flush();
 
@@ -176,9 +217,7 @@ describe('ProjectLibrary', () => {
   it('should ask a read again when its provider disposed it before the replacement bound (B9)', async () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();
-    library.bind(
-      bindingNamed('old', { chats: { ...bindingNamed('old').chats, getChat: async () => running.promise } }),
-    );
+    library.bind(bindingNamed('old', { chats: { getChat: async () => running.promise } }));
     const call = library.getChat('c1');
     await flush();
 
@@ -198,7 +237,6 @@ describe('ProjectLibrary', () => {
     library.bind(
       bindingNamed('only', {
         chats: {
-          ...bindingNamed('only').chats,
           getChat: async (chatId) => {
             attempts += 1;
             return attempts === 1 ? first.promise : chatOf(`only:${chatId}`);
@@ -224,7 +262,7 @@ describe('ProjectLibrary', () => {
     library.release();
     let settled = false;
     const call = (async () => {
-      const chat = await library.touchChatRecency('c1', 1);
+      const chat = await library.getChat('c1');
       settled = true;
       return chat;
     })();
@@ -240,13 +278,11 @@ describe('ProjectLibrary', () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();
     const replacementPatch = vi.fn(notCalled);
-    library.bind(
-      bindingNamed('old', { chats: { ...bindingNamed('old').chats, patchChat: async () => running.promise } }),
-    );
+    library.bind(bindingNamed('old', { chats: { patchChat: async () => running.promise } }));
     const call = library.patchChat('c1', 'name', 'renamed');
     await flush();
 
-    library.bind(bindingNamed('new', { chats: { ...bindingNamed('new').chats, patchChat: replacementPatch } }));
+    library.bind(bindingNamed('new', { chats: { patchChat: replacementPatch } }));
     running.reject(new Error('Chat observation was disposed.'));
 
     await expect(call).rejects.toThrow('Chat observation was disposed.');
@@ -257,18 +293,19 @@ describe('ProjectLibrary', () => {
     const library = createLibrary();
     const running = Promise.withResolvers<Chat | undefined>();
     let attempts = 0;
-    const ports = {
-      ...bindingNamed('only').chats,
-      getChat: async () => {
-        attempts += 1;
-        return running.promise;
+    const only = bindingNamed('only', {
+      chats: {
+        getChat: async () => {
+          attempts += 1;
+          return running.promise;
+        },
       },
-    };
-    library.bind(bindingNamed('only', { chats: ports }));
+    });
+    library.bind(only);
     const call = library.getChat('c1');
     await flush();
 
-    library.bind(bindingNamed('only', { chats: ports }));
+    library.bind(rebound(only));
     running.reject(new Error('unreadable'));
 
     await expect(call).rejects.toThrow('unreadable');
@@ -280,7 +317,6 @@ describe('ProjectLibrary', () => {
     library.bind(
       bindingNamed('only', {
         chats: {
-          ...bindingNamed('only').chats,
           getChat: async () => {
             throw new Error('unreadable');
           },
@@ -300,10 +336,13 @@ describe('ProjectLibrary', () => {
     const first = bindingNamed('first');
     library.bind(first);
     expect(listener).toHaveBeenCalledOnce();
-    expect(library.files.get()).toBe(first.files);
+    expect(library.files.get()).toEqual({
+      client: first.fileManager.recordFiles,
+      watchRecordFile: first.fileManager.watchRecordFile,
+    });
 
     /* A re-render with the same facade: nothing to restart. */
-    library.bind({ ...bindingNamed('again'), files: first.files });
+    library.bind(rebound(first));
     expect(listener).toHaveBeenCalledOnce();
 
     /* A replaced root worker gives a new record client. */
@@ -311,18 +350,15 @@ describe('ProjectLibrary', () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it('should invoke the workspace connection services of the binding current when the machine runs them', async () => {
+  it('should run its own workspace connection services over the binding current when the machine runs them (A3b)', async () => {
     const library = createLibrary();
-    const registered = vi.fn(async () => {
+    const replaced = vi.fn(notCalled);
+    const mounted = vi.fn(async () => {
       throw new Error('stop here');
     });
     library.start();
-    library.bind(bindingNamed('first'));
-    library.bind(
-      bindingNamed('second', {
-        connection: { registerWorkspace: registered, mountWorkspace: notCalled, prepareWorkspaceCatalog: notCalled },
-      }),
-    );
+    library.bind(bindingNamed('first', { syncProjectRoots: replaced }));
+    library.bind(bindingNamed('second', { syncProjectRoots: mounted }));
 
     library.workspaceConnection.send({ type: 'beginSelection', operationId: 'op1' });
     library.workspaceConnection.send({
@@ -332,7 +368,8 @@ describe('ProjectLibrary', () => {
     });
     await flush();
 
-    expect(registered).toHaveBeenCalledOnce();
+    expect(mounted).toHaveBeenCalledOnce();
+    expect(replaced).not.toHaveBeenCalled();
     expect(selectLibraryWorkspaceConnection(library.getSnapshot())).toMatchObject({ phase: 'failed' });
   });
 

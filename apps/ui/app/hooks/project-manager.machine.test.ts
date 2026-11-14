@@ -16,6 +16,15 @@ vi.mock('comlink', () => ({
   wrap: vi.fn(() => ({})),
 }));
 
+const faults = vi.hoisted(() => ({ reported: [] as unknown[] }));
+
+vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  reportAppRuntimeFault: (error: unknown) => {
+    faults.reported.push(error);
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -161,6 +170,51 @@ describe('projectManagerMachine', () => {
       expect(context.worker).toBeUndefined();
       expect(context.wrappedWorker).toBeUndefined();
       expect(context.error).toBeUndefined();
+      actor.stop();
+    });
+  });
+
+  // =========================================================================
+  // Root onError (charter D23, B2; plan § 4 A4a)
+  // =========================================================================
+  describe('root onError', () => {
+    afterEach(() => {
+      faults.reported.length = 0;
+    });
+
+    it('should keep the first fault an effect throws, report it once, and keep answering', async () => {
+      const first = new Error('first fault');
+      const second = new Error('second fault');
+      /* The failed start's error entry throws first; the retried start's ready entry throws second. */
+      vi.spyOn(console, 'error').mockImplementation(() => {
+        throw first;
+      });
+      vi.spyOn(console, 'debug').mockImplementation((message: unknown) => {
+        if (message === '[ProjectManager] state → ready') {
+          throw second;
+        }
+      });
+      let attempts = 0;
+      const actor = createTestActor({
+        initResult: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new Error('worker init failed');
+          }
+        },
+      });
+      actor.start();
+      actor.send({ type: 'initialize' });
+      const failed = await waitFor(actor, (state) => state.value === 'error' || state.status !== 'active');
+      expect(failed.status).toBe('active');
+      expect(failed.context.fault).toBe('first fault');
+
+      /* It still answers: the retry starts the worker again. */
+      actor.send({ type: 'initialize' });
+      const ready = await waitFor(actor, (state) => state.value === 'ready' || state.status !== 'active');
+      expect(ready.status).toBe('active');
+      expect(ready.context.fault).toBe('first fault');
+      expect(faults.reported).toEqual([first]);
       actor.stop();
     });
   });

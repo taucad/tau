@@ -304,13 +304,6 @@ export const revisionUserActor = (
     anonymous: boolean;
     /** The account's salt for this workspace, from {@link useRevisionSalt}; absent signed out or before it answers. */
     salt?: string;
-    /**
-     * The name and address commits are authored with instead of the session's,
-     * for a project linked to GitHub: GitHub declines a push that exposes a
-     * private address (GH007), so a linked project records the account's
-     * no-reply identity (D33). The actor id stays the Tau user.
-     */
-    commitIdentity?: Readonly<{ name: string; email: string }>;
   }>,
 ): RevisionUserActor => {
   if (input.anonymous || input.user === undefined) {
@@ -321,14 +314,12 @@ export const revisionUserActor = (
      * account, and one shared "signed-out" pseudonym would make every
      * signed-out person in a workspace one false identity.
      *
-     * No email either way: it is the identifying half, so an anonymous actor
-     * never carries one and nothing downstream has to remember to strip it.
+     * No address either way: a person has no address field (I3). A linked
+     * project's forge identity travels beside the actor as `setActor`'s
+     * `commitAuthor`, and the host never applies it to an anonymous person.
      */
     const salt = (input.user === undefined ? undefined : input.salt) ?? deviceSalt(input.workspace);
     return { kind: 'user', id: anonymousId(salt), name: 'Anonymous', anonymous: true };
-  }
-  if (input.commitIdentity !== undefined) {
-    return { kind: 'user', id: input.user.id, ...input.commitIdentity };
   }
   return { kind: 'user', id: input.user.id, ...(input.user.name === undefined ? {} : { name: input.user.name }) };
 };

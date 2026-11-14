@@ -34,6 +34,20 @@ const wide = { width: 1440, height: 900 } as const;
 const held = 2000;
 /** How long a settled load is watched for a late request or change. Milliseconds. */
 const settleWindow = 3000;
+/** The timing ladder (UI Policy § 6): an indicator shows from 1,000 ms and says the wait is long at 10,000 ms. */
+const indicatorDelay = 1000;
+const slowWait = 10_000;
+/** K-b's late listing, past the indicator delay; K-d's, past the slow mark. Milliseconds. */
+const cloudWait = 3000;
+const longCloudWait = 12_000;
+/** How long K-c counts requests after its Retry. Milliseconds. */
+const retryWatch = 9000;
+/** A row's own setup failed: not the defect, so it fails the row whatever `expectedFailure` says. */
+const precondition = (condition: boolean, message: string): void => {
+  if (!condition) {
+    throw new Error(message);
+  }
+};
 const workspace = selectors.getByCss('[data-project-workspace]');
 /** How long K-f holds the usage document, as the audit's 17 to 19 s stalls held it. Milliseconds. */
 const documentStall = 20_000;
@@ -202,7 +216,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `H6: holds the project grid's top offset on Home while /v1/projects is held ${String(held)} ms`,
     },
     async (defect) => {
@@ -215,11 +229,118 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await waitForSettledHome();
       const record = await keep('h6-listing-held');
       expect(record.gridTops.length, 'the project grid was never on screen').toBeGreaterThan(0);
+      precondition(
+        record.gridTops.some((sample) => sample.cloudListing),
+        'H6: the Tau Cloud listing was never awaited while the grid was on screen',
+      );
       const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
       await defect(() => {
         expect(tops, `H6: the project grid's top offset moved (${JSON.stringify(record.gridTops)})`).toEqual([
           record.gridTops.at(-1)?.top,
         ]);
+      });
+    },
+  );
+
+  /* K-b to K-d (P-k): the Tau Cloud listing's wait, slow notice and failure are said in the Projects header's slot. */
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title: `K-b: says Home waits for Tau Cloud in the Projects header's slot from ${String(indicatorDelay)} ms, the grid still, while /v1/projects is ${String(cloudWait)} ms late`,
+    },
+    async (defect) => {
+      await openSignedIn();
+      await seedLocalProject();
+      await target.navigate('/');
+      await waitForSettledHome();
+      await cloud.uiSetCloudStandInDelays({ projects: cloudWait });
+      await target.navigate('/');
+      await waitForSettledHome();
+      const record = await keep('k-b-listing-late');
+      const waits = record.cloudStates.filter((state) => state.text.includes('Loading Tau Cloud projects'));
+      precondition(waits.length > 0, 'K-b: the Tau Cloud wait was never shown');
+      const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
+      await defect(() => {
+        expect(
+          {
+            firstShownAt: Math.min(...waits.map((state) => state.t)) >= indicatorDelay,
+            inHeader: waits.every((state) => state.inHeader),
+            gridMoved: tops.length > 1,
+          },
+          `K-b: the Tau Cloud wait as shown ${JSON.stringify(waits)}, grid tops ${JSON.stringify(record.gridTops)}`,
+        ).toEqual({ firstShownAt: true, inHeader: true, gridMoved: false });
+      });
+    },
+  );
+
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title:
+        "K-c: reports a failed Tau Cloud listing in the Projects header's slot, the grid still, and its Retry asks once",
+    },
+    async (defect) => {
+      await openSignedIn();
+      await seedLocalProject();
+      await target.navigate('/');
+      await waitForSettledHome();
+      await cloud.uiSetCloudStandInFailures({ projects: 500 });
+      await target.navigate('/');
+      await waitForSignedIn();
+      await target.waitFor(
+        () =>
+          (
+            globalThis as typeof globalThis & { __TAU_CLOUD_LOAD__: CloudLoadRecord }
+          ).__TAU_CLOUD_LOAD__.cloudStates.some((state) => state.role === 'alert'),
+        undefined,
+        { timeout: 60_000 },
+      );
+      await target.delay(settleWindow);
+      await cloud.uiReadCloudRequestCounts(true);
+      await target.click(selectors.getByRole('button', { name: 'Retry Tau Cloud' }));
+      /* Long enough for react-query's own retries of a failed listing (1, 2 and 4 s) to be counted. */
+      await target.delay(retryWatch);
+      const counts = await cloud.uiReadCloudRequestCounts();
+      const record = await keep('k-c-listing-failed', counts);
+      const alerts = record.cloudStates.filter((state) => state.role === 'alert');
+      const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
+      await defect(() => {
+        expect(
+          {
+            words: alerts.every((state) => state.text.includes('Tau Cloud projects not loaded')),
+            inHeader: alerts.every((state) => state.inHeader),
+            gridMoved: tops.length > 1,
+            retryRequests: counts.projects,
+          },
+          `K-c: alerts ${JSON.stringify(alerts)}, grid tops ${JSON.stringify(record.gridTops)}, requests after Retry ${JSON.stringify(counts)}`,
+        ).toEqual({ words: true, inHeader: true, gridMoved: false, retryRequests: 1 });
+      });
+    },
+  );
+
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title: `K-d: says the Tau Cloud wait is long, with Retry, in the Projects header's slot at ${String(slowWait)} ms, while /v1/projects is ${String(longCloudWait)} ms late`,
+    },
+    async (defect) => {
+      await openSignedIn();
+      await seedLocalProject();
+      await target.navigate('/');
+      await waitForSettledHome();
+      await cloud.uiSetCloudStandInDelays({ projects: longCloudWait });
+      await target.navigate('/');
+      await waitForSettledHome();
+      const record = await keep('k-d-listing-long');
+      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading Tau Cloud projects'));
+      await defect(() => {
+        expect(
+          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Retry')),
+          `K-d: the Tau Cloud states shown ${JSON.stringify(record.cloudStates)}`,
+        ).toBe(true);
       });
     },
   );

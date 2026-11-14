@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -68,6 +68,10 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { indicatorDelayMilliseconds } from '@taucad/ui/utils/wait-timing';
+import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
+import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
 import {
   ProjectCard,
@@ -82,7 +86,7 @@ import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
-import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import type { CloudListingState, CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 import {
   CloudProjectCard,
@@ -274,10 +278,108 @@ export function ProjectLibrary({
     retry: retryCloud,
   } = useCloudProjects();
   const auth = useResolvedAuth();
+  const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
+  /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
+     empty frames alike; the grid itself is busy for as long. */
+  const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
   /* Read before the host's empty-content return below, so the hooks run in one order. */
   const phoneTopBar = usePhoneTopBar();
   const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
   const cloudPending = auth === 'authed' && !isCloudSettled && !isCloudFailed;
+  const isOnline = useNetworkConnectivity();
+  const waitClock = useWaitClockSource();
+  /* P-k: Tau Cloud's state shares the header's slot. Its first listing, or one a Retry asks for, is a wait; a later
+     refresh over listed projects is not, because the cards are already the answer. Offline and failed are said in
+     words, with Retry for the failure. */
+  const isCloudShown = !showDeleted && auth === 'authed';
+  const cloudNotice: CloudNotice | undefined = isCloudShown
+    ? cloudNoticeOf({ isOnline, isCloudSettled, cloud })
+    : undefined;
+  /* The time of the latest Retry press while its request runs: each press is a new request, so a new wait. */
+  const [cloudRetriedAt, setCloudRetriedAt] = useState<number>();
+  /* A Retry's own request is a wait even over listed projects, whose failed refresh stays `failed` while it asks. */
+  const isAwaitingCloud =
+    isCloudShown && ((cloudPending && cloud === 'fetching') || (cloudRetriedAt !== undefined && isCloudFetching));
+  /* Whether the listing's last answer was a failure, so a wait that follows it keeps the failure's Retry. */
+  const [hasCloudFailed, setHasCloudFailed] = useState(false);
+  if (cloud === 'failed' && !hasCloudFailed) {
+    setHasCloudFailed(true);
+  } else if (isCloudSettled && hasCloudFailed) {
+    /* Only an answer clears it: a paused request (a hidden tab) reads `ready` but has not answered. */
+    setHasCloudFailed(false);
+  }
+  /* A wait is timed from when this library saw it begin, so one that begins well into the page (a client navigation
+     to Home, a Retry, another account) starts its own 1,000 ms. A wait a Retry started is announced by the
+     slot's status region; any other by its indicator, once revealed. */
+  const [cloudWait, setCloudWait] = useState<CloudWait>();
+  if (isAwaitingCloud && cloudWait === undefined) {
+    setCloudWait({
+      startedAt: cloudRetriedAt ?? waitClock.now(),
+      isAnnounced: cloudRetriedAt !== undefined,
+      retriedAt: cloudRetriedAt,
+      followsFailure: hasCloudFailed,
+    });
+  } else if (!isAwaitingCloud && cloudWait !== undefined) {
+    setCloudWait(undefined);
+    setCloudRetriedAt(undefined);
+  } else if (cloudWait !== undefined && cloudRetriedAt !== undefined && cloudWait.retriedAt !== cloudRetriedAt) {
+    /* A Retry pressed during a wait, slow or not, starts a wait of its own, timed and announced from the press. */
+    setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt, followsFailure: true });
+  }
+  /* When the local listing's wait handed the slot to a running Tau Cloud wait, so a shown indicator stays shown. */
+  const [wasAwaitingListing, setWasAwaitingListing] = useState(isAwaitingListing);
+  const [listingHandoverAt, setListingHandoverAt] = useState<number>();
+  if (wasAwaitingListing !== isAwaitingListing) {
+    setWasAwaitingListing(isAwaitingListing);
+    if (!isAwaitingListing && isAwaitingCloud) {
+      setListingHandoverAt(waitClock.now());
+    }
+  } else if (!isAwaitingCloud && listingHandoverAt !== undefined) {
+    setListingHandoverAt(undefined);
+  }
+  const cloudShownFrom = shownFromOf({ wait: cloudWait, listingHandoverAt });
+  /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
+  /* Active once the wait's start is recorded, so this render, which may still be recording it, times nothing from 0. */
+  const { timing: cloudWaitTiming } = useWaitClock({
+    /* The listing's own wait holds the slot until it answers, so the Retry is timed from when it can show. */
+    active: isAwaitingCloud && cloudWait !== undefined && !isAwaitingListing,
+    startedAt: cloudShownFrom,
+  });
+  /* A shown wait that ends keeps its indicator for its 500 ms minimum, so a failure is said once that hold is over. */
+  const [releasedCloudHold, setReleasedCloudHold] = useState<WaitIndicatorTiming>();
+  const isCloudWaitHolding = cloudWaitTiming.state === 'holding' && releasedCloudHold !== cloudWaitTiming;
+  useEffect(() => {
+    if (cloudWaitTiming.state !== 'holding') {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setReleasedCloudHold(cloudWaitTiming);
+    }, Number.parseFloat(cloudWaitTiming.hideDelay));
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [cloudWaitTiming]);
+  /* On a phone whose top bar carries the /projects header, the header row is visually hidden until a notice is shown;
+     once shown, it stays for this page view, so a Retry or a recovery does not move the grid again. */
+  const [hasShownCloudNotice, setHasShownCloudNotice] = useState(false);
+  /* The press lasts as long as the Retry's own request, so a Retry that starts no wait (a failed refresh over listed
+     projects) leaves nothing behind for a later one; an earlier press's end does not clear a later one. */
+  const latestCloudRetry = useRef<number>(undefined);
+  const retryCloudListing = useCallback(async () => {
+    const pressedAt = waitClock.now();
+    latestCloudRetry.current = pressedAt;
+    setCloudRetriedAt(pressedAt);
+    try {
+      await retryCloud();
+    } finally {
+      if (latestCloudRetry.current === pressedAt) {
+        setCloudRetriedAt(undefined);
+      }
+    }
+  }, [retryCloud, waitClock]);
+  const handleRetryCloud = useCallback(() => {
+    void retryCloudListing();
+  }, [retryCloudListing]);
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
     cloud: cloudProjects,
@@ -539,7 +641,6 @@ export function ProjectLibrary({
     </DropdownMenu>
   );
 
-  const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
   const isCatalogUnavailable = !showDeleted && auth === 'authed' && (cloudPending || isCloudFailed);
   /* A host with its own empty content (Home) shows it in place of an empty section. The section stays
      whenever it has something to say: the Trash, a failure, a repair, or Tau Cloud still listing. An
@@ -556,22 +657,56 @@ export function ProjectLibrary({
     return emptyContent;
   }
 
-  /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
-     empty frames alike; the grid itself is busy for as long. */
-  const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
+  /* The latch reads the notice the slot shows, not one the listing's own wait still holds back. */
+  /* A Retry's wait over a failure says the wait, not the failure, until its own request answers. */
+  const isFailureHeld = cloudNotice === 'failed' && (cloudWait?.isAnnounced === true || isCloudWaitHolding);
+  const shownCloudNotice = isAwaitingListing || isFailureHeld ? undefined : cloudNotice;
+  if (shownCloudNotice !== undefined && !hasShownCloudNotice) {
+    setHasShownCloudNotice(true);
+  }
   /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
-  const listingWait = (
-    <WaitIndicator
-      className='min-w-0 flex-1 basis-0 justify-end overflow-hidden'
-      /* Seen, not announced: the sidebar's Recents label announces the same listing wait (one announcement per group). */
-      live={false}
-      active={isAwaitingListing}
-      label='Loading projects'
-      slowLabel='Still loading projects'
-      onRetry={() => {
-        void retry();
-      }}
-    />
+  const statusSlot = (
+    /* The listing's own wait keeps the slot while it runs: until it answers, there are no projects on this device to
+       speak of, and its slow words and Retry stay reachable. */
+    <LibraryStatusSlot
+      notice={shownCloudNotice}
+      /* A Retry's wait is announced by the slot's status region, there before the press, so the words are heard. */
+      announcement={!isAwaitingListing && cloudWait?.isAnnounced === true ? 'Loading Tau Cloud projects' : undefined}
+      /* One Retry for Tau Cloud: beside a failure, through the wait it starts, and from the first wait's slow mark, so a
+         Retry whose request fails or waits keeps its focus. */
+      retry={
+        isAwaitingListing
+          ? undefined
+          : cloudRetryOf({
+              /* A failure held behind its wait's minimum already offers its Retry, so the control does not leave. */
+              notice: isFailureHeld ? 'failed' : shownCloudNotice,
+              wait: cloudWait,
+              timing: cloudWaitTiming,
+              /* A follow-up request that paused (a hidden tab) has not answered the failure, so its Retry stays, where
+                 the slot shows Tau Cloud at all. */
+              isFailureUnanswered: isCloudShown && hasCloudFailed && !isCloudSettled,
+            })
+      }
+      onRetryCloud={handleRetryCloud}
+    >
+      <WaitIndicator
+        className='min-w-0 justify-end overflow-hidden'
+        /* The sidebar's Recents label announces the local listing's wait, and the slot's status region a Retry's (one
+           announcement per group); the indicator announces any other Tau Cloud wait, once its words are revealed. */
+        live={!isAwaitingListing && cloudWait?.isAnnounced !== true}
+        active={isAwaitingListing || isAwaitingCloud}
+        startedAt={isAwaitingListing ? 0 : cloudShownFrom}
+        label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}
+        slowLabel={isAwaitingListing ? 'Still loading projects' : 'Still loading Tau Cloud projects'}
+        onRetry={
+          isAwaitingListing
+            ? () => {
+                void retry();
+              }
+            : undefined
+        }
+      />
+    </LibraryStatusSlot>
   );
 
   return (
@@ -586,16 +721,19 @@ export function ProjectLibrary({
             <div
               className={cn(
                 'flex min-w-0 flex-1 basis-0 items-center justify-end gap-2',
-                isHeaderInPhoneBar && 'max-md:hidden',
+                /* On a phone the row is read before it is seen, so its status region announces offline words as
+                   they arrive; a notice shown gives it its height from then on. A wait is not seen there, so its
+                   Retry is not in the focus order until the row is. */
+                isHeaderInPhoneBar && !hasShownCloudNotice && 'max-md:sr-only max-md:[&_button]:hidden',
               )}
             >
-              {listingWait}
+              {statusSlot}
               <NewProjectLink isDeferredToPhoneBar />
             </div>
           }
         />
       ) : (
-        <SectionHeader level={headingLevel} title='Projects' className='mb-0' action={listingWait} />
+        <SectionHeader level={headingLevel} title='Projects' className='mb-0' action={statusSlot} />
       )}
 
       {workspaceBindingRepairs.length > 0 && (
@@ -747,27 +885,6 @@ export function ProjectLibrary({
         </div>
       ) : null}
 
-      {!showDeleted && cloud === 'failed' && auth === 'authed' ? (
-        <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-md border p-4'>
-          <span className='text-sm'>
-            Tau Cloud projects could not be loaded. Projects on this device are still available.
-          </span>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => {
-              retryCloud();
-            }}
-          >
-            Retry Tau Cloud
-          </Button>
-        </div>
-      ) : !showDeleted && auth === 'authed' && cloud === 'fetching' ? (
-        <div role='status' aria-busy='true' className='flex items-center gap-2 text-sm text-muted-foreground'>
-          <Loader className='size-4' />
-          Loading Tau Cloud projects…
-        </div>
-      ) : null}
       {listingError && projects.length === 0 ? (
         <div
           role='alert'
@@ -988,6 +1105,164 @@ function ProjectCardRoom(): React.JSX.Element {
         <div className='h-8' />
       </CardFooter>
     </Card>
+  );
+}
+
+/** What the Projects header's slot says about Tau Cloud in words, instead of a wait (P-k). */
+type CloudNotice = 'offline' | 'failed';
+
+/**
+ * Offline while the listing has not answered (it is held until the browser is back online), or failed.
+ *
+ * @param state - The browser's connection and the listing's state.
+ * @returns The notice, or `undefined` when the slot shows the wait or nothing.
+ */
+function cloudNoticeOf({
+  isOnline,
+  isCloudSettled,
+  cloud,
+}: {
+  readonly isOnline: boolean;
+  readonly isCloudSettled: boolean;
+  readonly cloud: CloudListingState;
+}): CloudNotice | undefined {
+  if (!isOnline && !isCloudSettled) {
+    return 'offline';
+  }
+  return cloud === 'failed' ? 'failed' : undefined;
+}
+
+/** One Tau Cloud wait as the slot times it: from its start, announced when a Retry press began it. */
+type CloudWait = Readonly<{
+  startedAt: number;
+  isAnnounced: boolean;
+  /** The press that began it, if any. A later press restarts the wait. */
+  retriedAt?: number;
+  /** Whether it followed a failure, whose Retry it keeps in view. */
+  followsFailure: boolean;
+}>;
+
+/**
+ * When the slot times a Tau Cloud wait from: its start, or, for a first wait that took over a shown local listing wait
+ * (shown from 1,000 ms), early enough that it counts as already shown, so the slot does not blink empty at the hand-over.
+ *
+ * @param state - The Tau Cloud wait and when the local listing's wait handed the slot over, if it did.
+ * @returns The start on the wait clock's timeline, or 0 when no wait runs. Milliseconds.
+ */
+function shownFromOf({
+  wait,
+  listingHandoverAt,
+}: {
+  readonly wait: CloudWait | undefined;
+  readonly listingHandoverAt: number | undefined;
+}): number {
+  if (wait === undefined) {
+    return 0;
+  }
+  if (wait.isAnnounced || listingHandoverAt === undefined || listingHandoverAt < indicatorDelayMilliseconds) {
+    return wait.startedAt;
+  }
+  return Math.min(wait.startedAt, listingHandoverAt - indicatorDelayMilliseconds);
+}
+
+/** Tau Cloud's Retry in the slot: shown, or, for the first wait, revealed at its slow mark (`slowDelay`). */
+type CloudRetry = Readonly<{ slowDelay?: string }>;
+
+/**
+ * Tau Cloud's one Retry: beside a failure, through the wait a Retry starts or that follows a failure, and from the
+ * slow mark of a first wait the person did not start. None beside the offline words, which a Retry cannot help.
+ *
+ * @param state - The slot's notice, the Tau Cloud wait and its timing, and whether a failure is still unanswered.
+ * @returns How Retry is offered, or `undefined` for none.
+ */
+function cloudRetryOf({
+  notice,
+  wait,
+  timing,
+  isFailureUnanswered,
+}: {
+  readonly notice: CloudNotice | undefined;
+  readonly wait: CloudWait | undefined;
+  readonly timing: WaitIndicatorTiming;
+  /** The listing's last answer was a failure and nothing has answered since. */
+  readonly isFailureUnanswered: boolean;
+}): CloudRetry | undefined {
+  if (notice === 'offline') {
+    return undefined;
+  }
+  if (notice === 'failed' || isFailureUnanswered || wait?.isAnnounced === true || wait?.followsFailure === true) {
+    return {};
+  }
+  if (wait !== undefined && timing.state === 'waiting') {
+    return { slowDelay: timing.slowDelay };
+  }
+  return undefined;
+}
+
+/**
+ * The reveal delay a Retry beside the slow words shares with them.
+ *
+ * @param slowDelay - The wait's slow mark, as the indicator's `--wait-slow-delay`.
+ * @returns The Retry's style.
+ */
+function retryRevealStyle(slowDelay: string): React.CSSProperties & Record<'--wait-slow-delay', string> {
+  return { '--wait-slow-delay': slowDelay };
+}
+
+/**
+ * The Projects header's trailing status slot (P-k): one line, as tall as the wait indicator, that takes the row's
+ * spare width and clips there, so it never wraps the header. It says Tau Cloud is offline or failed, with Retry for
+ * the failure, and otherwise holds the wait indicator it is given.
+ */
+function LibraryStatusSlot({
+  notice,
+  announcement,
+  retry,
+  onRetryCloud,
+  children,
+}: {
+  readonly notice: CloudNotice | undefined;
+  /** Words the status region announces without showing, for a wait a Retry started. */
+  readonly announcement: string | undefined;
+  /** How Tau Cloud's Retry is offered, if at all. */
+  readonly retry: CloudRetry | undefined;
+  readonly onRetryCloud: () => void;
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  return (
+    <div
+      data-slot='project-library-status'
+      className='flex min-h-6 min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 overflow-hidden text-xs text-muted-foreground'
+    >
+      {/* One status region, always present, so the offline words and a Retry's wait are announced when they arrive. */}
+      {/* Never `display: none`, even empty: a live region must be in the tree before its words arrive. Out of the
+          flow while it shows nothing, it adds no gap. */}
+      <span role='status' className={cn('min-w-0 truncate', notice !== 'offline' && 'sr-only')}>
+        {notice === 'offline' ? 'Offline. Showing projects on this device.' : announcement}
+      </span>
+      {notice === 'offline' ? null : notice === 'failed' ? (
+        <span role='alert' className='flex min-w-0 items-center gap-1.5'>
+          <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
+          <span className='truncate'>Tau Cloud projects not loaded</span>
+        </span>
+      ) : (
+        children
+      )}
+      {/* Last in the slot, so the same element stays while the words before it change. */}
+      {retry === undefined ? null : (
+        <Button
+          type='button'
+          variant='ghost'
+          size='xs'
+          className={cn('min-w-6 shrink-0', retry.slowDelay !== undefined && 'wait-after-slow')}
+          style={retry.slowDelay === undefined ? undefined : retryRevealStyle(retry.slowDelay)}
+          aria-label='Retry Tau Cloud'
+          onClick={onRetryCloud}
+        >
+          Retry
+        </Button>
+      )}
+    </div>
   );
 }
 

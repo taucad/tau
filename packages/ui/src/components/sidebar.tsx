@@ -10,7 +10,6 @@ import { Button } from '#components/button.js';
 import { Input } from '#components/input.js';
 import { Separator } from '#components/separator.js';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '#components/sheet.js';
-import { Skeleton } from '#components/skeleton.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/tooltip.js';
 
 const sidebarDefaultOpen = true;
@@ -862,47 +861,6 @@ function SidebarMenuBadge({ className, ...properties }: React.ComponentProps<'di
 }
 
 /**
- * Renders a loading placeholder shaped like a sidebar menu item.
- *
- * @public
- * @example <caption>Render a sidebar menu placeholder with an icon.</caption>
- * ```typescript
- * import { createElement } from 'react';
- * import { SidebarMenuSkeleton } from '@taucad/ui/components/sidebar';
- *
- * createElement(SidebarMenuSkeleton, { hasIcon: true });
- * ```
- */
-function SidebarMenuSkeleton({
-  className,
-  hasIcon = false,
-  ...properties
-}: React.ComponentProps<'div'> & {
-  readonly hasIcon?: boolean;
-}): React.JSX.Element {
-  // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`;
-  }, []);
-
-  return (
-    <div
-      data-slot='sidebar-menu-skeleton'
-      data-sidebar='menu-skeleton'
-      className={cn('flex h-7 items-center gap-2 rounded-md px-2', className)}
-      {...properties}
-    >
-      {hasIcon ? <Skeleton className='size-4 rounded-md' data-sidebar='menu-skeleton-icon' /> : null}
-      <Skeleton
-        className='h-4 max-w-(--skeleton-width) flex-1'
-        data-sidebar='menu-skeleton-text'
-        style={{ '--skeleton-width': width } as CssVariableProperties}
-      />
-    </div>
-  );
-}
-
-/**
  * Provides the list container for nested sidebar menu items.
  *
  * @public
@@ -1012,7 +970,6 @@ export {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSkeleton,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,

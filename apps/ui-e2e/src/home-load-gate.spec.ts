@@ -326,6 +326,185 @@ knownDefect(
 );
 
 /*
+ * H-c and H-d (A15g, P-d and P-g): what Home shows while it does not know yet. A per-frame recorder of its own,
+ * self-contained because it runs in the page: when the sidebar's "Loading projects" words were first visible,
+ * whether the sidebar's list and the project grid were busy, when the "No saved preview" icon was first on screen,
+ * and the first card's media box, each time it changed.
+ */
+type WaitSlotRecord = {
+  recentsShownAt?: number;
+  sidebarBusyAt?: number;
+  gridStates: Array<{ t: number; busy: boolean }>;
+  noPreviewIconAt?: number;
+  /** How many "No saved preview" icons were on screen, each time the count changed. */
+  noPreviewIcons: Array<{ t: number; count: number }>;
+  mediaRects: Array<{ t: number; rect: string }>;
+};
+const recordWaitSlots = (): void => {
+  const record: WaitSlotRecord = { gridStates: [], noPreviewIcons: [], mediaRects: [] };
+  Object.defineProperty(globalThis, '__TAU_WAIT_SLOTS__', { value: record });
+  const now = (): number => Math.round(performance.now());
+  const sample = (): void => {
+    /* The app sidebar's own slot: other surfaces also mark themselves `data-sidebar="sidebar"`. */
+    const sidebar = document.querySelector('[data-slot="sidebar"]');
+    if (
+      record.recentsShownAt === undefined &&
+      [...(sidebar?.querySelectorAll('[data-slot="wait-indicator"]') ?? [])].some(
+        // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- the visible words only: the indicator lays its words out hidden.
+        (slot) => slot instanceof HTMLElement && slot.innerText.includes('Loading projects'),
+      )
+    ) {
+      record.recentsShownAt = now();
+    }
+    if (record.sidebarBusyAt === undefined && sidebar?.querySelector('ul[aria-busy="true"]')) {
+      record.sidebarBusyAt = now();
+    }
+    const grid = document.querySelector('main ul[aria-label="Projects"]');
+    const busy = grid?.getAttribute('aria-busy') === 'true';
+    if (grid && record.gridStates.at(-1)?.busy !== busy) {
+      record.gridStates.push({ t: now(), busy });
+    }
+    const icons = document.querySelectorAll('main [aria-label="No saved preview"]').length;
+    if (record.noPreviewIconAt === undefined && icons > 0) {
+      record.noPreviewIconAt = now();
+    }
+    if ((record.noPreviewIcons.at(-1)?.count ?? 0) !== icons) {
+      record.noPreviewIcons.push({ t: now(), count: icons });
+    }
+    const media = grid?.querySelector('li [class*="aspect-4/3"]');
+    if (media) {
+      const box = media.getBoundingClientRect();
+      const rect = `${Math.round(box.width)}x${Math.round(box.height)}`;
+      if (record.mediaRects.at(-1)?.rect !== rect) {
+        record.mediaRects.push({ t: now(), rect });
+      }
+    }
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+};
+const readWaitSlots = async (): Promise<WaitSlotRecord> =>
+  target.evaluate(() => (globalThis as typeof globalThis & { __TAU_WAIT_SLOTS__: WaitSlotRecord }).__TAU_WAIT_SLOTS__);
+
+/** The indicator delay of the timing ladder (UI Policy § 6). Milliseconds. */
+const indicatorDelay = 1000;
+/** Every project's saved thumbnail, read from its working copy (the worker sees the path inside the project). */
+const thumbnailRead: WorkerReadDelay = {
+  method: 'readFile',
+  path: String.raw`^thumbnail\.webp$`,
+  milliseconds: 2000,
+};
+
+/* A guard: main meets it since A15g (#2214), measured 5 of 5 on its base. */
+knownDefect(
+  `H-c: Home with nothing stored draws no skeleton, says "Loading projects" in Recents from ${String(indicatorDelay)} ms and keeps the waiting lists busy, with the project listing 3 s late`,
+  {
+    artifact: 'h-c-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () => {
+      await target.setViewport(viewports.wide);
+      await target.installModelCatalogFixture(catalogLatency);
+      await target.startModelCatalogApi();
+      await installProjectLoadRecorder();
+      await installWorkerReadDelay();
+      await target.addInitScript(recordWaitSlots);
+      await target.navigate('/');
+      await target.expectVisible(richComposer, 60_000);
+      /* Nothing stored: no listing snapshot, no remembered count and no layout hint survive into the measured load. */
+      await target.evaluate(async () => {
+        localStorage.clear();
+        const cookies = await cookieStore.getAll();
+        await Promise.all(cookies.map(async (cookie) => cookieStore.delete(cookie.name ?? '')));
+      });
+      await armWorkerReadDelay([projectListingRead]);
+      await target.reload();
+      await target.expectVisible(richComposer, 60_000);
+      await target.delay(readDelay + settleWindow);
+      const record = await readProjectLoad();
+      const slots = await readWaitSlots();
+      const deliveries = await readWorkerDeliveries();
+      await target.writeArtifact(
+        'home-load-gate/h-c-wide.json',
+        `${JSON.stringify({ record, slots, workerDeliveries: deliveries }, null, 2)}\n`,
+      );
+      const listedAt = firstDelayedRead(deliveries, projectListingRead);
+      precondition(listedAt !== undefined, 'H-c: the project listing was not answered late');
+      /* When that late listing reached the page: the lists wait until then. */
+      const deliveredAt =
+        deliveries.find((entry) => entry.method === projectListingRead.method && entry.sentAt === listedAt)?.t ??
+        Number.NaN;
+      precondition(Number.isFinite(deliveredAt), 'H-c: the late project listing has no delivery time');
+      precondition(
+        record.dropped['skeletonFrames'] === undefined,
+        'H-c: the record dropped skeleton frames past its frame limit',
+      );
+      return { record, slots, deliveredAt };
+    },
+    assert: ({ record, slots, deliveredAt }) => {
+      expect(
+        {
+          skeletonFrames: record.skeletonFrames.length,
+          recentsShownFromDelay: slots.recentsShownAt !== undefined && slots.recentsShownAt >= indicatorDelay,
+          sidebarBusy: slots.sidebarBusyAt !== undefined,
+          gridIdleWhileWaiting: slots.gridStates.some(
+            (state) => !state.busy && slots.recentsShownAt !== undefined && state.t < deliveredAt,
+          ),
+        },
+        `H-c: skeleton frames ${JSON.stringify(record.skeletonFrames.slice(0, 3))}, slots ${JSON.stringify(slots)}`,
+      ).toEqual({ skeletonFrames: 0, recentsShownFromDelay: true, sidebarBusy: true, gridIdleWhileWaiting: false });
+    },
+  },
+);
+
+/* A guard: main meets it since A15g (#2214), measured 5 of 5 on its base. */
+knownDefect(
+  'H-d: a returning visitor\'s Home card draws no "No saved preview" icon before its thumbnail read settles, its media box still, with the read 2 s late',
+  {
+    artifact: 'h-d-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () => {
+      await target.addInitScript(recordWaitSlots);
+      const { record } = await measureReturningReload({
+        viewport: 'wide',
+        delays: [thumbnailRead],
+        label: 'h-d-wide',
+      });
+      const slots = await readWaitSlots();
+      const deliveries = await readWorkerDeliveries();
+      /* The worker's path names no project, so each card is matched by count: no more icons than settled reads. */
+      const settledTimes = deliveries
+        .filter(
+          (entry) =>
+            entry.method === thumbnailRead.method && new RegExp(thumbnailRead.path, 'u').test(entry.path ?? ''),
+        )
+        .map((entry) => entry.t)
+        .toSorted((a, b) => a - b);
+      const settledAt = settledTimes.at(0) ?? Number.NaN;
+      precondition(Number.isFinite(settledAt), 'H-d: no thumbnail read was answered late');
+      precondition(slots.mediaRects.length > 0, 'H-d: no card media box was on screen');
+      await target.writeArtifact(
+        'home-load-gate/h-d-slots.json',
+        `${JSON.stringify({ slots, settledTimes }, null, 2)}\n`,
+      );
+      return { record, slots, settledAt, settledTimes };
+    },
+    assert: ({ slots, settledAt, settledTimes }) => {
+      expect(
+        {
+          iconBeforeRead: slots.noPreviewIcons.some(
+            (sample) => sample.count > settledTimes.filter((settled) => settled <= sample.t).length,
+          ),
+          mediaResized: slots.mediaRects.length > 1,
+        },
+        `H-d: the thumbnail read answered at ${settledAt} ms; slots ${JSON.stringify(slots)}`,
+      ).toEqual({ iconBeforeRead: false, mediaResized: false });
+    },
+  },
+);
+
+/*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
  * (`#support/cloud-stand-ins.js`). Side lane N1 fixed both defects and set each `cloudDefectRow`'s

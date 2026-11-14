@@ -79,6 +79,7 @@ import {
   readinessOf,
   registerProjectFailureMessage,
   registerProjectOverHttp,
+  registrationOrigin,
   revisionCommitAuthorSchema,
   settleReadiness,
   tauRemoteUrl,
@@ -1006,12 +1007,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       /* B4c: a project its linked import tied to a GitHub repository says so, so
        * the push check admits the commits Tau did not record (B4). */
-      const remotes = await options.port.listRemotes();
-      const linked = remotes.some((remote) => remote.provider === 'github');
       await registerProjectOverHttp(
         apiBaseUrl,
         { kind: 'cookie' },
-        { id, name, ...(linked ? { origin: 'github' } : {}) },
+        {
+          id,
+          name,
+          ...registrationOrigin(await options.port.listRemotes()),
+        },
       );
     },
     publishPublication: async (input) => {

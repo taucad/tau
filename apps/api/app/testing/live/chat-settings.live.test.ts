@@ -40,13 +40,13 @@ import { expectCompleted, finalText, runUsage, toolCalls } from '#testing/live/l
  */
 
 /**
- * One model per provider that has a recommended row; `TAU_LIVE_MODEL` (comma-separated) picks others. Google's is
- * Gemini 3.8 Flash, not the recommended Gemini 4 Argon, whose stream stalled on most runs when this was measured.
+ * One recommended model per provider; `TAU_LIVE_MODEL` (comma-separated) picks others. Google's is Gemini 4 Argon,
+ * whose stream can still stall at the provider (`MODEL_STREAM_STALLED`): one of five runs on 2026-11-14.
  */
 const modelIds = process.env['TAU_LIVE_MODEL']?.split(',') ?? [
   'anthropic-claude-fable-5.2',
   'openai-gpt-6.1-terra',
-  'google-gemini-3.8-flash',
+  'google-gemini-4-argon',
   'together-kimi-k3.1-pro',
   'xai-grok-4.7',
 ];

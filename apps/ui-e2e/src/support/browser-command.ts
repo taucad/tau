@@ -2234,7 +2234,7 @@ export const uiReadDelayedTargetRequests: BrowserCommand = async (commandContext
 export type TargetEarlyInput = {
   /** The input was on screen before `hydrated` matched, within the wait. */
   readonly found: boolean;
-  /** `hydrated` already matched when the input was first acted on: the act did not happen before hydration. */
+  /** `hydrated` matched before the last act (screenshot, typing, Enter) was done: the acts did not all happen before hydration. */
   readonly hydratedBeforeAct: boolean;
   /** The input's box and a screenshot of it (base64 PNG) at first sight, when asked for. */
   readonly box?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
@@ -2279,7 +2279,7 @@ export const uiOpenBeforeHydration: BrowserCommand<
   if (!found) {
     return { found: false, hydratedBeforeAct: await isHydrated() };
   }
-  const hydratedBeforeAct = await isHydrated();
+  const hydratedAtSight = await isHydrated();
   const boxed = request.region === undefined ? input : page.locator(request.region).first();
   const box = (await boxed.boundingBox()) ?? undefined;
   const shot = async (clip: NonNullable<typeof box>): Promise<string> => {
@@ -2297,6 +2297,7 @@ export const uiOpenBeforeHydration: BrowserCommand<
   if (request.afterEnter !== undefined) {
     await page.keyboard.type(request.afterEnter);
   }
+  const hydratedBeforeAct = hydratedAtSight || (await isHydrated());
   let after: string | undefined;
   if (request.screenshots && box) {
     await page.waitForSelector(request.hydrated, { timeout: 60_000 });

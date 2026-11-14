@@ -631,8 +631,18 @@ export const recordProjectLoad = (input: {
       }
     }
   };
+  /* Visible motion only: an animation in its delay phase, or one lasting 1 ms or less (the wait ladder's timers), moves nothing. */
   const running = (animations: readonly Animation[]): number =>
-    animations.filter((animation) => animation.playState === 'running').length;
+    animations.filter((animation) => {
+      if (animation.playState !== 'running') {
+        return false;
+      }
+      const timing = animation.effect?.getComputedTiming();
+      const local = Number(timing?.localTime ?? 0);
+      const startDelay = timing?.delay ?? 0;
+      const active = Number(timing?.activeDuration ?? 0);
+      return active > 1 && local >= startDelay && local < startDelay + active;
+    }).length;
   const scanRegions = (frame: ProjectLoadFrame): void => {
     trackRegions();
     for (const [name, selector] of regionSelectors) {

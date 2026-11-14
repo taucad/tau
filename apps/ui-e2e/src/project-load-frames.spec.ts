@@ -954,6 +954,14 @@ knownDefect(
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone', { regions: phoneFrameRegions });
+      /* The open sheet is persisted, so the measured load restores it and its rect and motion can be read. */
+      await target.click(
+        selectors
+          .getByRole('navigation', { name: 'Workbench' })
+          .getByRole('button', { name: 'Parameters', exact: true }),
+      );
+      await target.expectVisible(selectors.getByCss(phoneFrameRegions.sheet), 30_000);
+      await target.delay(settleWindow);
       await delayWorkspaceChunk();
       await target.reload();
       await settleProject();
@@ -962,6 +970,10 @@ knownDefect(
       precondition(
         regionsOf(record, 'tabBar').at(-1)?.present === true,
         'F5: the settled page has no Workbench tab bar',
+      );
+      precondition(
+        regionsOf(record, 'sheet').at(-1)?.present === true,
+        'F5: the settled page has no open sheet, so the sheet clause measures nothing',
       );
       return record;
     },
@@ -1166,46 +1178,59 @@ const sourcePaneRegions = {
 /** F9: the entry file's read, delivered 500 ms late so its arrival has a time. */
 const entryRead: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^alpha\.ts$`, milliseconds: 500 };
 
+/** F9's forced load, measured once per run by whichever of its two rows runs first. */
+type SourcePaneLoad = {
+  readonly record: ProjectLoadRecord;
+  readonly readAt: number;
+  readonly shown: ProjectLoadRegionEntry;
+  readonly mounted: ProjectLoadRegionEntry;
+};
+let sourcePaneLoad: Promise<SourcePaneLoad> | undefined;
+const measureSourcePaneLoad = async (): Promise<SourcePaneLoad> => {
+  sourcePaneLoad ??= (async () => {
+    await seedProjects('wide', { openEntry: true, regions: sourcePaneRegions, frameTimes: true });
+    /* The Editor's tab for the entry file is the workbench's; the first `alpha.ts` tab is the viewer's. */
+    await target.click(selectors.getByRole('tab', { name: 'alpha.ts', exact: true }).last());
+    await target.expectVisible(selectors.getByCss('.cm-content'), 60_000);
+    /* The open source tab is persisted before the measured load. */
+    await target.delay(settleWindow);
+    await delayRequests(editorRuntimeChunk, chunkDelay);
+    await armWorkerReadDelay([entryRead]);
+    await target.reload();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss('.cm-content'), 60_000);
+    await target.delay(settleWindow);
+    const record = await keepRecord('f9-wide');
+    const held = await readDelayedRequests();
+    precondition(
+      held.some((url) => new RegExp(editorRuntimeChunk, 'u').test(url)),
+      'F9: the editor runtime was never delayed',
+    );
+    const deliveries = await readWorkerDeliveries();
+    await requireReadDelayed('F9', entryRead);
+    const read = deliveries.find(
+      (entry) => entry.method === entryRead.method && (entry.path ?? '').endsWith('alpha.ts'),
+    );
+    const texts = regionsOf(record, 'text');
+    const shown = texts.find((entry) => entry.present && entry.visible && entry.text !== '');
+    precondition(shown !== undefined, 'F9: the file text never showed');
+    const mounted = texts.find((entry) => entry.present && entry.node > 1);
+    precondition(
+      mounted !== undefined && mounted.t >= chunkDelay,
+      `F9: the editor mounted at ${String(mounted?.t)} ms, before the ${chunkDelay} ms hold could end`,
+    );
+    return { record, readAt: read!.t, shown: shown!, mounted: mounted! };
+  })();
+  return sourcePaneLoad;
+};
+
 knownDefect(
   'F9 (A15f): with the editor runtime 3 s late and the code pane open, the file text shows within 100 ms of its read, with no skeleton, and the pane and its first line hold still when the editor mounts',
   {
     artifact: 'f9-wide',
     expectedFailure: false,
     budget: loadBudget,
-    measure: async () => {
-      await seedProjects('wide', { openEntry: true, regions: sourcePaneRegions, frameTimes: true });
-      /* The Editor's tab for the entry file is the workbench's; the first `alpha.ts` tab is the viewer's. */
-      await target.click(selectors.getByRole('tab', { name: 'alpha.ts', exact: true }).last());
-      await target.expectVisible(selectors.getByCss('.cm-content'), 60_000);
-      /* The open source tab is persisted before the measured load. */
-      await target.delay(settleWindow);
-      await delayRequests(editorRuntimeChunk, chunkDelay);
-      await armWorkerReadDelay([entryRead]);
-      await target.reload();
-      await settleProject();
-      await target.expectVisible(selectors.getByCss('.cm-content'), 60_000);
-      await target.delay(settleWindow);
-      const record = await keepRecord('f9-wide');
-      const held = await readDelayedRequests();
-      precondition(
-        held.some((url) => new RegExp(editorRuntimeChunk, 'u').test(url)),
-        'F9: the editor runtime was never delayed',
-      );
-      const deliveries = await readWorkerDeliveries();
-      await requireReadDelayed('F9', entryRead);
-      const read = deliveries.find(
-        (entry) => entry.method === entryRead.method && (entry.path ?? '').endsWith('alpha.ts'),
-      );
-      const texts = regionsOf(record, 'text');
-      const shown = texts.find((entry) => entry.present && entry.visible && entry.text !== '');
-      precondition(shown !== undefined, 'F9: the file text never showed');
-      const mounted = texts.find((entry) => entry.present && entry.node > 1);
-      precondition(
-        mounted !== undefined && mounted.t >= chunkDelay,
-        `F9: the editor mounted at ${String(mounted?.t)} ms, before the ${chunkDelay} ms hold could end`,
-      );
-      return { record, readAt: read!.t, shown: shown!, mounted: mounted! };
-    },
+    measure: measureSourcePaneLoad,
     assert: ({ record, readAt, shown, mounted }) => {
       /* The frame before the text showed was painted less than 100 ms after the read: no frame later lacked it. */
       const before = record.frameTimes[shown.frame - 2];
@@ -1236,6 +1261,42 @@ knownDefect(
         },
         `F9: the file was read at ${readAt} ms; the frame before its text was at ${String(before)} ms and the text showed in ${describeEntry(shown)}; the editor mounted in ${describeEntry(mounted)}`,
         { textWithin100: true, skeletons: [], paneMoves: [], lineMoves: [] },
+      );
+    },
+  },
+);
+
+/* F9's clause past the mount: the editor's first line moves once CodeMirror lays out its gutters, after A15f. */
+knownDefect(
+  "F9 (A15f follow-up): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
+  {
+    artifact: 'f9-after-mount-wide',
+    expectedFailure: true,
+    budget: loadBudget,
+    measure: measureSourcePaneLoad,
+    assert: ({ record, mounted }) => {
+      const panes = regionsOf(record, 'pane').filter((entry) => entry.present && entry.t >= mounted.t);
+      const settledPane = panes.at(-1);
+      const paneMoves = panes.filter((entry) => settledPane !== undefined && !sameBox(entry, settledPane));
+      const mountedGlyph = mounted.glyph;
+      const lineMoves = regionsOf(record, 'text').filter(
+        (entry) =>
+          entry.present &&
+          entry.t >= mounted.t &&
+          (mountedGlyph === undefined ||
+            entry.glyph === undefined ||
+            Math.abs(entry.glyph.x - mountedGlyph.x) > 1 ||
+            Math.abs(entry.glyph.y - mountedGlyph.y) > 1),
+      );
+      expectMeasured(
+        {
+          paneMoves: paneMoves.map((entry) => describeEntry(entry)),
+          lineMoves: lineMoves.map(
+            (entry) => `${describeEntry(entry)} first glyph ${entry.glyph?.x ?? '-'},${entry.glyph?.y ?? '-'}`,
+          ),
+        },
+        `F9: after the editor mounted in ${describeEntry(mounted)} with its first glyph at ${mountedGlyph?.x ?? '-'},${mountedGlyph?.y ?? '-'}, the pane or its first line moved`,
+        { paneMoves: [], lineMoves: [] },
       );
     },
   },

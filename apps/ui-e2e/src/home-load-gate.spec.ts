@@ -22,6 +22,7 @@ import {
   knownDefectRows,
   precondition,
   projectRowMoves,
+  readDelayedRequests,
   readHomeLoad,
   readProjectLoad,
   firstDelayedRead,
@@ -622,6 +623,15 @@ const entryChunk = String.raw`/assets/entry\.client-[\w-]+\.js(?:\?|$)`;
 const richComposerHydrated = '[aria-label="Ask Tau to build anything..."][contenteditable="true"]';
 const firstMessage = 'Make a bracket.';
 
+/** The entry chunk was held, so the acts before hydration had a window to land in. */
+const requireEntryChunkHeld = async (label: string): Promise<void> => {
+  const held = await readDelayedRequests();
+  precondition(
+    held.some((url) => new RegExp(entryChunk, 'u').test(url)),
+    `${label}: the entry chunk was never delayed`,
+  );
+};
+
 /** A fresh visitor types on Home before it hydrates, with the entry chunk 2 s late; what happened after adoption. */
 const typeBeforeHomeHydrates = async (
   label: string,
@@ -630,6 +640,7 @@ const typeBeforeHomeHydrates = async (
   readonly early: EarlyInput;
   readonly onProject: boolean;
   readonly text: string;
+  readonly paragraphs: number;
   readonly projects: number;
 }> => {
   await target.setViewport(viewports.wide);
@@ -657,11 +668,14 @@ const typeBeforeHomeHydrates = async (
   const state = await target.evaluate(() => ({
     onProject: /^\/w\/[^/]+\/[^/]+/u.test(location.pathname),
     text: document.querySelector('[aria-label="Ask Tau to build anything..."]')?.textContent ?? '',
+    /* Enter taken as a line break leaves two paragraphs; taken as a send, one. */
+    paragraphs: document.querySelectorAll('[aria-label="Ask Tau to build anything..."] p').length,
     projects: document.querySelectorAll('[data-slot="project-trigger"]').length,
   }));
   await target.writeArtifact(`home-load-gate/${label}.json`, `${JSON.stringify({ early, state }, null, 2)}\n`);
   precondition(early.found, `${label}: the served composer was not on screen before hydration`);
   precondition(!early.hydratedBeforeAct, `${label}: the page had hydrated before the typing`);
+  await requireEntryChunkHeld(label);
   return { early, ...state };
 };
 
@@ -682,16 +696,17 @@ knownDefect(
   },
 );
 
-knownDefect('H-f (A15d, guard): an edit after Enter before Home hydrates cancels the send and keeps the text', {
+knownDefect('H-f (A15d): an edit after Enter before Home hydrates cancels the queued send and keeps the text', {
   artifact: 'h-f-cancel-wide',
-  expectedFailure: false,
+  expectedFailure: true,
   budget: homeBudget,
   measure: async () => typeBeforeHomeHydrates('h-f-cancel-wide', { enter: true, afterEnter: ' Twice' }),
-  assert: ({ onProject, projects, text }) => {
+  assert: ({ onProject, projects, text, paragraphs }) => {
+    /* One paragraph: Enter was taken as a send (then cancelled), not as a line break. */
     expectMeasured(
-      { onProject, projects, kept: text.includes(firstMessage) && text.includes('Twice') },
-      `H-f: after adoption the composer holds ${JSON.stringify(text)}`,
-      { onProject: false, projects: 0, kept: true },
+      { onProject, projects, kept: text.includes(firstMessage) && text.includes('Twice'), paragraphs },
+      `H-f: after adoption the composer holds ${JSON.stringify(text)} in ${paragraphs} paragraphs`,
+      { onProject: false, projects: 0, kept: true, paragraphs: 1 },
     );
   },
 });
@@ -753,6 +768,7 @@ knownDefect(
       });
       precondition(early.found, 'H-g: the served composer was not on screen before hydration');
       precondition(!early.hydratedBeforeAct, 'H-g: the page had hydrated before the first screenshot');
+      await requireEntryChunkHeld('H-g');
       precondition(early.before !== undefined && early.after !== undefined, 'H-g: a screenshot is missing');
       const differing = await differingPixels(early.before!, early.after!);
       await target.writeArtifact(

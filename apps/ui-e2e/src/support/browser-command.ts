@@ -2230,6 +2230,83 @@ export const uiDelayTargetRequests: BrowserCommand<[pattern: string, millisecond
 export const uiReadDelayedTargetRequests: BrowserCommand = async (commandContext) =>
   delayedTargetRequests.get(sessionFor(commandContext).context) ?? [];
 
+/** What `uiOpenBeforeHydration` did on the served page, before its scripts had hydrated it. */
+export type TargetEarlyInput = {
+  /** The input was on screen before `hydrated` matched, within the wait. */
+  readonly found: boolean;
+  /** `hydrated` matched before the last act (screenshot, typing, Enter) was done: the acts did not all happen before hydration. */
+  readonly hydratedBeforeAct: boolean;
+  /** The input's box and a screenshot of it (base64 PNG) at first sight, when asked for. */
+  readonly box?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  readonly before?: string;
+  /** The same box once `hydrated` matched and `settle` passed, when asked for. */
+  readonly after?: string;
+};
+
+/**
+ * A15 frame rows (F7, H-f, H-g): open `path` without waiting for its load, find `input` on the served page and act on
+ * it the moment it is visible, as a person typing at first paint would: type `text`, then press Enter, then type
+ * `afterEnter`. With `screenshots`, the input's box is captured at first sight and again after hydration (caret
+ * hidden), for a pixel comparison across adoption.
+ */
+export const uiOpenBeforeHydration: BrowserCommand<
+  [
+    request: {
+      readonly path: string;
+      readonly input: string;
+      readonly hydrated: string;
+      readonly text?: string;
+      readonly enter?: boolean;
+      readonly afterEnter?: string;
+      readonly screenshots?: boolean;
+      /** The box the screenshots clip to, when not the input's own. */
+      readonly region?: string;
+      readonly wait: number;
+      readonly settle: number;
+    },
+  ],
+  TargetEarlyInput
+> = async (commandContext, request) => {
+  const page = sessionFor(commandContext).primary;
+  await page.goto(new URL(request.path, testBaseURL).href, { waitUntil: 'commit' });
+  const input = page.locator(request.input).first();
+  const isHydrated = async (): Promise<boolean> =>
+    page.evaluate((selector) => document.querySelector(selector) !== null, request.hydrated);
+  const found = await input
+    .waitFor({ state: 'visible', timeout: request.wait })
+    .then(() => true)
+    .catch(() => false);
+  if (!found) {
+    return { found: false, hydratedBeforeAct: await isHydrated() };
+  }
+  const hydratedAtSight = await isHydrated();
+  const boxed = request.region === undefined ? input : page.locator(request.region).first();
+  const box = (await boxed.boundingBox()) ?? undefined;
+  const shot = async (clip: NonNullable<typeof box>): Promise<string> => {
+    const bytes = await page.screenshot({ clip, caret: 'hide' });
+    return bytes.toString('base64');
+  };
+  const before = request.screenshots && box ? await shot(box) : undefined;
+  if (request.text !== undefined) {
+    await input.focus();
+    await page.keyboard.type(request.text);
+  }
+  if (request.enter) {
+    await page.keyboard.press('Enter');
+  }
+  if (request.afterEnter !== undefined) {
+    await page.keyboard.type(request.afterEnter);
+  }
+  const hydratedBeforeAct = hydratedAtSight || (await isHydrated());
+  let after: string | undefined;
+  if (request.screenshots && box) {
+    await page.waitForSelector(request.hydrated, { timeout: 60_000 });
+    await page.waitForTimeout(request.settle);
+    after = await shot(box);
+  }
+  return { found, hydratedBeforeAct, box, before, after };
+};
+
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
 export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
   const session = sessionFor(commandContext);
@@ -3821,6 +3898,7 @@ export const uiBrowserCommands = {
   uiReadTauVertexOperations,
   uiDelayTargetRequests,
   uiReadDelayedTargetRequests,
+  uiOpenBeforeHydration,
   uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,

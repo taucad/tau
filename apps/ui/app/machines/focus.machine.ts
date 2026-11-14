@@ -844,6 +844,8 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             ...context.kept,
             [projectId]: {
               ...rest,
+              // The workspace comes from the project's own slugs, which a same-project request may have moved.
+              workspace: request.slugs?.workspaceSlug ?? rest.workspace,
               ...(request.chatId === undefined ? {} : { chatId: request.chatId }),
               ...(request.createdChatId === undefined ? {} : { createdChatId: request.createdChatId }),
             },

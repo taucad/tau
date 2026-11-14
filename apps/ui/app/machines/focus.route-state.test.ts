@@ -43,7 +43,8 @@ const heldOn = (answer: FocusAccessAnswer): FocusHarness => {
 };
 
 const recovery = <S extends 'recovering' | 'failed'>(status: S): Extract<PendingProjectRecovery, { status: S }> =>
-  // oxlint-disable-next-line typescript/consistent-type-assertions -- the selector reads only the status and reason.
+  /* oxlint-disable-next-line typescript/consistent-type-assertions -- the selector reads only the status and reason;
+   * mock<T>() cannot take the generic Extract<…, { status: S }> as a seed type, so the cast stays. */
   ({ status, reason: 'copy-failed' }) as unknown as Extract<PendingProjectRecovery, { status: S }>;
 
 describe('selectProjectRouteState: one row per route state', () => {

@@ -442,6 +442,27 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
 };
 
 /**
+ * The Tau Cloud listing as one state (A13, H6's state part): `failed` while react-query reports the listing errored,
+ * `fetching` while a request is otherwise in flight, and `ready` otherwise, including a listing not asked yet. This is
+ * the order Home's cloud line has always drawn: a retry of a listing that never answered reads `fetching`, because
+ * react-query clears its error when that retry starts; a refetch over earlier data that failed keeps `failed`.
+ *
+ * @public
+ */
+export type CloudListingState = 'fetching' | 'ready' | 'failed';
+
+/**
+ * The listing's state from its query.
+ *
+ * @param query - The listing query's error and fetch flags.
+ * @returns The state.
+ * @public
+ */
+export const selectCloudListingState = (
+  query: Readonly<{ isError: boolean; isFetching: boolean }>,
+): CloudListingState => (query.isError ? 'failed' : query.isFetching ? 'fetching' : 'ready');
+
+/**
  * The shared listing query.
  *
  * @param options - `enabled` gates the request; a project with no Tau remote has
@@ -459,6 +480,8 @@ export const useCloudProjects = (
   isSettled: boolean;
   isFailed: boolean;
   isFetching: boolean;
+  /** The listing's state, which Home's cloud line reads. */
+  cloud: CloudListingState;
   retry: () => void;
 }> => {
   const account = useRevisionSessionUser()?.id;
@@ -507,6 +530,7 @@ export const useCloudProjects = (
     isSettled: isSuccess,
     isFailed: isError,
     isFetching,
+    cloud: selectCloudListingState({ isError, isFetching }),
     retry: () => {
       void refetch();
     },

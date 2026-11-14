@@ -61,7 +61,11 @@ import type { LibraryRecoveryActor, ReplayOutcome } from '#machines/library-reco
 import { createLibraryAccess } from '#machines/library-access.machine.js';
 import type { AccessAnswer, LibraryAccessActor } from '#machines/library-access.machine.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
+import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import type { ListedChat } from '#lib/project-list-shape.lib.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { PendingProjectOperation, PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import {
@@ -88,8 +92,6 @@ import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
-import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 
 /** What the library takes from the runtime's composition. @public */
 export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
@@ -174,6 +176,10 @@ export type ProjectManagerRef = Actor<typeof projectManagerMachine>;
 
 /** The workspace-connection actor's ref. @public */
 export type WorkspaceConnectionRef = Actor<typeof workspaceConnectionMachine>;
+
+/** A project listing as the `['projects']` query holds it: its entries, among other fields. */
+const isProjectListing = (data: unknown): data is { readonly projects: readonly ProjectLibraryEntry[] } =>
+  typeof data === 'object' && data !== null && Array.isArray((data as { projects?: unknown }).projects);
 
 /** A mutation of one project, admitted by the recovery gate (rule 4) and accounted for until it settles. @public */
 export type LibraryMutation = Readonly<{
@@ -262,6 +268,12 @@ export class ProjectLibrary {
   public readonly access: LibraryAccessActor;
   /** The root file facade's record client and watch; `undefined` until the first one. */
   public readonly files: ProjectLibraryObservable<ProjectLibraryFiles | undefined>;
+  /**
+   * The listing snapshot (A13): the remembered shape of the last project listing and its chat listings, which the
+   * sidebar draws before they answer. The library writes it whenever a listing lands in its `QueryClient`, fetched or
+   * set (a workspace connect or disconnect publishes the listing with `setQueryData`).
+   */
+  public readonly listingSnapshot = projectListShapeStore;
   /** The project commands (A4a): create, duplicate, delete, restore, adopt, repair and rename. */
   public readonly commands: ProjectCommands;
   /** The workspace commands (A4b, row L6): connect, retry, choose a directory, repair bindings. */
@@ -560,8 +572,7 @@ export class ProjectLibrary {
       queryFn: async ({ signal }) => {
         const listing = await this.getProjectListing({ includeDeleted: true });
         signal.throwIfAborted();
-        /* R5: remember the list's shape, so the next load reserves its rows and cards. */
-        projectListShapeStore.remember(projectListShapeOf(listing.projects.map(projectLibraryEntryToListItem)));
+        /* R5, A13: the listing snapshot remembers the list's shape when it lands in the cache (`#watchListings`). */
         return listing;
       },
     };
@@ -578,6 +589,7 @@ export class ProjectLibrary {
     }
     this.#started = true;
     this.followRootFiles();
+    this.#subscriptions.push(this.#watchListings());
     this.projectManager.start();
     this.workspaceConnection.start();
     this.access.start();
@@ -1081,6 +1093,30 @@ export class ProjectLibrary {
     if (recordsChanged || filesChanged || previous.workerChangeChannel !== fileManager.workerChangeChannel) {
       this.#bindingChanged.emit();
     }
+  }
+
+  /**
+   * Remember each project and chat listing that lands in the cache, fetched or set, in the listing snapshot (A13).
+   *
+   * @returns The unsubscribe.
+   */
+  #watchListings(): () => void {
+    return this.queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success') {
+        return;
+      }
+      const [scope, resourceId, kind] = event.query.queryKey as readonly unknown[];
+      const data: unknown = event.query.state.data;
+      if (scope === 'projects' && resourceId === undefined && isProjectListing(data)) {
+        this.listingSnapshot.remember(projectListShapeOf(data.projects.map(projectLibraryEntryToListItem)));
+      } else if (scope === 'chats' && typeof resourceId === 'string' && kind === 'records' && Array.isArray(data)) {
+        this.listingSnapshot.rememberChats(
+          resourceId,
+          data as readonly ListedChat[],
+          (chatId) => !isUnownedChatObservation(chatId),
+        );
+      }
+    });
   }
 
   #publish(snapshot: ProjectLibrarySnapshot): void {

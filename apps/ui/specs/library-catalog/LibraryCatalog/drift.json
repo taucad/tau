@@ -123,7 +123,7 @@
     "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
     "apps/ui/app/runtime/project-library-commands.ts": "039b70ca792c6de893953f8ec5c2b3c77f22d813afb45252be62eb4760ebd9ec",
     "apps/ui/app/runtime/project-library-workspace.ts": "e255564cc91fe1f4b0f27009c71354404683d75e5653adb022ab2e2e0857aaf5",
-    "apps/ui/app/runtime/project-library.ts": "165e057e32279ff11452473b8964a1a61121a7291dd6c5518bdfde78990f9ab6"
+    "apps/ui/app/runtime/project-library.ts": "4a427ba45ba8b1e080d0522c2910346d4aa7acccdbfa74e8f70ad38163124a59"
   },
   "specs": {
     "LibraryCatalog.tla": "e8d9e281d3cae7323561d4227cf9bbf00e44389210eca8585c90c27aeea2fded"

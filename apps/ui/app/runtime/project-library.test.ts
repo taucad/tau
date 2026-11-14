@@ -25,6 +25,7 @@ import {
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { TestRootFiles } from '#runtime/project-library.fixture.js';
+import { projectListCountCookieName, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
 const worker = vi.hoisted(() => ({
@@ -372,29 +373,94 @@ describe('ProjectLibrary', () => {
     expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([['projects'], ['chats', 'p1']]);
   });
 
-  /* R5 and D9: the listing query is the library's own, and it remembers the live count, never a name, for the next load. */
-  it('should list every project through its listing query, and remember the live project count (A4b)', async () => {
-    const { projectListShapeStore, projectListCountCookieName } = await import('#lib/project-list-shape.lib.js');
-    const library = createLibrary(new QueryClient());
+  describe('listing snapshot (A13)', () => {
     const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
       projectId: id,
       manifest: { name: `Name ${id}` },
       library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
       locator: { backend: 'indexeddb' },
+      slugs: { workspaceSlug: 'home', projectSlug: id },
     });
-    const listing = {
-      projects: [entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)],
+    const listing = (...projects: Array<ReturnType<typeof entry>>) => ({
+      projects,
       conflicts: [],
       recoveries: [],
       workspaceBindingRepairs: [],
-    } as unknown as Awaited<ReturnType<ProjectLibrary['getProjectListing']>>;
-    const getProjectListing = vi.spyOn(library, 'getProjectListing').mockResolvedValue(listing);
+    });
 
-    expect(library.listingQuery.queryKey).toEqual(['projects']);
-    await expect(library.listingQuery.queryFn({ signal: new AbortController().signal })).resolves.toBe(listing);
+    afterEach(() => {
+      globalThis.localStorage.clear();
+      projectListShapeStore.reset();
+    });
 
-    expect(getProjectListing).toHaveBeenCalledExactlyOnceWith({ includeDeleted: true });
-    expect(projectListShapeStore.get()).toEqual({ count: 2 });
-    expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
+    it('should remember a fetched project listing, and one published with setQueryData, with only the count in the cookie', async () => {
+      const queryClient = new QueryClient();
+      const library = createLibrary(queryClient);
+      library.start();
+
+      await queryClient.query({
+        queryKey: ['projects'],
+        queryFn: async () => listing(entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)),
+      });
+      expect(library.listingSnapshot.get()).toEqual({
+        count: 2,
+        projects: [
+          {
+            id: 'newer',
+            name: 'Name newer',
+            lastActivityAt: 9,
+            slugs: { workspaceSlug: 'home', projectSlug: 'newer' },
+          },
+          {
+            id: 'older',
+            name: 'Name older',
+            lastActivityAt: 1,
+            slugs: { workspaceSlug: 'home', projectSlug: 'older' },
+          },
+        ],
+      });
+      expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
+      expect(document.cookie).not.toContain('Name');
+
+      /* A workspace connect or disconnect publishes its listing without a fetch. */
+      queryClient.setQueryData(['projects'], listing(entry('other', 3)));
+      expect(library.listingSnapshot.get()?.projects?.map((project) => project.id)).toEqual(['other']);
+    });
+
+    it("should remember a project's chat listing, live and owned chats only, and nothing once stopped", async () => {
+      const queryClient = new QueryClient();
+      const library = createLibrary(queryClient);
+      library.start();
+      queryClient.setQueryData(['projects'], listing(entry('p1', 1)));
+
+      queryClient.setQueryData(
+        ['chats', 'p1', 'records', 'source', { includeDeleted: false }],
+        [
+          { id: 'c1', resourceId: 'p1', name: 'One', createdAt: 1, updatedAt: 1 },
+          { id: 'c2', resourceId: 'p1', name: 'Two', createdAt: 2, updatedAt: 2, deletedAt: 3 },
+        ],
+      );
+      expect(library.listingSnapshot.get()?.projects?.[0]).toMatchObject({
+        chatCount: 1,
+        chats: [{ id: 'c1', name: 'One', createdAt: 1, updatedAt: 1 }],
+      });
+
+      library.stop();
+      queryClient.setQueryData(['projects'], listing(entry('after-stop', 1)));
+      expect(library.listingSnapshot.get()?.projects?.map((project) => project.id)).toEqual(['p1']);
+    });
+
+    /* D9: the listing query is the library's own; the snapshot above remembers what it lands. */
+    it('should list every project, deleted ones included, through its listing query (A4b)', async () => {
+      const library = createLibrary(new QueryClient());
+      const listed = listing(entry('older', 1), entry('trashed', 5, 6)) as unknown as Awaited<
+        ReturnType<ProjectLibrary['getProjectListing']>
+      >;
+      const getProjectListing = vi.spyOn(library, 'getProjectListing').mockResolvedValue(listed);
+
+      expect(library.listingQuery.queryKey).toEqual(['projects']);
+      await expect(library.listingQuery.queryFn({ signal: new AbortController().signal })).resolves.toBe(listed);
+      expect(getProjectListing).toHaveBeenCalledExactlyOnceWith({ includeDeleted: true });
+    });
   });
 });

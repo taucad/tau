@@ -355,6 +355,8 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
   let runtimeCloses = true;
   /** Whether the session's runs cancel; a refusal leaves the session `failed` with its runs still listed. */
   let runsCancel = true;
+  let flushSyncCalls = 0;
+  let flushGate: PromiseWithResolvers<void> | undefined;
 
   /**
    * A real registry and focus, and the route's visit that opened the project: focus knows its slugs only from a route
@@ -383,7 +385,10 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
         }
       },
       flushProducers: async () => undefined,
-      flushSync: async () => undefined,
+      flushSync: async () => {
+        flushSyncCalls += 1;
+        await flushGate?.promise;
+      },
       closeRuntime: async () => {
         if (!runtimeCloses) {
           throw new Error('runtime would not close');
@@ -445,6 +450,31 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
    * A named behaviour change (programme control's ruling): a session whose close failed holds its slot, and an open of
    * it was only a touch, so Reopen left the failed child in place. The reopen now closes it and opens it again.
    */
+  it('should neither restart nor re-flush a close still in flight when Reopen is pressed (round 10)', async () => {
+    const { registry } = await compose();
+    flushSyncCalls = 0;
+    const closing = registry.getSnapshot().context.refs[projectId];
+    flushGate = Promise.withResolvers<void>();
+    registry.send({ type: 'close', projectId, reason: 'memory' });
+    closing?.send({ type: 'confirmClose' });
+    await vi.waitFor(() => {
+      expect(flushSyncCalls).toBe(1);
+    });
+    expect(registry.getSnapshot().context.status[projectId]?.state).toBe('closing');
+
+    render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: undefined }} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    /* The close in flight is the memory policy's: the reopen waits behind it and does not take it over. */
+    expect(flushSyncCalls).toBe(1);
+    expect(closing?.getSnapshot().context.closeReason).toBe('memory');
+    flushGate.resolve();
+    flushGate = undefined;
+  });
+
   it('should close a failed session and open the project again as one reopen', async () => {
     const { registry } = await compose();
     runtimeCloses = false;

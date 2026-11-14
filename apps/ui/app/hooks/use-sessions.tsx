@@ -156,11 +156,6 @@ export function useFocus(): FocusHandle {
   return focus;
 }
 
-/** Focus, where one is composed: a surface that also renders outside the app's runtime reads it optionally. @public */
-export function useOptionalFocus(): FocusHandle | undefined {
-  return useContext(FocusContext);
-}
-
 /** The registry actor. @public */
 export function useSessions(): SessionsActor {
   const actor = useContext(SessionsContext);

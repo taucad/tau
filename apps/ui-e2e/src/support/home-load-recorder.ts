@@ -936,6 +936,20 @@ export const markProjectLoadOnClick = async (name: string): Promise<void> =>
     );
   }, name);
 
+/**
+ * A15f2: fail a row whose record stopped keeping frame times past its frame limit: a span or a frame count read from
+ * them would then be empty or NaN, and pass.
+ *
+ * @param label - The row, for the failure message.
+ * @param record - The row's record, kept with `frameTimes`.
+ */
+export const requireFrameTimes = (label: string, record: ProjectLoadRecord): void => {
+  precondition(
+    record.dropped['frameTimes'] === undefined && record.dropped['frameStamps'] === undefined,
+    `${label}: the record dropped frame times past its frame limit`,
+  );
+};
+
 /** A span a region was on screen, in frame-stamp time (`shownOnFrames`). Milliseconds. */
 export type ShownSpan = { readonly from: number; readonly to: number };
 
@@ -1000,6 +1014,19 @@ export const shownOnFrames = (
   return spans;
 };
 
+/**
+ * A15f2: {@link shownOnFrames} for one of a record's regions, from `since` on.
+ *
+ * @param record - The row's record, kept with `frameTimes`.
+ * @param region - The region's name.
+ * @param since - Keep only spans from this frame stamp on. Milliseconds.
+ * @returns The region's spans, in frame-stamp time.
+ */
+export const regionShownOnFrames = (record: ProjectLoadRecord, region: string, since = -Infinity): ShownSpan[] =>
+  shownOnFrames(record.regions[region] ?? [], record.frameStamps, record.regionRemovals[region]).filter(
+    (span) => span.from >= since,
+  );
+
 /** What the server's HTML for a document holds, before any script runs. */
 export type ServerShellInspection = {
   readonly wrapper: boolean;
@@ -1054,9 +1081,11 @@ export type WorkerReadDelay = {
   readonly busyMilliseconds?: number;
   /**
    * A15f2: also hold the main thread `milliseconds` from the first frame this selector matches a node in, whatever the
-   * reply does: a long task across a wait indicator's reveal, so the reveal paints late.
+   * reply does. With `acrossReveal`, the selector is a wait indicator's body and the task runs from the first frame
+   * its `wait-reveal` has a start time in until `milliseconds` past the reveal's due time: the frame that draws the
+   * reveal then runs that late, on the timeline as well as on screen.
    */
-  readonly longTask?: { readonly selector: string; readonly milliseconds: number };
+  readonly longTask?: { readonly selector: string; readonly milliseconds: number; readonly acrossReveal?: boolean };
   /**
    * A15f2: count `milliseconds` from the page's last click, not from the send, so a wait a click starts is answered at
    * a set time into it whatever the app took to send the read. A reply already past it goes on at once.
@@ -1083,7 +1112,7 @@ export type WorkerReadDeliveries = ReadonlyArray<{
 }>;
 
 type WorkerReadGlobal = typeof globalThis & {
-  __TAU_WORKER_READS__: { log: WorkerReadLog; delivered: WorkerReadDeliveries };
+  __TAU_WORKER_READS__: { log: WorkerReadLog; delivered: WorkerReadDeliveries; longTasks: readonly number[] };
 };
 
 /**
@@ -1099,7 +1128,7 @@ export const delayWorkerReads = (key: string): void => {
     milliseconds: number;
     afterShown?: string;
     busyMilliseconds?: number;
-    longTask?: { selector: string; milliseconds: number };
+    longTask?: { selector: string; milliseconds: number; acrossReveal?: boolean };
     fromClick?: boolean;
   }> = [];
   try {
@@ -1117,16 +1146,38 @@ export const delayWorkerReads = (key: string): void => {
       /* A long task: no frame runs until it ends. */
     }
   };
+  /* When each long task started, so a row can show its forcing ran. */
+  const longTasks: number[] = [];
   for (const { longTask } of rules) {
     if (longTask === undefined) {
       continue;
     }
     const untilPresent = (): void => {
-      if (document.querySelector(longTask.selector) === null) {
+      const node = document.querySelector(longTask.selector);
+      if (node === null) {
         requestAnimationFrame(untilPresent);
         return;
       }
-      holdMainThread(longTask.milliseconds);
+      if (longTask.acrossReveal !== true) {
+        longTasks.push(Math.round(performance.now()));
+        holdMainThread(longTask.milliseconds);
+        return;
+      }
+      const reveal = node
+        .getAnimations({ subtree: true })
+        .find((animation) => animation instanceof CSSAnimation && animation.animationName === 'wait-reveal');
+      if (reveal?.startTime === null || reveal === undefined) {
+        requestAnimationFrame(untilPresent);
+        return;
+      }
+      const due = Number(reveal.startTime) + Number(reveal.effect?.getTiming().delay ?? 0);
+      /* From the first frame the reveal has a start time in, always before it is due (its delay is 1,000 ms), until
+         `milliseconds` past the due time: the next frame, the first that can draw it, runs that late on the timeline
+         as well as on screen. */
+      if (Number(document.timeline.currentTime) < due) {
+        longTasks.push(Math.round(performance.now()));
+        holdMainThread(due - Number(document.timeline.currentTime) + longTask.milliseconds);
+      }
     };
     requestAnimationFrame(untilPresent);
   }
@@ -1142,7 +1193,7 @@ export const delayWorkerReads = (key: string): void => {
   const log: Array<{ t: number; method: string; path: string | undefined; delayed: boolean }> = [];
   /* Each held reply as it reached the page's listener: proof the late answer was late, not only that it was held. */
   const delivered: Array<{ t: number; sentAt: number; method: string; path: string | undefined }> = [];
-  Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log, delivered } });
+  Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log, delivered, longTasks } });
   type Held = {
     milliseconds: number;
     sentAt: number;
@@ -1332,6 +1383,10 @@ export const readWorkerReads = async (): Promise<WorkerReadLog> =>
  *
  * @returns Each delivery, with its request's send time.
  */
+/** When each `longTask` started on the page (`WorkerReadDelay.longTask`), in milliseconds from navigation start. */
+export const readLongTasks = async (): Promise<readonly number[]> =>
+  target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.longTasks);
+
 export const readWorkerDeliveries = async (): Promise<WorkerReadDeliveries> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.delivered);
 

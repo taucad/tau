@@ -24,6 +24,8 @@ import {
   projectRowMoves,
   projectLoadProbe,
   readDelayedRequests,
+  requireFrameTimes,
+  readLongTasks,
   holdRequestsUntilReleased,
   releaseHeldRequests,
   readProjectLoad,
@@ -34,7 +36,7 @@ import {
   openBeforeHydration,
   markProjectLoadOnClick,
   minimumBreaches,
-  shownOnFrames,
+  regionShownOnFrames,
 } from '#support/home-load-recorder.js';
 
 /**
@@ -1424,9 +1426,10 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
 
 /*
  * A15f2: the 500 ms minimum (UI Policy § 5) on History's "Loading history", seen at 164 ms in a local F10 record,
- * where the load's long tasks painted the reveal 222 ms late. The forcing: a 1,700 ms long task from the first frame
- * the indicator is in, across its reveal and the 500 ms after it, and History's read answered in the frame after the
- * first that shows the words. A span is measured on screen, from the first frame with the words to the first without.
+ * where the load's long tasks painted the reveal 222 ms late. The forcing: a long task from the first frame the reveal
+ * is timed in to 500 ms past its due time (read off its `wait-reveal` animation), so the frame that draws it runs that
+ * late, and History's read answered in the frame after the first that shows the words. A span is measured on screen,
+ * from the first frame with the words to the first without.
  */
 /** A15f2's assertion for both minimums (`minimumBreaches`). */
 const expectMinimum = (label: string, shown: readonly ShownSpan[], answeredAt: number): void => {
@@ -1440,7 +1443,7 @@ const expectMinimum = (label: string, shown: readonly ShownSpan[], answeredAt: n
 const historyHold: WorkerReadDelay = {
   ...historyRead(0),
   afterShown: historyRegions.historyIndicator,
-  longTask: { selector: historyRegions.historyIndicator, milliseconds: 1700 },
+  longTask: { selector: historyRegions.historyIndicator, milliseconds: 500, acrossReveal: true },
 };
 
 knownDefect(
@@ -1469,12 +1472,11 @@ knownDefect(
       );
       await target.delay(1500);
       const record = await keepRecord('history-minimum-wide');
+      requireFrameTimes('History minimum', record);
+      const longTasks = await readLongTasks();
+      precondition(longTasks.length > 0, 'History minimum: the reveal was due before the long task could hold it late');
       await requireReadDelayed('History minimum', historyHold);
-      const shown = shownOnFrames(
-        regionsOf(record, 'historyIndicator'),
-        record.frameStamps,
-        record.regionRemovals['historyIndicator'],
-      );
+      const shown = regionShownOnFrames(record, 'historyIndicator');
       precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
       const deliveries = await readWorkerDeliveries();
       return { shown, answeredAt: deliveries.find((delivery) => delivery.method === 'revision:log')!.t };
@@ -1527,6 +1529,7 @@ const measureSourceOpen = async (
   await target.expectVisible(selectors.getByCss(openedFileRegions.text), 60_000);
   await target.delay(milliseconds + settleWindow);
   const record = await keepRecord(label);
+  requireFrameTimes(label, record);
   /* The page's own click, and how long the app took from it to send the read: a product delay there would push the
      answer past the reveal, and the indicator would then be right to show. */
   const clicked = record.marks.find((mark) => mark.name === 'clicked');
@@ -1592,10 +1595,10 @@ knownDefect(
           revealBeforeAnswer: first === undefined ? undefined : first.from <= answeredAt + 20,
           /* The blueprint's row: visible from 1,000 ms to 1,500 ms after the wait starts. `to` is the first frame without it. */
           heldTo1500: first === undefined ? undefined : first.to - click.t >= 1500,
-          /* Counted in frames, not milliseconds: a frame a loaded runner paints late is not a late render, but a frame
-             painted after the answer without the text is. The reply reaches React in the next task and paints in the
-             frame after, so at most two frames go by without it. */
-          textAtAnswer: text === undefined ? undefined : afterAnswer.length <= 2,
+          /* In frames: a frame painted after the answer without the text is a late render, a frame a loaded runner paints
+             late is not; the reply renders in the next task, so at most two go by. 500 ms bounds a long task that holds
+             the text back with no frame at all (a loaded runner was seen at 334 ms). */
+          textAtAnswer: text === undefined ? undefined : afterAnswer.length <= 2 && text.t - answeredAt < 500,
         },
         `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms, ${afterAnswer.length} frames after the answer without it (the longest ${longestFrame} ms)`,
         { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
@@ -1620,12 +1623,8 @@ knownDefect(
         afterShown: openedFileRegions.fileIndicator,
         busyMilliseconds: 300,
       });
-      const clickedAt = measured.record.frameStamps[measured.clicked.frame - 1] ?? 0;
-      const shown = shownOnFrames(
-        regionsOf(measured.record, 'fileIndicator'),
-        measured.record.frameStamps,
-        measured.record.regionRemovals['fileIndicator'],
-      ).filter((span) => span.from >= clickedAt);
+      const clickedAt = measured.record.frameStamps[measured.clicked.frame - 1]!;
+      const shown = regionShownOnFrames(measured.record, 'fileIndicator', clickedAt);
       precondition(shown.length > 0, 'Opening file minimum: "Opening file" never showed');
       return { shown, answeredAt: measured.answeredAt };
     },

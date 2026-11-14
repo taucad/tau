@@ -23,6 +23,7 @@ import {
   selectLibraryWorkspaceConnection,
 } from '#runtime/project-library.js';
 import type { ProjectLibraryBinding } from '#runtime/project-library.js';
+import { projectListCountCookieName, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
 const worker = vi.hoisted(() => ({
@@ -404,5 +405,83 @@ describe('ProjectLibrary', () => {
     await library.invalidateChatListing('p1');
 
     expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([['projects'], ['chats', 'p1']]);
+  });
+
+  describe('listing snapshot (A13)', () => {
+    const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
+      projectId: id,
+      manifest: { name: `Name ${id}` },
+      library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
+      locator: { backend: 'indexeddb' },
+      slugs: { workspaceSlug: 'home', projectSlug: id },
+    });
+    const listing = (...projects: Array<ReturnType<typeof entry>>) => ({
+      projects,
+      conflicts: [],
+      recoveries: [],
+      workspaceBindingRepairs: [],
+    });
+
+    afterEach(() => {
+      globalThis.localStorage.clear();
+      projectListShapeStore.reset();
+    });
+
+    it('should remember a fetched project listing, and one published with setQueryData, with only the count in the cookie', async () => {
+      const queryClient = new QueryClient();
+      const library = createLibrary(queryClient);
+      library.start();
+
+      await queryClient.query({
+        queryKey: ['projects'],
+        queryFn: async () => listing(entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)),
+      });
+      expect(library.listingSnapshot.get()).toEqual({
+        count: 2,
+        projects: [
+          {
+            id: 'newer',
+            name: 'Name newer',
+            lastActivityAt: 9,
+            slugs: { workspaceSlug: 'home', projectSlug: 'newer' },
+          },
+          {
+            id: 'older',
+            name: 'Name older',
+            lastActivityAt: 1,
+            slugs: { workspaceSlug: 'home', projectSlug: 'older' },
+          },
+        ],
+      });
+      expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
+      expect(document.cookie).not.toContain('Name');
+
+      /* A workspace connect or disconnect publishes its listing without a fetch. */
+      queryClient.setQueryData(['projects'], listing(entry('other', 3)));
+      expect(library.listingSnapshot.get()?.projects?.map((project) => project.id)).toEqual(['other']);
+    });
+
+    it("should remember a project's chat listing, live and owned chats only, and nothing once stopped", async () => {
+      const queryClient = new QueryClient();
+      const library = createLibrary(queryClient);
+      library.start();
+      queryClient.setQueryData(['projects'], listing(entry('p1', 1)));
+
+      queryClient.setQueryData(
+        ['chats', 'p1', 'records', 'source', { includeDeleted: false }],
+        [
+          { id: 'c1', resourceId: 'p1', name: 'One', createdAt: 1, updatedAt: 1 },
+          { id: 'c2', resourceId: 'p1', name: 'Two', createdAt: 2, updatedAt: 2, deletedAt: 3 },
+        ],
+      );
+      expect(library.listingSnapshot.get()?.projects?.[0]).toMatchObject({
+        chatCount: 1,
+        chats: [{ id: 'c1', name: 'One', createdAt: 1, updatedAt: 1 }],
+      });
+
+      library.stop();
+      queryClient.setQueryData(['projects'], listing(entry('after-stop', 1)));
+      expect(library.listingSnapshot.get()?.projects?.map((project) => project.id)).toEqual(['p1']);
+    });
   });
 });

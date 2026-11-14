@@ -223,6 +223,7 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
     isSettled: !cloudListing.isFetching && !cloudListing.isFailed,
     isFailed: cloudListing.isFailed,
     isFetching: cloudListing.isFetching,
+    cloud: cloudListing.isFailed ? 'failed' : cloudListing.isFetching ? 'fetching' : 'ready',
     retry: vi.fn(),
   }),
 }));

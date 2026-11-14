@@ -67,7 +67,13 @@ import type { RecoveryRowInput, ReplayOutcome } from '#machines/library-recovery
 /** The root file manager's facade, as `FileManagerScope` builds it in React until A4b (D15 ruling, A2). @public */
 export type ProjectLibraryFileManager = Pick<
   ReturnType<typeof useFileManager>,
-  'client' | 'recordFiles' | 'workspace' | 'scopedStorage' | 'workerChangeChannel' | 'watchRecordFile'
+  | 'client'
+  | 'recordFiles'
+  | 'workspace'
+  | 'scopedStorage'
+  | 'workerChangeChannel'
+  | 'watchRecordFile'
+  | 'readDuplicateProjectFiles'
 >;
 
 export type ProjectDiscoveryConflict =

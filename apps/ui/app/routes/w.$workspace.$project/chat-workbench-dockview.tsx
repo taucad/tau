@@ -1898,6 +1898,19 @@ export function WorkbenchRightHeaderActions(properties: IDockviewHeaderActionsPr
   );
 }
 
+/* A key per adapter host: a Dockview made under one host is not reused under another. */
+const dockHostKeys = new WeakMap<WeakKey, number>();
+let nextDockHostKey = 0;
+const dockHostKey = (host: WeakKey): number => {
+  let key = dockHostKeys.get(host);
+  if (key === undefined) {
+    nextDockHostKey += 1;
+    key = nextDockHostKey;
+    dockHostKeys.set(host, key);
+  }
+  return key;
+};
+
 /**
  * WorkbenchDockview
  *
@@ -1923,7 +1936,12 @@ export const WorkbenchDockview = memo(function ({
   const dockHost = workspace.layout ?? editorRef;
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const [api, setApi] = useState<DockviewApi>();
+  /* The Dockview and the host it was made under. A host replaced under this component (a new project runtime) remounts
+   * the Dockview (its key), and the new one is handed over in the commit after its `onReady`: the runtime starts in its
+   * provider's passive effect, after this component's commit, and an unstarted host would only queue the hand-over. */
+  const [ready, setReady] = useState<Readonly<{ api: DockviewApi; host: typeof dockHost }>>();
+  const api = ready?.host === dockHost ? ready.api : undefined;
+  const dockKey = dockHostKey(dockHost);
   const dockId = useId();
 
   useEffect(() => {
@@ -2026,7 +2044,7 @@ export const WorkbenchDockview = memo(function ({
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const dockApi = event.api;
-      setApi(dockApi);
+      setReady({ api: dockApi, host: dockHost });
       restoreWorkbenchLayout({
         api: dockApi,
         layout: undefined,
@@ -2034,7 +2052,7 @@ export const WorkbenchDockview = memo(function ({
       });
       seedWorkbenchFromState(dockApi);
     },
-    [isTauDebugEnabled, seedWorkbenchFromState],
+    [dockHost, isTauDebugEnabled, seedWorkbenchFromState],
   );
 
   useEffect(() => {
@@ -2135,7 +2153,7 @@ export const WorkbenchDockview = memo(function ({
     <WorkbenchProfileContext.Provider value={profile}>
       <WorkbenchOpenPlaceholderFileContext.Provider value={handlePlaceholderOpenFile}>
         <DockviewFileActionProvider value={handleOpenFile}>
-          <div ref={handOver} className='contents'>
+          <div key={dockKey} ref={handOver} className='contents'>
             <Dockview
               components={components}
               tabComponents={tabComponents}

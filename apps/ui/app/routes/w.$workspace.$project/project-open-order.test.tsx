@@ -310,7 +310,6 @@ vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
 }));
 vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
+import { isValidElement, useEffect, useRef, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
@@ -119,8 +119,11 @@ let readyDockviewApi: DockviewApi | undefined;
 const workspaceLayout: { value: { send: (event: { type: string }) => void } | undefined } = { value: undefined };
 vi.mock('#components/panes/dockview.js', () => ({
   Dockview: ({ onReady }: { onReady: (event: DockviewReadyEvent) => void }) => {
+    // As Dockview (`useKeptInstance`): `onReady` once per mounted instance, whatever the later renders pass.
+    const announced = useRef(false);
     useEffect(() => {
-      if (readyDockviewApi) {
+      if (readyDockviewApi && !announced.current) {
+        announced.current = true;
         onReady({ api: readyDockviewApi });
       }
     }, [onReady]);
@@ -1668,6 +1671,79 @@ describe('workbench adapter record apply (A0.3)', () => {
     if (withLayout) {
       expect(mockEditorRef.send.mock.calls.some(([event]) => event.type === 'dockReady')).toBe(false);
     }
+  });
+
+  // D21 round 3: a runtime replaced under a mounted Dockview (a lease renewed after its grace) is started by its
+  // provider's passive effect, after the Dockview's commit. Handed over in that commit, the adapter was spawned only
+  // when its host started, and nothing attached it: the Dockview hands over to a host only once that host has started.
+  it('should attach the workbench adapter to a runtime that starts after the commit that replaced it', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      workspaceLayout.value = undefined;
+    });
+    /* A layout that queues what it is sent until it starts, as an unstarted actor does, and spawns an adapter on
+     * `dockReady`. */
+    const runtimeLayout = () => {
+      let started = false;
+      const queued: Array<{ type: string; dockId?: string }> = [];
+      const children = new Map<string, { send: (event: { type: string }) => void }>();
+      const attached = vi.fn();
+      const handle = (event: { type: string; dockId?: string }): void => {
+        const id = dockAdapterId('workbench', event.dockId ?? '');
+        if (event.type === 'dockReady') {
+          children.set(id, { send: attached });
+        } else if (event.type === 'dockReleased') {
+          children.delete(id);
+        }
+      };
+      return {
+        send: (event: { type: string; dockId?: string }) => {
+          if (started) {
+            handle(event);
+          } else {
+            queued.push(event);
+          }
+        },
+        getSnapshot: () => ({ children: Object.fromEntries(children) }),
+        start: () => {
+          started = true;
+          for (const event of queued.splice(0)) {
+            handle(event);
+          }
+        },
+        attached,
+      };
+    };
+    /* The project provider: its runtime starts in its passive effect, after its children's. */
+    function Runtime({ layout }: { readonly layout: ReturnType<typeof runtimeLayout> }) {
+      useEffect(() => {
+        layout.start();
+      }, [layout]);
+      // The workspace context re-renders the Dockview with the new runtime; the mocked hook needs a new prop for it.
+      return <WorkbenchDockview onApiChange={() => layout} />;
+    }
+    const first = runtimeLayout();
+    workspaceLayout.value = first;
+    const view = render(<Runtime layout={first} />);
+    expect(first.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+
+    const second = runtimeLayout();
+    workspaceLayout.value = second;
+    view.rerender(<Runtime layout={second} />);
+
+    expect(second.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+    view.unmount();
   });
 
   // A8b review: a record apply waits for its files to open, and the layout holds every pane intent until the apply

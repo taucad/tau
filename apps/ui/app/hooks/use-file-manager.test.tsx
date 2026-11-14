@@ -2047,7 +2047,7 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
     expect(opened.owner.dropped.aborted).toBe(true);
   });
 
-  it('follows the child when a new worker replaces the working copy, and the session close releases its connections', async () => {
+  it('follows the child when a re-root replaces the working copy, and the session close releases its connections', async () => {
     mockProxyExists.mockResolvedValue(true);
     const opened = openForSession();
     const heard = vi.fn();

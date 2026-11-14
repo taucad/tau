@@ -11,7 +11,7 @@
  *
  * It also feeds A6a's observable `parameterFiles` port from the session child (ruling R-b): the working-copy client of
  * the file manager's record connections, replaced, and announced, when the file manager publishes a new bridge opener
- * (a new worker). A6b fed it from the provider's scope; the provider now reads this one.
+ * (a reconnect or re-root on the same shared worker; a new shared worker rebuilds the file manager instead). A6b fed it from the provider's scope; the provider now reads this one.
  *
  * Every object here is a host object, so it lives in the child's closure and in a map keyed by the file manager's ref,
  * never in a machine's context (D4).
@@ -147,7 +147,7 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
     subscribe: (listener) => changes.subscribe(listener),
   };
 
-  /* A new worker publishes a new opener: the replacement owner is installed, which releases the replaced one, and
+  /* A reconnect or re-root publishes a new opener on the same shared worker: the replacement owner is installed, which releases the replaced one, and
    * every reader of the port hears it (the runtime's parameter service among them, through the provider). */
   const subscription = fileManagerRef.subscribe((snapshot) => {
     const next = connections.ownerFor(snapshot.context.openFileSystemBridge);

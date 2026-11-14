@@ -473,6 +473,12 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     expect(closing?.getSnapshot().context.closeReason).toBe('memory');
     flushGate.resolve();
     flushGate = undefined;
+    /* The reopen it waited behind then opens the project again. */
+    await vi.waitFor(() => {
+      const reopened = registry.getSnapshot().context.refs[projectId];
+      expect(reopened).toBeDefined();
+      expect(reopened).not.toBe(closing);
+    });
   });
 
   it('should close a failed session and open the project again as one reopen', async () => {

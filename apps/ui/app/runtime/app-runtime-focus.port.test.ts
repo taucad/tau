@@ -1,0 +1,248 @@
+// @vitest-environment jsdom
+/**
+ * The registry port's answers to focus over a real one-slot registry (A5b review round 13): a queued open that lands
+ * waiting is answered once resumed, the budget dialog's Not now answers start-failed, and a return refused by a close
+ * that came back live answers refused (rule 12).
+ */
+import { afterEach, expect, it, vi } from 'vitest';
+import { createActor } from 'xstate';
+import type { AnyActorRef } from 'xstate';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import { createFocusComposition } from '#runtime/app-runtime-focus.js';
+import {
+  createSessionsRegistryLogic,
+  registerProjectSessionServices,
+  reportRegionReady,
+} from '#services/sessions-store.js';
+
+vi.mock('#services/project-agent-host-registration.js', () => ({
+  registerProjectAgentHost: async () => ({ release: async () => undefined }),
+}));
+
+const cleanups: Array<() => void> = [];
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) {
+    cleanup();
+  }
+});
+const servicesFor = (projectId: string): void => {
+  cleanups.push(
+    registerProjectSessionServices(projectId, {
+      cancelRuns: async () => undefined,
+      flushProducers: async () => undefined,
+      flushSync: async () => undefined,
+      closeRuntime: async () => undefined,
+    }),
+  );
+};
+const flushTasks = async (): Promise<void> => {
+  await new Promise<void>((resolve) => {
+    globalThis.setTimeout(resolve, 0);
+  });
+};
+
+it('should an open that displaces the waiting one answers only itself (one slot, order of replies)', async () => {
+  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
+    input: { budget: 1 },
+    clock: new StepClock(),
+  }).start();
+  const told: Array<{ type: string } & Record<string, unknown>> = [];
+  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const composition = createFocusComposition({
+    library: {
+      routeAccess: async () => ({ status: 'missing' }),
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  const port = createActor(composition.logics.registry, {
+    input: { sessions: registry, focus: () => fakeFocus },
+  }).start();
+  cleanups.push(() => {
+    port.stop();
+    registry.stop();
+  });
+  for (const id of ['p1', 'p2', 'p3']) {
+    servicesFor(id);
+  }
+  port.send({ type: 'open', requestId: 'r1', projectId: 'p1' });
+  await flushTasks();
+  reportRegionReady('p1', 'runtime');
+  registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
+  await flushTasks();
+  port.send({ type: 'open', requestId: 'r2', projectId: 'p2' });
+  await flushTasks();
+  expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
+  port.send({ type: 'open', requestId: 'r3', projectId: 'p3' });
+  await flushTasks();
+  const settled = told
+    .filter((event) => event.type === 'openSettled')
+    .map((event) => `${String(event['requestId'])}:${String(event['result'])}`);
+  expect(settled).toEqual(['r1:live', 'r2:waiting', 'r3:waiting']);
+});
+
+it('should a queued open that lands waiting is answered when the registry resumes it', async () => {
+  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
+    input: { budget: 1 },
+    clock: new StepClock(),
+  }).start();
+  const told: Array<{ type: string } & Record<string, unknown>> = [];
+  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const composition = createFocusComposition({
+    library: {
+      routeAccess: async () => ({ status: 'missing' }),
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  const port = createActor(composition.logics.registry, {
+    input: { sessions: registry, focus: () => fakeFocus },
+  }).start();
+  cleanups.push(() => {
+    port.stop();
+    registry.stop();
+  });
+  for (const id of ['p1', 'p2']) {
+    servicesFor(id);
+  }
+  port.send({ type: 'open', requestId: 'r1', projectId: 'p1' });
+  await flushTasks();
+  reportRegionReady('p1', 'runtime');
+  registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
+  await flushTasks();
+  /* Focus answers the registry's notification of an earlier event with its next open: the registry queues it. */
+  let armed = true;
+  const inside = registry.subscribe(() => {
+    if (armed) {
+      armed = false;
+      port.send({ type: 'open', requestId: 'r2', projectId: 'p2' });
+    }
+  });
+  registry.send({ type: 'touch', projectId: 'p1' });
+  inside.unsubscribe();
+  await flushTasks();
+  expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
+  registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
+  registry.send({ type: 'close', projectId: 'p1', reason: 'user' });
+  registry.getSnapshot().context.refs['p1']?.send({ type: 'confirmClose' });
+  await vi.waitFor(() => {
+    expect(registry.getSnapshot().context.refs['p2']).toBeDefined();
+  });
+  await flushTasks();
+  const settled = told
+    .filter((event) => event.type === 'openSettled')
+    .map((event) => `${String(event['requestId'])}:${String(event['result'])}`);
+  expect(settled).toEqual(['r1:live', 'r2:waiting', 'r2:live']);
+});
+
+it("should the person's Not now on the budget dialog answers focus's waiting open start-failed", async () => {
+  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
+    input: { budget: 1 },
+    clock: new StepClock(),
+  }).start();
+  const told: Array<{ type: string } & Record<string, unknown>> = [];
+  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const composition = createFocusComposition({
+    library: {
+      routeAccess: async () => ({ status: 'missing' }),
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  const port = createActor(composition.logics.registry, {
+    input: { sessions: registry, focus: () => fakeFocus },
+  }).start();
+  cleanups.push(() => {
+    port.stop();
+    registry.stop();
+  });
+  for (const id of ['p1', 'p2']) {
+    servicesFor(id);
+  }
+  port.send({ type: 'open', requestId: 'r1', projectId: 'p1' });
+  await flushTasks();
+  reportRegionReady('p1', 'runtime');
+  registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
+  await flushTasks();
+  port.send({ type: 'open', requestId: 'r2', projectId: 'p2' });
+  await flushTasks();
+  expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
+  /* `BudgetRefusedDialog`'s Not now: straight to the registry, not through focus. */
+  registry.send({ type: 'cancelPendingOpen' });
+  await flushTasks();
+  const settled = told
+    .filter((event) => event.type === 'openSettled')
+    .map((event) => `${String(event['requestId'])}:${String(event['result'])}`);
+  expect(settled).toEqual(['r1:live', 'r2:waiting', 'r2:start-failed']);
+});
+
+it('should a return to a closing project refused by another close that came back live is answered refused (rule 12)', async () => {
+  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
+    input: { budget: 2 },
+    clock: new StepClock(),
+  }).start();
+  const told: Array<{ type: string } & Record<string, unknown>> = [];
+  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const composition = createFocusComposition({
+    library: {
+      routeAccess: async () => ({ status: 'missing' }),
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  const port = createActor(composition.logics.registry, {
+    input: { sessions: registry, focus: () => fakeFocus },
+  }).start();
+  cleanups.push(() => {
+    port.stop();
+    registry.stop();
+  });
+  let refuse: (error: Error) => void = () => undefined;
+  const gateY = new Promise<void>((_resolve, reject) => {
+    refuse = reject;
+  });
+  // oxlint-disable-next-line promise/prefer-await-to-then -- the row refuses this close on purpose; mark it handled.
+  gateY.catch(() => undefined);
+  /* A close that never settles: px stays closing. */
+  const gateX = new Promise<void>(() => {
+    /* Never settles. */
+  });
+  cleanups.push(
+    registerProjectSessionServices('px', {
+      cancelRuns: async () => undefined,
+      flushProducers: async () => gateX,
+      flushSync: async () => undefined,
+      closeRuntime: async () => undefined,
+    }),
+    registerProjectSessionServices('py', {
+      cancelRuns: async () => undefined,
+      flushProducers: async () => gateY,
+      flushSync: async () => undefined,
+      closeRuntime: async () => undefined,
+    }),
+  );
+  port.send({ type: 'open', requestId: 'r1', projectId: 'px' });
+  port.send({ type: 'open', requestId: 'r2', projectId: 'py' });
+  await flushTasks();
+  reportRegionReady('px', 'runtime');
+  reportRegionReady('py', 'runtime');
+  await flushTasks();
+  for (const id of ['px', 'py']) {
+    registry.send({ type: 'close', projectId: id, reason: 'user' });
+    registry.getSnapshot().context.refs[id]?.send({ type: 'confirmClose' });
+  }
+  await flushTasks();
+  port.send({ type: 'open', requestId: 'r3', projectId: 'px' });
+  await flushTasks();
+  refuse(new Error('producer refused'));
+  await flushTasks();
+  await flushTasks();
+  const settled = told
+    .filter((event) => event.type === 'openSettled')
+    .map((event) => `${String(event['requestId'])}:${String(event['result'])}`);
+  expect(settled).toEqual(['r1:live', 'r2:live', 'r3:waiting', 'r3:refused']);
+});

@@ -72,4 +72,16 @@ describe('useCanonicalProjectUrlCorrection with the route path it resolved from'
 
     expect(globalThis.location.pathname).toBe('/w/home/q');
   });
+
+  it('should, after its own write, leave a bar the person has since moved on from (I2)', () => {
+    showPath('/w/home/p');
+    listing.projectSlug = 'q';
+    const { rerender } = renderHook(() => useCanonicalProjectUrlCorrection('proj_1', '', '/w/home/p'));
+    expect(globalThis.location.pathname).toBe('/w/home/q');
+    /* The person navigates on before the route commits; then project 1 is renamed again. */
+    showPath('/w/home/elsewhere');
+    listing.projectSlug = 'r';
+    rerender();
+    expect(globalThis.location.pathname).toBe('/w/home/elsewhere');
+  });
 });

@@ -2539,3 +2539,40 @@ describe('round 12: a held answer on the project focus is on', () => {
     expect(focusedSessionId()).toBeUndefined();
   });
 });
+
+describe('round 13: a project left for a non-project route', () => {
+  it('should stop focusing the project once its leave flush settles and focus is idle', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const Shell = ({ projectId }: { readonly projectId?: string }): React.JSX.Element => (
+      <SessionsProvider actor={sessionsActor} focus={focusHost}>
+        <routeModule.ProjectRouteProviders projectId={projectId}>
+          <input aria-label='Page input' />
+        </routeModule.ProjectRouteProviders>
+      </SessionsProvider>
+    );
+    const view = render(<Shell projectId={projectA} />);
+    await screen.findByTestId('focused-project');
+    expect(focusedSessionId()).toBe(projectA);
+    view.rerender(<Shell />);
+    await flushTasks();
+    await flushTasks();
+    expect(focusHost.focus.getSnapshot().value).toBe('idle');
+    expect(sessionIds()).toEqual([projectA]);
+    expect(focusedSessionId()).toBeUndefined();
+    expect(screen.getByTestId('project-session').closest('[inert]')).toBeNull();
+  });
+});
+
+describe('round 13: no overlay on the project focus is on', () => {
+  it('should show no move overlay and leave the page usable once the project is focused', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    renderHost('/w/ws/alpha?chat=chat-1');
+    await flushTasks();
+    await flushTasks();
+    expect(focusedSessionId()).toBe(projectA);
+    expect(screen.queryByRole('status', { name: 'Opening project' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('project-session').closest('[inert]')).toBeNull();
+    expect(screen.getByTestId('project-session').closest('[aria-busy="true"]')).toBeNull();
+  });
+});

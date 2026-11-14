@@ -151,3 +151,49 @@ describe('the app runtime hands its focus, unload sequencer and library epoch do
     runtime.stop();
   });
 });
+
+describe('round 13: the runtime hands focus its route and flush ports', () => {
+  it("should deliver focus's cloudOpen marker to the bound route sink", () => {
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
+    const { focus, bindings } = selectRuntimeFocus(runtime);
+    const commands: AnyEventObject[] = [];
+    const unbind = bindings.bindRoute((command) => commands.push(command));
+    focus.send({
+      type: 'routeRequested',
+      requestId: 'route:1',
+      slugs: { workspaceSlug: 'w', projectSlug: 'a' },
+      projectId: 'proj_a',
+      cloudOpen: true,
+    });
+    expect(commands).toEqual([{ type: 'cloudOpenTaken', projectId: 'proj_a' }]);
+    unbind();
+    runtime.stop();
+  });
+
+  it("should run a live project's registered leave flush when focus asks", async () => {
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
+    const { focus, bindings } = selectRuntimeFocus(runtime);
+    const flush = vi.fn(async () => undefined);
+    bindings.registerLeaveFlush({ projectId: 'proj_a', flush });
+    const { ports } = focus.getSnapshot().context as unknown as {
+      ports: Record<string, { send: (event: AnyEventObject) => void }>;
+    };
+    ports['flush']?.send({ type: 'leaveFlushAsked', requestId: 'flush:1', projectId: 'proj_a' });
+    expect(flush).toHaveBeenCalledTimes(1);
+    runtime.stop();
+  });
+
+  it("should forward focus's open to the runtime's registry", () => {
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
+    const { focus } = selectRuntimeFocus(runtime);
+    const { ports } = focus.getSnapshot().context as unknown as {
+      ports: Record<string, { send: (event: AnyEventObject) => void }>;
+    };
+    ports['registry']?.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a' });
+    expect(selectSessionsRegistry(runtime.getSnapshot()).getSnapshot().context.refs['proj_a']).toBeDefined();
+    runtime.stop();
+  });
+});

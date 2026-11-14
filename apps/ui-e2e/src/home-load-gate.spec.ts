@@ -424,8 +424,9 @@ cloudDefectRow(
 
 /*
  * A15a frame rows for Home (loading states UX blueprint, § Red-first tests, Home), on A0.10's recorder: added after
- * A0.10 so later lanes only flip. H-a is S-flags' (#2180). The one guard that holds on `main`, H-g, asserts as a plain
- * passing row; every other row stands as an expected failure, and its title names the lane that flips it. H-f's cancel
+ * A0.10 so later lanes only flip. H-a is S-flags' (#2180). The guards that hold on `main` assert as plain passing
+ * rows: H-g, and H-b and H-c since A13 (#2164) and A15g (#2214) landed. Every other row stands as an expected failure,
+ * and its title names the lane that flips it. H-f's cancel
  * case is red until A15d: on `main` an Enter typed before hydration becomes a line break, so there is no send to cancel.
  */
 
@@ -457,7 +458,7 @@ knownDefect(
   'H-b (A13, A15g): a returning reload of Home with the project listing 3 s late shows the seeded rows and cards from the first frame after hydration, with no skeleton in any frame',
   {
     artifact: 'h-b-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
       const { record } = await measureReturningReload({
@@ -501,7 +502,7 @@ knownDefect(
   'H-c (A13, A15g): with nothing remembered and the project listing 3 s late, Home draws no skeleton, its Recents indicator shows from 1,000 ms, and the grid is busy',
   {
     artifact: 'h-c-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
       const { record } = await measureReturningReload({

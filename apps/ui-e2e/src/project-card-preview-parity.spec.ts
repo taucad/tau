@@ -31,6 +31,9 @@ test('project card thumbnail and preview parity', async () => {
   await target.click(toggle);
   const activeMedia = 'div:has(> button[aria-label="Preview model"][aria-pressed="true"])';
   await target.expectVisible(`${activeMedia} canvas`, 60_000);
+  /* The canvas paints before the camera has fitted the model to the card's viewport, so a silhouette measured on
+   * that first frame sits off-centre (39.5 px in runs 43472189308 and 43616009462). Measure the framed model. */
+  await target.expectGeometryFramed();
 
   let previewBounds: Awaited<ReturnType<typeof measureProjectCardForeground>>;
   await expect

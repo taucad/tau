@@ -12,6 +12,7 @@ import {
   layoutFlagsCookieName,
   parseLayoutFlags,
   readLayoutFlagsFromHeader,
+  resolveServerLayoutFlags,
   writeLayoutFlagsCookie,
 } from '#flags/layout-flags.js';
 import type { RemoteFlagClient } from '#flags/remote-flags.js';
@@ -106,6 +107,18 @@ describe('layout-flags cookie value', () => {
     expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.1');
     writeLayoutFlagsCookie({ onboarding: false });
     expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.0');
+  });
+});
+
+describe('the layout flags the server renders with', () => {
+  it('keeps a flag the cookie does not carry unknown while PostHog or a seeded state can answer', () => {
+    expect(resolveServerLayoutFlags({}, true)).toEqual({});
+    expect(resolveServerLayoutFlags({ onboarding: true }, true)).toEqual({ onboarding: true });
+  });
+
+  it('knows a PostHog-backed flag as its default when no answer can reach the page view, and keeps the cookie', () => {
+    expect(resolveServerLayoutFlags({}, false)).toEqual({ onboarding: false });
+    expect(resolveServerLayoutFlags({ onboarding: true }, false)).toEqual({ onboarding: true });
   });
 });
 

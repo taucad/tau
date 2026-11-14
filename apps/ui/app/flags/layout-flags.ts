@@ -14,8 +14,8 @@
 import * as Cookies from 'es-cookie';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
-import type { LayoutFlagName } from '#flags/flag.constants.js';
-import { layoutFlagNames } from '#flags/flag.constants.js';
+import type { FlagDefinition, LayoutFlagName } from '#flags/flag.constants.js';
+import { featureFlagDefaults, flagRegistry, layoutFlagNames } from '#flags/flag.constants.js';
 
 /** The settled values of the layout-affecting flags, by registry name. A flag not yet settled is absent. */
 export type LayoutFlagValues = Readonly<Partial<Record<LayoutFlagName, boolean>>>;
@@ -74,6 +74,34 @@ export const encodeLayoutFlags = (flags: LayoutFlagValues): string =>
  */
 export const readLayoutFlagsFromHeader = (header: string | undefined): LayoutFlagValues =>
   header ? parseLayoutFlags(Cookies.parse(header)[layoutFlagsCookieName]) : {};
+
+/**
+ * The layout flags the server renders with. A PostHog-backed flag the cookie does not carry is still known when no
+ * PostHog value can reach this page view (analytics not admitted by the request's consent, or no client key): the
+ * client's remote source then settles as absent, so the flag keeps its registry default and the server can omit the
+ * flagged surface instead of holding its box. A build that honours a seeded end-to-end flag state keeps it unknown,
+ * because the seed is invisible to the server.
+ *
+ * @param remembered - The flags the request's cookie carried.
+ * @param canReceiveRemoteValues - Whether PostHog, or a seeded flag state, can answer in this page view.
+ * @returns The flags for the server render; a flag absent from it is unknown.
+ */
+export const resolveServerLayoutFlags = (
+  remembered: LayoutFlagValues,
+  canReceiveRemoteValues: boolean,
+): LayoutFlagValues => {
+  if (canReceiveRemoteValues) {
+    return remembered;
+  }
+  const resolved: Partial<Record<LayoutFlagName, boolean>> = { ...remembered };
+  for (const name of layoutFlagNames) {
+    const definition: FlagDefinition = flagRegistry[name];
+    if (definition.posthogKey !== undefined && resolved[name] === undefined) {
+      resolved[name] = featureFlagDefaults[name];
+    }
+  }
+  return resolved;
+};
 
 /**
  * Mirror settled layout flags into the cookie the next document request carries. A flag that is not settled keeps

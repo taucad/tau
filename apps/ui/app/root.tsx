@@ -15,7 +15,8 @@ import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
 import { readProjectListCountFromHeader } from '#lib/project-list-shape.lib.js';
 import { readShellRequestHints } from '#lib/shell-request-hints.js';
-import { readLayoutFlagsFromHeader } from '#flags/layout-flags.js';
+import { readLayoutFlagsFromHeader, resolveServerLayoutFlags } from '#flags/layout-flags.js';
+import { isSeededFlagSourceAllowed } from '#flags/remote-flags.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
@@ -65,15 +66,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { pathname } = new URL(request.url);
   /* R3: the model label is final on first paint. The offline shell is a neutral prerendered document. */
   const queries = isOfflineShellPath(pathname) ? undefined : prefetchModelCatalog();
+  const consentStatus = readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl);
+  const env = await getClientEnvironment();
   return {
-    consentStatus: readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl),
+    consentStatus,
     globalPrivacyControl,
-    env: await getClientEnvironment(),
+    env,
     pathname,
     // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
     projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
     // H2: the settled layout-affecting flags, so the server renders, omits or holds a flagged row.
-    layoutFlags: readLayoutFlagsFromHeader(request.headers.get('Cookie') ?? undefined),
+    // A flag no PostHog answer can reach in this page view is known as its default, so nothing is held for it.
+    layoutFlags: resolveServerLayoutFlags(
+      readLayoutFlagsFromHeader(request.headers.get('Cookie') ?? undefined),
+      isSeededFlagSourceAllowed || (Boolean(env.POSTHOG_CLIENT_KEY) && consentStatus === 'accepted'),
+    ),
     // R4/R7: sidebar state and request platform, so the shell's first paint is final.
     shellHints: readShellRequestHints(request),
     theme: await readThemeCookie(request),

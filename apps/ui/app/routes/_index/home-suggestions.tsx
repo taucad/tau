@@ -88,7 +88,7 @@ const HomeSuggestionRow = memo(function (): React.JSX.Element | undefined {
           <Button
             variant='outline'
             size='sm'
-            className='h-8 w-full min-w-0 justify-start'
+            className='w-full min-w-0 justify-start'
             title={example.prompt}
             onClick={() => {
               handleSelect(example);

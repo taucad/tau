@@ -13,7 +13,11 @@ import {
   projectSessionIgnoredEvents,
   projectSessionMachine,
 } from './project-session.machine.js';
-import type { ProjectSessionMachineEvent, ProjectSessionRegion } from './project-session.machine.js';
+import type {
+  ProjectSessionMachineEvent,
+  ProjectSessionOpenRequest,
+  ProjectSessionRegion,
+} from './project-session.machine.js';
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -47,6 +51,7 @@ const harness = (options?: {
   readonly flushProducers?: () => Promise<void>;
   readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseAgentHost';
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
+  readonly request?: ProjectSessionOpenRequest;
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
@@ -105,6 +110,7 @@ const harness = (options?: {
         startBoundMilliseconds: 500,
         closeFlushMilliseconds: 100,
         ...(options?.parentRef === undefined ? {} : { parentRef: options.parentRef }),
+        ...(options?.request === undefined ? {} : { request: options.request }),
       },
       ...(options?.inspect === undefined ? {} : { inspect: options.inspect }),
     },
@@ -603,6 +609,59 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
+  it('should keep the request it was opened with in context (A5c, R3-F2)', async () => {
+    const request = { workspace: 'ws', nativeKernelId: 'build123d', chatId: 'chat-1', epoch: 2 };
+    const { actor } = harness({ request });
+    await settle();
+
+    expect(actor.getSnapshot().context.request).toEqual(request);
+    actor.stop();
+  });
+
+  it('should move only the chat fields of its request on chatRequested, in any state', async () => {
+    const request = { workspace: 'ws', nativeKernelId: 'build123d', chatId: 'chat-1', epoch: 2 };
+    const { actor } = harness({ request, readyRegions: [] });
+
+    actor.send({ type: 'chatRequested', chatId: 'chat-2', createdChatId: 'chat-2' });
+    expect(actor.getSnapshot().matches('opening')).toBe(true);
+    expect(actor.getSnapshot().context.request).toEqual({ ...request, chatId: 'chat-2', createdChatId: 'chat-2' });
+
+    actor.send({ type: 'chatRequested' });
+    expect(actor.getSnapshot().context.request).toEqual({
+      ...request,
+      chatId: undefined,
+      createdChatId: undefined,
+    });
+    actor.stop();
+  });
+
+  it('should keep no request on chatRequested when it was opened without one', async () => {
+    const { actor } = harness();
+    await settle();
+    const before = actor.getSnapshot().context;
+
+    actor.send({ type: 'chatRequested', chatId: 'chat-1' });
+
+    expect(actor.getSnapshot().context).toBe(before);
+    expect(actor.getSnapshot().context.request).toBeUndefined();
+    actor.stop();
+  });
+
+  it('should report its open facts to the registry with every state: chat ready and the first check settled', async () => {
+    const parent = recordingParent();
+    const { actor } = harness({ parentRef: parent.ref });
+    await settle();
+    actor.send({ type: 'revisionState', dirty: true, pushed: false });
+    await settle();
+
+    const reports = parent.received.filter((event) => event.type === 'sessionState');
+    expect(reports.length).toBeGreaterThanOrEqual(3);
+    for (const report of reports) {
+      expect(report).toMatchObject({ chatReady: true, availability: 'settled' });
+    }
+    actor.stop();
+  });
+
   it('stops every child when the actor itself is stopped', async () => {
     const { actor, live } = harness();
     await settle();
@@ -662,6 +721,7 @@ describe('projectSessionMachine — the machine contract (PV-S5, MC-R17)', () =>
       { type: 'visibilityChanged', visible: false, focused: false },
       { type: 'attention', count: 1 },
       { type: 'revisionState', dirty: true, pushed: false },
+      { type: 'chatRequested', chatId: 'c' },
     ] satisfies ProjectSessionMachineEvent[];
     expect(
       unansweredEvents(projectSessionMachine, {

@@ -1,9 +1,11 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { filesPane } from '#support/file-tree.js';
+import { filesPane, treeItem } from '#support/file-tree.js';
 
 const consentCookieName = 'tau-cookie-consent';
+/** The entry file of a project made at `/projects/new` with its preselected kernel, replicad. */
+const newProjectEntry = 'main.ts';
 const consentStatus = async (): Promise<string | undefined> => {
   const cookies = await target.cookies();
   const cookie = cookies.find(({ name }) => name === consentCookieName);
@@ -197,10 +199,6 @@ test('records editor, chat and file text in replay but never a credential block'
   await target.fill(selectors.getByCss('input#project-name'), 'Private workspace');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  const sourceTab = selectors.getByRole('tab', { name: 'main.scad', exact: true }).last();
-  await target.expectVisible(sourceTab, 60_000);
-  await target.click(sourceTab);
-  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   if (!(await target.isVisible(filesPane()))) {
     await target.click(selectors.getByRole('button', { name: /Search/u }));
     const search = selectors.getByPlaceholder('Search projects, chats, and actions…');
@@ -208,10 +206,21 @@ test('records editor, chat and file text in replay but never a credential block'
     await target.click(selectors.getByText('Open files', { exact: true }));
   }
   await target.expectVisible(filesPane(), 60_000);
+  /* A new project opens no file (53b887367b, #1386), and `/projects/new` preselects replicad, whose entry is
+   * `main.ts` (3948936544, #1825): open the entry from Files so the editor surface is mounted. */
+  await target.click(treeItem(newProjectEntry));
+  const sourceTab = selectors.getByRole('tab', { name: newProjectEntry, exact: true }).last();
+  await target.expectVisible(sourceTab, 60_000);
+  await target.click(sourceTab);
+  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
   if ((await target.getAttribute(chatToggle, 'aria-pressed')) === 'false') {
     await target.click(chatToggle);
   }
+  await target.fill(
+    selectors.getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]').last(),
+    'Private composer sentinel',
+  );
   const surfaces = await target.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-container');
     const files = document.querySelector<HTMLElement>('[role="treeitem"]')?.parentElement ?? null;
@@ -242,6 +251,7 @@ test('records editor, chat and file text in replay but never a credential block'
     'Visible source sentinel',
     'Visible filename sentinel',
     'Private credential sentinel',
+    'Private composer sentinel',
     'Public project control',
   ]);
   expect(summary.events).toContain('$snapshot');
@@ -249,6 +259,7 @@ test('records editor, chat and file text in replay but never a credential block'
   expect(summary.present['Visible source sentinel']).toBe(true);
   expect(summary.present['Visible filename sentinel']).toBe(true);
   expect(summary.present['Private credential sentinel']).toBe(false);
+  expect(summary.present['Private composer sentinel']).toBe(false);
 });
 
 test('withdraws an accepted tab when the website announces a decline', async () => {

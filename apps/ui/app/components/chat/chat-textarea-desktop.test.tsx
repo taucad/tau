@@ -65,6 +65,9 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
   },
 }));
 
+/* The trigger's name, or its placeholder while the catalog has not named the model. */
+const triggerName = vi.hoisted(() => ({ slot: 'trigger-model' as 'trigger-model' | 'trigger-model-placeholder' }));
+
 /* The sheet has its own suite; here it only has to sit beside Send. */
 vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -74,7 +77,7 @@ vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
       data-slot='agent-trigger'
       data-reasoning={agentConfig.options.find((option) => option.category === 'thought_level')?.currentValue}
     >
-      <span data-slot='trigger-model'>Agent and model</span>
+      <span data-slot={triggerName.slot}>Agent and model</span>
     </button>
   ),
 }));
@@ -918,6 +921,7 @@ describe('composer bar measurement lifecycle', () => {
     height = 40;
     requiredWidth = 260;
     reads = [];
+    triggerName.slot = 'trigger-model';
     observers.clear();
     originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
     fonts = Promise.withResolvers<FontFaceSet>();
@@ -948,7 +952,7 @@ describe('composer bar measurement lifecycle', () => {
       },
     );
     vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      if (this.dataset['slot'] !== 'trigger-model') {
+      if (this.dataset['slot'] !== triggerName.slot) {
         return 0;
       }
       const bar = this.closest('[data-slot=composer-bar]')!;
@@ -956,7 +960,7 @@ describe('composer bar measurement lifecycle', () => {
       return requiredWidth;
     });
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      if (this.dataset['slot'] !== 'trigger-model') {
+      if (this.dataset['slot'] !== triggerName.slot) {
         return 0;
       }
       const bar = this.closest('[data-slot=composer-bar]')!;
@@ -1004,6 +1008,15 @@ describe('composer bar measurement lifecycle', () => {
     expect(Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
     expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
     expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(false);
+  });
+
+  it('should fit labels in order while the model name is still a placeholder', () => {
+    triggerName.slot = 'trigger-model-placeholder';
+    const { container } = renderBar();
+    const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
+    expect(reads.slice(0, 3)).toEqual(['', 'kernel', 'kernel,mode']);
+    expect(Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(true);
   });
 
   it('should refit genuine height and live font changes even when width is unchanged', async () => {

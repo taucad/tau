@@ -15,7 +15,7 @@ import { leasesMachine } from '#runtime/leases.machine.js';
  *
  * One composition root for the app's long-lived actors, created by the entry and started once after hydration by
  * `AppRuntimeProvider` (named boundary 2, D15). Its static children are one list, {@link appRuntimeChildren}; the
- * lanes that own the others attach them here (A2, A5b, A6b). The project runtime, the revision lifecycle and
+ * lanes that own the others attach them here (A5b, A6b). The project runtime, the revision lifecycle and
  * the host connector are not children of this root: they are a session's lazy children, loaded by dynamic import,
  * and `import-boundary.node.test.ts` keeps them out of this module's graph.
  *
@@ -46,8 +46,7 @@ export const appRuntimeChildren = [
 export type AppRuntimeChild = (typeof appRuntimeChildren)[number];
 
 /**
- * The children this root attaches today. The rest are named slots: `choices` (A6b), `projectLibrary` and
- * `chatSessions` (A2), and `focus` (A5b).
+ * The children this root attaches today. The rest are named slots: `choices` (A6b) and `focus` (A5b).
  *
  * @public
  */
@@ -56,6 +55,8 @@ export const appRuntimeAttachedChildren = [
   'fileManagerHost',
   'rootFiles',
   'leases',
+  'projectLibrary',
+  'chatSessions',
   'sessions',
 ] as const satisfies readonly AppRuntimeChild[];
 
@@ -122,6 +123,13 @@ const environmentEventSchemas = {
 /** The driver default: no page, no listeners. The composition provides the browser's (MC-R8). */
 const noEnvironment = createCallbackLogic<EventObject>(() => undefined);
 
+/**
+ * The driver default of `projectLibrary` and `chatSessions`: nothing to start. The composition provides the library's
+ * callback, which starts and stops the `ProjectLibrary` with the root (D4, D9). The `ChatSessionStore` has no start or
+ * stop of its own: the composition builds it with the root and its child marks its slot.
+ */
+const noService = createCallbackLogic<EventObject>(() => undefined);
+
 const faultMessage = (error: unknown): string => (error instanceof Error ? error.message : 'app runtime fault');
 
 /**
@@ -156,6 +164,8 @@ export const appRuntimeMachine = setup({
   },
   actors: {
     environment: noEnvironment,
+    projectLibrary: noService,
+    chatSessions: noService,
     rootFiles: fileManagerMachine,
     fileManagerHost: fileManagerHostMachine,
     leases: leasesMachine,
@@ -177,8 +187,13 @@ export const appRuntimeMachine = setup({
       fault: undefined,
     };
   },
-  /* The invoke's own `onError` (MC-R12) records through the same first-fault rule. */
-  invoke: { id: 'environment', src: 'environment', onError: keepFirstFault },
+  /* Each invoke's own `onError` (MC-R12) records through the same first-fault rule. */
+  invoke: [
+    { id: 'environment', src: 'environment', onError: keepFirstFault },
+    /* A2: the library and the chat store, held in their callbacks' closures (D4, D9); the library starts with the root. */
+    { id: 'projectLibrary', src: 'projectLibrary', onError: keepFirstFault },
+    { id: 'chatSessions', src: 'chatSessions', onError: keepFirstFault },
+  ],
   on: {
     visibilityChanged: ({ context, event }, enq) => {
       enq.emit({ type: 'visibilityChanged', visible: event.visible });

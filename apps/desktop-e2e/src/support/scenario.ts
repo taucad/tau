@@ -247,13 +247,20 @@ export const pressModelTreeShortcut = async (page: Page): Promise<void> => {
  * device the page preselects Replicad, since Auto became every device's default in #1982 (blueprint E5), so a row
  * whose project must hold an OpenSCAD `main.scad` picks that kernel before *Create Project*.
  *
- * @param page - The renderer, on `/projects/new`.
+ * A browser client's page is server-rendered, and its kernel radios are buttons with no handler until React hydrates:
+ * a click on a cold load lands before then and is lost, so the page stays on Replicad. The name field adopts what was
+ * typed before hydration, which is what enables *Create Project*, so an enabled *Create Project* is the page's own
+ * sign that it now answers clicks. The call waits for it, so the caller fills the name first.
+ *
+ * Only locator waits, no `expect.poll`: suites call this from `beforeAll`, where vitest refuses `expect.poll`.
+ *
+ * @param page - The renderer, on `/projects/new`, with *Project Name* filled.
  * @param kernelName - The kernel's display name, such as `OpenSCAD`.
  */
 export const chooseNewProjectKernel = async (page: Page, kernelName: string): Promise<void> => {
-  const choice = page.getByRole('radio', { name: kernelName, exact: true });
-  await choice.click();
-  await expect.poll(async () => choice.getAttribute('aria-checked'), { timeout: 15_000 }).toBe('true');
+  await expectVisible(page.getByRole('button', { name: /^Create Project/u, disabled: false }), 60_000);
+  await page.getByRole('radio', { name: kernelName, exact: true }).click();
+  await expectVisible(page.getByRole('radio', { name: kernelName, exact: true, checked: true }), 15_000);
 };
 
 /**

@@ -302,15 +302,22 @@ export const selectModel = async (name: string): Promise<void> => {
 };
 
 /**
- * Choose the composer's reasoning level through the agent sheet.
+ * Choose the composer's effort through the agent sheet. Since ce8c822c5e (#747) effort is a row of the sheet that
+ * drills into a page of its own, one option per level; choosing one returns to the sheet.
  *
- * @param level - The level's name, as the sheet shows it.
+ * @param level - The level's name, as the effort page shows it.
  * @returns Nothing.
  */
-export const selectReasoningLevel = async (level: string): Promise<void> => {
+export const selectEffort = async (level: string): Promise<void> => {
   await target.click(selectors.getByCss(composerSelector).first());
   await target.keyboardPress('ControlOrMeta+Slash');
-  await target.click(selectors.getByRole('tab', { name: level, exact: true }));
+  await target.click(selectors.getByRole('button', { name: /^Effort for / }));
+  await target.click(
+    selectors.getByCss('[data-slot="effort-list"]').getByRole('option', { name: new RegExp(`^${level}(?:,|$)`, 'u') }),
+  );
+  await target.expectVisible(
+    selectors.getByRole('button', { name: new RegExp(`^Effort for .*: ${level}\\. Change$`, 'u') }),
+  );
   await target.keyboardPress('Escape');
 };
 

@@ -17,6 +17,12 @@ import { join } from 'node:path';
 /** One platform's `git-lfs` release archive. */
 export type GitLfsArchive = Readonly<{ name: string; sha256: string; url: string; format: 'zip' | 'tar.gz' }>;
 
+/*
+ * Bumping git: review the Terminal's store policy (`terminalGitStorePolicy` in
+ * `libs/shell-service/src/shell/shell-grant.ts`) against the Threat Set of
+ * `docs/research/linux-terminal-git-parity-blueprint.md` for every name in a
+ * git directory the new release starts to read as config, hooks or a remote.
+ */
 export const gitVersion = '2.55.0';
 /** From kernel.org's signed `sha256sums.asc`. */
 export const gitSourceSha256 = '457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357';

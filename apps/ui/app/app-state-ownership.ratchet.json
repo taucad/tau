@@ -1,6 +1,7 @@
 {
   "components": {
     "files": [
+      "apps/ui/app/hooks/chat-session-store.fixture.tsx",
       "apps/ui/app/hooks/use-file-manager.tsx",
       "apps/ui/app/hooks/use-memory-release.ts",
       "apps/ui/app/hooks/use-project-manager.tsx",
@@ -48,7 +49,9 @@
       "apps/ui/app/runtime/observability/observability.middleware.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
+      "apps/ui/app/runtime/project-library.ts",
       "apps/ui/app/runtime/project-runtime.ts",
+      "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
       "apps/ui/app/runtime/session-revisions.ts",
@@ -57,11 +60,12 @@
       "apps/ui/app/runtime/ui-runtime.schema.ts",
       "apps/ui/app/runtime/usdz-runtime.definition.ts",
       "apps/ui/app/runtime/usdz-runtime.worker.ts",
+      "apps/ui/app/workbench-records/pane-intents.ts",
+      "apps/ui/app/workbench-records/workbench-layout.machine.ts",
       "packages/ui/src/utils/wait-timing.ts"
     ]
   },
   "counts": {
-    "apps/ui/app/hooks/use-project-manager.tsx#useActorRef": 2,
     "apps/ui/app/hooks/use-project.tsx#useActorRef": 2,
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,

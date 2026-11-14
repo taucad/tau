@@ -88,6 +88,10 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     session_recording: {
       maskAllInputs: true,
+      // `maskAllInputs` covers input, textarea and select only. The chat composer is a TipTap
+      // (ProseMirror) contenteditable, so unsent text typed there is masked here; sent messages
+      // render in the transcript, which replays in full.
+      maskTextSelector: '.ProseMirror',
       blockSelector: 'a[href*="/invitations/"], a[href*="%2Finvitations%2F" i]',
       // The SDK calls this for rrweb Meta href before snapshot compression too.
       maskCapturedNetworkRequestFn: (request) => ({

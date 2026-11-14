@@ -53,6 +53,26 @@ describe('projectListShapeOf', () => {
     });
   });
 
+  /* A15g: a remembered Home card names where its project lives, as the listed card will. */
+  it('remembers where each project lives, and nothing for a row without a locator', () => {
+    const shape = projectListShapeOf([
+      { ...project('home', 3), locator: { backend: 'indexeddb' } },
+      { ...project('folder', 2), locator: { backend: 'webaccess' }, workspaceName: 'Parts' },
+      { ...project('unnamed', 1), locator: { backend: 'webaccess' } },
+      project('bare', 0),
+    ]);
+
+    expect(shape.projects?.map(({ id, place }) => ({ id, place }))).toEqual([
+      { id: 'home', place: { kind: 'home' } },
+      { id: 'folder', place: { kind: 'workspace', workspaceName: 'Parts' } },
+      { id: 'unnamed', place: { kind: 'workspace' } },
+      { id: 'bare', place: undefined },
+    ]);
+    projectListShapeStore.remember(shape);
+    projectListShapeStore.reset();
+    expect(projectListShapeStore.get()?.projects?.[1]?.place).toEqual({ kind: 'workspace', workspaceName: 'Parts' });
+  });
+
   it('keeps the most recent projects up to the cap, and counts every live one', () => {
     const many = Array.from({ length: rememberedProjectLimit + 5 }, (_, index) => project(`p${String(index)}`, index));
 

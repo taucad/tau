@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { Grid, ArrowRight, Table as TableIcon, Trash, AlertCircle, PackageX, FolderOpen, House } from 'lucide-react';
 import { NavLink, useNavigate, useNavigation } from 'react-router';
 import {
@@ -10,7 +11,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import type { VisibilityState, SortingState } from '@tanstack/react-table';
+import type { ColumnDef, VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -54,6 +55,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { isFunction } from '@taucad/ui-core/utils/function.utils';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
+import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
@@ -65,7 +67,7 @@ import type { InlineTextEditorHandle } from '#components/inline-text-editor.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { Skeleton } from '@taucad/ui/components/skeleton';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
 import {
   ProjectCard,
@@ -90,6 +92,7 @@ import {
   useMaterializeCloudProjects,
 } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
+import type { RememberedPlace, RememberedProject } from '#lib/project-list-shape.lib.js';
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -201,15 +204,20 @@ export function NewProjectLink({
 }
 
 /**
- * The last listing's count (R5), which the server also read from its cookie. The Trash
- * is a different list, so it keeps the unknown shape.
+ * The last listing's count (R5), which the server also read from its cookie, and on the client the projects the
+ * listing snapshot remembered (A15g). The Trash is a different list, so it keeps the unknown shape.
  *
  * @param isShowingDeleted - Whether the library shows the Trash.
- * @returns The count to reserve, or `undefined` when unknown.
+ * @returns The count to reserve, or `undefined` when unknown, and the remembered projects, when the snapshot has them.
  */
-function useRememberedLibraryCount(isShowingDeleted: boolean): number | undefined {
+function useRememberedLibrary(isShowingDeleted: boolean): {
+  readonly count: number | undefined;
+  readonly projects: readonly RememberedProject[] | undefined;
+} {
   const rememberedShape = useProjectListShape();
-  return isShowingDeleted ? undefined : rememberedShape?.count;
+  return isShowingDeleted
+    ? { count: undefined, projects: undefined }
+    : { count: rememberedShape?.count, projects: rememberedShape?.projects };
 }
 
 export function ProjectLibrary({
@@ -251,7 +259,7 @@ export function ProjectLibrary({
     updateName,
     isLoading,
   } = useProjects({ includeDeleted: showDeleted });
-  const rememberedCount = useRememberedLibraryCount(showDeleted);
+  const { count: rememberedCount, projects: rememberedProjects } = useRememberedLibrary(showDeleted);
   const degradedProjects = projects.filter(
     (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
   );
@@ -266,6 +274,9 @@ export function ProjectLibrary({
     retry: retryCloud,
   } = useCloudProjects();
   const auth = useResolvedAuth();
+  /* Read before the host's empty-content return below, so the hooks run in one order. */
+  const phoneTopBar = usePhoneTopBar();
+  const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
   const cloudPending = auth === 'authed' && !isCloudSettled && !isCloudFailed;
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
@@ -545,13 +556,46 @@ export function ProjectLibrary({
     return emptyContent;
   }
 
+  /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
+     empty frames alike; the grid itself is busy for as long. */
+  const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
+  /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
+  const listingWait = (
+    <WaitIndicator
+      className='min-w-0 flex-1 basis-0 justify-end overflow-hidden'
+      /* Seen, not announced: the sidebar's Recents label announces the same listing wait (one announcement per group). */
+      live={false}
+      active={isAwaitingListing}
+      label='Loading projects'
+      slowLabel='Still loading projects'
+      onRetry={() => {
+        void retry();
+      }}
+    />
+  );
+
   return (
     <PageContent className='flex flex-col gap-4 pb-4'>
       {/* Only the page that owns `/projects` titles the page and defers to the phone top bar; an embedded library is a section. */}
       {headingLevel === 1 ? (
-        <PageHeader title='Projects' className='mb-0' action={<NewProjectLink isDeferredToPhoneBar />} />
+        <PageHeader
+          title='Projects'
+          className='mb-0'
+          action={
+            /* Below `md` the phone bar carries the title and the action, and this row takes no height. */
+            <div
+              className={cn(
+                'flex min-w-0 flex-1 basis-0 items-center justify-end gap-2',
+                isHeaderInPhoneBar && 'max-md:hidden',
+              )}
+            >
+              {listingWait}
+              <NewProjectLink isDeferredToPhoneBar />
+            </div>
+          }
+        />
       ) : (
-        <SectionHeader level={headingLevel} title='Projects' className='mb-0' />
+        <SectionHeader level={headingLevel} title='Projects' className='mb-0' action={listingWait} />
       )}
 
       {workspaceBindingRepairs.length > 0 && (
@@ -747,6 +791,7 @@ export function ProjectLibrary({
           onShowDeletedChange={handleToggleDeleted}
           isLoading={isLoading && projects.length === 0}
           rememberedCount={rememberedCount}
+          rememberedProjects={rememberedProjects}
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
@@ -818,6 +863,8 @@ type UnifiedProjectListProps = {
   readonly isLoading: boolean;
   /** The last listing's count (R5): how many cards to reserve while loading, `0` for the empty state. */
   readonly rememberedCount?: number;
+  /** The projects the listing snapshot remembered (A15g): the cards drawn while loading, by name. */
+  readonly rememberedProjects?: readonly RememberedProject[];
   readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
@@ -877,6 +924,73 @@ function projectListLayout({
   };
 }
 
+/** The columns a remembered card is sorted and searched by, as the list's own columns define them. */
+const rememberedColumns: Array<ColumnDef<RememberedProject & { readonly description?: string }>> = [
+  { accessorKey: 'name', enableSorting: true },
+  { accessorKey: 'description' },
+  { accessorKey: 'lastActivityAt', sortingFn: 'datetime' },
+];
+
+/**
+ * The remembered cards a loading grid draws (P-g): the snapshot's projects through a table with the list's own sort,
+ * search and page size, so an accurate snapshot moves nothing when the listing answers. The snapshot holds no
+ * description, so a search or sort on it alone is settled by the listing.
+ *
+ * @param input - The remembered projects, the list's sorting and search, and its page size.
+ * @returns The first page of remembered cards.
+ */
+function useRememberedCards({
+  projects,
+  sorting,
+  globalFilter,
+  pageSize,
+}: {
+  readonly projects: readonly RememberedProject[] | undefined;
+  readonly sorting: SortingState;
+  readonly globalFilter: string | undefined;
+  readonly pageSize: number;
+}): RememberedProject[] | undefined {
+  'use no memo';
+
+  const data = useMemo(() => [...(projects ?? [])], [projects]);
+  // oxlint-disable-next-line react/incompatible-library -- Opted out of the compiler, as the list's own table is.
+  const table = useReactTable({
+    data,
+    columns: rememberedColumns,
+    getRowId: (row) => row.id,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    state: { sorting, globalFilter, pagination: { pageIndex: 0, pageSize } },
+  });
+  return projects === undefined ? undefined : table.getRowModel().rows.map((row) => row.original);
+}
+
+/**
+ * The room one card takes while nothing about it is known (P-g, the server render and the hydration frame): a card's
+ * box at its real height, drawn invisible, so the grid region has the height the count gives and no card shape is
+ * painted. The remembered or listed card that follows arrives into the room without moving anything.
+ *
+ * @returns The invisible room, hidden from assistive technology.
+ */
+function ProjectCardRoom(): React.JSX.Element {
+  return (
+    <Card aria-hidden className='invisible relative flex h-full flex-col overflow-hidden pt-0'>
+      <div className='relative aspect-4/3 h-fit w-full bg-muted' />
+      <CardHeader>
+        <div className='flex flex-col py-1'>
+          <div className='h-7' />
+          <div className='h-4' />
+        </div>
+      </CardHeader>
+      <CardFooter className='mt-auto'>
+        <div className='h-8' />
+      </CardFooter>
+    </Card>
+  );
+}
+
 function UnifiedProjectList({
   rows,
   viewMode,
@@ -888,6 +1002,7 @@ function UnifiedProjectList({
   onShowDeletedChange,
   isLoading,
   rememberedCount,
+  rememberedProjects,
   emptyTitleLevel,
 }: UnifiedProjectListProps) {
   'use no memo';
@@ -950,6 +1065,7 @@ function UnifiedProjectList({
     pageSize,
   });
   const selectedCount = table.getFilteredSelectedRowModel().rows.length;
+  const rememberedCards = useRememberedCards({ projects: rememberedProjects, sorting, globalFilter, pageSize });
 
   return (
     <div className='space-y-4'>
@@ -983,24 +1099,7 @@ function UnifiedProjectList({
         <div role='status' aria-label='Loading projects' aria-busy='true'>
           <DataTable table={table} columns={columns} isLoading />
         </div>
-      ) : isAwaitingRows ? (
-        <div role='status' aria-label='Loading projects' aria-busy='true' className={projectGridClassName}>
-          {Array.from({ length: placeholderCount }, (_, index) => (
-            <Card key={index} className='overflow-hidden pt-0'>
-              <Skeleton className='aspect-4/3 w-full rounded-none' />
-              <CardHeader>
-                <div className='py-1'>
-                  <Skeleton className='h-7 w-3/4' />
-                  <Skeleton className='h-4 w-1/2' />
-                </div>
-              </CardHeader>
-              <CardFooter>
-                <Skeleton className='h-8 w-20' />
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      ) : table.getFilteredRowModel().rows.length === 0 ? (
+      ) : !isAwaitingRows && table.getFilteredRowModel().rows.length === 0 ? (
         <PanelEmptyState
           className='h-60'
           icon={PackageX}
@@ -1020,6 +1119,35 @@ function UnifiedProjectList({
       ) : viewMode === 'table' ? (
         // Table View
         <DataTable table={table} columns={columns} />
+      ) : isAwaitingRows ? (
+        /* P-g: the remembered cards are the same list and cards the listing then fills, reconciled by id in place;
+           with only a count, the grid holds the room for that many cards and draws none. */
+        <ul aria-label='Projects' aria-busy='true' className={projectGridClassName}>
+          {/* One flat list, as the listed grid's, so its items are the ones the listing keeps. The snapshot keeps at
+              most 100 projects; an unfiltered page longer than that keeps the count's height with room. */}
+          {[
+            ...(rememberedCards ?? []).map((project) => (
+              <li key={project.id}>
+                <ProjectLibraryCard project={project} actions={actions} />
+              </li>
+            )),
+            ...Array.from(
+              {
+                length:
+                  rememberedCards === undefined
+                    ? placeholderCount
+                    : globalFilter
+                      ? 0
+                      : Math.max(placeholderCount - rememberedCards.length, 0),
+              },
+              (_, index) => (
+                <li key={`room-${String(index)}`} aria-hidden>
+                  <ProjectCardRoom />
+                </li>
+              ),
+            ),
+          ]}
+        </ul>
       ) : (
         // Grid View
         <ul aria-label='Projects' className={projectGridClassName}>
@@ -1057,8 +1185,11 @@ function UnifiedProjectList({
   );
 }
 
+/** A listed project's card, or one the listing snapshot remembered before the listing answered (A15g). */
+type ListedCardProject = ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
+
 type ProjectLibraryCardProps = {
-  readonly project: ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
+  readonly project: ListedCardProject | RememberedProject;
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   /** Whether any card is selected, so every card shows its checkbox (R13). */
@@ -1066,10 +1197,44 @@ type ProjectLibraryCardProps = {
   readonly onSelect?: () => void;
 };
 
+/**
+ * Where a card's project lives, as its location row draws it: the place's icon and full label, and the slugs. A
+ * remembered card takes the place the snapshot kept; one kept before places were remembered names its slugs only.
+ *
+ * @param project - The listed or remembered project.
+ * @returns The location row's icon, when the place is known, its label and its slug path.
+ */
+function cardLocation(project: ListedCardProject | RememberedProject): {
+  readonly LocationIcon: LucideIcon | undefined;
+  readonly label: string;
+  readonly slugPath: string;
+} {
+  const listed = 'locator' in project ? project : undefined;
+  const slugPath = project.slugs
+    ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
+    : listed
+      ? projectSlugOf(listed.locator)
+      : '';
+  const place: RememberedPlace | undefined =
+    'locator' in project
+      ? project.locator.backend === 'webaccess'
+        ? { kind: 'workspace', workspaceName: project.workspaceName }
+        : { kind: 'home' }
+      : project.place;
+  if (place === undefined) {
+    return { LocationIcon: undefined, label: slugPath, slugPath };
+  }
+  return {
+    LocationIcon: place.kind === 'workspace' ? FolderOpen : House,
+    label: projectLocationFullLabel(projectLocationDescriptor(place)),
+    slugPath,
+  };
+}
+
 export function ProjectLibraryCard({
   project,
   actions,
-  isSelected,
+  isSelected = false,
   isSelecting = false,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
@@ -1080,22 +1245,16 @@ export function ProjectLibraryCard({
   const [showPreview, setShowPreview] = useState(false);
   const thumbnail = useProjectThumbnail(project.id);
   const thumbnailSource = thumbnail.url;
-
-  const mainFile = project.assets.main?.entryPath;
-  const location = projectLocationDescriptor(
-    project.locator.backend === 'webaccess'
-      ? { kind: 'workspace', workspaceName: project.workspaceName }
-      : { kind: 'home' },
-  );
-  const LocationIcon = project.locator.backend === 'webaccess' ? FolderOpen : House;
-  const fullLocationLabel = projectLocationFullLabel(location);
-  const slugPath = project.slugs
-    ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
-    : projectSlugOf(project.locator);
+  /* A15g: a remembered card is the same card before the listing confirms it. It names, places and links its project;
+     its controls keep their resting look but take no input (`inert`) until the listing answers. */
+  const listed = 'locator' in project ? project : undefined;
+  const mainFile = listed?.assets.main?.entryPath;
+  const { LocationIcon, label: locationLabel, slugPath } = cardLocation(project);
+  const isInert = listed === undefined;
 
   return (
     <ProjectCard
-      {...(project.cloud?.cloudState === 'deleting'
+      {...(listed?.cloud?.cloudState === 'deleting'
         ? { onOpen: () => undefined, isOpening: true }
         : { to: projectUrl, isOpening })}
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
@@ -1104,6 +1263,7 @@ export function ProjectLibraryCard({
       {/* R13: selection is a mode, not resting chrome: the checkbox shows when the card is
           reached (hover or focus), on coarse pointers, and on every card once one is selected. */}
       <div
+        inert={isInert}
         className={cn(
           'absolute top-2 left-2 z-20',
           !isSelecting &&
@@ -1134,6 +1294,8 @@ export function ProjectLibraryCard({
       ) : null}
       <ProjectCardMedia
         thumbnailSource={thumbnailSource}
+        isThumbnailPending={thumbnail.status === 'registering' || thumbnail.status === 'pending'}
+        isPreviewInert={isInert}
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}
       >
@@ -1153,30 +1315,32 @@ export function ProjectLibraryCard({
       </ProjectCardMedia>
       <CardHeader>
         <div className='relative z-20 -mx-2 flex flex-1 flex-col items-start justify-start overflow-hidden py-1'>
-          <InlineTextEditor
-            ref={nameEditor}
-            ariaLabel='Project name'
-            value={project.name}
-            className='h-7 w-full [&_[data-slot=button]]:w-full [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:text-base [&_[data-slot=button]]:font-semibold'
-            onSave={async (value) => actions.handleRename(project.id, value)}
-          />
+          <div inert={isInert} className='contents'>
+            <InlineTextEditor
+              ref={nameEditor}
+              ariaLabel='Project name'
+              value={project.name}
+              className='h-7 w-full [&_[data-slot=button]]:w-full [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:text-base [&_[data-slot=button]]:font-semibold'
+              onSave={async (value) => actions.handleRename(project.id, value)}
+            />
+          </div>
           <Tooltip>
             <TooltipTrigger asChild>
               <div
-                className='flex w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
+                className='flex min-h-4 w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
                 role='group'
-                aria-label={`Location: ${fullLocationLabel}`}
+                aria-label={`Location: ${locationLabel}`}
               >
-                <LocationIcon className='size-3 shrink-0' />
+                {LocationIcon === undefined ? null : <LocationIcon className='size-3 shrink-0' />}
                 <span className='truncate'>{slugPath}</span>
-                {project.cloud?.cloudState === 'deleting' ? (
+                {listed?.cloud?.cloudState === 'deleting' ? (
                   <span role='status'>Deleting from Tau Cloud…</span>
-                ) : project.onCloud === true ? (
+                ) : listed?.onCloud === true ? (
                   <OnTauCloudMark />
                 ) : undefined}
               </div>
             </TooltipTrigger>
-            <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>
+            <TooltipContent side='right'>{locationLabel}</TooltipContent>
           </Tooltip>
         </div>
       </CardHeader>
@@ -1188,12 +1352,16 @@ export function ProjectLibraryCard({
           </span>
         </Button>
 
-        <div className='relative z-20'>
-          <ProjectActionDropdown
-            project={project}
-            actions={actions}
-            onRename={() => nameEditor.current?.startEditing()}
-          />
+        <div inert={isInert} className='relative z-20'>
+          {listed ? (
+            <ProjectActionDropdown
+              project={listed}
+              actions={actions}
+              onRename={() => nameEditor.current?.startEditing()}
+            />
+          ) : (
+            <ProjectActionMenu name={project.name} />
+          )}
         </div>
       </CardFooter>
     </ProjectCard>

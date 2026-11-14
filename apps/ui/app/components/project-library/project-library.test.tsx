@@ -842,7 +842,7 @@ describe('ProjectLibrary', () => {
       expect(screen.queryByText('No projects yet. Your first project appears here.')).not.toBeInTheDocument();
     });
 
-    it('stands in for the skeleton while the count is unknown, not while projects are remembered', () => {
+    it('stands in for the busy grid while the count is unknown, not while projects are remembered', () => {
       mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
       const unknown = renderLibrary();
       expect(screen.getByText('community builds')).toBeInTheDocument();
@@ -851,7 +851,29 @@ describe('ProjectLibrary', () => {
       mockRememberedShape = { count: 3 };
       renderLibrary();
       expect(screen.queryByText('community builds')).not.toBeInTheDocument();
-      expect(screen.getByRole('status', { name: 'Loading projects' })).toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Projects' })).toHaveAttribute('aria-busy', 'true');
+    });
+
+    it('calls its hooks in one order when the listing replaces the host empty content', () => {
+      const error = vi.spyOn(console, 'error');
+      try {
+        mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+        const view = renderLibrary();
+        expect(screen.getByText('community builds')).toBeInTheDocument();
+        mockUseProjectsResult = createUseProjectsResult();
+        view.rerender(
+          <TestRouter>
+            <TooltipProvider>
+              <ProjectLibrary headingLevel={2} emptyContent={<div>community builds</div>} />
+            </TooltipProvider>
+          </TestRouter>,
+        );
+        expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+        const messages = error.mock.calls.map((call) => String(call[0]));
+        expect(messages.filter((message) => /order of Hooks/u.test(message))).toEqual([]);
+      } finally {
+        error.mockRestore();
+      }
     });
 
     it('keeps the section once a project exists or a listing failure needs a retry', () => {
@@ -881,7 +903,7 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.queryByRole('status', { name: 'Loading projects' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Projects' })).not.toBeInTheDocument();
     expect(screen.getByText('No projects yet. Your first project appears here.')).toBeInTheDocument();
   });
 
@@ -897,8 +919,219 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByRole('status', { name: 'Loading projects' }).children).toHaveLength(3);
+    expect(screen.getByRole('list', { name: 'Projects' }).children).toHaveLength(3);
     expect(screen.queryByTestId('project-pagination-placeholder')).not.toBeInTheDocument();
+  });
+
+  /* C14 (P-g, H1 cards): the listing snapshot's projects are real cards in the first client commit, not skeletons. */
+  it('C14: paints the remembered projects as named card links while the listing loads, with no skeleton', () => {
+    mockRememberedShape = {
+      count: 2,
+      projects: [
+        {
+          id: 'proj_remembered_b',
+          name: 'Remembered Bravo',
+          lastActivityAt: 1,
+          slugs: { workspaceSlug: 'home', projectSlug: 'bravo' },
+        },
+        {
+          id: 'proj_remembered_a',
+          name: 'Remembered Alpha',
+          lastActivityAt: 2,
+          slugs: { workspaceSlug: 'home', projectSlug: 'alpha' },
+        },
+      ],
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    const { container } = render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    expect(grid).toHaveAttribute('aria-busy', 'true');
+    expect(
+      within(grid)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('aria-label') ?? link.textContent),
+    ).toEqual(['Open Remembered Alpha', 'Open Remembered Bravo']);
+    expect(within(grid).getByRole('link', { name: 'Open Remembered Alpha' })).toHaveAttribute('href', '/w/home/alpha');
+    expect(container.querySelectorAll('[data-slot=skeleton]')).toHaveLength(0);
+  });
+
+  /* P-g: the listing fills the remembered cards in place, by id; the grid's list and each card's item are kept. */
+  it('keeps each remembered card in place when the listing answers, and takes no input on it before', () => {
+    mockRememberedShape = {
+      count: 2,
+      projects: [
+        { id: mockProjects[0]!.id, name: 'Gearbox Alpha', lastActivityAt: 2, place: { kind: 'home' } },
+        { id: mockProjects[1]!.id, name: 'Bracket Beta', lastActivityAt: 1, place: { kind: 'home' } },
+      ],
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+    const tree = (): React.JSX.Element => (
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>
+    );
+    const view = render(tree());
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    const items = within(grid).getAllByRole('listitem');
+    expect(within(items[0]!).getByLabelText('Location: Home in this browser')).toBeInTheDocument();
+    expect(
+      within(items[0]!).getByRole('button', { name: 'Actions for Gearbox Alpha' }).closest('[inert]'),
+    ).not.toBeNull();
+    expect(within(items[0]!).getByRole('checkbox', { name: 'Select Gearbox Alpha' }).closest('[inert]')).not.toBeNull();
+    expect(within(items[0]!).getByText('Gearbox Alpha').closest('[inert]')).not.toBeNull();
+
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: [
+        { ...mockProjects[0]!, lastActivityAt: 2 },
+        { ...mockProjects[1]!, lastActivityAt: 1 },
+      ],
+    };
+    view.rerender(tree());
+
+    const listed = screen.getByRole('list', { name: 'Projects' });
+    expect(listed).toBe(grid);
+    expect(listed).not.toHaveAttribute('aria-busy');
+    expect(within(listed).getAllByRole('listitem')).toEqual(items);
+    expect(within(items[0]!).getByRole('button', { name: 'Trash Gearbox Alpha' }).closest('[inert]')).toBeNull();
+  });
+
+  /* P-g: the order is the list table's own, so a case the locale compare would order differently does not move. */
+  it('keeps the remembered order when the listing answers under a name sort, and warns about nothing', () => {
+    const warn = vi.spyOn(console, 'warn');
+    const error = vi.spyOn(console, 'error');
+    mockRememberedShape = {
+      count: 2,
+      projects: [
+        { id: mockProjects[0]!.id, name: 'alpha', lastActivityAt: 2 },
+        { id: mockProjects[1]!.id, name: 'Zeta', lastActivityAt: 1 },
+      ],
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+    const tree = (): React.JSX.Element => (
+      <TestRouter initialEntries={['/projects?sort=name:asc']}>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>
+    );
+    const view = render(tree());
+    const remembered = within(screen.getByRole('list', { name: 'Projects' })).getAllByRole('listitem');
+
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      projects: [
+        { ...mockProjects[0]!, name: 'alpha', lastActivityAt: 2 },
+        { ...mockProjects[1]!, name: 'Zeta', lastActivityAt: 1 },
+      ],
+    };
+    view.rerender(tree());
+
+    try {
+      expect(within(screen.getByRole('list', { name: 'Projects' })).getAllByRole('listitem')).toEqual(remembered);
+      const messages = [...warn.mock.calls, ...error.mock.calls].map((call) => String(call[0]));
+      expect(messages.filter((message) => /uncontrolled to controlled/u.test(message))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  /* P-g: the remembered cards follow the list's sort and search, so the listing moves nothing it agrees with. */
+  it('orders and filters the remembered cards as the list will', () => {
+    mockRememberedShape = {
+      count: 3,
+      projects: [
+        { id: 'proj_c', name: 'Clamp', lastActivityAt: 3 },
+        { id: 'proj_a', name: 'Axle', lastActivityAt: 1 },
+        { id: 'proj_b', name: 'Bushing', lastActivityAt: 2 },
+      ],
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+    const names = (): string[] =>
+      within(screen.getByRole('list', { name: 'Projects' }))
+        .getAllByRole('button', { name: /^Actions for / })
+        .map((button) => button.getAttribute('aria-label')!.replace('Actions for ', ''));
+
+    const byActivity = render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+    expect(names()).toEqual(['Clamp', 'Bushing', 'Axle']);
+    byActivity.unmount();
+
+    render(
+      <TestRouter initialEntries={['/projects?sort=name:asc&q=u']}>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+    expect(names()).toEqual(['Bushing']);
+  });
+
+  /* C14 (P-g): a count with no remembered names holds the grid's card frames, empty, with no skeleton. */
+  it('C14: holds the room for each remembered project, drawing no card, when only the count is known', () => {
+    mockRememberedShape = { count: 3 };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    const { container } = render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    expect(grid).toHaveAttribute('aria-busy', 'true');
+    expect(grid.children).toHaveLength(3);
+    /* The room is held, and no card shape is drawn in it. */
+    for (const room of grid.children) {
+      expect(room).toHaveAttribute('aria-hidden', 'true');
+      expect(room.firstElementChild).toHaveClass('invisible');
+    }
+    expect(container.querySelectorAll('[data-slot=skeleton]')).toHaveLength(0);
+  });
+
+  /* P-g: past the snapshot's 100 projects, a longer page keeps the count's height with room, so nothing moves. */
+  it('holds room after the remembered cards for a page longer than the snapshot keeps', () => {
+    mockCookieValues = { [cookieName.projectPageSize]: 150 };
+    mockRememberedShape = {
+      count: 120,
+      projects: Array.from({ length: 100 }, (_, index) => ({
+        id: `proj_many_${String(index)}`,
+        name: `Many ${String(index)}`,
+        lastActivityAt: 1000 - index,
+      })),
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    expect(grid.children).toHaveLength(120);
+    expect(within(grid).getAllByRole('link')).toHaveLength(100);
   });
 
   /* R14: the paging row is reserved with the grid when the remembered list spans pages. */
@@ -914,7 +1147,7 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByRole('status', { name: 'Loading projects' }).children).toHaveLength(20);
+    expect(screen.getByRole('list', { name: 'Projects' }).children).toHaveLength(20);
     expect(screen.getByTestId('project-pagination-placeholder')).toBeInTheDocument();
   });
 
@@ -956,7 +1189,7 @@ describe('ProjectLibrary', () => {
     expect(screen.getByRole('checkbox', { name: 'Select Bracket Beta' }).parentElement).not.toHaveClass('opacity-0');
   });
 
-  it('shows the project skeleton instead of the empty state while the listing is loading', () => {
+  it('holds the busy grid instead of the empty state while the listing is loading', () => {
     mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
 
     render(
@@ -967,7 +1200,7 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByRole('status', { name: 'Loading projects' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('list', { name: 'Projects' })).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
   });
 

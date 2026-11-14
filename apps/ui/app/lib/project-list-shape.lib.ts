@@ -1,6 +1,8 @@
 import * as Cookies from 'es-cookie';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
+import type { ChatRecord } from '@taucad/chat/schemas';
+import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { metaConfig } from '#constants/meta.constants.js';
 
 /**
@@ -140,11 +142,8 @@ type ListedProject = {
   readonly slugs?: { readonly workspaceSlug: string; readonly projectSlug: string };
 };
 
-/** What a chat listing's rows carry that the snapshot remembers. @public */
-export type ListedChat = RememberedChat & {
-  readonly deletedAt?: number;
-  readonly purgedAt?: number;
-};
+/** A chat listing's row, as the chat records read gives it. @public */
+export type ListedChat = ChatRecord;
 
 type RowOf<T> = T & { readonly id: string; readonly name: string; readonly lastActivityAt: number };
 
@@ -302,14 +301,16 @@ const createProjectListShapeStore = () => {
       return;
     }
     const listed = chats.filter((chat) => isLiveChat(chat) && isShown(chat.id));
+    /* The recency the sidebar sorts and groups by, a legacy record's own field included, so the remembered rows sit
+     * where the listing will put them. */
     const remembered = listed
       .map(
-        ({ id, name, createdAt, updatedAt, recencyAt }): RememberedChat => ({
-          id,
-          name,
-          createdAt,
-          updatedAt,
-          ...(recencyAt === undefined ? {} : { recencyAt }),
+        (chat): RememberedChat => ({
+          id: chat.id,
+          name: chat.name,
+          createdAt: chat.createdAt,
+          updatedAt: chat.updatedAt,
+          recencyAt: getChatRecencyAt(chat),
         }),
       )
       .sort(

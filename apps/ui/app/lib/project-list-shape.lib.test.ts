@@ -102,6 +102,7 @@ describe('projectListShapeStore', () => {
     projectListShapeStore.remember(projectListShapeOf([project('a', 1)]));
     const chats = Array.from({ length: rememberedChatLimit + 2 }, (_, index) => ({
       id: `c${String(index)}`,
+      resourceId: 'a',
       name: `Chat ${String(index)}`,
       createdAt: index,
       updatedAt: index,
@@ -111,8 +112,8 @@ describe('projectListShapeStore', () => {
       'a',
       [
         ...chats,
-        { id: 'trashed', name: 'Trashed', createdAt: 99, updatedAt: 99, deletedAt: 100 },
-        { id: 'hidden', name: 'Hidden', createdAt: 98, updatedAt: 98 },
+        { id: 'trashed', resourceId: 'a', name: 'Trashed', createdAt: 99, updatedAt: 99, deletedAt: 100 },
+        { id: 'hidden', resourceId: 'a', name: 'Hidden', createdAt: 98, updatedAt: 98 },
       ],
       (chatId) => chatId !== 'hidden',
     );
@@ -129,10 +130,31 @@ describe('projectListShapeStore', () => {
     expect(remembered?.chats?.[0]?.id).toBe(`c${String(rememberedChatLimit + 1)}`);
   });
 
+  /* The sidebar orders and groups chats by their recency, a legacy record's own field included (getChatRecencyAt). */
+  it('remembers each chat at the recency the sidebar sorts and groups it by', () => {
+    projectListShapeStore.remember(projectListShapeOf([project('a', 1)]));
+    const legacy = { id: 'legacy', resourceId: 'a', name: 'Legacy', createdAt: 1, updatedAt: 1 };
+    Reflect.set(legacy, 'lastUserActivityAt', 50);
+
+    projectListShapeStore.rememberChats('a', [
+      { id: 'plain', resourceId: 'a', name: 'Plain', createdAt: 10, updatedAt: 10 },
+      { id: 'recent', resourceId: 'a', name: 'Recent', createdAt: 2, updatedAt: 2, recencyAt: 40 },
+      legacy,
+    ]);
+
+    expect(projectListShapeStore.get()?.projects?.[0]?.chats?.map(({ id, recencyAt }) => [id, recencyAt])).toEqual([
+      ['legacy', 50],
+      ['recent', 40],
+      ['plain', 10],
+    ]);
+  });
+
   it('ignores a chat listing for a project the snapshot does not hold', () => {
     projectListShapeStore.remember(projectListShapeOf([project('a', 1)]));
 
-    projectListShapeStore.rememberChats('elsewhere', [{ id: 'c', name: 'C', createdAt: 1, updatedAt: 1 }]);
+    projectListShapeStore.rememberChats('elsewhere', [
+      { id: 'c', resourceId: 'elsewhere', name: 'C', createdAt: 1, updatedAt: 1 },
+    ]);
 
     expect(projectListShapeStore.get()?.projects).toEqual([{ id: 'a', name: 'Name a', lastActivityAt: 1 }]);
   });

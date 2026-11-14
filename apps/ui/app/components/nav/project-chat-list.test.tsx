@@ -7,7 +7,7 @@ import type { useChats } from '#hooks/use-chats.js';
 import type { useChatRecords } from '#hooks/use-chat-records.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
-import { projectListShapeStorageKey, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 
 const cloudOpening = vi.hoisted(() => ({ pending: false, loadingChats: false }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({
@@ -635,34 +635,14 @@ describe('ProjectChatList', () => {
   describe('remembered chat count', () => {
     /*
      * The remembered input is the listing snapshot (loading-states blueprint,
-     * A13): each project's id, name, activity and its newest chat rows, kept on
-     * this device under the shape's key.
+     * A13), seeded through its own writer: the project row, then the chat
+     * listing it remembers.
      */
     const rememberChats = (projectId: string, chats: readonly ChatRecord[]): void => {
-      globalThis.localStorage.setItem(
-        projectListShapeStorageKey,
-        JSON.stringify({
-          v: 1,
-          savedAt: 1,
-          count: 1,
-          projects: [
-            {
-              id: projectId,
-              name: project.name,
-              lastActivityAt: 1,
-              slugs: project.slugs,
-              chatCount: chats.length,
-              chats: chats.map(({ id, name, createdAt, updatedAt, recencyAt }) => ({
-                id,
-                name,
-                createdAt,
-                updatedAt,
-                ...(recencyAt === undefined ? {} : { recencyAt }),
-              })),
-            },
-          ],
-        }),
+      projectListShapeStore.remember(
+        projectListShapeOf([{ id: projectId, name: project.name, lastActivityAt: 1, slugs: project.slugs }]),
       );
+      projectListShapeStore.rememberChats(projectId, chats);
       projectListShapeStore.reset();
     };
     const rememberChatCount = (projectId: string, count: number): void => {
@@ -701,6 +681,25 @@ describe('ProjectChatList', () => {
 
       expect(chatListRowCount()).toBe(0);
       expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
+    });
+
+    /* A legacy record's recency is its own field: its remembered row sits where the listing puts it (round 2). */
+    it('U6: a legacy chat keeps its group and place when the chat list resolves', () => {
+      const now = Date.now();
+      const legacy = { ...chat(1) };
+      Reflect.set(legacy, 'lastUserActivityAt', now);
+      const listed = [legacy, { ...chat(2), recencyAt: now }, { ...chat(3), recencyAt: now }];
+      rememberChats(project.id, listed);
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+      const view = render(<ProjectChatList project={project} isProjectActive={false} />);
+      const loadingRows = chatListRowCount();
+      const loadingNames = screen.getAllByRole('link').map((link) => link.textContent);
+
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: listed });
+      view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(chatListRowCount()).toBe(loadingRows);
+      expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(loadingNames);
     });
 
     it.each([5, 1])(

@@ -721,8 +721,8 @@ const boxChanges = (entries: readonly ProjectLoadRegionEntry[]): string[] => {
     : entries.filter((entry) => !sameBox(entry, settled)).map((entry) => describeEntry(entry));
 };
 
-/** The element that holds the workspace's lanes: the placeholder, then the workspace; one frame from A15b on. */
-const workspaceFrame = '[data-slot="workspace-frame"], [data-testid="workspace-skeleton"], [data-project-workspace]';
+/** The persistent workspace frame A15b adds (blueprint: `R/workspace-frame*`, "the workspace-frame element"). */
+const workspaceFrame = '[data-slot="workspace-frame"]';
 /** The chat lane, by the history region it holds. */
 const chatLane = '[data-slot="floating-panel"]:has([role="region"][aria-label="Chat history"])';
 /** The entry chunk every page loads first: holding it holds hydration. */
@@ -737,16 +737,21 @@ const anyComposerInput = 'textarea[aria-label="Chat message"], [aria-label="Ask 
 const wideFrameRegions = {
   content: '[data-slot="sidebar-inset"]',
   workspaceFrame,
+  placeholder: '[data-testid="workspace-skeleton"]',
   skeletonLanes: '[data-slot="workspace-skeleton-lanes"]',
   lanes: '[data-project-workspace] .split-view',
 } as const;
 /**
- * The workspace's lanes, whatever draws them: the placeholder's lane columns, then the split view's panes. A lane that
- * draws the workspace frame of A15b differently re-points this selector in the same PR.
+ * The workspace's lanes, whatever draws them: today the placeholder's lane columns, then the split view's panes; from
+ * A15b on, the frame's lanes. This is the rows' contract with A15b: each lane box of the workspace frame carries
+ * `data-slot="workspace-lane"`, so A15b flips F1, F3 and F15 without editing them.
  */
 const workspaceLanes = {
-  lanes:
-    '[data-slot="workspace-skeleton-lanes"] > div, [data-project-workspace] .split-view > .split-view-container > .split-view-view',
+  lanes: [
+    '[data-slot="workspace-skeleton-lanes"] > div',
+    '[data-project-workspace] .split-view > .split-view-container > .split-view-view',
+    '[data-slot="workspace-frame"] [data-slot="workspace-lane"]',
+  ].join(', '),
 } as const;
 
 /** Drag the sash between the chat and the viewer by `dx` pixels, as a person resizes the chat lane. */
@@ -789,14 +794,35 @@ const sameLanes = (left: readonly ProjectLoadBox[], right: readonly ProjectLoadB
   left.length === right.length &&
   left.every((box, index) => Math.abs(box.x - right[index]!.x) <= 1 && Math.abs(box.width - right[index]!.width) <= 1);
 
-/** Every recorded lane set that differs from the settled one, from the first frame that drew a lane; a later frame with no lanes counts. */
-const laneMismatches = (record: ProjectLoadRecord, settled: readonly ProjectLoadBox[]): string[] => {
+/**
+ * The lane sets from the first frame that drew the content region (or, for a row that does not watch it, the first frame
+ * that drew any lane) to the end: the set standing at that frame, then every change. A frame with no lanes counts.
+ */
+const lanesFromFirstPaint = (
+  record: ProjectLoadRecord,
+): Array<{ readonly label: string; readonly boxes: readonly ProjectLoadBox[] }> => {
   const entries = record.boxSets['lanes'] ?? [];
-  const first = entries.findIndex((entry) => entry.boxes.length > 0);
-  return (first === -1 ? [] : entries.slice(first))
-    .filter((entry) => !sameLanes(entry.boxes, settled))
-    .map((entry) => `${describeFrame(entry)}: lanes ${describeBoxes(entry.boxes)}`);
+  const content = regionsOf(record, 'content').find((entry) => entry.present);
+  const start = content?.frame ?? entries.find((entry) => entry.boxes.length > 0)?.frame;
+  if (start === undefined) {
+    return [];
+  }
+  const standing = entries.findLast((entry) => entry.frame <= start);
+  return [
+    standing === undefined
+      ? { label: `frame ${start}`, boxes: [] }
+      : { label: describeFrame(standing), boxes: standing.boxes },
+    ...entries
+      .filter((entry) => entry.frame > start)
+      .map((entry) => ({ label: describeFrame(entry), boxes: entry.boxes })),
+  ];
 };
+
+/** Every lane set from first paint that differs from the settled one. */
+const laneMismatches = (record: ProjectLoadRecord, settled: readonly ProjectLoadBox[]): string[] =>
+  lanesFromFirstPaint(record)
+    .filter((entry) => !sameLanes(entry.boxes, settled))
+    .map((entry) => `${entry.label}: lanes ${describeBoxes(entry.boxes)}`);
 
 type ClosedWorkbenchLoad = {
   readonly record: ProjectLoadRecord;
@@ -895,19 +921,19 @@ knownDefect(
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record, settled }) => {
-      const animated = (['workspaceFrame', 'skeletonLanes', 'lanes'] as const).flatMap((name) =>
+      const animated = (['workspaceFrame', 'placeholder', 'skeletonLanes', 'lanes'] as const).flatMap((name) =>
         regionsOf(record, name)
           .filter((entry) => entry.animations > 0)
           .map((entry) => `${name} ${describeEntry(entry)}`),
       );
-      const first = (record.boxSets['lanes'] ?? []).find((entry) => entry.boxes.length > 0);
+      const [first] = lanesFromFirstPaint(record);
       expectMeasured(
         {
           animated: animated.slice(0, 5),
-          firstLanes: first === undefined ? 'none' : describeBoxes(first.boxes),
+          firstLanesSettled: first !== undefined && sameLanes(first.boxes, settled),
         },
-        `F3: a lane container ran an animation, or the first lanes (${first === undefined ? 'none' : describeFrame(first)}) were not the settled ones`,
-        { animated: [], firstLanes: describeBoxes(settled) },
+        `F3: a lane container ran an animation, or the first lanes (${first === undefined ? 'none' : `${first.label}: ${describeBoxes(first.boxes)}`}) were not the settled ${describeBoxes(settled)}`,
+        { animated: [], firstLanesSettled: true },
       );
     },
   },
@@ -915,7 +941,8 @@ knownDefect(
 
 /** The sidebar's resting-width stand-in: a slab with the sidebar's background that is not the sidebar itself. */
 const findSidebarStandIns = (html: Document): string[] =>
-  [...html.querySelectorAll('[class~="bg-sidebar"]')]
+  /* The slab's signature: the sidebar's background with its border, as `workspace-skeleton.tsx` draws it. */
+  [...html.querySelectorAll('[class~="bg-sidebar"][class~="border-sidebar-border"]')]
     /* Not the sidebar, and not a bar fixed to the window's edge (the phone's), which no sidebar width can stand for. */
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))
     .map((node) => `${node.tagName.toLowerCase()}.${node.className.split(' ').slice(0, 6).join('.')}`);
@@ -1475,7 +1502,11 @@ knownDefect('F15 (A15b): a project at its default layout draws its lanes at thei
   expectedFailure: true,
   budget: loadBudget,
   measure: async () => {
-    await seedProjects('wide', { boxSets: workspaceLanes });
+    await seedProjects('wide', { regions: { content: wideFrameRegions.content }, boxSets: workspaceLanes });
+    /* No frame hint: the device remembers nothing for this project, so its layout is the default. */
+    await target.evaluate(() => {
+      localStorage.clear();
+    });
     await target.reload();
     await settleProject();
     const settled = await readLanesNow();

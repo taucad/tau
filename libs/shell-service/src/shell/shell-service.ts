@@ -861,6 +861,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
             ...(approval === undefined ? {} : { approval }),
           }
         : notStarted(code, message);
+    /* Read live: the signal can abort while any await below is pending. */
+    const withdrawn = (): boolean => request.signal.aborted;
     const fingerprints = new Map<string, string>([[admitted.root, admitted.fingerprint]]);
     for (const folder of [...admitted.access.read, ...admitted.access.write]) {
       // oxlint-disable-next-line no-await-in-loop -- a handful of granted folders.
@@ -902,7 +904,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         );
       }
       /* A call withdrawn while its launch was staged is never prepared (E09); `didNotStart` answers `cancelled`. */
-      if (request.signal.aborted) {
+      if (withdrawn()) {
         return didNotStart('launch-failed', 'The command was cancelled before it started.');
       }
       let executionId: string;
@@ -937,7 +939,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         custody = { executionId, holds };
       }
       /* Nor launched, when it was withdrawn while custody was recorded; the receipt is released as for any refusal. */
-      if (request.signal.aborted) {
+      if (withdrawn()) {
         return didNotStart('launch-failed', 'The command was cancelled before it started.');
       }
       const controller = new AbortController();

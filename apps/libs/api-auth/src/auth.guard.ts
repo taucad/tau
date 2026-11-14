@@ -1,10 +1,11 @@
 import type { IncomingMessage } from 'node:http';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { isAuthoritativeSession, isOptionalAuth, isPublicAuth } from '#auth.constant.js';
-import { SessionResolver } from '#session-resolver.js';
+import { hasAuthorizationHeader, SessionResolver } from '#session-resolver.js';
+import { issuedOversizeSnapshot, sessionCookiePolicy } from '#session-cookie-policy.js';
 import type { SessionResolution } from '#session-resolver.js';
 
 /** A cloud host acting for its owner on one project's git routes (D21). */
@@ -52,6 +53,8 @@ const resolutions = new WeakMap<IncomingMessage, SessionResolution>();
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  private readonly logger = new Logger(AuthGuard.name);
+
   public constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(SessionResolver) private readonly sessions: SessionResolver,
@@ -133,6 +136,46 @@ export class AuthGuard implements CanActivate {
     if (raw !== undefined) {
       resolutions.set(raw, resolution);
     }
+    await this.forwardSnapshot(context, request, resolution);
     return resolution;
+  }
+
+  /*
+   * A Tau route forwards one thing only: an unchunked session snapshot with
+   * exactly the configured Max-Age, or its expiry. Never a session_token set or
+   * expiry, which could destroy a newer session (blueprint F5). Runs on the
+   * first resolution of a request only, so a doubly guarded handler appends once.
+   */
+  private async forwardSnapshot(
+    context: ExecutionContext,
+    request: FastifyRequest,
+    resolution: SessionResolution,
+  ): Promise<void> {
+    const maxAgeSeconds = this.sessions.maxAgeSeconds();
+    if (maxAgeSeconds === 0 || resolution.setCookies.length === 0) {
+      return;
+    }
+    const sessionDataName = await this.sessions.sessionDataName();
+    const kept = sessionCookiePolicy({
+      setCookies: resolution.setCookies,
+      surface: 'tau',
+      hasAuthorization: hasAuthorizationHeader(request.headers),
+      sessionDataName,
+      maxAgeSeconds,
+    });
+    if (issuedOversizeSnapshot(resolution.setCookies, sessionDataName)) {
+      this.logger.debug('Dropped an oversize session snapshot');
+    }
+    if (kept.length === 0) {
+      return;
+    }
+    const reply = context.switchToHttp().getResponse<FastifyReply>();
+    for (const entry of kept) {
+      void reply.header('set-cookie', entry);
+    }
+    // A default only: a handler that sets its own Cache-Control replaces it.
+    if (!reply.hasHeader('cache-control')) {
+      void reply.header('cache-control', 'private, no-store');
+    }
   }
 }

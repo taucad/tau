@@ -13,6 +13,7 @@ import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
+import { reportUiError } from '#lib/error-reporting.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -88,6 +89,11 @@ export type ProjectContext = {
   /** The main entry path from project.assets.main.entryPath. Set after project loads. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
+  /**
+   * The first defect the root `onError` caught (MC-R12, charter D23): a child that failed with no handler of its own,
+   * an effect that threw, or a send to no child. Later defects are usually its consequences, so they do not replace it.
+   */
+  fault: string | undefined;
 };
 
 /**
@@ -626,6 +632,17 @@ const reconcileUnitRuntime = (
 };
 
 /**
+ * Report the project's first fault through the app's error reporter, as the route error boundary reports what it
+ * catches. The project runtime's single fault hook replaces this (A6b).
+ *
+ * @param error - What the root `onError` was handed.
+ */
+export const reportProjectFault = (error: unknown): void => {
+  // async-iife: bootstrap -- an effect cannot await the report, and a report that fails is not retried.
+  void reportUiError(error);
+};
+
+/**
  * Project Machine
  *
  * Manages project lifecycle, storage operations, and filesystem coordination.
@@ -658,6 +675,18 @@ export const projectMachine = setup({
   },
 }).createMachine({
   id: 'project',
+  // A defect is recorded and the project stays in the state it was in, which still answers every public event (MC-R12,
+  // charter B2). The first is kept and reported once: the root cause matters more than the defects it sets off.
+  onError: ({ context, event }, enq) => {
+    if (context.fault === undefined) {
+      enq(reportProjectFault, event.error);
+    }
+    return {
+      context: {
+        fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+      },
+    };
+  },
   context: ({ input, spawn, actors }) => {
     const {
       projectId,
@@ -709,6 +738,7 @@ export const projectMachine = setup({
       kernelRefusal: undefined,
       mainEntryPath: '',
       logRef,
+      fault: undefined,
     };
   },
   // The project owns the shared model interaction, so it observes the focus there and forwards it to each view.

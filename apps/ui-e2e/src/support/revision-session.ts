@@ -287,11 +287,31 @@ export const branchChipOn = (name: string): Locator =>
   revisionStrip().getByRole('button', { name: `Branch: ${name}. Switch branch`, exact: true });
 
 /**
+ * Show every branch in History's lanes. *This branch* draws another branch only
+ * where the files reach it, and a branch with no entries of its own only while
+ * the files are on it (D2, f42cb91a2b); *All branches* draws each one, with its
+ * chip and ⋮. The choice is offered once there is a second branch.
+ */
+export const showAllBranches = async (): Promise<void> => {
+  const allBranches = selectors
+    .getByCss(visibleRevisionsPanel)
+    .getByRole('group', { name: 'Which branches to show' })
+    .getByRole('radio', { name: 'All branches' });
+  await target.expectVisible(allBranches, 60_000);
+  if ((await target.getAttribute(allBranches, 'aria-checked')) !== 'true') {
+    await target.click(allBranches);
+  }
+  await target.expectAttribute(allBranches, 'aria-checked', 'true');
+};
+
+/**
  * Start a branch where the files are, the way a person does: the History
  * header's chip, its last item *New branch…*, the name, *Create branch* (C2,
  * D3). The item is offered once the files have an entry to start from, so the
  * menu is reopened until it is. The files stay where they are, and the new
- * branch's chip in History's lanes carries its own ⋮, *More for ⟨name⟩*.
+ * branch's chip in History's lanes carries its own ⋮, *More for ⟨name⟩*: under
+ * *All branches*, since *This branch* draws a branch with no entries of its own
+ * only while the files are on it (D2, f42cb91a2b).
  *
  * @param name - The new branch's name.
  */
@@ -321,6 +341,7 @@ export const createBranchHere = async (name: string): Promise<void> => {
   await target.expectFocused(branchName);
   await target.fill(branchName, name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
+  await showAllBranches();
   await target.expectVisible(branchMore(name), 60_000);
 };
 
@@ -346,6 +367,8 @@ export const pickBranchVerb = async (name: string, item: string, before?: () => 
   const more = branchMore(name);
   const verb = selectors.getByRole('menuitem', { name: item, exact: true });
   const branchMenu = selectors.getByRole('menu').getByText(name, { exact: true });
+  /* History opens on *This branch*, which may not draw this one (D2). */
+  await showAllBranches();
   await target.expectVisible(more, 60_000);
   await expect
     .poll(

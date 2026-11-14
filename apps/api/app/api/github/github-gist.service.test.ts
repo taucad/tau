@@ -26,7 +26,7 @@ const fixture = () => {
     }),
   );
   database.database.query.githubGistPreference.findFirst.mockResolvedValue(undefined);
-  auth.api.getAccessToken.mockResolvedValue({
+  auth.getAccessToken.mockResolvedValue({
     accessToken: 'server-only-token',
     scopes: ['gist'],
     accessTokenExpiresAt: undefined,
@@ -79,7 +79,7 @@ describe('server-side Gist authority', () => {
       authorizationUrl: 'https://github.com/settings/connections/applications/client-id',
     });
     expect(JSON.stringify(capability)).not.toContain('server-only-token');
-    expect(auth.api.getAccessToken).toHaveBeenCalledWith({ headers, body: { accountId: 'linked' } });
+    expect(auth.getAccessToken).toHaveBeenCalledWith(headers, { accountId: 'linked' });
   });
   it('should require reconnection when the provider identity differs', async () => {
     const { service, state } = fixture();
@@ -90,7 +90,7 @@ describe('server-side Gist authority', () => {
     const { service, database, auth } = fixture();
     database.database.query.account.findFirst.mockResolvedValue(undefined);
     expect(await service.capability('user', headers)).toMatchObject({ status: 'not-connected' });
-    expect(auth.api.getAccessToken).not.toHaveBeenCalled();
+    expect(auth.getAccessToken).not.toHaveBeenCalled();
   });
   it('should reject a mutation without the live Gist grant', async () => {
     const { service, state, fetch } = fixture();

@@ -1,10 +1,10 @@
 /**
  * The app's one sessions registry (S44, A38).
  *
- * Created by {@link createSessionsActor} at the composition root (MC-R4), never
- * with `useActorRef`, so React Strict Mode's mount → stop → rehydrate cycle
- * cannot double-start every live project. `SessionsProvider` hands it down;
- * every reader is a selector over its snapshot.
+ * Composed here and created by the app runtime as its `sessions` child (D5),
+ * never in React, so neither Strict Mode nor a remount below the billing fence
+ * builds a second one (B9). `SessionsProvider` hands it down; every reader is
+ * a selector over its snapshot.
  *
  * The registry owns *liveness*. Two of a session's four startup regions own a
  * resource outright here — compute admission and the agent-host attachment —
@@ -23,7 +23,11 @@ import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
-import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
+import type {
+  SessionsMachineContext,
+  SessionsMachineInput,
+  SessionsProjectStatus,
+} from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
@@ -162,13 +166,6 @@ export const sessionEpoch: string = randomUuid();
 // Compute admission
 // ---------------------------------------------------------------------------
 
-let sharedFileManagerWorker: Worker | undefined;
-
-/** The shared file-manager worker, mirrored in by `SessionsProvider`. @public */
-export const setSharedFileManagerWorker = (worker: Worker | undefined): void => {
-  sharedFileManagerWorker = worker;
-};
-
 /**
  * Compute admission, per live project (brief item 4).
  *
@@ -176,19 +173,21 @@ export const setSharedFileManagerWorker = (worker: Worker | undefined): void => 
  * on its own close, never on another project's open. The session is what says
  * "this project is live", so it is what admits and releases.
  */
-const computeRegion = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
-  sharedFileManagerWorker?.postMessage({
-    type: 'computeStoreAdmission',
-    projectId: input.projectId,
-  });
-  sendBack({ type: 'childReady', region: 'compute' });
-  return () => {
-    sharedFileManagerWorker?.postMessage({
-      type: 'computeStoreRelease',
+const computeRegionOn = (sharedWorker: () => Worker | undefined) =>
+  createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
+    /* Read when the region starts and when it ends: the file-manager host's worker, once `rootFiles` has one (S28). */
+    sharedWorker()?.postMessage({
+      type: 'computeStoreAdmission',
       projectId: input.projectId,
     });
-  };
-});
+    sendBack({ type: 'childReady', region: 'compute' });
+    return () => {
+      sharedWorker()?.postMessage({
+        type: 'computeStoreRelease',
+        projectId: input.projectId,
+      });
+    };
+  });
 
 const agentHostRegistrations = new Map<string, Promise<ProjectAgentHostRegistration>>();
 
@@ -230,61 +229,93 @@ const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(
 // The registry actor
 // ---------------------------------------------------------------------------
 
-const projectSession = projectSessionMachine.provide({
-  actors: {
-    cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
-      run: async ({ input }) => {
-        await servicesFor(input.projectId).cancelRuns(input.runs);
-      },
-    }),
-    flushProducers: createAsyncLogic<void, { projectId: string }>({
-      run: async ({ input }) => {
-        await servicesFor(input.projectId).flushProducers();
-      },
-    }),
-    flushSync: createAsyncLogic<void, { projectId: string; boundMilliseconds: number }>({
-      run: async ({ input }) => {
-        await servicesFor(input.projectId).flushSync(input.boundMilliseconds);
-      },
-    }),
-    releaseAgentHost: createAsyncLogic<void, { projectId: string }>({
-      run: async ({ input }) => {
-        await servicesFor(input.projectId).closeRuntime();
-        const registration = agentHostRegistrations.get(input.projectId);
-        if (registration !== undefined) {
-          const registered = await registration;
-          await registered.release();
-          agentHostRegistrations.delete(input.projectId);
-        }
-      },
-    }),
-    fileManager: relayRegion('views'),
-    project: relayRegion('runtime'),
-    agentHost: agentHostRegion,
-    compute: computeRegion,
-  },
-});
+const projectSessionOn = (sharedWorker: () => Worker | undefined) =>
+  projectSessionMachine.provide({
+    actors: {
+      cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
+        run: async ({ input }) => {
+          await servicesFor(input.projectId).cancelRuns(input.runs);
+        },
+      }),
+      flushProducers: createAsyncLogic<void, { projectId: string }>({
+        run: async ({ input }) => {
+          await servicesFor(input.projectId).flushProducers();
+        },
+      }),
+      flushSync: createAsyncLogic<void, { projectId: string; boundMilliseconds: number }>({
+        run: async ({ input }) => {
+          await servicesFor(input.projectId).flushSync(input.boundMilliseconds);
+        },
+      }),
+      releaseAgentHost: createAsyncLogic<void, { projectId: string }>({
+        run: async ({ input }) => {
+          await servicesFor(input.projectId).closeRuntime();
+          const registration = agentHostRegistrations.get(input.projectId);
+          if (registration !== undefined) {
+            const registered = await registration;
+            await registered.release();
+            agentHostRegistrations.delete(input.projectId);
+          }
+        },
+      }),
+      fileManager: relayRegion('views'),
+      project: relayRegion('runtime'),
+      agentHost: agentHostRegion,
+      compute: computeRegionOn(sharedWorker),
+    },
+  });
 
 /** What a registry root takes from its composition (MC-R4); production passes none. @public */
 export type SessionsActorOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
 
 /**
- * Create the app's registry, unstarted (MC-R4, PV-S5).
+ * The registry's logic with its session children provided: the app runtime's `sessions` child (D5). The runtime gives
+ * it the file-manager host's shared worker, which admits and releases each live project's compute (S28).
+ *
+ * @param sharedWorker - The shared file-manager worker, read when a session's compute region starts and ends.
+ * @returns The registry's logic.
+ * @public
+ */
+export const createSessionsRegistryLogic = (sharedWorker: () => Worker | undefined): typeof sessionsMachine =>
+  sessionsMachine.provide({ actors: { projectSession: projectSessionOn(sharedWorker) } });
+
+/**
+ * The registry's logic with no shared worker: for compositions that run the registry alone.
+ *
+ * @public
+ */
+export const sessionsRegistryLogic = createSessionsRegistryLogic(() => undefined);
+
+/**
+ * The registry's input for this host (PV-S5).
  *
  * Desktop is bounded by memory rather than a count (A35): its budget is the
  * absence of one, and the idle window still applies. A phone or low-memory
  * browser holds one live project (B-08).
  *
- * @param options - The clock, inspector and rejected-event hook for this root.
+ * @returns The input the composition reads once, when it creates the registry.
+ * @public
+ */
+export const sessionsRegistryInput = (): SessionsMachineInput => ({
+  budget: liveProjectBudgetFor({ desktop: isDesktopTarget, constrained: isMemoryConstrainedDevice() }),
+});
+
+/**
+ * Create a registry of its own, unstarted (MC-R4). The app's registry is the runtime's `sessions` child; this root
+ * is for compositions that run the registry alone.
+ *
+ * @param options - The clock, inspector and rejected-event hook for this root, and the shared worker its compute
+ *   regions admit on (none by default).
  * @returns The registry actor; the caller starts it once.
  * @public
  */
-export const createSessionsActor = (options: SessionsActorOptions = {}): Actor<typeof sessionsMachine> =>
-  createActor(sessionsMachine.provide({ actors: { projectSession } }), {
+export const createSessionsActor = ({
+  sharedWorker,
+  ...options
+}: SessionsActorOptions & Readonly<{ sharedWorker?: () => Worker | undefined }> = {}): Actor<typeof sessionsMachine> =>
+  createActor(sharedWorker === undefined ? sessionsRegistryLogic : createSessionsRegistryLogic(sharedWorker), {
     ...options,
-    input: {
-      budget: liveProjectBudgetFor({ desktop: isDesktopTarget, constrained: isMemoryConstrainedDevice() }),
-    },
+    input: sessionsRegistryInput(),
   });
 
 // ---------------------------------------------------------------------------

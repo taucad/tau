@@ -19,6 +19,7 @@ export function RevisionRegion({
   children,
   className,
   bodyClassName,
+  isLandmark = true,
 }: {
   /** The heading's id, which names the region for assistive technology and for tests. */
   readonly id: string;
@@ -27,9 +28,19 @@ export function RevisionRegion({
   readonly children: ReactNode;
   readonly className?: string;
   readonly bodyClassName?: string;
+  /**
+   * Whether the card is a region landmark. A card titled like the pane its host already names (History in the History
+   * pane) is a named group instead, so the page never holds two landmarks of one name (WCAG 1.3.1, axe landmark-unique).
+   */
+  readonly isLandmark?: boolean;
 }): React.JSX.Element {
+  const Container = isLandmark ? 'section' : 'div';
   return (
-    <section aria-labelledby={id} className={cn('rounded-xl border border-border bg-card', className)}>
+    <Container
+      role={isLandmark ? undefined : 'group'}
+      aria-labelledby={id}
+      className={cn('rounded-xl border border-border bg-card', className)}
+    >
       <div className='flex min-h-8 items-center justify-between gap-2 border-b px-3 py-1'>
         <Heading level={3} variant='label' id={id} className='min-w-0 truncate text-foreground'>
           {title}
@@ -37,6 +48,6 @@ export function RevisionRegion({
         {action}
       </div>
       <div className={bodyClassName ?? 'p-1.5'}>{children}</div>
-    </section>
+    </Container>
   );
 }

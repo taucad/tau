@@ -104,6 +104,14 @@
       "owner": "filesystem redesign W6.4"
     },
     {
+      "id": "REVISIONS-GIT-WAIT",
+      "bound": "Re-probe while the person's own Git operation holds the checkout (a rebase, merge, cherry-pick or held index.lock), every 2 seconds; the save waits and resumes when it ends, and nothing times out",
+      "site": "packages/revisions/src/checkout.machine.ts",
+      "token": "waitWindow",
+      "class": "Debounce",
+      "owner": "Terminal git access TG4"
+    },
+    {
       "id": "A8",
       "bound": "Pull render window",
       "site": "packages/revisions/src/sync.machine.ts",

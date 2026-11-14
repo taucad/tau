@@ -126,6 +126,7 @@ import {
   noteRendererGone,
   rendererErrorReportingEnvironment,
   reportDesktopSignal,
+  reportRevisionEngineFailure,
 } from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
@@ -1082,7 +1083,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
-    onUtilityFrame: (frame) => permissionBridge.accept(frame),
+    /* A permission answer (W9), or a revision-engine failure for error reporting, which redacts it. */
+    onUtilityFrame: (frame) => permissionBridge.accept(frame) || reportRevisionEngineFailure(frame),
   });
   /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
   const stopKeepingAwake = machinesEnabled
@@ -1261,9 +1263,17 @@ const bootstrapElectronApp = async (): Promise<void> => {
     services.post({ type: 'importGrants', grants });
   };
   publishImportGrants(importGrants.list());
-  /* The session's user id rides with the bearer as the launcher's `principal` (GI-Q6). */
+  /*
+   * The session's user id rides with the bearer as the launcher's `principal` (GI-Q6), and with its name as the account
+   * the Terminal's git commits as.
+   */
   const publishCredential = (): void => {
-    services.post({ type: 'authToken', token: auth.token(), principal: auth.principal() });
+    services.post({
+      type: 'authToken',
+      token: auth.token(),
+      principal: auth.principal(),
+      principalName: auth.principalName(),
+    });
   };
   /* Kernel utilities run project code, so they get a Zoo-scoped token rather
    * than the session: it opens Tau's Zoo proxy as this user and nothing else. */

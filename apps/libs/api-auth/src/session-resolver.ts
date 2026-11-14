@@ -9,6 +9,7 @@ import { MetricsService } from '@taucad/api-observability/metrics';
 import type { AuthSessionResolutionAttributes } from '@taucad/api-observability/metrics';
 import { authInstanceKey } from '#auth.constant.js';
 import type { AuthSession, AuthUser } from '#auth.type.js';
+import { sessionDataNameOf, stripSessionSnapshot } from '#session-snapshot.js';
 
 /** One request's credentials, as the resolver sees them. */
 export type SessionLookup = {
@@ -103,6 +104,7 @@ const joinWindow = 250;
 @Injectable()
 export class SessionResolver {
   private readonly flights = new Map<string, Flight>();
+  private snapshotName: Promise<string> | undefined;
 
   public constructor(
     @Inject(authInstanceKey) private readonly auth: Auth,
@@ -150,17 +152,42 @@ export class SessionResolver {
     }
   }
 
+  /**
+   * The session snapshot cookie's name for this instance.
+   *
+   * @returns The name, read once from Better Auth's context.
+   */
+  public async sessionDataName(): Promise<string> {
+    this.snapshotName ??= sessionDataNameOf(this.auth);
+    return this.snapshotName;
+  }
+
+  /**
+   * The configured snapshot lifetime.
+   *
+   * @returns Seconds, or 0 when the cookie cache is disabled.
+   */
+  public maxAgeSeconds(): number {
+    const cache = this.auth.options.session?.cookieCache;
+    return cache?.enabled === true ? (cache.maxAge ?? 0) : 0;
+  }
+
   private async lookup(l: SessionLookup, mode: SessionReadMode): Promise<SessionResolution> {
     try {
-      const { response, headers } = await this.auth.api.getSession({
-        headers: fromNodeHeaders(l.headers),
+      const headers = fromNodeHeaders(l.headers);
+      // Authoritative means both: the bypass query and no snapshot in what Better Auth reads.
+      if (mode === 'authoritative' && l.headers.cookie !== undefined) {
+        headers.set('cookie', stripSessionSnapshot(l.headers.cookie, await this.sessionDataName()));
+      }
+      const { response, headers: responseHeaders } = await this.auth.api.getSession({
+        headers,
         query: mode === 'authoritative' ? { disableCookieCache: true } : undefined,
         returnHeaders: true,
       });
       return freezeResolution({
         session: response?.session ?? null,
         user: response?.user ?? null,
-        setCookies: headers.getSetCookie(),
+        setCookies: responseHeaders.getSetCookie(),
         mode,
         coalesced: false,
       });

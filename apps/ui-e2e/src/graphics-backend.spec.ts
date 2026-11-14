@@ -1387,33 +1387,45 @@ test.describe('Graphics backend regression guard', () => {
     });
   }
 
-  test('WebGPU feature flag defaults off and switches the live viewer in both directions', async () => {
+  test('Prefer WebGPU defaults on and switches the live viewer in both directions', async () => {
+    // Since #1057 (da8fd25a34) the `webGpu` flag is the Experimental "Prefer WebGPU" switch, and it defaults on.
     await target.navigate('/__e2e/example-fixture?locator=replicad.birdhouse&settings=experimental');
     await waitForGraphicsViewer();
     await waitForGraphicsTestBridge();
-    await target.expectGraphicsBackend('webgl');
-    const toggle = selectors.getByRole('switch', { name: 'WebGPU rendering' });
+    await target.expectPresentedGraphicsBackend('webgpu');
+    const toggle = selectors.getByRole('switch', { name: 'Prefer WebGPU' });
     await target.expectVisible(toggle);
+    await target.expectAttribute(toggle, 'aria-checked', 'true');
     await target.screenshot(selectors.getByRole('dialog', { name: 'Settings' }), 'webgpu-feature-flag.png');
-    // Each switch remounts the viewer on a new renderer, also where WebGPU then presents on its WebGL fallback.
+    /*
+     * Where a WebGPU canvas presents, each switch remounts the viewer on a new renderer. Where it cannot (the software
+     * adapter), the viewer already draws on its WebGL fallback after the canvas loss and the page answers WebGL for
+     * either preference, so both switches keep that canvas instead of mounting another.
+     */
+    const webGpuPresents = target.presentedGraphicsBackend('webgpu') === 'webgpu';
     const initialRenderer = await target.rendererGeneration();
     await target.click(toggle);
-    await target.expectPresentedGraphicsBackend('webgpu');
-    await target.expectGeometryFramed();
-    const switchedRenderer = await target.rendererGeneration();
-    expect(switchedRenderer).not.toBe(initialRenderer);
-    await target.click(toggle);
+    await target.expectAttribute(toggle, 'aria-checked', 'false');
     await target.expectGraphicsBackend('webgl');
     await target.expectGeometryFramed();
+    const switchedRenderer = await target.rendererGeneration();
+    if (webGpuPresents) {
+      expect(switchedRenderer).not.toBe(initialRenderer);
+    } else {
+      expect(switchedRenderer).toBe(initialRenderer);
+    }
+    await target.click(toggle);
+    await target.expectAttribute(toggle, 'aria-checked', 'true');
+    await target.expectPresentedGraphicsBackend('webgpu');
+    await target.expectGeometryFramed();
     const restoredRenderer = await target.rendererGeneration();
-    if (target.presentedGraphicsBackend('webgpu') === 'webgpu') {
+    if (webGpuPresents) {
       expect(restoredRenderer).not.toBe(switchedRenderer);
     } else {
-      // WebGPU already presented on its WebGL fallback: switching back keeps that canvas instead of mounting another.
       expect(restoredRenderer).toBe(switchedRenderer);
     }
     await target.keyboardPress('Escape');
-    await assertCanvasHasNonBackgroundPixels(previewCanvasSelector, 'flag switched back to WebGL');
+    await assertCanvasHasNonBackgroundPixels(previewCanvasSelector, 'preference switched back to WebGPU');
   });
 
   test('timed camera motion restores non-default perspective zoom', async () => {

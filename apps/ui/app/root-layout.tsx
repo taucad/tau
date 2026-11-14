@@ -3,13 +3,13 @@ import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
 import { Links, Meta, Scripts, ScrollRestoration, useNavigate, useRouteLoaderData, useLocation } from 'react-router';
-import { HydrationBoundary, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { HydrationBoundary, QueryClientProvider } from '@tanstack/react-query';
 import type { DehydratedState } from '@tanstack/react-query';
-import { authQueryKeys } from '@better-auth-ui/core';
-import { Fragment, useEffect, useMemo } from 'react';
+import { Fragment, useEffect } from 'react';
 import { toast } from 'sonner';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
+import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { Page } from '#components/layout/page.js';
@@ -25,7 +25,7 @@ import { useFavicon } from '#hooks/use-favicon.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ErrorPage } from '#components/error-page.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
-import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
+import { RootFileManagerProvider } from '#hooks/use-file-manager.js';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
@@ -37,8 +37,10 @@ import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { DocumentMemoryKillReporter } from '#components/memory-kill-reporter.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
-import { authErrorMessage, betterFetchErrorBodyMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-billing.js';
+import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
+import { selectRuntimeIdleFileManagers, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
+import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
@@ -52,37 +54,6 @@ export type RootLoaderData = {
 
 const noPreferences: ServerPreferences = {};
 
-export const handleQueryError = (error: unknown, metadata: Readonly<Record<string, unknown>> | undefined): void => {
-  if (metadata?.['handlesErrorLocally'] === true) {
-    return;
-  }
-  const message = betterFetchErrorBodyMessage(error);
-  if (message !== undefined) {
-    toast.error(message);
-  }
-};
-
-const shouldRetrySessionQuery = (failureCount: number, error: unknown): boolean => {
-  const status =
-    error !== null && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
-      ? error.status
-      : undefined;
-  return failureCount < 2 && (status === undefined || status < 400 || status >= 500);
-};
-
-/**
- * Applies the one shared session query's freshness and failure policy.
- *
- * @param client - The app's root query client.
- */
-export function configureSessionQueryDefaults(client: QueryClient): void {
-  client.setQueryDefaults(authQueryKeys.session, {
-    retry: shouldRetrySessionQuery,
-    retryOnMount: false,
-    staleTime: 30_000,
-  });
-}
-
 export function RootLayout({
   analyticsBoundary: AnalyticsBoundary = Fragment,
   children,
@@ -95,31 +66,9 @@ export function RootLayout({
   const data = useRouteLoaderData<RootLoaderData>('root');
   // Preserve null so the theme provider can resolve the system preference before hydration.
   const ssrTheme = data?.theme ?? null;
-  const queryClient = useMemo(() => {
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { networkMode: 'offlineFirst' },
-        mutations: { networkMode: 'offlineFirst' },
-      },
-    });
-
-    // Surface unhandled better-auth-ui mutation/query errors as toasts. Inline
-    // `onError` handlers on individual `useMutation` calls (e.g. sign-in) take
-    // precedence and override this default, so we never double-toast.
-    client.setMutationDefaults([], {
-      onError: (error) => {
-        toast.error(authErrorMessage(error));
-      },
-    });
-
-    client.getQueryCache().config.onError = (error, query) => {
-      handleQueryError(error, query.meta);
-    };
-
-    configureSessionQueryDefaults(client);
-
-    return client;
-  }, []);
+  /* D9 (A2): the runtime creates the browser `QueryClient`, above the billing fence, and the project library writes
+   * into the same instance. Each server request's runtime has its own. */
+  const queryClient = selectRuntimeQueryClient(useAppRuntime());
 
   const managedChildren = (
     <HeadlessImageProvider>
@@ -143,12 +92,13 @@ export function RootLayout({
       </ProjectManagerProvider>
     </HeadlessImageProvider>
   );
-  const application =
-    data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
-      children
-    ) : (
-      <HomeFileManagerProvider rootDirectory='/'>{managedChildren}</HomeFileManagerProvider>
-    );
+  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname);
+  const application = isHarness ? (
+    children
+  ) : (
+    /* The runtime's `rootFiles`: the file manager for `/`, read in the first render and on the server (A1b). */
+    <RootFileManagerProvider>{managedChildren}</RootFileManagerProvider>
+  );
 
   /*
    * `QueryClientProvider` is outermost so `AuthConfigProvider`'s own
@@ -172,6 +122,7 @@ export function RootLayout({
                 <ColorProvider>
                   <AppViewerEnvironment>
                     <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
+                      <HarnessDocumentLoad />
                       {application}
                     </LayoutDocument>
                   </AppViewerEnvironment>
@@ -275,11 +226,30 @@ export function ProductApp(): React.JSX.Element {
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
   const page = <Page />;
-  return data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
+  return isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
     page
   ) : (
     <ProjectSessionsHost>{page}</ProjectSessionsHost>
   );
+}
+
+/**
+ * Load the page as a document when a client navigation crosses into or out of the remote-host harness: the runtime's
+ * file managers are idle for the harness's document only, and that is fixed when the runtime is created. It reads the
+ * same debug flag and path the client entry did (never the loader data, which an error boundary or a root with no
+ * loader lacks), so the reloaded document always agrees and never reloads again. Renders nothing, so the server render
+ * and hydration are unchanged.
+ */
+function HarnessDocumentLoad(): React.ReactNode {
+  const runtime = useOptionalAppRuntime();
+  const { pathname } = useLocation();
+  const isIdle = runtime === undefined ? undefined : selectRuntimeIdleFileManagers(runtime);
+  useEffect(() => {
+    if (isIdle !== undefined && isIdle !== isRemoteHostHarness(ENV.TAU_DEBUG, pathname)) {
+      globalThis.location.reload();
+    }
+  }, [pathname, isIdle]);
+  return undefined;
 }
 
 export function RootErrorBoundary(): React.JSX.Element {

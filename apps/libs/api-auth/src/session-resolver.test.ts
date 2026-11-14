@@ -55,13 +55,17 @@ const adversarialCookieHeaders = (data: string, token: string): readonly string[
   `junk; ${data}=J`,
   `=x; ${data}=J`,
   `${data}=J`,
-  `a=1;  ${data}=J; ${token}=t`,
-  `a=1; ${data}=J;  ${token}=t`,
+  `a=1; \u00A0${data}=J; ${token}=t`,
+  `a=1; ${data}=J; \u00A0${token}=t`,
 ];
 
 const createResolver = () => {
   const getSession = vi.fn<(input: GetSessionInput) => Promise<ReturnType<typeof answer>>>();
-  const auth = { api: { getSession } } as unknown as Auth;
+  const auth = {
+    api: { getSession },
+    options: {},
+    $context: Promise.resolve({ authCookies: { sessionData: { name: 'tau.session_data' } } }),
+  } as unknown as Auth;
   const metrics = mockDeep<MetricsService>();
   const resolver = new SessionResolver(auth, metrics);
   const flights = (): Map<string, unknown> => Reflect.get(resolver, 'flights') as Map<string, unknown>;
@@ -181,6 +185,29 @@ describe('SessionResolver', () => {
 
       expect(getSession).toHaveBeenCalledTimes(adversarialCookieHeaders('', '').length);
       expect(getSession.mock.calls.every(([input]) => input.query?.disableCookieCache === true)).toBe(true);
+    });
+
+    it('should remove the snapshot from what an authoritative lookup hands Better Auth', async () => {
+      const { resolver, getSession } = createResolver();
+      getSession.mockResolvedValue(answer());
+
+      await resolver.resolve({ headers: { cookie: 'a=1;tau.session_data=J; tau.session_token=t' }, method: 'POST' });
+      await resolver.resolve({ headers: { cookie: 'tau.session_data=J' }, method: 'GET', authoritative: true });
+
+      expect(getSession.mock.calls.map(([input]) => input.headers.get('cookie'))).toEqual([
+        'a=1; tau.session_token=t',
+        '',
+      ]);
+      expect(getSession.mock.calls.every(([input]) => input.headers.has('cookie'))).toBe(true);
+    });
+
+    it('should leave the snapshot in a cached lookup', async () => {
+      const { resolver, getSession } = createResolver();
+      getSession.mockResolvedValue(answer());
+
+      await resolver.resolve(cookieGet('tau.session_data=J; tau.session_token=t'));
+
+      expect(getSession.mock.calls[0]?.[0].headers.get('cookie')).toBe('tau.session_data=J; tau.session_token=t');
     });
 
     it('should ask Better Auth for its response headers', async () => {

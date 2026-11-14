@@ -131,6 +131,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-converter.spec.ts',
       'apps/desktop-e2e/src/desktop-ephemeral-isolation.spec.ts',
       'apps/desktop-e2e/src/desktop-kernel-utility-cap.spec.ts',
+      'apps/desktop-e2e/src/desktop-lfs-packaged.spec.ts',
       'apps/desktop-e2e/src/desktop-machine-profiles.spec.ts',
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',

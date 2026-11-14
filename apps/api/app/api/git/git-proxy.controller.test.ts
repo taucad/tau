@@ -132,6 +132,36 @@ describe('GitProxyController', () => {
     vi.unstubAllGlobals();
   });
 
+  it('answers private, no-store and never relays the upstream cache-control', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('0000', {
+            status: 200,
+            headers: {
+              'content-type': 'application/x-git-upload-pack-advertisement',
+              'cache-control': 'public, max-age=600',
+            },
+          }),
+      ),
+    );
+    const answer = reply();
+
+    await proxyController().proxyGet(
+      'user-1',
+      { url: 'https://github.com/tau/example.git/info/refs' },
+      request({}),
+      answer,
+    );
+
+    expect(answer.header).toHaveBeenCalledWith('content-type', 'application/x-git-upload-pack-advertisement');
+    expect(answer.header).toHaveBeenCalledWith('cache-control', 'private, no-store');
+    expect(answer.header).not.toHaveBeenCalledWith('cache-control', 'public, max-age=600');
+
+    vi.unstubAllGlobals();
+  });
+
   // Red pin (e): the review reproduced a 302 from an allowed host to loopback
   // being followed with no re-check — an SSRF hole into the Fly private network.
   it('refuses a redirect to a blocked host instead of following it', async () => {

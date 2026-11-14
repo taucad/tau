@@ -522,3 +522,202 @@ export const readPhysicalDatabasePrefix = async (required: boolean): Promise<str
     }
     return name?.slice(0, -suffix.length) ?? 'tau-';
   }, required);
+
+/** The library journal row a permanent delete writes first (`db/indexeddb-storage.ts:224` `beginPermanentDeleteProject`). */
+export type PendingPermanentDeleteRow = {
+  readonly projectId: string;
+  readonly storage: { readonly backend: 'indexeddb' | 'opfs'; readonly providerBasePath: string };
+};
+
+/**
+ * What the library database (`IndexedDbStorageProvider`, named beside the project-routing metadata) holds for one
+ * project: whether any journal row is still on this device, and the project's Trash time.
+ */
+export type ProjectLibraryEvidence = {
+  readonly pendingOperationIds: readonly string[];
+  /** `undefined` when the project's library row is absent or not in the Trash. */
+  readonly deletedAt?: number;
+  readonly hasLibraryState: boolean;
+};
+
+/** Read the library journal and one project's library row without importing application modules. */
+export const readProjectLibraryEvidence = async (projectId: string): Promise<ProjectLibraryEvidence> =>
+  target.evaluate(async (id) => {
+    const databases = await indexedDB.databases();
+    const handles = databases.find(({ name }) => name?.endsWith('fs-handles'))?.name;
+    const name = handles === undefined ? undefined : `${handles.slice(0, -'fs-handles'.length)}db`;
+    if (name === undefined || !databases.some((database) => database.name === name)) {
+      throw new Error('The library database is missing');
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.addEventListener(
+        'success',
+        () => {
+          resolve(request.result);
+        },
+        { once: true },
+      );
+      request.addEventListener(
+        'error',
+        () => {
+          reject(request.error ?? new Error('Failed to open the library database'));
+        },
+        { once: true },
+      );
+    });
+    try {
+      return await new Promise<ProjectLibraryEvidence>((resolve, reject) => {
+        const transaction = db.transaction(['pendingProjectOperations', 'projectLibraryStates']);
+        const keys = transaction.objectStore('pendingProjectOperations').getAllKeys();
+        const state = transaction.objectStore('projectLibraryStates').get(id) as IDBRequest<
+          { deletedAt?: number } | undefined
+        >;
+        transaction.addEventListener(
+          'complete',
+          () => {
+            resolve({
+              pendingOperationIds: keys.result.map(String),
+              ...(state.result?.deletedAt === undefined ? {} : { deletedAt: state.result.deletedAt }),
+              hasLibraryState: state.result !== undefined,
+            });
+          },
+          { once: true },
+        );
+        transaction.addEventListener(
+          'error',
+          () => {
+            reject(transaction.error ?? new Error('Failed to read the library database'));
+          },
+          { once: true },
+        );
+      });
+    } finally {
+      db.close();
+    }
+  }, projectId);
+
+/**
+ * Leave a permanent delete half done, as a document that unloads between its journal write and its commit leaves it:
+ * the row `beginPermanentDeleteProject` adds, in the same transaction shape and under the same Trash check, and
+ * nothing after it. It omits the app's refusal of a second pending delete for the same project
+ * (`db/indexeddb-storage.ts:247–255`), so the caller writes one row per project.
+ *
+ * @param row - The project and the storage its directory is on.
+ * @returns The journal row's operation id.
+ */
+export const writePendingPermanentDelete = async (row: PendingPermanentDeleteRow): Promise<string> =>
+  target.evaluate(async (input) => {
+    const databases = await indexedDB.databases();
+    const handles = databases.find(({ name }) => name?.endsWith('fs-handles'))?.name;
+    const name = handles === undefined ? undefined : `${handles.slice(0, -'fs-handles'.length)}db`;
+    if (name === undefined || !databases.some((database) => database.name === name)) {
+      throw new Error('The library database is missing');
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.addEventListener(
+        'success',
+        () => {
+          resolve(request.result);
+        },
+        { once: true },
+      );
+      request.addEventListener(
+        'error',
+        () => {
+          reject(request.error ?? new Error('Failed to open the library database'));
+        },
+        { once: true },
+      );
+    });
+    const operationId = `req_e2e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(['projectLibraryStates', 'pendingProjectOperations'], 'readwrite');
+        let refusal: Error | undefined;
+        const state = transaction.objectStore('projectLibraryStates').get(input.projectId) as IDBRequest<
+          { deletedAt?: number } | undefined
+        >;
+        state.addEventListener('success', () => {
+          if (state.result?.deletedAt === undefined) {
+            refusal = new Error('Permanent delete is available only for trashed projects');
+            transaction.abort();
+            return;
+          }
+          transaction.objectStore('pendingProjectOperations').add({
+            operationId,
+            kind: 'permanent-delete',
+            projectId: input.projectId,
+            storage: input.storage,
+          });
+        });
+        transaction.addEventListener(
+          'complete',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+        transaction.addEventListener(
+          'abort',
+          () => {
+            reject(refusal ?? transaction.error ?? new Error('Journaling the permanent delete was aborted'));
+          },
+          { once: true },
+        );
+      });
+    } finally {
+      db.close();
+    }
+    return operationId;
+  }, row);
+
+/** Read one library journal row back as stored, or `undefined` when it is gone. */
+export const readPendingOperation = async (operationId: string): Promise<unknown> =>
+  target.evaluate(async (id) => {
+    const databases = await indexedDB.databases();
+    const handles = databases.find(({ name }) => name?.endsWith('fs-handles'))?.name;
+    const name = handles === undefined ? undefined : `${handles.slice(0, -'fs-handles'.length)}db`;
+    if (name === undefined || !databases.some((database) => database.name === name)) {
+      throw new Error('The library database is missing');
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.addEventListener(
+        'success',
+        () => {
+          resolve(request.result);
+        },
+        { once: true },
+      );
+      request.addEventListener(
+        'error',
+        () => {
+          reject(request.error ?? new Error('Failed to open the library database'));
+        },
+        { once: true },
+      );
+    });
+    try {
+      return await new Promise<unknown>((resolve, reject) => {
+        const request = db.transaction('pendingProjectOperations').objectStore('pendingProjectOperations').get(id);
+        request.addEventListener(
+          'success',
+          () => {
+            resolve(request.result);
+          },
+          { once: true },
+        );
+        request.addEventListener(
+          'error',
+          () => {
+            reject(request.error ?? new Error('Failed to read the library journal'));
+          },
+          { once: true },
+        );
+      });
+    } finally {
+      db.close();
+    }
+  }, operationId);

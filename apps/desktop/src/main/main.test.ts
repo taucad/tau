@@ -362,6 +362,7 @@ vi.mock('#main/auth-service.js', () => ({
     restore: vi.fn(async () => state.authRestored),
     token: vi.fn(() => state.authToken),
     principal: vi.fn(() => undefined),
+    principalName: vi.fn(() => undefined),
     refresh: vi.fn(async () => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),

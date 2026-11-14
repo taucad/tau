@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import axe from 'axe-core';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +22,7 @@ import {
   DropdownMenuToggleGroupItem,
   DropdownMenuTrigger,
 } from '#components/dropdown-menu.js';
+import { DropdownMenuSliderItem } from '#components/menu-slider-item.js';
 import { ResponsiveSurfaceProvider } from '#hooks/use-mobile.js';
 
 type MenuProperties = {
@@ -514,6 +515,39 @@ describe('responsive dropdown menu parts in a drawer', () => {
     fireEvent.click(within(drawer).getByRole('radio', { name: 'in' }));
 
     expect(onValueChange).toHaveBeenCalledWith('in');
+    // A drawer row of the shared list, which only its options act on.
+    const row = within(drawer)
+      .getByRole('radio', { name: 'in' })
+      .closest('[data-slot=dropdown-menu-toggle-group-item]');
+    expect(row).toHaveAttribute('data-drawer-row');
+    expect(drawer.querySelector('[data-slot=dropdown-menu-drawer-items]')).toContainElement(row as HTMLElement);
+    expect(screen.getByRole('dialog', { name: 'View' })).toBeInTheDocument();
+  });
+
+  it('should render a slider item as a drawer row whose drag scrubs instead of moving the sheet', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn<(value: number) => void>();
+    const drawer = await openWith(
+      <DropdownMenuSliderItem value={50} trailingAdornment='%' aria-label='Opacity' onValueChange={onValueChange}>
+        Opacity
+      </DropdownMenuSliderItem>,
+    );
+
+    // No menu item: a drawer has no menu for one to belong to.
+    expect(within(drawer).queryByRole('menuitem')).not.toBeInTheDocument();
+    const field = within(drawer).getByRole('spinbutton', { name: 'Opacity' });
+    const row = field.closest('[data-drawer-row]');
+    expect(drawer.querySelector('[data-slot=dropdown-menu-drawer-items]')).toContainElement(row as HTMLElement);
+    expect(row).toHaveAttribute('data-vaul-no-drag');
+
+    // The keys, not a pointer: vaul's drag handling under the pointer needs pointer capture, which jsdom lacks.
+    act(() => {
+      field.focus();
+    });
+    await user.keyboard('{Control>}a{/Control}75{Enter}');
+
+    expect(onValueChange).toHaveBeenLastCalledWith(75);
+    expect(screen.getByRole('dialog', { name: 'View' })).toBeInTheDocument();
   });
 
   it('should open a submenu as a sub-view with a Back row, and close the drawer when one of its items is chosen', async () => {

@@ -37,7 +37,7 @@ import { restoreMachine, selectRestoreBusy } from '#restore.machine.js';
 import { selectRemoteHeads, selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncMachineEvent } from '#sync.machine.js';
 import type { SyncFacet, SyncPushOutcome, VersionRenumbering } from '#sync.types.js';
-import type { CheckoutRecord, ConflictRecord, RevisionPortErrorCode } from '#revision-port.js';
+import type { CheckoutRecord, ConflictRecord, RevisionGitOperation, RevisionPortErrorCode } from '#revision-port.js';
 import { turnMachine } from '#turn.machine.js';
 import type { TurnFailureCode, TurnOutcome, TurnSettlement } from '#turn.machine.js';
 import type { TurnAttemptKey, TurnCutOf } from '#turn.types.js';
@@ -54,6 +54,8 @@ export type CheckoutStatusEntry = Readonly<{
   branch: string | undefined;
   headRevisionId: string | undefined;
   headTreeId?: string | undefined;
+  /** While `waiting`: the Git operation that holds its mints. */
+  waitFor?: RevisionGitOperation | undefined;
 }>;
 
 /** What the root knows of one turn attempt, kept from the facts its actor sends (RM-R7). @public */
@@ -156,6 +158,7 @@ export type ProjectRevisionsMachineEvent =
       branch: string | undefined;
       headRevisionId?: string;
       headTreeId?: string;
+      waitFor?: RevisionGitOperation;
     }>
   /* The host's turn verbs, keyed by attempt (D14). */
   /* `request` is the person's request, which titles the attempt's result (Q9). */
@@ -1008,6 +1011,7 @@ const projectRevisionsMachineDefinition = setup({
                 branch: event.branch,
                 headRevisionId: event.headRevisionId,
                 headTreeId: event.headTreeId,
+                ...(event.waitFor === undefined ? {} : { waitFor: event.waitFor }),
               },
             },
           };
@@ -1687,6 +1691,7 @@ export const selectRevisionStatus = (
     projectDirty: Object.values(context.checkoutStatus).some((entry) => entry.status !== 'clean'),
     dirty: status !== undefined && status.status !== 'clean',
     minting: status?.status === 'minting',
+    ...(status?.waitFor === undefined ? {} : { waiting: status.waitFor }),
     headRevisionId,
     follow: context.follow,
     /* A conflicted branch needs a person as much as a failed cut does (A22,

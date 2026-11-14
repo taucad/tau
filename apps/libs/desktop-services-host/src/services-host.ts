@@ -209,6 +209,10 @@ const host = createServicesHost({
   terminalSessionsAnswered: (requestId, sessions) => {
     parentPort.postMessage({ type: 'terminal-sessions-answered', requestId, sessions });
   },
+  /* Raw: main's error reporting redacts it before it leaves the machine. */
+  onRevisionEngineFailure: (failure) => {
+    parentPort.postMessage({ type: 'revision-engine-failed', ...failure });
+  },
   machineBindingCompleted: (requestId, result) => {
     parentPort.postMessage(
       'error' in result

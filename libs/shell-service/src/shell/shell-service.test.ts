@@ -735,6 +735,113 @@ describe('human Terminal sessions (D6, D21)', () => {
     await opened.session[Symbol.asyncDispose]();
   });
 
+  const openedTerminal = async (
+    overrides: Partial<ShellServiceOptions>,
+    account?: Readonly<{ id: string; name?: string }>,
+  ): Promise<
+    Readonly<{
+      launch: ShellLaunch;
+      gitConfig: string | undefined;
+      agent: () => Promise<ShellLaunch>;
+      close: () => Promise<void>;
+    }>
+  > => {
+    const { service, provider } = harness(
+      (launch) =>
+        launch.stdio.kind === 'terminal'
+          ? { status: 'started', stdout: '$ ' }
+          : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } },
+      overrides,
+    );
+    const opened = await service.openTerminal({
+      projectRoot: project,
+      size,
+      ...(account === undefined ? {} : { account }),
+      signal: new AbortController().signal,
+    });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    const launch = provider.launches[0]!;
+    const gitConfig = await readFile(join(launch.environment['HOME']!, '.gitconfig'), 'utf8').catch(() => undefined);
+    const agent = async (): Promise<ShellLaunch> => {
+      await service.run(call({ command: 'true' }));
+      return provider.launches.at(-1)!;
+    };
+    return { launch, gitConfig, agent, close: async () => opened.session[Symbol.asyncDispose]() };
+  };
+
+  it('opens the store for writing in a macOS Terminal, all but the names that run a program, and commits as the person', async () => {
+    const { launch, gitConfig, agent, close } = await openedTerminal(
+      { platform: 'darwin' },
+      { id: 'user_1', name: 'Ada Lovelace' },
+    );
+    const store = join(project, '.git');
+
+    expect(launch.filesystem.denied.filter((path) => path.startsWith(`${store}/`) || path === store)).toStrictEqual([]);
+    expect(launch.filesystem.readOnly).not.toContain(store);
+    expect(launch.filesystem.readOnly).toStrictEqual(
+      expect.arrayContaining(
+        ['config', 'hooks', 'commondir', 'config.worktree', 'worktrees', 'modules'].map((name) => join(store, name)),
+      ),
+    );
+    expect(launch.filesystem.readOnly).toContain(join(store, '[cC][oO][mM][mM][oO][nN][dD][iI][rR]'));
+    expect(launch.filesystem.writable).toContain(project);
+    /* Optional locks are back, since `git status` may refresh the index; the system config stays out. */
+    expect(launch.environment).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1' });
+    expect(launch.environment).not.toHaveProperty('GIT_OPTIONAL_LOCKS');
+    /* The store keeps its own LFS objects: no scratch folder, so a committed large file keeps its bytes. */
+    expect(gitConfig).toBe('[user]\n\tname = "Ada Lovelace"\n\temail = "user_1@users.noreply.tau.new"\n');
+    /* The agent's launch on the same Mac is unchanged: the real store stays denied, with no identity of the person. */
+    const agentLaunch = await agent();
+    expect(agentLaunch.filesystem.denied).toContain(store);
+    expect(agentLaunch.filesystem.readOnly).not.toContain(join(store, 'config'));
+    expect(agentLaunch.environment).not.toHaveProperty('GIT_CONFIG_NOSYSTEM');
+    await close();
+  });
+
+  it('writes no identity while signed out, so git asks who the person is', async () => {
+    const writable = await openedTerminal({ platform: 'darwin' });
+    expect(writable.gitConfig).toBeUndefined();
+    await writable.close();
+
+    const readOnly = await openedTerminal({});
+    expect(readOnly.gitConfig).not.toContain('[user]');
+    expect(readOnly.gitConfig).toContain('[lfs]');
+    await readOnly.close();
+  });
+
+  it('keeps a Linux Terminal store read-only, with the LFS scratch folder and the identity beside it', async () => {
+    const { launch, gitConfig, close } = await openedTerminal({}, { id: 'user_1', name: '' });
+
+    expect(launch.filesystem.readOnly).toContain(join(project, '.git'));
+    expect(launch.filesystem.readOnly).not.toContain(join(project, '.git', 'commondir'));
+    expect(launch.environment).toMatchObject({ GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    /* An empty name falls back to the account id, which git accepts. */
+    expect(gitConfig).toBe(
+      `[user]\n\tname = "user_1"\n\temail = "user_1@users.noreply.tau.new"\n[lfs]\n\tstorage = "${join(launch.environment['TMPDIR']!, 'git-lfs')}"\n`,
+    );
+    await close();
+  });
+
+  it('writes no identity a config line cannot carry, and quotes the one it writes', async () => {
+    const forged = await openedTerminal(
+      { platform: 'darwin' },
+      { id: 'user_1', name: 'Ada\n[core]\n\thooksPath = /tmp' },
+    );
+    expect(forged.gitConfig).toBeUndefined();
+    await forged.close();
+    const unaddressable = await openedTerminal({ platform: 'darwin' }, { id: 'user 1@x', name: 'Ada' });
+    expect(unaddressable.gitConfig).toBeUndefined();
+    await unaddressable.close();
+    const quoted = await openedTerminal(
+      { platform: 'darwin' },
+      { id: 'user_1', name: String.raw`Ada "the" \ Countess` },
+    );
+    expect(quoted.gitConfig).toContain(String.raw`name = "Ada \"the\" \\ Countess"`);
+    await quoted.close();
+  });
+
   it("still refuses a Terminal grant that names a version-control directory, the checkout's own included", async () => {
     const { service, provider } = harness(() => ({ status: 'started', stdout: '$ ' }));
     for (const folder of [join(project, '.git'), join(outside, '.git')]) {

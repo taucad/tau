@@ -2142,6 +2142,48 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     30_000,
   );
 
+  /* Field visibility for the revision engine: a failed `git worktree` reaches main with git's own words, for main's
+   * error reporting to redact, and the local log keeps only the port's sentence. */
+  /* POSIX only: the stand-in git is a `#!/bin/sh` script found through `which`. */
+  it.runIf(gitToolchainOnPath && process.platform !== 'win32')(
+    'hands main a failed worktree command with its code and git stderr',
+    async () => {
+      const failures: TauHost.RevisionEngineFailure[] = [];
+      const logged: Array<readonly [string, unknown]> = [];
+      const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+      const bundleRoot = await mkdtemp(join(tmpdir(), 'tau-services-git-worktree-'));
+      workspaces.push(bundleRoot);
+      const failingGit = join(bundleRoot, 'git');
+      await writeFile(
+        failingGit,
+        `#!/bin/sh\nfor argument in "$@"; do\n  if [ "$argument" = worktree ]; then\n    echo "fatal: '$PWD' forced worktree failure" >&2\n    exit 128\n  fi\ndone\nexec "${git}" "$@"\n`,
+      );
+      await chmod(failingGit, 0o755);
+      const { host, workspaceRoot } = await configuredHost(
+        {},
+        {
+          gitExecutable: failingGit,
+          onRevisionEngineFailure: (failure) => {
+            failures.push(failure);
+          },
+          log: (event, detail) => {
+            logged.push([event, detail]);
+          },
+        },
+      );
+      connect(host, workspaceRoot);
+
+      await expect.poll(() => failures.length, { timeout: 10_000 }).toBeGreaterThan(0);
+      expect(failures[0]?.code).toBe('ENGINE_FAILED');
+      expect(failures[0]?.message).toBe('Native Git failed worktree.');
+      expect(failures[0]?.detail).toMatch(/^fatal: '.+' forced worktree failure$/u);
+      const local = logged.filter(([event]) => event === 'agent-host.revision-engine-failed');
+      expect(local.length).toBeGreaterThan(0);
+      expect(JSON.stringify(local)).not.toContain('forced worktree failure');
+    },
+    30_000,
+  );
+
   it('leaves a direct turn to the project context main already registered', async () => {
     const runtimeContext = vi.fn();
     const { host, workspaceRoot } = await configuredHost({}, { runtimeContext });
@@ -2423,6 +2465,55 @@ describe('Terminal sessions for quit (T15)', () => {
       first.disconnect();
       late.disconnect();
       expect(ask('q-6')).toBe(0);
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+  it('should open the Terminal as the signed-in account main names, and as nobody once it signs out', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-terminal-account-'));
+    const root = realpathSync(sandbox);
+    const authorityDirectory = join(root, 'authority');
+    await mkdir(authorityDirectory);
+    const requests: TauHost.TerminalSessionRequest[] = [];
+    const shell: TauHost.HostShell = {
+      identity: { platform: 'linux', kind: 'bash', shellVersion: '5.2', shellDigest: 'sha256:0', provider: 'fake' },
+      run: async () => {
+        throw new Error('not under test');
+      },
+      openTerminal: async (request) => {
+        requests.push(request);
+        return { status: 'refused', code: 'sandbox-unavailable', message: 'Not under test.', recovery: 'None.' };
+      },
+    };
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      terminalShell: async (): Promise<TauHost.ShellProbe> => ({ status: 'available', shell }),
+    });
+    const open = async (windowId: string): Promise<void> => {
+      const port = terminalPort();
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'terminal', context: { projectRoot: root, windowId } }, [
+          port.port as unknown as UtilityPort,
+        ]),
+      );
+      port.send({ type: 'open', size: { columns: 80, rows: 24 } });
+      await vi.waitFor(() => {
+        expect(port.received.map(({ type }) => type)).toContain('refused');
+      });
+      port.disconnect();
+    };
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      host.handleMessage(
+        frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1', principalName: 'Ada Lovelace' }),
+      );
+      await open('window-1');
+      expect(requests.at(-1)?.account).toEqual({ id: 'user_1', name: 'Ada Lovelace' });
+
+      host.handleMessage(frame({ type: 'authToken', token: undefined, principalName: 'Ada Lovelace' }));
+      await open('window-2');
+      expect(requests.at(-1)).not.toHaveProperty('account');
     } finally {
       await rm(sandbox, { recursive: true, force: true });
     }

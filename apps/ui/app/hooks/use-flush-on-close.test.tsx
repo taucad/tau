@@ -1,8 +1,37 @@
 // @vitest-environment jsdom
 
-import { render, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { act, render, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StepClock } from '@taucad/xstate-testing/clock';
+import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
 import { UnloadProvider, useFlushOnClose, useFlushProducers } from '#hooks/use-flush-on-close.js';
+import { SessionsProvider } from '#hooks/use-sessions.js';
+import { createSessionsActor, registerProjectSessionServices } from '#services/sessions-store.js';
+
+/* A0.2: the desktop quit seam, captured so a row can ask the renderer to quit. */
+const desktopQuit = vi.hoisted(() => ({
+  ask: undefined as ((attemptId: string) => void) | undefined,
+  answers: [] as string[],
+}));
+vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof DesktopBridgeModule>()),
+  onDesktopQuitRequested: (handler: (attemptId: string) => void) => {
+    desktopQuit.ask = handler;
+    return () => {
+      desktopQuit.ask = undefined;
+    };
+  },
+  reportDesktopQuiesced: (attemptId: string, forced: boolean) => {
+    desktopQuit.answers.push(`${attemptId}:${String(forced)}`);
+  },
+}));
+vi.mock('#components/nav/project-close-dialogs.js', () => ({ BudgetRefusedDialog: () => null }));
+vi.mock('#services/project-agent-host-registration.js', () => ({
+  registerProjectAgentHost: async () => ({ release: async () => undefined }),
+}));
 
 let visibility: DocumentVisibilityState = 'visible';
 
@@ -187,5 +216,183 @@ describe('UnloadProvider', () => {
     } finally {
       reported.mockRestore();
     }
+  });
+});
+
+/*
+ * A0.2 (row S26, D26): the eight `useFlushOnClose` registrations the app mounts today, with the stage each
+ * declares. Seven are producers; the revision lifecycle's is the session stage — the close cut.
+ */
+const unloadRegistrations = [
+  { site: 'routes/w.$workspace.$project/project-live-sessions.tsx', stage: 'producer' },
+  { site: 'routes/w.$workspace.$project/entries-sync-host.tsx', stage: 'producer' },
+  { site: 'routes/w.$workspace.$project/workbench-record-host.tsx', stage: 'producer' },
+  { site: 'routes/w.$workspace.$project/view-settings-sync-host.tsx', stage: 'producer' },
+  { site: 'hooks/use-revision-status.ts', stage: 'session' },
+  { site: 'hooks/use-editor-document-session.tsx', stage: 'producer' },
+  { site: 'hooks/active-chat-provider.tsx', stage: 'producer' },
+  { site: 'components/global-chat-flush-guard.tsx', stage: 'producer' },
+] as const;
+
+/** Each registration's callback, as a step a row can hold open and release. */
+const heldRegistrations = (sequence: string[]) =>
+  unloadRegistrations.map(({ site, stage }) => {
+    const gate = Promise.withResolvers<void>();
+    return {
+      site,
+      stage,
+      release: gate.resolve,
+      callback: async (phase: 'hidden' | 'pagehide'): Promise<void> => {
+        sequence.push(`${stage}:${site}:${phase}:start`);
+        if (stage === 'producer') {
+          await gate.promise;
+        }
+        sequence.push(`${stage}:${site}:${phase}:done`);
+      },
+    };
+  });
+
+describe('UnloadProvider — the unload order over the S26 registrations (A0.2 item 9)', () => {
+  beforeEach(() => {
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+  });
+
+  it('should name the eight registration sites with the stage each declares', async () => {
+    const declared = await Promise.all(
+      unloadRegistrations.map(async ({ site }) => {
+        const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
+        return [...source.matchAll(/useFlushOnClose\([\s\S]*?\{ stage: '(producer|session)' \}\s*,?\s*\)/gu)].map(
+          (match) => match[1],
+        );
+      }),
+    );
+    expect(declared).toEqual(unloadRegistrations.map(({ stage }) => [stage]));
+  });
+
+  it('should settle every producer on hidden before the session stage runs, and run only the session stage on pagehide', async () => {
+    const sequence: string[] = [];
+    const registrations = heldRegistrations(sequence);
+    render(
+      <UnloadProvider>
+        {registrations.map(({ site, stage, callback }) => (
+          <Registration key={site} stage={stage} callback={callback} />
+        ))}
+      </UnloadProvider>,
+    );
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const producers = registrations.filter(({ stage }) => stage === 'producer');
+    expect(sequence.toSorted()).toEqual(producers.map(({ site }) => `producer:${site}:hidden:start`).toSorted());
+
+    /* Release them out of registration order; the session stage waits for the last. */
+    for (const producer of producers.toReversed()) {
+      expect(sequence.some((entry) => entry.startsWith('session:'))).toBe(false);
+      // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
+      await act(async () => {
+        producer.release();
+        await Promise.resolve();
+      });
+    }
+    await waitFor(() => {
+      expect(sequence.at(-1)).toBe('session:hooks/use-revision-status.ts:hidden:done');
+    });
+    const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
+    const producerDone = sequence.filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done'));
+    expect(producerDone).toHaveLength(7);
+    expect(sequence.slice(0, firstSession).filter((entry) => entry.endsWith(':done'))).toEqual(producerDone);
+
+    sequence.length = 0;
+    globalThis.dispatchEvent(new Event('pagehide'));
+    expect(sequence).toEqual([
+      'session:hooks/use-revision-status.ts:pagehide:start',
+      'session:hooks/use-revision-status.ts:pagehide:done',
+    ]);
+  });
+});
+
+describe('the quit guard — producers before the close cut (A0.2 item 9, D26)', () => {
+  const projectId = 'proj_quit_aaaaaaaaaaaaaaa';
+  let releaseServices: (() => void) | undefined;
+  let registry: ReturnType<typeof createSessionsActor> | undefined;
+
+  beforeEach(() => {
+    /* The order rows above leave the page hidden. */
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+  });
+
+  afterEach(() => {
+    registry?.stop();
+    registry = undefined;
+    releaseServices?.();
+    releaseServices = undefined;
+    desktopQuit.ask = undefined;
+    desktopQuit.answers.length = 0;
+  });
+
+  it("should settle every producer registration before the registry takes a session's close cut", async () => {
+    const sequence: string[] = [];
+    const registrations = heldRegistrations(sequence);
+    const started = createSessionsActor({ clock: new StepClock() }).start();
+    registry = started;
+    releaseServices = registerProjectSessionServices(projectId, {
+      cancelRuns: async () => undefined,
+      flushProducers: async () => {
+        sequence.push('session-service:flushProducers');
+      },
+      flushSync: async () => {
+        sequence.push('session-service:close-cut');
+      },
+      closeRuntime: async () => undefined,
+    });
+    started.send({ type: 'open', projectId });
+    render(
+      <UnloadProvider>
+        {registrations.map(({ site, stage, callback }) => (
+          <Registration key={site} stage={stage} callback={callback} />
+        ))}
+        <SessionsProvider actor={started}>
+          <span>app</span>
+        </SessionsProvider>
+      </UnloadProvider>,
+    );
+
+    await act(async () => {
+      desktopQuit.ask?.('quit-attempt');
+      await Promise.resolve();
+    });
+    const producers = registrations.filter(({ stage }) => stage === 'producer');
+    for (const producer of producers) {
+      expect(sequence).not.toContain('session-service:close-cut');
+      expect(started.getSnapshot().matches('ready')).toBe(true);
+      // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
+      await act(async () => {
+        producer.release();
+        await Promise.resolve();
+      });
+    }
+    await waitFor(() => {
+      expect(desktopQuit.answers).toEqual(['quit-attempt:false']);
+    });
+
+    const cut = sequence.indexOf('session-service:close-cut');
+    expect(cut).toBeGreaterThan(-1);
+    expect(
+      sequence.slice(0, cut).filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done')),
+    ).toHaveLength(7);
+    /* Quit runs the producer stage itself; the session stage is the registry's close, not `hidden`'s. */
+    expect(sequence.filter((entry) => entry.startsWith('session:'))).toEqual([]);
+    expect(started.getSnapshot().matches('quiesced')).toBe(true);
   });
 });

@@ -24,6 +24,7 @@ import type { AnyActorRef, AnyEventObject, EnqueueObject, SnapshotFrom } from 'x
 
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
+import type { RevisionGitOperation } from '#revision-port.js';
 import type { TurnAttemptKey, TurnCutOf } from '#turn.types.js';
 
 /** What asked for a cut. @public */
@@ -54,6 +55,18 @@ export const checkoutIdleWindowMilliseconds = 5 * 60 * 1000;
  * @public
  */
 export const checkoutMintFloorMilliseconds = 1000;
+
+/**
+ * How often a checkout that waits on a Git operation looks again.
+ *
+ * A merge, rebase or detached head the person's own Git left in the checkout
+ * holds every mint until it ends (see `waiting`). Nothing tells the checkout
+ * when that is, so it reads the store again at this pace. The default of
+ * {@link CheckoutMachineInput.waitWindow}.
+ *
+ * @public
+ */
+export const checkoutWaitWindowMilliseconds = 2000;
 
 /**
  * How many requests may wait behind one running mint.
@@ -90,8 +103,15 @@ export type CheckoutCutRequest = Readonly<{
   restoredFrom?: string;
 }>;
 
-/** Settled condition of one checkout, as its parent reads it. @public */
-export type CheckoutStatus = 'clean' | 'dirty' | 'minting' | 'stale' | 'failed';
+/**
+ * Settled condition of one checkout, as its parent reads it.
+ *
+ * `waiting`: a Git operation another process left in progress holds every
+ * mint, and the status fact names it.
+ *
+ * @public
+ */
+export type CheckoutStatus = 'clean' | 'dirty' | 'minting' | 'waiting' | 'stale' | 'failed';
 
 /** Input accepted when creating the checkoutMachine actor. @public */
 export type CheckoutMachineInput = Readonly<{
@@ -111,6 +131,8 @@ export type CheckoutMachineInput = Readonly<{
   idleWindow?: number;
   /** Least milliseconds from one published mint to the next; `0` does not pace. */
   mintFloor?: number;
+  /** Milliseconds between two looks at a Git operation the checkout waits on. */
+  waitWindow?: number;
   /** The `project-revisions` root, which routes outcomes back to the requester. */
   parentRef?: AnyActorRef;
 }>;
@@ -125,6 +147,10 @@ type CheckoutMachineContextFields = Readonly<{
   idleWindow: number;
   /** Least milliseconds from one published mint to the next. */
   mintFloor: number;
+  /** Milliseconds between two looks at a Git operation the checkout waits on. */
+  waitWindow: number;
+  /** The Git operation the checkout waits on, while it is `waiting`. */
+  waitFor: RevisionGitOperation | undefined;
   parentRef: AnyActorRef | undefined;
   /** Monotonic counter of content-change events, supplied by the seam. */
   writeGeneration: number;
@@ -205,8 +231,9 @@ type Addressed = Readonly<{
 export type CheckoutMachineEmitted =
   /* `branch`: the branch the mint published on, so sync records only its own branch's head (RM-S3). */
   | (Readonly<{ type: 'revisionMinted'; revisionId: string; branch: string | undefined }> & Addressed)
-  /* `heldBy`: a trigger-only cut found a lease on this checkout after its capture and wrote nothing (RM-R16). */
-  | (Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey }> & Addressed)
+  /* `heldBy`: a trigger-only cut found a lease on this checkout after its capture and wrote nothing (RM-R16).
+   * `waitFor`: a leaving cut found a Git operation in progress, and the page cannot wait for it to end. */
+  | (Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey; waitFor?: RevisionGitOperation }> & Addressed)
   | (Readonly<{ type: 'cutFailed'; reason: string }> & Addressed)
   | (Readonly<{ type: 'casLost' }> & Addressed)
   | Readonly<{ type: 'cutCancelled'; checkoutId: string; requestId: string; turn?: TurnCutOf }>
@@ -218,6 +245,8 @@ export type CheckoutMachineEmitted =
       branch: string | undefined;
       headRevisionId?: string;
       headTreeId?: string;
+      /** While `waiting`: the Git operation that holds the checkout. */
+      waitFor?: RevisionGitOperation;
     }>;
 
 /**
@@ -268,6 +297,13 @@ export type CheckoutCutActorOutput = Readonly<{
    * as unrelated history.
    */
   nothingToSave?: boolean;
+  /**
+   * A Git operation another process left in progress in this checkout. The
+   * host checks before it captures anything, and the checkout waits instead
+   * of minting: a cut now would record conflict markers, or move the branch
+   * under the person's own merge.
+   */
+  waitFor?: RevisionGitOperation;
 }>;
 
 /** Input of the injected `writeRevision` actor. @public */
@@ -304,6 +340,8 @@ export type CheckoutHead = Readonly<{
   revisionId: string | undefined;
   treeId: string | undefined;
   branch: string | undefined;
+  /** A Git operation in progress in the checkout, which a `waiting` checkout reads to know when to go on. */
+  waitFor?: RevisionGitOperation;
 }>;
 
 /**
@@ -343,6 +381,12 @@ export const checkoutIgnoredEvents: ReadonlyArray<readonly [state: string, event
   ['spacing.edited', 'fenceRefused'],
   ['rereading', 'fenceGranted'],
   ['rereading', 'fenceRefused'],
+  ['waiting', 'fenceGranted'],
+  ['waiting', 'fenceRefused'],
+  ['waiting.holding', 'fenceGranted'],
+  ['waiting.holding', 'fenceRefused'],
+  ['waiting.probing', 'fenceGranted'],
+  ['waiting.probing', 'fenceRefused'],
   ['failed', 'fenceGranted'],
   ['failed', 'fenceRefused'],
 ];
@@ -352,7 +396,7 @@ export const checkoutIgnoredEvents: ReadonlyArray<readonly [state: string, event
  * its narrowed parent in alpha.59's strict setup targets, so each exit lands in
  * `minting.done` and `minting`'s own `onDone` routes it.
  */
-type MintExit = 'clean' | 'dirty' | 'spacing' | 'stale' | 'rereading' | 'failed';
+type MintExit = 'clean' | 'dirty' | 'spacing' | 'waiting' | 'stale' | 'rereading' | 'failed';
 
 /** Per-state context of a running mint (MC-R26): the request it serves, and where it leaves to. */
 type MintingContext = Readonly<{
@@ -371,7 +415,7 @@ type CheckoutEnqueue = EnqueueObject<CheckoutMachineEvent, CheckoutMachineEmitte
 
 type Answer =
   | Readonly<{ type: 'revisionMinted'; revisionId: string; branch: string | undefined }>
-  | Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey }>
+  | Readonly<{ type: 'nothingToSave'; heldBy?: TurnAttemptKey; waitFor?: RevisionGitOperation }>
   | Readonly<{ type: 'cutFailed'; reason: string }>
   | Readonly<{ type: 'casLost' }>;
 
@@ -578,8 +622,25 @@ const reportStatus = (context: CheckoutMachineContext, enq: CheckoutEnqueue, sta
     branch: context.branch,
     ...(context.headRevisionId === undefined ? {} : { headRevisionId: context.headRevisionId }),
     ...(context.headTreeId === undefined ? {} : { headTreeId: context.headTreeId }),
+    ...(status === 'waiting' && context.waitFor !== undefined ? { waitFor: context.waitFor } : {}),
   };
   enq.sendTo(context.parentRef, fact);
+};
+
+/*
+ * A page that is leaving cannot wait for the person's merge to end: its cut
+ * is answered at once, as a lease's is (RM-R16), with nothing written and the
+ * files still the person's to record later. Every other request waits.
+ */
+const isLeavingCut = (request: Readonly<{ trigger: CheckoutCutTrigger; turn?: TurnCutOf }>): boolean =>
+  request.turn === undefined && leavingTriggers.has(request.trigger);
+
+const answerLeavingCuts = (context: CheckoutMachineContext, enq: CheckoutEnqueue): Partial<CheckoutMachineContext> => {
+  const waitFor = context.waitFor === undefined ? {} : { waitFor: context.waitFor };
+  for (const request of context.queued.filter(isLeavingCut)) {
+    announce(context, enq, { request, answer: { type: 'nothingToSave', ...waitFor } });
+  }
+  return { queued: context.queued.filter((request) => !isLeavingCut(request)) };
 };
 
 /* A mint that answered its requesters leaves: re-read a head that moved under it (RM-R6), then F4's generation test. */
@@ -641,6 +702,7 @@ const checkoutMachineDefinition = setup({
       },
     },
     spacing: { states: { routing: {}, settled: {}, edited: {} } },
+    waiting: { states: { holding: {}, probing: {}, done: {} } },
     stale: {},
     rereading: {},
     failed: {},
@@ -688,6 +750,7 @@ const checkoutMachineDefinition = setup({
   delays: {
     idleWindow: ({ context }) => context.idleWindow,
     mintFloor: ({ context }) => context.mintFloor,
+    waitWindow: ({ context }) => context.waitWindow,
   },
   guards: {
     /* I5: a revision is minted only when the cut's tree differs from the head's. */
@@ -706,6 +769,8 @@ const checkoutMachineDefinition = setup({
     headTreeId: input.headTreeId,
     idleWindow: input.idleWindow ?? checkoutIdleWindowMilliseconds,
     mintFloor: input.mintFloor ?? checkoutMintFloorMilliseconds,
+    waitWindow: input.waitWindow ?? checkoutWaitWindowMilliseconds,
+    waitFor: undefined,
     parentRef: input.parentRef,
     writeGeneration: 0,
     cutGeneration: 0,
@@ -918,6 +983,15 @@ const checkoutMachineDefinition = setup({
               generation: context.cutGeneration,
             }),
             onDone: ({ context, event, guards }, enq) => {
+              /* Nothing was captured: the request goes back to the front of the queue and waits with the rest. */
+              if (event.output.waitFor !== undefined) {
+                return leave('waiting', {
+                  waitFor: event.output.waitFor,
+                  queued: [context.pending, ...context.queued],
+                  changedPaths: unionPaths(context.cutPaths, context.changedPaths),
+                  cutPaths: [],
+                });
+              }
               if (event.output.nothingToSave === true || guards.treeUnchanged(context, event.output.treeId)) {
                 announce(context, enq, { request: context.pending, answer: { type: 'nothingToSave' } });
                 return leave(afterMint(context, true));
@@ -1047,6 +1121,81 @@ const checkoutMachineDefinition = setup({
           },
         },
       },
+    },
+    /*
+     * A Git operation another process left in progress holds every mint: a
+     * merge or cherry-pick stopped on a conflict, a rebase, a detached head,
+     * a held `index.lock`. The cut that found it captured nothing, and its
+     * request waits at the front of the queue with every other request, except
+     * a leaving page's, which is answered at once. Writes and head facts only
+     * count meanwhile. The checkout reads its head again every `waitWindow`,
+     * through `readHead`, which names the operation while it lasts; once it is
+     * gone the checkout leaves as a re-read does, with the head the operation
+     * left, and the queued requests mint from there. A head the person moved
+     * meanwhile is thus learned before the next compare-and-swap, which still
+     * decides (I7).
+     */
+    waiting: {
+      tags: ['dirty'],
+      entry: ({ context }, enq) => {
+        const answered = answerLeavingCuts(context, enq);
+        reportStatus(context, enq, 'waiting');
+        return { context: answered };
+      },
+      on: {
+        cut: ({ context, event }, enq) => {
+          if (isLeavingCut(event)) {
+            announce(context, enq, {
+              request: requestOf(event),
+              answer: { type: 'nothingToSave', ...(context.waitFor === undefined ? {} : { waitFor: context.waitFor }) },
+            });
+            return {};
+          }
+          return { context: queueRequest(context, event, enq) };
+        },
+      },
+      initial: 'holding',
+      states: {
+        holding: {
+          after: { waitWindow: { target: 'probing' } },
+        },
+        probing: {
+          entry: ({ context }) => ({ context: { seenMoveGeneration: context.moveGeneration } }),
+          invoke: {
+            src: 'readHead',
+            input: ({ context }) => ({ checkoutId: context.checkoutId }),
+            onDone: ({ context, event }, enq) => {
+              const { waitFor } = event.output;
+              if (waitFor !== undefined) {
+                if (waitFor.kind !== context.waitFor?.kind || waitFor.branch !== context.waitFor.branch) {
+                  reportStatus({ ...context, waitFor }, enq, 'waiting');
+                }
+                return { target: 'holding', context: { waitFor } };
+              }
+              return {
+                target: 'done',
+                context: {
+                  waitFor: undefined,
+                  branch: event.output.branch,
+                  headRevisionId: event.output.revisionId,
+                  headTreeId: event.output.treeId,
+                  ...(event.output.revisionId === context.headRevisionId ? {} : { changedPaths: undefined }),
+                },
+              };
+            },
+            /* A read that failed proves nothing: look again at the next window. */
+            onError: { target: 'holding' },
+          },
+        },
+        done: { type: 'final' },
+      },
+      /* As a re-read leaves: a newer head fact reads again, and bytes written since the last clean are compared (I6). */
+      onDone: ({ context }) =>
+        context.moveGeneration > context.seenMoveGeneration
+          ? { target: 'rereading' }
+          : context.writeGeneration === context.cleanGeneration
+            ? { target: 'clean' }
+            : { target: 'dirty', context: { comparison: 'pending' } },
     },
     stale: {
       tags: ['dirty'],

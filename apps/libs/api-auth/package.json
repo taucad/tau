@@ -29,6 +29,7 @@
     "./config/better-auth": "./src/config/better-auth.config.ts",
     "./module": "./src/auth.module.ts",
     "./testing": "./src/testing.ts",
+    "./testing/session-cache": "./src/testing/session-cache.fixture.ts",
     "./package.json": "./package.json"
   },
   "imports": {
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
+    "better-call": "catalog:",
     "dotenv": "catalog:",
     "pino-http": "^10.5.0",
     "reflect-metadata": "^0.2.2",

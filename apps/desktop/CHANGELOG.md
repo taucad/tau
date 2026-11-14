@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 (2026-11-13)
+
+### Features
+
+- feat(api-auth): Resolve sessions once per request through a single-flight resolver (#2027) (5617b2054)
+- feat(ui): Offer Undo on the Merged and Closed toasts (#2025) (56d89e740)
+
+### Fixes
+
+- fix(agent-tools): Keep test statuses and source revisions in a reduced test_model result (#2017) (7fe168ed2)
+- fix(agent-observability): Do not let a todo update after the last check hide task success (#2023) (89fa095c4)
+
 ## 0.3.0 (2026-11-13)
 
 ### Features

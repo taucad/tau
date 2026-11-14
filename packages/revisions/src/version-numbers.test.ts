@@ -9,6 +9,7 @@ import type { RevisionTag } from '#revision-port.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { recordedBy } from '#test/identity.js';
 import {
+  isNumberedTagNotVersion,
   isSameVersion,
   newVersionId,
   nextVersionNumber,
@@ -73,6 +74,18 @@ describe('version tag refs', () => {
     for (const id of ids) {
       expect(id).toMatch(/^[\da-f]{32}$/u);
     }
+  });
+});
+
+describe('isNumberedTagNotVersion', () => {
+  const versions = [version(2, 'Base', { createdAt: 1000 })];
+
+  it.each(['refs/tags/v1', 'refs/tags/v3'])('leaves out %s, which no version holds', (name) => {
+    expect(isNumberedTagNotVersion(name, versions)).toBe(true);
+  });
+
+  it.each(['refs/tags/v2', 'refs/tags/release', 'refs/tags/v02', 'refs/heads/v3'])('offers %s', (name) => {
+    expect(isNumberedTagNotVersion(name, versions)).toBe(false);
   });
 });
 

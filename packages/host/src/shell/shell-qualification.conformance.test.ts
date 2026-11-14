@@ -22,11 +22,13 @@
  * the row, `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes, `TAU_SHELL_QUALIFICATION_SEED` replays an
  * interleaving run and, on Linux, `TAU_SHELL_CONFORMANCE_BWRAP` the installed, profiled bubblewrap.
  */
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { createRequire } from 'node:module';
 import {
+  accessSync,
   chmodSync,
+  constants,
   copyFileSync,
   cpSync,
   existsSync,
@@ -44,7 +46,7 @@ import {
 } from 'node:fs';
 import { connect as connectSocket, createServer } from 'node:net';
 import type { Server } from 'node:net';
-import { tmpdir } from 'node:os';
+import { release, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MessageChannel } from 'node:worker_threads';
@@ -2149,17 +2151,27 @@ describe.runIf(enabled)('shell qualification', () => {
   );
 
   /*
-   * Terminal git: the person's Terminal reads the project's real store read-only (operator ruling
-   * 2026-11-12), so git there sees history live, a save made after the session opened included, and every write fails.
-   * The project tracks a large file through Git LFS with the index Tau's refresh leaves after a save (stat data zero),
-   * which makes git run the LFS clean filter: both the Terminal and the agent's view must still answer a clean status.
-   * The host's own git and git-lfs folders are the toolchain, as the desktop passes its bundled ones. Outside bytes
-   * judge: each command's output and exit status land in a granted folder, and the store's digest is compared outside.
+   * Terminal git: the person's Terminal reaches the project's real store, so git there sees history live, a save made
+   * after the session opened included. On macOS the store is writable except the names through which git runs a
+   * program or follows another address (`config`, `hooks`, `commondir`, `remotes`, `branches` and the rest), so `add`,
+   * `commit`, `switch -c`, `stash` and `merge` succeed and commit under the signed-in person's Tau no-reply address,
+   * while a `git config` write, a hook, a direct write to `.git/config`, a lock renamed over it, a planted `commondir`
+   * and a planted legacy remote all fail, as do each name spelled with the characters a case-folding volume reads as
+   * its letters and a hard link to `config`. On Linux the store stays read-only, because
+   * bubblewrap cannot keep an absent `commondir` from being created without leaving a stand-in that breaks git outside,
+   * and every write fails. The project tracks a large file through Git LFS with the index Tau's refresh leaves after a
+   * save (stat data zero), which makes git run the LFS clean filter: both the Terminal and the agent's view must still
+   * answer a clean status. The host's own git and git-lfs folders are the toolchain, as the desktop passes its bundled
+   * ones. Outside bytes judge: each command's output and exit status land in a granted folder, and the store's digests
+   * are compared outside.
    */
   qualification(
     'E14-terminal',
-    'Terminal git: the person reads the real store live, large files included, and every write fails',
+    'Terminal git: the person reads the real store live and writes it where config and hooks stay protected',
     async () => {
+      /* The shell service's rule (`terminalGitAccess`): the store is writable where Seatbelt protects it. */
+      const writable = process.platform === 'darwin';
+      const account = { id: 'user_e14terminal', name: 'Terminal Person' };
       const store = join(root, 'projects', 'terminal-git');
       const pointer = join(root, 'projects', 'terminal-pointer');
       const elsewhere = join(root, 'terminal-git-elsewhere');
@@ -2240,6 +2252,7 @@ describe.runIf(enabled)('shell qualification', () => {
           projectRoot,
           size: { columns: 160, rows: 48 },
           access: { read: [], write: [answers], domains: [] },
+          account,
           signal: new AbortController().signal,
         });
         if (opened.status !== 'opened') {
@@ -2313,34 +2326,166 @@ describe.runIf(enabled)('shell qualification', () => {
         const afterSave = await terminal.run('git status --porcelain');
         expect(afterSave).toStrictEqual({ exitCode: 0, text: '' });
 
-        const before = treeDigestOf(join(store, '.git'));
-        const identity = '-c user.name=Forged -c user.email=forged@example.invalid';
-        const writes = [
-          String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
-          `git ${identity} commit --allow-empty -m forged`,
-          'git switch -c forged',
-          `git ${identity} stash`,
-          'git config core.hooksPath forged',
-          'git fetch "$PWD" main:refs/heads/fetched',
+        const gitDirectory = join(store, '.git');
+        /*
+         * The shell service's store policy, restated so the judge does not read the list it judges. Each name, under
+         * every spelling a case-folding volume reads as it (`HOOKS`, or `hook` + U+017F), is judged outside: its bytes
+         * or its tree, so a name the Terminal created, removed or wrote shows. `config` is judged by its link count
+         * too, so a second name for it shows.
+         */
+        const policy = [
+          'config',
+          'hooks',
+          'commondir',
+          'config.worktree',
+          'worktrees',
+          'modules',
+          'remotes',
+          'branches',
         ];
-        const refused: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
-        for (const command of writes) {
-          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
-          refused.push({ command, ...(await terminal.run(command)) });
-        }
-        expect(refused.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
-        /* Each one that says why names the filesystem refusal; `git stash` can fail without a word. */
-        expect(
-          refused.filter(
-            (entry) =>
-              entry.text.trim() !== '' &&
-              !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
-                entry.text,
-              ),
+        const folded = (name: string): string => name.normalize('NFD').toUpperCase().toLowerCase();
+        const executableDigest = (): string =>
+          JSON.stringify({
+            links: statSync(join(gitDirectory, 'config')).nlink,
+            entries: readdirSync(gitDirectory)
+              .filter((name) => policy.includes(folded(name)))
+              .toSorted()
+              .map((name) => {
+                const path = join(gitDirectory, name);
+                return [name, statSync(path).isDirectory() ? treeDigestOf(path) : digestOf(path)];
+              }),
+          });
+        const executableBefore = executableDigest();
+        /*
+         * Every write that would make git outside the sandbox run a program or follow an address the Terminal chose;
+         * each one fails on both platforms. `remotes` and `branches` are git's legacy remote files, which `git push
+         * backup` and `git fetch mirror` outside would follow (blueprint Finding 6).
+         */
+        const protectedWrites = [
+          'git config core.hooksPath forged',
+          `printf '#!/bin/sh\n' > .git/hooks/post-commit`,
+          `printf '[core]\n\thooksPath = forged\n' >> .git/config`,
+          'cp .git/config .git/config.lock && mv -f .git/config.lock .git/config',
+          `printf '%s\n' "$PWD/forged" > .git/commondir`,
+          `printf '%s\n' "$PWD/forged" > .git/COMMONDIR`,
+          `printf '[core]\n\thooksPath = forged\n' > .git/config.worktree`,
+          `mkdir .git/remotes && printf 'URL: %s\nPush: refs/heads/main\n' "$PWD/forged" > .git/remotes/backup`,
+          `mkdir .git/branches && printf '%s\n' "$PWD/forged" > .git/branches/mirror`,
+        ];
+        /*
+         * The macOS residuals (blueprint T14, T15, LP6). A case-folding APFS volume reads U+017F as `s`, U+212A as `k`
+         * and U+FB01 as `fi`, so each policy name written with them is the policy name to git outside: each spelling
+         * is created, or written into where the volume finds the name already there. A hard link would give `config`
+         * a second name that no rule names, in the store or in the work tree. Each fails in the Terminal.
+         */
+        const foldings: ReadonlyArray<readonly [string, string]> = [
+          ['fi', '\uFB01'],
+          ['s', '\u017F'],
+          ['k', '\u212A'],
+        ];
+        const foldedSpellings = (name: string): string[] => {
+          const spellings = new Set<string>();
+          for (const [ascii, character] of foldings) {
+            for (let index = name.indexOf(ascii); index !== -1; index = name.indexOf(ascii, index + 1)) {
+              spellings.add(`${name.slice(0, index)}${character}${name.slice(index + ascii.length)}`);
+            }
+          }
+          let every = name;
+          for (const [ascii, character] of foldings) {
+            every = every.replaceAll(ascii, character);
+          }
+          if (every !== name) {
+            spellings.add(every);
+          }
+          return [...spellings];
+        };
+        const directoryNames = new Set(['hooks', 'worktrees', 'modules', 'remotes', 'branches']);
+        const macResiduals = [
+          ...policy.flatMap((name) =>
+            foldedSpellings(name).map((spelling) =>
+              directoryNames.has(name)
+                ? `mkdir -p '.git/${spelling}' && printf '%s\n' "$PWD/forged" > '.git/${spelling}/planted'`
+                : `printf '[core]\n\thooksPath = forged\n' >> '.git/${spelling}'`,
+            ),
           ),
-        ).toStrictEqual([]);
-        /* Outside bytes are the judge: the store is byte for byte what the save left. */
-        expect(treeDigestOf(join(store, '.git'))).toBe(before);
+          `ln .git/config .git/config-link && printf '[core]\n\thooksPath = forged\n' >> .git/config-link`,
+          `ln .git/config config-link && printf '[core]\n\thooksPath = forged\n' >> config-link`,
+        ];
+        const before = treeDigestOf(gitDirectory);
+        if (writable) {
+          /* The person's own git workflow: each step writes the real store and succeeds. */
+          const workflow = [
+            String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+            'git commit --quiet -m "Grow it again"',
+            'git switch --quiet -c side',
+            String.raw`printf 'sphere(1);\n' > side.scad && git add side.scad && git commit --quiet -m "Side part"`,
+            'git switch --quiet main',
+            String.raw`printf 'cube(5);\n' > part.scad && git stash --quiet && git stash pop --quiet`,
+            'git commit --quiet -am "Grow it once more"',
+            'git merge --quiet --no-edit side',
+          ];
+          for (const command of workflow) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            const answer = await terminal.run(command);
+            expect(answer.exitCode, `${command}: ${answer.text}`).toBe(0);
+          }
+          /* Git outside the sandbox reads what the Terminal wrote, under the person's Tau no-reply address. */
+          expect(hostGit(store, 'log', '-4', '--format=%an <%ae>|%s')).toBe(
+            [
+              `${account.name} <${account.id}@users.noreply.tau.new>|Merge branch 'side'`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Grow it once more`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Side part`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Grow it again`,
+            ].join('\n') + '\n',
+          );
+          expect(hostGit(store, 'status', '--porcelain')).toBe('');
+          /* The store keeps its own LFS objects, so the large file reads as present, as it is. */
+          const lfsFiles = await terminal.run('git lfs ls-files');
+          expect(lfsFiles.exitCode, lfsFiles.text).toBe(0);
+          expect(lfsFiles.text).toMatch(/^[\da-f]+ \* large\.bin\n$/u);
+        } else {
+          const identity = '-c user.name=Forged -c user.email=forged@example.invalid';
+          const writes = [
+            String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+            `git ${identity} commit --allow-empty -m forged`,
+            'git switch -c forged',
+            `git ${identity} stash`,
+            'git fetch "$PWD" main:refs/heads/fetched',
+          ];
+          const refused: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+          for (const command of writes) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            refused.push({ command, ...(await terminal.run(command)) });
+          }
+          expect(refused.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+          /* Each one that says why names the filesystem refusal; `git stash` can fail without a word. */
+          expect(
+            refused.filter(
+              (entry) =>
+                entry.text.trim() !== '' &&
+                !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
+                  entry.text,
+                ),
+            ),
+          ).toStrictEqual([]);
+          measurements = { ...measurements, writesRefused: refused.length };
+        }
+        const refusedExecutable: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+        for (const command of writable ? [...protectedWrites, ...macResiduals] : protectedWrites) {
+          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+          refusedExecutable.push({ command, ...(await terminal.run(command)) });
+        }
+        expect(refusedExecutable.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+        /*
+         * Outside bytes are the judge: config, hooks and every other policy name, under any spelling, are what the
+         * store had, `config` has no second name, and nothing the residual cases named was left in the work tree.
+         */
+        expect(existsSync(join(store, 'config-link'))).toBe(false);
+        expect(executableDigest()).toBe(executableBefore);
+        if (!writable) {
+          /* A read-only store is byte for byte what the save left. */
+          expect(treeDigestOf(gitDirectory)).toBe(before);
+        }
 
         /* The large file edited in place, same size: listed as modified, and status still succeeds. */
         const edited = await terminal.run(
@@ -2348,8 +2493,15 @@ describe.runIf(enabled)('shell qualification', () => {
         );
         expect(edited.exitCode, edited.text).toBe(0);
         expect(edited.text).toContain(' M large.bin\n');
-        expect(treeDigestOf(join(store, '.git'))).toBe(before);
-        measurements = { ...measurements, writesRefused: refused.length };
+        expect(executableDigest()).toBe(executableBefore);
+        if (!writable) {
+          expect(treeDigestOf(gitDirectory)).toBe(before);
+        }
+        measurements = {
+          ...measurements,
+          store: writable ? 'writable' : 'read-only',
+          executableWritesRefused: refusedExecutable.length,
+        };
       } finally {
         await terminal.close();
       }
@@ -2365,6 +2517,261 @@ describe.runIf(enabled)('shell qualification', () => {
       }
     },
   );
+
+  /*
+   * E14-guard-host (Linux Terminal git parity blueprint, LP0): can a stock guest run the store guard at all? A probe,
+   * not product behaviour. As this unprivileged test user, Tau's packaged bubblewrap, under its AppArmor profile, makes
+   * an outer user namespace that keeps `CAP_SYS_ADMIN` inside it; the research prototype guard
+   * (`store-guard-prototype/`, built here with the guest's Go) mounts FUSE over the store from a private side bind; the
+   * capabilities are dropped and the same bubblewrap starts nested, as the sandbox runtime's own would. In that nested
+   * shell a commit through the guard succeeds and writes to `config` and `commondir` are refused, judged again outside.
+   * `/dev/fuse`'s mode and the kernel release land in the receipt. A guest that refuses the outer namespace, the mount
+   * or the nested start fails this row as the kill-criterion outcome (stop and return to the blueprint's OD1); it never
+   * passes silently. Only the Linux rows run it: macOS's Seatbelt already decides by name.
+   */
+  if (linux) {
+    qualification(
+      'E14-guard-host',
+      "the store guard prototype mounts under Tau's bubblewrap and a nested bubblewrap commits through it while config and commondir are refused",
+      async () => {
+        const uid = process.getuid!();
+        const devFuse = existsSync('/dev/fuse') ? statSync('/dev/fuse') : undefined;
+        const usable = (() => {
+          try {
+            accessSync('/dev/fuse', constants.R_OK);
+            accessSync('/dev/fuse', constants.W_OK);
+            return 'yes';
+          } catch {
+            return 'no';
+          }
+        })();
+        measurements = {
+          kernel: release(),
+          devFuse:
+            devFuse === undefined
+              ? 'absent'
+              : `${devFuse.mode.toString(8).slice(-4)} ${String(devFuse.uid)}:${String(devFuse.gid)}`,
+          devFuseUsable: usable,
+          bwrap: bwrapPath,
+          uid,
+        };
+        /* The probe means something only for an ordinary user: root would not need the namespace's capability. */
+        expect(uid, 'E14-guard-host runs as the unprivileged test user').not.toBe(0);
+
+        const work = join(root, 'guard-host');
+        const store = join(root, 'projects', 'guard-host');
+        const gitDirectory = join(store, '.git');
+        const side = join(work, 'side');
+        const guard = join(work, 'store-guard');
+        const log = join(work, 'guard.log');
+        for (const directory of [work, store, side]) {
+          mkdirSync(directory, { recursive: true });
+        }
+        const gitEnvironment = {
+          PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+          HOME: root,
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_AUTHOR_NAME: 'Fixture',
+          GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+          GIT_COMMITTER_NAME: 'Fixture',
+          GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+        };
+        const hostGit = (...arguments_: string[]): string =>
+          execFileSync('git', arguments_, {
+            cwd: store,
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: gitEnvironment,
+          });
+
+        /* Built in the job from the prototype's own source and checksums; the toolchain never downloads itself. */
+        const source = fileURLToPath(new URL('store-guard-prototype', import.meta.url));
+        const goVersion = spawnSync('go', ['version'], { encoding: 'utf8' });
+        if (goVersion.error !== undefined || goVersion.status !== 0) {
+          throw new Error(
+            `no Go toolchain on PATH to build the store guard prototype (${String(goVersion.error ?? goVersion.stderr)}); the Linux guests install golang-go for this row.`,
+          );
+        }
+        measurements = { ...measurements, go: goVersion.stdout.trim() };
+        execFileSync('go', ['build', '-trimpath', '-o', guard, '.'], {
+          cwd: source,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            CGO_ENABLED: '0',
+            GOTOOLCHAIN: 'local',
+            GOFLAGS: '-mod=readonly -modcacherw -buildvcs=false',
+            GOPATH: join(work, 'go'),
+            GOCACHE: join(work, 'go-cache'),
+          },
+        });
+
+        hostGit('init', '--quiet', '--initial-branch=main');
+        writeFileSync(join(store, 'a.txt'), 'one\n');
+        hostGit('add', 'a.txt');
+        hostGit('commit', '--quiet', '-m', 'First');
+        const configBefore = readFileSync(join(gitDirectory, 'config'), 'utf8');
+
+        /* In the outer namespace: the side bind, the guard over `.git`, then the capability drop and the nested start. */
+        const outer = join(work, 'outer.sh');
+        writeFileSync(
+          outer,
+          [
+            'set -u',
+            'guard="$1"; store="$2"; side="$3"; log="$4"; bwrap="$5"; project="$6"; nested="$7"',
+            String.raw`printf 'outer-uid=%s\n' "$(id -u)"`,
+            String.raw`printf 'outer-capeff=%s\n' "$(sed -n 's/^CapEff:[[:space:]]*//p' /proc/self/status)"`,
+            String.raw`printf 'outer-apparmor=%s\n' "$(cat /proc/self/attr/apparmor/current 2>/dev/null || cat /proc/self/attr/current 2>/dev/null || printf unknown)"`,
+            String.raw`mount --bind "$store" "$side" || { printf 'stage=side-bind-refused\n'; exit 20; }`,
+            '"$guard" "$side" "$store" > "$log" 2>&1 &',
+            'guard_pid=$!',
+            'for _ in $(seq 100); do',
+            '  grep -qx ready "$log" && break',
+            '  kill -0 "$guard_pid" 2>/dev/null || break',
+            '  sleep 0.1',
+            'done',
+            String.raw`grep -qx ready "$log" || { printf 'stage=mount-refused\n'; sed 's/^/guard: /' "$log"; exit 21; }`,
+            String.raw`printf 'stage=mounted\n'`,
+            String.raw`printf 'outer-fstype=%s\n' "$(findmnt -n -o FSTYPE --target "$store")"`,
+            'setpriv --ambient-caps=-all --inh-caps=-all "$bwrap" --unshare-user --unshare-pid --die-with-parent \\',
+            '  --bind / / --dev /dev --tmpfs "$side" --chdir "$project" -- bash "$nested" "$side"',
+            'status=$?',
+            String.raw`printf 'nested-exit=%s\n' "$status"`,
+            'kill "$guard_pid" 2>/dev/null',
+            'wait "$guard_pid" 2>/dev/null',
+            'exit "$status"',
+            '',
+          ].join('\n'),
+        );
+        /* In the nested shell, as the sandbox's own would run it: the person's uid and no capability. */
+        const nested = join(work, 'nested.sh');
+        writeFileSync(
+          nested,
+          [
+            'set -u',
+            String.raw`printf 'nested-uid=%s\n' "$(id -u)"`,
+            String.raw`printf 'nested-capeff=%s\n' "$(sed -n 's/^CapEff:[[:space:]]*//p' /proc/self/status)"`,
+            String.raw`printf 'nested-fstype=%s\n' "$(findmnt -n -o FSTYPE --target "$PWD/.git")"`,
+            String.raw`printf 'side=%s\n' "$(ls -A "$1" | wc -l)"`,
+            String.raw`printf 'two\n' > a.txt`,
+            "out=$( { git add a.txt && git commit --quiet -m 'Through the guard'; } 2>&1 )",
+            String.raw`printf 'commit=%s %s\n' "$?" "$out"`,
+            'out=$(git config core.fsmonitor forged 2>&1)',
+            String.raw`printf 'config-git=%s %s\n' "$?" "$out"`,
+            String.raw`out=$( { printf '[core]\n\tfsmonitor = forged\n' >> .git/config; } 2>&1 )`,
+            String.raw`printf 'config-append=%s %s\n' "$?" "$out"`,
+            'out=$( { cp .git/config .git/config.lock && mv -f .git/config.lock .git/config; } 2>&1 )',
+            String.raw`printf 'config-replace=%s %s\n' "$?" "$out"`,
+            'rm -f .git/config.lock',
+            `out=$( { printf '%s\\n' "$PWD/forged" > .git/commondir; } 2>&1 )`,
+            String.raw`printf 'commondir=%s %s\n' "$?" "$out"`,
+            '',
+          ].join('\n'),
+        );
+
+        const run = spawnSync(
+          bwrapPath,
+          [
+            '--unshare-user',
+            '--unshare-pid',
+            '--die-with-parent',
+            '--cap-add',
+            'CAP_SYS_ADMIN',
+            '--dev-bind',
+            '/',
+            '/',
+            '--',
+            'bash',
+            outer,
+            guard,
+            gitDirectory,
+            side,
+            log,
+            bwrapPath,
+            store,
+            nested,
+          ],
+          { encoding: 'utf8', env: gitEnvironment, timeout: 60_000, killSignal: 'SIGKILL' },
+        );
+        const transcript = `exit ${String(run.status)} ${String(run.signal ?? '')}\n${run.stdout}${run.stderr}`;
+        const values = new Map<string, string>();
+        for (const line of run.stdout.split('\n')) {
+          const separator = line.indexOf('=');
+          if (separator > 0 && !values.has(line.slice(0, separator))) {
+            values.set(line.slice(0, separator), line.slice(separator + 1));
+          }
+        }
+        /* Bit 21 of the effective set: the outer namespace must hold CAP_SYS_ADMIN, and the nested shell nothing. */
+        const holdsSysAdmin = (mask: string | undefined): boolean =>
+          mask !== undefined && /^[\da-f]+$/iu.test(mask) && (BigInt(`0x${mask}`) / 2n ** 21n) % 2n === 1n;
+        /* The first stage that did not happen names the outcome. */
+        const outcome = ((): string => {
+          if (!values.has('outer-uid')) {
+            return "kill criterion: Tau's bubblewrap refused the outer user namespace";
+          }
+          if (!holdsSysAdmin(values.get('outer-capeff'))) {
+            return 'kill criterion: the outer namespace does not hold CAP_SYS_ADMIN';
+          }
+          if (values.get('stage') === 'side-bind-refused') {
+            return 'kill criterion: the outer namespace could not bind the store aside';
+          }
+          if (values.get('stage') !== 'mounted') {
+            return 'kill criterion: the guest refused the FUSE mount';
+          }
+          if (!values.has('nested-uid')) {
+            return 'kill criterion: the nested bubblewrap did not start inside the guarded namespace';
+          }
+          return 'feasible';
+        })();
+        measurements = {
+          ...measurements,
+          outcome,
+          outerApparmor: values.get('outer-apparmor') ?? 'unknown',
+          outerCapEff: values.get('outer-capeff') ?? 'unknown',
+          guardFstype: values.get('outer-fstype') ?? 'none',
+          nestedCapEff: values.get('nested-capeff') ?? 'unknown',
+        };
+        if (outcome !== 'feasible') {
+          throw new Error(
+            `LP0 ${outcome} (/dev/fuse ${String(measurements['devFuse'])}, kernel ${release()}): stop and return to OD1 of the Linux Terminal git parity blueprint.\n${transcript}`,
+          );
+        }
+
+        /* Inside: the guard is the store, the side path is hidden, and the shell has the person's uid and no capability. */
+        expect(values.get('outer-fstype'), transcript).toBe('fuse.gitguard');
+        expect(values.get('nested-fstype'), transcript).toBe('fuse.gitguard');
+        expect(values.get('side'), transcript).toBe('0');
+        expect(values.get('nested-uid'), transcript).toBe(String(uid));
+        expect(values.get('nested-capeff'), transcript).toMatch(/^0+$/u);
+        expect(values.get('commit'), transcript).toMatch(/^0 /u);
+        const refused = ['config-git', 'config-append', 'config-replace', 'commondir'].map((key) => ({
+          key,
+          answer: values.get(key) ?? 'missing',
+        }));
+        expect(refused.filter(({ answer }) => answer.startsWith('0 ') || answer === 'missing')).toStrictEqual([]);
+        /* The direct writes say why: the guard's refusal, not some other failure. */
+        expect(
+          refused
+            .filter(({ key }) => key !== 'config-git')
+            .filter(({ answer }) => !/operation not permitted/iu.test(answer)),
+          transcript,
+        ).toStrictEqual([]);
+        expect(values.get('nested-exit'), transcript).toBe('0');
+
+        /* Outside bytes are the judge: the commit is in the real store, and config, commondir and the mounts are not. */
+        expect(hostGit('log', '--format=%s')).toBe('Through the guard\nFirst\n');
+        expect(readFileSync(join(gitDirectory, 'config'), 'utf8')).toBe(configBefore);
+        expect(
+          readdirSync(gitDirectory).filter((name) => ['commondir', 'config.lock'].includes(name.toLowerCase())),
+        ).toStrictEqual([]);
+        hostGit('fsck', '--no-progress');
+        expect(readFileSync('/proc/self/mountinfo', 'utf8')).not.toContain('gitguard');
+        expect(readdirSync(side)).toStrictEqual([]);
+        measurements = { ...measurements, writesRefused: refused.length };
+      },
+    );
+  }
 
   /* ---------------------------------------------------------------- Stress and determinism (S rows) */
 

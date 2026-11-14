@@ -33,7 +33,7 @@ import type { AnyActorRef, AnyEventObject, EnqueueObject, SnapshotFrom } from 'x
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
-import { isStorageRefusal } from '#refusal-markers.js';
+import { isCommitRefusal, isStorageRefusal } from '#refusal-markers.js';
 import type { RevisionRef, RemoteStorageRefusal } from '#revision-port.js';
 import type {
   SyncFacet,
@@ -601,7 +601,15 @@ const codeOf = (error: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined;
 };
 
-const isFatal = (error: unknown): boolean => terminalFailureCodes.has(codeOf(error) ?? '');
+/*
+ * A refused commit stays in every later push of its branch, so the remote
+ * refuses each retry the same way and only the person can clear it: the
+ * refusal is shown once and waits for *Try again*, never replayed on the
+ * backoff.
+ */
+const isFatal = (error: unknown): boolean =>
+  terminalFailureCodes.has(codeOf(error) ?? '') ||
+  (codeOf(error) === 'REMOTE_REJECTED' && error instanceof Error && isCommitRefusal(error.message));
 
 /* A 429's wait, read off the port's error the way `codeOf` reads its code. */
 const retryAfterOf = (error: unknown): number | undefined => {
@@ -2052,6 +2060,11 @@ const syncMachineDefinition = setup({
           const refusedHistory = event.output.refs.find(
             (entry) => entry.status === 'rejected' && entry.name === historyRefOf(context.branch),
           );
+          /* A branch or tag refused for a commit it carries is terminal wherever it
+           * is: every retry offers that ref, and that commit, again. */
+          const commitRefused = event.output.refs.some(
+            (entry) => entry.status === 'rejected' && isHistoryRef(entry.name) && isCommitRefusal(entry.reason),
+          );
           /* The over-quota list is `remote.machine`'s, always (P19, A40): the
            * scheduler forwards it through the parent and keeps no copy. */
           if ((event.output.overQuota ?? []).length > 0 && context.parentRef !== undefined) {
@@ -2100,8 +2113,11 @@ const syncMachineDefinition = setup({
               /* A change made while this push was on the wire is still unsent, from its own moment. */
               unsyncedSince: acknowledged ? context.changedSincePushAt : context.unsyncedSince,
               /* Rule 19: a refused history is terminal, as the thrown class is; a
-               * record's refusal never blocks history, so it keeps retrying. */
-              failure: quota && refusedHistory !== undefined ? 'fatal' : acknowledged ? 'none' : 'retry',
+               * record's refusal never blocks history, so it keeps retrying. A
+               * history refused for a commit it carries is terminal too: every
+               * retry carries that commit again (see `isFatal`). */
+              failure:
+                (refusedHistory !== undefined && quota) || commitRefused ? 'fatal' : acknowledged ? 'none' : 'retry',
               attempt: acknowledged ? 0 : context.attempt + 1,
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
@@ -2475,8 +2491,10 @@ const syncMachineDefinition = setup({
               }
               enq(reportConflictLineFailure, 'refused', refused.name, refused.reason);
               const quota = (event.output.overQuota ?? []).length > 0 || isStorageRefusal(refused.reason ?? '');
+              /* A conflict line refused for a commit it carries is terminal, as the thrown form is. */
+              const terminal = quota || isCommitRefusal(refused.reason);
               return {
-                target: sessionPullOf(context) ?? (quota ? 'offered' : 'owed'),
+                target: sessionPullOf(context) ?? (terminal ? 'offered' : 'owed'),
                 context: { leases, attempt: context.attempt + 1, retryAfterMilliseconds: undefined },
               };
             },

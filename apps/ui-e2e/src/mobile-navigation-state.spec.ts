@@ -302,10 +302,9 @@ test.each(phoneViewports)(
     await send('Design a desk ornament');
 
     const question = selectors.getByText('Which form should the desk ornament take?', { exact: true });
-    const recommended = selectors.getByRole('button', {
-      name: 'A, Twisted ribbon, recommended. Prints without supports.',
-    });
-    const other = selectors.getByRole('button', { name: 'B, Faceted gem. Crisp at 0.2 mm layers.' });
+    /* Since 3dca302b78 (#1455) each answer is a radio that only selects, and Submit records the reply. */
+    const recommended = selectors.getByRole('radio', { name: 'Twisted ribbon, recommended. Prints without supports.' });
+    const other = selectors.getByRole('radio', { name: 'Faceted gem. Crisp at 0.2 mm layers.' });
     await expect.poll(async () => countOf(other), { timeout: 120_000 }).toBeGreaterThan(0);
     // The decision raises the sheet exactly as far as it needs, and is wholly shown there.
     expect(await stableDetent()).toBe(questionArrivalDetent[viewport.width]);
@@ -323,6 +322,7 @@ test.each(phoneViewports)(
     await moveSheet('End', detents.full);
     await expect.poll(async () => unshownEverywhere(other), { timeout: 30_000 }).toBeUndefined();
     await target.click(other.first(), { touch: true });
+    await target.click(selectors.getByRole('button', { name: 'Submit', exact: true }), { touch: true });
     await target.expectVisible(selectors.getByText('Going with the faceted gem.', { exact: true }), 120_000);
   },
 );

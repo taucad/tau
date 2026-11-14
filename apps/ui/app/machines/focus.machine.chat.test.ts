@@ -55,4 +55,30 @@ describe('focus: the chat a session is given', () => {
 
     expect(harness.lastOpen()).toMatchObject({ projectId: 'a', request: { chatId: 'chat-y', epoch: 1 } });
   });
+
+  it('should ignore a resolution of the old chat while the starting session has not been given the new one (I18)', () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a', { chatId: 'chat-x' });
+    harness.ready('r1', 'a');
+    harness.loaded();
+    harness.settleOpen('live');
+    harness.facts('a', 'starting', { chatReady: false, availability: 'pending' });
+    harness.route('r2', 'a', { chatId: 'chat-y' });
+    harness.send({ type: 'focusedChatResolved', projectId: 'a', requestedChatId: 'chat-x', chatId: 'chat-x' });
+
+    expect(harness.sent.route).toEqual([]);
+    expect(harness.context().kept['a']?.chatId).toBe('chat-y');
+  });
+
+  it('should ignore a resolution of the old chat while its open is still unanswered (I18)', () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a', { chatId: 'chat-x' });
+    harness.ready('r1', 'a');
+    harness.loaded();
+    harness.facts('a', 'live', { chatReady: false, availability: 'pending' });
+    harness.route('r2', 'a', { chatId: 'chat-y' });
+    harness.send({ type: 'focusedChatResolved', projectId: 'a', requestedChatId: 'chat-x', chatId: 'chat-x' });
+
+    expect(harness.sent.route).toEqual([]);
+  });
 });

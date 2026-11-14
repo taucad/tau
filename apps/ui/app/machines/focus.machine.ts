@@ -1245,7 +1245,11 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           }
           if (!own) {
             const epoch = context.lastSent?.epoch ?? context.epoch;
-            const stale = event.result === 'waiting' && epoch < context.epoch;
+            /* Stale: from before a library change, or a person's open whose kept request a held answer dropped
+             * (rule 9). */
+            const stale =
+              event.result === 'waiting' &&
+              (epoch < context.epoch || (personProject !== undefined && context.kept[personProject]?.epoch !== epoch));
             if (event.result === 'waiting' && context.withdrawnId === event.requestId) {
               // An adopted open focus withdrew when it moved: the registry's slot no longer holds it (rule 9).
               patch.personOpens = withoutKey(context.personOpens, event.requestId);
@@ -1397,8 +1401,9 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           }
           const kept = context.kept[event.projectId];
           const given = context.forwarded[event.projectId];
-          if (event.requestedChatId !== given?.chatId) {
-            // I18: a resolution of a chat the session was given before the route switched away from it.
+          if (event.requestedChatId !== given?.chatId || event.requestedChatId !== context.request.chatId) {
+            /* I18: a resolution of a chat the route has switched away from, whether or not the session has been
+             * given the new chat yet. */
             return {};
           }
           enq.sendTo(context.ports.route, {

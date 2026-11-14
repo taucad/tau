@@ -142,8 +142,8 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'cancelClose' }
   | { readonly type: 'childReady'; readonly region: ProjectSessionRegion }
   /**
-   * The `fileManager` child built and started the project's file manager, or closed it while `rootFiles` has no worker
-   * (A6c).
+   * The `fileManager` child built and started the project's file manager, or closed it because the shared worker was
+   * lost or replaced or the child is stopping (A6c).
    */
   | { readonly type: 'fileManagerChanged'; readonly fileManagerRef: FileManagerRef | undefined }
   | { readonly type: 'childFailed'; readonly region: ProjectSessionRegion; readonly reason: string }

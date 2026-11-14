@@ -70,7 +70,7 @@
 \* listener did; a `discovery-required` verification, or a question that skips
 \* verification, asks for the bootstrap pass, an `Unmodelled` emission. A mutation's or replay's copy of
 \* its operation is dropped once taken; a later attempt reads the journal. A failed pass, journal read or
-\* discard rejects with the port's own error, kept by the library. No action or correspondence changes.
+\* discard rejects with the port's own error, which the library keeps. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

@@ -342,7 +342,9 @@ vi.mock('@xstate/react', async (importOriginal) => {
 
 /* `ProjectProvider` leases its project runtime, which spawns the project and editor actors (A6b): the stand-in
  * runtime hands the rows' stand-ins to the provider and owns the real producer set. Its start is the editor's
- * `load`, as the real root's entry is. */
+ * `load`, as the real root's entry is. The runtime's entries record child stands in for every record producer of a
+ * live project, focused or not: it registers in the producer set when the runtime starts and leaves it when the
+ * runtime stops (A9, S40). */
 vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectRuntimeModule>();
   return {
@@ -351,20 +353,45 @@ vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
       const projectRef = actorFor(`project:${options.projectId}`);
       const editorRef = actorFor(`editor:${options.projectId}`);
       const snapshot = { status: 'active', context: { projectRef, editorRef, manifestObservationError: undefined } };
+      const producers = actual.createProjectRuntimeProducers();
+      const { projectId } = options;
+      const registrations: Array<() => void> = [];
       const actor = {
         getSnapshot: () => snapshot,
         subscribe: () => ({ unsubscribe: () => undefined }),
         send: () => undefined,
         start: () => {
           editorRef.send({ type: 'load' });
+          if (options.entriesRecord !== undefined) {
+            registrations.push(
+              producers.register(async () => {
+                fixtures.order.push(`producer:${projectId}`);
+                await fixtures.chatProducers.get(projectId)?.();
+              }),
+            );
+            /* A second member of the set, so the guard is seen walking every producer, not the first. */
+            if (fixtures.secondProducer) {
+              registrations.push(
+                producers.register(async () => {
+                  fixtures.order.push(`producer:${projectId}:second`);
+                  await fixtures.chatProducers.get(`${projectId}:second`)?.();
+                }),
+              );
+            }
+          }
           return actor;
         },
-        stop: () => actor,
+        stop: () => {
+          for (const unregister of registrations.splice(0)) {
+            unregister();
+          }
+          return actor;
+        },
       };
       return {
         actor,
         parameterService: { get: () => parameterService, subscribe: () => () => undefined },
-        producers: actual.createProjectRuntimeProducers(),
+        producers,
       };
     },
   };
@@ -512,38 +539,6 @@ vi.mock('#hooks/use-editor-document-session.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-/*
- * The entries host stands in for every record host of a live project, focused or not: it registers one
- * producer in the project's producer set, as `entries-sync-host.tsx` does (S40).
- */
-vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', async () => {
-  const { useProject } = await import('#hooks/use-project.js');
-  return {
-    EntriesSyncHost: () => {
-      const { projectId, registerWorkbenchRecordProducer } = useProject();
-      useEffect(
-        () =>
-          registerWorkbenchRecordProducer(async () => {
-            fixtures.order.push(`producer:${projectId}`);
-            await fixtures.chatProducers.get(projectId)?.();
-          }),
-        [projectId, registerWorkbenchRecordProducer],
-      );
-      /* A second member of the set, so the guard is seen walking every producer, not the first. */
-      useEffect(
-        () =>
-          fixtures.secondProducer
-            ? registerWorkbenchRecordProducer(async () => {
-                fixtures.order.push(`producer:${projectId}:second`);
-                await fixtures.chatProducers.get(`${projectId}:second`)?.();
-              })
-            : undefined,
-        [projectId, registerWorkbenchRecordProducer],
-      );
-      return null;
-    },
-  };
-});
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({ RevisionSaveShortcut: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));

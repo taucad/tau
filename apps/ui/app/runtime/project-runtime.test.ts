@@ -45,6 +45,7 @@ import type {
   ObservablePort,
 } from '#runtime/project-runtime.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
+import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import { createViewRecordPorts } from '#workbench-records/view-record-session.js';
 import { workbenchRecords } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
@@ -192,9 +193,20 @@ const createPort = <T>(initial: T) => {
   };
 };
 
-/** The editor profile loading from disk takes the view record ports; no view opens in these rows. */
+/** An entries record session that reads nothing: it starts and stops with the runtime and registers no producer. */
+const idleEntriesRecord = (): EntriesRecordSession => ({
+  getSnapshot: () => ({ entriesRecord: undefined, appliedEntryRevisions: new Map() }),
+  subscribe: () => () => undefined,
+  changePaths: async () => false,
+  replaceHost: () => undefined,
+  start: () => () => undefined,
+});
+
+/** The editor profile loading from disk takes the view record ports and the entries session; no view opens here. */
 const profileOptions = (profile: ProjectRuntimeProfile): ProjectRuntimeProfileOptions =>
-  profile === 'editor' ? { profile, viewRecordPorts: mock<ViewRecordPortsHandle>() } : { profile };
+  profile === 'editor'
+    ? { profile, viewRecordPorts: mock<ViewRecordPortsHandle>(), entriesRecord: idleEntriesRecord() }
+    : { profile };
 
 /** Let the fakes' promises deliver: one real macrotask per round, in order. */
 const settle = async (rounds = 10): Promise<void> => {
@@ -329,6 +341,7 @@ describe('createProjectRuntime', () => {
       library: createLibrary(),
       profile: 'editor',
       viewRecordPorts,
+      entriesRecord: idleEntriesRecord(),
       input: { shouldLoadModelOnStart: false },
       clock,
     });
@@ -419,6 +432,7 @@ describe('createProjectRuntime', () => {
         library,
         profile: 'editor',
         viewRecordPorts,
+        entriesRecord: idleEntriesRecord(),
         input: { shouldLoadModelOnStart: false },
         clock: new StepClock(),
       });
@@ -498,6 +512,61 @@ describe('createProjectRuntime', () => {
       expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toEqual({ outcome: 'applied' });
       runtime.actor.stop();
     });
+  });
+
+  // A9, D12, R3-F5: the entries record session is a runtime child. It starts with the root, follows the project
+  // actor, and its flush is in the producer set from its start to its stop, with nothing mounted.
+  it('should start the entries record session with the runtime and keep its flush in the producer set until it stops', async () => {
+    const guard = guardActors({ ignore });
+    const content = createContent();
+    const flushed = vi.fn(async () => undefined);
+    const stopped = vi.fn();
+    const starts: unknown[] = [];
+    const entriesRecord: EntriesRecordSession = {
+      ...idleEntriesRecord(),
+      start: ({ project: followed, producers }) => {
+        starts.push(followed);
+        const unregister = producers.register(flushed);
+        return () => {
+          unregister();
+          stopped();
+        };
+      },
+    };
+    const runtime = createProjectRuntime({
+      projectId: project.id,
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
+      library: createLibrary(),
+      profile: 'editor',
+      viewRecordPorts: mock<ViewRecordPortsHandle>(),
+      entriesRecord,
+      input: { shouldLoadModelOnStart: false },
+      inspect: guard.inspect,
+    });
+    expect(starts).toEqual([]);
+
+    runtime.actor.start();
+    expect(starts).toEqual([selectProjectRef(runtime.actor.getSnapshot())]);
+    // The layout child's producer runs too; over mocked view record ports it cannot confirm, and only the entries
+    // session's flush is this row's.
+    const flushAll = async (): Promise<void> => {
+      try {
+        await runtime.producers.flushAll();
+      } catch {
+        // The layout's refusal is not this row's.
+      }
+    };
+    await flushAll();
+    expect(flushed).toHaveBeenCalledOnce();
+
+    runtime.actor.stop();
+    expect(stopped).toHaveBeenCalledOnce();
+    await flushAll();
+    expect(flushed).toHaveBeenCalledOnce();
+    expect(selectProjectRuntimeFault(runtime.actor.getSnapshot())).toBeUndefined();
   });
 
   it("should release each geometry unit's kernel runtime when it stops", async () => {

@@ -1,6 +1,6 @@
 import { randomUuid } from '@taucad/utils/id';
 
-/** Local-only User Timing phases shared by the project-opening measurement contract. */
+/** User Timing phases shared by the project-opening measurement contract, each measured as `tau.load.<phase>`. */
 export type ProjectOpenPhase =
   | 'document'
   | 'bootstrap'
@@ -94,6 +94,12 @@ export type ProjectOpenTimedSpan = Readonly<{
   counters?: ProjectOpenCounters;
 }>;
 
+/**
+ * Where a page's measures came from: `local` is an admitted loopback harness injection, `deployed` is any browser page
+ * without one, whose measures carry no harness identifiers and stay in that page's own timeline.
+ */
+export type ProjectOpenEnvironment = 'local' | 'deployed';
+
 /** Internal, inert when no valid local measurement configuration was injected. */
 export type ProjectOpenPerformance = Readonly<{
   begin: (phase: ProjectOpenPhase, parentSpanId?: string) => ProjectOpenSpan;
@@ -173,6 +179,11 @@ const uuidPattern = /^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\d
 const fixturePattern = /^(?:none|root-(?:10|1000|10000)|library-(?:1|20|64|500))$/u;
 const routeTemplates = new Set(['/', '/w/:workspace/:project', '/projects', '/projects/new']);
 const localConfigSlot = '__TAU_LOCAL_PROJECT_OPEN_PERFORMANCE__';
+/**
+ * The most measures a deployed page writes. User Timing keeps every measure until it is cleared, so a long session must
+ * not grow the timeline; one project open writes a few dozen.
+ */
+const deployedMeasureLimit = 256;
 const noopSpan: ProjectOpenSpan = { spanId: '', finish: () => undefined };
 const disabled: ProjectOpenPerformance = { begin: () => noopSpan, record: () => undefined };
 
@@ -205,6 +216,21 @@ const currentOrigin = (): string | undefined => {
     return typeof origin === 'string' ? origin : undefined;
   } catch {
     return undefined;
+  }
+};
+
+/** A browser page with an http(s) origin; false in server rendering and in workers. */
+const isBrowserPage = (): boolean => {
+  try {
+    const document: unknown = Reflect.get(globalThis, 'document');
+    const origin = currentOrigin();
+    if (typeof document !== 'object' || document === null || origin === undefined) {
+      return false;
+    }
+    const { protocol } = new URL(origin);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
   }
 };
 
@@ -269,28 +295,42 @@ const admittedConfig = (raw: unknown): Readonly<ProjectOpenPerformanceConfig> | 
 };
 
 /**
- * Build a synchronous, local-only timing adapter. Invalid or absent injection is inert.
- * User Timing detail carries aggregate identifiers and counters only; it never
- * receives a project ID, name, source path, URL, or exception message.
+ * One recorder. Each finished span is one synchronous `performance.measure`; nothing is observed, scheduled or sent.
  *
- * @param config - Explicit harness configuration for this page or worker realm.
- * @returns A begin/finish recorder, inert outside an admitted loopback origin.
+ * @param harness - The admitted harness configuration, or undefined on a deployed page, whose detail then carries null
+ *   for every harness identifier.
+ * @param limit - The most measures this recorder writes; unbounded for an admitted harness, which clears its own.
+ * @returns The begin/finish recorder.
  */
-export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConfig): ProjectOpenPerformance => {
-  const admitted = admittedConfig(config);
-  if (admitted === undefined) {
-    return disabled;
-  }
+const createRecorder = (
+  harness: Readonly<ProjectOpenPerformanceConfig> | undefined,
+  limit: number,
+): ProjectOpenPerformance => {
+  const environment: ProjectOpenEnvironment = harness === undefined ? 'deployed' : 'local';
+  // Read once, so a span pays no per-field work for the identifiers.
+  const identity = Object.freeze({
+    runId: harness?.runId ?? null,
+    journeyId: harness?.journeyId ?? null,
+    buildId: harness?.buildId ?? null,
+    fixtureId: harness?.fixtureId ?? null,
+    routeTemplate: harness?.routeTemplate ?? null,
+    environment,
+    profile: harness?.profile ?? null,
+    cacheCohort: harness?.cacheCohort ?? null,
+    realm: harness?.realm ?? 'page',
+  });
+  let remaining = limit;
   const emit = (
     phase: ProjectOpenPhase,
-    identity: Readonly<{ spanId: string; parentSpanId: string | undefined }>,
+    ids: Readonly<{ spanId: string; parentSpanId: string | undefined }>,
     span: ProjectOpenTimedSpan,
   ): void => {
-    const { spanId, parentSpanId } = identity;
+    const { spanId, parentSpanId } = ids;
     try {
-      if (!outcomes.has(span.outcome) || !Number.isFinite(span.start) || !Number.isFinite(span.end)) {
+      if (remaining <= 0 || !outcomes.has(span.outcome) || !Number.isFinite(span.start) || !Number.isFinite(span.end)) {
         return;
       }
+      remaining--;
       const { start } = span;
       const end = Math.max(start, span.end);
       performance.measure(`tau.load.${phase}`, {
@@ -298,18 +338,18 @@ export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConf
         end,
         detail: {
           schemaVersion: 1,
-          runId: admitted.runId,
-          journeyId: admitted.journeyId,
+          runId: identity.runId,
+          journeyId: identity.journeyId,
           spanId,
           parentSpanId: parentSpanId ?? null,
           phase,
-          buildId: admitted.buildId,
-          fixtureId: admitted.fixtureId,
-          routeTemplate: admitted.routeTemplate,
-          environment: 'local',
-          profile: admitted.profile,
-          cacheCohort: admitted.cacheCohort,
-          realm: admitted.realm,
+          buildId: identity.buildId,
+          fixtureId: identity.fixtureId,
+          routeTemplate: identity.routeTemplate,
+          environment: identity.environment,
+          profile: identity.profile,
+          cacheCohort: identity.cacheCohort,
+          realm: identity.realm,
           timeOrigin: performance.timeOrigin,
           start,
           duration: end - start,
@@ -324,7 +364,7 @@ export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConf
   };
   return {
     begin: (phase, parentSpanId) => {
-      if (!phaseNames.has(phase) || (parentSpanId !== undefined && !uuidPattern.test(parentSpanId))) {
+      if (remaining <= 0 || !phaseNames.has(phase) || (parentSpanId !== undefined && !uuidPattern.test(parentSpanId))) {
         return noopSpan;
       }
       let start: number;
@@ -354,7 +394,7 @@ export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConf
       };
     },
     record: (phase, span) => {
-      if (!phaseNames.has(phase)) {
+      if (remaining <= 0 || !phaseNames.has(phase)) {
         return;
       }
       let spanId: string;
@@ -366,6 +406,22 @@ export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConf
       emit(phase, { spanId, parentSpanId: undefined }, span);
     },
   };
+};
+
+/**
+ * Build a synchronous, local-only timing adapter. Invalid or absent injection is inert.
+ * User Timing detail carries aggregate identifiers and counters only; it never
+ * receives a project ID, name, source path, URL, or exception message.
+ *
+ * @param config - Explicit harness configuration for this page or worker realm.
+ * @returns A begin/finish recorder, inert outside an admitted loopback origin.
+ */
+export const createProjectOpenPerformance = (config?: ProjectOpenPerformanceConfig): ProjectOpenPerformance => {
+  const admitted = admittedConfig(config);
+  if (admitted === undefined) {
+    return disabled;
+  }
+  return createRecorder(admitted, Number.POSITIVE_INFINITY);
 };
 
 /**
@@ -384,20 +440,43 @@ export const readLocalProjectOpenPerformance = (): ProjectOpenPerformance | unde
   }
 };
 
-let pageRecorder: ProjectOpenPerformance | undefined;
+type PageRecorder = Readonly<{ recorder: ProjectOpenPerformance; environment: ProjectOpenEnvironment | undefined }>;
 
-/**
- * This page's recorder: the admitted harness injection, read once, or the inert recorder. Owners that are not handed
- * a recorder, such as the composer and the code editor, time themselves through this.
- *
- * @returns The page's recorder; inert unless a valid local injection was present when first read.
- */
-export const pageProjectOpenPerformance = (): ProjectOpenPerformance => {
-  pageRecorder ??= readLocalProjectOpenPerformance() ?? disabled;
+let pageRecorder: PageRecorder | undefined;
+
+const readPageRecorder = (): PageRecorder => {
+  if (pageRecorder !== undefined) {
+    return pageRecorder;
+  }
+  const local = readLocalProjectOpenPerformance();
+  if (local !== undefined) {
+    pageRecorder = { recorder: local, environment: 'local' };
+  } else if (isBrowserPage()) {
+    pageRecorder = { recorder: createRecorder(undefined, deployedMeasureLimit), environment: 'deployed' };
+  } else {
+    pageRecorder = { recorder: disabled, environment: undefined };
+  }
   return pageRecorder;
 };
 
-/** Test seam: read the injection slot again on the next {@link pageProjectOpenPerformance}. */
+/**
+ * This page's recorder, chosen once: the admitted harness injection; otherwise, on any browser page, a deployed
+ * recorder that writes at most 256 `tau.load.*` measures with no harness identifiers and sends nothing anywhere;
+ * otherwise (server rendering, a worker) the inert recorder. Owners that are not handed a recorder, such as the
+ * composer and the code editor, time themselves through this.
+ *
+ * @returns The page's recorder.
+ */
+export const pageProjectOpenPerformance = (): ProjectOpenPerformance => readPageRecorder().recorder;
+
+/**
+ * Which recorder {@link pageProjectOpenPerformance} chose.
+ *
+ * @returns `local` for an admitted harness, `deployed` for any other browser page, undefined where it is inert.
+ */
+export const pageProjectOpenEnvironment = (): ProjectOpenEnvironment | undefined => readPageRecorder().environment;
+
+/** Test seam: choose the page recorder again on the next {@link pageProjectOpenPerformance}. */
 export const resetPageProjectOpenPerformance = (): void => {
   pageRecorder = undefined;
 };

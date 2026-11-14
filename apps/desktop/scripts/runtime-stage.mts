@@ -19,7 +19,10 @@ import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/p
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
-import { desktopNativeDeployments, nativePackageResources } from '#tau/desktop-native-deployments.js';
+import {
+  desktopNativeDeployments,
+  nativePackageResources,
+} from '@taucad/desktop-services-host/desktop-native-deployments';
 import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */

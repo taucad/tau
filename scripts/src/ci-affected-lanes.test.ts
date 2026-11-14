@@ -619,10 +619,17 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     'shell-service',
     'host',
     'desktop-terminal',
-    'desktop',
+    'desktop-services-host',
     'desktop-e2e',
   ];
-  const queueProjects = ['desktop-terminal', 'host', 'native-process-core', 'sandbox', 'shell-service'];
+  const queueProjects = [
+    'desktop-services-host',
+    'desktop-terminal',
+    'host',
+    'native-process-core',
+    'sandbox',
+    'shell-service',
+  ];
   const guard = (project: string): string => `contains(fromJSON(needs.select.outputs.projects), '${project}')`;
   const lane = ci.jobs['shell'];
   const condition =
@@ -637,7 +644,7 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(ci.jobs['plan']?.outputs?.['shell-projects']).toBe(expression('steps.plan.outputs.shell-projects'));
   });
 
-  it('should tag exactly the five queue projects ci:shell', { timeout: 60_000 }, async () => {
+  it('should tag exactly the six queue projects ci:shell', { timeout: 60_000 }, async () => {
     const { createProjectGraphAsync, readCachedProjectGraph } = await import('@nx/devkit');
     const graph = await (async () => {
       try {

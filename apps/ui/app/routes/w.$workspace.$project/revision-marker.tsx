@@ -29,13 +29,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Skeleton } from '@taucad/ui/components/skeleton';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { cn } from '@taucad/ui/utils/cn';
 import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
+import { useWaitStart } from '#hooks/use-wait-start.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
@@ -117,21 +118,15 @@ function FileComparison({
     compareAgainst === 'checkout' ? 'checkout' : undefined,
   );
   const label = `Comparison for ${path}`;
+  /* One frame in every state, holding the wait's slot from the first render: arrival changes only the body, so a
+     shown indicator keeps its 500 ms minimum in place (loading states UX blueprint, timing ladder). */
+  const isRegion = !isLoading && error === undefined && comparison !== undefined && comparison.change !== 'unchanged';
+  let body: React.ReactNode = null;
   if (isLoading) {
-    return (
-      <div id={id} role='status' aria-label={label} aria-busy='true' className='border-t px-2 py-1.5'>
-        <ComparisonSkeleton />
-      </div>
-    );
-  }
-  if (error !== undefined) {
-    return (
-      <div
-        id={id}
-        role='alert'
-        aria-label={label}
-        className='flex flex-wrap items-center gap-2 border-t px-2 py-1.5 text-xs'
-      >
+    body = null;
+  } else if (error !== undefined) {
+    body = (
+      <div role='alert' className='flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs'>
         <span className='min-w-0 flex-auto'>{`Couldn’t compare ${path}.`}</span>
         <Button size='xs' variant='outline' className='ml-auto' onClick={retry}>
           <RotateCcw aria-hidden className='size-3.5' />
@@ -139,65 +134,110 @@ function FileComparison({
         </Button>
       </div>
     );
-  }
-  if (!isLoaded || comparison === undefined) {
-    return null;
-  }
-  if (comparison.change === 'unchanged') {
-    return (
-      <p id={id} role='note' aria-label={label} className='border-t px-2 py-1.5 text-xs text-muted-foreground'>
+  } else if (!isLoaded || comparison === undefined) {
+    body = null;
+  } else if (comparison.change === 'unchanged') {
+    body = (
+      <p role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
         {compareAgainst === 'checkout' ? 'No changes since then.' : 'No changes in this file.'}
       </p>
+    );
+  } else {
+    body = (
+      <>
+        {comparison.notices.map((notice) => (
+          <p key={notice} role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
+            {comparisonNotices[notice]}
+          </p>
+        ))}
+        {comparison.kind === 'text' ? (
+          original === modified ? null : (
+            <DiffViewer
+              originalContent={original}
+              modifiedContent={modified}
+              language={resolveHighlightLanguageForPath(path).language}
+            />
+          )
+        ) : (
+          <p role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
+            {comparison.kind === 'binary'
+              ? `Binary file ${comparison.change === 'added' ? 'added' : comparison.change === 'deleted' ? 'deleted' : 'changed'}.`
+              : 'This file can’t be shown as text.'}
+          </p>
+        )}
+      </>
     );
   }
   return (
     /* A region that scrolls sideways must be reachable by keyboard to scroll. */
     <div
       id={id}
-      role='region'
+      role={isRegion ? 'region' : 'group'}
       aria-label={label}
+      aria-busy={isLoading ? 'true' : undefined}
       // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be keyboard reachable (WCAG 2.1.1)
-      tabIndex={0}
+      tabIndex={isRegion ? 0 : undefined}
       /* An empty diff line keeps its height, and the hidden-lines label keeps the 12 px floor (round 5). */
-      className='[scrollbar-width:thin] overflow-x-auto border-t bg-background focus-visible:focus-outline [&_.line:empty]:min-h-[1.6em] [&_.whitespace-nowrap]:text-xs'
-    >
-      {comparison.notices.map((notice) => (
-        <p key={notice} role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
-          {comparisonNotices[notice]}
-        </p>
-      ))}
-      {comparison.kind === 'text' ? (
-        original === modified ? null : (
-          <DiffViewer
-            originalContent={original}
-            modifiedContent={modified}
-            language={resolveHighlightLanguageForPath(path).language}
-          />
-        )
-      ) : (
-        <p role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
-          {comparison.kind === 'binary'
-            ? `Binary file ${comparison.change === 'added' ? 'added' : comparison.change === 'deleted' ? 'deleted' : 'changed'}.`
-            : 'This file can’t be shown as text.'}
-        </p>
+      className={cn(
+        'border-t',
+        isRegion &&
+          '[scrollbar-width:thin] overflow-x-auto bg-background focus-visible:focus-outline [&_.line:empty]:min-h-[1.6em] [&_.whitespace-nowrap]:text-xs',
       )}
+    >
+      <ComparisonWait isActive={isLoading} label='Loading comparison' onRetry={retry} className='px-2 py-1.5' />
+      {body}
     </div>
   );
 }
 
 /**
- * A comparison that has not arrived: two skeleton lines, with the words kept
- * for screen readers only (M7).
+ * A comparison's wait slot: the one line its words or its Try again take, with the wait's words in it once the wait
+ * passes 1,000 ms (loading states UX blueprint, U17; M7). It is rendered in every state of its frame, so a shown
+ * indicator keeps its 500 ms minimum after the comparison arrives, and the line folds away only once the indicator is
+ * idle. Compare is a gesture after the route opened, so the wait is its own group and its slot is live.
  *
- * @returns The skeleton.
+ * From 10,000 ms Retry sits beside the slow words; it reads again and starts a new wait, timed from the Retry.
+ *
+ * @param props - Whether the comparison is waiting, what is being waited for, how to read it again, and the line's
+ *   spacing.
+ * @returns The indicator slot.
  */
-function ComparisonSkeleton(): React.JSX.Element {
+function ComparisonWait({
+  isActive,
+  label,
+  onRetry,
+  className,
+}: {
+  readonly isActive: boolean;
+  readonly label: string;
+  readonly onRetry: () => void;
+  readonly className?: string;
+}): React.JSX.Element {
+  const { startedAt, restart } = useWaitStart(isActive);
+  const slot = useRef<HTMLDivElement>(null);
   return (
-    <span className='flex flex-col gap-1.5 py-0.5'>
-      <span className='sr-only'>Loading comparison…</span>
-      <Skeleton aria-hidden className='h-3 w-3/4' />
-      <Skeleton aria-hidden className='h-3 w-1/2' />
-    </span>
+    /* Focus lands here after Retry, which replaces the indicator's words and its button; it never falls to the page. */
+    <div
+      ref={slot}
+      tabIndex={-1}
+      data-slot='comparison-wait'
+      className={cn(
+        'flex w-fit rounded-md outline-none focus-visible:focus-outline has-[>[data-state=idle]]:hidden',
+        className,
+      )}
+    >
+      <WaitIndicator
+        active={isActive}
+        label={label}
+        slowLabel={`Still ${label.toLowerCase()}`}
+        startedAt={startedAt}
+        onRetry={() => {
+          restart();
+          onRetry();
+          slot.current?.focus();
+        }}
+      />
+    </div>
   );
 }
 
@@ -342,6 +382,7 @@ function CurrentComparison({
 }): React.JSX.Element {
   const { changes, isLoaded, error, retry } = useRevisionChangesSince(revision);
   const name = entryReference(revision) ?? 'this point';
+  const isWaiting = error === undefined && !isLoaded;
   const body =
     error === undefined ? (
       isLoaded ? (
@@ -352,11 +393,7 @@ function CurrentComparison({
         ) : (
           <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
         )
-      ) : (
-        <p role='status' aria-busy='true'>
-          <ComparisonSkeleton />
-        </p>
-      )
+      ) : null
     ) : (
       <div role='alert' className='flex flex-wrap items-center gap-2 text-xs'>
         <span className='min-w-0 flex-auto'>Couldn’t compare with your current files.</span>
@@ -375,7 +412,12 @@ function CurrentComparison({
           Done
         </Button>
       </p>
-      {body}
+      {/* One frame in every state, holding the wait's slot: arrival changes only the body, so a shown indicator keeps
+          its 500 ms minimum in place. */}
+      <div data-slot='current-comparison' aria-busy={isWaiting ? 'true' : undefined} className='flex flex-col gap-1'>
+        <ComparisonWait isActive={isWaiting} label='Loading changes' onRetry={retry} />
+        {body}
+      </div>
     </div>
   );
 }

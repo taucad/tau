@@ -142,7 +142,7 @@ describe('local project-open performance recorder', () => {
     expect(JSON.stringify(measure.mock.calls)).not.toContain('/private/project/source.ts');
   });
 
-  it('should give the page one recorder, inert without an injection', () => {
+  it('should give the page one recorder, inert outside a browser page without an injection', () => {
     const measure = stubTiming();
 
     const inert = pageProjectOpenPerformance();
@@ -156,5 +156,107 @@ describe('local project-open performance recorder', () => {
     resetPageProjectOpenPerformance();
     pageProjectOpenPerformance().begin('composer.mount').finish('ok');
     expect(measure.mock.calls.map(([name]) => name)).toEqual(['tau.load.composer.mount']);
+  });
+});
+
+describe('deployed project-open performance recorder', () => {
+  const stubDeployedPage = () => {
+    const measure = stubTiming();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+    vi.stubGlobal('document', {});
+    const fetch = vi.fn();
+    const sendBeacon = vi.fn();
+    const send = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('navigator', { sendBeacon });
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        public open = vi.fn();
+        public send = send;
+      },
+    );
+    return { measure, network: [fetch, sendBeacon, send] };
+  };
+
+  it('should create tau.load measures on a nonloopback page without a harness injection', () => {
+    const { measure } = stubDeployedPage();
+
+    const recorder = pageProjectOpenPerformance();
+    const span = recorder.begin('composer.mount');
+    recorder.begin('editor.runtime', span.spanId).finish('ok');
+    span.finish('ok', { fileCount: 3 });
+    recorder.record('viewer.firstFrame', { start: 40, end: 52, outcome: 'ok' });
+
+    expect(measure.mock.calls.map(([name]) => name)).toEqual([
+      'tau.load.editor.runtime',
+      'tau.load.composer.mount',
+      'tau.load.viewer.firstFrame',
+    ]);
+    expect(measure.mock.calls[1]?.[1]).toMatchObject({
+      start: 10,
+      detail: {
+        schemaVersion: 1,
+        environment: 'deployed',
+        realm: 'page',
+        phase: 'composer.mount',
+        spanId,
+        parentSpanId: null,
+        runId: null,
+        journeyId: null,
+        buildId: null,
+        fixtureId: null,
+        routeTemplate: null,
+        outcome: 'ok',
+        counters: { fileCount: 3 },
+      },
+    });
+  });
+
+  it('should send nothing over the network', async () => {
+    const { network } = stubDeployedPage();
+
+    const recorder = pageProjectOpenPerformance();
+    recorder.begin('editor.mount').finish('ok');
+    recorder.record('canvas.2d', { start: 1, end: 2, outcome: 'ok', source: 'gizmo.face' });
+    recorder.begin('composer.mount').finish('error');
+    await Promise.resolve();
+
+    for (const send of network) {
+      expect(send).not.toHaveBeenCalled();
+    }
+  });
+
+  it('should stop at a bounded number of measures per page', () => {
+    const { measure } = stubDeployedPage();
+
+    const recorder = pageProjectOpenPerformance();
+    for (let index = 0; index < 1000; index++) {
+      recorder.record('canvas.2d', { start: index, end: index + 1, outcome: 'ok' });
+    }
+
+    expect(measure).toHaveBeenCalledTimes(256);
+  });
+
+  it('should stay inert outside a browser page, as in server rendering', () => {
+    const measure = stubTiming();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+
+    pageProjectOpenPerformance().begin('composer.mount').finish('ok');
+    resetPageProjectOpenPerformance();
+    vi.stubGlobal('location', undefined);
+    vi.stubGlobal('document', {});
+    pageProjectOpenPerformance().begin('composer.mount').finish('ok');
+
+    expect(measure).not.toHaveBeenCalled();
+  });
+
+  it('should leave the harness-only reader and an explicit recorder unchanged on a deployed page', () => {
+    const { measure } = stubDeployedPage();
+
+    expect(readLocalProjectOpenPerformance()).toBeUndefined();
+    createProjectOpenPerformance().begin('tree.list').finish('ok');
+
+    expect(measure).not.toHaveBeenCalled();
   });
 });

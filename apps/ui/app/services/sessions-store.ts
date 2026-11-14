@@ -6,13 +6,12 @@
  * builds a second one (B9). `SessionsProvider` hands it down; every reader is
  * a selector over its snapshot.
  *
- * The registry owns *liveness*. Two of a session's four startup regions own a
- * resource outright here — compute admission and the agent-host attachment —
- * and the other two are reported by the subtree that holds the file-manager,
- * project and editor actors, because those are built from React-context
- * handles (the shared worker, the query client, the project
- * manager's closures). The session still decides when they exist: the project
- * route renders a project's resources iff the registry says it is live, and
+ * The registry owns *liveness*. Three of a session's four startup regions own a
+ * resource outright here: the project's file manager (A6c), compute admission
+ * and the agent-host attachment. The fourth, the runtime, is still reported by
+ * the subtree that holds the project and editor actors, until A6d makes it a
+ * child too. The session still decides when they exist: the project route
+ * renders a project's resources iff the registry says it is live, and
  * `closing` completes — flush, lease release — before the registry drops it.
  */
 
@@ -29,7 +28,10 @@ import type {
   SessionsProjectStatus,
 } from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
-import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
+import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
+import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
+import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
 import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
 
@@ -86,7 +88,10 @@ const servicesFor = (projectId: string): ProjectSessionServices => services.get(
 
 type RegionOutcome = Readonly<{ ready: true } | { ready: false; reason: string }>;
 
-const regionKey = (projectId: string, region: ProjectSessionRegion): string => `${projectId}:${region}`;
+/** The one region the subtree still reports: the project and editor actors, until A6d (A6c made `views` a child). */
+type RelayedRegion = 'runtime';
+
+const regionKey = (projectId: string, region: RelayedRegion): string => `${projectId}:${region}`;
 const regionOutcomes = new Map<string, RegionOutcome>();
 /* One fan-out for every region of every project; the key rides on the event so
  * a session's relay child filters to its own (event-fanout policy). */
@@ -97,39 +102,35 @@ const regionTopic = new Topic<{
   name: 'sessions.regions',
 });
 
-const publishRegion = (projectId: string, region: ProjectSessionRegion, outcome: RegionOutcome): void => {
+const publishRegion = (projectId: string, region: RelayedRegion, outcome: RegionOutcome): void => {
   const key = regionKey(projectId, region);
   regionOutcomes.set(key, outcome);
   regionTopic.emit({ key, outcome });
 };
 
-/** The project's views (file manager) or runtime (project + editor) are up. @public */
-export const reportRegionReady = (projectId: string, region: ProjectSessionRegion): void => {
+/** The project's runtime (project + editor) is up. @public */
+export const reportRegionReady = (projectId: string, region: RelayedRegion): void => {
   publishRegion(projectId, region, { ready: true });
 };
 
 /** That region could not come up, with the reason the failed row shows. @public */
-export const reportRegionFailed = (projectId: string, region: ProjectSessionRegion, reason: string): void => {
+export const reportRegionFailed = (projectId: string, region: RelayedRegion, reason: string): void => {
   publishRegion(projectId, region, { ready: false, reason });
 };
 
 /** Forget what a closed project's subtree last said. @public */
 export const forgetProjectRegions = (projectId: string): void => {
-  for (const region of ['views', 'runtime', 'agentHost', 'compute'] as const) {
-    regionOutcomes.delete(regionKey(projectId, region));
-  }
+  regionOutcomes.delete(regionKey(projectId, 'runtime'));
 };
 
 /*
- * Ponytail: one relay, four regions — not an abstraction with one caller.
+ * The runtime region's relay, until A6d builds the runtime in the session.
  *
- * A region whose resource is built from React context reports through
- * `reportRegionReady`; this child turns that report into the machine event and
- * holds the region open for the session's life, so stopping the child is what
- * ends it. Upgrade path: when a region's resource can be constructed without a
- * React handle, provide a child that builds it here instead of relaying.
+ * The subtree reports through `reportRegionReady`; this child turns that report
+ * into the machine event and holds the region open for the session's life, so
+ * stopping the child is what ends it.
  */
-const relayRegion = (region: ProjectSessionRegion) =>
+const relayRegion = (region: RelayedRegion) =>
   createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
     const key = regionKey(input.projectId, region);
     const deliver = (outcome: RegionOutcome): void => {
@@ -149,6 +150,137 @@ const relayRegion = (region: ProjectSessionRegion) =>
     }
     return unsubscribe;
   });
+
+// ---------------------------------------------------------------------------
+// The project's file manager (A6c)
+// ---------------------------------------------------------------------------
+
+/**
+ * Open one project's file manager for its session. The app runtime gives the registry the file-manager host's builder
+ * and the wait on its clock (S17 to S19); a composition that runs the registry alone gives none.
+ *
+ * @public
+ */
+export type SessionFileManagerOpener = (projectId: string) => SessionFileManager;
+
+/**
+ * The file-manager host's shared worker, which a session's file manager is built on (A6c): the worker `rootFiles` holds
+ * now, and a listener called after each change. @public
+ */
+export type SessionFileManagerWorker = Readonly<{
+  current: () => Worker | undefined;
+  subscribe: (listener: (worker: Worker | undefined) => void) => () => void;
+}>;
+
+/**
+ * The `fileManager` child: it builds the project's file manager through the host for `/projects/<id>`, owns it for
+ * the session's life and closes it when the session stops the child (I23). It tells the session the file manager's
+ * ref, then reports the views region each time the file manager comes up, from its snapshot rather than from a mount
+ * (I5). A build that throws fails the region with its reason.
+ *
+ * With the host's shared worker it follows `rootFiles`, as the shared-worker gate made the mounted subtree follow it
+ * before A6c: it builds only once `rootFiles` holds a worker, so a session opened while the root connects or restarts
+ * never starts a second worker on the same store, and when the worker is lost or replaced it closes the file manager
+ * built on the old one and builds a fresh one on the new one. A nested file manager never restarts its parent's
+ * worker, so the one built on a dead worker would otherwise stay down for the session's life.
+ */
+const fileManagerRegionOn = (open: SessionFileManagerOpener, worker: SessionFileManagerWorker | undefined) =>
+  createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
+    let current: Readonly<{ opened: SessionFileManager; release: () => void }> | undefined;
+
+    const closeCurrent = (): void => {
+      if (current === undefined) {
+        return;
+      }
+      const { release } = current;
+      current = undefined;
+      sendBack({ type: 'fileManagerChanged', fileManagerRef: undefined });
+      release();
+    };
+
+    const openCurrent = (): void => {
+      let opened: SessionFileManager;
+      try {
+        opened = open(input.projectId);
+      } catch (error) {
+        sendBack({
+          type: 'childFailed',
+          region: 'views',
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      const fileManager: FileManagerRef = opened.fileManagerRef;
+      const untrack = trackSessionFileManager(opened);
+      sendBack({ type: 'fileManagerChanged', fileManagerRef: fileManager });
+      /* Edge-triggered, as the binding's effect was: one report each time the file manager enters `ready`. An `error`
+       * reports nothing, as the binding reported nothing: a nested file manager errs when the shared worker dies, often
+       * before `rootFiles` sees it, and the rebuild on the root's new worker is what recovers it. The start bound
+       * decides an opening session that never comes up. */
+      let ready = false;
+      const observe = (snapshot: ReturnType<FileManagerRef['getSnapshot']>): void => {
+        const now = snapshot.matches('ready');
+        if (now && !ready) {
+          sendBack({ type: 'childReady', region: 'views' });
+        }
+        ready = now;
+      };
+      const subscription = fileManager.subscribe(observe);
+      current = {
+        opened,
+        release: () => {
+          subscription.unsubscribe();
+          untrack();
+          opened.close();
+        },
+      };
+      observe(fileManager.getSnapshot());
+    };
+
+    if (worker === undefined) {
+      openCurrent();
+      return closeCurrent;
+    }
+    let builtOn = worker.current();
+    if (builtOn !== undefined) {
+      openCurrent();
+    }
+    const unsubscribe = worker.subscribe((next) => {
+      if (next === builtOn) {
+        return;
+      }
+      builtOn = next;
+      closeCurrent();
+      if (next !== undefined) {
+        openCurrent();
+      }
+    });
+    return () => {
+      unsubscribe();
+      closeCurrent();
+    };
+  });
+
+/**
+ * The views region of a registry composed with no file-manager host (rows that run the registry alone): no file
+ * manager is built, and the region is up at once, as the subtree's report made it up before A6c.
+ */
+const withoutFileManager = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+  sendBack({ type: 'childReady', region: 'views' });
+  return undefined;
+});
+
+/**
+ * Open session file managers through a host builder and a services wait: what the app runtime composes.
+ *
+ * @param ports - The file-manager host's builder and the wait on the runtime's clock.
+ * @returns The opener the registry gives each session's `fileManager` child.
+ * @public
+ */
+export const sessionFileManagerOpener =
+  (ports: SessionFileManagerPorts): SessionFileManagerOpener =>
+  (projectId) =>
+    openSessionFileManager(projectId, ports);
 
 // ---------------------------------------------------------------------------
 // Cross-process identity
@@ -229,7 +361,7 @@ const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(
 // The registry actor
 // ---------------------------------------------------------------------------
 
-const projectSessionOn = (sharedWorker: () => Worker | undefined) =>
+const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker }: SessionsRegistryFiles) =>
   projectSessionMachine.provide({
     actors: {
       cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
@@ -258,7 +390,8 @@ const projectSessionOn = (sharedWorker: () => Worker | undefined) =>
           }
         },
       }),
-      fileManager: relayRegion('views'),
+      fileManager:
+        openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager, fileManagerWorker),
       project: relayRegion('runtime'),
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
@@ -269,22 +402,38 @@ const projectSessionOn = (sharedWorker: () => Worker | undefined) =>
 export type SessionsActorOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
 
 /**
+ * What the registry's sessions take from the file-manager host. @public
+ */
+export type SessionsRegistryFiles = Readonly<{
+  /** The shared file-manager worker, read when a session's compute region starts and ends (S28). */
+  sharedWorker: () => Worker | undefined;
+  /** Opens each session's file manager (A6c). Without it the views region is up with no file manager. */
+  openFileManager?: SessionFileManagerOpener;
+  /**
+   * The shared worker each session's file manager is built on (A6c). With it a file manager is built once `rootFiles`
+   * holds a worker and rebuilt when the worker is replaced; without it, at once.
+   */
+  fileManagerWorker?: SessionFileManagerWorker;
+}>;
+
+/**
  * The registry's logic with its session children provided: the app runtime's `sessions` child (D5). The runtime gives
- * it the file-manager host's shared worker, which admits and releases each live project's compute (S28).
+ * it the file-manager host's shared worker, which admits and releases each live project's compute (S28), and the
+ * opener each session's file manager is built through (A6c).
  *
- * @param sharedWorker - The shared file-manager worker, read when a session's compute region starts and ends.
+ * @param files - The shared worker and the session file-manager opener.
  * @returns The registry's logic.
  * @public
  */
-export const createSessionsRegistryLogic = (sharedWorker: () => Worker | undefined): typeof sessionsMachine =>
-  sessionsMachine.provide({ actors: { projectSession: projectSessionOn(sharedWorker) } });
+export const createSessionsRegistryLogic = (files: SessionsRegistryFiles): typeof sessionsMachine =>
+  sessionsMachine.provide({ actors: { projectSession: projectSessionOn(files) } });
 
 /**
- * The registry's logic with no shared worker: for compositions that run the registry alone.
+ * The registry's logic with no file-manager host: for compositions that run the registry alone.
  *
  * @public
  */
-export const sessionsRegistryLogic = createSessionsRegistryLogic(() => undefined);
+export const sessionsRegistryLogic = createSessionsRegistryLogic({ sharedWorker: () => undefined });
 
 /**
  * The registry's input for this host (PV-S5).
@@ -304,19 +453,26 @@ export const sessionsRegistryInput = (): SessionsMachineInput => ({
  * Create a registry of its own, unstarted (MC-R4). The app's registry is the runtime's `sessions` child; this root
  * is for compositions that run the registry alone.
  *
- * @param options - The clock, inspector and rejected-event hook for this root, and the shared worker its compute
- *   regions admit on (none by default).
+ * @param options - The clock, inspector and rejected-event hook for this root, the shared worker its compute
+ *   regions admit on (none by default), the session file-manager opener (none by default) and the shared worker its
+ *   file managers are built on (none: each is built at once).
  * @returns The registry actor; the caller starts it once.
  * @public
  */
 export const createSessionsActor = ({
   sharedWorker,
+  openFileManager,
+  fileManagerWorker,
   ...options
-}: SessionsActorOptions & Readonly<{ sharedWorker?: () => Worker | undefined }> = {}): Actor<typeof sessionsMachine> =>
-  createActor(sharedWorker === undefined ? sessionsRegistryLogic : createSessionsRegistryLogic(sharedWorker), {
-    ...options,
-    input: sessionsRegistryInput(),
-  });
+}: SessionsActorOptions & Partial<SessionsRegistryFiles> = {}): Actor<typeof sessionsMachine> =>
+  createActor(
+    createSessionsRegistryLogic({
+      sharedWorker: sharedWorker ?? (() => undefined),
+      ...(openFileManager === undefined ? {} : { openFileManager }),
+      ...(fileManagerWorker === undefined ? {} : { fileManagerWorker }),
+    }),
+    { ...options, input: sessionsRegistryInput() },
+  );
 
 // ---------------------------------------------------------------------------
 // Selectors
@@ -324,6 +480,18 @@ export const createSessionsActor = ({
 
 /** Which projects are live right now, in open order. @public */
 export const selectLiveProjectIds = (context: SessionsMachineContext): readonly string[] => Object.keys(context.refs);
+
+/**
+ * A session's file manager, as its `fileManager` child reported it (A6c): what the session subtree's provider is a view
+ * of.
+ *
+ * @param snapshot - The session's snapshot.
+ * @returns The file manager, or `undefined` before the child reports it, after it stops, or with no host.
+ * @public
+ */
+export const selectProjectSessionFileManager = (
+  snapshot: ReturnType<ProjectSessionActorRef['getSnapshot']>,
+): FileManagerRef | undefined => snapshot.context.fileManagerRef;
 
 /** One project's session actor, or `undefined` when it is closed. @public */
 export const selectProjectSession = (

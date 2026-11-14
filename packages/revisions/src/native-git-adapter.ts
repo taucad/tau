@@ -209,7 +209,6 @@ const canonicalPerson = (person: RevisionUserActor): RevisionUserActor => ({
   kind: 'user',
   id: person.id,
   ...(person.name === undefined ? {} : { name: person.name }),
-  ...(person.email === undefined ? {} : { email: person.email }),
   ...(person.anonymous === undefined ? {} : { anonymous: person.anonymous }),
 });
 

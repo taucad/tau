@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchView } from '@taucad/workbench';
 import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { createActor } from 'xstate';
+import type { Actor } from 'xstate';
+import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerDockReady } from '#workbench-records/viewer-adapter.js';
 
 const fixture = vi.hoisted(() => ({
   projectSend: vi.fn(),
@@ -45,6 +49,9 @@ vi.mock('#hooks/use-project-availability.js', () => {
   return { useProjectAvailability: useAvailability, useModelAvailability: useAvailability };
 });
 
+/** The viewer adapter the editor double spawned, as the editor does on a page without a layout. */
+const dock: { adapter: Actor<typeof viewerAdapterLogic> | undefined; id: string } = { adapter: undefined, id: '' };
+
 vi.mock('#hooks/use-project.js', () => {
   const projectSnapshot = { matches: (state: string) => state === 'ready' };
   const projectRef = {
@@ -57,8 +64,26 @@ vi.mock('#hooks/use-project.js', () => {
   const project = {
     projectRef,
     editorRef: {
-      send: fixture.editorSend,
-      getSnapshot: () => fixture.editorSnapshot,
+      // The editor hosts the viewer's adapter on a page without a layout: it spawns it on `dockReady` (A8d).
+      send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
+        if ('api' in event) {
+          dock.adapter?.stop();
+          dock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+          dock.id = event.dockId;
+          dock.adapter.start();
+          return;
+        }
+        if (event.type === 'dockReleased') {
+          dock.adapter?.stop();
+          dock.adapter = undefined;
+          return;
+        }
+        fixture.editorSend(event);
+      },
+      getSnapshot: () => ({
+        ...fixture.editorSnapshot,
+        children: dock.adapter === undefined ? {} : { [`viewerAdapter:${dock.id}`]: dock.adapter },
+      }),
       subscribe: () => ({ unsubscribe: () => undefined }),
     },
     get mainEntryPath() {
@@ -187,6 +212,7 @@ vi.mock('#components/panes/dockview.js', () => ({
           return { dispose: () => addListeners.delete(listener) };
         },
         onDidRemovePanel: subscribe,
+        onDidRemoveGroup: subscribe,
         onWillDragPanel: subscribe,
         onUnhandledDragOver: subscribe,
       } as unknown as DockviewApi;
@@ -228,11 +254,36 @@ describe('restored viewer layout admission', () => {
 
   // A0.3 row 2, Y8/I12: unmounting Dockview detaches the viewer adapter (the host then reads the applied revision as
   // unknown), and a remounted Dockview attaches again.
+  // A8d: the layout spawns the adapter on `dockReady` (sent from the dock's ref) and stops it on `dockReleased`; the
+  // adapter registers with the controller, so the row reads the same attach and detach through it.
   it('should detach the viewer adapter on unmount and attach again on remount', () => {
     const detach = vi.fn();
     const registerViewer = vi.fn(() => detach);
+    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined; id: string } = {
+      adapter: undefined,
+      id: '',
+    };
     fixture.workspace = {
-      layoutController: { registerViewer, personViewerChanged: vi.fn() },
+      layoutController: {
+        registerViewer,
+        personViewerChanged: vi.fn(),
+        connectViewerIntents: () => () => undefined,
+        requestViewerFile: vi.fn(),
+      },
+      layout: {
+        getSnapshot: () => ({
+          children: layoutDock.adapter === undefined ? {} : { [`viewerAdapter:${layoutDock.id}`]: layoutDock.adapter },
+        }),
+        send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
+          layoutDock.adapter?.stop();
+          layoutDock.adapter = undefined;
+          if ('api' in event) {
+            layoutDock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+            layoutDock.id = event.dockId;
+            layoutDock.adapter.start();
+          }
+        },
+      },
     } as unknown as NonNullable<typeof fixture.workspace>;
     const view = render(<ViewerDockview profile='editor' />);
     expect(registerViewer).toHaveBeenCalledOnce();
@@ -242,6 +293,52 @@ describe('restored viewer layout admission', () => {
     render(<ViewerDockview profile='editor' />);
     expect(registerViewer).toHaveBeenCalledTimes(2);
     expect(detach).toHaveBeenCalledOnce();
+  });
+
+  // A8d review round 1: a project switch hands the dock over again, and the new adapter starts on that render's facts,
+  // so it registers with the new project's layout only, never again with the old one's.
+  it('should register the re-handed viewer with the new project layout only', () => {
+    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined; id: string } = {
+      adapter: undefined,
+      id: '',
+    };
+    const workspaceWith = (registerViewer: () => () => void): NonNullable<typeof fixture.workspace> =>
+      ({
+        layoutController: {
+          registerViewer,
+          personViewerChanged: vi.fn(),
+          connectViewerIntents: () => () => undefined,
+          requestViewerFile: vi.fn(),
+        },
+        layout: {
+          getSnapshot: () => ({
+            children:
+              layoutDock.adapter === undefined ? {} : { [`viewerAdapter:${layoutDock.id}`]: layoutDock.adapter },
+          }),
+          send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
+            layoutDock.adapter?.stop();
+            layoutDock.adapter = undefined;
+            if ('api' in event) {
+              layoutDock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+              layoutDock.id = event.dockId;
+              layoutDock.adapter.start();
+            }
+          },
+        },
+      }) as unknown as NonNullable<typeof fixture.workspace>;
+    const registerA = vi.fn(() => () => undefined);
+    const registerB = vi.fn(() => () => undefined);
+    fixture.workspace = workspaceWith(registerA);
+    render(<ViewerDockview profile='editor' />);
+    expect(registerA).toHaveBeenCalledOnce();
+    fixture.switchProject();
+    fixture.workspace = workspaceWith(registerB);
+    // The viewer is memoised on its props, so the switch reaches it through a hook it reads, as the runtime's does.
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(registerA).toHaveBeenCalledOnce();
+    expect(registerB).toHaveBeenCalledOnce();
   });
 
   it('should publish the resolved main entry when a viewer starts before its manifest', () => {
@@ -394,6 +491,26 @@ describe('restored viewer layout admission', () => {
       operationTimeout: undefined,
     });
     expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ entryPath: 'other.ts' }));
+  });
+
+  // A8d review round 3: a dock handed to a new project actor attaches its new adapter on that render's facts, so it
+  // admits nothing for a model still downloading, and admits it once it is ready.
+  it('should admit a re-handed project only on its own availability', () => {
+    render(<ViewerDockview profile='shared' />);
+    fixture.switchProject();
+    fixture.availability = 'downloading';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+    expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', entryPath: 'main.ts' }),
+    );
+    fixture.availability = 'ready';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.nextProjectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
 
   it('releases only the hidden secondary viewer demand after reveal', () => {

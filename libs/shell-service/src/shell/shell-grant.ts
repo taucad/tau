@@ -128,6 +128,11 @@ export type ShellProjectProtected = Readonly<{
   denied: readonly string[];
   /** The registry's directory rows among them, which are directories whenever they exist. */
   directories: readonly string[];
+  /**
+   * Git stores the person's Terminal writes through the provider's store guard (`guardStores`), each protected by
+   * {@link terminalGitStorePolicy} by name inside the provider instead of by path here.
+   */
+  guarded?: readonly string[] | undefined;
 }>;
 
 /**
@@ -301,18 +306,20 @@ const executableSpellings = async (
 /**
  * Whether a platform's sandbox can open the Terminal's store for writing ({@link TerminalGitAccess}). Writing needs a
  * provider that keeps an absent name such as `commondir` from being created without putting anything in its place, so
- * that git outside the sandbox never finds it. Seatbelt does that with a deny rule. Bubblewrap can only mask a name by
- * mounting over something that exists, so the host creates a stand-in there for the session's life, and git outside
- * the sandbox then fails to read the empty `commondir` ("failed to read .git/commondir") in every repository of that
- * store. Leaving the name unprotected instead would let code in the Terminal point the store at a config of its own,
- * which git outside the sandbox, Tau's own included, then runs. Linux therefore keeps the read-only store.
+ * that git outside the sandbox never finds it. Seatbelt does that with a deny rule. Bubblewrap alone can only mask a
+ * name by mounting over something that exists, and git outside the sandbox detaches such a mask whenever it replaces
+ * `config` by rename (Linux Terminal git parity blueprint, Finding 2). On Linux the store guard decides by name instead
+ * (blueprint R2): a FUSE passthrough over each store, mounted where git outside never sees it. So Linux writes when the
+ * provider's guard can start, and keeps the read-only store where it cannot (blueprint R3, OD2), which loses nothing a
+ * host had before.
  *
  * @param platform - The host platform.
+ * @param storeGuard - Whether the provider's store guard can start on this device (the provider's `storeGuard`).
  * @returns The access the Terminal's store gets.
  * @public
  */
-export const terminalGitAccess = (platform: NodeJS.Platform): TerminalGitAccess =>
-  platform === 'darwin' ? 'write' : 'read';
+export const terminalGitAccess = (platform: NodeJS.Platform, storeGuard = false): TerminalGitAccess =>
+  platform === 'darwin' || (platform === 'linux' && storeGuard) ? 'write' : 'read';
 
 /**
  * The checkout's own control and record paths: every registry row the agent may not write, and every existing name
@@ -326,7 +333,9 @@ export const terminalGitAccess = (platform: NodeJS.Platform): TerminalGitAccess 
  * or follows another address stay read-only ({@link terminalGitStorePolicy}): no code in the Terminal can make git
  * outside the sandbox run anything or push to a place it chose.
  * A `.git` pointer file, an absent `.git` and a store whose path cannot be spelled as a glob stay read-only whole.
- * `write` needs a provider that protects an absent name without creating it ({@link terminalGitAccess}).
+ * `write` needs a provider that protects an absent name without creating it ({@link terminalGitAccess}). With
+ * `guardStores` (Linux, where the provider's store guard can start) each store is listed in `guarded` instead, and the
+ * guard refuses the policy's names by name, absent ones included, without anything written in their place.
  *
  * A store is moved out of the denied set rather than also listed read-only, because Seatbelt opens a read-only root
  * inside a denied one only when it lies strictly inside, never when the two are the same path. `.jj`, `.hg`, `.svn`,
@@ -334,16 +343,17 @@ export const terminalGitAccess = (platform: NodeJS.Platform): TerminalGitAccess 
  * still refused. The agent's launch never passes `terminalGit`.
  *
  * @param root - The checkout's real root.
- * @param options - `terminalGit` for the person's Terminal.
- * @returns The read-only and denied absolute paths.
+ * @param options - `terminalGit` for the person's Terminal, and `guardStores` when its provider guards stores by name.
+ * @returns The read-only, denied and guarded absolute paths.
  */
 export const projectProtected = async (
   root: string,
-  options: Readonly<{ terminalGit?: TerminalGitAccess | undefined }> = {},
+  options: Readonly<{ terminalGit?: TerminalGitAccess | undefined; guardStores?: boolean | undefined }> = {},
 ): Promise<ShellProjectProtected> => {
   const denied = new Set<string>();
   const readOnly = new Set<string>();
   const directories = new Set<string>();
+  const guarded = new Set<string>();
   const protect = (path: string, agentAccess: string): void => {
     (agentAccess === 'read-only' ? readOnly : denied).add(path);
   };
@@ -392,6 +402,11 @@ export const projectProtected = async (
         continue;
       }
       denied.delete(path);
+      /* The store guard protects the policy's names inside the provider, so nothing in the store is listed here. */
+      if (entry === 'store' && options.terminalGit === 'write' && options.guardStores === true) {
+        guarded.add(path);
+        continue;
+      }
       const executable =
         // oxlint-disable-next-line no-await-in-loop -- one listing per writable store.
         entry === 'store' && options.terminalGit === 'write' ? await executableSpellings(path) : undefined;
@@ -411,6 +426,7 @@ export const projectProtected = async (
     readOnly: [...readOnly].filter((path) => !denied.has(path)),
     denied: [...denied],
     directories: [...directories],
+    ...(guarded.size === 0 ? {} : { guarded: [...guarded] }),
   };
 };
 
@@ -423,6 +439,7 @@ export const projectProtected = async (
 export const protectedPaths = (checkout: ShellProjectProtected): readonly string[] => [
   ...checkout.readOnly,
   ...checkout.denied,
+  ...(checkout.guarded ?? []),
 ];
 
 /**
@@ -621,6 +638,8 @@ export type ShellFilesystemPlan = Readonly<{
   denied: readonly string[];
   /** Protected paths that are directories when present, so an absent one is never stood in for by a file. */
   directories: readonly string[];
+  /** The Terminal's git stores written through the provider's store guard, with the policy's names. */
+  guardedStores?: Readonly<{ stores: readonly string[]; protect: readonly string[] }> | undefined;
 }>;
 
 /**
@@ -682,6 +701,14 @@ export const compileShellFilesystem = async (
     ],
     denied: deniedPaths,
     directories: [...new Set([...input.checkoutProtected.directories, ...writeControls])],
+    ...(input.checkoutProtected.guarded === undefined || input.checkoutProtected.guarded.length === 0
+      ? {}
+      : {
+          guardedStores: {
+            stores: input.checkoutProtected.guarded,
+            protect: terminalGitStorePolicy.map(({ name }) => name),
+          },
+        }),
   };
 };
 

@@ -18,6 +18,7 @@ import {
   startCompletion,
 } from '@codemirror/autocomplete';
 import { CodeEditor } from '#components/code/code-editor.client.js';
+import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
@@ -93,6 +94,63 @@ it.each([
   expect(getComputedStyle(editor).fontFamily).toContain('Geist Mono');
   expect(getComputedStyle(editor).fontSize).toBe(width < 600 ? '16px' : '14px');
   await page.screenshot();
+});
+
+/** The box of a pane's first character: the first text node under `root`, measured with a range. */
+function firstCharacterRect(root: Element): DOMRect {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => (node.textContent === '' ? NodeFilter.FILTER_SKIP : NodeFilter.FILTER_ACCEPT),
+  });
+  const text = walker.nextNode();
+  if (text === null) {
+    throw new Error('no text to measure');
+  }
+  const range = document.createRange();
+  range.setStart(text, 0);
+  range.setEnd(text, 1);
+  return range.getBoundingClientRect();
+}
+
+/*
+ * Loading states UX blueprint P-i: the file's text shows in the editor's metrics before the editor can mount, and the
+ * editor mounts in place, so the first line does not move. Twelve lines keep the 4ch line-number floor; 1,500 lines
+ * widen the gutter to four digits.
+ */
+it.each([
+  [1000, 12],
+  [1000, 1500],
+  [390, 12],
+  [390, 1500],
+])('mounts the editor with its first line where the placeholder drew it (%spx, %s lines)', async (width, lines) => {
+  await page.viewport(width, 600);
+  await document.fonts.ready;
+  const source = Array.from({ length: lines }, (_, line) => `const value${String(line)} = ${String(line)};`).join('\n');
+  const pane = (body: React.ReactNode): React.JSX.Element => (
+    <div style={{ position: 'fixed', top: 0, left: 0, width: Math.min(width, 800), height: 300 }}>{body}</div>
+  );
+  const placeholder = render(pane(<EditorPanePlaceholder label='Loading main.ts' text={source} />));
+  const text = placeholder.container.querySelector('[data-slot="editor-pane-text"]')!;
+  await document.fonts.ready;
+  const before = firstCharacterRect(text);
+  const lineBox = text.getBoundingClientRect();
+  const { lineHeight } = getComputedStyle(text);
+  placeholder.unmount();
+
+  const { container } = render(
+    pane(
+      <CodeEditor document={new EditorDocument('main.ts', source)} viewId='placeholder-pane' languageId='typescript' />,
+    ),
+  );
+  await expect.poll(() => container.querySelector('.cm-line')?.textContent).toContain('const value0');
+  const after = firstCharacterRect(container.querySelector('.cm-content')!);
+  expect(after.left).toBeCloseTo(before.left, 1);
+  expect(after.top).toBeCloseTo(before.top, 1);
+  expect(after.height).toBeCloseTo(before.height, 1);
+  expect(container.querySelector('.cm-content')!.getBoundingClientRect().left).toBeCloseTo(lineBox.left, 1);
+  expect(container.querySelector('.cm-line')!.getBoundingClientRect().height).toBeCloseTo(
+    Number.parseFloat(lineHeight),
+    1,
+  );
 });
 
 it('shares accepted text and undo across split views without sharing focus', async () => {

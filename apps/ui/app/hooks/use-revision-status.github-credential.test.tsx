@@ -730,10 +730,14 @@ describe('connecting a remote', () => {
       expiresAt: expiringIn(eightHours),
     });
 
-    expect(scripted.actors().at(-1)).toMatchObject({
+    /* The forge identity rides beside the person, for the author line alone (D33, I3). */
+    const sent = scripted.actors().at(-1);
+    expect(sent).toMatchObject({
       command: 'setActor',
-      actor: { kind: 'user', name: 'octo', email: '7+octo@users.noreply.github.com' },
+      actor: { kind: 'user' },
+      commitAuthor: { name: 'octo', email: '7+octo@users.noreply.github.com' },
     });
+    expect(JSON.stringify(sent?.command === 'setActor' ? sent.actor : undefined)).not.toContain('noreply.github.com');
   });
 
   it('should link a github.com address with no App credential as an anonymous read-only remote (G2)', async () => {

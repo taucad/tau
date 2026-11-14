@@ -6,7 +6,9 @@
 (* access (app state orchestration charter D10, D13, invariants I4, I7,    *)
 (* I8, I9 and I18). It is the spec for `library-discovery.machine`,        *)
 (* `library-recovery.machine` and `library-access.machine` (lane A3a) and   *)
-(* lands before them, under formal verification policy rule 1.             *)
+(* lands before them, under formal verification policy rule 1. The         *)
+(* machines replay its export suite in                                     *)
+(* `library-catalog.conformance.test.ts`.                                  *)
 (*                                                                         *)
 (* Parties:                                                                *)
 (*   storage    the project roots and the journal of pending operations;   *)
@@ -59,6 +61,35 @@
 \* The provider hands the library its binding in render; a port called before it waits for it, and
 \* its children are optional, and a connection wait superseded by a later selection rejects; neither
 \* changes an action. The observation effect releases and resumes the library's binding around its reads.
+\* A3a, after A2: the machines' citations of `use-project-manager.tsx` lines moved with A2's additions
+\* above them; the code they name is unchanged, so no action or correspondence changes.
+\* A12 (app state orchestration, I21): `createProject` tells the chat store when the first chat it writes
+\* holds no message, so that chat shows empty at once. It is a call to the chat store after the operation
+\* commits, and the creating callback lists the store among its inputs; no root, row or read changes,
+\* so every action is unchanged.
+\* A3b: `ProjectLibrary` runs the three machines and the hook delegates to it. The `today` configurations
+\* keep describing the hook at 7918b118, before that wiring. A discovery `apply` reports a write it
+\* skipped at a write-stop gate, so a stop that ended while the deletes ran redoes the pass at once,
+\* as `WriteStopEnded` would (rule 3), and the listing is refetched as a redo starts, as today's skew
+\* listener did; a `discovery-required` verification, or a question that skips
+\* verification, asks for the bootstrap pass, an `Unmodelled` emission. A mutation's or replay's copy of
+\* its operation is dropped once taken; a later attempt reads the journal. A failed pass, journal read or
+\* discard rejects with the port's own error, which the library keeps. No action or correspondence changes.
+\* A4a: create, duplicate, delete, restore, adopt, repair and rename are `ProjectLibrary` commands
+\* (`runtime/project-library-commands.ts`), moved from the hook unchanged with the create-project named lock.
+\* They begin, journal, apply and abandon a mutation through the same library calls, so `MutationJournaled`,
+\* `MutationApplied` and rule 4's gate keep their correspondence. The delete's quiescence check and session
+\* close ask the registry and the chat store, outside the model; the check's chat read is not asked again
+\* after a release, as the hook's was not. No action changes.
+\* A4b: connecting a workspace, retrying it, choosing a project's directory and repairing workspace
+\* bindings are `ProjectLibrary` workspace commands (`runtime/project-library-workspace.ts`), moved from
+\* the hook in the same order; choosing a directory now also refetches the listing. The library follows the
+\* root file facade the app runtime builds, so no provider binds, releases or resumes it, and a provider
+\* unmount no longer releases a held read. The library is the listing's only writer: the hook's
+\* refetches after a mutation are the commands' own, a query refetch that moves no epoch, as before. A
+\* connection the workspace machine's root `onError` caught a defect on rejects, so the next starts afresh;
+\* the workspace machine is outside this model. A stopped library follows no facade again. No action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

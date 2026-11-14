@@ -244,6 +244,8 @@ export type RecordFile = Readonly<{
   toolChoice?: unknown;
   mode?: string;
   unread?: Readonly<Record<string, boolean>>;
+  /** Each chat's read receipt: the attention row the person last saw (PV-S8). */
+  readThrough?: Readonly<Record<string, Readonly<{ leaderEpoch: string; sequence: number }>>>;
 }>;
 
 /** The draft's text, joined, from a record file. */

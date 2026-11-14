@@ -34,11 +34,12 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useSessions } from '#hooks/use-sessions.js';
+import { useFocus, useSessions } from '#hooks/use-sessions.js';
+import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';
-import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
+import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
-import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
 
@@ -258,6 +259,12 @@ const restoreFromTrash = async (
   }
 };
 
+/** The project's session child when its close failed: it holds its slot until a reopen closes it again. */
+const selectFailedSession = (sessions: SessionsActorRef, projectId: string): ProjectSessionActorRef | undefined => {
+  const { status, refs } = sessions.getSnapshot().context;
+  return status[projectId]?.state === 'failed' ? refs[projectId] : undefined;
+};
+
 /**
  * Bind the table's verbs to their effects.
  *
@@ -268,6 +275,7 @@ const restoreFromTrash = async (
 export const useProjectRouteNoticeActions = (projectId: string | undefined): ((run: NoticeActionRun) => void) => {
   const navigate = useNavigate();
   const sessions = useSessions();
+  const { focus } = useFocus();
   const projectManager = useProjectManager();
   const retry = useContext(ProjectRouteRetryContext);
 
@@ -276,8 +284,17 @@ export const useProjectRouteNoticeActions = (projectId: string | undefined): ((r
       switch (run) {
         case 'reopen': {
           if (projectId !== undefined) {
-            sessions.send({ type: 'open', projectId });
-            sessions.send({ type: 'touch', projectId });
+            /* A session whose close failed holds its slot, and an open of it is only a touch: the reopen closes it
+             * and opens it again as one action (programme control's ruling on a failed child, a named change). */
+            const failed = selectFailedSession(sessions, projectId);
+            if (failed !== undefined) {
+              sessions.send({ type: 'close', projectId, reason: 'user' });
+              /* The person already chose Reopen on a closed project: a failed child that still lists runs (its
+               * cancellation was refused) would otherwise wait in `closing.asking` for a dialog nobody shows. */
+              failed.send({ type: 'confirmClose' });
+            }
+            /* A person's open goes through focus, which re-sends the request it kept for the project (D7, S39). */
+            focus.send({ type: 'openRequested', projectId });
           }
           return;
         }
@@ -308,7 +325,7 @@ export const useProjectRouteNoticeActions = (projectId: string | undefined): ((r
         }
       }
     },
-    [navigate, projectId, projectManager, retry, sessions],
+    [focus, navigate, projectId, projectManager, retry, sessions],
   );
 };
 

@@ -673,7 +673,8 @@ test('project and chat rows reveal their actions over a dissolving name', async 
    * The row could not read this until `2cfd558fd` repaired the lookups above. */
   expect(closeMetrics.background).toBe(closeMetrics.tabBackground);
   expect(closeMetrics.background).not.toBe('rgba(0, 0, 0, 0)');
-  expect(closeMetrics.flex).toEqual(['1', '1', '112px', '160px']);
+  /* The 112 px floor is capped at the strip's width, so a lone tab at large text sizes still fits (#1144). */
+  expect(closeMetrics.flex).toEqual(['1', '1', 'min(112px, 100%)', '160px']);
   expect(Math.max(...closeMetrics.inset) - Math.min(...closeMetrics.inset)).toBeLessThanOrEqual(1);
   await target.hover(closeButton);
   expect(await target.evaluateLocator(closeButton, (element) => getComputedStyle(element).backgroundColor)).not.toBe(

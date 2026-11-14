@@ -122,6 +122,21 @@ describe('LangfuseClient', () => {
     ).resolves.toBe('unavailable');
   });
 
+  it('should tell a found root, which Langfuse reads with a null parent, from a found child (LW24)', async () => {
+    const { identity } = await span();
+    const from = new Date('2026-10-29T00:00:00.000Z');
+    const reading = (row: Record<string, unknown>) =>
+      new LangfuseClient(target, 1000, vi.fn<typeof fetch>().mockResolvedValue(json(200, { data: [row], meta: {} })));
+
+    await expect(reading({ id: identity.spanId, parentObservationId: null }).lookup(identity, from)).resolves.toBe(
+      'present-root',
+    );
+    await expect(reading({ id: identity.spanId, parentObservationId: 'parent' }).lookup(identity, from)).resolves.toBe(
+      'present',
+    );
+    await expect(reading({ id: identity.spanId }).lookup(identity, from)).resolves.toBe('present');
+  });
+
   it('should read only generations and their metadata, and call a cut-short read partial', async () => {
     const window = { environment: 'synthetic', from: new Date(0), to: new Date(1000) };
     const tau = {

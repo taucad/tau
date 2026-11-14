@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -77,5 +78,27 @@ describe('packaged Terminal smoke', () => {
       process.platform === 'linux' ? resolvedGit.endsWith(`${bundledBin}/git`) : resolvedGit !== '',
       resolvedGit,
     ).toBe(true);
+
+    /*
+     * The packaged app commits from the Terminal where it ships a writable store: macOS, and Linux x64 through the
+     * bundled store guard. Elsewhere the store stays read-only and the commit is refused. The identity is given on the
+     * command line so the row does not depend on the signed-in account.
+     */
+    const writable = process.platform === 'darwin' || (process.platform === 'linux' && process.arch === 'x64');
+    await typeTerminalCommand(
+      session.page,
+      `printf 'packaged\\n' > committed.txt && git add committed.txt && git -c user.name=Packaged -c user.email=packaged@users.noreply.tau.new commit --quiet -m 'Packaged commit' > git-commit.txt 2>&1; printf '%s' "$?" > git-commit-exit.txt`,
+    );
+    await expect.poll(() => existsSync(join(root, 'git-commit-exit.txt')), { timeout: 30_000 }).toBe(true);
+    const commitExit = await readFile(join(root, 'git-commit-exit.txt'), 'utf8');
+    const commitOutput = await readFile(join(root, 'git-commit.txt'), 'utf8');
+    const subjects = execFileSync('git', ['-C', root, 'log', '--format=%s'], { encoding: 'utf8' });
+    if (writable) {
+      expect(commitExit, commitOutput).toBe('0');
+      expect(subjects.split('\n')[0]).toBe('Packaged commit');
+    } else {
+      expect(commitExit, commitOutput).not.toBe('0');
+      expect(subjects).not.toContain('Packaged commit');
+    }
   });
 });

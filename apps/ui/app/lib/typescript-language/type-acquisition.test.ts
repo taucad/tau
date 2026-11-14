@@ -2,6 +2,7 @@ import type { TypeScriptWorkerCommand } from '@taucad/lsp/typescript-worker/prot
 import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorDocument } from '#lib/editor-document.js';
+import type { DeclarationImport } from '#lib/typescript-language/declaration-graph.js';
 import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';
 
 const declarations = 'export declare const size: number;';
@@ -363,6 +364,154 @@ describe('TypeAcquisitionController implicit packages', () => {
       controller.dispose();
       vi.unstubAllGlobals();
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('TypeAcquisitionController network shape', () => {
+  /** A worker stand-in that also reports `/// <reference types>` directives, as the real worker does. */
+  function referencingFixture() {
+    const setExtraLib = vi.fn(async (_uri: string, _text: string) => undefined);
+    const request = vi.fn(async (command: TypeScriptWorkerCommand): Promise<DeclarationImport[] | undefined> => {
+      if (command.kind !== 'declarationImports') {
+        return undefined;
+      }
+      const info = ts.preProcessFile(command.text, true, true);
+      const at = (name: string) => {
+        const from = command.text.indexOf(name);
+        return { from, to: from + name.length };
+      };
+      return [
+        ...info.importedFiles.map((ref) => ({ name: ref.fileName, ...at(ref.fileName) })),
+        ...info.typeReferenceDirectives.map((ref) => ({
+          name: ref.fileName,
+          ...at(ref.fileName),
+          reference: 'types',
+        })),
+      ];
+    });
+    const controller = new TypeAcquisitionController({
+      client: {
+        setExtraLib,
+        request: async <T>(command: TypeScriptWorkerCommand): Promise<T> => (await request(command)) as T,
+      },
+      staticTypes: [],
+      dynamicTypes: true,
+    });
+    return { controller, setExtraLib };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('acquires independent imports concurrently, never more than six requests at once', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const held: Array<() => void> = [];
+    const fetch = vi.fn(async (input: string) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise<void>((resolve) => {
+        held.push(resolve);
+      });
+      inFlight -= 1;
+      const name = new URL(input).pathname.split('/')[1];
+      return input.endsWith('.d.ts')
+        ? new Response(declarations)
+        : new Response('', { headers: { 'X-TypeScript-Types': `/${name}@1/index.d.ts` } });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const { controller, setExtraLib } = referencingFixture();
+    const packages = Array.from({ length: 10 }, (_, index) => `pkg${index}`);
+    try {
+      await scan(controller, packages.map((name) => `import '${name}';`).join('\n'));
+      // Serial acquisition holds one request open at a time; ten independent imports may not wait in line.
+      expect(inFlight).toBe(6);
+      while (held.length > 0) {
+        held.shift()?.();
+        // oxlint-disable-next-line eslint/no-await-in-loop -- release one held response per tick.
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(peak).toBe(6);
+      for (const name of packages) {
+        expect(fetch).toHaveBeenCalledWith(`https://esm.sh/${name}`, expect.any(Object));
+      }
+      expect(setExtraLib).toHaveBeenCalledTimes(packages.length);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('follows a URL types reference as a URL, never as a malformed @types package', async () => {
+    const dependency = 'https://esm.sh/@types/dep@1.0.0/index.d.ts';
+    const fetch = vi.fn(async (input: string) => {
+      if (input === 'https://esm.sh/pkg') {
+        return new Response('', { headers: { 'X-TypeScript-Types': '/pkg@1/index.d.ts' } });
+      }
+      if (input === 'https://esm.sh/pkg@1/index.d.ts') {
+        return new Response(`/// <reference types="${dependency}" />\nexport declare const size: number;`);
+      }
+      if (input === dependency) {
+        return new Response('declare const dep: number;');
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const { controller, setExtraLib } = referencingFixture();
+    try {
+      await scan(controller, "import 'pkg';");
+      const requested = fetch.mock.calls.map(([input]) => input);
+      expect(requested.filter((input) => input.includes('@types/https'))).toEqual([]);
+      expect(requested).toContain(dependency);
+      expect(setExtraLib).toHaveBeenCalledWith(
+        expect.stringContaining('/node_modules/.tau-types/'),
+        'declare const dep: number;',
+      );
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('maps a scoped bare types reference to its @types package', async () => {
+    const fetch = vi.fn(async (input: string) =>
+      input.endsWith('.d.ts')
+        ? new Response(declarations)
+        : new Response('', { headers: { 'X-TypeScript-Types': '/@types/scope__lib@1/index.d.ts' } }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const { controller } = referencingFixture();
+    try {
+      await scan(controller, '/// <reference types="@scope/lib" />\nexport {};');
+      expect(fetch).toHaveBeenCalledWith('https://esm.sh/@types/scope__lib', expect.any(Object));
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  it('requests a declaration shared by two packages once', async () => {
+    const shared = 'https://esm.sh/shared@1/index.d.ts';
+    const fetch = vi.fn(async (input: string) => {
+      if (input === 'https://esm.sh/a' || input === 'https://esm.sh/b') {
+        const name = input.slice(-1);
+        return new Response('', { headers: { 'X-TypeScript-Types': `/${name}@1/index.d.ts` } });
+      }
+      if (input === shared) {
+        return new Response('export type Shared = number;');
+      }
+      return new Response(`export type { Shared } from '${shared}';`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    const { controller } = referencingFixture();
+    try {
+      await scan(controller, "import 'a'; import 'b';");
+      expect(fetch.mock.calls.filter(([input]) => input === shared)).toHaveLength(1);
+    } finally {
+      controller.dispose();
     }
   });
 });

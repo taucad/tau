@@ -24,7 +24,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Skeleton } from '@taucad/ui/components/skeleton';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitStart } from '#hooks/use-wait-start.js';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -307,7 +308,8 @@ function WhereYouAre(): React.JSX.Element {
     <section aria-label='Where you are' className='flex shrink-0 flex-col gap-1 border-b bg-sidebar px-3 py-1.5'>
       <div data-slot='where-line' className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
         {isUnknown ? (
-          <Skeleton aria-hidden className='h-6 w-24 rounded-full' />
+          /* The chip's own box, empty until the line is located: nothing is drawn for a branch nobody knows yet. */
+          <span data-slot='branch-chip-pending' aria-hidden className='h-6 w-24' />
         ) : (
           <BranchChip projectId={projectId} branch={line.name} isBranchable={canBranch} />
         )}
@@ -327,6 +329,8 @@ function WhereYouAre(): React.JSX.Element {
         role='status'
         aria-label='History status'
         aria-busy={facts.mark === 'running' || sentence === 'Loading history…' ? true : undefined}
+        /* The History card's indicator is the one voice of a History wait (one announcement per group). */
+        aria-live={sentence === 'Loading history…' ? 'off' : undefined}
         className='flex items-start gap-1.5 text-xs'
       >
         <StatusIcon
@@ -1465,26 +1469,6 @@ function HistoryList(): React.JSX.Element {
 }
 
 /**
- * Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one
- * *Loading history…* sentence, never *No revisions yet*.
- *
- * @returns The loading geometry.
- */
-function HistoryLoading(): React.JSX.Element {
-  return (
-    <div role='status' aria-label='Loading history' aria-busy='true' className='flex flex-col gap-2 px-2 py-1'>
-      {[0, 1, 2].map((row) => (
-        <div key={row} className='flex items-center gap-2'>
-          <Skeleton aria-hidden className='size-2 rounded-full' />
-          <Skeleton aria-hidden className='h-4 flex-1' />
-          <Skeleton aria-hidden className='h-4 w-16' />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
  * The marker text the worker materialized, by revision and path.
  *
  * *Open* is a request, not a render: `resolution.machine` reads the three terms
@@ -1602,7 +1586,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const { projectId, projectRef } = useProject();
   const project = useSelector(projectRef, (snapshot) => snapshot.context.project);
   const { updateProject } = useProjectManager();
-  const { revisions, line, isLoading } = useRevisions();
+  const { revisions, line, isLoading, retry: retryHistory } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const projectRole = useProjectRole();
@@ -1614,6 +1598,13 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const conflictTexts = useConflictTexts();
   /* M2 (I6): an unlocated line is loading, never an empty History. */
   const isHistoryLoading = isLoading || line.kind === 'unknown';
+  /* Remembered entries are content: the wait is shown only while History has none to show. */
+  const isHistoryWaiting = isHistoryLoading && revisions.length === 0;
+  const historyWait = useWaitStart(isHistoryWaiting);
+  /* S20 (I6): an empty History is never on screen with *Loading history…*, so a wait that ends empty ends its
+     indicator at once instead of holding it; a new key gives an idle slot. */
+  const isHistoryEmpty = !isHistoryWaiting && revisions.length === 0;
+  const historySlot = useRef<HTMLSpanElement>(null);
 
   return (
     <div data-slot='revisions-panel-body' className='@container flex size-full min-h-0 flex-col bg-sidebar'>
@@ -1652,10 +1643,43 @@ export function RevisionsPanelBody(): React.JSX.Element {
 
         {/* The pane's host (the Workbench tab, the phone surface) is already the History landmark, so this card is a
             group of that name (#1878 renamed the pane to History). */}
-        <RevisionRegion id='revision-history-heading' title='History' isLandmark={false}>
-          {isHistoryLoading && revisions.length === 0 ? (
-            <HistoryLoading />
-          ) : revisions.length === 0 ? (
+        <RevisionRegion
+          id='revision-history-heading'
+          title='History'
+          isLandmark={false}
+          /* Loading is not empty (DESIGN, I6, S20): the card itself is busy and its body empty, never *No history yet*,
+             and nothing stands for rows that have not arrived (loading states UX blueprint, U17). */
+          isBusy={isHistoryWaiting}
+          /* The header's trailing slot is always rendered, so the indicator never changes the header's height. It is the
+             wait's one voice: live for a History a person opened (the strip keeps its *Loading history…* quiet), and
+             seen but not announced for one restored with the route open. Focus lands on the slot after Retry. */
+          action={
+            <span
+              ref={historySlot}
+              tabIndex={-1}
+              className='inline-flex rounded-md outline-none focus-visible:focus-outline'
+            >
+              <WaitIndicator
+                key={isHistoryEmpty ? 'empty' : 'history'}
+                active={isHistoryWaiting}
+                label='Loading history'
+                slowLabel='Still loading history'
+                startedAt={historyWait.startedAt}
+                live={historyWait.isGesture}
+                onRetry={
+                  retryHistory === undefined
+                    ? undefined
+                    : () => {
+                        historyWait.restart();
+                        retryHistory();
+                        historySlot.current?.focus();
+                      }
+                }
+              />
+            </span>
+          }
+        >
+          {isHistoryWaiting ? null : revisions.length === 0 ? (
             <PanelEmptyState
               icon={History}
               title='No history yet'

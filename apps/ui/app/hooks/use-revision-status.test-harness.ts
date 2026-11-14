@@ -96,6 +96,10 @@ export const revisionStatusHarness = {
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
   comparisonRead: undefined as (() => Promise<RevisionFileComparison>) | undefined,
+  /** Answers a read of what changed since a revision (Compare with the current files), so a row can hold it pending. */
+  diffSinceRead: undefined as (() => Promise<readonly RevisionDiffEntry[]>) | undefined,
+  /** Answers a branch's log read in place of its rows, so a row can hold the read pending. */
+  logRead: undefined as (() => Promise<readonly RevisionRow[]>) | undefined,
   /** D27: which role the account holds on this project, or none at all. */
   role: undefined as ProjectAccessRole | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
@@ -148,6 +152,8 @@ export const revisionStatusHarness = {
     this.comparison = emptyComparison();
     this.comparisonError = undefined;
     this.comparisonRead = undefined;
+    this.diffSinceRead = undefined;
+    this.logRead = undefined;
     this.role = undefined;
     this.toasts.clear();
     for (const command of Object.values(this.commands)) {
@@ -234,6 +240,9 @@ export const revisionStatusMock = (): Record<string, unknown> => {
         return found === undefined ? [] : [found];
       }
       revisionStatusHarness.logRequests.push(request?.branch ?? '');
+      if (revisionStatusHarness.logRead !== undefined) {
+        return revisionStatusHarness.logRead();
+      }
       const rows =
         (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
         revisionStatusHarness.rows;
@@ -266,6 +275,9 @@ export const revisionStatusMock = (): Record<string, unknown> => {
             ? revisionId
             : `${from}..${revisionId}`,
       );
+      if (options?.against === 'checkout' && revisionStatusHarness.diffSinceRead !== undefined) {
+        return revisionStatusHarness.diffSinceRead();
+      }
       return revisionStatusHarness.diff;
     },
     compare: async (revisionId: string, path: string, options?: { against?: 'checkout' }) => {

@@ -29,7 +29,7 @@
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import { createCallbackLogic, matchesState } from 'xstate';
+import { createActor, createCallbackLogic, matchesState } from 'xstate';
 import type { AnyMachineSnapshot, EventObject, StateValue } from 'xstate';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import {
@@ -38,8 +38,12 @@ import {
   projectSessionMachine,
 } from '#machines/project-session.machine.js';
 import type { ProjectSessionMachineEvent, ProjectSessionRegion } from '#machines/project-session.machine.js';
+import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 const regions: readonly ProjectSessionRegion[] = ['views', 'runtime', 'agentHost', 'compute'];
+
+/** A file manager's stand-in: the session keeps the ref it is told and never reads it. */
+const fileManagerStandIn = createCallbackLogic(() => undefined) as unknown as typeof fileManagerMachine;
 
 /** One or more samples of every event type; the mapped type fails to compile when the union gains a type. */
 type Samples = {
@@ -54,6 +58,11 @@ const samples: Samples = {
   confirmClose: [{ type: 'confirmClose' }],
   cancelClose: [{ type: 'cancelClose' }],
   childReady: regions.map((region) => ({ type: 'childReady', region })),
+  /* The child's report carries the file manager it built; the session only keeps the ref, so a stand-in serves. */
+  fileManagerChanged: [
+    { type: 'fileManagerChanged', fileManagerRef: createActor(fileManagerStandIn) },
+    { type: 'fileManagerChanged', fileManagerRef: undefined },
+  ],
   childFailed: [{ type: 'childFailed', region: 'runtime', reason: 'refused' }],
   projectedRunsChanged: [
     { type: 'projectedRunsChanged', runs: ['chat_1'], stoppableRuns: ['chat_1'] },

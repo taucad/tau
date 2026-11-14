@@ -3,7 +3,7 @@
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 
-import type { ProjectRootRegistry } from '#main/project-roots.js';
+import type { ProjectRootRegistry } from '@taucad/desktop-services-host/project-roots';
 import type { QuickLookPathRequest, QuickLookUsdzRequest } from '#shared/quick-look.js';
 
 const staleSessionAgeMilliseconds = 24 * 60 * 60 * 1000;

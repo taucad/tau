@@ -12,6 +12,10 @@ import type { ModelComponentActionTarget } from '@taucad/workbench-panes/compone
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { PanelState } from '@taucad/ui-core/types/editor.types';
 import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
+import { createActor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import type { editorMachine } from '#machines/editor.machine.js';
+import { createLayoutBridgeLogic, createProjectShellPort } from '#runtime/project-runtime.layout.js';
 
 /*
  * A part-menu reveal opens a pane that is a cold lazy chunk on a phone. The editor emits the reveal once, before that
@@ -47,6 +51,9 @@ const editor = vi.hoisted(() => ({
   handlers: new Map<string, Set<(event: unknown) => void>>(),
   emitted: [] as string[],
   snapshot: undefined as unknown as Snapshot,
+  /** The project runtime's shell port and bridge: the editor's reveals reach the workspace through them (A8b). */
+  runtime: undefined as unknown,
+  stop: undefined as (() => void) | undefined,
 }));
 
 const emitByCommand: Record<string, string> = {
@@ -106,7 +113,13 @@ const editorRef = {
 };
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef, mainEntryPath: 'main.ts', projectId: 'project-1', viewRecords: new Map() }),
+  useProject: () => ({
+    editorRef,
+    mainEntryPath: 'main.ts',
+    projectId: 'project-1',
+    viewRecords: new Map(),
+    projectRuntime: editor.runtime,
+  }),
 }));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: () => 'ready',
@@ -117,6 +130,7 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),
   useLocation: () => ({ key: 'initial', search: '', state: undefined }),
+  useNavigationType: () => 'PUSH',
 }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => true }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({
@@ -269,6 +283,15 @@ const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project
 const { ChatInterfaceMobile } = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');
 
 const renderShell = (): void => {
+  const shell = createProjectShellPort();
+  const bridge = createActor(createLayoutBridgeLogic({ shell, host: undefined }), {
+    input: { editor: editorRef as unknown as ActorRefFrom<typeof editorMachine>, layout: undefined },
+  });
+  bridge.start();
+  editor.runtime = { shell, layout: undefined, actor: { getSnapshot: () => ({ context: { layoutRef: undefined } }) } };
+  editor.stop = () => {
+    bridge.stop();
+  };
   render(
     <KeyboardProvider>
       <TooltipProvider>
@@ -281,6 +304,7 @@ const renderShell = (): void => {
 };
 
 beforeEach(() => {
+  editor.stop?.();
   editor.listeners.clear();
   editor.emitted.length = 0;
   editor.snapshot = {

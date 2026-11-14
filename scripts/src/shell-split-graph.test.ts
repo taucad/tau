@@ -14,8 +14,9 @@ import { cacheViolations, isConformanceTarget } from '#shell-evidence.js';
  * the private app library `apps/libs/desktop-terminal` that the desktop app bundles. Every section is in the
  * project-level form: the closure each library's rows test, private, bundled by its one owner. The service reaches the
  * sandbox only through its stateless `./shell/*` subpaths, so `@taucad/host` ships neither the SRT provider nor its
- * native dependencies (blueprint F2.7). The Terminal concern reaches only the service and the wire; the desktop keeps
- * its services host, its frame routing and the unchanged rows that drive them (decision D4).
+ * native dependencies (blueprint F2.7). The Terminal concern reaches only the service and the wire; the services host,
+ * its frame routing and the unchanged rows that drive them (decision D4) live in `apps/libs/desktop-services-host`
+ * since the desktop split's DS-2, which `scripts/src/desktop-split-graph.test.ts` guards.
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -88,8 +89,8 @@ const desktopTerminalForbiddenImports = [
   '#shared',
 ];
 
-/** The desktop Terminal rows that stay in `desktop`, unchanged (decision D4). */
-const desktopTerminalConformance = 'apps/desktop/src/tau/services-host.terminal.conformance.test.ts';
+/** The desktop Terminal's real rows, unchanged (decision D4), in the services host library since the desktop split's DS-2. */
+const desktopTerminalConformance = 'apps/libs/desktop-services-host/src/services-host.terminal.conformance.test.ts';
 
 /** The workspace projects one project depends on directly. */
 const directDependencies = (projectGraphValue: ProjectGraph, project: string): readonly string[] =>
@@ -277,14 +278,15 @@ describe('shell split graph', () => {
     expect(globSync('apps/desktop/src/tau/services-host.terminal.ts', { cwd: root })).toEqual([]);
   });
 
-  it('keeps the desktop Terminal rows and their target in desktop', async () => {
+  it('keeps the desktop Terminal rows and their target with the services host', async () => {
     expect(globSync(desktopTerminalConformance, { cwd: root })).toEqual([desktopTerminalConformance]);
-    expect(specifiers(read(desktopTerminalConformance))).toContain('#tau/services-host.impl.js');
+    expect(specifiers(read(desktopTerminalConformance))).toContain('#services-host.impl.js');
     const graph = await projectGraph();
-    const target = graph.nodes['desktop']?.data.targets?.['test:terminal-conformance'];
+    expect(graph.nodes['desktop']?.data.targets).not.toHaveProperty('test:terminal-conformance');
+    const target = graph.nodes['desktop-services-host']?.data.targets?.['test:terminal-conformance'];
     const options = target?.options as { command?: string } | undefined;
     expect(target?.cache).toBe(false);
-    expect(options?.command).toContain('src/tau/services-host.terminal.conformance.test.ts');
+    expect(options?.command).toContain('src/services-host.terminal.conformance.test.ts');
   });
 
   it('imports only the shell service and the Terminal wire from the concern', () => {
@@ -347,14 +349,19 @@ describe('shell split graph', () => {
   });
 
   it('bundles the Terminal concern into the desktop app from source', async () => {
-    expect(directDependencies(await projectGraph(), 'desktop')).toContain('desktop-terminal');
-    const manifest = JSON.parse(read('apps/desktop/package.json')) as { dependencies?: Record<string, string> };
+    // The services host composes the concern (DS-2), and the app bundles both.
+    expect(directDependencies(await projectGraph(), 'desktop-services-host')).toContain('desktop-terminal');
+    const manifest = JSON.parse(read('apps/libs/desktop-services-host/package.json')) as {
+      dependencies?: Record<string, string>;
+    };
     expect(manifest.dependencies?.['@taucad/desktop-terminal']).toBe('workspace:*');
     const bundled = /const bundledWorkspaceDependencies = \[(?<list>[^\]]*)\]/u.exec(
       read('apps/desktop/electron.vite.config.ts'),
     )?.groups?.['list'];
     expect(bundled).toContain("'@taucad/desktop-terminal'");
-    expect(specifiers(read('apps/desktop/src/tau/services-host.impl.ts'))).toContain('@taucad/desktop-terminal');
+    expect(specifiers(read('apps/libs/desktop-services-host/src/services-host.impl.ts'))).toContain(
+      '@taucad/desktop-terminal',
+    );
   });
 
   it('lets no shell library depend on the host or the desktop app', async () => {
@@ -381,8 +388,8 @@ describe('shell split graph', () => {
 
     expect(targets.map(({ target }) => target).toSorted()).toEqual(
       expect.arrayContaining([
+        'desktop-services-host:test:terminal-conformance',
         'desktop-terminal:test:terminal-conformance',
-        'desktop:test:terminal-conformance',
         'host:test:shell-conformance',
         'host:test:shell-qualification',
         'native-process-core:test:native-sandbox-integration',

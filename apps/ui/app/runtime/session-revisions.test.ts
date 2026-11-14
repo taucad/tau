@@ -14,7 +14,7 @@ import { guardActors } from '@taucad/xstate-testing/inspect';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionClientTestApi } from '#hooks/use-revision-status.js';
-import type { FlushPhase } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#runtime/environment.js';
 import { revisionUserActor } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -481,7 +481,7 @@ describe('session revisions', () => {
     expect(guard.take()).toEqual([]);
   });
 
-  it("should author the actor with the project's GitHub no-reply identity once it is linked (D33)", () => {
+  it("should send the project's GitHub no-reply identity beside the actor once it is linked (D33, I3)", () => {
     const guard = guardActors();
     const log: ClientLog = [];
     const client = createFakeClient('a', log);
@@ -501,7 +501,8 @@ describe('session revisions', () => {
 
     expect(sent(log, 'a', 'setActor').at(-1)).toEqual({
       command: 'setActor',
-      actor: { kind: 'user', id: 'usr_1', name: 'ada', email: '1+ada@users.noreply.github.com' },
+      actor: { kind: 'user', id: 'usr_1', name: 'Ada' },
+      commitAuthor: { name: 'ada', email: '1+ada@users.noreply.github.com' },
     });
     session.stop();
     expect(guard.take()).toEqual([]);

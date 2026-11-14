@@ -578,18 +578,21 @@ describe('retainPreviousAssets', () => {
   });
 });
 
-describe('runtime bundles (PicoGK and the C# language service)', () => {
-  const oldHost = `picogk-browser/${'a'.repeat(64)}`;
-  const newHost = `picogk-browser/${'b'.repeat(64)}`;
+describe('runtime bundles (the C# language service)', () => {
+  const oldHost = `csharp-language/${'a'.repeat(64)}`;
+  const newHost = `csharp-language/${'b'.repeat(64)}`;
   const language = `csharp-language/${'c'.repeat(64)}`;
+  const picogk = `picogk-browser/${'d'.repeat(64)}`;
   /** The store's file name for some bytes: their integrity, safe as a file name. */
   const storeNameOf = (bytes: string): string => integrityOf(bytes).replaceAll('/', '_').replaceAll('+', '-');
 
   it('should accept a file under a bundle content address and refuse any other path under its root', () => {
     expect(isServableRuntimePath(`${oldHost}/_framework/dotnet.js`)).toBe(true);
     expect(isServableRuntimePath(`${language}/manifest.json`)).toBe(true);
-    expect(isServableRuntimePath('picogk-browser/unprepared/_framework/dotnet.js')).toBe(false);
-    expect(isServableRuntimePath(`picogk-browser/${'A'.repeat(64)}/dotnet.js`)).toBe(false);
+    expect(isServableRuntimePath('csharp-language/unprepared/_framework/dotnet.js')).toBe(false);
+    expect(isServableRuntimePath(`csharp-language/${'A'.repeat(64)}/dotnet.js`)).toBe(false);
+    // PicoGK moved to the dependency hosts: a deploy neither serves nor retains it.
+    expect(isServableRuntimePath(`${picogk}/_framework/dotnet.js`)).toBe(false);
     expect(isServableRuntimePath(oldHost)).toBe(false);
     expect(isServableRuntimePath(`${oldHost}/../escape.js`)).toBe(false);
     expect(isServableRuntimePath(`other-runtime/${'a'.repeat(64)}/x.js`)).toBe(false);
@@ -597,7 +600,7 @@ describe('runtime bundles (PicoGK and the C# language service)', () => {
     expect(isServableAssetPath(`${oldHost}/_framework/dotnet.js`)).toBe(false);
   });
 
-  it('should keep the previous PicoGK host when a deploy changes it, so a tab loaded before can still start it', async () => {
+  it('should keep the previous C# bundle when a deploy changes it, so a tab loaded before can still start it', async () => {
     const previous = await createClient({
       'assets/app-OLD1.js': 'app-old',
       [`${oldHost}/_framework/dotnet.js`]: 'host-old',
@@ -630,9 +633,9 @@ describe('runtime bundles (PicoGK and the C# language service)', () => {
     ]);
     const served = JSON.parse(await readFile(join(next, servedRuntimesIndexFileName), 'utf8')) as ServedAssetsIndex;
     expect(served.assets.map((asset) => [asset.path, asset.generation])).toStrictEqual([
-      [`${language}/manifest.json`, 0],
       [`${oldHost}/_framework/dotnet.js`, 1],
       [`${newHost}/_framework/dotnet.js`, 0],
+      [`${language}/manifest.json`, 0],
     ]);
   });
 
@@ -684,6 +687,29 @@ describe('runtime bundles (PicoGK and the C# language service)', () => {
     expect(live.requests).toContain(`${oldHost}/_framework/dotnet.js`);
     expect(result.storedBytes).toBe(0);
     expect(await readFile(join(store, storeNameOf('host-old')), 'utf8')).toBe('host-old');
+  });
+  it('should drop a retired PicoGK host a live index still lists, rather than refuse or retain it', async () => {
+    const live = await startLiveDeploy(
+      {
+        [`${picogk}/_framework/dotnet.js`]: 'picogk-old',
+        [`${language}/manifest.json`]: 'language',
+        [servedRuntimesIndexFileName]: JSON.stringify(
+          indexOf([
+            { path: `${picogk}/_framework/dotnet.js`, integrity: integrityOf('picogk-old'), generation: 1 },
+            { path: `${language}/manifest.json`, integrity: integrityOf('language'), generation: 0 },
+          ]),
+        ),
+      },
+      indexOf([]),
+    );
+    const next = await createClient({ 'assets/app-NEW1.js': 'app-new', [`${language}/manifest.json`]: 'language' });
+
+    await retainPreviousAssets({ clientDirectory: next, origin: live.origin, now });
+
+    expect(live.requests).not.toContain(`${picogk}/_framework/dotnet.js`);
+    await expect(readFile(join(next, `${picogk}/_framework/dotnet.js`), 'utf8')).rejects.toThrow(/ENOENT/u);
+    const served = JSON.parse(await readFile(join(next, servedRuntimesIndexFileName), 'utf8')) as ServedAssetsIndex;
+    expect(served.assets.map((asset) => asset.path)).toStrictEqual([`${language}/manifest.json`]);
   });
 });
 

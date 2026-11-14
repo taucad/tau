@@ -1,6 +1,6 @@
 import { createActor, createCallbackLogic, setup, types } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, EventObject } from 'xstate';
-import type { StreamingMachine } from '#shared/machine-shutdown.js';
+import type { StreamingMachine } from '@taucad/types/desktop';
 
 /** One process-lifetime identity; monotonically numbered attempts are never reused. */
 export type ShutdownMachineInput = { readonly identity: string };

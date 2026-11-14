@@ -15,7 +15,7 @@ export const ephemeralKernelOptions: LazyKernelOptionsFactory = async () => {
 
 /**
  * Bytes a memory-mounted preview sends with its first render. The ephemeral utility serves its own
- * empty memory filesystem (`apps/desktop/src/tau/kernel-host.ts`) and cannot see the renderer's
+ * empty memory filesystem (`apps/libs/desktop-services-host/src/kernel-host.ts`) and cannot see the renderer's
  * mount, so the preview's bytes travel inline, as every other ephemeral consumer sends them.
  * @param files - The preview's root-relative files.
  * @returns The stage map for the initial render.

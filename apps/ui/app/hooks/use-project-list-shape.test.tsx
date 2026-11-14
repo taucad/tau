@@ -37,6 +37,6 @@ describe('useProjectListShape', () => {
 
     const { result } = renderHook(() => useProjectListShape());
 
-    expect(result.current).toEqual({ count: 1 });
+    expect(result.current).toEqual({ count: 1, projects: [] });
   });
 });

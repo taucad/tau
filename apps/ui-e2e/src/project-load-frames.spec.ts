@@ -17,6 +17,7 @@ import {
   readDelayedRequests,
   readProjectLoad,
   firstDelayedRead,
+  readLaneBordersNow,
   readWorkerDeliveries,
   readWorkerReads,
 } from '#support/home-load-recorder.js';
@@ -46,6 +47,8 @@ type ViewportName = keyof typeof viewports;
 
 /** The workspace chunk `loadProjectWorkspace()` imports. */
 const workspaceChunk = String.raw`/assets/project-live-sessions-[\w-]+\.js(?:\?|$)`;
+/** The agent host worker's script (`browser-agent-worker.ts`): every transcript answer comes from the host it boots. */
+const agentHostWorker = String.raw`/assets/agent-host\.worker-[\w-]+\.js(?:\?|$)`;
 /** U1: 1.5 s can pass on today's code. Milliseconds. */
 const chunkDelay = 3000;
 /** How late a delayed worker read answers. Milliseconds. */
@@ -105,7 +108,7 @@ const keepRecord = async (name: string, extra: Readonly<Record<string, unknown>>
  */
 const seedProjects = async (
   viewport: ViewportName,
-  options: { readonly laneBorders?: boolean } = {},
+  options: { readonly laneBorders?: boolean; readonly watchText?: string } = {},
 ): Promise<{ readonly path: string; readonly chatId: string }> => {
   await target.addCookies([
     { domain: 'localhost', name: 'tau-cookie-consent', path: '/', value: cookieValue('declined') },
@@ -157,8 +160,8 @@ const seedTranscriptWithTray = async (chatId: string): Promise<void> => {
 };
 
 /**
- * The transcript's event-log listing for one chat: the page's own read that the transcript waits for. (The
- * transcript's `read` page stream now runs in the agent host, past the page's ports, and only tails the log.)
+ * The transcript's event-log listing for one chat. U10 holds it beside the tray file; it does not hold the
+ * transcript itself, which waits for the agent host's read answer (U7 holds the host).
  */
 const transcriptRead = (chatId: string): WorkerReadDelay => ({
   method: 'readdir',
@@ -260,34 +263,36 @@ for (const viewport of ['wide', 'phone'] as const) {
   });
 }
 
-knownDefect('U22: a click on a project row from Home removes the sidebar wrapper zero times', {
-  artifact: 'u22-wide',
-  expectedFailure: true,
-  budget: loadBudget,
-  measure: async () => {
-    await seedProjects('wide');
-    await target.navigate('/');
-    await target.expectVisible(composer, 60_000);
-    await target.delay(settleWindow);
-    const row = selectors.getByRole('link', { name: projectNames.a }).first();
-    await target.expectVisible(row, 60_000);
-    await markProjectLoad('click');
-    await target.click(row);
-    await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 60_000);
-    await settleProject();
-    const record = await keepRecord('u22-wide');
-    const click = record.marks.find((mark) => mark.name === 'click');
-    precondition(click !== undefined, 'U22: the click was not marked');
-    return { record, click: click! };
-  },
-  assert: ({ record, click }) => {
-    const removals = record.wrapperRemovals.filter((removal) => removal.t >= click.t);
-    expect(
-      removals,
-      `U22: after the click in ${describeFrame(click)}, [data-slot=sidebar-wrapper] was removed before ${describeFrames(removals)}`,
-    ).toEqual([]);
-  },
-});
+for (const viewport of ['wide', 'phone'] as const) {
+  knownDefect(`U22: a click on a project row from Home removes the sidebar wrapper zero times at ${viewport} size`, {
+    artifact: `u22-${viewport}`,
+    expectedFailure: true,
+    budget: loadBudget,
+    measure: async () => {
+      await seedProjects(viewport);
+      await target.navigate('/');
+      await target.expectVisible(composer, 60_000);
+      await target.delay(settleWindow);
+      const row = selectors.getByRole('link', { name: projectNames.a }).first();
+      await target.expectVisible(row, 60_000);
+      await markProjectLoad('click');
+      await target.click(row);
+      await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 60_000);
+      await settleProject();
+      const record = await keepRecord(`u22-${viewport}`);
+      const click = record.marks.find((mark) => mark.name === 'click');
+      precondition(click !== undefined, 'U22: the click was not marked');
+      return { record, click: click! };
+    },
+    assert: ({ record, click }) => {
+      const removals = record.wrapperRemovals.filter((removal) => removal.t >= click.t);
+      expect(
+        removals,
+        `U22: after the click in ${describeFrame(click)}, [data-slot=sidebar-wrapper] was removed before ${describeFrames(removals)}`,
+      ).toEqual([]);
+    },
+  });
+}
 
 knownDefect(
   'U3: a direct load with the sidebar open has the wrapper and sidebar in the server HTML and in every frame',
@@ -349,11 +354,10 @@ knownDefect('U4: the workspace placeholder node is created at most once per load
  */
 const extraLaneBorders = (
   record: ProjectLoadRecord,
-  contentLeft: number,
-  windowWidth: number,
+  settled: readonly number[],
+  bounds: { readonly contentLeft: number; readonly windowWidth: number },
 ): Array<ProjectLoadFrame & { readonly xs: readonly number[] }> => {
-  const settled = record.laneBorders.at(-1)?.xs ?? [];
-  const isInside = (x: number): boolean => x > contentLeft + 2 && x < windowWidth - 2;
+  const isInside = (x: number): boolean => x > bounds.contentLeft + 2 && x < bounds.windowWidth - 2;
   const isSettled = (x: number): boolean => settled.some((known) => Math.abs(known - x) <= 2);
   return record.laneBorders
     .map((frame) => ({ ...frame, xs: frame.xs.filter((x) => isInside(x) && !isSettled(x)) }))
@@ -382,15 +386,21 @@ knownDefect(
       const contentLeft = await target.evaluate(() =>
         Math.round(document.querySelector('[data-slot="sidebar-container"]')?.getBoundingClientRect().right ?? 0),
       );
-      const record = await keepRecord('u5-wide', { contentLeft });
-      precondition(record.laneBorders.length > 0, 'U5: the settled page drew no lane border to compare frames with');
-      return { record, contentLeft };
+      /* The settled reference is the page as it stands now, not the last frame the record kept. */
+      const settled = await readLaneBordersNow();
+      const record = await keepRecord('u5-wide', { contentLeft, settled });
+      precondition(settled.length > 0, 'U5: the settled page drew no lane border to compare frames with');
+      precondition(
+        record.dropped['laneBorders'] === undefined,
+        `U5: the record dropped ${String(record.dropped['laneBorders'])} lane border changes past its frame limit`,
+      );
+      return { record, settled, contentLeft };
     },
-    assert: ({ record, contentLeft }) => {
-      const extra = extraLaneBorders(record, contentLeft, viewports.wide.width);
+    assert: ({ record, settled, contentLeft }) => {
+      const extra = extraLaneBorders(record, settled, { contentLeft, windowWidth: viewports.wide.width });
       expect(
         extra.slice(0, 5).map((frame) => `${describeFrame(frame)}: x ${frame.xs.join(', ')}`),
-        `U5: a workbench-closed project painted a lane border the settled page lacks (settled: x ${(record.laneBorders.at(-1)?.xs ?? []).join(', ')}) in ${extra.length} frames`,
+        `U5: a workbench-closed project painted a lane border the settled page lacks (settled: x ${settled.join(', ')}) in ${extra.length} frames`,
       ).toEqual([]);
     },
   },
@@ -421,20 +431,29 @@ knownDefect('U6: no sidebar project row moves on a reload with the chat listing 
   },
 });
 
-knownDefect('U7: the largest contentful paint is not the empty-chat state with the transcript read 3 s late', {
+knownDefect('U7: the largest contentful paint is not the empty-chat state with the agent host 3 s late', {
   artifact: 'u7-wide',
   expectedFailure: true,
   budget: turnBudget,
   measure: async () => {
-    const { chatId } = await seedProjects('wide');
+    const { chatId } = await seedProjects('wide', { watchText: finalReply });
     await seedTranscriptWithTray(chatId);
-    await armWorkerReadDelay(transcriptReads(chatId));
+    /* The transcript is shown only once the agent host answers its read, so holding the host's script holds it. */
+    await delayRequests(agentHostWorker, readDelay);
     await target.reload();
     await settleProject();
     await target.delay(readDelay);
     await target.expectVisible(selectors.getByText(finalReply, { exact: true }), 60_000);
     const record = await keepRecord('u7-wide');
-    await requireReadDelayed('U7', transcriptRead(chatId));
+    const held = await readDelayedRequests();
+    precondition(
+      held.some((url) => new RegExp(agentHostWorker, 'u').test(url)),
+      'U7: the agent host worker was never delayed',
+    );
+    precondition(
+      record.textFirstFrame !== undefined && record.textFirstFrame.t >= readDelay,
+      `U7: the transcript was shown at ${String(record.textFirstFrame?.t)} ms, before the ${readDelay} ms hold could end`,
+    );
     precondition(record.largestPaints.length > 0, 'U7: no largest-contentful-paint entry');
     return record;
   },

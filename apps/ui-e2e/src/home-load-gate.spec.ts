@@ -323,9 +323,8 @@ knownDefect(
 /*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
- * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
- * `cloudDefectRow` `expectedFailure` to `false`. Each is a plain test: only its defect assertion's failure is
- * recorded as the standing defect, and any other fault, or that assertion passing, fails the row.
+ * (`#support/cloud-stand-ins.js`). Side lane N1 fixed both defects and set each `cloudDefectRow`'s
+ * `expectedFailure` to `false`, so each now passes as a guard and any fault, its defect assertion among them, fails it.
  */
 const cloud = cloudStandInCommands(target.commands);
 const cloudLoadTier = await cloud.uiIsCloudLoadTier();

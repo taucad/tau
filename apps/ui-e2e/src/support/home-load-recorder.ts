@@ -364,10 +364,14 @@ export type ProjectLoadRecord = {
   readonly firstContentfulPaint: number | undefined;
   /** Named moments the spec marked in the page, such as a click. */
   readonly marks: ReadonlyArray<ProjectLoadFrame & { readonly name: string }>;
+  /** The first frame the document's text held the watched text (`watchText`), if one was given and it ever did. */
+  readonly textFirstFrame: ProjectLoadFrame | undefined;
+  /** Entries each list dropped past the frame limit, by the list's name. A list that dropped any is incomplete. */
+  readonly dropped: Readonly<Record<string, number>>;
 };
 
 type ProjectLoadGlobal = typeof globalThis & {
-  __TAU_PROJECT_LOAD__: ProjectLoadRecord & { mark(name: string): void };
+  __TAU_PROJECT_LOAD__: ProjectLoadRecord & { mark(name: string): void; scanLaneBorders(): number[] };
 };
 
 /** How many frames of one kind a record keeps; the count past it is still right in `frames`. */
@@ -384,6 +388,7 @@ export const recordProjectLoad = (input: {
   readonly probe: ProjectLoadProbe;
   readonly limit: number;
   readonly laneBorders: boolean;
+  readonly watchText: string | undefined;
 }): void => {
   const { probe, limit } = input;
   const describe = (node: Node | undefined): string => {
@@ -419,15 +424,30 @@ export const recordProjectLoad = (input: {
     firstPaint: undefined as number | undefined,
     firstContentfulPaint: undefined as number | undefined,
     marks: [] as Array<ProjectLoadFrame & { name: string }>,
+    textFirstFrame: undefined as ProjectLoadFrame | undefined,
+    dropped: Object.create(null) as Record<string, number>,
     mark: (name: string): void => {
       record.marks.push({ frame: record.frames + 1, t: now(), name });
     },
+    /* The lane borders the document draws now: the settled reference, read when the spec asks. */
+    scanLaneBorders: (): number[] => laneBorderXs(),
   };
+  const listNames = new Map<unknown[], string>();
   Object.defineProperty(globalThis, '__TAU_PROJECT_LOAD__', { value: record });
   const keep = <Entry>(list: Entry[], entry: Entry): void => {
     if (list.length < limit) {
       list.push(entry);
+      return;
     }
+    if (listNames.size === 0) {
+      for (const [name, value] of Object.entries(record)) {
+        if (Array.isArray(value)) {
+          listNames.set(value, name);
+        }
+      }
+    }
+    const name = listNames.get(list) ?? 'unknown';
+    record.dropped[name] = (record.dropped[name] ?? 0) + 1;
   };
   /* A mutation is painted in the next frame, so it carries that frame's index. */
   const nextFrame = (): ProjectLoadFrame => ({ frame: record.frames + 1, t: now() });
@@ -503,7 +523,7 @@ export const recordProjectLoad = (input: {
   }).observe({ type: 'paint', buffered: true });
 
   /* A lane border is a visible left or right border on a box at least half the window tall. */
-  const scanLaneBorders = (frame: ProjectLoadFrame): void => {
+  const laneBorderXs = (): number[] => {
     const xs = new Set<number>();
     for (const element of document.body.querySelectorAll('*')) {
       const rect = element.getBoundingClientRect();
@@ -521,9 +541,17 @@ export const recordProjectLoad = (input: {
         xs.add(Math.round(rect.right));
       }
     }
-    if (xs.size > 0) {
-      keep(record.laneBorders, { ...frame, xs: [...xs].toSorted((left, right) => left - right) });
+    return [...xs].toSorted((left, right) => left - right);
+  };
+  /* Kept only when the set of borders changes, so a long load stays inside the frame limit. */
+  let lastLaneBorders = '';
+  const scanLaneBorders = (frame: ProjectLoadFrame): void => {
+    const xs = laneBorderXs();
+    const key = xs.join(',');
+    if (xs.length > 0 && key !== lastLaneBorders) {
+      keep(record.laneBorders, { ...frame, xs });
     }
+    lastLaneBorders = key;
   };
   let lastComposer = '';
   const rowOffsets = new Map<string, number>();
@@ -575,6 +603,13 @@ export const recordProjectLoad = (input: {
     if (document.querySelector(probe.hydrated)) {
       record.hydratedFirstFrame ??= frame;
     }
+    if (
+      input.watchText !== undefined &&
+      record.textFirstFrame === undefined &&
+      document.body.textContent.includes(input.watchText)
+    ) {
+      record.textFirstFrame = frame;
+    }
     const skeletons = document.querySelectorAll(probe.skeleton).length;
     if (skeletons > 0) {
       keep(record.skeletonFrames, { ...frame, count: skeletons });
@@ -609,21 +644,29 @@ export const projectRowMoves = (record: ProjectLoadRecord, since = 0): string[] 
 /**
  * Install the project load recorder on every document the target page loads from now on.
  *
- * @param options - `laneBorders` also records every frame's lane borders, which costs a pass over the document.
+ * @param options - `laneBorders` also records every frame's lane borders, which costs a pass over the document;
+ *   `watchText` records the first frame the document's text holds that text.
  */
-export const installProjectLoadRecorder = async (options: { readonly laneBorders?: boolean } = {}): Promise<void> =>
+export const installProjectLoadRecorder = async (
+  options: { readonly laneBorders?: boolean; readonly watchText?: string } = {},
+): Promise<void> =>
   target.addInitScript(recordProjectLoad, {
     probe: projectLoadProbe,
     limit: projectLoadFrameLimit,
     laneBorders: options.laneBorders === true,
+    watchText: options.watchText,
   });
 
 /** The current document's project load record, without its page-side helpers. */
 export const readProjectLoad = async (): Promise<ProjectLoadRecord> =>
   target.evaluate(() => {
-    const { mark: _mark, ...record } = (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__;
+    const { mark: _mark, scanLaneBorders: _scan, ...record } = (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__;
     return structuredClone(record) as ProjectLoadRecord;
   });
+
+/** The lane borders' x offsets the current document draws now (the settled page, once the load has settled). */
+export const readLaneBordersNow = async (): Promise<number[]> =>
+  target.evaluate(() => (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__.scanLaneBorders());
 
 /**
  * Mark a moment in the current document's record, such as the click that starts a client navigation.

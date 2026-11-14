@@ -13,7 +13,7 @@ import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
-import { ProjectProvider, useProject } from '#hooks/use-project.js';
+import { SessionProjectProvider, useProject } from '#hooks/use-project.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
 import { ProjectPrintRouteIntent } from '#routes/w.$workspace.$project/project-print-route-intent.js';
@@ -58,17 +58,14 @@ import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-sav
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
 import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
-import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { ProjectRouteNotice } from '#routes/w.$workspace.$project/project-route-notices.js';
 import { useProjectSession } from '#hooks/use-sessions.js';
 import {
-  forgetProjectRegions,
   registerProjectSessionServices,
-  reportRegionFailed,
-  reportRegionReady,
   selectProjectSessionFileManager,
+  selectProjectSessionRuntime,
 } from '#services/sessions-store.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
@@ -83,7 +80,7 @@ import {
 import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
-import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { closeProjectRuntime } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
@@ -176,8 +173,9 @@ const liveSessionKernel = ({
 /**
  * The session's half of a project subtree (S44).
  *
- * The registry decides *whether* a project is live; this reports whether its
- * resources came up, and hands the session the four things `closing` has to do.
+ * The registry decides *whether* a project is live, and the session's children
+ * report whether its resources came up (A6c, A6d); this hands the session the
+ * four things `closing` has to do and relays what only the subtree holds yet.
  * It is mounted inside the project's providers, which is the only place that
  * can reach them.
  */
@@ -206,9 +204,6 @@ function ProjectSessionBinding({
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
   const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
-  const runtimeReady = useSelector(projectRef, (state) => state.context.project !== undefined);
-  /* R4: why this project has no kernel, from the machine that owns its units. */
-  const kernelRefusal = useSelector(projectRef, selectProjectKernelRefusal);
   const status = useRevisionClientStatus(client);
   useEffect(() => {
     if (cloudIntent === 'open' && status?.sync.hasAppliedRemote === true) {
@@ -419,17 +414,6 @@ function ProjectSessionBinding({
     useCallback(() => isRecordingEditorConflict(projectId), [projectId]),
   );
 
-  /* One report for one region (R4): a runtime whose kernel was refused is not
-   * ready, however loaded the project itself is, and the sidebar row says which
-   * refusal until the kernel is back. */
-  useEffect(() => {
-    if (kernelRefusal !== undefined) {
-      reportRegionFailed(projectId, 'runtime', kernelRefusal);
-    } else if (runtimeReady) {
-      reportRegionReady(projectId, 'runtime');
-    }
-  }, [kernelRefusal, projectId, runtimeReady]);
-
   /* What a policy close is allowed to touch (I24, I25), from the one place that
    * knows: the project's own revision projection. The *session* owns these
    * facts and tells the registry; the route never reports over its head. */
@@ -557,13 +541,6 @@ function ProjectSessionBinding({
     };
   }, [chatSessions, isFocused, projectId]);
 
-  useEffect(
-    () => () => {
-      forgetProjectRegions(projectId);
-    },
-    [projectId],
-  );
-
   return (
     <>
       {isFocused ? <ProjectSyncAnnouncement /> : null}
@@ -612,29 +589,23 @@ function ProjectSession({
   children,
   projectId,
   isFocused,
-  nativeKernelId,
-  requestedChatId,
-  createdChatId,
-  onFocusedChatResolved,
   onFlushRegistration,
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
   readonly isFocused?: boolean;
-  readonly nativeKernelId?: string;
-  readonly requestedChatId?: string;
-  readonly createdChatId?: string;
-  readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.ReactNode {
-  const kernelSelection = useProjectKernelOptions({
-    projectId,
-    nativeKernelId,
-  });
+  const session = useProjectSession(projectId);
   /* A6c: the session's `fileManager` child built this project's file manager through the host; the provider is a view
    * of it and creates nothing. */
-  const fileManagerRef = useSelector(useProjectSession(projectId), (snapshot) =>
+  const fileManagerRef = useSelector(session, (snapshot) =>
     snapshot === undefined ? undefined : selectProjectSessionFileManager(snapshot),
+  );
+  /* A6d: the session's `project` child built its runtime from its file manager, `choices` and its open request, which
+   * carries the native kernel id and the chat; the provider is a view of it and creates nothing. */
+  const runtimeRef = useSelector(session, (snapshot) =>
+    snapshot === undefined ? undefined : selectProjectSessionRuntime(snapshot),
   );
   const focused = isFocused === true;
   return (
@@ -644,14 +615,7 @@ function ProjectSession({
       rootDirectory={`/projects/${projectId}`}
     >
       <WebglContextTrackerProvider>
-        <ProjectProvider
-          key={kernelSelection.key}
-          projectId={projectId}
-          requestedChatId={requestedChatId}
-          createdChatId={createdChatId}
-          onFocusedChatResolved={onFocusedChatResolved}
-          kernelOptionsFactory={kernelSelection.kernelOptionsFactory}
-        >
+        <SessionProjectProvider projectId={projectId} runtimeRef={runtimeRef}>
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
           <ViewSettingsSyncHost />
           <ProjectSessionBinding projectId={projectId} isFocused={focused} />
@@ -678,7 +642,7 @@ function ProjectSession({
               </EditorDocumentSessionProvider>
             </>
           ) : null}
-        </ProjectProvider>
+        </SessionProjectProvider>
       </WebglContextTrackerProvider>
     </SessionFileManagerProvider>
   );
@@ -686,24 +650,21 @@ function ProjectSession({
 
 type FocusedProjectSession = Readonly<{
   projectId: string;
-  requestedChatId: string | undefined;
-  createdChatId: string | undefined;
   children: React.ReactNode;
 }>;
 
-/** The app-level keyed host for every live project's resource subtree. */
+/**
+ * The app-level keyed host for every live project's resource subtree. The chat each session shows and the kernel it
+ * runs are its open request's (A6d), so the route passes neither.
+ */
 export function LiveProjectSessions({
   focused,
   liveProjectIds,
-  onFocusedChatResolved,
   onFlushRegistration,
-  retainedKernels,
 }: {
   readonly focused?: FocusedProjectSession;
   readonly liveProjectIds: readonly string[];
-  readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
-  readonly retainedKernels: Readonly<Record<string, string | undefined>>;
 }): React.JSX.Element {
   return (
     <>
@@ -714,10 +675,6 @@ export function LiveProjectSessions({
             key={projectId}
             projectId={projectId}
             isFocused={isFocused}
-            nativeKernelId={retainedKernels[projectId]}
-            requestedChatId={isFocused ? focused.requestedChatId : undefined}
-            createdChatId={isFocused ? focused.createdChatId : undefined}
-            onFocusedChatResolved={isFocused ? onFocusedChatResolved : undefined}
             onFlushRegistration={isFocused ? onFlushRegistration : noFlushRegistration}
           >
             {isFocused ? focused.children : undefined}
@@ -815,12 +772,17 @@ function ProjectPersistenceGuard({
   return <></>;
 }
 
-export function ProjectChatRoute(): React.JSX.Element {
+export function ProjectChatRoute(): React.ReactNode {
   const state = useProjectRouteState();
   /*
    * W2/W3: the editor is the only state with the project's providers above it,
    * so `ChatWithProvider`'s `useProject()` stays inside that branch. Every other
-   * state renders its notice in the same shell, with the sidebar intact.
+   * state renders its notice in the same shell, with the sidebar intact. The gate
+   * publishes a state for every project route since A5b, so no state means no
+   * project route and nothing to show (the editor is never assumed, A6d).
    */
-  return state === undefined || state.kind === 'editor' ? <ChatWithProvider /> : <ProjectRouteNotice state={state} />;
+  if (state === undefined) {
+    return null;
+  }
+  return state.kind === 'editor' ? <ChatWithProvider /> : <ProjectRouteNotice state={state} />;
 }

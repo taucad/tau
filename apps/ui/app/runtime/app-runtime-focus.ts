@@ -10,7 +10,8 @@
  * - `registry`: forwards `open`, `touch`, `chatRequested` and `cancelPendingOpen` to the registry and answers each open
  *   with `openSettled`, read off the registry's snapshot after the send, and again when the open waiting in
  *   `pendingOpen` is resumed, dropped (`pendingOpenDropped`) or refused. It reports each project's session facts on
- *   every change and again after every live answer. One actor forwards synchronously, so the registry's answers and
+ *   every change and again after every live answer, and each chat a live session's editor focused
+ *   (`focusedChatResolved`, A6d). One actor forwards synchronously, so the registry's answers and
  *   facts reach focus in the order the registry produced them (the ordered-channel contract A5a's wiring rests on).
  * - `flush`: runs the leave flush of the session being left. Until A7c that is the registration React provides today
  *   (`ProjectSessionFlushRegistration`), kept per project while the project is live.
@@ -340,6 +341,15 @@ export const createFocusComposition = ({ library, loadModule }: FocusComposition
         answer(requestId, projectId, 'dropped');
       }
     });
+    /* A6d: the session reports the chat its editor focused; focus shows it if it is still the route's (I18). */
+    const chatFocused = sessions.on('chatFocused', (event) => {
+      tell(input, {
+        type: 'focusedChatResolved',
+        projectId: event.projectId,
+        chatId: event.chatId,
+        ...(event.requestedChatId === undefined ? {} : { requestedChatId: event.requestedChatId }),
+      });
+    });
     const refused = sessions.on('budgetRefused', (event) => {
       if (
         !sending &&
@@ -410,6 +420,7 @@ export const createFocusComposition = ({ library, loadModule }: FocusComposition
     return () => {
       snapshots.unsubscribe();
       dropped.unsubscribe();
+      chatFocused.unsubscribe();
       refused.unsubscribe();
     };
   });

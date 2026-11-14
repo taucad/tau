@@ -11,11 +11,7 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import type { FocusAccessAnswer } from '#machines/focus.machine.js';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
-import {
-  createSessionsRegistryLogic,
-  registerProjectSessionServices,
-  reportRegionReady,
-} from '#services/sessions-store.js';
+import { createSessionsRegistryLogic, registerProjectSessionServices } from '#services/sessions-store.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -97,7 +93,6 @@ it('should tell focus the victim the open closed before answering the open that 
   await vi.waitFor(() => {
     expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
   });
-  reportRegionReady('p1', 'runtime');
   await flushTasks();
   route(2, 'p2');
   await vi.waitFor(() => {
@@ -184,7 +179,6 @@ it("should keep focus's open waiting through a refused budget close, so the pers
   await vi.waitFor(() => {
     expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
   });
-  reportRegionReady('p1', 'runtime');
   await flushTasks();
   expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
 

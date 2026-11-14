@@ -48,6 +48,9 @@ const harness = (options?: {
   const readyChild = (region: ProjectSessionRegion) =>
     createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
+      if (region === 'runtime') {
+        sendBack({ type: 'chatReady' });
+      }
       return () => undefined;
     });
   /* The compute child is this session's liveness probe: its cleanup runs when

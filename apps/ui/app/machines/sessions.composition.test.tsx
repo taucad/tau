@@ -41,6 +41,8 @@ import { SessionsProvider } from '#hooks/use-sessions.js';
 import { startFocusHost, startRuntimeSlice } from '#runtime/app-runtime-focus.fixture.js';
 import type { FocusHostFixture, RuntimeSliceFixture } from '#runtime/app-runtime-focus.fixture.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
@@ -361,13 +363,7 @@ const projectContextOf = (projectId: string): unknown => {
   return created;
 };
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({
-    children,
-    projectId,
-    requestedChatId,
-    createdChatId,
-  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
-    projectProviderInputs.push({ projectId, requestedChatId, createdChatId });
+  SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     return (
       <StubProjectContext.Provider value={projectId}>
         <div>{children}</div>
@@ -526,7 +522,28 @@ const openChatRoot = (projectId: string, chatId: string) => {
 };
 
 /** The registry the rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor({ sharedWorker: () => workerRef.current }).start();
+const sessionsActor = createSessionsActor({
+  sharedWorker: () => workerRef.current,
+  openFileManager: (projectId) => openSessionFileManagerStandIn(projectId),
+  /* A6d: each session's runtime is a stand-in; what the session asks its editor for is what these rows read. */
+  openRuntime: {
+    open: async (input) => {
+      const standIn = openSessionRuntimeStandIn(input);
+      return {
+        ...standIn,
+        requestChat: (chat) => {
+          projectProviderInputs.push({
+            projectId: input.projectId,
+            requestedChatId: chat.chatId,
+            createdChatId: chat.createdChatId,
+          });
+          standIn.requestChat(chat);
+        },
+      };
+    },
+    onChoicesChanged: () => () => undefined,
+  },
+}).start();
 
 /* Focus and its ports over a registry, as the runtime root composes them (A5b); a fresh one per row, as each row
  * mounted a fresh gate before. */

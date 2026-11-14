@@ -2,8 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Chat } from '@taucad/chat';
 import type { ChatStorage } from '#types/storage.types.js';
 import { QueryClient } from '@tanstack/react-query';
-import { isKnownChatId } from '#hooks/use-project.js';
-import { ensureFocusedChatForProject } from '#runtime/project-runtime.helpers.js';
+import { ensureFocusedChatForProject, isKnownChatId } from '#runtime/project-runtime.helpers.js';
 
 const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
   resourceId: 'project_test',

@@ -302,7 +302,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
 }));
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  SessionProjectProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   useProject: () => projectValue,
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({

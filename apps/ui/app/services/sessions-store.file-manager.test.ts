@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flush } from '@taucad/xstate-testing/clock';
 import { Topic } from '@taucad/events';
-import { createSessionsActor, reportRegionReady } from '#services/sessions-store.js';
+import { createSessionsActor } from '#services/sessions-store.js';
 import type { SessionFileManagerWorker } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
@@ -84,8 +84,6 @@ describe('the session builds its file manager as a child (A6c)', () => {
   it('I5: should go live when its file manager is ready, with no binding mounted to report it', async () => {
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id, { ready: false }));
     registry.send({ type: 'open', projectId });
-    /* The runtime region is still the subtree's report until A6d. */
-    reportRegionReady(projectId, 'runtime');
     await flush();
 
     expect(sessionOf(registry)?.getSnapshot().matches('opening')).toBe(true);
@@ -99,7 +97,6 @@ describe('the session builds its file manager as a child (A6c)', () => {
   it('I23: should close the file manager when the session closes, and open a fresh one on the next open', async () => {
     const { registry, opened, opener } = harness((id) => openSessionFileManagerStandIn(id));
     registry.send({ type: 'open', projectId });
-    reportRegionReady(projectId, 'runtime');
     await flush();
     expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
 
@@ -120,7 +117,6 @@ describe('the session builds its file manager as a child (A6c)', () => {
       throw new Error('no host');
     });
     registry.send({ type: 'open', projectId });
-    reportRegionReady(projectId, 'runtime');
     await flush();
 
     const session = sessionOf(registry);
@@ -132,7 +128,6 @@ describe('the session builds its file manager as a child (A6c)', () => {
   it('should report the views region again when the file manager comes back after the session opened', async () => {
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id));
     registry.send({ type: 'open', projectId });
-    reportRegionReady(projectId, 'runtime');
     await flush();
     const session = sessionOf(registry);
     session?.send({ type: 'childFailed', region: 'views', reason: 'worker lost' });
@@ -165,7 +160,6 @@ describe("the session's file manager follows the host's shared worker (A6c)", ()
     const worker = sharedWorkerOf(workerA);
     const { registry, opener, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
     registry.send({ type: 'open', projectId });
-    reportRegionReady(projectId, 'runtime');
     await flush();
     expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
 
@@ -205,7 +199,6 @@ describe('a nested file manager that errs on a dead worker (A6c)', () => {
     const worker = sharedWorkerOf(workerA);
     const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id, { ready: false }), worker.port);
     registry.send({ type: 'open', projectId });
-    reportRegionReady(projectId, 'runtime');
     await flush();
 
     /* The nested file manager sees the worker die before `rootFiles` does, then the root restarts its worker. */

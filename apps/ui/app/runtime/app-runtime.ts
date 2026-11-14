@@ -59,8 +59,9 @@ import {
   onLoopbackAgentHostsChanged,
   onPlacementReachabilityChanged,
 } from '#lib/agent-host-placement.js';
-import { createChoicesLogic } from '#runtime/choices.js';
+import { createChoicesLogic, readChoices } from '#runtime/choices.js';
 import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime/choices.js';
+import type { SessionRuntimeOpener } from '#services/sessions-store.js';
 import { store as preferenceStore } from '#hooks/use-cookie.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { getAllFlags } from '#flags/feature-flags.js';
@@ -252,6 +253,73 @@ const createChoicesPorts = (queryClient: QueryClient): ChoicesPorts => ({
 });
 
 /**
+ * The module a session builds its project runtime with, by dynamic import (D5): the entry graph never reaches it.
+ */
+const loadSessionRuntimeModule = async () => import('#runtime/project-runtime.session.js');
+
+/**
+ * How each session builds its project runtime (A6d): the lazy module, over the library, the chat store, the query
+ * cache, the device's choices and the services wait on this runtime's clock. Each is a closure, never machine context
+ * (D4). The choices are the root's, as `choices` last reported them, or read now before it first reports.
+ *
+ * @param ports - What the composition holds.
+ * @returns The opener the registry gives each session's `project` child.
+ */
+const createSessionRuntimeOpener = (
+  ports: Readonly<{
+    projectLibrary: ProjectLibrary;
+    chatSessions: ChatSessionStore;
+    queryClient: QueryClient;
+    choicesPorts: ChoicesPorts;
+    runtime: () => AppRuntime | undefined;
+    options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'onRejectedEvent'>;
+  }>,
+): SessionRuntimeOpener => {
+  const choicesNow = (): ProjectChoices => {
+    const runtime = ports.runtime();
+    return (
+      (runtime === undefined ? undefined : selectAppChoices(runtime.getSnapshot())) ?? readChoices(ports.choicesPorts)
+    );
+  };
+  return {
+    open: async (input) => {
+      const { openSessionProjectRuntime } = await loadSessionRuntimeModule();
+      return openSessionProjectRuntime(input, {
+        library: ports.projectLibrary,
+        chatSessions: ports.chatSessions,
+        queryClient: ports.queryClient,
+        choices: choicesNow,
+        awaitServices: async (fileManager, gone) =>
+          awaitFileManager(fileManager, 'services', {
+            reason: 'services-timeout',
+            gone,
+            ...(ports.options.clock === undefined ? {} : { clock: ports.options.clock }),
+          }),
+        ...(ports.options.clock === undefined ? {} : { clock: ports.options.clock }),
+        ...(ports.options.onRejectedEvent === undefined ? {} : { onRejectedEvent: ports.options.onRejectedEvent }),
+      });
+    },
+    onChoicesChanged: (listener) => {
+      const runtime = ports.runtime();
+      if (runtime === undefined) {
+        return () => undefined;
+      }
+      let last = selectAppChoices(runtime.getSnapshot());
+      const subscription = runtime.subscribe((snapshot) => {
+        const next = selectAppChoices(snapshot);
+        if (next !== last) {
+          last = next;
+          listener();
+        }
+      });
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  };
+};
+
+/**
  * Create the app runtime, unstarted (MC-R4).
  *
  * @param options - The clock, inspector and rejected-event hook for the whole tree, and the page to listen to.
@@ -305,6 +373,7 @@ export const createAppRuntime = ({
   /* The host the sessions build their file managers through: the root spawns it with itself, so it is read once the
    * root exists, before any session can open. */
   const builtHost: { current: FileManagerHostRef | undefined } = { current: undefined };
+  const choicesPorts = createChoicesPorts(queryClient);
   const runtime = createActor(
     appRuntimeMachine.provide({
       actors: {
@@ -315,7 +384,7 @@ export const createAppRuntime = ({
         focusModule: focusComposition.logics.module,
         focusRoute: focusComposition.logics.route,
         /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
-        choices: createChoicesLogic(createChoicesPorts(queryClient)),
+        choices: createChoicesLogic(choicesPorts),
         /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
          * which mounts no `ProjectManagerProvider`) starts no worker. */
         projectLibrary: createCallbackLogic<EventObject>(() => {
@@ -352,6 +421,15 @@ export const createAppRuntime = ({
                 gone,
                 ...(options.clock === undefined ? {} : { clock: options.clock }),
               }),
+          }),
+          /* A6d: each session builds its project runtime behind a dynamic import, once it has its file manager. */
+          openRuntime: createSessionRuntimeOpener({
+            projectLibrary,
+            chatSessions,
+            queryClient,
+            choicesPorts,
+            runtime: () => composed.runtime,
+            options,
           }),
         }),
       },

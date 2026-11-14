@@ -13,11 +13,9 @@ import {
 } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
-import type { ActorRefFrom, InputFrom } from 'xstate';
-import type { QueryClient } from '@tanstack/react-query';
+import type { ActorRefFrom, AnyActorRef, InputFrom } from 'xstate';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
-import type { Chat } from '@taucad/chat';
 import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
@@ -36,12 +34,7 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import { useAppRuntime } from '#runtime/app-runtime-provider.js';
-import {
-  selectRuntimeChatSessions,
-  selectRuntimeLeases,
-  selectRuntimeProjectLibrary,
-  selectRuntimeQueryClient,
-} from '#runtime/app-runtime.js';
+import { selectRuntimeChatSessions, selectRuntimeLeases, selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import type { LeaseEntry } from '#runtime/leases.js';
 import {
   createProjectRuntime,
@@ -57,8 +50,9 @@ import type {
 } from '#runtime/project-runtime.js';
 import { createProjectViewRecords } from '#runtime/project-runtime.view-records.js';
 import { createEntriesRecordSession } from '#workbench-records/entries-record-session.js';
-import type { EntriesRecordSession, EntriesRecordSnapshot } from '#workbench-records/entries-record-session.js';
-import type { ProjectViewRecords } from '#runtime/project-runtime.view-records.js';
+import type { EntriesRecordSnapshot } from '#workbench-records/entries-record-session.js';
+import { sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
+import type { ProjectRuntimeViewSource } from '#runtime/project-runtime.session.js';
 
 type ProjectContextType = {
   manifestObservationError: string | undefined;
@@ -132,38 +126,6 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Parameter operation failed.';
 
-/**
- * Whether `chatId` is a chat the client already holds — freshly created here, or
- * present in a current non-deleted chat list. Such a chat needs no async
- * ensure round trip, so the editor can focus it synchronously. Deleted-inclusive
- * and invalidated lists cannot authorize a stale route.
- *
- * @returns True when the chat is already known.
- */
-export function isKnownChatId({
-  chatId,
-  createdChatId,
-  projectId,
-  queryClient,
-}: {
-  readonly chatId: string;
-  readonly createdChatId: string | undefined;
-  readonly projectId: string;
-  readonly queryClient: QueryClient;
-}): boolean {
-  if (chatId === createdChatId) {
-    return true;
-  }
-  const visibleChatKeys = [
-    ['chats', projectId, { includeDeleted: false }],
-    ['chats', projectId, 'records', { includeDeleted: false }],
-  ];
-  return visibleChatKeys.some((queryKey) => {
-    const state = queryClient.getQueryState<Array<Pick<Chat, 'id'>>>(queryKey);
-    return state !== undefined && !state.isInvalidated && state.data?.some((chat) => chat.id === chatId) === true;
-  });
-}
-
 /** The file manager's parts this provider feeds its runtime: the parameter client (A6a R-b) and the record watch. */
 type ProjectProviderFiles = Readonly<{
   parameterFiles: ParameterFilesClient;
@@ -171,17 +133,21 @@ type ProjectProviderFiles = Readonly<{
 }>;
 
 /** What a lease builds with the project runtime: its view records, and the file port the provider feeds. */
-type LeasedProjectRuntime = Readonly<{
-  runtime: ProjectRuntime;
-  viewRecords: ProjectViewRecords;
-  /** The entries record session (A9): only the editor loading from disk keeps one. */
-  entriesRecord: EntriesRecordSession | undefined;
-  /** Hand the runtime the file manager's current parts: the parameter port and the record sessions' host follow it. */
-  replaceFiles: (files: ProjectProviderFiles) => void;
-}>;
+type LeasedProjectRuntime = ProjectRuntimeViewSource &
+  Readonly<{
+    /** Hand the runtime the file manager's current parts: the parameter port and the record sessions' host follow it. */
+    replaceFiles: (files: ProjectProviderFiles) => void;
+  }>;
 
-/* What each leased root was built with, by root: the lease store holds only the actor. */
-const leasedRuntimes = new WeakMap<ProjectRuntimeActor, LeasedProjectRuntime>();
+type HotData = { leasedRuntimes?: WeakMap<ProjectRuntimeActor, LeasedProjectRuntime> };
+
+const hotData = import.meta.hot?.data as HotData | undefined;
+/* What each leased root was built with, by root: the lease store holds only the actor. Kept in `import.meta.hot.data`,
+ * so a Fast Refresh of this module still finds the runtimes the lease store holds (A6b risk, carried to A6d). */
+const leasedRuntimes: WeakMap<ProjectRuntimeActor, LeasedProjectRuntime> = hotData?.leasedRuntimes ?? new WeakMap();
+if (hotData !== undefined) {
+  hotData.leasedRuntimes = leasedRuntimes;
+}
 
 /** A value the provider replaces and the runtime follows: the parameter client port of A6a (R-b). */
 const createFedPort = <T,>(initial: T): ObservablePort<T> & Readonly<{ set: (next: T) => void }> => {
@@ -203,9 +169,6 @@ const createFedPort = <T,>(initial: T): ObservablePort<T> & Readonly<{ set: (nex
 type ProjectProviderProps = {
   readonly children: ReactNode;
   readonly projectId: string;
-  readonly requestedChatId?: string;
-  readonly createdChatId?: string;
-  readonly onFocusedChatResolved?: (chatId: string) => void;
   /* Replaces this provider's actors wholesale: a project that is not on disk loads from its own source. */
   readonly provide?: { readonly actors: Pick<MachineActors<typeof projectMachine>, 'loadProjectActor'> };
   readonly input?: Omit<
@@ -280,24 +243,20 @@ const leasedRuntimeOf = (actor: ProjectRuntimeActor): LeasedProjectRuntime => {
 };
 
 /**
- * The project's actors for the tree below: a view of a leased project runtime (plan § 4 A6b). It creates nothing.
+ * The project's actors for a standalone host: a view of a leased project runtime (plan § 4 A6b). It creates nothing.
  *
  * The runtime (`runtime/project-runtime.ts`) builds the project and editor actors, the parameter service, the parameter
- * observers, the manifest observation and the library events, and owns the producer set every flush walks. This
- * provider leases it from the app runtime, keyed by its mount, so share, preview and the converter acquire theirs the
- * same way (D6). The lease builds the runtime once, with the props of the render that first asks for it, as
- * `useActorRef` read its input once. Until A6d the session's provider still passes the requested chat and its kernel
- * selection as props, and the session remounts it on a new kernel selection.
+ * observers, the manifest observation and the library events, and owns the producer set every flush walks. Share,
+ * preview and the converter lease theirs from the app runtime, keyed by the mount (D6). The lease builds the runtime
+ * once, with the props of the render that first asks for it, as `useActorRef` read its input once. A live project's
+ * session builds its own runtime (A6d); {@link SessionProjectProvider} is the view of that one.
  *
- * @param props - The project, the chat the route asks for, how the project loads, its kernel and profile.
+ * @param props - The project, how it loads, its kernel and profile.
  * @returns The provider element.
  */
 export function ProjectProvider({
   children,
   projectId,
-  requestedChatId,
-  createdChatId,
-  onFocusedChatResolved,
   provide,
   input,
   kernelOptionsFactory,
@@ -305,7 +264,6 @@ export function ProjectProvider({
   previewParameterService,
 }: ProjectProviderProps): React.JSX.Element {
   const appRuntime = useAppRuntime();
-  const queryClient = selectRuntimeQueryClient(appRuntime);
   const fileManager = useFileManager();
   const files = useMemo<ProjectProviderFiles>(
     () => ({ parameterFiles: fileManager.parameterFiles, watchRecordFile: fileManager.watchRecordFile }),
@@ -341,7 +299,6 @@ export function ProjectProvider({
       ...profileOptions,
       ...(kernelOptionsFactory === undefined ? {} : { kernelSelection: { kernelOptionsFactory } }),
       ...(input === undefined ? {} : { input }),
-      ...(requestedChatId === undefined ? {} : { requestedChatId }),
       ...(previewParameterService === undefined ? {} : { previewParameterService }),
       clock: appRuntime.clock,
       ...(inspect === undefined ? {} : { inspect }),
@@ -358,11 +315,8 @@ export function ProjectProvider({
       },
     };
   });
-  const { runtime, viewRecords, entriesRecord: entriesRecordSession, replaceFiles } = leasedRuntimeOf(lease.actor);
-  const { actor } = runtime;
-  /* The root spawned both with itself and never replaces them, so one read is enough. */
-  const actorRef = selectProjectRef(actor.getSnapshot());
-  const editorRef = selectEditorRef(actor.getSnapshot());
+  const leased = leasedRuntimeOf(lease.actor);
+  const { runtime, replaceFiles } = leased;
 
   /* The file manager's parts reach the runtime before any passive effect of this commit reads them, as the view
    * records' host replacement did. It sends nothing to an actor. */
@@ -373,6 +327,66 @@ export function ProjectProvider({
       runtime.replacePreviewParameterService(previewParameterService);
     }
   }, [files, replaceFiles, runtime, previewParameterService]);
+
+  return (
+    <ProjectRuntimeView projectId={projectId} profile={profile} source={leased}>
+      {children}
+    </ProjectRuntimeView>
+  );
+}
+
+/**
+ * The project's actors for a live project's subtree: a view of the runtime its session built (plan § 4 A6d). It creates,
+ * starts and stops nothing: the session's `project` child owns the runtime, follows the session file manager's
+ * connections, and asks the editor for the open request's chat. Until the child reports a runtime, and between two
+ * runtimes, it renders nothing, as the session's file-manager provider does. A new runtime (a change of kernel
+ * selection) remounts the subtree, as the React key on the provider did until A6e.
+ *
+ * @param props - The project, the root of the runtime its session built, and the subtree.
+ * @returns The provider element, or nothing before the session has a runtime.
+ * @public
+ */
+export function SessionProjectProvider({
+  children,
+  projectId,
+  runtimeRef,
+}: {
+  readonly children: ReactNode;
+  readonly projectId: string;
+  /** The session's runtime (`selectProjectSessionRuntime`). */
+  readonly runtimeRef: AnyActorRef | undefined;
+}): React.ReactNode {
+  const source = runtimeRef === undefined ? undefined : sessionProjectRuntimeOf(runtimeRef);
+  if (source === undefined) {
+    return null;
+  }
+  return (
+    <ProjectRuntimeView key={source.key} projectId={projectId} profile='editor' source={source}>
+      {children}
+    </ProjectRuntimeView>
+  );
+}
+
+/**
+ * The context over one project runtime, whoever owns it: selectors over its actors and records, and the parameter and
+ * metadata commands. It neither sends, subscribes nor times in an effect (I1, I16).
+ */
+function ProjectRuntimeView({
+  children,
+  projectId,
+  profile,
+  source,
+}: {
+  readonly children: ReactNode;
+  readonly projectId: string;
+  readonly profile: 'editor' | 'shared';
+  readonly source: ProjectRuntimeViewSource;
+}): React.JSX.Element {
+  const { runtime, viewRecords, entriesRecord: entriesRecordSession } = source;
+  const { actor } = runtime;
+  /* The root spawned both with itself and never replaces them. */
+  const actorRef = useSelector(actor, selectProjectRef);
+  const editorRef = useSelector(actor, selectEditorRef);
 
   const parameterService = useSyncExternalStore(
     runtime.parameterService.subscribe,
@@ -389,18 +403,6 @@ export function ProjectProvider({
     appliedWorkbenchRevisions,
   } = useSyncExternalStore(viewRecords.subscribe, viewRecords.getSnapshot, viewRecords.getSnapshot);
 
-  /* A chat we already hold is focused synchronously. `setRequestedChatId` re-enters
-   * `ensuringFocusedChat` for an async chat-list round trip, which flashes the chat
-   * pane's skeleton — correct for an unknown/absent id, a visible flicker for every
-   * switch between chats the sidebar just listed. A6d moves this into the session's open request. */
-  useEffect(() => {
-    editorRef.send(
-      requestedChatId !== undefined && isKnownChatId({ chatId: requestedChatId, createdChatId, projectId, queryClient })
-        ? { type: 'focusKnownChat', chatId: requestedChatId }
-        : { type: 'setRequestedChatId', chatId: requestedChatId },
-    );
-  }, [createdChatId, editorRef, projectId, queryClient, requestedChatId]);
-
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
   /* The entries record session's record and acknowledgements (A9); it runs as a child of the runtime. */
   const { entriesRecord, appliedEntryRevisions } = useSyncExternalStore(
@@ -416,15 +418,6 @@ export function ProjectProvider({
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
   const mainEntryPath = useSelector(actorRef, (state) => state.context.mainEntryPath);
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
-
-  const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
-  const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
-  const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
-  useEffect(() => {
-    if (focusedChatResolved && focusedChatId !== undefined && resolvedRequestedChatId === requestedChatId) {
-      onFocusedChatResolved?.(focusedChatId);
-    }
-  }, [focusedChatId, focusedChatResolved, onFocusedChatResolved, requestedChatId, resolvedRequestedChatId]);
 
   const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
     const report = async (): Promise<void> => {

@@ -10,11 +10,7 @@ import type { AnyActorRef, AnyEventObject } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
-import {
-  createSessionsRegistryLogic,
-  registerProjectSessionServices,
-  reportRegionReady,
-} from '#services/sessions-store.js';
+import { createSessionsRegistryLogic, registerProjectSessionServices } from '#services/sessions-store.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -75,7 +71,6 @@ it('should an open that displaces the waiting one answers only itself (one slot,
   }
   port.send(open('r1', 'p1'));
   await flushTasks();
-  reportRegionReady('p1', 'runtime');
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
   await flushTasks();
   port.send(open('r2', 'p2'));
@@ -119,7 +114,6 @@ it('should a queued open that lands waiting is answered when the registry resume
   }
   port.send(open('r1', 'p1'));
   await flushTasks();
-  reportRegionReady('p1', 'runtime');
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
   await flushTasks();
   /* Focus answers the registry's notification of an earlier event with its next open: the registry queues it. */
@@ -177,7 +171,6 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
   }
   port.send(open('r1', 'p1'));
   await flushTasks();
-  reportRegionReady('p1', 'runtime');
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
   await flushTasks();
   port.send(open('r2', 'p2'));
@@ -244,8 +237,6 @@ it('should a return to a closing project refused by another close that came back
   port.send(open('r1', 'px'));
   port.send(open('r2', 'py'));
   await flushTasks();
-  reportRegionReady('px', 'runtime');
-  reportRegionReady('py', 'runtime');
   await flushTasks();
   for (const id of ['px', 'py']) {
     registry.send({ type: 'close', projectId: id, reason: 'user' });

@@ -66,7 +66,7 @@
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
 (*                  of ProjectPersistenceGuard after the commit that       *)
 (*                  mounts the session it names (project-live-sessions.tsx *)
-(*                  652, 795 to 810), so the person may edit before it     *)
+(*                  656, 799 to 814), so the person may edit before it     *)
 (*                  lands; React runs it before the next render, so it has *)
 (*                  landed before the next commit or effect run            *)
 (*                  (RegFlushed). FALSE: it is current at every step.      *)
@@ -674,7 +674,7 @@ DRetry ==
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
 
-\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 795 to 810, 719): the
+\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 799 to 814, 723): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration

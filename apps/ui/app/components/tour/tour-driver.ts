@@ -109,6 +109,8 @@ export const startTourDriver = ({ tour, sources, ports }: TourDriverInput): (() 
         return;
       }
       case 'replayEnded': {
+        /* Set before the announcement too: announcing changes the session, and the replay is over already. */
+        isEndingReplay = true;
         if (emitted.completed) {
           telemetry.tourCompleted({ mode: 'replay' });
           session.announce(tourChromeCopy.finished);
@@ -116,7 +118,6 @@ export const startTourDriver = ({ tour, sources, ports }: TourDriverInput): (() 
           telemetry.tourDismissed({ mode: 'replay', step: emitted.step ?? 'ask' });
           session.announce(tourChromeCopy.replayClosed);
         }
-        isEndingReplay = true;
         session.endReplay();
         isEndingReplay = false;
       }

@@ -2,7 +2,7 @@
 import { describe, expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { axeAudit, readPageSemantics } from '#support/page-audit.js';
+import { pageAxeViolations, readPageSemantics } from '#support/page-audit.js';
 import { flagTest, runsInFlagStates } from '#support/flag-state-test.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- event and person properties are analytics wire names. */
@@ -232,7 +232,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     const findings: Record<string, unknown> = {};
     const audit = async (step: string): Promise<void> => {
       const semantics = await readPageSemantics();
-      const { violations } = await axeAudit();
+      const violations = await pageAxeViolations();
       findings[step] = { semantics, violations };
       expect.soft(violations, `${step}: axe violations`).toStrictEqual([]);
       expect.soft(semantics.headingOnes, `${step}: exactly one h1`).toHaveLength(1);

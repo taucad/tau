@@ -702,9 +702,6 @@ const shownSpans = (
   return spans;
 };
 
-/** One frame at 60 Hz, rounded up: the sampler's resolution. Milliseconds. */
-const frameSlack = 17;
-
 /** Two boxes are the same within 1 px. */
 const sameBox = (left: ProjectLoadRegionEntry, right: ProjectLoadRegionEntry): boolean =>
   left.present === right.present &&
@@ -1090,7 +1087,7 @@ const measureHeldTranscript = async (label: string): Promise<ProjectLoadRecord> 
 };
 
 knownDefect(
-  'F6 (A12, A15d): with the agent host 3 s late, the chat lane shows no empty state or skeleton, its header indicator shows from 1,000 ms for at least 500 ms, and the composer keeps its box',
+  'F6 (A15d): with the agent host 3 s late, the chat lane shows no empty state or skeleton, its header indicator shows from 1,000 ms for at least 500 ms, and the composer keeps its box',
   {
     artifact: 'f6-wide',
     expectedFailure: true,
@@ -1477,7 +1474,7 @@ knownDefect('F12 source pane (A15f): a file opened from the tree with its read 6
 });
 
 knownDefect(
-  'F12 source pane (A15f): a file opened from the tree with its read 1,100 ms late shows its indicator from 1,000 ms after the click for at least 500 ms',
+  'F12 source pane (A15f): a file opened from the tree with its read 1,100 ms late shows its indicator from 1,000 ms after the click until at least 1,500 ms',
   {
     artifact: 'f12-1100-wide',
     expectedFailure: false,
@@ -1494,12 +1491,12 @@ knownDefect(
           spans: shown.length,
           revealAfterClick: first === undefined ? undefined : first.from - click.t >= 1000,
           revealBeforeAnswer: first === undefined ? undefined : first.from <= answeredAt + 20,
-          /* Within one 60 Hz frame: the ladder times its hold from the wait's start, which can lead the painted reveal by a frame. */
-          heldMinimum: first === undefined ? undefined : first.longest >= 500 - frameSlack,
+          /* The blueprint's row: visible from 1,000 ms to 1,500 ms after the wait starts. `to` is the first frame without it. */
+          heldTo1500: first === undefined ? undefined : first.to - click.t >= 1500,
           textAtAnswer: text === undefined ? undefined : text.t - answeredAt < 200,
         },
         `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms`,
-        { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldMinimum: true, textAtAnswer: true },
+        { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
       );
     },
   },

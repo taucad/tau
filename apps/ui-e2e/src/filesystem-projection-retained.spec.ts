@@ -352,7 +352,8 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
       shouldSaveToProject: true,
     }),
   );
-  await target.expectAttribute(selectors.getByRole('button', { name: /^STL$/iu }), 'aria-pressed', 'true');
+  /* One format, shown on the Export format picker, not a pressed STL toggle (#980, 111b1e5dc7). */
+  await target.expectText(selectors.getByRole('button', { name: 'Export format', exact: true }), /^stl/u);
   await target.expectAttribute(
     selectors.getByRole('checkbox', { name: 'Download to disk', exact: true }),
     'data-state',

@@ -13,7 +13,8 @@
  * Only an annotated tag with a valid `Tau-Tag` record is a version (I7: no
  * reader for any older shape). Any other `refs/tags/v<n>` — a lightweight tag,
  * a tag another tool wrote — still holds its number: it is never replaced,
- * and no version is given that number. It is held by number only.
+ * and no version is given that number. It is held by number only, and stays
+ * on this device: Tau Cloud refuses it ({@link isNumberedTagNotVersion}).
  *
  * A version is identified by the random `id` its trailer carries
  * ({@link isSameVersion}); a rename and a move both keep it. A number is
@@ -51,6 +52,31 @@ export const versionNumberOfTag = (name: string): number | undefined => {
   const match = versionTagPattern.exec(name.startsWith(tagRefPrefix) ? name.slice(tagRefPrefix.length) : name);
   const number = match === null ? undefined : Number(match[1]);
   return number === undefined || !Number.isSafeInteger(number) || number <= startVersionNumber ? undefined : number;
+};
+
+const numberedTagRefPattern = /^refs\/tags\/v[1-9]\d*$/u;
+
+/**
+ * Whether a push to Tau Cloud leaves a ref out: a `refs/tags/v<n>`, `v1`
+ * included, that is not one of this store's versions. Tau Cloud takes that ref
+ * only from a version (`GIT_PUSH_VERSION_TAG_INVALID`) and the history set is
+ * atomic, so offering it would refuse every branch with it, on every retry.
+ * The tag stays on this device and still holds its number.
+ *
+ * @param name - A full ref.
+ * @param versions - This store's versions.
+ * @returns True for a numbered tag ref that no version holds.
+ * @public
+ */
+export const isNumberedTagNotVersion = (
+  name: string,
+  versions: ReadonlyArray<Readonly<Pick<RevisionTag, 'number'>>>,
+): boolean => {
+  if (!numberedTagRefPattern.test(name)) {
+    return false;
+  }
+  const number = versionNumberOfTag(name);
+  return number === undefined || !versions.some((tag) => tag.number === number);
 };
 
 /**

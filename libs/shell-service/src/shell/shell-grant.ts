@@ -131,45 +131,215 @@ export type ShellProjectProtected = Readonly<{
 }>;
 
 /**
- * Whether a protected path is a git directory the person's Terminal may read: named `.git` under any spelling, outside
- * Tau's own `.tau` directory, and not a link, which would open whatever it names. An absent one stays read-only too, so
- * no session can create it.
+ * How the person's Terminal reaches the project's real git store: `read`, the whole store read-only, or `write`, the
+ * store writable except the names through which git runs a program ({@link terminalGitAccess}).
+ *
+ * @public
  */
-const readableGitDirectory = async (root: string, path: string): Promise<boolean> => {
+export type TerminalGitAccess = 'read' | 'write';
+
+/**
+ * One entry of the {@link terminalGitStorePolicy}: a top-level name in a git directory, protected with everything under
+ * it, and whether it is a directory when present.
+ *
+ * @public
+ */
+export type TerminalGitStoreName = Readonly<{ name: string; directory: boolean }>;
+
+/**
+ * The store policy (Linux Terminal git parity blueprint R1): the top-level names in a git directory that a writable
+ * store keeps read-only, each with everything under it, because a write there makes git outside the sandbox, Tau's own
+ * engine or the person's git, run a program or follow another path. One list for every provider: the grant compiler
+ * spells it for Seatbelt here, and the Linux store guard reads the same list.
+ *
+ * `config` and `hooks` name programs directly. `commondir` makes git read the config and hooks of any folder it names,
+ * in a repository of any kind, and `config.worktree` is read as config once `extensions.worktreeConfig` is set.
+ * `worktrees` and `modules` hold the git directories of linked checkouts and submodules, each with its own `commondir`
+ * or `config`. `remotes` and `branches` are git's legacy remote files: `git fetch <name>` and `git push <name>` outside
+ * the sandbox follow the address in them. Every other name, objects, refs, the index, `HEAD`, logs, LFS objects and the
+ * in-progress state of a merge, stash or rebase, stays writable.
+ *
+ * Review this list against the blueprint's Threat Set (`docs/research/linux-terminal-git-parity-blueprint.md`)
+ * whenever the bundled git is bumped (`gitVersion` in `apps/desktop/scripts/git-payload.mts`): a name a newer git starts
+ * to trust stays open until it is added here.
+ *
+ * @public
+ */
+export const terminalGitStorePolicy: readonly TerminalGitStoreName[] = [
+  { name: 'config', directory: false },
+  { name: 'hooks', directory: true },
+  { name: 'commondir', directory: false },
+  { name: 'config.worktree', directory: false },
+  { name: 'worktrees', directory: true },
+  { name: 'modules', directory: true },
+  { name: 'remotes', directory: true },
+  { name: 'branches', directory: true },
+];
+
+/** Characters the sandbox runtime reads as a glob. */
+const globCharacters = /[*?[\]]/u;
+
+/**
+ * The non-ASCII characters a case-folding APFS volume reads as ASCII letters of a policy name. APFS compares names
+ * after canonical decomposition and Unicode full case folding, under which exactly these code points fold onto ASCII
+ * letters: U+017F (long s) onto `s`, U+212A (Kelvin sign) onto `k`, U+00DF and U+1E9E onto `ss`, and the Latin
+ * ligatures U+FB00 to U+FB06 onto `ff`, `fi`, `fl`, `ffi`, `ffl` and `st`. Of those letter runs only `s`, `k` and
+ * `fi` occur in the policy's names. A name created as `hook\u017F` would therefore be found by git outside as `hooks`,
+ * while Seatbelt matches the leaf of a name being created as it was typed.
+ */
+const foldingSpellings: ReadonlyArray<readonly [ascii: string, folding: string]> = [
+  ['fi', '\uFB01'],
+  ['s', '\u017F'],
+  ['k', '\u212A'],
+];
+
+/**
+ * A name as a volume that folds case compares it: canonical decomposition, then full case folding, approximated here
+ * by upper then lower case (`\u017F` and `S` both answer `s`, `\uFB01` answers `fi`).
+ *
+ * @param name - A file name.
+ * @returns Its folded form.
+ */
+const foldName = (name: string): string => name.normalize('NFD').toUpperCase().toLowerCase();
+
+/** One ASCII letter as the bracket that matches it under either case (`[cC]`); any other character as itself. */
+const caselessCharacter = (character: string): string => {
+  const lower = character.toLowerCase();
+  const upper = character.toUpperCase();
+  return lower === upper ? character : `[${lower}${upper}]`;
+};
+
+/**
+ * A name as the one-segment globs that match it under every spelling a case-folding volume reads as that name: each
+ * ASCII letter as a bracket of both cases (`[cC][oO]…`), and each letter run in {@link foldingSpellings} either so or as
+ * its folding character. The folding character is written outside any bracket, so the pattern means the same whether
+ * Seatbelt matches the path's bytes or its characters; a bracket holding a multi-byte character would not.
+ *
+ * @param name - A policy name.
+ * @returns Its globs, the ASCII-only one first.
+ */
+const caselessGlobs = (name: string): readonly string[] => {
+  let spellings = [''];
+  let index = 0;
+  while (index < name.length) {
+    const rest = name.slice(index).toLowerCase();
+    const folding = foldingSpellings.find(([ascii]) => rest.startsWith(ascii));
+    const run = name.slice(index, index + (folding?.[0].length ?? 1));
+    const bracketed = [...run].map((character) => caselessCharacter(character)).join('');
+    const options = folding === undefined ? [bracketed] : [bracketed, folding[1]];
+    spellings = spellings.flatMap((prefix) => options.map((option) => `${prefix}${option}`));
+    index += run.length;
+  }
+  return spellings;
+};
+
+/**
+ * What a protected path is to the person's Terminal: a git `store` (a real `.git` directory), another git `entry` (a
+ * `.git` pointer file, or an absent `.git`, which stays read-only so no session can create it), or `undefined` when it
+ * stays denied: not named `.git` under any spelling, inside Tau's own `.tau` directory, or a link, which would open
+ * whatever it names.
+ */
+const terminalGitEntry = async (root: string, path: string): Promise<'store' | 'entry' | undefined> => {
   if (basename(path).toLowerCase() !== '.git') {
-    return false;
+    return undefined;
   }
   const [first = ''] = relative(root, path).split(sep);
   if (first.toLowerCase() === reservedTauDirectory) {
-    return false;
+    return undefined;
   }
   try {
     const status = await lstat(path);
-    return !status.isSymbolicLink();
+    if (status.isSymbolicLink()) {
+      return undefined;
+    }
+    return status.isDirectory() ? 'store' : 'entry';
   } catch {
-    return true;
+    return 'entry';
   }
 };
+
+/**
+ * Every spelling of a writable store's policy names to keep read-only: each existing entry under its own spelling, the
+ * canonical name, and its caseless globs. A store whose own path holds a glob character cannot be spelled that way, so
+ * it is answered `undefined` and stays read-only whole.
+ *
+ * Git looks a name up through the filesystem, so on a case-folding volume `.git/COMMONDIR`, and `.git/hook\u017F`
+ * too, is read as the policy's name, and Seatbelt matches the leaf of a name being created as it was typed. An absent
+ * name is therefore protected by its globs, which match every spelling that folds onto it, and an existing one by its
+ * resolved spelling as well.
+ */
+const executableSpellings = async (
+  store: string,
+): Promise<Readonly<{ paths: readonly string[]; directories: readonly string[] }> | undefined> => {
+  if (globCharacters.test(store)) {
+    return undefined;
+  }
+  let present: readonly string[] = [];
+  try {
+    present = await readdir(store);
+  } catch {
+    return undefined;
+  }
+  const paths = new Set<string>();
+  const directories = new Set<string>();
+  for (const { name, directory } of terminalGitStorePolicy) {
+    const spellings = [
+      ...present.filter((entry) => foldName(entry) === name).map((entry) => join(store, entry)),
+      join(store, name),
+      ...caselessGlobs(name).map((glob) => join(store, glob)),
+    ];
+    for (const path of spellings) {
+      paths.add(path);
+      if (directory) {
+        directories.add(path);
+      }
+    }
+  }
+  return { paths: [...paths], directories: [...directories] };
+};
+
+/**
+ * Whether a platform's sandbox can open the Terminal's store for writing ({@link TerminalGitAccess}). Writing needs a
+ * provider that keeps an absent name such as `commondir` from being created without putting anything in its place, so
+ * that git outside the sandbox never finds it. Seatbelt does that with a deny rule. Bubblewrap can only mask a name by
+ * mounting over something that exists, so the host creates a stand-in there for the session's life, and git outside
+ * the sandbox then fails to read the empty `commondir` ("failed to read .git/commondir") in every repository of that
+ * store. Leaving the name unprotected instead would let code in the Terminal point the store at a config of its own,
+ * which git outside the sandbox, Tau's own included, then runs. Linux therefore keeps the read-only store.
+ *
+ * @param platform - The host platform.
+ * @returns The access the Terminal's store gets.
+ * @public
+ */
+export const terminalGitAccess = (platform: NodeJS.Platform): TerminalGitAccess =>
+  platform === 'darwin' ? 'write' : 'read';
 
 /**
  * The checkout's own control and record paths: every registry row the agent may not write, and every existing name
  * the classifier hides or protects, under any spelling the filesystem resolves (D20, A04). Read-only rows stay
  * readable (E03); every other protected name is denied.
  *
- * The person's Terminal reads the project's real git store (operator ruling 2026-11-12, "Real .git, read-only"):
- * with `readableGit`, every `.git` directory, the checkout's own and nested ones, is read-only instead of denied, so
- * git there reads live history and can write none of it. The store is moved out of the denied set rather than also
- * listed read-only, because Seatbelt opens a read-only root inside a denied one only when it lies strictly inside,
- * never when the two are the same path. `.jj`, `.hg`, `.svn`, `.tau/binding.json` and the staging directory stay
- * denied, and a grant that names a version-control directory is still refused. The agent's launch never passes it.
+ * The person's Terminal reaches the project's real git store, the checkout's own `.git` and nested ones, instead of
+ * having it denied. With `terminalGit: 'read'` (operator ruling 2026-11-12, "Real .git, read-only") each store is
+ * read-only, so git there reads live history and can write none of it. With `terminalGit: 'write'` each store is
+ * writable, so `add`, `commit`, `switch`, `stash` and `merge` work, and only the names through which git runs a program
+ * or follows another address stay read-only ({@link terminalGitStorePolicy}): no code in the Terminal can make git
+ * outside the sandbox run anything or push to a place it chose.
+ * A `.git` pointer file, an absent `.git` and a store whose path cannot be spelled as a glob stay read-only whole.
+ * `write` needs a provider that protects an absent name without creating it ({@link terminalGitAccess}).
+ *
+ * A store is moved out of the denied set rather than also listed read-only, because Seatbelt opens a read-only root
+ * inside a denied one only when it lies strictly inside, never when the two are the same path. `.jj`, `.hg`, `.svn`,
+ * `.tau/binding.json` and the staging directory stay denied, and a grant that names a version-control directory is
+ * still refused. The agent's launch never passes `terminalGit`.
  *
  * @param root - The checkout's real root.
- * @param options - `readableGit` for the person's Terminal.
+ * @param options - `terminalGit` for the person's Terminal.
  * @returns The read-only and denied absolute paths.
  */
 export const projectProtected = async (
   root: string,
-  options: Readonly<{ readableGit?: boolean | undefined }> = {},
+  options: Readonly<{ terminalGit?: TerminalGitAccess | undefined }> = {},
 ): Promise<ShellProjectProtected> => {
   const denied = new Set<string>();
   const readOnly = new Set<string>();
@@ -214,12 +384,26 @@ export const projectProtected = async (
   for (const path of await nestedControlDirectories(root)) {
     denied.add(path);
   }
-  if (options.readableGit === true) {
+  if (options.terminalGit !== undefined) {
     for (const path of denied) {
       // oxlint-disable-next-line no-await-in-loop -- one lstat per protected `.git`, a handful at most.
-      if (await readableGitDirectory(root, path)) {
-        denied.delete(path);
+      const entry = await terminalGitEntry(root, path);
+      if (entry === undefined) {
+        continue;
+      }
+      denied.delete(path);
+      const executable =
+        // oxlint-disable-next-line no-await-in-loop -- one listing per writable store.
+        entry === 'store' && options.terminalGit === 'write' ? await executableSpellings(path) : undefined;
+      if (executable === undefined) {
         readOnly.add(path);
+        continue;
+      }
+      for (const name of executable.paths) {
+        readOnly.add(name);
+      }
+      for (const name of executable.directories) {
+        directories.add(name);
       }
     }
   }

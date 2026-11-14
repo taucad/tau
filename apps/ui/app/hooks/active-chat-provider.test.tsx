@@ -272,7 +272,10 @@ const {
   useChatAutoResume,
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
+  await import('#hooks/chat-session-store.fixture.js');
 const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 
 const testModel: DraftAttachmentModel = {

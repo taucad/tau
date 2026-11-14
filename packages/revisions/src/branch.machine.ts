@@ -44,11 +44,19 @@ import type { BranchOperation } from '#branch.types.js';
  * meet that no port names: the head moved under the cut it asked for (the
  * `TurnFailureCode` shape, one verb over), and the cut named nothing this
  * project is standing in — which is not a name collision, so it is not
- * `CHECKOUT_CONFLICT`.
+ * `CHECKOUT_CONFLICT`. A *Merge* settles two ways that move nothing and so are
+ * not *Merged* (M1): `MERGE_UP_TO_DATE`, the branch is already in, and
+ * `MERGE_UNDONE`, a restore on either side took back what the two share.
  *
  * @public
  */
-export type BranchFailureCode = RevisionPortErrorCode | 'CAS_LOST' | 'CHECKOUT_UNKNOWN' | 'REVISIONS_BUSY';
+export type BranchFailureCode =
+  | RevisionPortErrorCode
+  | 'CAS_LOST'
+  | 'CHECKOUT_UNKNOWN'
+  | 'REVISIONS_BUSY'
+  | 'MERGE_UP_TO_DATE'
+  | 'MERGE_UNDONE';
 
 /** Input accepted when creating the branchMachine actor. @public */
 export type BranchMachineInput = Readonly<{
@@ -232,8 +240,10 @@ export type BranchApplySwitchActorOutput = Readonly<{
  * @public
  */
 export type BranchMergeActorOutput =
-  /** `before`: `<current>`'s head before the merge, absent when it was unborn or nothing moved. */
+  /** `before`: `<current>`'s head before the merge, absent when it was unborn. */
   | Readonly<{ status: 'merged'; revisionId: string; before?: string }>
+  /** The branch is already in `<current>`: nothing moved, so the toast never says *Merged* (M1). */
+  | Readonly<{ status: 'upToDate'; revisionId: string }>
   | Readonly<{ status: 'conflicted'; paths: readonly string[] }>;
 
 /** Output of the injected `rename` actor: the new name, and the checkout whose HEAD it moved, if any (RM-R5). @public */
@@ -634,6 +644,15 @@ const branchMachineDefinition = setup({
                * paths are W10's to resolve. */
               if (event.output.status === 'conflicted') {
                 return { target: '#branch.conflicted', context: { conflicts: event.output.paths } };
+              }
+              if (event.output.status === 'upToDate') {
+                return {
+                  target: '#branch.failed',
+                  context: failWith(
+                    `${context.branch ?? ''} is already in ${context.currentBranch ?? ''}.`,
+                    'MERGE_UP_TO_DATE',
+                  ),
+                };
               }
               const fact: BranchMachineEmitted = {
                 type: 'branchMerged',

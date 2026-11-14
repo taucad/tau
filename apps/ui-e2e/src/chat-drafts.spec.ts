@@ -15,7 +15,7 @@ import {
   recordPaths,
   seededChatIds,
   selectModel,
-  selectReasoningLevel,
+  selectEffort,
   sendDraft,
 } from '#support/chat-attachments.js';
 
@@ -65,15 +65,15 @@ const openChat = async (name: string): Promise<void> => {
     .toBe(true);
 };
 
-test('restores draft text and the reasoning level after a reload, and keeps the draft per chat', async () => {
+test('restores draft text and the effort after a reload, and keeps the draft per chat', async () => {
   const { projectId, chatIds } = await openSeededChats();
   const recordPath = recordPaths.chat(projectId, chatIds[0]!);
 
-  // A model that offers levels, so the sheet shows its reasoning control.
+  // A model that offers levels, so the sheet shows its Effort row (ce8c822c5e, #747: the trigger names it `effort`).
   await selectModel(imageOnlyModelName);
-  await selectReasoningLevel('Low');
+  await selectEffort('Low');
   await target.expectVisible(
-    selectors.getByRole('button', { name: `Agent and model: ${imageOnlyModelName}, reasoning Low` }),
+    selectors.getByRole('button', { name: `Agent and model: ${imageOnlyModelName}, effort Low` }),
   );
 
   const draftText = 'Draft that must survive a reload.';
@@ -87,7 +87,7 @@ test('restores draft text and the reasoning level after a reload, and keeps the 
   await target.expectContainingText(selectors.getByCss(composerSelector).first(), draftText, 30_000);
   await expect
     .poll(async () => target.getAttribute(agentTrigger(), 'aria-label'), { timeout: 30_000 })
-    .toBe(`Agent and model: ${imageOnlyModelName}, reasoning Low`);
+    .toBe(`Agent and model: ${imageOnlyModelName}, effort Low`);
 
   // The other chat has its own record: no draft.
   await openChat('Second chat');

@@ -18,7 +18,9 @@ import type { Chat } from '@taucad/chat';
 import type { RevisionRow } from '@taucad/revisions';
 import type { ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import { ChatSessionStoreProvider, useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+import { MirroredChatSessionStoreProvider as ChatSessionStoreProvider } from '#hooks/chat-session-store.fixture.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 

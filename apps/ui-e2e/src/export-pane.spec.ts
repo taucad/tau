@@ -56,11 +56,12 @@ const openOptions = async (): Promise<Locator> => {
   return disclosure;
 };
 
+/** A set number shows its unit on the slider input; an unset one, such as a fresh explicit tolerance, on its input group. */
 const fieldUnit = async (input: Locator): Promise<string> =>
   target.evaluateLocator(input, (element) => {
     const adornment = element
-      .closest<HTMLElement>('[data-slot="slider-input"]')
-      ?.querySelector<HTMLElement>('[data-slot="slider-input-adornment"]');
+      .closest<HTMLElement>('[data-slot="slider-input"], [data-slot="input-group"]')
+      ?.querySelector<HTMLElement>('[data-slot="slider-input-adornment"], [data-slot="input-group-addon"]');
     return adornment?.textContent.trim() ?? '';
   });
 
@@ -75,7 +76,8 @@ test('keeps export option roots flat, collapsed per format, and the action reach
   await selectFormat('STL');
 
   await openOptions();
-  await target.expectVisible(selectors.getByRole('button', { name: 'Group: Tessellation' }), 15_000);
+  // Tessellation is a preset or explicit tolerances, so it is a root select rather than a group.
+  await target.expectVisible(panel.getByRole('combobox', { name: 'Select for Tessellation' }), 15_000);
   await target.expectCount(panel.getByCss('[data-slot="parameter-catalog"]'), 0);
   await target.expectCount(panel.getByCss('[data-slot="embedded-form-root"]'), 1);
 

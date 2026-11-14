@@ -117,13 +117,13 @@
     "writeStopEnded"
   ],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813",
+    "apps/ui/app/hooks/use-project-manager.tsx": "8407788fd0580bb08558f683776660ed62ff02710a5b3e1141a05a05dc9636b1",
     "apps/ui/app/machines/library-access.machine.ts": "9414fd69d6eeb27453a4d8c73d4d1e010f11162d40164171e0a43d160fec3488",
     "apps/ui/app/machines/library-discovery.machine.ts": "714b3a34db66a3aa10f3d78dda143e66c1d3c197c3b832139096b2a77bc7874b",
     "apps/ui/app/machines/library-recovery.machine.ts": "41907b4cc6ffe0b3dc6a2ac124c8cc231327c18134a2c0c7ea41d705e0a24367"
   },
   "specs": {
-    "LibraryCatalog.tla": "fe8e3005ddd22de077ec5343af081c2a8be319e2d34c864ed8352ea59dc07d0c"
+    "LibraryCatalog.tla": "b28eb86240a8c7fb5b61691131ac0e51ce8a55abb1d258f3ef99bb4b3fd04e66"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",
@@ -141,7 +141,7 @@
     "LibraryCatalog.today-ref-epoch-safe.cfg": "6820ab1b6b89c0a0d47de908ceae256d01e4111049d8004d2daebb0e6c24f67b",
     "LibraryCatalog.today-ref-epoch.cfg": "bbd222e64dd0e6b9cbf59057f4346110ab64658a0c6f3f251023330665c0a87c",
     "LibraryCatalog.wide.cfg": "13bb12904b6222c282f37460eb225ff6f402cc2fa5d96f34bb54836ad214822c",
-    "expected.json": "667056ac3f7f92d1442a2e593344b49802182538c13f474da0299e57ff84d1ad"
+    "expected.json": "ab5df4c34ff06385edb879591d9b8417f5b96d758d405948a9be1ab365652a4c"
   },
   "versions": {
     "library-access": "1",

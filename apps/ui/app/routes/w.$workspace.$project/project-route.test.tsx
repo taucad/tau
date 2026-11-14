@@ -106,11 +106,16 @@ const publishProjectHostConnector = vi.fn(
 );
 const browserClientOptions: unknown[] = [];
 const browserHostLeaseReleases: Array<ReturnType<typeof vi.fn>> = [];
-const retainBrowserAgentHostProject = vi.fn((_options: unknown) => {
-  const release = vi.fn();
-  browserHostLeaseReleases.push(release);
-  return release;
-});
+/* Hoisted: the agent-host client's mock reads these when the module is first imported, which the app runtime's
+ * graph does during this file's imports. */
+const { retainBrowserAgentHostProject, noteBrowserRunRated } = vi.hoisted(() => ({
+  retainBrowserAgentHostProject: vi.fn((_options: unknown) => {
+    const release = vi.fn();
+    browserHostLeaseReleases.push(release);
+    return release;
+  }),
+  noteBrowserRunRated: vi.fn(async (_rating: unknown) => undefined),
+}));
 const daemonClientTransports: unknown[] = [];
 const cancelProjectedRun = vi.fn(async (): Promise<'stopped' | 'continuing'> => 'stopped');
 const storedHostSettings = new Map<
@@ -136,7 +141,6 @@ const chatSessionStore = {
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
   cancelProjectedRun,
 };
-const noteBrowserRunRated = vi.fn(async (_rating: unknown) => undefined);
 /** The desktop shell's bridge, when a row stands in for the desktop app; otherwise the web build's none. */
 let desktopShellBridge: unknown;
 vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
@@ -242,7 +246,6 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useSharedFileManagerWorker: () => undefined,
   SharedWorkerGate: ({
     children,
     placeholder,

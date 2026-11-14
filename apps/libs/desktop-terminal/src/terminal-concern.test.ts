@@ -217,6 +217,17 @@ describe('terminal concern', () => {
     expect(port.of('output')).toEqual([{ type: 'output', data: 'hé\r\n', offset: 5 }]);
   });
 
+  it('should open each shell as the account signed in at that moment, and as nobody while signed out', async () => {
+    let account: Readonly<{ id: string; name?: string }> | undefined = { id: 'user_1', name: 'Ada Lovelace' };
+    const { connect, sessions } = setup({ account: () => account });
+    await opened(connect('1'));
+    expect(sessions[0]?.request.account).toEqual({ id: 'user_1', name: 'Ada Lovelace' });
+
+    account = undefined;
+    await opened(connect('2'));
+    expect(sessions[1]?.request).not.toHaveProperty('account');
+  });
+
   it('should decode a character split across chunks once', async () => {
     const { connect, sessions } = setup();
     const port = connect();

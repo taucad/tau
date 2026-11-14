@@ -103,6 +103,7 @@ import type {
   BranchApplySwitchActorOutput,
   BranchCheckActorInput,
   BranchCheckActorOutput,
+  BranchFailureCode,
   BranchMergeActorOutput,
   BranchRenameActorOutput,
 } from '#branch.machine.js';
@@ -146,7 +147,7 @@ import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionRow } from '#revision-verbs.js';
 import { isVersionNumberRefusal } from '#refusal-markers.js';
-import { renumberUnpushedVersions, versionNumberOfTag } from '#version-numbers.js';
+import { isNumberedTagNotVersion, renumberUnpushedVersions, versionNumberOfTag } from '#version-numbers.js';
 import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
@@ -193,6 +194,7 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionGitOperation,
+  RevisionLogEntry,
   RevisionPort,
   RevisionPushResult,
   RevisionPushSession,
@@ -678,6 +680,24 @@ const mergeMovedError = (): Error => {
   const code: RestoreFailureCode = 'UNDO_MERGE_MOVED';
   return Object.assign(new Error('This branch changed after the merge, so the merge can’t be undone here.'), { code });
 };
+
+/**
+ * M1: a merge refused because one side's newest restore took back history the two branches share (an Undo of a
+ * merge, or a Restore to before the merge base), so building on that base would leave work out of the files.
+ *
+ * @param undone - The restore entry that took it back, and the entry it restored.
+ * @returns The refusal, carrying `MERGE_UNDONE` and both entries.
+ */
+const mergeUndoneError = (undone: UndoneHistory): Error => {
+  const code: BranchFailureCode = 'MERGE_UNDONE';
+  return Object.assign(
+    new Error('Part of what these branches share was taken back by an Undo or a Restore, so nothing was merged.'),
+    { code, ...undone },
+  );
+};
+
+/** A restore entry above a merge base whose restored entry does not hold that base (M1). */
+type UndoneHistory = Readonly<{ restoreId: string; restoredFrom: string }>;
 
 /** Where leases live, relative to the project. A `records` row in the registry. */
 const leaseDirectory = '.tau/runs';
@@ -4003,6 +4023,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     branch: string;
     into: string;
     sourceLabel?: string;
+    /**
+     * What a merge does when a side's newest restore took back the history both share (M1). A person's *Merge* refuses
+     * (`MERGE_UNDONE`); a ruling that it should redo the undone merge replaces `'refuse'`. Absent — a sync of one line
+     * with its own remote — the restore is that line's own and merges as any entry does.
+     */
+    undone?: 'refuse';
   }>;
 
   /**
@@ -4093,6 +4119,71 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   /**
+   * The newest restore entry on `head`'s own line above `base`, when the entry it restored does not hold `base` (M1).
+   *
+   * Read from what the commits record (`restoredFrom` and parents), so every device answers alike. The newest restore
+   * decides: a later Restore of the merge, or *Undo restore*, puts the shared history back.
+   *
+   * @param entries - The graph both heads reach, as `log` answered it.
+   * @param head - One side's head.
+   * @param base - The two sides' merge base.
+   * @returns The restore that took the shared history back, or `undefined`.
+   */
+  const undoneHistoryOf = async (
+    entries: readonly RevisionLogEntry[],
+    head: string,
+    base: string,
+  ): Promise<UndoneHistory | undefined> => {
+    const byId = new Map(entries.map((entry) => [entry.id as string, entry]));
+    const shared = new Set<string>();
+    const frontier = [base];
+    while (frontier.length > 0) {
+      const current = frontier.pop()!;
+      if (!shared.has(current)) {
+        shared.add(current);
+        frontier.push(...(byId.get(current)?.parents ?? []));
+      }
+    }
+    let current: string | undefined = head;
+    while (current !== undefined && !shared.has(current)) {
+      const entry = byId.get(current);
+      const restoredFrom = entry?.provenance.restoredFrom;
+      if (restoredFrom !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- the newest restore decides, so this runs at most once.
+        return (await lineContains(restoredFrom, base)) ? undefined : { restoreId: current, restoredFrom };
+      }
+      current = entry?.parents[0];
+    }
+    return undefined;
+  };
+
+  /**
+   * Refuse a person's *Merge* when either side's newest restore took back the history both share (M1). A redo of the
+   * undone merge, if ruled, replaces this refusal.
+   *
+   * @param entries - The graph both heads reach.
+   * @param heads - Both sides' heads; an unborn side has none.
+   * @param base - Their merge base, if they share history.
+   * @throws Error With `MERGE_UNDONE`, naming the restore entry and what it restored.
+   */
+  const refuseUndone = async (
+    entries: readonly RevisionLogEntry[],
+    heads: ReadonlyArray<string | undefined>,
+    base: string | undefined,
+  ): Promise<void> => {
+    if (base === undefined) {
+      return;
+    }
+    for (const head of heads) {
+      // oxlint-disable-next-line no-await-in-loop -- two sides, and the first refusal ends the merge.
+      const undone = head === undefined ? undefined : await undoneHistoryOf(entries, head, base);
+      if (undone !== undefined) {
+        throw mergeUndoneError(undone);
+      }
+    }
+  };
+
+  /**
    * Compose one branch into another, recording a conflict on `into`'s conflict line (D14).
    *
    * `checkoutId` names the checkout a landed merge moved, so its actor can
@@ -4105,6 +4196,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     input: MergeBranchesInput,
   ): Promise<
     | Readonly<{ status: 'merged'; revisionId: string; checkoutId?: string; before?: string }>
+    /* `base === theirs`: nothing to bring, and nothing moved. */
+    | Readonly<{ status: 'upToDate'; revisionId: string }>
     | Readonly<{ status: 'conflicted'; line: string; paths: readonly string[] }>
   > => {
     await ensureStore();
@@ -4122,12 +4215,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (target === undefined) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This project has no files open to merge into.');
     }
-    const base =
-      ours === undefined
-        ? undefined
-        : mergeBaseOf(await port.log({ heads: mergeBaseHeads(ours, theirs) }), ours, theirs);
+    const graph = ours === undefined ? [] : await port.log({ heads: mergeBaseHeads(ours, theirs) });
+    const base = ours === undefined ? undefined : mergeBaseOf(graph, ours, theirs);
+    /*
+     * M1: a side whose newest restore took back shared history (an undone merge, a Restore past the fork) would
+     * fast-forward over the other side's entries or bring only part of a branch. A person's merge refuses, before
+     * the no-op answer, which would say a branch is in whose files are not.
+     */
+    if (input.undone === 'refuse') {
+      await refuseUndone(graph, [ours, theirs], base);
+    }
     if (base === theirs) {
-      return { status: 'merged', revisionId: ours ?? theirs };
+      return { status: 'upToDate', revisionId: ours ?? theirs };
     }
     /*
      * The lease before the files, always (rule 9): a turn's own writes make its
@@ -5189,14 +5288,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         Readonly<{ projectId: string; branch: string; into: string }>
       >(async ({ input }) => {
         /* The registry is re-read on `branchMerged`, so the moved checkout stays this module's. */
-        const outcome = await mergeBranches(input);
-        return outcome.status === 'merged'
-          ? {
+        const outcome = await mergeBranches({ ...input, undone: 'refuse' });
+        if (outcome.status === 'conflicted') {
+          return { status: 'conflicted', paths: outcome.paths };
+        }
+        return outcome.status === 'upToDate'
+          ? outcome
+          : {
               status: 'merged',
               revisionId: outcome.revisionId,
               ...(outcome.before === undefined ? {} : { before: outcome.before }),
-            }
-          : { status: 'conflicted', paths: outcome.paths };
+            };
       }),
       /* A rename is two ref writes, in the order that cannot lose the head: the
        * new name is born first, and only a ref that still points where we read
@@ -5886,9 +5988,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const own = await devicesOrNone();
         const current = await devicesOrNone(opsLog.currentDevices);
         const trackedTags = remoteTrackingRef(input.remote, 'refs/tags');
-        const [heads, tags, trackedTagReferences, chats, evidence, logs] = await Promise.all([
+        const [heads, tags, versions, trackedTagReferences, chats, evidence, logs] = await Promise.all([
           port.listRefs('refs/heads'),
           port.listRefs('refs/tags'),
+          configured?.kind === 'tau' ? port.listTags() : Promise.resolve([]),
           port.listRefs(trackedTags),
           syncChats ? port.listRefs(chatRefPrefix) : Promise.resolve([]),
           syncLargeExports ? port.listRefs('refs/tau/evidence') : Promise.resolve([]),
@@ -5900,9 +6003,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /* Another device's conflict line is that device's to push: offering a
          * copy this host fetched earlier would only sink the atomic set when
          * the owner has moved it on since (D14). */
+        /* A `refs/tags/v<n>` that is not a version (`git tag v2` in a terminal)
+         * stays here: Tau Cloud refuses it, and the atomic set with it (M2). */
         const history = [...heads, ...tags]
           .map((entry) => entry.name)
-          .filter((name) => offered(name) && pushOffers(name, own));
+          .filter(
+            (name) =>
+              offered(name) &&
+              pushOffers(name, own) &&
+              !(configured?.kind === 'tau' && isNumberedTagNotVersion(name, versions)),
+          );
         const records = [...chats, ...evidence, ...ops]
           .map((entry) => entry.name)
           .filter((name) => offered(name) && !failedPreparation.has(name));

@@ -87,7 +87,7 @@ export function GlassPrismLoader({
     [initialShape, onSequenceChangeRef, quality, seed],
   );
 
-  const { status, shouldPlay, attachRoot, canvasRef } = useShowcaseLoader({
+  const { status, shouldPlay, attachRoot, canvasRef, canvasKey } = useShowcaseLoader({
     create,
     name: 'Glass prism loader',
     speed,
@@ -108,6 +108,7 @@ export function GlassPrismLoader({
       className={cn('relative overflow-hidden', className)}
     >
       <canvas
+        key={canvasKey}
         ref={canvasRef}
         aria-hidden='true'
         className={cn(

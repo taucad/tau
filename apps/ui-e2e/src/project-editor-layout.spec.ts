@@ -42,7 +42,8 @@ const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
     const main = outerRoot?.querySelector<HTMLElement>('main');
     const sidebar = document.querySelector<HTMLElement>('[role="complementary"][aria-label="Application sidebar"]');
     const workspace = document.querySelector<HTMLElement>('[data-project-workspace]');
-    const root = workspace?.querySelector<HTMLElement>(':scope > .split-view');
+    /* The lanes' Allotment sits inside its resize owner (3c02161458). */
+    const root = workspace?.querySelector<HTMLElement>(':scope > [data-resize-owner] > .split-view');
     const firstPane = root?.querySelector<HTMLElement>(':scope > .split-view-container > .split-view-view-visible');
     const sashContainer = root?.querySelector<HTMLElement>(':scope > .sash-container');
     const content = document.querySelector<HTMLElement>('[data-slot="collection-empty-state"]');
@@ -147,7 +148,10 @@ test('the project shell keeps stable controls, split geometry, and focus scroll'
   const canvas = selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first();
 
   await target.expectVisible(canvas, 60_000);
-  await target.expectVisible(selectors.getByCss('[data-project-workspace] > .split-view'), 60_000);
+  await target.expectVisible(
+    selectors.getByCss('[data-project-workspace] > [data-resize-owner] > .split-view'),
+    60_000,
+  );
   await target.expectVisible(composer, 60_000);
   await target.expectVisible(home);
   await target.expectVisible(sidebarTrigger);

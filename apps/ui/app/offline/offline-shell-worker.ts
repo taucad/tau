@@ -25,6 +25,12 @@
  * and never enters a cache; private usage data belongs to B4's account-scoped
  * IndexedDB store, not here.
  *
+ * A shell navigation is network-first, but bounded: once it has had no
+ * response for `offlineShellNavigationTimeout` (3,000 ms) it is answered
+ * with the cached neutral document, so a stalled server shows the shell instead
+ * of a blank tab. The late network response is discarded, never stored — it
+ * may be session-rendered, and the cached copy must stay neutral.
+ *
  * Responses are stored and replayed whole, so `Cross-Origin-Opener-Policy`,
  * `Cross-Origin-Embedder-Policy`, `Cross-Origin-Resource-Policy`,
  * `Content-Security-Policy`, `Content-Type` and cache directives come back
@@ -64,18 +70,24 @@ export type OfflineShellMessage = {
 
 const cacheNamePrefix = 'tau-offline-shell-';
 
+/** How long a shell navigation waits for a network response before the cached neutral document answers it. Milliseconds. */
+export const offlineShellNavigationTimeout = 3000;
+
 /**
  * Minimal structural views of the worker global.
  *
  * Deliberately narrower than the platform types: the TypeScript DOM library has
  * no `ServiceWorkerGlobalScope`, and a structural shape the real globals and a
- * test fake both satisfy avoids a cast on either side.
+ * test fake both satisfy avoids a cast on either side. Time comes through the
+ * scope's own timers, so a test drives the navigation bound with a manual clock.
  */
 export type OfflineShellScope = {
   readonly location: { readonly origin: string };
   readonly caches: ShellCacheStorage;
   readonly clients: { matchAll(options?: { includeUncontrolled?: boolean }): Promise<readonly ClientLike[]> };
   fetch(input: string, init?: RequestInit): Promise<Response>;
+  setTimeout(callback: () => void, ms: number): number;
+  clearTimeout(handle: number | undefined): void;
 };
 
 /** The `Cache` surface this worker uses. */
@@ -238,12 +250,68 @@ export const classifyOfflineShellRequest = (
 };
 
 /**
+ * Answer a shell navigation: network-first, bounded by
+ * `offlineShellNavigationTimeout`.
+ *
+ * - The network answers first: its document is served (redirect identity
+ *   dropped).
+ * - The network fails first: the cached document is served at once; with none
+ *   cached, the failure is rethrown.
+ * - The bound passes with no response: the cached document is served and the
+ *   late network response is discarded, never stored — it may be
+ *   session-rendered, and the cached copy must stay neutral. Its rejection is
+ *   observed, so it is never an unhandled rejection. With no cached document
+ *   the network is still awaited.
+ *
+ * @param scope - Worker global (or a test fake).
+ * @param cache - This version's complete cache.
+ * @param navigation - The document's cache key and the navigation's URL.
+ * @returns The response to serve.
+ */
+const respondToShellNavigation = async (
+  scope: OfflineShellScope,
+  cache: ShellCache,
+  { key, url }: { readonly key: string; readonly url: string },
+): Promise<Response> => {
+  const network = scope.fetch(url);
+  let timer: number | undefined;
+  const timedOut = new Promise<'timed-out'>((resolve) => {
+    timer = scope.setTimeout(() => {
+      resolve('timed-out');
+    }, offlineShellNavigationTimeout);
+  });
+  try {
+    const first = await Promise.race([network, timedOut]);
+    if (first !== 'timed-out') {
+      return shellDocument(first);
+    }
+  } catch (error) {
+    const cached = await cache.match(key);
+    if (cached === undefined) {
+      throw error;
+    }
+    return cached;
+  } finally {
+    scope.clearTimeout(timer);
+  }
+  const cached = await cache.match(key);
+  if (cached === undefined) {
+    return shellDocument(await network);
+  }
+  /* Discarded: `Promise.race` above already observes `network`, so a late
+     rejection is handled there and never surfaces as an unhandled one. */
+  return cached;
+};
+
+/**
  * Produce the response for a request this worker owns.
  *
  * Hashed assets are cache-first (immutable by filename); shell documents are
- * network-first with the cached neutral document as the offline fallback. Both
- * replay the stored response, headers included. Nothing is written to the cache
- * here — only a completed install populates it.
+ * network-first with the cached neutral document as the fallback when the
+ * network fails or has not responded within `offlineShellNavigationTimeout`
+ * (3,000 ms). Both replay the stored response, headers included. Nothing is
+ * written to the cache here — only a completed install populates it, so a late
+ * network response is discarded rather than stored.
  *
  * @param scope - Worker global (or a test fake).
  * @param manifest - Build-generated shell description.
@@ -268,15 +336,7 @@ export const respondFromOfflineShell = async (
   if (decision.kind === 'asset') {
     return (await cache.match(decision.key)) ?? scope.fetch(request.url);
   }
-  try {
-    return shellDocument(await scope.fetch(request.url));
-  } catch (error) {
-    const cached = await cache.match(decision.key);
-    if (cached === undefined) {
-      throw error;
-    }
-    return cached;
-  }
+  return respondToShellNavigation(scope, cache, { key: decision.key, url: request.url });
 };
 
 /**

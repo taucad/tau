@@ -16,7 +16,14 @@ import {
   installGatewayFixture,
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
-import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf } from '#support/scenario.js';
+import {
+  chooseNewProjectKernel,
+  expectCount,
+  expectVisible,
+  selectChatModel,
+  sendPrompt,
+  stopButtonOf,
+} from '#support/scenario.js';
 import {
   backupLine,
   forgetBackupByDefault,
@@ -193,11 +200,12 @@ const browserStorePaths = async (client: BrowserClient, prefix: string): Promise
     return found.filter((entry) => entry.startsWith(root));
   }, prefix);
 
-/** Create a project through the product's own *New project (from code)* page. */
+/** Create an OpenSCAD project, whose entry is `main.scad`, through the product's own *New project (from code)* page. */
 const createProjectInBrowser = async (client: BrowserClient, name: string): Promise<string> => {
   const { page } = client;
   await page.goto('/projects/new', { waitUntil: 'domcontentloaded' });
   await page.getByLabel('Project Name *').fill(name);
+  await chooseNewProjectKernel(page, 'OpenSCAD');
   await page
     .getByRole('button', { name: /^Create Project/u })
     .first()
@@ -2135,6 +2143,7 @@ describe('close and continue', () => {
     try {
       await source.page.goto('app://tau/projects/new', { waitUntil: 'domcontentloaded' });
       await source.page.getByLabel('Project Name *').fill('W18 Desktop To Browser');
+      await chooseNewProjectKernel(source.page, 'OpenSCAD');
       await source.page
         .getByRole('button', { name: /^Create Project/u })
         .first()

@@ -332,7 +332,6 @@ vi.mock('@xstate/react', async (importOriginal) => {
 });
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useSharedFileManagerWorker: () => undefined,
   HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     useEffect(() => {
       fixtures.order.push(`mount:${projectId}`);

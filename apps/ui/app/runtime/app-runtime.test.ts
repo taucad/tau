@@ -2,9 +2,10 @@
  * The app runtime root without React (app state orchestration charter D5, D23, D26; plan § 4 A1a).
  *
  * The root is created unstarted with the clock, `inspect` and `onRejectedEvent` (MC-R4). It holds the static
- * children in one list; A1a attaches `environment` and `sessions`. Starting it starts both, and stopping it stops
- * both and removes every DOM listener `environment` added. `environment` reports document visibility, window focus
- * and the memory class, and never listens for an unload phase: `UnloadProvider` stays the one unload sequencer
+ * children in one list; A1a attaches `environment` and `sessions`, A1b `fileManagerHost`, `rootFiles` and
+ * `leases`, and A2 `projectLibrary` and `chatSessions`. Starting it starts them, and stopping it stops them and removes every DOM listener `environment` added.
+ * `environment` reports document visibility, window focus and the memory class, and never listens for an unload
+ * phase: `UnloadProvider` stays the one unload sequencer
  * until A5b (D26). The root keeps its first fault (D23).
  */
 import { flush, StepClock } from '@taucad/xstate-testing/clock';
@@ -25,10 +26,19 @@ import type { AppRuntimeEvent } from '#runtime/app-runtime.machine.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import {
   createAppRuntime,
+  noAnalytics,
   selectAppEnvironment,
   selectAppRuntimeFault,
+  selectFileManagerHost,
+  selectRootFiles,
+  selectRuntimeChatSessions,
+  selectRuntimeIdleFileManagers,
+  selectRuntimeProjectLibrary,
+  selectRuntimeQueryClient,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
+import { QueryClient } from '@tanstack/react-query';
+import { ChatSessionStore } from '#services/chat-session-store.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { createEnvironmentLogic } from '#runtime/environment.js';
 import { sessionsRegistryLogic } from '#services/sessions-store.js';
@@ -37,8 +47,11 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 
+/* `rootFiles` as a root composed without the host builds it: waiting for Home's backend, never asked to connect. */
+const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
+
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach environment and sessions', () => {
+  it('should list the nine static children once, and attach the seven A1a, A1b and A2 compose', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -50,7 +63,15 @@ describe('app runtime root', () => {
       'sessions',
       'focus',
     ]);
-    expect(appRuntimeAttachedChildren).toEqual(['environment', 'sessions']);
+    expect(appRuntimeAttachedChildren).toEqual([
+      'environment',
+      'fileManagerHost',
+      'rootFiles',
+      'leases',
+      'projectLibrary',
+      'chatSessions',
+      'sessions',
+    ]);
   });
 
   it('should compose unstarted and start and stop its children with no React', () => {
@@ -108,7 +129,7 @@ describe('app runtime root', () => {
           actors: { environment: createEnvironmentLogic(() => host), sessions: sessionsRegistryLogic },
         }),
       ),
-      { input: { sessions: {} } },
+      { input: { sessions: {}, rootFiles: idleRootFiles } },
     );
     const emitted = recordEmitted(runtime);
     runtime.start();
@@ -158,6 +179,87 @@ describe('app runtime root', () => {
     expect(onRejectedEvent).not.toHaveBeenCalled();
     registry.send({ type: 'touch', projectId: 'p1' });
     expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped', targetId: 'sessions' }));
+
+    /* The library's actors report through the same hook. */
+    onRejectedEvent.mockClear();
+    selectRuntimeProjectLibrary(runtime).workspaceConnection.send({ type: 'beginSelection', operationId: 'op1' });
+    expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped' }));
+  });
+
+  /* Programme control ruling: the client runtime captures workspace telemetry through `admittedAnalytics`; the server
+   * runtime and every test runtime pass none and get the no-op client, so they capture nothing. */
+  it('should capture workspace telemetry through its analytics port, and nothing without one (D15)', () => {
+    const capture = vi.fn();
+    const withPort = createAppRuntime({ environment: () => createFakeEnvironmentHost(), analytics: { capture } });
+    const skipped = { workspaceId: 'w1', reason: 'permission' } as const;
+    selectRootFiles(withPort.getSnapshot()).getSnapshot().context.onRootSkipped?.(skipped);
+    expect(capture).toHaveBeenCalledOnce();
+    expect(capture).toHaveBeenCalledWith(expect.any(String), expect.objectContaining(skipped));
+
+    const noOp = vi.spyOn(noAnalytics, 'capture');
+    const withoutPort = createAppRuntime({ environment: () => createFakeEnvironmentHost() });
+    selectRootFiles(withoutPort.getSnapshot()).getSnapshot().context.onRootSkipped?.(skipped);
+    expect(noOp).toHaveBeenCalledOnce();
+    expect(capture).toHaveBeenCalledOnce();
+    noOp.mockRestore();
+  });
+
+  /* The remote-host harness renders no file manager, so its runtime reads no Home engine and connects no worker. */
+  it('should leave its file managers idle when asked to', async () => {
+    const loadHomeBackend = vi.fn(async (): Promise<'opfs'> => 'opfs');
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      loadHomeBackend,
+      idleFileManagers: true,
+    }).start();
+    await flush();
+    expect(loadHomeBackend).not.toHaveBeenCalled();
+    expect(selectFileManagerHost(runtime.getSnapshot()).getSnapshot().value).toBe('resolving');
+    expect(selectRootFiles(runtime.getSnapshot()).getSnapshot().value).toBe('initializing');
+    expect(selectRuntimeIdleFileManagers(runtime)).toBe(true);
+    expect(selectRuntimeIdleFileManagers(createAppRuntime({ environment: () => undefined }))).toBe(false);
+    runtime.stop();
+  });
+
+  /* A2 (D9; row L3): the runtime builds the query client, the library and the chat store, and the library's actors
+   * and worker start and stop with the root. */
+  it('should build its query client, project library and chat store, and start and stop the library with the root', () => {
+    const runtime = createAppRuntime({ environment: () => createFakeEnvironmentHost() });
+    const library = selectRuntimeProjectLibrary(runtime);
+    expect(selectRuntimeQueryClient(runtime)).toBeInstanceOf(QueryClient);
+    expect(library.queryClient).toBe(selectRuntimeQueryClient(runtime));
+    expect(selectRuntimeChatSessions(runtime)).toBeInstanceOf(ChatSessionStore);
+
+    /* Created, not started: the library's actors exist and answer their initial snapshots, and no worker is asked for. */
+    expect(library.projectManager.getSnapshot().status).toBe('active');
+    expect(library.projectManager.getSnapshot().value).toBe('initializing');
+    expect(library.workspaceConnection.getSnapshot().value).toBe('idle');
+
+    runtime.start();
+    /* Started with the root, and sent `initialize`: the worker is being created. */
+    expect(library.projectManager.getSnapshot().value).not.toBe('initializing');
+    expect(selectRuntimeProjectLibrary(runtime)).toBe(library);
+
+    runtime.stop();
+    expect(library.projectManager.getSnapshot().status).toBe('stopped');
+    expect(library.workspaceConnection.getSnapshot().status).toBe('stopped');
+  });
+
+  it('should take the query client its composition passes', () => {
+    const queryClient = new QueryClient();
+    const runtime = createAppRuntime({ environment: () => undefined, queryClient });
+    expect(selectRuntimeQueryClient(runtime)).toBe(queryClient);
+    expect(selectRuntimeProjectLibrary(runtime).queryClient).toBe(queryClient);
+  });
+
+  /* The remote-host harness mounts no `ProjectManagerProvider`, so an idle runtime starts no project-manager worker. */
+  it('should not start the library of an idle runtime', () => {
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      idleFileManagers: true,
+    }).start();
+    expect(selectRuntimeProjectLibrary(runtime).projectManager.getSnapshot().value).toBe('initializing');
+    runtime.stop();
   });
 
   it('should keep the first fault and keep answering (D23)', async () => {
@@ -179,7 +281,7 @@ describe('app runtime root', () => {
         }),
       ),
       {
-        input: { sessions: {} },
+        input: { sessions: {}, rootFiles: idleRootFiles },
         inspect: (inspection) => {
           if (inspection.type === '@xstate.transition' && inspection.event.type === 'xstate.error.actor') {
             errors.push(String((inspection.event as { actorId?: unknown }).actorId));
@@ -224,7 +326,7 @@ describe('app runtime root totality', () => {
     const events: readonly AnyEventObject[] = Object.values(samples).flat();
     expect(
       unansweredEvents(appRuntimeMachine, {
-        input: { sessions: {} },
+        input: { sessions: {}, rootFiles: idleRootFiles },
         events,
         limit: 500,
         ignore: appRuntimeIgnoredEvents,

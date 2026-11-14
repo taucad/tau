@@ -579,6 +579,55 @@ export const shellGitReadEnvironment: Readonly<Record<string, string>> = Object.
 });
 
 /**
+ * What a Terminal whose store is writable carries: still no system-wide config, and optional locks allowed again, so
+ * `git status` refreshes the index it may now write, as it does in any other terminal.
+ *
+ * @public
+ */
+export const shellGitWriteEnvironment: Readonly<Record<string, string>> = Object.freeze({
+  GIT_CONFIG_NOSYSTEM: '1',
+});
+
+/** The signed-in Tau account a Terminal commits as. @public */
+export type ShellGitAccount = Readonly<{
+  /** The account's user id, which its no-reply address names. */
+  id: string;
+  /** The account's display name; the id stands in when it is absent or empty. */
+  name?: string | undefined;
+}>;
+
+/** The email domain of a Tau no-reply address, `<accountId>@users.noreply.tau.new`, the only address backup accepts. */
+const tauNoreplyDomain = 'users.noreply.tau.new';
+
+/** An account id the server reads back out of a no-reply address: no `@`, space or angle bracket, and no quote. */
+const noreplyLocalPart = /^[^@\s<>"\\]+$/u;
+
+/** A value as a quoted git config value, or `undefined` when it holds a character a config line cannot carry. */
+const configValue = (value: string): string | undefined =>
+  [...value].some((character) => character.codePointAt(0)! < 0x20 || character === '\u007F')
+    ? undefined
+    : `"${value.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`;
+
+/**
+ * The git identity a Terminal session commits as: the person's Tau name and their Tau no-reply address, the address
+ * backup records a commit under. Without an account, or with one whose id or name a config line cannot carry, it
+ * is `undefined`, and git's own "Please tell me who you are" answers a commit.
+ *
+ * @param account - The signed-in account, or `undefined` when signed out.
+ * @returns The `[user]` section, or `undefined`.
+ * @public
+ */
+export const shellGitIdentityConfig = (account: ShellGitAccount | undefined): string | undefined => {
+  if (account === undefined || !noreplyLocalPart.test(account.id)) {
+    return undefined;
+  }
+  const given = account.name?.trim() ?? '';
+  const name = configValue(given === '' ? account.id : given);
+  const email = configValue(`${account.id}@${tauNoreplyDomain}`);
+  return name === undefined || email === undefined ? undefined : `[user]\n\tname = ${name}\n\temail = ${email}\n`;
+};
+
+/**
  * The environment that points git in the shell at a view: its directory and work tree, no optional lock (status must
  * not try to refresh the read-only index copy, and every write fails) and no system-wide config. The machine's system
  * config is not the view's: Xcode's git carries `credential.helper=osxkeychain` in its bundled one, and a distribution's

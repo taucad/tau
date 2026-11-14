@@ -3,8 +3,8 @@
  * H6, the state part (app state orchestration plan § 4 A13): the library reports the Tau Cloud listing as one of
  * three states, `fetching | ready | failed`, and Home's cloud line reads that state rather than two flags.
  *
- * `fetching` is a request in flight; `failed` is a listing whose last request failed, also while a retry runs, as
- * the cloud line shows today; `ready` is every other case, including a listing not asked yet.
+ * `fetching` is a request in flight, a retry after a failure included; `failed` is a listing whose last request failed;
+ * `ready` is every other case, including a listing not asked yet. These are the cases the cloud line draws today.
  */
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -27,7 +27,7 @@ const createWrapper = () => {
 };
 
 /** The listing state the hook reports. */
-const cloudOf = (result: { readonly current: unknown }): unknown => (result.current as { cloud?: unknown }).cloud;
+const cloudOf = (result: { readonly current: ReturnType<typeof useCloudProjects> }): string => result.current.cloud;
 
 beforeEach(() => {
   localStorage.clear();
@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe('H6: the cloud listing state', () => {
-  it.fails('H6: reports fetching while the listing request is in flight, then ready once it answers', async () => {
+  it('H6: reports fetching while the listing request is in flight, then ready once it answers', async () => {
     const response = Promise.withResolvers<Response>();
     fetchMock.mockImplementation(async () => response.promise);
     const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
@@ -60,7 +60,7 @@ describe('H6: the cloud listing state', () => {
     });
   });
 
-  it.fails('H6: reports failed when the listing request fails, and keeps failed while a retry is in flight', async () => {
+  it('H6: reports failed when the listing request fails, and fetching while its retry is in flight', async () => {
     fetchMock.mockImplementation(async () => new Response(undefined, { status: 503 }));
     const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
 
@@ -74,9 +74,8 @@ describe('H6: the cloud listing state', () => {
       result.current.retry();
     });
     await waitFor(() => {
-      expect(result.current.isFetching).toBe(true);
+      expect(cloudOf(result)).toBe('fetching');
     });
-    expect(cloudOf(result)).toBe('failed');
 
     await act(async () => {
       retried.resolve(Response.json([]));
@@ -87,7 +86,7 @@ describe('H6: the cloud listing state', () => {
     });
   });
 
-  it.fails('H6: reports ready for a listing that is not asked', () => {
+  it('H6: reports ready for a listing that is not asked', () => {
     fetchMock.mockImplementation(async () => Response.json([]));
     const { result } = renderHook(() => useCloudProjects({ enabled: false }), { wrapper: createWrapper() });
 

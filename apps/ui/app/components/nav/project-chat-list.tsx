@@ -6,6 +6,8 @@ import type { ProjectListItem } from '#types/project-library.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { useProjectListShape } from '#hooks/use-project-list-shape.js';
+import type { RememberedChat } from '#lib/project-list-shape.lib.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
@@ -19,7 +21,6 @@ import {
   SidebarRowContextMenu,
   SidebarRowLink,
   SidebarRowMenuButton,
-  SidebarRowSkeleton,
   sidebarRowClass,
   sidebarRowEditorClass,
 } from '#components/nav/sidebar-row.js';
@@ -47,12 +48,53 @@ const startOfToday = (): number => {
 
 export const sortProjectChats = (chats: readonly ChatRecord[]): ChatRecord[] => [...chats].sort(compareChatsByRecency);
 
+/** What a chat list needs of its project: a listed project, or a row the listing snapshot remembered. */
+type ChatListProject = Pick<ProjectListItem, 'id' | 'slugs'>;
+
+/** No remembered chats: a stable empty list. */
+const noRememberedChats: readonly RememberedChat[] = [];
+
+/** A remembered chat row as the record the list draws, sorts and groups. */
+const rememberedChatRecord = (projectId: string, chat: RememberedChat): ChatRecord => ({
+  id: chat.id,
+  resourceId: projectId,
+  name: chat.name,
+  createdAt: chat.createdAt,
+  updatedAt: chat.updatedAt,
+  ...(chat.recencyAt === undefined ? {} : { recencyAt: chat.recencyAt }),
+});
+
+/**
+ * The rows a chat list draws (A13): until the chat listing answers, the ones the last listing had (the listing
+ * snapshot), as real rows under the day labels their own times give; the listing then reconciles them by id in place.
+ * With none remembered the list is empty.
+ *
+ * @param projectId - The project whose chats are listed.
+ * @param listedChats - The chat listing's live rows.
+ * @param isAwaitingChats - Whether the listing has not answered and has no row.
+ * @returns The rows, and whether they are remembered ones.
+ */
+function useChatRows(
+  projectId: string,
+  listedChats: ChatRecord[],
+  isAwaitingChats: boolean,
+): { readonly chats: ChatRecord[]; readonly isRemembered: boolean } {
+  const rememberedChats =
+    useProjectListShape()?.projects?.find((entry) => entry.id === projectId)?.chats ?? noRememberedChats;
+  const isRemembered = isAwaitingChats && rememberedChats.length > 0;
+  const chats = useMemo(
+    () => (isRemembered ? rememberedChats.map((chat) => rememberedChatRecord(projectId, chat)) : listedChats),
+    [isRemembered, listedChats, projectId, rememberedChats],
+  );
+  return { chats, isRemembered };
+}
+
 export function ProjectChatList({
   project,
   isProjectActive,
   isExpanded = true,
 }: {
-  readonly project: ProjectListItem;
+  readonly project: ChatListProject;
   readonly isProjectActive: boolean;
   readonly isExpanded?: boolean;
 }): React.ReactNode {
@@ -60,13 +102,15 @@ export function ProjectChatList({
   const isOpening = useTauCloudIntent(project.id) === 'open';
   const isLoadingCloudChats = useProjectSidebarRow(project.id).sync?.chats === 'loading';
   const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
-  const chats = useMemo(
+  const listedChats = useMemo(
     () =>
       allChats.filter(
         (chat) => chat.deletedAt === undefined && chat.purgedAt === undefined && !isUnownedChatObservation(chat.id),
       ),
     [allChats],
   );
+  const isAwaitingChats = (isLoading || isOpening || isLoadingCloudChats) && listedChats.length === 0;
+  const { chats, isRemembered } = useChatRows(project.id, listedChats, isAwaitingChats);
   const store = useChatSessionStore();
   // Metadata and ordering do not retire leases; only membership or the owning project/store does.
   const observations = useMemo(
@@ -94,13 +138,15 @@ export function ProjectChatList({
   const unreadKey = useSyncExternalStore(
     useCallback((listener: () => void) => store.subscribeUnread(listener), [store]),
     () =>
-      chats
+      listedChats
         .filter((chat) => store.isUnread(chat.id))
         .map((chat) => chat.id)
         .join(observedKeySeparator),
     () => '',
   );
-  const observedKey = [...new Set([...visibleChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)])]
+  /* A remembered row is not observed: its transcript loads once the listing names it. */
+  const observedChats = isRemembered ? [] : visibleChats;
+  const observedKey = [...new Set([...observedChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)])]
     .filter((chatId) => chatId !== '' && !isUnownedChatObservation(chatId))
     .join(observedKeySeparator);
   useEffect(() => {
@@ -164,15 +210,9 @@ export function ProjectChatList({
      * project row never share a column. */
     <SidebarMenuSub
       id={listId}
+      aria-busy={isAwaitingChats && !isRemembered ? true : undefined}
       className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0.5 border-l border-sidebar-border py-0 pr-0 pl-1.5'
     >
-      {(isLoading || isOpening || isLoadingCloudChats) && chats.length === 0
-        ? Array.from({ length: 3 }, (_, index) => (
-            <SidebarMenuSubItem key={index} aria-hidden>
-              <SidebarRowSkeleton />
-            </SidebarMenuSubItem>
-          ))
-        : null}
       {error ? (
         <SidebarMenuSubItem>
           <SidebarFailureRow
@@ -247,7 +287,7 @@ function ProjectChatItem({
   onDelete,
 }: {
   readonly chat: ChatRecord;
-  readonly project: ProjectListItem;
+  readonly project: ChatListProject;
   readonly isActive: boolean;
   readonly isPending: boolean;
   readonly isEditing: boolean;

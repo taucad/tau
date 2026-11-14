@@ -76,7 +76,7 @@ vi.mock('#components/nav/project-chat-list.js', () => ({
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarGroup: ({ children }: { readonly children: ReactNode }) => <section>{children}</section>,
   SidebarGroupLabel: ({ children }: { readonly children: ReactNode }) => <h2>{children}</h2>,
-  SidebarMenu: ({ children }: { readonly children: ReactNode }) => <ul>{children}</ul>,
+  SidebarMenu: ({ children, ...properties }: { readonly children: ReactNode }) => <ul {...properties}>{children}</ul>,
   SidebarMenuItem: ({ children, ...properties }: { readonly children: ReactNode }) => (
     <li {...properties}>{children}</li>
   ),
@@ -496,26 +496,57 @@ describe('ProjectNavigation', () => {
     expect(screen.getAllByRole('link')).toHaveLength(2);
   });
 
-  it('shows one-line skeletons while the first list loads', () => {
+  /* R5, A13: the listing reconciles the rows the last listing had, so nothing below them moves. */
+  it('draws the remembered rows as real links, and the Show more row past a page, before the listing', () => {
+    rememberedShape = {
+      count: 7,
+      projects: Array.from({ length: 7 }, (_, index) => ({
+        id: `proj_${index + 1}`,
+        name: `Project ${index + 1}`,
+        lastActivityAt: index + 1,
+        slugs: { workspaceSlug: 'home', projectSlug: `project-${index + 1}` },
+      })),
+    };
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
     render(<ProjectNavigation />);
-    const skeletons = screen.getAllByTestId('project-navigation-skeleton');
-    expect(skeletons).toHaveLength(3);
-    expect(skeletons[0]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
+
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(
+      [7, 6, 5, 4, 3].map((index) => `/w/home/project-${String(index)}`),
+    );
+    expect(screen.getByRole('button', { name: 'Show more projects' })).toBeEnabled();
+    expect(document.querySelector('[data-slot=skeleton]')).toBeNull();
+    expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
   });
 
-  /* R5: the listing fills the rows the last listing had, so nothing below them moves. */
-  it('reserves skeleton rows, never names, and the Show more row past a page', () => {
-    rememberedShape = { count: 7 };
+  /* A server render, or a device that kept only a count: no row stands in for a project it cannot name. */
+  it('draws no row from a remembered count alone', () => {
+    rememberedShape = { count: 3 };
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
     render(<ProjectNavigation />);
 
-    const placeholders = screen.getAllByTestId('project-navigation-skeleton');
-    expect(placeholders).toHaveLength(6);
-    expect(placeholders[0]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
-    expect(placeholders[0]).toHaveTextContent('');
-    expect(placeholders[5]).toHaveTextContent('Show more projects');
-    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('section > ul > li')).toHaveLength(0);
+    expect(document.querySelector('section > ul')).toHaveAttribute('aria-busy', 'true');
+  });
+
+  /* A13: a remembered row that the listing dropped leaves; one it renamed updates in place. */
+  it('reconciles the remembered rows by id when the listing arrives', () => {
+    rememberedShape = {
+      count: 2,
+      projects: [
+        { ...secondProject, name: 'Two (old name)' },
+        { id: 'proj_gone', name: 'Gone', lastActivityAt: 15, slugs: { workspaceSlug: 'home', projectSlug: 'gone' } },
+      ],
+    };
+    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+    const view = render(<ProjectNavigation />);
+    const remembered = screen.getByRole('link', { name: 'Two (old name)' }).closest('li');
+
+    mockUseProjects.mockReturnValue(projectsResult);
+    view.rerender(<ProjectNavigation />);
+
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
+    expect(screen.getByRole('link', { name: 'Two' }).closest('li')).toBe(remembered);
   });
 
   it('says there are no projects before the listing when the last listing had none', () => {
@@ -523,7 +554,6 @@ describe('ProjectNavigation', () => {
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
     render(<ProjectNavigation />);
 
-    expect(screen.queryByTestId('project-navigation-skeleton')).not.toBeInTheDocument();
     expect(screen.getByText('No projects yet')).toBeInTheDocument();
   });
 
@@ -752,14 +782,13 @@ describe('ProjectNavigation', () => {
     );
 
     /*
-     * U6/H5 for project rows with a live project states the defect only. On a
-     * direct project load the session goes live before the listing resolves;
-     * once it resolves, the "Earlier" label row joins the list (a live and a
-     * non-live project are both visible), and the loading frame reserved no row
-     * for it, so the rows jump by one. It says nothing about how the frame
-     * should account for the label.
+     * U6/H5 for project rows with a live project. On a direct project load the
+     * session goes live before the listing resolves. The loading frame draws the
+     * remembered rows, so the "Earlier" label row comes from their remembered
+     * times there too (programme-control ruling, 2026-11-14), and the rows do
+     * not jump by one when the listing resolves.
      */
-    it.fails.each([2, 5, 7])(
+    it.each([2, 5, 7])(
       'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and a live project',
       (count) => {
         liveProjectIds = ['proj_1'];
@@ -781,7 +810,7 @@ describe('ProjectNavigation', () => {
      * the device has never listed. The list is empty and busy, and the wait is
      * the label's trailing slot, so the arriving rows displace nothing.
      */
-    it.fails('H1: with nothing remembered the first list is empty and busy, with the wait in the label slot', () => {
+    it('H1: with nothing remembered the first list is empty and busy, with the wait in the label slot', () => {
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
       render(<ProjectNavigation />);
 
@@ -791,14 +820,11 @@ describe('ProjectNavigation', () => {
     });
 
     /*
-     * H1 states the defect only: with a persisted listing, the first client
-     * render already has the real rows. The seam is the remembered shape, the
-     * one input served before the worker lists (R5); today it carries only the
-     * count, and the fix (follow-up A15) serves a persisted listing snapshot
-     * through it or beside it. Nothing here says what, if anything, replaces
-     * the skeleton.
+     * H1: with a persisted listing, the first client render already has the
+     * real rows. The seam is the remembered shape, the one input served before
+     * the worker lists (R5), which carries the listing snapshot (A13).
      */
-    it.fails('H1: with a persisted listing the first client render has real project rows and no skeleton row', () => {
+    it('H1: with a persisted listing the first client render has real project rows and no skeleton row', () => {
       const persistedListing = { count: 2, projects: [firstProject, secondProject] };
       rememberedShape = persistedListing;
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });

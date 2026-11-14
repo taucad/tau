@@ -77,6 +77,8 @@ vi.mock('react-router', () => ({
   useLocation: () => ({ search }),
   useNavigate: () => mockNavigate,
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
+  /* No root loader: the remembered shape is this device's own snapshot. */
+  useRouteLoaderData: () => undefined,
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarMenuButton: ({ children, ...properties }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -679,7 +681,7 @@ describe('ProjectChatList', () => {
     });
 
     /* C8: remembered chats are real links under the labels their own times give, with no stand-in row. */
-    it.fails('C8: with a remembered listing the loading list has real chat links under their day labels', () => {
+    it('C8: with a remembered listing the loading list has real chat links under their day labels', () => {
       rememberChats(project.id, [
         { ...chat(1), name: 'Earlier chat', recencyAt: 1 },
         { ...chat(2), name: 'Today chat', recencyAt: Date.now() },
@@ -693,7 +695,7 @@ describe('ProjectChatList', () => {
       expect(screen.queryAllByTestId('skeleton')).toHaveLength(0);
     });
 
-    it.fails('C8: with nothing remembered the loading list has no row and is busy', () => {
+    it('C8: with nothing remembered the loading list has no row and is busy', () => {
       mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
       render(<ProjectChatList project={project} isProjectActive={false} />);
 
@@ -701,7 +703,7 @@ describe('ProjectChatList', () => {
       expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
     });
 
-    it.fails.each([5, 1])(
+    it.each([5, 1])(
       'U6: chat row count is equal before and after the chat list resolves with %i remembered',
       (count) => {
         rememberChatCount(project.id, count);

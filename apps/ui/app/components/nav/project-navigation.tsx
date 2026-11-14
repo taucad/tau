@@ -17,6 +17,7 @@ import {
   SidebarMenuItem,
 } from '#components/ui/sidebar.js';
 import { Button } from '@taucad/ui/components/button';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -37,7 +38,6 @@ import {
   SidebarRowContextMenu,
   SidebarRowLink,
   SidebarRowMenuButton,
-  SidebarRowSkeleton,
   sidebarRowButtonClass,
   sidebarRowClass,
   sidebarRowEditorClass,
@@ -59,14 +59,20 @@ import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-n
 
 const projectsPerPage = 5;
 
-/** Rows reserved while a browser that has never listed its projects waits for its first listing. */
-const unknownShapeRowCount = 3;
+/**
+ * What a sidebar project row draws: a listed project, or a row the listing snapshot remembered (A13), which has no
+ * locator until the listing names it.
+ */
+export type SidebarProject = Pick<ProjectListItem, 'id' | 'name' | 'lastActivityAt' | 'slugs'> &
+  Partial<Pick<ProjectListItem, 'locator'>>;
 
-export const sortProjectsByActivity = (projects: readonly ProjectListItem[]): ProjectListItem[] =>
+export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 'lastActivityAt'>>(
+  projects: readonly Row[],
+): Row[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
 export function ProjectNavigation({ className }: { readonly className?: string }): React.JSX.Element {
-  const { projects, isLoading, error, deleteProject, duplicateProject, updateName } = useProjects();
+  const { projects, isLoading, error, retry, deleteProject, duplicateProject, updateName } = useProjects();
   const { createChat } = useProjectManager();
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
   const queryClient = useQueryClient();
@@ -76,14 +82,21 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const liveProjectIds = useLiveProjectIds();
+  /* R5, A13: until the worker lists, the rows are the ones the last listing had
+   * (the listing snapshot), as real rows; the listing reconciles them by id in
+   * place. A device that remembers none shows an empty, busy list, and says
+   * "No projects yet" up front when the last listing had none. */
+  const rememberedShape = useProjectListShape();
+  const isAwaitingListing = isLoading && projects.length === 0;
+  const rememberedProjects = isAwaitingListing ? rememberedShape?.projects : undefined;
+  const rows: readonly SidebarProject[] = rememberedProjects ?? projects;
+  const isAwaitingRows = isAwaitingListing && rows.length === 0;
   /* A29's temporal hiding: what is live now sits above what is not, and the
    * rest keeps its recency order. */
   const sortedProjects = useMemo(() => {
     const live = new Set(liveProjectIds);
-    return sortProjectsByActivity(projects).sort(
-      (left, right) => Number(live.has(right.id)) - Number(live.has(left.id)),
-    );
-  }, [liveProjectIds, projects]);
+    return sortProjectsByActivity(rows).sort((left, right) => Number(live.has(right.id)) - Number(live.has(left.id)));
+  }, [liveProjectIds, rows]);
   const visibleProjects = sortedProjects.slice(0, visibleCount);
   const earlierFromId = useMemo(() => {
     const live = new Set(liveProjectIds);
@@ -91,18 +104,12 @@ export function ProjectNavigation({ className }: { readonly className?: string }
       ? visibleProjects.find((entry) => !live.has(entry.id))?.id
       : undefined;
   }, [liveProjectIds, visibleProjects]);
-  /* R5: until the worker lists, reserve the rows the last listing had (with its
-   * names once the client has them), and say "No projects yet" up front when it
-   * had none, so the listing only fills slots that are already there. */
-  const rememberedShape = useProjectListShape();
-  const isAwaitingListing = isLoading && projects.length === 0;
-  const placeholderCount = rememberedShape ? Math.min(rememberedShape.count, projectsPerPage) : unknownShapeRowCount;
   const isKnownEmpty = isAwaitingListing ? rememberedShape?.count === 0 : !isLoading && !error && projects.length === 0;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
   /* `isActive` gates the merge: the open project's parameters belong to its own
    * URL, so they travel with a chat switch but never onto another project. */
-  const handleCreateChat = async (project: ProjectListItem, isActive: boolean): Promise<void> => {
+  const handleCreateChat = async (project: SidebarProject, isActive: boolean): Promise<void> => {
     if (!project.slugs) {
       return;
     }
@@ -113,7 +120,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
     });
   };
 
-  const handleDuplicate = async (project: ProjectListItem): Promise<void> => {
+  const handleDuplicate = async (project: SidebarProject): Promise<void> => {
     const duplicate = await duplicateProject(project.id);
     toast.success(`Duplicated ${project.name}`, {
       action: {
@@ -130,18 +137,16 @@ export function ProjectNavigation({ className }: { readonly className?: string }
      * down the list. Project status descriptions stay screen-reader-only. */
     <TooltipProvider delayDuration={500} skipDelayDuration={300}>
       <SidebarGroup className={cn('px-2 group-data-[collapsible=icon]:hidden', className)}>
-        <ProjectsLabel />
+        <ProjectsLabel
+          isAwaitingRows={isAwaitingRows}
+          onRetry={() => {
+            void retry();
+          }}
+        />
         {/* One row pitch throughout: projects, a project and its first chat, and
           chats between themselves all sit `gap-0.5` apart, so expanding or
           collapsing a project shifts nothing. */}
-        <SidebarMenu className='gap-0.5'>
-          {isAwaitingListing
-            ? Array.from({ length: placeholderCount }, (_, index) => (
-                <SidebarMenuItem key={index} aria-hidden data-testid='project-navigation-skeleton'>
-                  <SidebarRowSkeleton />
-                </SidebarMenuItem>
-              ))
-            : null}
+        <SidebarMenu className='gap-0.5' aria-busy={isAwaitingRows ? true : undefined}>
           {/* D18: a failed refresh over a list already on screen shows nothing;
             the last good list stays. */}
           {error && projects.length === 0 ? (
@@ -215,13 +220,6 @@ export function ProjectNavigation({ className }: { readonly className?: string }
               </Fragment>
             );
           })}
-          {isAwaitingListing && rememberedShape !== undefined && rememberedShape.count > projectsPerPage ? (
-            <SidebarMenuItem aria-hidden data-testid='project-navigation-skeleton'>
-              <SidebarMenuButton type='button' disabled tabIndex={-1} className={sidebarDisclosureButtonClass}>
-                Show more projects
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ) : null}
           {visibleCount < sortedProjects.length ? (
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -258,7 +256,7 @@ function ProjectNavigationItem({
   onShare,
   onDelete,
 }: {
-  readonly project: ProjectListItem;
+  readonly project: SidebarProject;
   readonly isActive: boolean;
   readonly isPending: boolean;
   readonly isExpanded: boolean;
@@ -538,11 +536,20 @@ function ProjectNavigationItem({
  *
  * The budget stays stated (I28) in two words, and its way out — closing exactly
  * the projects the registry says a policy may close — is the label's overflow
- * menu, reachable on hover, focus and coarse pointers.
+ * menu, reachable on hover, focus and coarse pointers. While a device that
+ * remembers no rows waits for its first listing, the wait is the label's
+ * trailing slot (blueprint P-d), so nothing below the label moves.
  *
+ * @param props - Whether the list waits with no row to show, and its Retry.
  * @returns The label.
  */
-function ProjectsLabel(): React.JSX.Element {
+function ProjectsLabel({
+  isAwaitingRows,
+  onRetry,
+}: {
+  readonly isAwaitingRows: boolean;
+  readonly onRetry: () => void;
+}): React.JSX.Element {
   const { projects, idleProjectIds } = useLiveNow();
   const { closeProject } = useSidebarCommands();
   return (
@@ -552,6 +559,12 @@ function ProjectsLabel(): React.JSX.Element {
         Recents
         {projects > 0 ? <span className='ml-1.5 tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>
+      <WaitIndicator
+        active={isAwaitingRows}
+        label='Loading projects'
+        slowLabel='Still loading projects'
+        onRetry={onRetry}
+      />
       {idleProjectIds.length > 0 ? (
         <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'>
           <DropdownMenu isResponsive>

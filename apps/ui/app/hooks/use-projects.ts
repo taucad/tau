@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import type { Project } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
@@ -6,16 +6,14 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#runtime/project-library-commands.js';
 import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
-  const queryClient = useQueryClient();
   const chatSessions = useChatSessionStore();
   const includeDeleted = options?.includeDeleted ?? false;
   const {
-    getProjectListing,
+    projectListingQuery,
     discoveryObservationError,
     refreshFilesystemObservations,
     updateProject,
@@ -40,18 +38,11 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     refetch,
   } = useQuery({
     // One key for one whole-workspace discovery pass per navigation: the deleted rows are
-    // filtered below rather than scanned again under a second key (W21).
-    queryKey: ['projects'],
-    async queryFn({ signal }) {
-      const listing = await getProjectListing({ includeDeleted: true });
-      signal.throwIfAborted();
-      /* R5: remember the list's shape, so the next load reserves its rows and cards. */
-      projectListShapeStore.remember(projectListShapeOf(listing.projects.map(projectLibraryEntryToListItem)));
-      return listing;
-    },
+    // filtered below rather than scanned again under a second key (W21). The library writes it (D9).
+    ...projectListingQuery,
     enabled: !isWorkerLoading,
     // No poll: worker filesystem events and cross-tab root broadcasts already
-    // invalidate this key (coalesced in ProjectManagerProvider), and the
+    // invalidate this key (coalesced in the project library), and the
     // default window-focus refetch covers a tab returning from the background.
     // The stale window only stops rapid navigations re-running the scan.
     staleTime: 3000,
@@ -62,12 +53,10 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     async (projectId: string): Promise<boolean> => {
       await requireQuiescentProject(projectId);
       await closeProjectSession(projectId);
-      const trashed = await deleteProject(projectId);
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-      return trashed;
+      /* The library refetches the listing and the project's own queries (D9). */
+      return deleteProject(projectId);
     },
-    [closeProjectSession, deleteProject, queryClient, requireQuiescentProject],
+    [closeProjectSession, deleteProject, requireQuiescentProject],
   );
 
   const handleRestoreProject = useCallback(
@@ -79,10 +68,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
       }
 
       await restoreProject(projectId);
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
     },
-    [getProject, restoreProject, queryClient],
+    [getProject, restoreProject],
   );
 
   const handlePermanentlyDeleteProject = useCallback(
@@ -94,38 +81,25 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
       await permanentlyDeleteProject(projectId);
       // This device's view exceptions for the project go with it; a trashed project keeps them for its restore.
       viewExceptions.dropProject(projectId);
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      queryClient.removeQueries({ queryKey: ['project', projectId] });
     },
-    [chatSessions, closeProjectSession, permanentlyDeleteProject, queryClient, requireQuiescentProject],
+    [chatSessions, closeProjectSession, permanentlyDeleteProject, requireQuiescentProject],
   );
 
   const handleDuplicateProject = useCallback(
-    async (projectId: string): Promise<CreatedProject> => {
-      const newProject = await duplicateProject(projectId);
-
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      return newProject;
-    },
-    [duplicateProject, queryClient],
+    async (projectId: string): Promise<CreatedProject> => duplicateProject(projectId),
+    [duplicateProject],
   );
 
   const handleAdoptProject = useCallback(
-    async (locator: ProjectLocator): Promise<Project> => {
-      const adopted = await adoptProject(locator);
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      return adopted;
-    },
-    [adoptProject, queryClient],
+    async (locator: ProjectLocator): Promise<Project> => adoptProject(locator),
+    [adoptProject],
   );
 
   const handleRepairProject = useCallback(
     async (projectId: string): Promise<void> => {
       await repairProject(projectId);
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
     },
-    [repairProject, queryClient],
+    [repairProject],
   );
 
   const handleChooseProjectDirectory = useCallback(
@@ -133,21 +107,16 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
       // An open session reads the folder the route named when it opened.
       await closeProjectSession(projectId);
       await chooseProjectDirectory(locator, projectId);
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
     },
-    [chooseProjectDirectory, closeProjectSession, queryClient],
+    [chooseProjectDirectory, closeProjectSession],
   );
 
   const handleUpdateName = useCallback(
     async (projectId: string, name: string) => {
-      const updated = await updateProject(projectId, { name });
-      if (updated) {
-        void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-        void queryClient.invalidateQueries({ queryKey: ['projects'] });
-      }
+      /* A written rename refetches the listing and the project's queries in the library (D9). */
+      await updateProject(projectId, { name });
     },
-    [updateProject, queryClient],
+    [updateProject],
   );
 
   return {

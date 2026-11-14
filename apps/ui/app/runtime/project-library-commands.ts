@@ -52,7 +52,8 @@ import {
 } from '#utils/kernel.utils.js';
 import { directorySlug, homeWorkspaceSlug } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
-import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
+import { withNamedLock } from '#lib/named-lock.js';
 import { selectCaughtUp } from '#machines/chat-projection.logic.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatStorage } from '#types/storage.types.js';
@@ -290,6 +291,10 @@ export type ProjectCommandsHost = Readonly<{
   noteLibraryChanged: () => void;
   sessions: () => ProjectLibrarySessions | undefined;
   chatSessions: () => ProjectLibraryChatSessions | undefined;
+  /** One project's own queries changed (D9: the library writes the cache, A4b). */
+  invalidateProject: (projectId: string) => void;
+  /** A project is gone for good: its own queries are dropped. */
+  forgetProject: (projectId: string) => void;
 }>;
 
 /** The operation field naming where a created chat's attachments are copied from, when not Home. */
@@ -493,6 +498,7 @@ export class ProjectCommands {
       `/projects/${projectId}/tau.json`,
       serializeProjectManifest(projectToManifest(updated)),
     );
+    this.#projectChanged(projectId);
     return { ...updated, id: projectId };
   };
 
@@ -514,6 +520,7 @@ export class ProjectCommands {
     const fileManager = await this.#host.facade();
     await fileManager.recordFiles.writeFile(`/projects/${projectId}/tau.json`, serializeProjectManifest(project.data));
     this.#host.invalidateListing();
+    this.#host.invalidateProject(projectId);
     return { ...project.data, id: projectId };
   };
 
@@ -592,6 +599,7 @@ export class ProjectCommands {
     await mutation.apply(operation, worker);
     /* D19: a copy has no remote of its own, so it backs up by default too. */
     tauCloudIntent.set(targetId, 'default');
+    void this.#host.invalidateProjectListing();
     return {
       ...operation.manifest,
       id: operation.projectId,
@@ -610,11 +618,13 @@ export class ProjectCommands {
     const worker = await this.#host.readiedWorker();
     const trashed = await worker.trashProject(projectId);
     if (trashed?.deletedAt === undefined) {
+      this.#projectChanged(projectId);
       return false;
     }
     const fileManager = await this.#host.facade();
     await writeProjectLibraryFile(fileManager.recordFiles, projectId, { deletedAt: trashed.deletedAt });
     this.#host.noteLibraryChanged();
+    this.#projectChanged(projectId);
     return true;
   };
 
@@ -629,11 +639,13 @@ export class ProjectCommands {
     const worker = await this.#host.readiedWorker();
     const restored = await worker.restoreProject(projectId);
     if (!restored) {
+      this.#projectChanged(projectId);
       return false;
     }
     const fileManager = await this.#host.facade();
     await writeProjectLibraryFile(fileManager.recordFiles, projectId, {});
     this.#host.noteLibraryChanged();
+    this.#projectChanged(projectId);
     return true;
   };
 
@@ -663,6 +675,8 @@ export class ProjectCommands {
     mutation.journaled(operation);
     await mutation.apply(operation, worker);
     this.#host.noteLibraryChanged();
+    void this.#host.invalidateProjectListing();
+    this.#host.forgetProject(projectId);
   };
 
   /**
@@ -761,6 +775,12 @@ export class ProjectCommands {
       throw new Error('The project library was built without the chat store');
     }
     return chatSessions;
+  }
+
+  /** The listing and the project's own queries are read again (D9: only the library writes them). */
+  #projectChanged(projectId: string): void {
+    void this.#host.invalidateProjectListing();
+    this.#host.invalidateProject(projectId);
   }
 
   async #importStagingOwners(): Promise<string[]> {

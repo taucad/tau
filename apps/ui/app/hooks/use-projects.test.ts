@@ -83,6 +83,9 @@ vi.mock('@tanstack/react-query', () => ({
 
 /* The quiescence check and the session close are the library's commands since A4a (row L7): the real ones, over the
  * registry and chat-store doubles below. */
+/** The library's listing query, as `useProjectManager()` hands it down. */
+const listingQuery = vi.hoisted(() => ({ queryKey: ['projects'], queryFn: async () => undefined }));
+
 const commands = vi.hoisted(() => ({
   current: undefined as Pick<ProjectCommands, 'verifyProjectQuiescent' | 'closeProjectSession'> | undefined,
 }));
@@ -115,6 +118,8 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     replayForPerson: notCalled,
     invalidateProjectListing: notCalled,
     invalidateListing: () => undefined,
+    invalidateProject: () => undefined,
+    forgetProject: () => undefined,
     noteLibraryChanged: () => undefined,
     sessions: () => registry.actor,
     chatSessions: () => chatStore,
@@ -135,6 +140,7 @@ vi.mock('#hooks/use-project-manager.js', async () => {
       permanentlyDeleteProject: projectManager.permanentlyDeleteProject,
       duplicateProject: vi.fn(),
       isLoading: worker.isLoading,
+      projectListingQuery: listingQuery,
     }),
   };
 });
@@ -148,7 +154,6 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 
 const { useProjects } = await import('#hooks/use-projects.js');
-const { projectListShapeStore, projectListCountCookieName } = await import('#lib/project-list-shape.lib.js');
 
 const listingQueryOptions = (): Record<string, unknown> => {
   useQuery.mockClear();
@@ -306,25 +311,10 @@ describe('useProjects listing query', () => {
     query.data = undefined;
   });
 
-  /* R5: the next load reserves this many rows and cards, server-side through the cookie. */
-  it('remembers the live project count, and no names, after every listing', async () => {
-    const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
-      projectId: id,
-      manifest: { name: `Name ${id}` },
-      library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
-      locator: { backend: 'indexeddb' },
-    });
-    projectManager.getProjectListing.mockResolvedValueOnce({
-      projects: [entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)],
-      conflicts: [],
-      recoveries: [],
-      workspaceBindingRepairs: [],
-    });
-    const { queryFn } = listingQueryOptions() as { queryFn: (context: { signal: AbortSignal }) => Promise<unknown> };
-
-    await queryFn({ signal: new AbortController().signal });
-
-    expect(projectListShapeStore.get()).toEqual({ count: 2 });
-    expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
+  /* D9: the hook queries with the library's listing query, so the library alone writes the listing. */
+  it("queries the listing with the library's own key and function", () => {
+    const options = listingQueryOptions();
+    expect(options['queryKey']).toBe(listingQuery.queryKey);
+    expect(options['queryFn']).toBe(listingQuery.queryFn);
   });
 });

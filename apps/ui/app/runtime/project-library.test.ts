@@ -2,13 +2,13 @@
  * The project library service (app state orchestration charter D9; plan § 4 A2, A3b; inventory L3, L5, L6).
  *
  * The library owns its actors, starts them and the worker once, publishes a snapshot React reads, and exposes the
- * ports the chat store and the project runtime call. Since A3b the chat ports run over the library's own chat store,
- * built over the record client of the one transitional binding `ProjectManagerProvider` supplies in render (D15
- * ruling): a port called before the first binding waits for it and is delivered, never dropped, and a replaced binding
- * leaves no waiter behind.
+ * ports the chat store and the project runtime call. The chat ports run over the library's own chat store, built over
+ * the record client of the root file facade the runtime builds over `rootFiles` (A4b; the D15 binding is gone): a port
+ * called before the facade exists waits for it and is delivered, never dropped, and a replaced record client leaves no
+ * waiter behind.
  *
- * The chat store and the metadata read owner are doubles here, keyed by the binding's record client: these rows are
- * about which binding serves a call, and the observations they would wait on are the hook suites' subject.
+ * The chat store and the metadata read owner are doubles here, keyed by the facade's record client: these rows are
+ * about which record client serves a call, and the observations they would wait on are the hook suites' subject.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
@@ -22,7 +22,9 @@ import {
   selectLibraryIsLoading,
   selectLibraryWorkspaceConnection,
 } from '#runtime/project-library.js';
-import type { ProjectLibraryBinding } from '#runtime/project-library.js';
+import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import { testRootFiles } from '#runtime/project-library.fixture.js';
+import type { TestRootFiles } from '#runtime/project-library.fixture.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
 const worker = vi.hoisted(() => ({
@@ -78,11 +80,11 @@ const chatOf = (id: string): Chat => ({ id, resourceId: 'p1', name: id, messages
 
 type ChatPorts = Pick<ChatStorage, 'getChat' | 'patchChat'>;
 
-/** A binding whose record client stands for a chat store that records the binding it came from. */
-const bindingNamed = (
+/** A facade whose record client stands for a chat store that records the facade it came from. */
+const facadeNamed = (
   name: string,
   { chats, syncProjectRoots }: Readonly<{ chats?: Partial<ChatPorts>; syncProjectRoots?: () => Promise<void> }> = {},
-): ProjectLibraryBinding => {
+): ProjectLibraryFileManager => {
   const recordFiles = {
     readFile: notCalled,
     writeFile: notCalled,
@@ -98,26 +100,32 @@ const bindingNamed = (
   };
   stores.set(recordFiles, store);
   return {
-    fileManager: {
-      recordFiles,
-      watchRecordFile: () => {
-        throw new Error('not called in this test');
-      },
-      workspace: { syncProjectRoots: syncProjectRoots ?? notCalled },
-    } as unknown as ProjectLibraryBinding['fileManager'],
-  };
+    recordFiles,
+    watchRecordFile: () => {
+      throw new Error('not called in this test');
+    },
+    workspace: { syncProjectRoots: syncProjectRoots ?? notCalled },
+  } as unknown as ProjectLibraryFileManager;
 };
 
-/** The same facade, as a re-render hands it over again. */
-const rebound = (binding: ProjectLibraryBinding): ProjectLibraryBinding => ({
-  fileManager: { ...binding.fileManager },
-});
+/** The same parts in a new object, as the facade republishes when only its change channel moved. */
+const republished = (fileManager: ProjectLibraryFileManager): ProjectLibraryFileManager => ({ ...fileManager });
 
 const libraries: ProjectLibrary[] = [];
-const createLibrary = (queryClient = new QueryClient()): ProjectLibrary => {
-  const library = new ProjectLibrary({ queryClient });
+/** A library over `rootFiles`, or over none yet: the runtime builds the facade after the library. */
+const createLibrary = (
+  queryClient = new QueryClient(),
+  rootFiles: () => TestRootFiles | undefined = () => undefined,
+): ProjectLibrary => {
+  const library = new ProjectLibrary({ queryClient, rootFiles });
   libraries.push(library);
   return library;
+};
+
+/** A library over a facade a row replaces. */
+const libraryOver = (first: ProjectLibraryFileManager): Readonly<{ library: ProjectLibrary; root: TestRootFiles }> => {
+  const root = testRootFiles(first);
+  return { library: createLibrary(new QueryClient(), () => root), root };
 };
 
 afterEach(() => {
@@ -168,8 +176,19 @@ describe('ProjectLibrary', () => {
     expect(selectLibraryWorkspaceConnection(after)).toBe(selectLibraryWorkspaceConnection(before));
   });
 
-  it('should hold a port called before the first binding, and deliver it once the binding arrives (D15 ruling)', async () => {
-    const library = createLibrary();
+  it('should follow the root file facade the runtime built, with no provider (A4b)', async () => {
+    const { createAppRuntime, selectRuntimeProjectLibrary, selectRuntimeRootFileFacade } =
+      await import('#runtime/app-runtime.js');
+    const runtime = createAppRuntime({ idleFileManagers: true });
+    const library = selectRuntimeProjectLibrary(runtime);
+    /* Nothing is mounted: the library reads the runtime's facade over `rootFiles`, not a binding a provider supplies. */
+    const facade = selectRuntimeRootFileFacade(runtime).get();
+    expect(library.files.get()).toEqual({ client: facade.recordFiles, watchRecordFile: facade.watchRecordFile });
+  });
+
+  it('should hold a port called before the facade exists, and deliver it once the library follows it', async () => {
+    const slot: { root?: TestRootFiles } = {};
+    const library = createLibrary(new QueryClient(), () => slot.root);
     let settled = false;
     const call = (async () => {
       const chat = await library.getChat('c1', 'p1');
@@ -179,120 +198,66 @@ describe('ProjectLibrary', () => {
     await flush();
     expect(settled).toBe(false);
 
-    library.bind(bindingNamed('first'));
+    const root = testRootFiles(facadeNamed('first'));
+    slot.root = root;
+    library.start();
 
     await expect(call).resolves.toMatchObject({ id: 'first:c1' });
   });
 
-  it('should resume a waiting call on the binding current when it resumes, so a replaced binding leaves no waiter', async () => {
-    const library = createLibrary();
+  it('should resume a waiting call on the facade current when it resumes, so a replaced one leaves no waiter', async () => {
+    const slot: { root?: TestRootFiles } = {};
+    const library = createLibrary(new QueryClient(), () => slot.root);
     const waiting = library.getChat('c1');
 
-    /* A provider remount in one pass: the first mount's binding, then the remount's, before the waiter resumes. */
-    library.bind(bindingNamed('unmounted'));
-    library.bind(bindingNamed('remounted'));
+    /* The worker is replaced in one pass: the first facade, then the next, before the waiter resumes. */
+    const root = testRootFiles(facadeNamed('first'));
+    slot.root = root;
+    library.start();
+    root.replace(facadeNamed('replaced'));
 
-    await expect(waiting).resolves.toMatchObject({ id: 'remounted:c1' });
-    await expect(library.getChat('c2')).resolves.toMatchObject({ id: 'remounted:c2' });
+    await expect(waiting).resolves.toMatchObject({ id: 'replaced:c1' });
+    await expect(library.getChat('c2')).resolves.toMatchObject({ id: 'replaced:c2' });
   });
 
-  it('should ask a read again of the binding that replaced the one whose provider disposed it (B9)', async () => {
-    const library = createLibrary();
+  it('should ask a read again of the records that replaced the ones it ran on (a new root worker)', async () => {
     const running = Promise.withResolvers<Chat | undefined>();
-    library.bind(bindingNamed('old', { chats: { getChat: async () => running.promise } }));
+    const { library, root } = libraryOver(facadeNamed('old', { chats: { getChat: async () => running.promise } }));
     const call = library.getChat('c1');
     await flush();
 
-    /* The provider's order at a remount: the new render binds, the old cleanup releases and fails its reads, the new
-     * setup resumes. */
-    library.bind(bindingNamed('new'));
-    library.release();
+    root.replace(facadeNamed('new'));
     running.reject(new Error('Chat observation was disposed.'));
-    library.resume();
 
     await expect(call).resolves.toMatchObject({ id: 'new:c1' });
   });
 
-  it('should ask a read again when its provider disposed it before the replacement bound (B9)', async () => {
-    const library = createLibrary();
-    const running = Promise.withResolvers<Chat | undefined>();
-    library.bind(bindingNamed('old', { chats: { getChat: async () => running.promise } }));
-    const call = library.getChat('c1');
-    await flush();
-
-    /* The provider's cleanup releases its binding, then fails its reads; the remount binds later. */
-    library.release();
-    running.reject(new Error('Chat observation was disposed.'));
-    await flush();
-    library.bind(bindingNamed('new'));
-
-    await expect(call).resolves.toMatchObject({ id: 'new:c1' });
+  it('should keep serving reads when a provider over it unmounts: nothing releases the facade (A4b, B9)', async () => {
+    const { library } = libraryOver(facadeNamed('only'));
+    library.start();
+    /* A provider's unmount touched the binding before A4b; the facade is the runtime's and is not released. */
+    await expect(library.getChat('c1')).resolves.toMatchObject({ id: 'only:c1' });
+    await expect(library.getChat('c2')).resolves.toMatchObject({ id: 'only:c2' });
   });
 
-  it('should ask a read again when its provider released and resumed it while it ran (StrictMode)', async () => {
-    const library = createLibrary();
-    const first = Promise.withResolvers<Chat | undefined>();
-    let attempts = 0;
-    library.bind(
-      bindingNamed('only', {
-        chats: {
-          getChat: async (chatId) => {
-            attempts += 1;
-            return attempts === 1 ? first.promise : chatOf(`only:${chatId}`);
-          },
-        },
-      }),
-    );
-    const call = library.getChat('c1');
-    await flush();
-
-    /* The effect's cleanup and setup run back to back, then the first attempt's disposal is seen. */
-    library.release();
-    library.resume();
-    first.reject(new Error('Chat observation was disposed.'));
-
-    await expect(call).resolves.toMatchObject({ id: 'only:c1' });
-    expect(attempts).toBe(2);
-  });
-
-  it('should hold ports while released, and deliver them on the same binding once its provider resumes', async () => {
-    const library = createLibrary();
-    library.bind(bindingNamed('only'));
-    library.release();
-    let settled = false;
-    const call = (async () => {
-      const chat = await library.getChat('c1');
-      settled = true;
-      return chat;
-    })();
-    await flush();
-    expect(settled).toBe(false);
-
-    library.resume();
-
-    await expect(call).resolves.toMatchObject({ id: 'only:c1' });
-  });
-
-  it('should hand a write running on a replaced binding its own outcome, never repeat it', async () => {
-    const library = createLibrary();
+  it('should hand a write running on replaced records its own outcome, never repeat it', async () => {
     const running = Promise.withResolvers<Chat | undefined>();
     const replacementPatch = vi.fn(notCalled);
-    library.bind(bindingNamed('old', { chats: { patchChat: async () => running.promise } }));
+    const { library, root } = libraryOver(facadeNamed('old', { chats: { patchChat: async () => running.promise } }));
     const call = library.patchChat('c1', 'name', 'renamed');
     await flush();
 
-    library.bind(bindingNamed('new', { chats: { patchChat: replacementPatch } }));
+    root.replace(facadeNamed('new', { chats: { patchChat: replacementPatch } }));
     running.reject(new Error('Chat observation was disposed.'));
 
     await expect(call).rejects.toThrow('Chat observation was disposed.');
     expect(replacementPatch).not.toHaveBeenCalled();
   });
 
-  it('should keep the own failure of a read when a re-render rebound its provider meanwhile', async () => {
-    const library = createLibrary();
+  it('should keep the own failure of a read when the facade republished the same record client meanwhile', async () => {
     const running = Promise.withResolvers<Chat | undefined>();
     let attempts = 0;
-    const only = bindingNamed('only', {
+    const only = facadeNamed('only', {
       chats: {
         getChat: async () => {
           attempts += 1;
@@ -300,21 +265,20 @@ describe('ProjectLibrary', () => {
         },
       },
     });
-    library.bind(only);
+    const { library, root } = libraryOver(only);
     const call = library.getChat('c1');
     await flush();
 
-    library.bind(rebound(only));
+    root.replace(republished(only));
     running.reject(new Error('unreadable'));
 
     await expect(call).rejects.toThrow('unreadable');
     expect(attempts).toBe(1);
   });
 
-  it('should keep the failure of a read whose binding no other replaced', async () => {
-    const library = createLibrary();
-    library.bind(
-      bindingNamed('only', {
+  it('should keep the failure of a read whose records nothing replaced', async () => {
+    const { library } = libraryOver(
+      facadeNamed('only', {
         chats: {
           getChat: async () => {
             throw new Error('unreadable');
@@ -327,37 +291,39 @@ describe('ProjectLibrary', () => {
   });
 
   it('should notify its file facade only when the record client or the watch changes', () => {
-    const library = createLibrary();
+    const slot: { root?: TestRootFiles } = {};
+    const library = createLibrary(new QueryClient(), () => slot.root);
     const listener = vi.fn();
     library.files.subscribe(listener);
     expect(library.files.get()).toBeUndefined();
 
-    const first = bindingNamed('first');
-    library.bind(first);
+    const first = facadeNamed('first');
+    const root = testRootFiles(first);
+    slot.root = root;
+    library.start();
     expect(listener).toHaveBeenCalledOnce();
     expect(library.files.get()).toEqual({
-      client: first.fileManager.recordFiles,
-      watchRecordFile: first.fileManager.watchRecordFile,
+      client: first.recordFiles,
+      watchRecordFile: first.watchRecordFile,
     });
 
-    /* A re-render with the same facade: nothing to restart. */
-    library.bind(rebound(first));
+    /* The same parts republished: nothing to restart. */
+    root.replace(republished(first));
     expect(listener).toHaveBeenCalledOnce();
 
     /* A replaced root worker gives a new record client. */
-    library.bind(bindingNamed('replaced'));
+    root.replace(facadeNamed('replaced'));
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it('should run its own workspace connection services over the binding current when the machine runs them (A3b)', async () => {
-    const library = createLibrary();
+  it('should run its own workspace connection services over the facade current when the machine runs them (A3b)', async () => {
     const replaced = vi.fn(notCalled);
     const mounted = vi.fn(async () => {
       throw new Error('stop here');
     });
+    const { library, root } = libraryOver(facadeNamed('first', { syncProjectRoots: replaced }));
     library.start();
-    library.bind(bindingNamed('first', { syncProjectRoots: replaced }));
-    library.bind(bindingNamed('second', { syncProjectRoots: mounted }));
+    root.replace(facadeNamed('second', { syncProjectRoots: mounted }));
 
     library.workspaceConnection.send({ type: 'beginSelection', operationId: 'op1' });
     library.workspaceConnection.send({
@@ -404,5 +370,31 @@ describe('ProjectLibrary', () => {
     await library.invalidateChatListing('p1');
 
     expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([['projects'], ['chats', 'p1']]);
+  });
+
+  /* R5 and D9: the listing query is the library's own, and it remembers the live count, never a name, for the next load. */
+  it('should list every project through its listing query, and remember the live project count (A4b)', async () => {
+    const { projectListShapeStore, projectListCountCookieName } = await import('#lib/project-list-shape.lib.js');
+    const library = createLibrary(new QueryClient());
+    const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
+      projectId: id,
+      manifest: { name: `Name ${id}` },
+      library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
+      locator: { backend: 'indexeddb' },
+    });
+    const listing = {
+      projects: [entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)],
+      conflicts: [],
+      recoveries: [],
+      workspaceBindingRepairs: [],
+    } as unknown as Awaited<ReturnType<ProjectLibrary['getProjectListing']>>;
+    const getProjectListing = vi.spyOn(library, 'getProjectListing').mockResolvedValue(listing);
+
+    expect(library.listingQuery.queryKey).toEqual(['projects']);
+    await expect(library.listingQuery.queryFn({ signal: new AbortController().signal })).resolves.toBe(listing);
+
+    expect(getProjectListing).toHaveBeenCalledExactlyOnceWith({ includeDeleted: true });
+    expect(projectListShapeStore.get()).toEqual({ count: 2 });
+    expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
   });
 });

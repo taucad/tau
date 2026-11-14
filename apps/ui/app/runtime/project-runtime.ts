@@ -49,7 +49,7 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
-import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 import {
   createProjectManifestChangeObserver,

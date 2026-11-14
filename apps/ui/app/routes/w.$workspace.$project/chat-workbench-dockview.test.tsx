@@ -611,9 +611,10 @@ describe('FileEditor routing', () => {
     expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
   });
 
-  /* Loading states UX blueprint P-i: the pane owns one "Opening file" wait, at its code area's top right, which
-     survives the body's move from the loading branch to the routed viewer and keeps its 500 ms minimum there. */
-  it('keeps one Opening file wait in the code area across the move from loading to the file’s text', () => {
+  /* Loading states UX blueprint P-i: the pane owns one "Opening file" wait, in its header's slot (the first child of
+     its file actions), which survives the body's move from the loading branch to the routed viewer and keeps its
+     500 ms minimum there. */
+  it('keeps one Opening file wait in the header slot across the move from loading to the file’s text', () => {
     const now = vi.spyOn(performance, 'now').mockReturnValue(100);
     onTestFinished(() => {
       now.mockRestore();
@@ -624,10 +625,11 @@ describe('FileEditor routing', () => {
     const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
     expect(slot).toHaveAttribute('data-state', 'waiting');
     expect(slot).toHaveTextContent('Opening file…');
-    // In the code area, beside the body: not over the header, and not in the files sidecar.
-    const codeArea = slot?.parentElement?.parentElement?.parentElement;
-    expect(codeArea).toContainElement(screen.getByRole('group', { name: 'Loading main.ts' }));
-    expect(screen.getByRole('group', { name: 'File actions for main.ts' })).not.toContainElement(slot as HTMLElement);
+    // In the header's actions group, first, as the inline skin: nothing overlays the code area.
+    const actions = screen.getByRole('group', { name: 'File actions for main.ts' });
+    expect(actions.firstElementChild).toContainElement(slot as HTMLElement);
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).not.toContainElement(slot as HTMLElement);
+    expect(slot?.closest('.absolute')).toBeNull();
 
     now.mockReturnValue(1300);
     content = { kind: 'text', content: new TextEncoder().encode('let ready = true;') };
@@ -635,8 +637,11 @@ describe('FileEditor routing', () => {
       <FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} parameters={{ filePath: 'main.ts' }} />,
     );
     expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
-    // The same node: shown at 1,100 ms, it holds until 1,600 ms, 300 ms after the text arrived.
+    // The same node, still first in the actions: shown at 1,100 ms, it holds until 1,600 ms, 300 ms after the text.
     expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(screen.getByRole('group', { name: 'File actions for main.ts' }).firstElementChild).toContainElement(
+      slot as HTMLElement,
+    );
     expect(slot).toHaveAttribute('data-state', 'holding');
     expect(
       slot
@@ -688,6 +693,30 @@ describe('FileEditor routing', () => {
       ?.style.getPropertyValue('--wait-reveal-delay');
     expect(Number.parseFloat(revealDelay ?? '')).toBeGreaterThanOrEqual(1000);
     expect(slot).not.toHaveAttribute('role');
+  });
+
+  /* A Retry is a gesture: the new wait is its own announcement group even in a pane restored without one. */
+  it('announces the wait a Retry starts in a pane restored without a gesture', async () => {
+    const user = userEvent.setup();
+    const activation = { isActive: false, hasBeenActive: false };
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator) as Navigator, { userActivation: activation }));
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+      vi.unstubAllGlobals();
+    });
+    const retry = vi.fn();
+    mockUseFileContent.mockReturnValue({ kind: 'loading', retry });
+    const pane = render(<FileEditor paneId='restored-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).not.toHaveAttribute('role');
+
+    now.mockReturnValue(10_100);
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('role', 'status');
   });
 
   it('announces the wait of a pane a person opened', () => {

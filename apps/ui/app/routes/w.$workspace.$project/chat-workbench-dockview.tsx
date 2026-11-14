@@ -1194,7 +1194,10 @@ function FileWorkbenchPane({
   readonly presentation?: FileViewerPresentation;
   readonly shouldHandleReveal: () => boolean;
   readonly onOpenFile: (path: string, readOnly?: boolean) => void;
-  /** The pane's wait indicator, at the code area's top right, clear of the files sidecar. */
+  /**
+   * The pane's wait indicator, in the header's actions group as its first child (loading states UX blueprint P-i): the
+   * group is right-aligned, so the slot grows to its left and never moves the actions beside it.
+   */
   readonly waitSlot?: ReactNode;
   readonly children: ReactNode;
 }): React.JSX.Element {
@@ -1214,6 +1217,7 @@ function FileWorkbenchPane({
 
   const actions = (
     <div className='ml-2 flex shrink-0 items-center gap-1' role='group' aria-label={`File actions for ${title}`}>
+      {waitSlot}
       {viewerActions}
       {alternateView ? (
         <PaneButton
@@ -1264,7 +1268,6 @@ function FileWorkbenchPane({
       <div className='flex min-h-0 flex-1'>
         <div className='relative min-h-0 min-w-0 flex-1'>
           <EditorSymbolPathProvider onSymbolPath={setSymbolPath}>{children}</EditorSymbolPathProvider>
-          {waitSlot === undefined ? null : <div className='absolute top-2 right-3 z-20'>{waitSlot}</div>}
         </div>
         {paneState.filesOpen ? (
           <FilePaneFilesSidecar
@@ -1624,15 +1627,14 @@ export const FileEditor = memo(function ({
       waitSlot={
         /* Focus lands here after Retry, which replaces the indicator's words and its button (focus never falls to the
            page). Live only for a pane a person opened: one restored with the route open is part of its announcement. */
-        <div ref={waitSlotRef} tabIndex={-1} className='rounded-lg outline-none focus-visible:focus-outline'>
+        <div ref={waitSlotRef} tabIndex={-1} className='flex rounded-md outline-none focus-visible:focus-outline'>
           <WaitIndicator
             active={isWaitingForText}
             label='Opening file'
             slowLabel='Still opening file'
             startedAt={textWait.startedAt}
             live={textWait.isGesture}
-            variant='pill'
-            className='[&_[data-slot=wait-indicator-body]]:bg-popover'
+            variant='inline'
             onRetry={() => {
               textWait.restart();
               result.retry();

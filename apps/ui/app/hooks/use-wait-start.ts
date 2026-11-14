@@ -15,7 +15,10 @@ export type WaitStart = Readonly<{
    * A wait that is part of the route open, or that nobody asked for, is seen but not announced.
    */
   isGesture: boolean;
-  /** Starts the wait again now, as a Retry does. Call it from the Retry's handler. */
+  /**
+   * Starts the wait again now, as a Retry does, and marks it a gesture's: a Retry is pressed, so the new wait is its own
+   * announcement group even when the first one (a restored pane) was not. Call it from the Retry's handler.
+   */
   restart: () => void;
 }>;
 
@@ -73,7 +76,7 @@ export function useWaitStart(active: boolean): WaitStart {
     isGesture: current.isGesture,
     restart: () => {
       const startedAt = clock.now();
-      setTracked((previous) => ({ ...previous, startedAt }));
+      setTracked((previous) => ({ ...previous, startedAt, isGesture: true }));
     },
   };
 }

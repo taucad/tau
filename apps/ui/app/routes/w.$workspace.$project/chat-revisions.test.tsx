@@ -1298,6 +1298,34 @@ describe('Revisions pane vocabulary and History', () => {
     expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
   });
 
+  /* A Retry is a gesture: in a History restored with the route open (seen, not announced) its new wait is announced. */
+  it('announces the wait a Retry starts in a History restored without a gesture', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, {
+        userActivation: { isActive: false, hasBeenActive: false },
+      }),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    revisionStatusHarness.logRead = async () => Promise.withResolvers<never>().promise;
+    render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    const slot = card.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).not.toHaveAttribute('role');
+
+    const now = vi.spyOn(performance, 'now').mockReturnValue(30_000);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    await user.click(within(card).getByRole('button', { name: 'Retry' }));
+
+    expect(card.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('role', 'status');
+  });
+
   /* One announcement per group: a History a person opens is announced by its card's indicator, not by the strip. */
   it('announces a History a person opened through its card, keeping the strip quiet while it loads', async () => {
     vi.stubGlobal(

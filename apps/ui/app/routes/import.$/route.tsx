@@ -25,7 +25,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { useProjects } from '#hooks/use-projects.js';
-import { withNamedLock } from '#hooks/use-cloud-projects.js';
+import { withNamedLock } from '#lib/named-lock.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';

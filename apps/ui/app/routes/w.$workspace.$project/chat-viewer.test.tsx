@@ -377,6 +377,9 @@ vi.mock('#services/part-thumbnail-visual.js', () => ({
 
 vi.mock('#hooks/use-cloud-projects.js', () => ({
   useTauCloudIntent: () => (mockSyncStatus.sync.state === 'checking' ? 'open' : undefined),
+}));
+vi.mock('#lib/tau-cloud-intent.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   canOpenCloudProject: () => true,
 }));
 

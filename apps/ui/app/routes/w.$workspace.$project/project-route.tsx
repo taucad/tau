@@ -1,4 +1,4 @@
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import {
   createContext,
   lazy,

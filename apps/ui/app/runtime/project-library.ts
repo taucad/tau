@@ -14,19 +14,21 @@
  *   happen: the discovery epoch, the journal's readiness, the recovery set and every row start reach access; a settled
  *   row moves the discovery epoch; and the bootstrap pass, once it has run, lets the replay loop start.
  *
- * The machines' ports are the storage calls in `project-library-storage.ts`. They run over the root file manager's
- * facade, which `FileManagerScope` still builds in React, so `ProjectManagerProvider` hands it over in render through
- * one transitional {@link ProjectLibraryBinding} (programme-control D15 ruling, A2). A3b deleted the binding's
- * discovery half: `touchProject`'s wait, the chat ports and the connection services are the service's own now, and
- * only the facade is left, which A4b builds over `rootFiles` and then deletes. A port called before the first binding
- * waits for it; a later binding replaces the earlier one, and a call that resumes reads the current one.
+ * The machines' ports are the storage calls in `project-library-storage.ts`. They run over the root file facade, which
+ * the runtime builds over `rootFiles` with no React (`createRootFileFacade`, A4b): the transitional binding that
+ * `ProjectManagerProvider` supplied in render (programme-control D15 ruling, A2) is gone. The library follows the
+ * facade for its life: a new record client rebuilds the chat store and its read owner, and a read the replaced records
+ * failed is asked again of the new ones. A port called before the facade exists waits for it.
+ *
+ * Since A4b the library also owns the workspace commands (row L6, {@link WorkspaceCommands}) and is the only writer of
+ * the project listing in the query cache (D9): readers query it with {@link ProjectLibrary.listingQuery}.
  */
 import { createActor, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { QueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
 import type { Remote } from 'comlink';
-import type { Chat, TauAgentHostId } from '@taucad/chat';
+import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
@@ -88,6 +90,8 @@ import {
 import type { LibraryRecords } from '#runtime/project-library-observations.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
+import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
+import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 
 /** What the library takes from the runtime's composition. @public */
 export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
@@ -101,6 +105,13 @@ export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 
     sessions?: () => ProjectLibrarySessions | undefined;
     /** The runtime's chat store, read when a command needs it; built after the library, so a getter too. */
     chatSessions?: () => ProjectLibraryChatSessions | undefined;
+    /**
+     * The root file facade over `rootFiles` (A4b). The runtime builds it after the library, so it is a getter; a port
+     * called before it answers waits for it.
+     */
+    rootFiles?: () => ProjectLibraryRootFiles | undefined;
+    /** The workspace connection's telemetry; a library built without it reports none. */
+    workspaceTelemetry?: Pick<WorkspaceTelemetry, 'workspaceConnection'>;
   }>;
 
 /** The root file manager's record client and watch, which the chat store reads its records through. @public */
@@ -131,13 +142,8 @@ export type ProjectLibraryChatPorts = Readonly<{
   createNavigationRepairChat: (resourceId: string) => Promise<Chat>;
 }>;
 
-/**
- * The transitional binding `ProjectManagerProvider` supplies in render (D15 ruling, A2): the root file manager's
- * facade, which `FileManagerScope` builds in React. A4b builds it over `rootFiles` and deletes the binding.
- *
- * @public
- */
-export type ProjectLibraryBinding = Readonly<{ fileManager: ProjectLibraryFileManager }>;
+/** The root file facade as the library reads it: its value now, and its changes (A4b). @public */
+export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFileManager>;
 
 /** The route's answer about one project's access (`getProjectRouteAccess`). @public */
 export type ProjectRouteAccess = Exclude<AccessAnswer, Readonly<{ status: 'error' }>>;
@@ -174,20 +180,6 @@ export type WorkspaceConnectionRef = Actor<typeof workspaceConnectionMachine>;
 /** A project listing as the `['projects']` query holds it: its entries, among other fields. */
 const isProjectListing = (data: unknown): data is { readonly projects: readonly ProjectLibraryEntry[] } =>
   typeof data === 'object' && data !== null && Array.isArray((data as { projects?: unknown }).projects);
-
-/** The telemetry of one workspace connection, filled in as its services run. @public */
-export type WorkspaceConnectionTrace = {
-  readonly operationId: string;
-  startedAt: number;
-  workspaceId: string | undefined;
-  registeringDuration: number;
-  mountingDuration: number;
-  catalogDuration: number;
-  publishingDuration: number;
-  candidateCount: number;
-  projectCount: number;
-  conflictCount: number;
-};
 
 /** A mutation of one project, admitted by the recovery gate (rule 4) and accounted for until it settles. @public */
 export type LibraryMutation = Readonly<{
@@ -274,7 +266,7 @@ export class ProjectLibrary {
   public readonly recovery: LibraryRecoveryActor;
   /** Route access (row L8). */
   public readonly access: LibraryAccessActor;
-  /** The root file facade's record client and watch, from the binding; `undefined` until the first one. */
+  /** The root file facade's record client and watch; `undefined` until the first one. */
   public readonly files: ProjectLibraryObservable<ProjectLibraryFiles | undefined>;
   /**
    * The listing snapshot (A13): the remembered shape of the last project listing and its chat listings, which the
@@ -284,14 +276,26 @@ export class ProjectLibrary {
   public readonly listingSnapshot = projectListShapeStore;
   /** The project commands (A4a): create, duplicate, delete, restore, adopt, repair and rename. */
   public readonly commands: ProjectCommands;
+  /** The workspace commands (A4b, row L6): connect, retry, choose a directory, repair bindings. */
+  public readonly workspaceCommands: WorkspaceCommands;
+  /**
+   * The project listing's query (D9): the one key and the one function that write it. Every reader of `['projects']`
+   * queries with these, so the library is the listing's only writer.
+   */
+  public readonly listingQuery: Readonly<{
+    queryKey: readonly ['projects'];
+    queryFn: (context: Readonly<{ signal: AbortSignal }>) => Promise<ProjectListing>;
+  }>;
 
-  #binding: ProjectLibraryBinding | undefined;
-  #bound = Promise.withResolvers<void>();
-  /** The current binding's provider disposed its reads and has not bound again. */
-  #released = false;
-  /** Counts releases, so a read can tell its provider released and resumed it while it ran (StrictMode). */
-  #releases = 0;
-  /** The chat store and its read owner over the binding's record client. */
+  readonly #rootFiles: () => ProjectLibraryRootFiles | undefined;
+  /** The root facade's current value, once the library follows it. */
+  #fileManager: ProjectLibraryFileManager | undefined;
+  #unfollowRootFiles: (() => void) | undefined;
+  #stopped = false;
+  readonly #bound = Promise.withResolvers<void>();
+  /** Counts record replacements, so a read can tell the records it ran on were replaced while it ran. */
+  #replacements = 0;
+  /** The chat store and its read owner over the facade's record client. */
   #records: LibraryRecords | undefined;
   readonly #changed = new Topic<void>({ name: 'project-library' });
   readonly #filesChanged = new Topic<void>({ name: 'project-library-files' });
@@ -322,12 +326,17 @@ export class ProjectLibrary {
   /** The bootstrap pass in flight or run; dropped when it fails, so the next caller runs it again (A3a choice 4). */
   #bootstrap: Promise<void> | undefined;
   #bootstrapped = false;
-  /** One workspace connection at a time, and its telemetry. */
-  #connection: Promise<unknown> | undefined;
-  #connectionTrace: WorkspaceConnectionTrace | undefined;
 
-  public constructor({ queryClient, sessions, chatSessions, ...options }: ProjectLibraryOptions) {
+  public constructor({
+    queryClient,
+    sessions,
+    chatSessions,
+    rootFiles,
+    workspaceTelemetry,
+    ...options
+  }: ProjectLibraryOptions) {
     this.queryClient = queryClient;
+    this.#rootFiles = rootFiles ?? (() => undefined);
     this.projectManager = createActor(projectManagerMachine, options);
     const connection: WorkspaceConnectionServices = {
       registerWorkspace: async (selection, signal) => this.#registerWorkspace(selection, signal),
@@ -337,9 +346,8 @@ export class ProjectLibrary {
     this.workspaceConnection = createActor(workspaceConnectionMachine, { ...options, input: connection });
     const host = {
       queryClient,
-      /* The observations are the provider's: they read nothing while it has released its binding (B9). */
-      fileManager: () => (this.#released ? undefined : this.#binding?.fileManager),
-      records: () => (this.#released ? undefined : this.#records),
+      fileManager: () => this.#fileManager,
+      records: () => this.#records,
       subscribeBinding: (listener: () => void) => this.#bindingChanged.subscribe(listener),
       subscribeInvalidate: (listener: () => void) => this.#invalidateRequested.subscribe(listener),
       passSettled: async () => this.#passSettled(),
@@ -504,7 +512,8 @@ export class ProjectLibrary {
     });
     this.files = {
       get: () => {
-        const fileManager = this.#binding?.fileManager;
+        this.followRootFiles();
+        const fileManager = this.#fileManager;
         return fileManager === undefined
           ? undefined
           : { client: fileManager.recordFiles, watchRecordFile: fileManager.watchRecordFile };
@@ -533,7 +542,41 @@ export class ProjectLibrary {
       },
       sessions: () => sessions?.(),
       chatSessions: () => chatSessions?.(),
+      invalidateProject: (projectId) => {
+        this.invalidateProject(projectId);
+      },
+      forgetProject: (projectId) => {
+        this.forgetProject(projectId);
+      },
     });
+    this.workspaceCommands = new WorkspaceCommands({
+      workspaceConnection: this.workspaceConnection,
+      facade: async () => this.#facade(),
+      readiedWorker: async () => this.getReadiedWorker(),
+      whenDiscoveryReady: async () => this.whenDiscoveryReady(),
+      discover: async () => {
+        const { result } = await this.discover();
+        return result;
+      },
+      prepareCurrentWorkspaceCatalog: async (selected, signal) => this.prepareCurrentWorkspaceCatalog(selected, signal),
+      invalidateListing: () => {
+        this.invalidateListing();
+      },
+      invalidateProject: (projectId) => {
+        this.invalidateProject(projectId);
+      },
+      telemetry: workspaceTelemetry,
+    });
+    this.listingQuery = {
+      queryKey: ['projects'],
+      queryFn: async ({ signal }) => {
+        const listing = await this.getProjectListing({ includeDeleted: true });
+        signal.throwIfAborted();
+        /* R5, A13: the listing snapshot remembers the list's shape when it lands in the cache (`#watchListings`). */
+        return listing;
+      },
+    };
+    this.followRootFiles();
   }
 
   /**
@@ -545,6 +588,7 @@ export class ProjectLibrary {
       return;
     }
     this.#started = true;
+    this.followRootFiles();
     this.#subscriptions.push(this.#watchListings());
     this.projectManager.start();
     this.workspaceConnection.start();
@@ -569,6 +613,9 @@ export class ProjectLibrary {
     for (const unsubscribe of this.#subscriptions.splice(0)) {
       unsubscribe();
     }
+    this.#stopped = true;
+    this.#unfollowRootFiles?.();
+    this.#unfollowRootFiles = undefined;
     this.access.stop();
     this.recovery.stop();
     this.discovery.stop();
@@ -591,73 +638,29 @@ export class ProjectLibrary {
     this.#libraryChanged.subscribe(listener);
 
   /**
-   * Supply the transitional binding (D15 ruling, A2). Called by `ProjectManagerProvider` in render; calling it again
-   * replaces the binding. A change of the record client builds the chat store and its read owner again, and a change
-   * of what the observations read rebuilds them.
-   *
-   * @param binding - The provider's current file manager facade.
+   * Follow the root file facade, once the runtime has built it: adopt its value now and each one it publishes. The
+   * runtime calls it as soon as the facade exists, so a chat store built before it gets its record client with no
+   * port called and no provider mounted; the constructor, `start` and each port that needs it call it too. A second
+   * call, or one after `stop`, does nothing.
    */
-  public bind(binding: ProjectLibraryBinding): void {
-    const previous = this.#binding?.fileManager;
-    const { fileManager } = binding;
-    const wasReleased = this.#released;
-    this.#binding = binding;
-    this.#released = false;
-    this.#bound.resolve();
-    const recordsChanged = previous?.recordFiles !== fileManager.recordFiles || this.#records === undefined;
-    if (recordsChanged) {
-      const chatStore = createChatFileStore({
-        client: fileManager.recordFiles,
-        projectIds: async () =>
-          (this.queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.projectId),
-      });
-      this.#records = { chatStore, readOwner: createMetadataReadOwner(chatStore) };
-      /* Reads the old records served are disposed with them: each is asked again of the new ones. */
-      this.#releases += 1;
-    }
-    const filesChanged =
-      previous?.recordFiles !== fileManager.recordFiles || previous.watchRecordFile !== fileManager.watchRecordFile;
-    if (filesChanged) {
-      this.#filesChanged.emit();
-    }
-    if (
-      wasReleased ||
-      recordsChanged ||
-      filesChanged ||
-      previous.workerChangeChannel !== fileManager.workerChangeChannel
-    ) {
-      this.#bindingChanged.emit();
-    }
-  }
-
-  /**
-   * The provider disposed the reads its binding serves (its effect's cleanup): ports wait for it to
-   * {@link ProjectLibrary.resume} or for the next {@link ProjectLibrary.bind}, and a read that failed meanwhile is
-   * asked again of that binding.
-   */
-  public release(): void {
-    if (this.#released) {
+  public readonly followRootFiles = (): void => {
+    /* A stopped library follows nothing again: a late port call must not leave a subscription nothing removes. */
+    if (this.#stopped || this.#unfollowRootFiles !== undefined) {
       return;
     }
-    this.#released = true;
-    this.#releases += 1;
-    this.#bound = Promise.withResolvers<void>();
-    /* The observations stop with the provider that serves them, which fails the reads they hold. */
-    this.#bindingChanged.emit();
-  }
-
-  /** The provider's effect runs again over the binding it already supplied (an effect re-run, StrictMode). */
-  public resume(): void {
-    if (!this.#released || this.#binding === undefined) {
+    const rootFiles = this.#rootFiles();
+    if (rootFiles === undefined) {
       return;
     }
-    this.#released = false;
-    this.#bound.resolve();
-    this.#bindingChanged.emit();
-  }
+    this.#unfollowRootFiles = rootFiles.subscribe(() => {
+      this.#adopt(rootFiles.get());
+    });
+    this.#adopt(rootFiles.get());
+  };
 
-  /** The chat store over the current binding's record client; `undefined` before the first binding. */
+  /** The chat store over the facade's current record client; `undefined` before the runtime built the facade. */
   public get chatStore(): ChatStorage | undefined {
+    this.followRootFiles();
     return this.#records?.chatStore;
   }
 
@@ -678,9 +681,8 @@ export class ProjectLibrary {
     { retry = true }: Readonly<{ retry?: boolean }> = {},
   ): Promise<Value> => {
     if (!retry) {
-      // Admitted now, as the provider's read was: an unmount that follows in the same task fails it.
-      const records = this.#released ? undefined : this.#records;
-      return (records ?? (await this.#currentRecords())).readOwner.read(operation, projectId);
+      // Admitted now, on the records that serve now: a replacement that follows does not ask it again.
+      return (this.#records ?? (await this.#currentRecords())).readOwner.read(operation, projectId);
     }
     return this.#read(async ({ readOwner }) => readOwner.read(operation, projectId));
   };
@@ -776,6 +778,27 @@ export class ProjectLibrary {
   public readonly updateEditorState = async (editorState: EditorStateInput): Promise<unknown> => {
     const worker = await this.#readiedWorker('Project manager worker');
     return worker.updateEditorState(editorState);
+  };
+
+  /** One project's own queries changed: its row is read again where it is shown. */
+  public readonly invalidateProject = (projectId: string): void => {
+    void this.queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+  };
+
+  /** A project is gone for good: its own queries are dropped. */
+  public readonly forgetProject = (projectId: string): void => {
+    this.queryClient.removeQueries({ queryKey: ['project', projectId] });
+  };
+
+  /**
+   * Keep a new chat's device-relative placement in this device's placements record for its project (XD2), through the
+   * root file facade.
+   */
+  public readonly rememberChatPlacement = async (
+    placement: Readonly<{ projectId: string; chatId: string; execution?: CadAgentExecution }>,
+  ): Promise<void> => {
+    const fileManager = await this.#facade();
+    await rememberChatPlacement(fileManager.recordFiles, placement);
   };
 
   /** The project listing changed. */
@@ -1039,34 +1062,38 @@ export class ProjectLibrary {
   };
 
   /* ---------------------------------------------------------------------------------------------------------------- */
-  /* The workspace connection's telemetry and single flight, which `connectWorkspace` drives. */
 
-  /** One connection at a time: a second call while one runs joins it. */
-  public readonly connectOnce = async <Value>(run: () => Promise<Value>): Promise<Value> => {
-    if (this.#connection !== undefined) {
-      return this.#connection as Promise<Value>;
+  /**
+   * Adopt the facade's value: a change of the record client builds the chat store and its read owner again, and a
+   * change of what the observations read rebuilds them.
+   */
+  #adopt(fileManager: ProjectLibraryFileManager): void {
+    const previous = this.#fileManager;
+    if (previous === fileManager) {
+      return;
     }
-    const connection = run();
-    this.#connection = connection;
-    try {
-      return await connection;
-    } finally {
-      if (this.#connection === connection) {
-        this.#connection = undefined;
-      }
+    this.#fileManager = fileManager;
+    this.#bound.resolve();
+    const recordsChanged = previous?.recordFiles !== fileManager.recordFiles || this.#records === undefined;
+    if (recordsChanged) {
+      const chatStore = createChatFileStore({
+        client: fileManager.recordFiles,
+        projectIds: async () =>
+          (this.queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.projectId),
+      });
+      this.#records = { chatStore, readOwner: createMetadataReadOwner(chatStore) };
+      /* Reads the old records served are disposed with them: each is asked again of the new ones. */
+      this.#replacements += 1;
     }
-  };
-
-  /** The telemetry of the connection that runs now, which its services fill in. */
-  public get connectionTrace(): WorkspaceConnectionTrace | undefined {
-    return this.#connectionTrace;
+    const filesChanged =
+      previous?.recordFiles !== fileManager.recordFiles || previous.watchRecordFile !== fileManager.watchRecordFile;
+    if (filesChanged) {
+      this.#filesChanged.emit();
+    }
+    if (recordsChanged || filesChanged || previous.workerChangeChannel !== fileManager.workerChangeChannel) {
+      this.#bindingChanged.emit();
+    }
   }
-
-  public set connectionTrace(trace: WorkspaceConnectionTrace | undefined) {
-    this.#connectionTrace = trace;
-  }
-
-  /* ---------------------------------------------------------------------------------------------------------------- */
 
   /**
    * Remember each project and chat listing that lands in the cache, fetched or set, in the listing snapshot (A13).
@@ -1379,13 +1406,13 @@ export class ProjectLibrary {
           ? await createWorkspace(selection.handle)
           : await createNodeWorkspace(selection.path);
       signal.throwIfAborted();
-      if (this.#connectionTrace) {
-        this.#connectionTrace.workspaceId = connection.workspaceId;
+      if (this.workspaceCommands.connectionTrace) {
+        this.workspaceCommands.connectionTrace.workspaceId = connection.workspaceId;
       }
       return { workspace: connection, minted: connection.minted };
     } finally {
-      if (this.#connectionTrace) {
-        this.#connectionTrace.registeringDuration += performance.now() - startedAt;
+      if (this.workspaceCommands.connectionTrace) {
+        this.workspaceCommands.connectionTrace.registeringDuration += performance.now() - startedAt;
       }
     }
   }
@@ -1403,8 +1430,8 @@ export class ProjectLibrary {
       await fileManager.workspace.syncProjectRoots();
       signal.throwIfAborted();
     } finally {
-      if (this.#connectionTrace) {
-        this.#connectionTrace.mountingDuration += performance.now() - startedAt;
+      if (this.workspaceCommands.connectionTrace) {
+        this.workspaceCommands.connectionTrace.mountingDuration += performance.now() - startedAt;
       }
     }
   }
@@ -1416,7 +1443,7 @@ export class ProjectLibrary {
     const startedAt = performance.now();
     try {
       const catalog = await this.prepareCurrentWorkspaceCatalog(workspace.workspace, signal);
-      const trace = this.#connectionTrace;
+      const trace = this.workspaceCommands.connectionTrace;
       if (trace) {
         trace.candidateCount = catalog.candidateCount;
         trace.projectCount = catalog.projectCount;
@@ -1429,48 +1456,47 @@ export class ProjectLibrary {
           try {
             await catalog.publish();
           } finally {
-            if (this.#connectionTrace) {
-              this.#connectionTrace.publishingDuration += performance.now() - publishStartedAt;
+            if (this.workspaceCommands.connectionTrace) {
+              this.workspaceCommands.connectionTrace.publishingDuration += performance.now() - publishStartedAt;
             }
           }
         },
       };
     } finally {
-      if (this.#connectionTrace) {
-        this.#connectionTrace.catalogDuration += performance.now() - startedAt;
+      if (this.workspaceCommands.connectionTrace) {
+        this.workspaceCommands.connectionTrace.catalogDuration += performance.now() - startedAt;
       }
     }
   }
 
-  /** The current binding's facade, once there is one: a call made earlier waits, and reads the one current then. */
+  /** The root facade, once there is one: a call made earlier waits, and reads the one current then. */
   async #facade(): Promise<ProjectLibraryFileManager> {
+    this.followRootFiles();
     await this.#bound.promise;
-    return this.#binding!.fileManager;
+    return this.#fileManager!;
   }
 
   async #currentRecords(): Promise<LibraryRecords> {
+    this.followRootFiles();
     await this.#bound.promise;
     return this.#records!;
   }
 
   /**
-   * A read through the current records. A provider that unmounts disposes its reads, so a read that fails after its
-   * provider released it (a billing-fence remount, B9, or an effect re-run), or after the records it ran on were
-   * replaced, is asked once more of the records that serve next: the chat store outlives the provider and would
-   * otherwise keep a session whose history never loaded. Only reads are asked again.
+   * A read through the current records. Records replaced under a read dispose it, so a read that fails after the
+   * records it ran on were replaced (a new root worker) is asked once more of the records that serve next: the chat
+   * store would otherwise keep a session whose history never loaded. Only reads are asked again.
    */
   async #read<T>(call: (records: LibraryRecords) => Promise<T>): Promise<T> {
-    await this.#bound.promise;
-    const records = this.#records!;
-    const releases = this.#releases;
+    const records = await this.#currentRecords();
+    const replacements = this.#replacements;
     try {
       return await call(records);
     } catch (error) {
-      /* No release while it ran: the read's own failure, whatever re-render rebound the same ports meanwhile. */
-      if (!this.#released && this.#releases === releases) {
+      /* Nothing replaced while it ran: the read's own failure. */
+      if (this.#replacements === replacements) {
         throw error;
       }
-      /* Released (and replaced or resumed, in any order): ask the records that serve reads next. */
       return call(await this.#currentRecords());
     }
   }

@@ -64,6 +64,9 @@ vi.mock('#workbench-records/view-actions.js', () => ({
 }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({
   useTauCloudIntent: () => (pending.current ? 'open' : undefined),
+}));
+vi.mock('#lib/tau-cloud-intent.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   canOpenCloudProject: () => true,
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({

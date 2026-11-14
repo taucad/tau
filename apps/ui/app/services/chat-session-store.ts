@@ -1565,6 +1565,22 @@ export class ChatSessionStore {
     }
   }
 
+  /**
+   * Note a chat this tab has just created with no messages, before it is opened: its transcript is `empty` at once
+   * rather than `loading` until its log answers (I21, plan A12). A later log answer with turns still shows them.
+   *
+   * @param chatId - The new chat.
+   * @public
+   */
+  public noteCreatedEmpty(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      this.#createdEmpty.add(chatId);
+    } else {
+      this.#latchTranscriptSettled(session);
+    }
+  }
+
   public get(chatId: string): ChatSession | undefined {
     return this.#sessions.get(chatId);
   }
@@ -3904,22 +3920,6 @@ export class ChatSessionStore {
     }
     session.transcriptSettled = true;
     this.#chatTopics.get(session.chatId)?.emit();
-  }
-
-  /**
-   * Note a chat this tab has just created with no messages, before it is opened: its transcript is `empty` at once
-   * rather than `loading` until its log answers (I21, plan A12). A later log answer with turns still shows them.
-   *
-   * @param chatId - The new chat.
-   * @public
-   */
-  public noteCreatedEmpty(chatId: string): void {
-    const session = this.#sessions.get(chatId);
-    if (session === undefined) {
-      this.#createdEmpty.add(chatId);
-    } else {
-      this.#latchTranscriptSettled(session);
-    }
   }
 
   async #clearAcceptedSeed(chatId: string, requestId: string): Promise<void> {

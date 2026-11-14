@@ -1,13 +1,13 @@
 {
   "//": "Written by the release bot from a verified build (.github/workflows/picogk-browser-host-publish.yml, scripts/src/picogk-browser-host-pin.ts); never edit by hand. Every blob is served write-once at https://dependencies.tau.new/blobs/sha256/<hex> and https://dependencies.taucad.dev/blobs/sha256/<hex> before this file lands.",
   "schemaVersion": 1,
-  "inputsKey": "picogk-browser-host-v2-9440db9a52109efbc5a4481cb25022328d9eaf31-0.2.1-c3354f4ad0cad7c15006db0a3f16aa8231becd47b997a08deb1d5abd0d0f8c46-912dc726247c0a36ccc77fc9a632075c90a970dd0d1aef1084ed06aae72481b0",
+  "inputsKey": "picogk-browser-host-v2-e7cb9b668b6b505074259ea393668b8604d60642-0.2.1-e19c9b573c44aa8aed82994186ee28cd3982656bc2df8eb12834f7860ec21078-912dc726247c0a36ccc77fc9a632075c90a970dd0d1aef1084ed06aae72481b0",
   "manifest": {
-    "sha256": "313d375b1617a54a132ed2ade3161e3aeb801254b6978bd46568c6a2b85f2ab7",
+    "sha256": "93d4634b0a1b730f346cd9f05561bd73e5a19bd60ca93d82977806ec5e386985",
     "byteLength": 70134
   },
   "files": {
     "count": 469,
-    "byteLength": 201356969
+    "byteLength": 201357037
   }
 }

@@ -696,6 +696,21 @@ export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promis
  */
 export const expectPresentedGraphicsBackend = async (requested: 'webgl' | 'webgpu'): Promise<void> => {
   const presented = presentedGraphicsBackend(requested);
+  if (presented !== requested) {
+    /* The visible canvas can still be the WebGPU one the browser is about to destroy: the WebGL canvas mounts after
+     * the loss, on a fresh owner, and only then installs its bridge. Wait for that remount before reading the backend,
+     * so the read below sees the settled viewer and not the gap between the two canvases. A remount that never lands
+     * leaves the read to report what the page presents instead. */
+    await waitFor(
+      (backend) =>
+        (
+          globalThis as typeof globalThis & {
+            __TAU_SECTION_VIEW_TEST__?: { getGraphicsBackend(): 'webgl' | 'webgpu' };
+          }
+        ).__TAU_SECTION_VIEW_TEST__?.getGraphicsBackend() === backend,
+      presented,
+    ).catch(() => undefined);
+  }
   await expectGraphicsBackend(presented);
   if (presented !== requested) {
     const reason = await evaluate(() =>

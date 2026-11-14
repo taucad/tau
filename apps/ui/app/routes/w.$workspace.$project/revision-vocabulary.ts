@@ -526,7 +526,8 @@ const gitOperationWords: Readonly<Record<'merge' | 'cherryPick' | 'revert' | 're
  * A save would record conflict markers, or move the branch under the
  * person's own operation, so every save waits until it ends. The sentence
  * names the operation and what ends it; a detached head names the branch to
- * go back to, when Git's own log knows it.
+ * go back to, when Git's own log knows it, and a rebase whose todo runs
+ * commands names the Terminal as the contained place to end it.
  *
  * @param waiting - The operation the checkout waits on.
  * @returns *Saving paused · Finish or abort the merge in Git*, or the detached head's way back.
@@ -541,6 +542,12 @@ export const waitingSentence = (waiting: RevisionGitOperation): string => {
     }
     case 'locked': {
       return 'Saving paused · Git is busy';
+    }
+    case 'rebase': {
+      /* LP7: `git rebase --continue` would run the todo's `exec` lines. */
+      return waiting.runsCommands === true
+        ? 'Saving paused · The rebase will run commands · Finish or abort it in Tau’s Terminal'
+        : 'Saving paused · Finish or abort the rebase in Git';
     }
     default: {
       return `Saving paused · Finish or abort the ${gitOperationWords[waiting.kind]} in Git`;

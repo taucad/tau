@@ -623,6 +623,9 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   const [chatId] = await openChat(writingTurn(reply('Reply one.', { gated: true })));
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Writing the proof.', { exact: true }).last(), 120_000);
+  /* The first call's text shows before its `create_file` runs, so a Stop there changed nothing and settles as plain
+   * Saved. The second call parks at its stream gate only after the tool has written the file. */
+  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' }, 120_000);
 
   await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
   await target.releaseAgentHostGatewayFixture();

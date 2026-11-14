@@ -1,0 +1,162 @@
+# The producer of third-party dependency files: it serves, from both locked dependency hosts, the files a
+# `tau-plugin.json` pins only by a third-party URL, so a locked `tau prepare` (`TAU_ACQUISITION=locked`) can
+# fetch them from `TAU_DEPENDENCY_MIRROR`. Today that is the PicoGK `dotnet` runtime archives, pinned from
+# `builds.dotnet.microsoft.com` by the sha512 Microsoft publishes.
+#
+# Dispatched on `main`, the `tag` job downloads every `dotnet` file `packages/plugins/picogk/tau-plugin.json`
+# pins, refuses unless each matches its pinned integrity and byte length, and names the bytes with a key: the
+# first 16 hex of the SHA-256 of their sorted SHA-256 hexes (`scripts/src/mirror-dependency-files.ts`). It
+# then ends green, creating nothing, when `dependency@dotnet-runtime-<key>` already exists or when both hosts
+# already serve every blob with its digest. Otherwise the tau-release-bot tags the dispatched commit, and that
+# tag's push runs the publish jobs below. The key names bytes, not pins, so re-pinning the same archives by
+# sha256 keeps the tag and a later dispatch does nothing.
+#
+# On a `dependency@dotnet-runtime-*` tag (created only by the release bot or release-managers: the
+# release-tags ruleset) the tagged commit's pins are downloaded again, refused unless they match and the tag
+# names their bytes, and each file is written once under `blobs/sha256/<hex>` with `If-None-Match: *` and
+# immutable caching, first to staging and then to production:
+#   - `publish-staging`, environment `dependencies-staging` (no reviewer): bucket
+#     `tau-staging-au-dependencies`, read back from `https://dependencies.taucad.dev`.
+#   - `publish-production`, environment `dependencies` (a required reviewer): bucket
+#     `tau-prod-dependencies`, read back from `https://dependencies.tau.new`.
+# Both run `.github/actions/dependency-files-publish`. Each bucket is locked, so a blob that already exists is
+# refused; it counts as present only when its bytes, read back through the bucket, hash to its key. Both
+# environments admit `dependency@*` tags and no branch or pull request.
+name: Dependency files publish
+run-name: ${{ github.ref_name }}
+
+on:
+  push:
+    tags: ['dependency@dotnet-runtime-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-files-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MANIFEST: packages/plugins/picogk/tau-plugin.json
+  FILE_NAME: dotnet
+  TAG_NAME: dotnet-runtime
+
+jobs:
+  # ---- Producer, dispatched on main ----------------------------------------------------------------
+
+  tag:
+    if: github.ref == 'refs/heads/main'
+    name: Tag the pinned files unless both hosts serve them
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.20.0'
+      - name: Download and verify every pinned file
+        id: key
+        run: |
+          set -euo pipefail
+          node scripts/src/mirror-dependency-files.ts fetch --manifest "$MANIFEST" --name "$FILE_NAME" \
+            --tag-name "$TAG_NAME" --out "$RUNNER_TEMP/dependency-files" | tee -a "$GITHUB_OUTPUT"
+      - name: Decide whether a publish is needed
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.key.outputs.tag }}
+        run: |
+          set -euo pipefail
+          plan="$RUNNER_TEMP/dependency-files/plan.tsv"
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2> /dev/null; then
+            message="$TAG already exists; its run publishes these bytes, so nothing is tagged."
+            needed=false
+          elif node scripts/src/mirror-dependency-files.ts check --plan "$plan" --base https://dependencies.tau.new/ \
+            && node scripts/src/mirror-dependency-files.ts check --plan "$plan" --base https://dependencies.taucad.dev/; then
+            message="Both dependency hosts already serve every blob with its digest; $TAG is not created."
+            needed=false
+          else
+            message="$TAG is created; staging publishes at once, and production after a reviewer approves the dependencies environment."
+            needed=true
+          fi
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Dependency files::$message"
+          printf '### Dependency files\n\n- %s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+      - name: Mint tau-release-bot token
+        id: bot
+        if: steps.decide.outputs.needed == 'true'
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      # The tag is created with the App token, so its push starts this workflow's publish jobs; a
+      # GITHUB_TOKEN tag would start nothing.
+      - name: Tag the dispatched commit
+        if: steps.decide.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          TAG: ${{ steps.key.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+          printf -- '- tagged `%s` at `%s`; a reviewer of the `dependencies` environment approves `Publish to production` in its run.\n' \
+            "$TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- Publish, on a dependency@dotnet-runtime-* tag -----------------------------------------------
+
+  # One step implementation, two environments. Staging publishes at once; production waits for a
+  # reviewer of `dependencies` and for staging, so a file reaches production only once staging serves it.
+  publish-staging:
+    if: startsWith(github.ref, 'refs/tags/dependency@dotnet-runtime-')
+    name: Publish to staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: dependencies-staging
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/dependency-files-publish
+        with:
+          environment: staging
+          manifest: ${{ env.MANIFEST }}
+          name: ${{ env.FILE_NAME }}
+          tag-name: ${{ env.TAG_NAME }}
+          bucket: ${{ vars.DEPENDENCY_R2_BUCKET }}
+          endpoint: ${{ vars.DEPENDENCY_R2_ENDPOINT }}
+          access-key-id: ${{ secrets.DEPENDENCY_R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.DEPENDENCY_R2_SECRET_ACCESS_KEY }}
+
+  publish-production:
+    needs: publish-staging
+    name: Publish to production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: dependencies
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/dependency-files-publish
+        with:
+          environment: production
+          manifest: ${{ env.MANIFEST }}
+          name: ${{ env.FILE_NAME }}
+          tag-name: ${{ env.TAG_NAME }}
+          bucket: ${{ vars.DEPENDENCY_R2_BUCKET }}
+          endpoint: ${{ vars.DEPENDENCY_R2_ENDPOINT }}
+          access-key-id: ${{ secrets.DEPENDENCY_R2_ACCESS_KEY_ID }}
+          secret-access-key: ${{ secrets.DEPENDENCY_R2_SECRET_ACCESS_KEY }}

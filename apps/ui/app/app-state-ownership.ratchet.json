@@ -57,6 +57,7 @@
       "apps/ui/app/runtime/observability/observability.middleware.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
+      "apps/ui/app/runtime/project-library-commands.ts",
       "apps/ui/app/runtime/project-library-observations.ts",
       "apps/ui/app/runtime/project-library-storage.ts",
       "apps/ui/app/runtime/project-library.ts",

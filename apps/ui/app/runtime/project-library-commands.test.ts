@@ -10,11 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import type { Chat } from '@taucad/chat';
 import { ProjectLibrary } from '#runtime/project-library.js';
-import type {
-  ProjectLibraryBinding,
-  ProjectLibrarySessions,
-  ProjectLibraryChatSessions,
-} from '#runtime/project-library.js';
+import type { ProjectLibraryBinding } from '#runtime/project-library.js';
+import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
 /** The chat store each record client stands for. */
@@ -56,18 +53,18 @@ const bindingWith = (chats: readonly Chat[]): ProjectLibraryBinding => {
   return { fileManager: { recordFiles } as unknown as ProjectLibraryBinding['fileManager'] };
 };
 
-type Refs = Readonly<Record<string, unknown>>;
+type LiveSessions = Readonly<Record<string, unknown>>;
 
 /** A registry double: the live refs, and a `close` that drops one and tells every listener. */
 const registryOf = (
   live: readonly string[],
 ): ProjectLibrarySessions & { readonly sent: Array<Readonly<{ type: string; projectId?: string }>> } => {
-  let refs: Refs = Object.fromEntries(live.map((projectId) => [projectId, {}]));
-  const listeners = new Set<(snapshot: { context: { refs: Refs } }) => void>();
+  let liveSessions: LiveSessions = Object.fromEntries(live.map((projectId) => [projectId, {}]));
+  const listeners = new Set<(snapshot: { context: { refs: LiveSessions } }) => void>();
   const sent: Array<Readonly<{ type: string; projectId?: string }>> = [];
   return {
     sent,
-    getSnapshot: () => ({ context: { refs } }),
+    getSnapshot: () => ({ context: { refs: liveSessions } }),
     subscribe(listener) {
       listeners.add(listener);
       return {
@@ -78,9 +75,11 @@ const registryOf = (
     },
     send(event) {
       sent.push(event);
-      refs = Object.fromEntries(Object.entries(refs).filter(([projectId]) => projectId !== event.projectId));
+      liveSessions = Object.fromEntries(
+        Object.entries(liveSessions).filter(([projectId]) => projectId !== event.projectId),
+      );
       for (const listener of listeners) {
-        listener({ context: { refs } });
+        listener({ context: { refs: liveSessions } });
       }
     },
   };

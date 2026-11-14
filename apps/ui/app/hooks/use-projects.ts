@@ -3,18 +3,15 @@ import { useCallback } from 'react';
 import type { Project } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { CreatedProject } from '#hooks/use-project-manager.js';
+import type { CreatedProject } from '#runtime/project-library-commands.js';
 import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
-import { useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { selectCaughtUp } from '#machines/chat-projection.logic.js';
 import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
   const queryClient = useQueryClient();
-  const sessions = useSessions();
   const chatSessions = useChatSessionStore();
   const includeDeleted = options?.includeDeleted ?? false;
   const {
@@ -23,7 +20,6 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     refreshFilesystemObservations,
     updateProject,
     getProject,
-    getChatsForResource,
     deleteProject,
     restoreProject,
     permanentlyDeleteProject,
@@ -32,6 +28,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     adoptProject,
     repairProject,
     chooseProjectDirectory,
+    verifyProjectQuiescent: requireQuiescentProject,
+    closeProjectSession,
   } = useProjectManager();
 
   const {
@@ -59,49 +57,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     staleTime: 3000,
   });
 
-  const closeProjectSession = useCallback(
-    async (projectId: string): Promise<void> => {
-      if (sessions.getSnapshot().context.refs[projectId] === undefined) {
-        return;
-      }
-      await new Promise<void>((resolve) => {
-        const subscription = sessions.subscribe((snapshot) => {
-          if (snapshot.context.refs[projectId] === undefined) {
-            subscription.unsubscribe();
-            resolve();
-          }
-        });
-        sessions.send({ type: 'close', projectId, reason: 'user' });
-      });
-    },
-    [sessions],
-  );
-
-  const requireQuiescentProject = useCallback(
-    async (projectId: string): Promise<void> => {
-      const chats = await getChatsForResource(projectId, { includeDeleted: true });
-      if (chats.length > 0) {
-        if (sessions.getSnapshot().context.refs[projectId] === undefined) {
-          throw new Error('Restore and open this project to verify its chats before deleting it.');
-        }
-        const observed = new Set(chatSessions.observedChatIdsOf(projectId));
-        if (
-          chats.some((chat) => {
-            const projection = chatSessions.getProjection(chat.id);
-            return !observed.has(chat.id) || projection === undefined || !selectCaughtUp(projection);
-          })
-        ) {
-          throw new Error('Wait for every chat history to load before deleting this project.');
-        }
-      }
-      const plan = await chatSessions.getProjectClosePlan(projectId);
-      if (plan.liveChatIds.length > 0) {
-        throw new Error('This project has running work. Stop it and wait for the chat log to settle before deleting.');
-      }
-    },
-    [chatSessions, getChatsForResource, sessions],
-  );
-
+  /* Row L7: the quiescence check and the session close are library commands that ask the registry. */
   const handleDeleteProject = useCallback(
     async (projectId: string): Promise<boolean> => {
       await requireQuiescentProject(projectId);

@@ -75,6 +75,11 @@
 \* verification, asks for the bootstrap pass, an `Unmodelled` emission. A mutation's or replay's copy of
 \* its operation is dropped once taken; a later attempt reads the journal. A failed pass, journal read or
 \* discard rejects with the port's own error, which the library keeps. No action or correspondence changes.
+\* A4a: create, duplicate, delete, restore, adopt, repair and rename are `ProjectLibrary` commands
+\* (`runtime/project-library-commands.ts`), moved from the hook unchanged with the create-project named lock.
+\* They begin, journal, apply and abandon a mutation through the same library calls, so `MutationJournaled`,
+\* `MutationApplied` and rule 4's gate keep their correspondence. The delete's quiescence check and session
+\* close ask the registry and the chat store, outside the model. No action changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

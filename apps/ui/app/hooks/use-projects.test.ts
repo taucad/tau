@@ -75,26 +75,60 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), removeQueries: vi.fn() }),
 }));
 
-vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({
-    getProjectListing: projectManager.getProjectListing,
-    getChatsForResource: projectManager.getChatsForResource,
-    updateProject: vi.fn(),
-    getProject: vi.fn(),
-    deleteProject: projectManager.deleteProject,
-    restoreProject: vi.fn(),
-    permanentlyDeleteProject: projectManager.permanentlyDeleteProject,
-    duplicateProject: vi.fn(),
-    isLoading: worker.isLoading,
-  }),
-}));
+/* The quiescence check and the session close are the library's commands since A4a (row L7): the real ones, over the
+ * registry and chat-store doubles below. */
+const commands = vi.hoisted(() => ({ current: undefined as unknown as Record<string, unknown> }));
 
-vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => registry.actor }));
-vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({
+vi.mock('#hooks/use-project-manager.js', async () => {
+  const { ProjectCommands } = await import('#runtime/project-library-commands.js');
+  const notCalled = async (): Promise<never> => {
+    throw new Error('not called in this test');
+  };
+  const chatStore = {
     observedChatIdsOf: () => chats.observed,
     getProjection: () => chats.projection,
     getProjectClosePlan: async () => chats.plan,
+    noteCreatedEmpty: () => undefined,
+  };
+  const built = new ProjectCommands({
+    facade: notCalled,
+    chatStore: () => undefined,
+    readChats: async (operation) =>
+      operation({ getChatsForResource: projectManager.getChatsForResource } as never) as never,
+    readiedWorker: notCalled,
+    whenDiscoveryReady: notCalled,
+    whenReplaysDrained: notCalled,
+    discover: notCalled,
+    beginMutation: notCalled,
+    replayForPerson: notCalled,
+    invalidateProjectListing: notCalled,
+    invalidateListing: () => undefined,
+    noteLibraryChanged: () => undefined,
+    sessions: () => registry.actor,
+    chatSessions: () => chatStore as never,
+  });
+  commands.current = {
+    verifyProjectQuiescent: built.verifyProjectQuiescent,
+    closeProjectSession: built.closeProjectSession,
+  };
+  return {
+    useProjectManager: () => ({
+      ...commands.current,
+      getProjectListing: projectManager.getProjectListing,
+      getChatsForResource: projectManager.getChatsForResource,
+      updateProject: vi.fn(),
+      getProject: vi.fn(),
+      deleteProject: projectManager.deleteProject,
+      restoreProject: vi.fn(),
+      permanentlyDeleteProject: projectManager.permanentlyDeleteProject,
+      duplicateProject: vi.fn(),
+      isLoading: worker.isLoading,
+    }),
+  };
+});
+
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({
     removeProject: async (projectId: string) => {
       registry.operations.push(`remove-composers:${projectId}`);
     },

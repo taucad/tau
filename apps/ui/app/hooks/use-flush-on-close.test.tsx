@@ -6,34 +6,48 @@ import { fileURLToPath } from 'node:url';
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
 import { UnloadProvider, useFlushOnClose, useFlushProducers } from '#hooks/use-flush-on-close.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { createSessionsActor, registerProjectSessionServices } from '#services/sessions-store.js';
+import { startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
+import { registerProjectSessionServices } from '#services/sessions-store.js';
 
-/* A0.2: the desktop quit seam, captured so a row can ask the renderer to quit. */
-const desktopQuit = vi.hoisted(() => ({
+/* A0.2: the desktop quit seam `environment` is composed with, captured so a row can ask the renderer to quit. */
+const desktopQuit = {
   ask: undefined as ((attemptId: string) => void) | undefined,
   answers: [] as string[],
-}));
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof DesktopBridgeModule>()),
-  onDesktopQuitRequested: (handler: (attemptId: string) => void) => {
-    desktopQuit.ask = handler;
-    return () => {
-      desktopQuit.ask = undefined;
-    };
+  seam: {
+    onQuitRequested: (handler: (attemptId: string) => void) => {
+      desktopQuit.ask = handler;
+      return () => {
+        desktopQuit.ask = undefined;
+      };
+    },
+    reportQuiesced: (attemptId: string, forced: boolean) => {
+      desktopQuit.answers.push(`${attemptId}:${String(forced)}`);
+    },
   },
-  reportDesktopQuiesced: (attemptId: string, forced: boolean) => {
-    desktopQuit.answers.push(`${attemptId}:${String(forced)}`);
-  },
-}));
+};
 vi.mock('#components/nav/project-close-dialogs.js', () => ({ BudgetRefusedDialog: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 
 let visibility: DocumentVisibilityState = 'visible';
+
+/* D26: `environment` is the one listener; each row composes it over the page with a sequencer of its own. */
+let environment: EnvironmentHostFixture = startEnvironmentHost();
+const startEnvironment = (options?: Parameters<typeof startEnvironmentHost>[0]): EnvironmentHostFixture => {
+  environment.stop();
+  environment = startEnvironmentHost(options);
+  return environment;
+};
+beforeEach(() => {
+  startEnvironment();
+});
+afterEach(() => {
+  environment.stop();
+});
 
 function Registration({
   callback,
@@ -60,7 +74,7 @@ describe('UnloadProvider', () => {
     const producer = Promise.withResolvers<void>();
 
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         <Registration
           callback={(phase) => {
             sequence.push(`session:${phase}`);
@@ -103,7 +117,7 @@ describe('UnloadProvider', () => {
     }
 
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         <Registration
           callback={(phase) => {
             sequence.push(`session:${phase}`);
@@ -146,7 +160,7 @@ describe('UnloadProvider', () => {
       return undefined;
     }
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         <Registration
           stage='producer'
           callback={() => {
@@ -179,7 +193,7 @@ describe('UnloadProvider', () => {
         return undefined;
       };
       render(
-        <UnloadProvider>
+        <UnloadProvider sequencer={environment.sequencer}>
           <Registration
             stage='producer'
             callback={async () => {
@@ -278,7 +292,7 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         {registrations.map(({ site, stage, callback }) => (
           <Registration key={site} stage={stage} callback={callback} />
         ))}
@@ -322,7 +336,6 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
 describe('the quit guard — producers before the close cut (A0.2 item 9, D26)', () => {
   const projectId = 'proj_quit_aaaaaaaaaaaaaaa';
   let releaseServices: (() => void) | undefined;
-  let registry: ReturnType<typeof createSessionsActor> | undefined;
 
   beforeEach(() => {
     /* The order rows above leave the page hidden. */
@@ -334,8 +347,6 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
   });
 
   afterEach(() => {
-    registry?.stop();
-    registry = undefined;
     releaseServices?.();
     releaseServices = undefined;
     desktopQuit.ask = undefined;
@@ -345,8 +356,14 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
   it("should settle every producer registration before the registry takes a session's close cut", async () => {
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
-    const started = createSessionsActor({ clock: new StepClock() }).start();
-    registry = started;
+    const { registry: started } = startEnvironment({
+      registry: true,
+      desktopQuit: desktopQuit.seam,
+      clock: new StepClock(),
+    });
+    if (started === undefined) {
+      throw new Error('the environment host spawns a registry');
+    }
     releaseServices = registerProjectSessionServices(projectId, {
       cancelRuns: async () => undefined,
       flushProducers: async () => {
@@ -359,7 +376,7 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     });
     started.send({ type: 'open', projectId });
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         {registrations.map(({ site, stage, callback }) => (
           <Registration key={site} stage={stage} callback={callback} />
         ))}

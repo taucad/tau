@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
@@ -93,7 +95,7 @@ function renderWithStore(onSessionStage: () => void = () => undefined): {
   }
 
   const utils = render(
-    <UnloadProvider>
+    <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
       <ChatSessionStoreProvider>
         <Capture />
         <GlobalChatFlushGuard />
@@ -128,6 +130,16 @@ function dispatchVisibilityHidden(): void {
   });
   document.dispatchEvent(new Event('visibilitychange'));
 }
+
+/* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
+let unloadEnvironment: EnvironmentHostFixture | undefined;
+beforeEach(() => {
+  unloadEnvironment = startEnvironmentHost();
+});
+afterEach(() => {
+  unloadEnvironment?.stop();
+  unloadEnvironment = undefined;
+});
 
 describe('GlobalChatFlushGuard', () => {
   beforeEach(() => {

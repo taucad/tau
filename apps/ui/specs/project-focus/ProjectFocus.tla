@@ -93,6 +93,12 @@
 (***************************************************************************)
 \* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
 \* route gate imports the type from there. No action or correspondence changes.
+\* A5b: the route gate's effects are gone. The route reports to focus (`project-route-intent.tsx`) and
+\* the runtime composes focus with the registry, the library epoch and the module import over ordered ports
+\* (`runtime/app-runtime-focus.ts`): registry facts reach focus after the open's answer they follow, every
+\* epoch reaches the registry before an open that names it, and a resume the registry drops as stale is
+\* answered `dropped`. Those ports are the environment this spec assumes, so they join the drift sources.
+\* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

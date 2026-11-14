@@ -103,4 +103,27 @@ describe('focus: the chat a session is given', () => {
 
     expect(harness.sent.route).toEqual([{ type: 'chatShown', projectId: 'a', chatId: 'chat-z' }]);
   });
+
+  it("should not show B's late chat correction once the route has gone back to A (I2, A0.1 report-only row)", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+    harness.route('r2', 'b');
+    harness.ready('r2', 'b');
+    harness.facts('b', 'live');
+    harness.settleOpen('live');
+    /* The person clicks back to A before B's editor resolves its chat; B's correction lands afterwards. */
+    harness.route('r3', 'a');
+    harness.send({ type: 'focusedChatResolved', projectId: 'b', chatId: 'chat-b' });
+
+    expect(harness.sent.route.filter((command) => command['projectId'] === 'b')).toEqual([]);
+    expect(harness.context().kept['b']?.chatId).toBeUndefined();
+  });
+
+  it("should take a same-project request's workspace into the request it keeps", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+    harness.route('r2', 'a', { slugs: { workspaceSlug: 'moved', projectSlug: 'a' } });
+
+    expect(harness.context().kept['a']?.workspace).toBe('moved');
+  });
 });

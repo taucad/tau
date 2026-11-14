@@ -8,7 +8,7 @@
  * (B9).
  */
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useSelector } from '@xstate/react';
@@ -16,38 +16,43 @@ import type { ActorRefFrom } from 'xstate';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { Button } from '@taucad/ui/components/button';
-import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
 import { sessionsPendingRevisions } from '#machines/sessions.machine.js';
 import { selectProjectLiveness, selectProjectSession } from '#services/sessions-store.js';
-import { selectRuntimeSessions } from '#runtime/app-runtime.js';
+import { selectQuitHold, selectRuntimeFocus, selectRuntimeSessions } from '#runtime/app-runtime.js';
+import type { AppRuntime } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import type { FocusHandle } from '#runtime/app-runtime-focus.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
-import { useFlushProducers } from '#hooks/use-flush-on-close.js';
 import { BudgetRefusedDialog } from '#components/nav/project-close-dialogs.js';
 
 type SessionsActor = ActorRefFrom<typeof sessionsMachine>;
 
 const SessionsContext = createContext<SessionsActor | undefined>(undefined);
+const FocusContext = createContext<FocusHandle | undefined>(undefined);
 
 /**
- * Hand down the runtime's registry.
+ * Hand down the runtime's registry and focus.
  *
- * @param props - The subtree that reads the registry, and a started registry a test composes instead.
+ * @param props - The subtree that reads the registry, and a started registry and focus a test composes instead.
  * @returns The provider element.
  */
 export function SessionsProvider({
   children,
   actor: composed,
+  focus: composedFocus,
 }: {
   readonly children: ReactNode;
   readonly actor?: SessionsActor;
+  readonly focus?: FocusHandle;
 }): React.JSX.Element {
-  /* The runtime's `sessions` child, fixed for the runtime's life; `AppRuntimeProvider` starts it after hydration. */
+  /* The runtime's `sessions` and `focus` children, fixed for the runtime's life; `AppRuntimeProvider` starts them
+   * after hydration. */
   const runtime = useOptionalAppRuntime();
   const actor = composed ?? (runtime === undefined ? undefined : selectRuntimeSessions(runtime));
   if (actor === undefined) {
     throw new Error('SessionsProvider must be used within <AppRuntimeProvider>');
   }
+  const focus = composedFocus ?? (runtime === undefined ? undefined : selectRuntimeFocus(runtime));
   /* The budget is a visible refusal that names what to close (I28) — never a
    * silent drop, and never a surprise close of somebody else's project. The
    * refusal's surface is `BudgetRefusedDialog` in the sidebar (W20), which
@@ -57,12 +62,14 @@ export function SessionsProvider({
 
   return (
     <SessionsContext.Provider value={actor}>
-      {children}
-      <SessionsQuitHold />
-      {/* R5: the refusal's one surface, mounted above every route. Inside the
-          sidebar it was a Radix sheet's child on mobile, unmounted while
-          closed — exactly where the budget bites hardest (I28). */}
-      <BudgetRefusedDialog />
+      <FocusContext.Provider value={focus}>
+        {children}
+        {runtime === undefined ? null : <SessionsQuitHold runtime={runtime} actor={actor} />}
+        {/* R5: the refusal's one surface, mounted above every route. Inside the
+            sidebar it was a Radix sheet's child on mobile, unmounted while
+            closed — exactly where the budget bites hardest (I28). */}
+        <BudgetRefusedDialog />
+      </FocusContext.Provider>
     </SessionsContext.Provider>
   );
 }
@@ -70,74 +77,22 @@ export function SessionsProvider({
 /**
  * The quit hold's renderer half (D31, P49).
  *
- * Main asks; the unload producers flush first (W15), then every live session
- * runs its own `closing` — cancel the runs, flush the sync through W13's seam,
- * release the leases — and the person sees what is being waited for and can
- * cut it short. `quiesced` answers main, which then quiesces the services
- * utility and disposes.
+ * `environment` runs the hold (D26): main asks, the unload producers flush first (W15), then every live session runs
+ * its own `closing`, and the person sees what is being waited for and can cut it short. This renders what
+ * `environment` reported, and its two buttons are the person's commands.
  *
- * The browser needs nothing here: `pagehide` is its quit, and W13's
- * `use-flush-on-close` already flushes every registrant there. A `quit` sent
- * on `pagehide` could not be awaited anyway — the document is going.
- *
+ * @param props - The runtime whose hold this shows, and its registry.
  * @returns The overlay, while quit is held.
  */
-function SessionsQuitHold(): React.ReactPortal | undefined {
-  const actor = useSessions();
-  const flushProducers = useFlushProducers();
-  const [held, setHeld] = useState(false);
-  const [flushError, setFlushError] = useState<string>();
-  const attempt = useRef<string | undefined>(undefined);
+function SessionsQuitHold({
+  runtime,
+  actor,
+}: {
+  readonly runtime: AppRuntime;
+  readonly actor: SessionsActor;
+}): React.ReactPortal | undefined {
+  const { held, error: flushError } = useSelector(runtime, selectQuitHold);
   const pending = useSelector(actor, (state) => sessionsPendingRevisions(state.context));
-
-  useEffect(() => {
-    const subscription = actor.on('quiesced', (event) => {
-      if (attempt.current !== undefined) {
-        reportDesktopQuiesced(attempt.current, event.forced);
-      }
-      setHeld(false);
-    });
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [actor]);
-
-  const requestQuit = useCallback(async (): Promise<void> => {
-    /* A38's order: producers settle before any session's close cut. A Home
-     * draft still in its debounce writes through the services utility main
-     * disposes once this answers, and `hidden` only fires at window teardown
-     * — after that. Main's bound covers a producer that never settles. */
-    const requestId = attempt.current;
-    if (requestId === undefined) {
-      return;
-    }
-    try {
-      await flushProducers();
-      if (attempt.current !== requestId) {
-        return;
-      }
-    } catch (error) {
-      setFlushError(error instanceof Error ? error.message : 'Pending changes could not be saved.');
-      setHeld(true);
-      return;
-    }
-    setFlushError(undefined);
-    if (actor.getSnapshot().status === 'done') {
-      reportDesktopQuiesced(requestId, actor.getSnapshot().matches('forced'));
-      return;
-    }
-    setHeld(true);
-    actor.send({ type: 'quit' });
-  }, [actor, flushProducers]);
-
-  useEffect(
-    () =>
-      onDesktopQuitRequested((attemptId) => {
-        attempt.current = attemptId;
-        void requestQuit();
-      }),
-    [requestQuit],
-  );
 
   if (!held) {
     return undefined;
@@ -163,7 +118,7 @@ function SessionsQuitHold(): React.ReactPortal | undefined {
           <Button
             type='button'
             onClick={() => {
-              void requestQuit();
+              runtime.send({ type: 'quitRetried' });
             }}
           >
             Try again
@@ -185,6 +140,25 @@ function SessionsQuitHold(): React.ReactPortal | undefined {
     </div>,
     document.body,
   );
+}
+
+/**
+ * Focus and the bindings its ports read (D7), from the runtime or the test that composed them.
+ *
+ * @returns The focus handle.
+ * @public
+ */
+export function useFocus(): FocusHandle {
+  const focus = useContext(FocusContext);
+  if (focus === undefined) {
+    throw new Error('useFocus must be used within <SessionsProvider> over a runtime or a composed focus');
+  }
+  return focus;
+}
+
+/** Focus, where one is composed: a surface that also renders outside the app's runtime reads it optionally. @public */
+export function useOptionalFocus(): FocusHandle | undefined {
+  return useContext(FocusContext);
 }
 
 /** The registry actor. @public */

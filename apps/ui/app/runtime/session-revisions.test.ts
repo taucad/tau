@@ -14,7 +14,7 @@ import { guardActors } from '@taucad/xstate-testing/inspect';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionClientTestApi } from '#hooks/use-revision-status.js';
-import type { FlushPhase } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#runtime/environment.js';
 import { revisionUserActor } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';

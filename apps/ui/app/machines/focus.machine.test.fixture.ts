@@ -28,7 +28,8 @@ type PortName = keyof FocusPorts;
 
 /** A ready project with an entry, for answers. */
 export const projectFixture = (id: string, entryPath = 'main.ts'): Project =>
-  // oxlint-disable-next-line typescript/consistent-type-assertions -- the machine reads only `id` and the entry path.
+  /* oxlint-disable-next-line typescript/consistent-type-assertions -- the machine reads only `id` and the entry path,
+   * and rows compare answers with toEqual, which a mock<Project>() proxy's extra members would break. */
   ({ id, name: id, assets: { main: { entryPath } } }) as unknown as Project;
 
 /** The slugs a project id is addressed by in these tests. */

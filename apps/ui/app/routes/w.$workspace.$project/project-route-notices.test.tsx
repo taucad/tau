@@ -6,20 +6,31 @@ import { projectManifestSchemaUrl } from '@taucad/types';
 import type { Project } from '@taucad/types';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
-import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
-import { createActor } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { sessionsMachine } from '#machines/sessions.machine.js';
+import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
+import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
+import { createSessionsActor, registerProjectSessionServices } from '#services/sessions-store.js';
 
 const navigate = vi.fn();
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 
 const send = vi.fn();
+const focusSend = vi.fn();
 /* Deliberately not 30 minutes: the idle copy must state the registry's window, not a literal. */
 const idleWindowMilliseconds = 45 * 60 * 1000;
+/* A row composes a real registry and focus here; the others read the doubles. */
+const composed: { sessions: unknown; focus: unknown } = { sessions: undefined, focus: undefined };
 vi.mock('#hooks/use-sessions.js', () => ({
-  useSessions: () => ({ send, getSnapshot: () => ({ context: { idleWindowMilliseconds } }) }),
+  useSessions: () =>
+    composed.sessions ?? { send, getSnapshot: () => ({ context: { idleWindowMilliseconds, status: {} } }) },
+  useFocus: () => composed.focus ?? { focus: { send: focusSend }, bindings: {} },
+}));
+
+/* The registry's agent-host region is a real browser probe; unmocked it rejects in jsdom and every close fails. */
+vi.mock('#services/project-agent-host-registration.js', () => ({
+  registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 
 const restoreProject = vi.fn(async () => true);
@@ -141,6 +152,7 @@ beforeEach(() => {
   vi.stubEnv('TAU_DESKTOP_RELEASED', 'true');
   navigate.mockClear();
   send.mockClear();
+  focusSend.mockClear();
   restoreProject.mockClear();
 });
 
@@ -232,12 +244,13 @@ describe('ProjectRouteNotice', () => {
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  it('should reopen a closed project through the registry', async () => {
+  it('should reopen a closed project through focus, and send the registry nothing itself', async () => {
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
 
-    expect(send.mock.calls).toEqual([[{ type: 'open', projectId }], [{ type: 'touch', projectId }]]);
+    expect(focusSend.mock.calls).toEqual([[{ type: 'openRequested', projectId }]]);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('should restore a trashed project and offer its Trash view', async () => {
@@ -331,30 +344,115 @@ describe('ProjectRouteNotice', () => {
 });
 
 /*
- * A0.2 (row S39): the notice's reopen is the other sender of `open` (`project-route-notices.tsx` 277 to 278).
- * It sends a bare project id and a touch. Whether the reopened session carries the request focus kept (I4)
- * is pinned over the route gate harness in `project-route.test.tsx`, which is the one that ever held it.
+ * A0.2 (row S39): the notice's reopen is the other sender of `open`. Since A5b it asks focus (`openRequested`), which
+ * re-sends the request it kept (I4, pinned over the route gate harness in `project-route.test.tsx`). These rows run it
+ * over a real registry and focus.
  */
 describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)', () => {
   const nativeProject: Project = { ...project, assets: { main: { entryPath: 'main.py' } } };
-  let registry: ReturnType<typeof createActor<typeof sessionsMachine>> | undefined;
+  let stop: (() => void) | undefined;
+  /** Whether the session's runtime closes; a refusal leaves the session `failed`, holding its slot. */
+  let runtimeCloses = true;
+
+  /**
+   * A real registry and focus, and the route's visit that opened the project: focus knows its slugs only from a route
+   * (a person's open names a project the route showed). Resolves once the visit's session is up.
+   */
+  const compose = async (
+    opened: Project = project,
+  ): Promise<Readonly<{ registry: ReturnType<typeof createSessionsActor>; host: FocusHostFixture }>> => {
+    const registry = createSessionsActor({ clock: new StepClock() }).start();
+    const host = startFocusHost({
+      sessions: registry,
+      library: {
+        routeAccess: async () => ({ status: 'ready', project: opened }),
+        epoch: () => 0,
+        onEpochChanged: () => () => undefined,
+      },
+      loadModule: async () => undefined,
+    });
+    composed.sessions = registry;
+    composed.focus = host;
+    /* The services a mounted session subtree registers; the close reads them. */
+    const releaseServices = registerProjectSessionServices(projectId, {
+      cancelRuns: async () => undefined,
+      flushProducers: async () => undefined,
+      flushSync: async () => undefined,
+      closeRuntime: async () => {
+        if (!runtimeCloses) {
+          throw new Error('runtime would not close');
+        }
+      },
+    });
+    stop = () => {
+      host.stop();
+      registry.stop();
+      releaseServices();
+    };
+    host.focus.send({
+      type: 'routeRequested',
+      requestId: 'route:1',
+      slugs: { workspaceSlug: 'rifont', projectSlug: 'planetary-gear' },
+      projectId,
+    });
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.refs[projectId]).toBeDefined();
+    });
+    return { registry, host };
+  };
+
+  /** Close the project's session and wait for its slot to settle in `state`, or to be dropped. */
+  const closeTo = async (
+    registry: ReturnType<typeof createSessionsActor>,
+    state: 'failed' | undefined,
+  ): Promise<void> => {
+    const session = registry.getSnapshot().context.refs[projectId];
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    session?.send({ type: 'confirmClose' });
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.status[projectId]?.state).toBe(state);
+    });
+  };
 
   afterEach(() => {
-    registry?.stop();
-    registry = undefined;
-    send.mockReset();
+    stop?.();
+    stop = undefined;
+    runtimeCloses = true;
+    composed.sessions = undefined;
+    composed.focus = undefined;
   });
 
   it('should spawn a session for the project it reopens and touch it', async () => {
-    const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
-    registry = started;
-    send.mockImplementation((event: Parameters<typeof started.send>[0]) => {
-      started.send(event);
-    });
+    const { registry } = await compose(nativeProject);
+    await closeTo(registry, undefined);
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project: nativeProject, reason: 'user' }} />);
     await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
 
-    expect(started.getSnapshot().context.refs[projectId]?.getSnapshot().context.projectId).toBe(projectId);
-    expect(started.getSnapshot().context.touchOrder[projectId]).toBe(2);
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.projectId).toBe(projectId);
+    });
+    expect(registry.getSnapshot().context.touchOrder[projectId]).toBeGreaterThan(0);
+  });
+
+  /*
+   * A named behaviour change (programme control's ruling): a session whose close failed holds its slot, and an open of
+   * it was only a touch, so Reopen left the failed child in place. The reopen now closes it and opens it again.
+   */
+  it('should close a failed session and open the project again as one reopen', async () => {
+    const { registry } = await compose();
+    runtimeCloses = false;
+    const failed = registry.getSnapshot().context.refs[projectId];
+    await closeTo(registry, 'failed');
+    runtimeCloses = true;
+
+    render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
+
+    await vi.waitFor(() => {
+      const reopened = registry.getSnapshot().context.refs[projectId];
+      expect(reopened).toBeDefined();
+      expect(reopened).not.toBe(failed);
+    });
+    expect(registry.getSnapshot().context.status[projectId]?.state).not.toBe('failed');
   });
 });

@@ -15,8 +15,6 @@ import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/cha
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions.machine.js';
-import { sessionsMachine } from '#machines/sessions.machine.js';
-import { StepClock } from '@taucad/xstate-testing/clock';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -41,8 +39,11 @@ import type { SnapshotListener } from '@taucad/ui-core/lib/xstate-test.utils';
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => undefined }));
+/* A5b: a person's open goes to focus, which opens with the request it kept (I4). */
+const focusSend = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-sessions.js', () => ({
   useSessions: vi.fn(),
+  useFocus: () => ({ focus: { send: focusSend }, bindings: {} }),
   useLiveProjectIds: () => Object.keys(fakeRegistry.refs),
 }));
 vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
@@ -1338,17 +1339,15 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
 });
 
 /*
- * A0.2 (row S39): the sidebar's `openProject` is one of the two other senders of `open`. It sends a bare
- * project id. Whether the reopened session carries the request focus kept (I4) is pinned over the route
- * gate harness in `project-route.test.tsx`, which is the one that ever held that request.
+ * A0.2 (row S39): the sidebar's `openProject` is one of the two other senders of `open`. Since A5b it asks focus
+ * (`openRequested`), which re-sends the request it kept for the project (I4); that the reopened session carries it is
+ * pinned over the route gate harness in `project-route.test.tsx`.
  */
 describe('use-sidebar-status — pin (A0.2 S39): the sidebar open', () => {
   const reopened = 'proj_sidebar_open_aaaaaaa';
-  let registry: ReturnType<typeof createActor<typeof sessionsMachine>> | undefined;
 
   afterEach(() => {
-    registry?.stop();
-    registry = undefined;
+    focusSend.mockReset();
   });
 
   function Open(): React.JSX.Element {
@@ -1365,15 +1364,15 @@ describe('use-sidebar-status — pin (A0.2 S39): the sidebar open', () => {
     );
   }
 
-  it('should send the registry an open that spawns a session for the project', () => {
-    const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
-    registry = started;
-    vi.mocked(useSessions).mockImplementation(() => started);
+  it('should ask focus to open the project, and send the registry nothing itself', () => {
+    const registrySend = vi.fn();
+    vi.mocked(useSessions).mockImplementation(() => ({ ...fakeRegistry.actor, send: registrySend }));
     render(<Open />);
     act(() => {
       screen.getByRole('button', { name: 'Open' }).click();
     });
 
-    expect(started.getSnapshot().context.refs[reopened]?.getSnapshot().context.projectId).toBe(reopened);
+    expect(focusSend.mock.calls).toEqual([[{ type: 'openRequested', projectId: reopened }]]);
+    expect(registrySend).not.toHaveBeenCalled();
   });
 });

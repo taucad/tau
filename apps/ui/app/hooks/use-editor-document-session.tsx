@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import type { FlushPhase } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#runtime/environment.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';

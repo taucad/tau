@@ -444,6 +444,18 @@ vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ Mobi
 
 const routeModule = await import('./project-route.js');
 const sessionsModule = await import('./project-live-sessions.js');
+const { startFocusHost } = await import('#runtime/app-runtime-focus.fixture.js');
+
+/* Focus and its ports over the registry, as the runtime root composes them (A5b). */
+const focusHost = startFocusHost({
+  sessions: sessionsActor,
+  library: {
+    routeAccess: async (projectId) => getProjectRouteAccess(projectId),
+    epoch: () => projectManager.libraryRevision,
+    onEpochChanged: () => () => undefined,
+  },
+  loadModule: async () => undefined,
+});
 /* Both layouts are lazy chunks; load them before a row runs so a fake clock never waits on a module read. */
 await import('./chat-interface-desktop.js');
 await import('./chat-interface-mobile.js');
@@ -452,10 +464,10 @@ const OpenRoute = (): React.JSX.Element => (
   <MemoryRouter>
     <KeyboardProvider>
       <TooltipProvider>
-        <SessionsProvider actor={sessionsActor}>
-          <routeModule.ProjectRouteGate requestedProjectId={projectA}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
+          <routeModule.ProjectRouteProviders projectId={projectA}>
             <sessionsModule.ProjectChatRoute />
-          </routeModule.ProjectRouteGate>
+          </routeModule.ProjectRouteProviders>
         </SessionsProvider>
       </TooltipProvider>
     </KeyboardProvider>

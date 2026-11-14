@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ChatStorage } from '#types/storage.types.js';
+import type { ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
 
 const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(() => {
   const listeners = new Set<
@@ -80,7 +82,7 @@ vi.mock('@tanstack/react-query', () => ({
 const commands = vi.hoisted(() => ({ current: undefined as unknown as Record<string, unknown> }));
 
 vi.mock('#hooks/use-project-manager.js', async () => {
-  const { ProjectCommands } = await import('#runtime/project-library-commands.js');
+  const commandsModule = await import('#runtime/project-library-commands.js');
   const notCalled = async (): Promise<never> => {
     throw new Error('not called in this test');
   };
@@ -90,11 +92,11 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     getProjectClosePlan: async () => chats.plan,
     noteCreatedEmpty: () => undefined,
   };
-  const built = new ProjectCommands({
+  const chatSource = { getChatsForResource: projectManager.getChatsForResource };
+  const built = new commandsModule.ProjectCommands({
     facade: notCalled,
     chatStore: () => undefined,
-    readChats: async (operation) =>
-      operation({ getChatsForResource: projectManager.getChatsForResource } as never) as never,
+    readChats: async (operation) => operation(chatSource as unknown as ChatStorage),
     readiedWorker: notCalled,
     whenDiscoveryReady: notCalled,
     whenReplaysDrained: notCalled,
@@ -105,7 +107,7 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     invalidateListing: () => undefined,
     noteLibraryChanged: () => undefined,
     sessions: () => registry.actor,
-    chatSessions: () => chatStore as never,
+    chatSessions: () => chatStore as unknown as ProjectLibraryChatSessions,
   });
   commands.current = {
     verifyProjectQuiescent: built.verifyProjectQuiescent,

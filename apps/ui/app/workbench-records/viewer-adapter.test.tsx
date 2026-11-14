@@ -393,6 +393,33 @@ describe('viewer adapter (A8d)', () => {
     expect(createViewRecord).not.toHaveBeenCalled();
   });
 
+  // A8d review round 4: the dock keeps a group to drop into once its last viewer goes, restored with no timer (I15).
+  it('should give the dock a group back once its last viewer is removed', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const facts = createViewerAdapterFactsPort(baseFacts());
+    await act(async () => {
+      startAdapter({
+        api,
+        ports: { profile: 'shared', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: 'main.ts' },
+      });
+    });
+    await act(async () => {
+      api.getPanel('front')!.api.close();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
+    expect(api.panels).toHaveLength(0);
+    expect(api.groups).toHaveLength(1);
+  });
+
   it('should open a requested file at once on a page without a layout', async () => {
     const api = mountDock();
     const project = mountProject();

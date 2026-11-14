@@ -22,6 +22,7 @@ import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 import { readServerPreferences } from '#hooks/use-cookie.js';
 import { prefetchModelCatalog } from '#lib/model-catalog.server.js';
+import { timeModelCatalogRead } from '#lib/server-timing.server.js';
 
 // Every route mounts the palette items, so the example catalog loads on its own
 // chunk instead of joining each route's entry.
@@ -60,12 +61,13 @@ export const meta: MetaFunction = () => [
 ];
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, context }: LoaderFunctionArgs) {
   throwRedirectIfSubdomain(request, 'www');
   const globalPrivacyControl = request.headers.get('Sec-GPC') === '1';
   const { pathname } = new URL(request.url);
   /* R3: the model label is final on first paint. The offline shell is a neutral prerendered document. */
-  const queries = isOfflineShellPath(pathname) ? undefined : prefetchModelCatalog();
+  /* LB0a: how the catalog cache was found and how long it was waited on go out in the document's `Server-Timing`. */
+  const queries = isOfflineShellPath(pathname) ? undefined : timeModelCatalogRead(context, prefetchModelCatalog);
   const consentStatus = readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl);
   const env = await getClientEnvironment();
   return {

@@ -2057,12 +2057,43 @@ describe('A0.2 the same project keeps its editor (I20, D7)', () => {
     expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-3' });
     expect(router.location?.key).not.toBe(historyKey);
     expect(router.action).toBe('REPLACE');
-    /* A6d: the editor focused chat-3 itself, so the URL that now names it asks it for nothing again. */
-    expect(providerRequestsOf(projectA).map((request) => request.requestedChatId)).not.toContain('chat-3');
+    /* The editor is asked for the chat the URL now names, as the provider's prop asked it before A6d. */
+    expect(providerRequestsOf(projectA).at(-1)).toMatchObject({ requestedChatId: 'chat-3' });
     expect(editorMarker).toEqual({ mounts: 1, unmounts: 0 });
     expect(noticeKinds).toEqual([]);
     expect(publishedKinds.length).toBeGreaterThan(0);
     expect(publishedKinds.filter((kind) => kind !== 'editor')).toEqual([]);
+  });
+});
+
+describe('A6d the editor follows the chat the route shows (D21 round 1)', () => {
+  beforeEach(() => {
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it("should show the editor's next focused chat after it showed one it focused itself", async () => {
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+    await act(async () => {
+      resolveFocusedChat(projectA, 'chat-3');
+      await Promise.resolve();
+    });
+    await flushTasks();
+    expect(router.location).toMatchObject({ search: '?chat=chat-3' });
+
+    /* A chat focused in the editor itself (Fix with AI, a conflict's chat) reaches the URL too. */
+    await act(async () => {
+      resolveFocusedChat(projectA, 'chat-4');
+      await Promise.resolve();
+    });
+    await flushTasks();
+
+    expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-4' });
   });
 });
 

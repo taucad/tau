@@ -95,11 +95,13 @@ describe('B9: the runtime survives an owner change below the billing fence', () 
       registryA.send({ type: 'open', projectId: 'p1' });
       await Promise.resolve();
     });
-    /* The agent-host double settles after a microtask; one macrotask lets every region report. */
+    /* The agent-host double settles after a microtask, and the session's runtime loads by dynamic import (A6d). */
     await act(async () => {
       await flush();
     });
-    expect(registryA.getSnapshot().context.status['p1']?.state).toBe('live');
+    await vi.waitFor(() => {
+      expect(registryA.getSnapshot().context.status['p1']?.state).toBe('live');
+    });
     const sessionA = seen.session;
     expect(sessionA).toBeDefined();
     expect(seen.mounts).toBe(1);

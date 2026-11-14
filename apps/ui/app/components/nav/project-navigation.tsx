@@ -71,6 +71,24 @@ export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 
 ): Row[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
+/**
+ * The projects the list draws as live: the live sessions, and the open project from the first frame. Its session goes
+ * live after the remembered rows are drawn, and it would otherwise move above them then (U6).
+ */
+const useShownLiveIds = (
+  rows: readonly SidebarProject[],
+  liveProjectIds: readonly string[],
+  pathname: string,
+): ReadonlySet<string> => {
+  const openProjectId = rows.find(
+    (project) => project.slugs !== undefined && pathname === projectUrlOr(project.slugs),
+  )?.id;
+  return useMemo(
+    () => new Set(openProjectId === undefined ? liveProjectIds : [...liveProjectIds, openProjectId]),
+    [liveProjectIds, openProjectId],
+  );
+};
+
 export function ProjectNavigation({ className }: { readonly className?: string }): React.JSX.Element {
   const { projects, isLoading, error, retry, deleteProject, duplicateProject, updateName } = useProjects();
   const { createChat } = useProjectManager();
@@ -95,18 +113,24 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const rows: readonly SidebarProject[] = rememberedProjects ?? projects;
   const isWaiting = isAwaitingListing && rememberedShape?.count !== 0;
   /* A29's temporal hiding: what is live now sits above what is not, and the
-   * rest keeps its recency order. */
-  const sortedProjects = useMemo(() => {
-    const live = new Set(liveProjectIds);
-    return sortProjectsByActivity(rows).sort((left, right) => Number(live.has(right.id)) - Number(live.has(left.id)));
-  }, [liveProjectIds, rows]);
+   * rest keeps its recency order. The open project counts as live from the
+   * first frame (U6). */
+  const shownLiveIds = useShownLiveIds(rows, liveProjectIds, location.pathname);
+  const sortedProjects = useMemo(
+    () =>
+      sortProjectsByActivity(rows).sort(
+        (left, right) => Number(shownLiveIds.has(right.id)) - Number(shownLiveIds.has(left.id)),
+      ),
+    [shownLiveIds, rows],
+  );
   const visibleProjects = sortedProjects.slice(0, visibleCount);
-  const earlierFromId = useMemo(() => {
-    const live = new Set(liveProjectIds);
-    return visibleProjects.some((entry) => live.has(entry.id))
-      ? visibleProjects.find((entry) => !live.has(entry.id))?.id
-      : undefined;
-  }, [liveProjectIds, visibleProjects]);
+  const earlierFromId = useMemo(
+    () =>
+      visibleProjects.some((entry) => shownLiveIds.has(entry.id))
+        ? visibleProjects.find((entry) => !shownLiveIds.has(entry.id))?.id
+        : undefined,
+    [shownLiveIds, visibleProjects],
+  );
   const isKnownEmpty = isAwaitingListing ? rememberedShape?.count === 0 : !isLoading && !error && projects.length === 0;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 

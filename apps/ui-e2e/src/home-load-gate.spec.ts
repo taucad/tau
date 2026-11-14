@@ -289,7 +289,7 @@ knownDefect(
   'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
   {
     artifact: 'h5-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
       /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's did. */

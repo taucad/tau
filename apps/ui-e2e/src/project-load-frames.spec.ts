@@ -426,7 +426,7 @@ knownDefect(
 
 knownDefect('U6: no sidebar project row moves on a reload with the chat listing 3 s late', {
   artifact: 'u6-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     await seedProjects('wide');

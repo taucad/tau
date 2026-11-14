@@ -421,7 +421,8 @@ describe('ProjectNavigation', () => {
     search = '?chat=chat_1&keep=1';
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[1]!);
+    /* The open project is drawn first (U6). */
+    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[0]!);
 
     expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=share');
   });
@@ -431,7 +432,7 @@ describe('ProjectNavigation', () => {
     search = '?chat=chat_1';
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[1]!);
 
     expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?workbench=share');
   });
@@ -761,7 +762,7 @@ describe('ProjectNavigation', () => {
       }));
 
     /** The list as drawn: each row's link name, or a label row's text. */
-    const drawnRows = (): (string | null)[] =>
+    const drawnRows = (): string[] =>
       [...document.querySelectorAll('section > ul > li')].map(
         (item) => item.querySelector('a')?.textContent ?? item.textContent,
       );
@@ -772,7 +773,7 @@ describe('ProjectNavigation', () => {
      * above the rest, with "Earlier" below it, so nothing moves when its
      * session goes live and the listing answers.
      */
-    it.fails('U6: the open project is drawn first before its session is live, so no row moves when it goes live', () => {
+    it('U6: the open project is drawn first before its session is live, so no row moves when it goes live', () => {
       pathname = '/w/home/one';
       rememberedShape = { count: 2, projects: [secondProject, firstProject] };
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });

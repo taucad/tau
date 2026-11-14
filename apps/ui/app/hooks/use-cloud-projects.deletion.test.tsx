@@ -116,7 +116,7 @@ describe('cloud project deletion', () => {
     isOffline = false;
     serverState = 'deleted';
     await act(async () => {
-      reloaded.result.current.retry();
+      await reloaded.result.current.retry();
     });
     await waitFor(() => {
       expect(reloaded.result.current.projects).toEqual([]);

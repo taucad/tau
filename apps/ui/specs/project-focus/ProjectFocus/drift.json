@@ -31,12 +31,12 @@
   ],
   "sources": {
     "apps/ui/app/machines/focus.route-state.ts": "b0c957ceb2719138e839ef9bb02138da3b1fbb0b4e625c3ebf014806ba57e3dd",
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "4d411e8b910de3440e5903a09104146ebdc573a4c7897a0d38a21989f60bd704",
+    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "ce36a47dc50b029857a3ba80f8166cad0d368bd975588cb0eaf4a04d09a65d06",
     "apps/ui/app/routes/w.$workspace.$project/project-route-state.ts": "ba314e4cc58fc406d701af59f46e8220cd6993f751e530bc7f843a9058468659",
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "212fc2ab213c066ade459601a7db8447c582b81981207676825efad93859a7eb"
   },
   "specs": {
-    "ProjectFocus.tla": "75f9741d31582d8213adcdb11ebfb72aa77bf40aecdd9a7ad9d692758e541b1b"
+    "ProjectFocus.tla": "40a49ba9de46afb2a60d93f9eeb40495092d951b6a8e9943e768d4773f288c5d"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",
@@ -70,7 +70,7 @@
     "ProjectFocus.today-first-check.cfg": "40093556669e98a7cd64781d114695aa8f5a10a94e56f62d29da5490baa1d3b0",
     "ProjectFocus.today-held-skips-flush.cfg": "ca2a4d3a2123aac9baa8aa81676abb7b664476d6cfde94a8feac1955272d3f7b",
     "ProjectFocus.today-late-effect-reachable.cfg": "8563528263def6ff580c2bd7bbebbd0d369306d30d4a8e17bc8e7f6a34ceb054",
-    "ProjectFocus.today-late-effect.cfg": "0d5c2d9399fe91fecf1ea72688fb6e0ddf3e0dcc90924095e14e1d62dd7be04c",
+    "ProjectFocus.today-late-effect.cfg": "6ed210863636f186434fec427ce0fc6ebc93ec77f6c233cfb1e808a8bf716887",
     "ProjectFocus.today-library-retry.cfg": "f6f146879b36d263ce68a17fc7f2222451ac8650553f6a209f24a4df67e466eb",
     "ProjectFocus.today-module-race.cfg": "30633b9f3943e0e8cfe4df30cc84c00f1cbcbcf8e04b3dec748649a5e45d7f6e",
     "ProjectFocus.today-stale-return.cfg": "f37d10bb2d7ce08a0ac3b635e03be84604c79c0c3368a62364634b996d665c8c",

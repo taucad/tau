@@ -381,7 +381,6 @@ vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({
     return <span data-testid='view-settings-host' data-project-id={projectId} />;
   },
 }));
-vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));

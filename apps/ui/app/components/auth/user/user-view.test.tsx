@@ -22,13 +22,13 @@ beforeEach(() => {
 
 /* The account row (blueprint, app shell): it holds its box and shows what the session already gives, else nothing. */
 describe('the account row while the session loads', () => {
-  it.fails('draws no skeleton and no avatar block while the session is unknown', () => {
+  it('draws no skeleton and no avatar block while the session is unknown', () => {
     const html = renderToString(<UserView />);
     expect(html).not.toContain('data-slot="skeleton"');
     expect(html).not.toContain('data-slot="avatar"');
   });
 
-  it.fails('holds the avatar box at its size with nothing in it', () => {
+  it('holds the avatar box at its size with nothing in it', () => {
     const { container } = render(<UserAvatar className='size-9' />);
     const box = container.firstElementChild;
     expect(box).toHaveAttribute('data-slot', 'user-avatar-frame');
@@ -36,7 +36,7 @@ describe('the account row while the session loads', () => {
     expect(box).toBeEmptyDOMElement();
   });
 
-  it.fails('shows the user the session already gives while it still loads', () => {
+  it('shows the user the session already gives while it still loads', () => {
     session.data = { user: owner };
     render(<UserView />);
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();

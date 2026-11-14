@@ -208,6 +208,8 @@ const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
   cloudListing: {
     isFailed: false,
     isFetching: false,
+    /* Paused: offline, react-query holds the request, so the listing is neither settled, fetching nor failed. */
+    isPaused: false,
     current: [] as CloudProject[],
     openOverride: undefined as ((entry: CloudProject) => Promise<void>) | undefined,
     retry: vi.fn(),
@@ -221,7 +223,7 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCloudProjects: () => ({
     projects: cloudListing.current,
-    isSettled: !cloudListing.isFetching && !cloudListing.isFailed,
+    isSettled: !cloudListing.isFetching && !cloudListing.isFailed && !cloudListing.isPaused,
     isFailed: cloudListing.isFailed,
     isFetching: cloudListing.isFetching,
     cloud: cloudListing.isFailed ? 'failed' : cloudListing.isFetching ? 'fetching' : 'ready',
@@ -269,6 +271,7 @@ describe('ProjectLibrary', () => {
     cloudListing.current = [];
     cloudListing.isFailed = false;
     cloudListing.isFetching = false;
+    cloudListing.isPaused = false;
     cloudListing.openOverride = undefined;
   });
 
@@ -378,7 +381,7 @@ describe('ProjectLibrary', () => {
     it('should preserve local projects while reporting a failed cloud catalog', () => {
       cloudListing.isFailed = true;
       renderLibrary();
-      expect(screen.getByRole('alert')).toHaveTextContent('Tau Cloud projects could not be loaded');
+      expect(screen.getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
       expect(screen.getByRole('button', { name: 'Retry Tau Cloud' })).toBeEnabled();
       expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
     });
@@ -1469,14 +1472,14 @@ describe('ProjectLibrary', () => {
         (region) => !header.contains(region),
       );
 
-    it.fails('C14: keeps the Tau Cloud wait inside the header slot, with no row above the grid', () => {
+    it('C14: keeps the Tau Cloud wait inside the header slot, with no row above the grid', () => {
       cloudListing.isFetching = true;
       const header = renderLibrary();
       expect(header).toHaveTextContent('Loading Tau Cloud projects');
       expect(regionsOutside(header)).toEqual([]);
     });
 
-    it.fails('C14: reports a failed Tau Cloud listing as an alert in the same slot, whose Retry asks once', async () => {
+    it('C14: reports a failed Tau Cloud listing as an alert in the same slot, whose Retry asks once', async () => {
       cloudListing.isFailed = true;
       const header = renderLibrary();
       const alert = within(header).getByRole('alert');
@@ -1488,8 +1491,9 @@ describe('ProjectLibrary', () => {
       expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
     });
 
-    it.fails('C14: says it is offline in the same slot and keeps the projects on this device', () => {
+    it('C14: says it is offline in the same slot and keeps the projects on this device', () => {
       vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      cloudListing.isPaused = true;
       const header = renderLibrary();
       expect(within(header).getByRole('status')).toHaveTextContent('Offline. Showing projects on this device.');
       expect(regionsOutside(header)).toEqual([]);

@@ -68,6 +68,8 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
 import {
   ProjectCard,
@@ -82,7 +84,7 @@ import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
-import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import type { CloudListingState, CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 import {
   CloudProjectCard,
@@ -278,6 +280,14 @@ export function ProjectLibrary({
   const phoneTopBar = usePhoneTopBar();
   const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
   const cloudPending = auth === 'authed' && !isCloudSettled && !isCloudFailed;
+  const isOnline = useNetworkConnectivity();
+  const waitClock = useWaitClockSource();
+  /* P-k: a Retry is a new wait, timed from the gesture; the first listing's wait started with the document. */
+  const [cloudRetriedAt, setCloudRetriedAt] = useState<number>();
+  const retryCloudListing = useCallback(() => {
+    setCloudRetriedAt(waitClock.now());
+    retryCloud();
+  }, [retryCloud, waitClock]);
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
     cloud: cloudProjects,
@@ -559,19 +569,34 @@ export function ProjectLibrary({
   /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
      empty frames alike; the grid itself is busy for as long. */
   const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
+  /* P-k: Tau Cloud's state shares the slot. Its first listing (or a Retry) is a wait; a later refresh over listed
+     projects is not, because the cards are already the answer. Offline and failed are said in words, with Retry. */
+  const isCloudShown = !showDeleted && auth === 'authed';
+  const cloudNotice: CloudNotice | undefined = isCloudShown
+    ? cloudNoticeOf({ isOnline, isCloudSettled, cloud })
+    : undefined;
+  const isAwaitingCloud = isCloudShown && cloudPending && cloud === 'fetching';
   /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
-  const listingWait = (
-    <WaitIndicator
-      className='min-w-0 flex-1 basis-0 justify-end overflow-hidden'
-      /* Seen, not announced: the sidebar's Recents label announces the same listing wait (one announcement per group). */
-      live={false}
-      active={isAwaitingListing}
-      label='Loading projects'
-      slowLabel='Still loading projects'
-      onRetry={() => {
-        void retry();
-      }}
-    />
+  const statusSlot = (
+    <LibraryStatusSlot notice={cloudNotice} onRetryCloud={retryCloudListing}>
+      <WaitIndicator
+        className='min-w-0 justify-end overflow-hidden'
+        /* The listing's wait is seen, not announced: the sidebar's Recents label announces it (one announcement per
+           group). Nothing else announces Tau Cloud's. */
+        live={!isAwaitingListing}
+        active={isAwaitingListing || isAwaitingCloud}
+        startedAt={isAwaitingListing ? 0 : (cloudRetriedAt ?? 0)}
+        label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}
+        slowLabel={isAwaitingListing ? 'Still loading projects' : 'Still loading Tau Cloud projects'}
+        onRetry={
+          isAwaitingListing
+            ? () => {
+                void retry();
+              }
+            : retryCloudListing
+        }
+      />
+    </LibraryStatusSlot>
   );
 
   return (
@@ -586,16 +611,17 @@ export function ProjectLibrary({
             <div
               className={cn(
                 'flex min-w-0 flex-1 basis-0 items-center justify-end gap-2',
-                isHeaderInPhoneBar && 'max-md:hidden',
+                /* A notice is said even on a phone, where it gives the row its height; a wait is not. */
+                isHeaderInPhoneBar && cloudNotice === undefined && 'max-md:hidden',
               )}
             >
-              {listingWait}
+              {statusSlot}
               <NewProjectLink isDeferredToPhoneBar />
             </div>
           }
         />
       ) : (
-        <SectionHeader level={headingLevel} title='Projects' className='mb-0' action={listingWait} />
+        <SectionHeader level={headingLevel} title='Projects' className='mb-0' action={statusSlot} />
       )}
 
       {workspaceBindingRepairs.length > 0 && (
@@ -747,27 +773,6 @@ export function ProjectLibrary({
         </div>
       ) : null}
 
-      {!showDeleted && cloud === 'failed' && auth === 'authed' ? (
-        <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-md border p-4'>
-          <span className='text-sm'>
-            Tau Cloud projects could not be loaded. Projects on this device are still available.
-          </span>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => {
-              retryCloud();
-            }}
-          >
-            Retry Tau Cloud
-          </Button>
-        </div>
-      ) : !showDeleted && auth === 'authed' && cloud === 'fetching' ? (
-        <div role='status' aria-busy='true' className='flex items-center gap-2 text-sm text-muted-foreground'>
-          <Loader className='size-4' />
-          Loading Tau Cloud projects…
-        </div>
-      ) : null}
       {listingError && projects.length === 0 ? (
         <div
           role='alert'
@@ -988,6 +993,77 @@ function ProjectCardRoom(): React.JSX.Element {
         <div className='h-8' />
       </CardFooter>
     </Card>
+  );
+}
+
+/** What the Projects header's slot says about Tau Cloud in words, instead of a wait (P-k). */
+type CloudNotice = 'offline' | 'failed';
+
+/**
+ * Offline while the listing has not answered (it is held until the browser is back online), or failed.
+ *
+ * @param state - The browser's connection and the listing's state.
+ * @returns The notice, or `undefined` when the slot shows the wait or nothing.
+ */
+function cloudNoticeOf({
+  isOnline,
+  isCloudSettled,
+  cloud,
+}: {
+  readonly isOnline: boolean;
+  readonly isCloudSettled: boolean;
+  readonly cloud: CloudListingState;
+}): CloudNotice | undefined {
+  if (!isOnline && !isCloudSettled) {
+    return 'offline';
+  }
+  return cloud === 'failed' ? 'failed' : undefined;
+}
+
+/**
+ * The Projects header's trailing status slot (P-k): one line, as tall as the wait indicator, that takes the row's
+ * spare width and clips there, so it never wraps the header. It says Tau Cloud is offline or failed, with Retry for
+ * the failure, and otherwise holds the wait indicator it is given.
+ */
+function LibraryStatusSlot({
+  notice,
+  onRetryCloud,
+  children,
+}: {
+  readonly notice: CloudNotice | undefined;
+  readonly onRetryCloud: () => void;
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  return (
+    <div
+      data-slot='project-library-status'
+      className='flex min-h-6 min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 overflow-hidden text-xs text-muted-foreground'
+    >
+      {notice === 'offline' ? (
+        <span role='status' className='truncate'>
+          Offline. Showing projects on this device.
+        </span>
+      ) : notice === 'failed' ? (
+        <>
+          <span role='alert' className='flex min-w-0 items-center gap-1.5'>
+            <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
+            <span className='truncate'>Tau Cloud projects not loaded</span>
+          </span>
+          <Button
+            type='button'
+            variant='ghost'
+            size='xs'
+            className='min-w-6 shrink-0'
+            aria-label='Retry Tau Cloud'
+            onClick={onRetryCloud}
+          >
+            Retry
+          </Button>
+        </>
+      ) : (
+        children
+      )}
+    </div>
   );
 }
 

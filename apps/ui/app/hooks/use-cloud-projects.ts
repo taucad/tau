@@ -345,6 +345,28 @@ const toCloudProject = (value: unknown): CloudProject | undefined => {
   };
 };
 
+/** Tau Cloud answered the listing with an error status: asking again at once gets the same answer (P-k, K-c). */
+class CloudListingAnswerError extends Error {
+  public readonly status: number;
+
+  public constructor(status: number) {
+    super(`Tau Cloud answered ${String(status)}`);
+    this.status = status;
+  }
+}
+
+/**
+ * Whether a failed listing is asked again on its own: a request that never reached Tau Cloud is, up to three times
+ * as react-query's default; an answer from Tau Cloud is not. That answer is said at once in the Projects header's
+ * slot, and its Retry asks once (K-c).
+ *
+ * @param failureCount - The failures so far.
+ * @param error - The last one.
+ * @returns Whether to ask again.
+ */
+const retryCloudListing = (failureCount: number, error: unknown): boolean =>
+  !(error instanceof CloudListingAnswerError) && failureCount < 3;
+
 /**
  * The caller's projects on Tau Cloud, or none at all.
  *
@@ -373,7 +395,7 @@ export const fetchCloudProjects = async (signal?: AbortSignal): Promise<readonly
        no projects" from "nobody asked" (N1). The library renders no section for
        either; only the role resolver needs the difference, and a silent empty
        list would have told a signed-out tab its access had been revoked. */
-    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
+    throw recordApiRequestId(new CloudListingAnswerError(response.status), response);
   }
   const body: unknown = await response.json();
   if (getRevisionSessionUser()?.id !== account) {
@@ -518,6 +540,7 @@ export const useCloudProjects = (
         ? 3000
         : false,
     enabled: (options?.enabled ?? true) && !awaitsSession,
+    retry: retryCloudListing,
     /* The set only changes when another device backs something up or an owner
        shares one, and a window focus is when this device is most likely to have
        missed either — which is react-query's `refetchOnWindowFocus` default

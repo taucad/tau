@@ -83,6 +83,8 @@ export const useCloudProjectPreview = (
 ): {
   url: string | undefined;
   isLoading: boolean;
+  /** The read has answered, with an image, with none, or with a failure; until then nothing is known (P-g). */
+  isSettled: boolean;
   isFailed: boolean;
   canRetry: boolean;
   retry: () => Promise<unknown>;
@@ -112,6 +114,7 @@ export const useCloudProjectPreview = (
   return {
     url: !query.isError && query.data && source?.blob === query.data ? source.url : undefined,
     isLoading: query.isFetching,
+    isSettled: (query.isSuccess || query.isError) && !query.isFetching,
     isFailed: query.isError,
     // Access/client failures need the project or service repaired, not repeated image requests.
     canRetry:

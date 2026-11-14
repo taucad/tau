@@ -216,7 +216,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `H6: holds the project grid's top offset on Home while /v1/projects is held ${String(held)} ms`,
     },
     async (defect) => {
@@ -242,7 +242,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `K-b: says Home waits for Tau Cloud in the Projects header's slot from ${String(indicatorDelay)} ms, the grid still, while /v1/projects is ${String(cloudWait)} ms late`,
     },
     async (defect) => {
@@ -273,7 +273,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title:
         "K-c: reports a failed Tau Cloud listing in the Projects header's slot, the grid still, and its Retry asks once",
     },
@@ -319,7 +319,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `K-d: says the Tau Cloud wait is long, with Retry, in the Projects header's slot at ${String(slowWait)} ms, while /v1/projects is ${String(longCloudWait)} ms late`,
     },
     async (defect) => {

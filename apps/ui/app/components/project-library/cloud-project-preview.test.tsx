@@ -34,23 +34,22 @@ afterEach(() => {
 
 describe('cloud project preview recovery', () => {
   it('should explain unavailable previews without offering a futile retry', () => {
-    preview.isFailed = true;
-    preview.canRetry = false;
+    Object.assign(preview, { isFailed: true, isSettled: true, canRetry: false });
     render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.getByText('Preview unavailable. Open the project to view it.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry preview' })).not.toBeInTheDocument();
   });
 
   it('should retry a transient failure, announce progress, then show the recovered image', () => {
-    preview.isFailed = true;
+    Object.assign(preview, { isFailed: true, isSettled: true });
     const view = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
     expect(preview.retry).toHaveBeenCalledOnce();
-    preview.isLoading = true;
+    Object.assign(preview, { isLoading: true, isSettled: false });
     view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
-    expect(screen.getByRole('status', { name: 'Loading saved preview' })).toHaveAttribute('aria-busy', 'true');
+    expect(view.container.querySelector('[data-slot="skeleton"]')).toBeNull();
     expect(screen.getByRole('button', { name: 'Loading preview…' })).toBeDisabled();
-    Object.assign(preview, { isLoading: false, isFailed: false, url: 'blob:recovered' });
+    Object.assign(preview, { isLoading: false, isFailed: false, isSettled: true, url: 'blob:recovered' });
     view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.getByRole('img', { name: 'Saved preview of Cloud cube' })).toHaveAttribute('src', 'blob:recovered');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -69,13 +68,13 @@ describe('cloud project preview recovery', () => {
   });
 
   /* C15 (P-g, H-d): a Tau Cloud card's media box stays plain until its saved preview's read has settled. */
-  it.fails('C15: draws no icon and no skeleton before the saved preview is asked for', () => {
+  it('C15: draws no icon and no skeleton before the saved preview is asked for', () => {
     const { container } = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
   });
 
-  it.fails('C15: draws no icon and no skeleton while the saved preview is read', () => {
+  it('C15: draws no icon and no skeleton while the saved preview is read', () => {
     preview.isLoading = true;
     const { container } = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();

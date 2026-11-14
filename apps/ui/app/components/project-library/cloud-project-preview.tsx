@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudProjectPreview } from '#hooks/use-cloud-project-preview.js';
@@ -36,6 +35,7 @@ export function CloudProjectPreview({
     };
   }, []);
   const hasImage = preview.url !== undefined && failedUrl !== preview.url;
+  /* P-g: the media box stays plain until the read settles; the icon says it settled with no image (or failed). */
   return (
     <div
       ref={target}
@@ -53,14 +53,12 @@ export function CloudProjectPreview({
             setFailedUrl(preview.url);
           }}
         />
-      ) : preview.isLoading ? (
-        <Skeleton className='size-full' role='status' aria-busy='true' aria-label='Loading saved preview' />
-      ) : (
+      ) : preview.isSettled ? (
         <Box
           aria-label={preview.isFailed || failedUrl ? 'Saved preview unavailable' : 'No saved preview'}
           className={isCompact ? 'size-4' : 'size-8'}
         />
-      )}
+      ) : null}
 
       {!isCompact && preview.isFailed && !preview.canRetry ? (
         <p className='absolute right-2 bottom-2 left-2 text-center text-xs'>

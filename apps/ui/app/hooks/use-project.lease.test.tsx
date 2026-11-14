@@ -13,6 +13,8 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { createActor, createMachine } from 'xstate';
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 
 const fileManager = vi.hoisted(() => ({ current: undefined as unknown }));
 
@@ -221,5 +223,37 @@ describe('ProjectProvider over a leased project runtime (A6b)', () => {
     const after = seen.at(-1)!.parameterService;
     expect(after).not.toBe(before);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows a preview's replaced parameter service without rebuilding the runtime", async () => {
+    fileManager.current = createFileManagerFixture();
+    const clock = new StepClock();
+    const runtime = createRuntime(clock);
+    const seen: ProjectContextValue[] = [];
+    const previewService = (): ParameterSetService => {
+      const service = mock<ParameterSetService>();
+      service.subscribeActors.mockReturnValue(() => undefined);
+      return service;
+    };
+    const first = previewService();
+    const second = previewService();
+    const page = (service: ParameterSetService): React.JSX.Element =>
+      tree(
+        runtime,
+        <ProjectProvider projectId={projectId} profile='shared' previewParameterService={service}>
+          <Probe seen={seen} />
+        </ProjectProvider>,
+      );
+    const view = render(page(first));
+    await act(flush);
+    const { projectRef } = seen.at(-1)!;
+    expect(seen.at(-1)!.parameterService).toBe(first);
+
+    // The preview scope closes its service and builds another when its worker opener changes (it keeps the mount).
+    view.rerender(page(second));
+    await act(flush);
+    expect(seen.at(-1)!.parameterService).toBe(second);
+    expect(seen.at(-1)!.projectRef).toBe(projectRef);
+    expect(second.subscribeActors).toHaveBeenCalled();
   });
 });

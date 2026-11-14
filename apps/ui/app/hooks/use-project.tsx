@@ -350,7 +350,11 @@ export function ProjectProvider({
    * records' host replacement did. It sends nothing to an actor. */
   useLayoutEffect(() => {
     replaceFiles(files);
-  }, [files, replaceFiles]);
+    /* A preview's scope rebuilds its service when its worker opener changes; the runtime follows it, as the memo did. */
+    if (previewParameterService !== undefined) {
+      runtime.replacePreviewParameterService(previewParameterService);
+    }
+  }, [files, replaceFiles, runtime, previewParameterService]);
 
   const parameterService = useSyncExternalStore(
     runtime.parameterService.subscribe,

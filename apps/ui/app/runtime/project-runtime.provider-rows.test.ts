@@ -275,7 +275,7 @@ describe('the parameter observers, as the provider ran them for a preview', () =
     const observers = createActor(
       createParameterObserversLogic({
         parameterService: { get: () => service, subscribe: () => () => undefined },
-        previewParameterService: service,
+        publishesPreviewParameters: true,
       }),
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a stand-in read by snapshot only.
       { input: { project: project as unknown as ProjectChildInput['project'] } },

@@ -355,6 +355,11 @@ export type ProjectRuntime = Readonly<{
   actor: ProjectRuntimeActor;
   parameterService: ObservablePort<ParameterSetService>;
   producers: ProjectRuntimeProducers;
+  /**
+   * Hand a preview's runtime the service its scope rebuilt (a new worker opener): the observers rebind to it, as the
+   * provider's memo followed the prop. The scope owns and closes the services; a runtime built without one ignores it.
+   */
+  replacePreviewParameterService: (service: ParameterSetService) => void;
 }>;
 
 /**
@@ -427,10 +432,11 @@ const errorMessage = (error: unknown): string =>
 export const createParameterObserversLogic = (
   options: Readonly<{
     parameterService: ObservablePort<ParameterSetService>;
-    previewParameterService?: ParameterSetService;
+    /** A preview's: its resolved values reach the kernel as temporary parameters instead of committed stages. */
+    publishesPreviewParameters?: boolean;
   }>,
 ): ProjectChildLogic<ParameterObserversEvent> => {
-  const { previewParameterService } = options;
+  const publishesPreviewParameters = options.publishesPreviewParameters === true;
   return createCallbackLogic<ParameterObserversEvent, ProjectChildInput>(({ input: { project }, receive }) => {
     /* The service the observers are bound to: a rebuilt service rebinds them, as the provider's effect re-runs. */
     let parameterService = options.parameterService.get();
@@ -440,11 +446,11 @@ export const createParameterObserversLogic = (
     const previewValuesByRuntime = new WeakMap<WeakKey, string>();
 
     const publishPreviewParameters = (entryPath: string): void => {
-      if (previewParameterService === undefined) {
+      if (!publishesPreviewParameters) {
         return;
       }
       const cadRef = project.getSnapshot().context.geometryUnits.get(entryPath);
-      const snapshot = previewParameterService.snapshot(entryPath);
+      const snapshot = parameterService.snapshot(entryPath);
       if (cadRef === undefined || snapshot === undefined) {
         return;
       }
@@ -476,7 +482,7 @@ export const createParameterObserversLogic = (
         if (cadRef === undefined || current === undefined) {
           return;
         }
-        if (previewParameterService !== undefined) {
+        if (publishesPreviewParameters) {
           if (shouldDispatchParameterSettlement(outcome)) {
             publishPreviewParameters(entryPath);
           }
@@ -919,7 +925,7 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
       editor: providedEditor,
       parameterObservers: createParameterObserversLogic({
         parameterService,
-        ...(previewParameterService === undefined ? {} : { previewParameterService }),
+        publishesPreviewParameters: previewParameterService !== undefined,
       }),
       manifestObservation: createManifestObservationLogic({ projectId, fileManagerRef }),
       libraryEvents: createLibraryEventsLogic({ projectId, profile, library }),
@@ -961,5 +967,10 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
     actor,
     parameterService: { get: parameterService.get, subscribe: parameterService.subscribe },
     producers: createProjectRuntimeProducers(),
+    replacePreviewParameterService: (service) => {
+      if (previewParameterService !== undefined && service !== parameterService.get()) {
+        parameterService.replace(service);
+      }
+    },
   };
 }

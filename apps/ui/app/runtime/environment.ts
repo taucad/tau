@@ -147,8 +147,8 @@ export const createUnloadSequencer = (): UnloadSequencer => {
     pagehide: () => {
       for (const registration of registrations) {
         if (registration.stage === 'session') {
-          /* Synchronous by contract: pagehide can only emit data prepared by hidden and cannot wait for a fresh
-           * producer flush. */
+          /* Each callback's synchronous part runs here, before the memory release: pagehide can only emit data
+           * prepared by hidden and cannot wait for a fresh producer flush. */
           // async-iife: bootstrap -- the document is going; each registrant settles, or logs, on its own.
           void pageHideSafely(registration.callback);
         }

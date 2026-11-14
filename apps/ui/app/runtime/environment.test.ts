@@ -146,4 +146,20 @@ describe('environment: the memory release (B-08)', () => {
     expect(later).toHaveBeenCalledWith('pagehide');
     errors.mockRestore();
   });
+
+  it('should offer every session its pagehide flush before the memory release closes any (round 8)', () => {
+    const order: string[] = [];
+    const sequencer = createUnloadSequencer();
+    sequencer.register('session', async (phase) => {
+      order.push(`flush:${phase}`);
+    });
+    const { host, send } = start({ coarse: true, projectId: 'projA', sequencer });
+    send.mockImplementation((event: { type: string }) => {
+      order.push(event.type);
+    });
+
+    host.window.dispatchEvent(new Event('pagehide'));
+
+    expect(order).toEqual(['flush:pagehide', 'releaseMemory']);
+  });
 });

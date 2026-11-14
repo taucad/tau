@@ -905,6 +905,8 @@ export class ProjectLibrary {
           outcome = replayOutcomeOf(error);
           throw error;
         } finally {
+          // Settled either way: the journal holds a row that failed, and a replay reads it again from there.
+          this.#operations.delete(operation.operationId);
           this.recovery.send({ type: 'mutationSettled', operationId: operation.operationId, outcome });
         }
       },

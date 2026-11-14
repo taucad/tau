@@ -18,7 +18,7 @@
     "ui:formal:tla:library-catalog": 80,
     "ui:formal:tla:live-overlay": 2,
     "ui:formal:tla:message-queue": 17,
-    "ui:formal:tla:project-focus": 85,
+    "ui:formal:tla:project-focus": 75,
     "ui:formal:tla:record-sync": 155
   }
 }

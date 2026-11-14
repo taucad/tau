@@ -15,7 +15,6 @@ import type { CaptureImagesRpcInput, CaptureImagesRpcResult, RunGeoSpecTestsRpcI
 import { rpcName } from '@taucad/chat/constants';
 import { ENV } from '#environment.config.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
-import { createRpcHandlers } from '#hooks/rpc-handlers.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
@@ -92,6 +91,8 @@ export function DebugProbes(): ReactNode {
       depsRef.current.fileManager.fileManagerRef.getSnapshot().context.openFileSystemBridge !== undefined;
     probeGlobals.__tauCaptureImages = async (input) => {
       const { activeChatId: chatId, ...deps } = depsRef.current;
+      // The RPC handler stack loads on the first probe call; a failed import rejects this probe's promise.
+      const { createRpcHandlers } = await import('#hooks/rpc-handlers.js');
       return createRpcHandlers({ chatId, ...deps }).executeRpcCall({
         rpcName: rpcName.captureImages,
         args: input,

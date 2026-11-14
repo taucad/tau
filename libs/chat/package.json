@@ -46,6 +46,11 @@
       "import": "./src/rpc/index.ts",
       "default": "./src/rpc/index.ts"
     },
+    "./rpc/client-text-mutation": {
+      "types": "./src/rpc/client-text-mutation.ts",
+      "import": "./src/rpc/client-text-mutation.ts",
+      "default": "./src/rpc/client-text-mutation.ts"
+    },
     "./schemas": {
       "types": "./src/schemas/index.ts",
       "import": "./src/schemas/index.ts",

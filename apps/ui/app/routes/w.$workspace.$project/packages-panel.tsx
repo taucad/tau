@@ -13,7 +13,6 @@ import { randomUuid } from '@taucad/utils/id';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { useFileContent } from '#hooks/use-file-content.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { createRpcHandlers } from '#hooks/rpc-handlers.js';
 import { ENV } from '#environment.config.js';
 import { ChatMessageToolInstallPackages } from '#routes/w.$workspace.$project/chat-message-tool-install-packages.js';
 
@@ -119,8 +118,25 @@ export function PackagesPanel(): React.JSX.Element {
     setIsInstalling(true);
     const toolCallId = randomUuid();
     try {
+      // The RPC handler stack (the package resolver and `semver`) loads on the first Install, not with the panel.
+      const handlersModule = await import('#hooks/rpc-handlers.js').catch((error: unknown) =>
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      if (handlersModule instanceof Error) {
+        setResult({
+          toolCallId,
+          state: 'output-error',
+          input: {},
+          errorText: `The installer did not load: ${handlersModule.message}`,
+        });
+        return;
+      }
       // X43: under the locked profile Install makes no registry request and reports registry-unavailable.
-      const handlers = createRpcHandlers({ chatId: 'packages-panel', fileManager, acquisition: ENV.TAU_ACQUISITION });
+      const handlers = handlersModule.createRpcHandlers({
+        chatId: 'packages-panel',
+        fileManager,
+        acquisition: ENV.TAU_ACQUISITION,
+      });
       const outcome = await handlers.executeRpcCall({
         rpcName: rpcName.installPackages,
         args: {},

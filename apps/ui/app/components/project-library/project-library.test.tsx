@@ -1596,6 +1596,34 @@ describe('ProjectLibrary', () => {
       expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
     });
 
+    /* D21 round 4: each Retry is a new request, so a second press in an announced slow wait restarts it from the press. */
+    it.fails('C14: restarts an announced Tau Cloud wait from a second Retry, keeping its focus', async () => {
+      cloudListing.retry.mockImplementation(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
+      cloudListing.isFailed = true;
+      const clock = { at: 0 };
+      const slot = renderSlot({ clock });
+      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      await userEvent.click(retry);
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      const firstWait = slot.header().querySelector('[data-slot="wait-indicator-body"]');
+      clock.at = 11_000;
+      await userEvent.click(retry);
+      slot.rerender();
+      /* A new wait is a new indicator body, timed from the press. */
+      const body = slot.header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+      expect(body).not.toBe(firstWait);
+      expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+      expect(retry).toHaveFocus();
+      cloudListing.retry.mockReset();
+    });
+
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
     it("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
       /* The Retry's request is still in flight. */
@@ -1663,6 +1691,15 @@ describe('ProjectLibrary', () => {
       const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
       expect(row).not.toHaveClass('max-md:hidden');
       expect(row).toHaveClass('max-md:sr-only');
+    });
+
+    /* D21 round 4: on a phone a wait is read, not seen, so its controls are not reachable while the row is unseen. */
+    it.fails("C14: keeps the phone header row's unseen controls out of the focus order", () => {
+      cloudListing.isFetching = true;
+      const slot = renderSlot({ isPhoneBar: true });
+      const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
+      expect(row).toHaveClass('max-md:sr-only');
+      expect(row).toHaveClass('max-md:[&_button]:hidden');
     });
 
     /* D21 round 3: the phone row shows for a notice the slot shows, not one the local listing's wait still holds back. */

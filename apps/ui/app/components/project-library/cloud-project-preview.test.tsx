@@ -56,6 +56,29 @@ describe('cloud project preview recovery', () => {
     expect(screen.queryByText('Saved preview')).not.toBeInTheDocument();
   });
 
+  /* D21 round 4: a retried read with nothing cached clears its error while it runs; the Retry keeps its place and focus,
+     and says it is loading, through its own request. */
+  it.fails('should keep the focused Retry, saying it is loading, while a failed read is retried', async () => {
+    preview.retry.mockImplementationOnce(
+      async () =>
+        new Promise<undefined>(() => {
+          /* Never answers in this row. */
+        }),
+    );
+    Object.assign(preview, { isFailed: true, isSettled: true });
+    const view = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
+    const retry = screen.getByRole('button', { name: 'Retry preview' });
+    retry.focus();
+    fireEvent.click(retry);
+    /* react-query resets a retried query with no data to pending, clearing its error. */
+    Object.assign(preview, { isFailed: false, isLoading: true, isSettled: false });
+    view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
+    expect(retry).toBeInTheDocument();
+    expect(retry).toHaveFocus();
+    expect(retry).toHaveAccessibleName('Loading preview…');
+    expect(retry).toHaveAttribute('aria-busy', 'true');
+  });
+
   it('should keep a project with no saved image neutral and allow retry of a corrupt image', () => {
     const view = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();

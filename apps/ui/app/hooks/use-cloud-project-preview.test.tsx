@@ -130,4 +130,27 @@ describe('cloud saved previews', () => {
     view.unmount();
     client.clear();
   });
+
+  /* P-g, D21 round 1: a settled answer stays settled through a refetch, so a card's icon does not blink on focus. */
+  it.fails('should keep a settled "no saved preview" answer while it is asked again', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(undefined, { status: 204 }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const view = renderHook(() => useCloudProjectPreview('project', true), { wrapper });
+    await waitFor(() => {
+      expect(view.result.current.isSettled).toBe(true);
+    });
+    vi.mocked(fetch).mockImplementation(async () => new Promise<Response>(() => undefined));
+    act(() => {
+      void view.result.current.retry();
+    });
+    await waitFor(() => {
+      expect(view.result.current.isLoading).toBe(true);
+    });
+    expect(view.result.current.isSettled).toBe(true);
+    view.unmount();
+    client.clear();
+  });
 });

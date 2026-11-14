@@ -94,4 +94,40 @@ describe('H6: the cloud listing state', () => {
     expect(cloudOf(result)).toBe('ready');
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  /* D21 round 1: a 5xx from Tau Cloud is often transient (a deploy), so the listing asks again on its own. */
+  it.fails('H6: asks again on its own when Tau Cloud answers 503, and settles when it recovers', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(undefined, { status: 503 }));
+    fetchMock.mockResolvedValue(Response.json([]));
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(
+      () => {
+        expect(cloudOf(result)).toBe('ready');
+        expect(result.current.isSettled).toBe(true);
+      },
+      { timeout: 4000 },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  /* K-c: a person's Retry is one request, even when Tau Cloud answers it with a 5xx again. */
+  it('H6: asks once for a Retry, whatever Tau Cloud answers', async () => {
+    fetchMock.mockResolvedValue(new Response(undefined, { status: 400 }));
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('failed');
+    });
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(new Response(undefined, { status: 503 }));
+    act(() => {
+      result.current.retry();
+    });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('failed');
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1500);
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });

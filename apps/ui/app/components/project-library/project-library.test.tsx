@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectToManifest, projectManifestSchemaUrl } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
+import { PhoneTopBarContext } from '#components/layout/page-header.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -1471,6 +1473,90 @@ describe('ProjectLibrary', () => {
       [...screen.queryAllByRole('status'), ...screen.queryAllByRole('alert')].filter(
         (region) => !header.contains(region),
       );
+
+    /** A library whose wait clock reads `clock.at`, optionally under a phone top bar that carries the header. */
+    const renderSlot = ({ clock = { at: 0 }, isPhoneBar = false } = {}) => {
+      const tree = (): React.JSX.Element => (
+        <WaitClockProvider clock={{ now: () => clock.at }}>
+          <PhoneTopBarContext.Provider value={{ hasTitle: isPhoneBar, hasAction: isPhoneBar }}>
+            <TestRouter>
+              <TooltipProvider>
+                <ProjectLibrary />
+              </TooltipProvider>
+            </TestRouter>
+          </PhoneTopBarContext.Provider>
+        </WaitClockProvider>
+      );
+      const view = render(tree());
+      return {
+        header: (): HTMLElement =>
+          screen.getByRole('heading', { name: 'Projects' }).closest('[data-slot="page-header-title"]')!.parentElement!,
+        rerender: () => {
+          view.rerender(tree());
+        },
+      };
+    };
+
+    /* D21 round 1: a cloud wait is timed from when it began, not from the document's start. */
+    it.fails('C14: times a Tau Cloud wait that begins 30 s into the page from its own start, not as already slow', () => {
+      cloudListing.isFetching = true;
+      const { header } = renderSlot({ clock: { at: 30_000 } });
+      const body = header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+      expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
+      expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+    });
+
+    /* D21 round 1: the first listing belongs to the page's open, which the sidebar announces; a Retry is announced. */
+    it.fails('C14: does not announce the first Tau Cloud wait, and announces the wait a Retry starts', async () => {
+      cloudListing.isFetching = true;
+      const slot = renderSlot();
+      expect(within(slot.header()).queryByRole('status')).toBeNull();
+      cloudListing.isFetching = false;
+      cloudListing.isFailed = true;
+      slot.rerender();
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      expect(within(slot.header()).getByRole('status')).toBeInTheDocument();
+    });
+
+    /* D21 round 1: Retry beside the slow words keeps its focus; the wait it restarts does not remount the control. */
+    it.fails("C14: keeps focus on the slow wait's Retry when it is pressed", async () => {
+      cloudListing.isFetching = true;
+      const clock = { at: 0 };
+      const { header } = renderSlot({ clock });
+      const retry = within(header()).getByRole('button', { name: 'Retry', hidden: true });
+      /* Pressed at 11 s, once the slow words and their Retry show. */
+      clock.at = 11_000;
+      await userEvent.click(retry);
+      expect(cloudListing.retry).toHaveBeenCalledOnce();
+      expect(retry).toBeInTheDocument();
+      expect(retry).toHaveFocus();
+    });
+
+    /* D21 round 1: the local listing's own wait keeps the slot while it runs; Tau Cloud's notice waits its turn. */
+    it.fails("C14: keeps the local listing's wait in the slot while Tau Cloud has failed", () => {
+      mockRememberedShape = { count: 2, projects: [] };
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      cloudListing.isFailed = true;
+      const { header } = renderSlot();
+      expect(header()).toHaveTextContent('Loading projects');
+      expect(within(header()).queryByRole('alert')).toBeNull();
+    });
+
+    /* D21 round 1: on a phone whose top bar carries the /projects header, a notice's row stays once shown. */
+    it.fails('C14: keeps the phone header row once a Tau Cloud notice has shown, through its Retry', async () => {
+      cloudListing.isFailed = true;
+      const slot = renderSlot({ isPhoneBar: true });
+      const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
+      expect(row).not.toHaveClass('max-md:hidden');
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      expect(row).not.toHaveClass('max-md:hidden');
+    });
 
     it('C14: keeps the Tau Cloud wait inside the header slot, with no row above the grid', () => {
       cloudListing.isFetching = true;

@@ -24,7 +24,8 @@ import { z } from 'zod';
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const crateRoot = resolve(workspaceRoot, 'libs/sandbox/store-guard');
 const outputRoot = resolve(workspaceRoot, 'out/store-guard');
-const cargoTarget = resolve(outputRoot, 'cargo');
+/* Cargo's own build tree stays in the crate (its `target`, ignored), so the script reads only its own project. */
+const cargoTarget = resolve(crateRoot, 'target');
 const stageRoot = resolve(outputRoot, 'linux-x64');
 const target = 'x86_64-unknown-linux-musl';
 const executableName = 'tau-store-guard';

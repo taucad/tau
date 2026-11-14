@@ -2204,7 +2204,10 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
 /** Each target context's requests that `uiDelayTargetRequests` held, by URL, in the order they were held. */
 const delayedTargetRequests = new WeakMap<object, string[]>();
 
-/** Each target context's open gate: requests held until `uiReleaseTargetRequests`, and whether it was released. */
+/**
+ * Each target context's open gate, shared by its holds until release: the requests held until
+ * `uiReleaseTargetRequests`, and whether it was released.
+ */
 const targetRequestGates = new WeakMap<object, { released: boolean; readonly waiting: Array<() => void> }>();
 
 /** A gate holds no request longer than this, so a row that fails before its release cannot leave the page hanging. */
@@ -2224,7 +2227,10 @@ export const uiDelayTargetRequests: BrowserCommand<[pattern: string, millisecond
   const session = sessionFor(commandContext);
   const held = delayedTargetRequests.get(session.context) ?? [];
   delayedTargetRequests.set(session.context, held);
-  const gate = { released: false, waiting: [] as Array<() => void> };
+  /* Holds until release share the context's open gate, so one release lets them all go on; after a release, a new
+     hold opens a new gate. */
+  const open = targetRequestGates.get(session.context);
+  const gate = open?.released === false ? open : { released: false, waiting: [] as Array<() => void> };
   if (milliseconds === 'until-released') {
     targetRequestGates.set(session.context, gate);
   }

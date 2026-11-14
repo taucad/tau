@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.0 (2026-11-14)
+
+### Features
+
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+
+### Fixes
+
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(api-agent-observability): Count a trace unit for a root that reconciliation finds (#2189) (5bcd6d4a8)
+- fix(api): Report a shared readiness dependency only when two probes in a row find it down (#2186) (63ab660ed)
+- fix(api-git-core): Refuse a push that moves a backed-up version to another entry (#2151) (ae7272fa3)
+
+### Other changes
+
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+
 ## 0.12.0 (2026-11-14)
 
 ### Features

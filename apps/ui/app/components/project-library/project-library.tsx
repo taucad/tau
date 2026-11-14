@@ -1143,6 +1143,9 @@ function cloudRetryOf({
   readonly wait: CloudWait | undefined;
   readonly timing: WaitIndicatorTiming;
 }): CloudRetry | undefined {
+  if (notice === 'offline') {
+    return undefined;
+  }
   if (notice === 'failed' || wait?.isAnnounced === true || wait?.followsFailure === true) {
     return {};
   }
@@ -1188,7 +1191,9 @@ function LibraryStatusSlot({
       className='flex min-h-6 min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 overflow-hidden text-xs text-muted-foreground'
     >
       {/* One status region, always present, so the offline words and a Retry's wait are announced when they arrive. */}
-      <span role='status' className={cn('min-w-0 truncate empty:hidden', notice !== 'offline' && 'sr-only')}>
+      {/* Never `display: none`, even empty: a live region must be in the tree before its words arrive. Out of the
+          flow while it shows nothing, it adds no gap. */}
+      <span role='status' className={cn('min-w-0 truncate', notice !== 'offline' && 'sr-only')}>
         {notice === 'offline' ? 'Offline. Showing projects on this device.' : announcement}
       </span>
       {notice === 'offline' ? null : notice === 'failed' ? (

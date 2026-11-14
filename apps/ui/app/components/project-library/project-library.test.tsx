@@ -1735,7 +1735,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 7: the slot's status region stays in the accessibility tree while empty, so words entering it are heard. */
-    it.fails("C14: keeps the slot's empty status region in the accessibility tree", () => {
+    it("C14: keeps the slot's empty status region in the accessibility tree", () => {
       const slot = renderSlot();
       const region = slot.header().querySelector('[data-slot="project-library-status"] > [role="status"]');
       expect(region).toBeEmptyDOMElement();
@@ -1744,7 +1744,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 7: offline, Retry cannot help, so it is not offered, even while a Retry's request hangs. */
-    it.fails('C14: offers no Retry beside the offline words while a Retry is in flight', async () => {
+    it('C14: offers no Retry beside the offline words while a Retry is in flight', async () => {
       cloudListing.retry.mockImplementationOnce(
         async () =>
           new Promise<void>(() => {

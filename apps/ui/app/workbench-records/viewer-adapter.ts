@@ -307,6 +307,8 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       isApplying = true;
       try {
         const removed = adoptViewerRecordNode(api, node);
+        // An apply clears and rebuilds the groups; an arrangement with none gets its group once that has finished.
+        ensureViewerGroup(api);
         adopted = JSON.stringify(shownNode());
         for (const viewId of removed) {
           void facts.get().viewCommands.remove(viewId);
@@ -520,9 +522,12 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       }),
     );
     // Dockview removes the last panel's group once the panel has gone: the dock gets a group back to drop into then.
+    // An apply removes every group while it rebuilds them, so it gives the group back itself once it has finished.
     listen(
       api.onDidRemoveGroup(() => {
-        ensureViewerGroup(api);
+        if (!isApplying) {
+          ensureViewerGroup(api);
+        }
       }),
     );
 

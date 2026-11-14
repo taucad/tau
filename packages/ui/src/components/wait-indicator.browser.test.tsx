@@ -254,3 +254,39 @@ it('should reveal the second of two waits started in one long render 1,000 ms af
   ).toBeGreaterThanOrEqual(999);
   expect(revealed).toBeLessThan(1034);
 });
+
+it('should hold a wait that took over an indicator not yet painted 500 ms from the frame it showed in', async () => {
+  /* The first wait's reveal is due, but no frame has drawn it when a second wait takes over, and a long task holds
+     the first frame that does. The takeover keeps the words; their minimum must run from that frame. */
+  /* On the timeline the hook reads, so the first wait is 1,100 ms in whatever the frame's age. */
+  const startedAt = Number(document.timeline.currentTime) - 1100;
+  const view = render(<WaitIndicator active label='Loading history' startedAt={startedAt} />);
+  const takenOverAt = Number(document.timeline.currentTime);
+  /* No frame runs through the task, so the words paint in the first frame after it. That frame can carry a time from
+     before the task, so its start is read off the performance clock, as its reveal begins. */
+  let shownAt = Number.NaN;
+  const onReveal = (event: AnimationEvent): void => {
+    if (event.animationName === 'wait-reveal' && Number.isNaN(shownAt)) {
+      shownAt = performance.now();
+    }
+  };
+  document.addEventListener('animationstart', onReveal, { capture: true });
+  view.rerender(<WaitIndicator active label='Loading history' startedAt={takenOverAt} />);
+  holdMainThread(400);
+  const heldUntil = performance.now();
+  await act(async () => {
+    await nextFrame();
+    await nextFrame();
+  });
+  document.removeEventListener('animationstart', onReveal, { capture: true });
+  expect(shownAt, 'the words paint after the long task').toBeGreaterThanOrEqual(heldUntil);
+
+  await act(async () => {
+    view.rerender(<WaitIndicator active={false} label='Loading history' startedAt={takenOverAt} />);
+  });
+
+  expect(
+    (await effectTime('wait-conceal')) - shownAt,
+    'the takeover held the words from a reveal no frame had drawn',
+  ).toBeGreaterThanOrEqual(499);
+});

@@ -16,8 +16,9 @@
 (*             epoch current when it answers (LibraryCatalog's             *)
 (*             AccessAnswerFenced); the epoch may move again before focus  *)
 (*             acts on the answer                                          *)
-(*   focus     the machine this spec rules or, with Focus = "today", the   *)
-(*             effects of ProjectRouteGate as written                      *)
+(*   focus     the machine this spec rules (machines/focus.machine.ts and  *)
+(*             its selector, focus.route-state.ts; A5a) or, with Focus =   *)
+(*             "today", the effects of ProjectRouteGate as written         *)
 (*   leaving   the session being left (`f.from`), dirty or clean, and its  *)
 (*             leave flush, which completes, fails or is still running     *)
 (*   module    the project runtime import, one for every project           *)
@@ -180,6 +181,8 @@ PersonCommands == MaxPersonOpens > 0
 \* Focus holds an answer for the library's current epoch.
 Fresh == f.ans # "none" /\ f.ansEpoch = lib.epoch
 \* Target: focus's own open waiting in the registry's pendingOpen slot for the project it is opening.
+\* It is by project: a person's open of that project takes the slot in its place, and the machine then
+\* waits for that open's reply (focus.machine.ts, `personOpen`).
 FocusPending == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq /\ pendingOpen.project = f.ansProj
                 /\ f.st = "opening" /\ f.opened
 \* Target: focus withdraws that open (the registry's cancelPendingOpen) in the step it stops opening

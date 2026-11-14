@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { registerPermissionBridge } from '#main/permission-bridge.js';
-import { createProjectRootRegistry } from '#main/project-roots.js';
-import { permissionChannels } from '#shared/permission-channels.js';
-import type { PermissionRequestFrame } from '#shared/permission-channels.js';
+import { createProjectRootRegistry } from '@taucad/desktop-services-host/project-roots';
+import { permissionChannels } from '@taucad/types/desktop';
+import type { PermissionRequestFrame } from '@taucad/types/desktop';
 
 let base = '';
 let granted = '';

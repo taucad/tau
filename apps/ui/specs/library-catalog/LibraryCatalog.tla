@@ -6,7 +6,9 @@
 (* access (app state orchestration charter D10, D13, invariants I4, I7,    *)
 (* I8, I9 and I18). It is the spec for `library-discovery.machine`,        *)
 (* `library-recovery.machine` and `library-access.machine` (lane A3a) and   *)
-(* lands before them, under formal verification policy rule 1.             *)
+(* lands before them, under formal verification policy rule 1. The         *)
+(* machines replay its export suite in                                     *)
+(* `library-catalog.conformance.test.ts`.                                  *)
 (*                                                                         *)
 (* Parties:                                                                *)
 (*   storage    the project roots and the journal of pending operations;   *)
@@ -53,6 +55,14 @@
 (* adds or removes; thumbnails, metadata, cloud projects and the workspace *)
 (* connection handshake are abstracted away.                               *)
 (***************************************************************************)
+\* A2 (app state orchestration): the project-manager and workspace-connection actors moved into the
+\* `ProjectLibrary` service, which the runtime starts. Discovery, recovery and route access still run in
+\* `ProjectManagerProvider` against them, with the same refs and reads, so every action is unchanged.
+\* The provider hands the library its binding in render; a port called before it waits for it, and
+\* its children are optional, and a connection wait superseded by a later selection rejects; neither
+\* changes an action. The observation effect releases and resumes the library's binding around its reads.
+\* A3a, after A2: the machines' citations of `use-project-manager.tsx` lines moved with A2's additions
+\* above them; the code they name is unchanged, so no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

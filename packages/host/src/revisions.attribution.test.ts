@@ -123,7 +123,7 @@ describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', ()
  * A1: a native host records the Tau account it is handed (the session a
  * renderer sends with `setActor`, or the account a token belongs to) and, with
  * none, this device's pseudonym. This is the wiring every Node entry point uses:
- * the desktop (`apps/desktop/src/tau/services-host.impl.ts`) and `tau serve`
+ * the desktop (`apps/libs/desktop-services-host/src/services-host.impl.ts`) and `tau serve`
  * (`packages/host/src/host-daemon.ts`) through `createProjectHost`, and
  * `tau revisions save` through `openProjectRevisions`.
  */

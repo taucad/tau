@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RevisionDiffEntry } from '@taucad/revisions';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
@@ -392,6 +393,147 @@ describe('RevisionRow', () => {
     };
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
+  });
+
+  /* U17: a comparison that has not arrived is its row's frame, never bars. */
+  it('draws no Skeleton while a comparison loads', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(frame).toHaveAttribute('aria-busy', 'true');
+    expect(document.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton shapes in the comparison').toHaveLength(0);
+  });
+
+  /* From the slow mark the comparison's wait offers Retry, which asks the read again and times a new wait from the Retry. */
+  it('offers Retry on a slow comparison, reading again, timing the new wait from the Retry and keeping focus', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    const requests = revisionStatusHarness.comparisonRequests.length;
+
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
+    await user.click(within(frame).getByRole('button', { name: 'Retry' }));
+    vi.restoreAllMocks();
+
+    // A new read, though the first one is still pending.
+    await waitFor(() => {
+      expect(revisionStatusHarness.comparisonRequests.length).toBe(requests + 1);
+    });
+    // The Retry button is replaced by the new wait's words; focus stays in the comparison, never on the page.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(frame).toContainElement(document.activeElement as HTMLElement);
+
+    const body = frame.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
+  /* Timing ladder: a shown indicator stays 500 ms. A comparison revealed at 1,000 ms that lands at 1,050 ms renders at
+     once, and its indicator finishes its time in the same slot until 1,500 ms. */
+  it('keeps a shown comparison indicator in the same slot until its 500 ms minimum after the comparison lands', async () => {
+    const user = userEvent.setup();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const read = Promise.withResolvers<RevisionFileComparison>();
+    revisionStatusHarness.comparisonRead = async () => read.promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    const slot = frame.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).toHaveAttribute('data-state', 'waiting');
+
+    now.mockReturnValue(1050);
+    read.resolve({ original: 'a', modified: 'b', kind: 'text', change: 'modified', notices: [] });
+    expect(await within(frame).findByTestId('diff')).toHaveTextContent('a|b');
+
+    // The same frame and the same slot: arrival changed only the body.
+    expect(document.querySelector('[aria-label="Comparison for bracket.scad"]')).toBe(frame);
+    expect(frame).toHaveAttribute('role', 'region');
+    expect(frame).not.toHaveAttribute('aria-busy');
+    expect(frame.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('data-state', 'holding');
+    expect(
+      slot
+        ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+        ?.style.getPropertyValue('--wait-hide-delay'),
+    ).toBe('450ms');
+    now.mockRestore();
+  });
+
+  /* The same rule for the whole entry's Compare with the current files. */
+  it('keeps the changes-since indicator in the same slot until its 500 ms minimum after the list lands', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+    renderRow();
+    await openRow(user);
+    const pending = Promise.withResolvers<readonly RevisionDiffEntry[]>();
+    revisionStatusHarness.diffSinceRead = async () => pending.promise;
+    await user.click(screen.getByRole('button', { name: 'Compare' }));
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[data-slot="current-comparison"]');
+      expect(element).toHaveAttribute('aria-busy', 'true');
+      return element!;
+    });
+    const slot = frame.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).toHaveAttribute('data-state', 'waiting');
+
+    now.mockReturnValue(1050);
+    pending.resolve(revisionStatusHarness.diff);
+    await within(frame).findByRole('list', { name: 'Changed since “Thicker base”' });
+
+    expect(document.querySelector('[data-slot="current-comparison"]')).toBe(frame);
+    expect(frame).not.toHaveAttribute('aria-busy');
+    expect(frame.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('data-state', 'holding');
+    expect(
+      slot
+        ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+        ?.style.getPropertyValue('--wait-hide-delay'),
+    ).toBe('450ms');
+    now.mockRestore();
+  });
+
+  /* A Retry while the first comparison is still pending is a second read, not a join onto the first. */
+  it('reads a comparison again on Retry while its first read is pending, and shows the second answer', async () => {
+    const user = userEvent.setup();
+    const first = Promise.withResolvers<never>();
+    revisionStatusHarness.comparisonRead = async () => first.promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(revisionStatusHarness.comparisonRequests).toHaveLength(1);
+
+    revisionStatusHarness.comparisonRead = undefined;
+    revisionStatusHarness.comparison = { original: 'a', modified: 'b', kind: 'text', change: 'modified', notices: [] };
+    await user.click(within(frame).getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
+    expect(revisionStatusHarness.comparisonRequests).toHaveLength(2);
   });
 
   it('restores an entry the files are not at, naming it in the button’s accessible name', async () => {

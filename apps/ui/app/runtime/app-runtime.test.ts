@@ -2,8 +2,8 @@
  * The app runtime root without React (app state orchestration charter D5, D23, D26; plan § 4 A1a).
  *
  * The root is created unstarted with the clock, `inspect` and `onRejectedEvent` (MC-R4). It holds the static
- * children in one list; A1a attaches `environment` and `sessions`, and A1b `fileManagerHost`, `rootFiles` and
- * `leases`. Starting it starts them, and stopping it stops them and removes every DOM listener `environment` added.
+ * children in one list; A1a attaches `environment` and `sessions`, A1b `fileManagerHost`, `rootFiles` and
+ * `leases`, and A2 `projectLibrary` and `chatSessions`. Starting it starts them, and stopping it stops them and removes every DOM listener `environment` added.
  * `environment` reports document visibility, window focus and the memory class, and never listens for an unload
  * phase: `UnloadProvider` stays the one unload sequencer
  * until A5b (D26). The root keeps its first fault (D23).
@@ -31,12 +31,21 @@ import {
   selectAppRuntimeFault,
   selectFileManagerHost,
   selectRootFiles,
+  selectRuntimeChatSessions,
   selectRuntimeIdleFileManagers,
+  selectRuntimeProjectLibrary,
+  selectRuntimeQueryClient,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
+import { QueryClient } from '@tanstack/react-query';
+import { ChatSessionStore } from '#services/chat-session-store.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { createEnvironmentLogic } from '#runtime/environment.js';
 import { sessionsRegistryLogic } from '#services/sessions-store.js';
+import { store as preferences } from '#hooks/use-cookie.js';
+import { metaConfig } from '#constants/meta.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { modelsQueryKey } from '#lib/model-catalog.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -46,7 +55,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
 
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach the five A1a and A1b compose', () => {
+  it('should list the nine static children once, and attach the eight A1a, A1b, A2 and A6b compose', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -58,7 +67,16 @@ describe('app runtime root', () => {
       'sessions',
       'focus',
     ]);
-    expect(appRuntimeAttachedChildren).toEqual(['environment', 'fileManagerHost', 'rootFiles', 'leases', 'sessions']);
+    expect(appRuntimeAttachedChildren).toEqual([
+      'environment',
+      'choices',
+      'fileManagerHost',
+      'rootFiles',
+      'leases',
+      'projectLibrary',
+      'chatSessions',
+      'sessions',
+    ]);
   });
 
   it('should compose unstarted and start and stop its children with no React', () => {
@@ -166,6 +184,11 @@ describe('app runtime root', () => {
     expect(onRejectedEvent).not.toHaveBeenCalled();
     registry.send({ type: 'touch', projectId: 'p1' });
     expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped', targetId: 'sessions' }));
+
+    /* The library's actors report through the same hook. */
+    onRejectedEvent.mockClear();
+    selectRuntimeProjectLibrary(runtime).workspaceConnection.send({ type: 'beginSelection', operationId: 'op1' });
+    expect(onRejectedEvent).toHaveBeenCalledWith(expect.objectContaining({ reason: 'stopped' }));
   });
 
   /* Programme control ruling: the client runtime captures workspace telemetry through `admittedAnalytics`; the server
@@ -201,6 +224,77 @@ describe('app runtime root', () => {
     expect(selectRuntimeIdleFileManagers(runtime)).toBe(true);
     expect(selectRuntimeIdleFileManagers(createAppRuntime({ environment: () => undefined }))).toBe(false);
     runtime.stop();
+  });
+
+  /* A2 (D9; row L3): the runtime builds the query client, the library and the chat store, and the library's actors
+   * and worker start and stop with the root. */
+  it('should build its query client, project library and chat store, and start and stop the library with the root', () => {
+    const runtime = createAppRuntime({ environment: () => createFakeEnvironmentHost() });
+    const library = selectRuntimeProjectLibrary(runtime);
+    expect(selectRuntimeQueryClient(runtime)).toBeInstanceOf(QueryClient);
+    expect(library.queryClient).toBe(selectRuntimeQueryClient(runtime));
+    expect(selectRuntimeChatSessions(runtime)).toBeInstanceOf(ChatSessionStore);
+
+    /* Created, not started: the library's actors exist and answer their initial snapshots, and no worker is asked for. */
+    expect(library.projectManager.getSnapshot().status).toBe('active');
+    expect(library.projectManager.getSnapshot().value).toBe('initializing');
+    expect(library.workspaceConnection.getSnapshot().value).toBe('idle');
+
+    runtime.start();
+    /* Started with the root, and sent `initialize`: the worker is being created. */
+    expect(library.projectManager.getSnapshot().value).not.toBe('initializing');
+    expect(selectRuntimeProjectLibrary(runtime)).toBe(library);
+
+    runtime.stop();
+    expect(library.projectManager.getSnapshot().status).toBe('stopped');
+    expect(library.workspaceConnection.getSnapshot().status).toBe('stopped');
+  });
+
+  it('should take the query client its composition passes', () => {
+    const queryClient = new QueryClient();
+    const runtime = createAppRuntime({ environment: () => undefined, queryClient });
+    expect(selectRuntimeQueryClient(runtime)).toBe(queryClient);
+    expect(selectRuntimeProjectLibrary(runtime).queryClient).toBe(queryClient);
+  });
+
+  /* The remote-host harness mounts no `ProjectManagerProvider`, so an idle runtime starts no project-manager worker. */
+  it('should not start the library of an idle runtime', () => {
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      idleFileManagers: true,
+    }).start();
+    expect(selectRuntimeProjectLibrary(runtime).projectManager.getSnapshot().value).toBe('initializing');
+    runtime.stop();
+  });
+
+  /* A6b: `choices` is attached with its real ports (plan § 4 A6b): the preference store, the runtime's query cache, the
+   * flag store and this tab's loopback admissions. It reads the catalog from the cache and never fetches it. */
+  it('A6b: attaches choices with its real ports, reads the stored preferences and the cached catalog, and follows a change', () => {
+    const queryClient = new QueryClient();
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      idleFileManagers: true,
+      queryClient,
+    });
+    const read = (): Record<string, unknown> | undefined =>
+      (runtime.getSnapshot().context as { choices?: Record<string, unknown> }).choices;
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`, false);
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.cadKernel}`, 'openscad');
+    runtime.start();
+    expect(read()).toMatchObject({
+      testingEnabled: false,
+      defaultKernel: 'openscad',
+      modelCatalog: { status: 'loading' },
+    });
+    // The catalog comes from the cache, so attaching `choices` asks the API for nothing.
+    expect(queryClient.getQueryState(modelsQueryKey)?.fetchStatus ?? 'idle').toBe('idle');
+
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`, true);
+    queryClient.setQueryData(modelsQueryKey, [{ id: 'model-a', default: true }]);
+    expect(read()).toMatchObject({ testingEnabled: true, modelCatalog: { status: 'loaded' } });
+    runtime.stop();
+    preferences.remove(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`);
+    preferences.remove(`${metaConfig.cookiePrefix}${cookieName.cadKernel}`);
   });
 
   it('should keep the first fault and keep answering (D23)', async () => {
@@ -256,6 +350,22 @@ describe('app runtime root totality', () => {
     memoryClassChanged: [
       { type: 'memoryClassChanged', constrained: true },
       { type: 'memoryClassChanged', constrained: false },
+    ],
+    choicesChanged: [
+      {
+        type: 'choicesChanged',
+        choices: {
+          computePlacement: { state: 'local' },
+          computeSelectionRevision: 0,
+          computeReuseMode: 'durable',
+          computeReuseRevision: 0,
+          defaultExecution: { kind: 'tau', model: '' },
+          modelCatalog: { status: 'loading' },
+          modelPinning: false,
+          defaultKernel: 'openscad',
+          testingEnabled: true,
+        },
+      },
     ],
   };
 

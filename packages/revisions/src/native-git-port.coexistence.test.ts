@@ -11,6 +11,7 @@
  * | 6 | a linked checkout answers for its own admin directory |
  * | 7 | staging of one file is carried onto a Tau save of another: `git diff --cached` names only it, and `git commit` records it on top of Tau's head without undoing Tau's save |
  * | 8 | a staged file the Tau save also changed keeps the person's entry, and `git status` shows it staged and modified |
+ * | 9 | a rebase whose todo holds an `exec` or `x` line says it runs commands, a real one and a planted one, even beside a planted `MERGE_HEAD`; a todo without one, or with it only in a comment, is a plain rebase (LP7) |
  *
  * Every row drives stock `git` beside the port on a real repository.
  */
@@ -213,6 +214,52 @@ describe.runIf(gitToolchainOnPath)('native store beside stock Git', () => {
 
     await writeFile(join(path, '.git', 'index.lock'), '');
     expect(await port.gitOperation?.()).toEqual({ kind: 'locked' });
+  });
+
+  it('row 9: says a rebase whose todo holds an exec line runs commands', async () => {
+    const { path, port, mint } = await repository({ 'a.txt': 'base\n' });
+    gitOk(path, ['switch', '-c', 'theirs']);
+    await writeFile(join(path, 'a.txt'), 'theirs\n');
+    gitOk(path, ['commit', '-am', 'Theirs']);
+    gitOk(path, ['switch', 'main']);
+    await writeFile(join(path, 'a.txt'), 'ours\n');
+    await mint({ 'a.txt': 'ours\n' });
+
+    /* Stock Git's own: stopped on the conflict, `exec true` still to run. */
+    expect(git(path, ['rebase', '--exec', 'true', 'theirs']).status).not.toBe(0);
+    expect(await port.gitOperation?.()).toEqual({ kind: 'rebase', runsCommands: true });
+    gitOk(path, ['rebase', '--abort']);
+    expect(await port.gitOperation?.()).toBeUndefined();
+
+    /* Planted whole, as threat probe case 11 plants it. */
+    const head = gitOk(path, ['rev-parse', 'HEAD']);
+    const rebase = join(path, '.git', 'rebase-merge');
+    spawnSync('mkdir', ['-p', rebase]);
+    for (const [name, content] of [
+      ['onto', head],
+      ['orig-head', head],
+      ['head-name', 'refs/heads/main\n'],
+      ['interactive', ''],
+      ['done', ''],
+      ['end', '1\n'],
+      ['msgnum', '0\n'],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- a handful of small files.
+      await writeFile(join(rebase, name), content);
+    }
+    const todo = join(rebase, 'git-rebase-todo');
+    await writeFile(todo, 'exec ./planted.sh\n');
+    expect(await port.gitOperation?.()).toEqual({ kind: 'rebase', runsCommands: true });
+    await writeFile(todo, `pick ${head.trim()} Ours\n  x ./planted.sh\n`);
+    expect(await port.gitOperation?.()).toEqual({ kind: 'rebase', runsCommands: true });
+
+    /* A planted `MERGE_HEAD` would otherwise name a merge and hide the warning. */
+    await writeFile(join(path, '.git', 'MERGE_HEAD'), head);
+    expect(await port.gitOperation?.()).toEqual({ kind: 'rebase', runsCommands: true });
+    await rm(join(path, '.git', 'MERGE_HEAD'));
+
+    await writeFile(todo, `pick ${head.trim()} Ours\n# exec ./planted.sh\n`);
+    expect(await port.gitOperation?.()).toEqual({ kind: 'rebase' });
   });
 
   it('row 7: carries staging of one file onto a Tau save of another', async () => {

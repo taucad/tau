@@ -24,9 +24,10 @@
  *   APIs) — scoped per chatId so a token streaming into chat A never wakes
  *   subscribers bound to chat B.
  *
- * Dependencies (`setDependencies`) are mirrored on every render of the
- * provider so the store always invokes the latest closures from
- * `useProjectManager()`, held in a ref so effect identity does not churn.
+ * Dependencies are given at construction (A2): the app runtime passes the
+ * project library's ports, and the record client and watch through the
+ * library's file facade, which notifies when the root worker is replaced.
+ * `setDependencies` swaps them at once.
  */
 
 import type { Chat } from '@ai-sdk/react';
@@ -669,7 +670,22 @@ const sendRevisionFacts = (ref: ChatSessionActorRef, facts: ChatRevisionFacts): 
  * @public
  */
 export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
-  Readonly<{ chatSession?: typeof chatSessionMachine }>;
+  Readonly<{
+    chatSession?: typeof chatSessionMachine;
+    /**
+     * The closures the store calls, given at construction (A2): the app runtime passes the project library's ports.
+     * Without them the store's defaults throw until `setDependencies`.
+     */
+    dependencies?: Omit<ChatSessionDeps, 'client' | 'watchRecordFile'>;
+    /**
+     * The record client and watch the store reads its records through, which change when the root worker is replaced:
+     * the store takes the current pair now and on each notice, as a `setDependencies` with a new client does.
+     */
+    files?: Readonly<{
+      get: () => Pick<ChatSessionDeps, 'client' | 'watchRecordFile'> | undefined;
+      subscribe: (listener: () => void) => () => void;
+    }>;
+  }>;
 
 /** The revision facts one project's chats show (the project's route reports them). @public */
 export type ChatRevisionFacts = Readonly<{
@@ -868,7 +884,7 @@ export class ChatSessionStore {
    * `getSnapshot` callers always observe the latest membership.
    */
   #membershipNotifyScheduled = false;
-  // Default deps throw — `setDependencies` must be called before any acquire.
+  // Default deps throw until construction or `setDependencies` supplies them.
   // Stored as a single object so swaps are atomic (no torn reads).
   #deps: ChatSessionDeps = {
     async getChat() {
@@ -897,7 +913,17 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const { chatSession, ...rootOptions } = options;
+    const { chatSession, dependencies, files, ...rootOptions } = options;
+    if (dependencies !== undefined) {
+      this.#deps = { ...this.#deps, ...dependencies };
+    }
+    if (files !== undefined) {
+      const current = (): Partial<Pick<ChatSessionDeps, 'client' | 'watchRecordFile'>> => files.get() ?? {};
+      this.#deps = { ...this.#deps, ...current() };
+      files.subscribe(() => {
+        this.setDependencies({ ...this.#deps, ...current() });
+      });
+    }
     /* One admission per chat; the project-scoped connector owns log attachment. */
     this.#chatSessionLogic =
       chatSession ??
@@ -2096,12 +2122,12 @@ export class ChatSessionStore {
    * receipt names. A legacy unread mark is a receipt that matches no row. Until this page has read the chat's log,
    * the legacy mark alone answers (D9).
    *
-   * @param chatId - A chat with a live session.
+   * @param chatId - A chat with a live session or an observed sidebar row.
    * @returns Whether the chat has something the person has not seen.
    * @public
    */
   public isUnread(chatId: string): boolean {
-    const projectId = this.#sessions.get(chatId)?.projectId;
+    const projectId = this.#chatProjectId(chatId);
     const record = projectId === undefined ? undefined : this.#unreadRecords.get(projectId);
     if (record === undefined) {
       return false;
@@ -2120,12 +2146,12 @@ export class ChatSessionStore {
    * on a log with no attention row no longer makes the chat unread, but the mark stays in the record, and the next page
    * answers from it until that page has read the log. `markViewed` clears it.
    *
-   * @param chatId - A chat with a live session.
+   * @param chatId - A chat with a live session or an observed sidebar row.
    * @returns Whether a loaded record marks the chat.
    * @public
    */
   public hasUnreadMark(chatId: string): boolean {
-    const projectId = this.#sessions.get(chatId)?.projectId;
+    const projectId = this.#chatProjectId(chatId);
     return projectId !== undefined && this.#unreadRecords.get(projectId)?.legacy.has(chatId) === true;
   }
 
@@ -3917,6 +3943,14 @@ export class ChatSessionStore {
       runId,
       ...(phase === 'failed' && reason !== undefined ? { reason } : {}),
     });
+  }
+
+  /**
+   * The project a chat belongs to on this page: its session's, or, for a chat a sidebar row only observes (D-UI-06),
+   * its observation's. Unread is answered for both, so a row is never read through a session it does not hold.
+   */
+  #chatProjectId(chatId: string): string | undefined {
+    return this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
   }
 
   /** The chat's newest attention row, once this page holds its whole log; `undefined` while it is unknown. */

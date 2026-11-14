@@ -2122,12 +2122,12 @@ export class ChatSessionStore {
    * receipt names. A legacy unread mark is a receipt that matches no row. Until this page has read the chat's log,
    * the legacy mark alone answers (D9).
    *
-   * @param chatId - A chat with a live session.
+   * @param chatId - A chat with a live session or an observed sidebar row.
    * @returns Whether the chat has something the person has not seen.
    * @public
    */
   public isUnread(chatId: string): boolean {
-    const projectId = this.#sessions.get(chatId)?.projectId;
+    const projectId = this.#chatProjectId(chatId);
     const record = projectId === undefined ? undefined : this.#unreadRecords.get(projectId);
     if (record === undefined) {
       return false;
@@ -2146,12 +2146,12 @@ export class ChatSessionStore {
    * on a log with no attention row no longer makes the chat unread, but the mark stays in the record, and the next page
    * answers from it until that page has read the log. `markViewed` clears it.
    *
-   * @param chatId - A chat with a live session.
+   * @param chatId - A chat with a live session or an observed sidebar row.
    * @returns Whether a loaded record marks the chat.
    * @public
    */
   public hasUnreadMark(chatId: string): boolean {
-    const projectId = this.#sessions.get(chatId)?.projectId;
+    const projectId = this.#chatProjectId(chatId);
     return projectId !== undefined && this.#unreadRecords.get(projectId)?.legacy.has(chatId) === true;
   }
 
@@ -3943,6 +3943,14 @@ export class ChatSessionStore {
       runId,
       ...(phase === 'failed' && reason !== undefined ? { reason } : {}),
     });
+  }
+
+  /**
+   * The project a chat belongs to on this page: its session's, or, for a chat a sidebar row only observes (D-UI-06),
+   * its observation's. Unread is answered for both, so a row is never read through a session it does not hold.
+   */
+  #chatProjectId(chatId: string): string | undefined {
+    return this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
   }
 
   /** The chat's newest attention row, once this page holds its whole log; `undefined` while it is unknown. */

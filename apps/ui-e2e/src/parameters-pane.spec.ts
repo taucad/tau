@@ -75,7 +75,7 @@ type HeaderVisualState = {
 
 type SurfaceVisualState = {
   readonly bodyBackground: string;
-  readonly bodyToPaneBottomGap: number;
+  readonly bodyToNextUnitGap: number;
   readonly bottomRadius: number;
   readonly catalogBottomPadding: number;
   readonly catalogInlinePadding: number;
@@ -129,13 +129,20 @@ const readSurfaceVisualState = async (header: Locator): Promise<SurfaceVisualSta
     const headerRoot = element.closest<HTMLElement>('[data-slot="paneview-header"]');
     const pane = element.closest<HTMLElement>('.dv-pane');
     const body = pane?.querySelector<HTMLElement>('[data-slot="parameters"]');
-    const paneBody = body?.closest<HTMLElement>('.dv-pane-body');
+    /* The unit gap is the next header's top margin, or the collection's bottom padding under the last unit, rather
+     * than padding inside each pane body (`paneviewAttachedSurfaceStyleOverrides`). */
+    const collection = pane?.closest<HTMLElement>('[class~="pb-(--pane-unit-gap)"]');
+    const nextUnitEdge = (unitHeader: HTMLElement, root: HTMLElement): number => {
+      const headers = [...root.querySelectorAll<HTMLElement>('[data-slot="paneview-header"]')];
+      const nextHeader = headers[headers.indexOf(unitHeader) + 1];
+      return nextHeader ? nextHeader.getBoundingClientRect().top : root.getBoundingClientRect().bottom;
+    };
     const panel = document.querySelector<HTMLElement>('[data-slot="parameters-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="parameters-filter"]');
     const filter = document.querySelector<HTMLInputElement>('[aria-label="Filter parameters"]');
     const catalog = body?.querySelector<HTMLElement>('[data-slot="parameter-catalog"]');
     const scroller = body?.querySelector<HTMLElement>('form');
-    if (!headerRoot || !body || !paneBody || !panel || !toolbar || !filter || !catalog || !scroller) {
+    if (!headerRoot || !body || !collection || !panel || !toolbar || !filter || !catalog || !scroller) {
       throw new Error('Parameters attached surface was incomplete.');
     }
 
@@ -147,7 +154,7 @@ const readSurfaceVisualState = async (header: Locator): Promise<SurfaceVisualSta
     const scrollerStyle = getComputedStyle(scroller);
     return {
       bodyBackground: getComputedStyle(body).backgroundColor,
-      bodyToPaneBottomGap: paneBody.getBoundingClientRect().bottom - bodyBounds.bottom,
+      bodyToNextUnitGap: nextUnitEdge(headerRoot, collection) - bodyBounds.bottom,
       bottomRadius: Number.parseFloat(getComputedStyle(body).borderBottomLeftRadius),
       catalogBottomPadding: Number.parseFloat(catalogStyle.paddingBottom),
       catalogInlinePadding: Number.parseFloat(catalogStyle.paddingLeft),
@@ -716,7 +723,7 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
   const lightSurface = await readSurfaceVisualState(main);
   expect(lightSurface.seamDelta).toBeLessThanOrEqual(1);
   expect(lightSurface.horizontalEdgeDelta).toBeLessThanOrEqual(1);
-  expect(lightSurface.bodyToPaneBottomGap).toBeCloseTo(8, 0);
+  expect(lightSurface.bodyToNextUnitGap).toBeCloseTo(8, 0);
   expect(lightSurface.bottomRadius).toBeGreaterThan(0);
   expect(lightSurface.catalogBottomPadding).toBe(8);
   expect(lightSurface.catalogInlinePadding).toBe(8);

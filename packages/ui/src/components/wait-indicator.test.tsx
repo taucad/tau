@@ -3,7 +3,7 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { WaitIndicator } from '#components/wait-indicator.js';
-import { WaitClockProvider } from '#hooks/use-wait-clock.js';
+import { WaitClockProvider, useWaitClockSource } from '#hooks/use-wait-clock.js';
 import type { WaitIndicatorProps } from '#components/wait-indicator.js';
 
 /** A clock that only moves when the test moves it. */
@@ -262,5 +262,26 @@ describe('WaitIndicator', () => {
 
     expect(slot()).toHaveTextContent('Downloading model…');
     expect(slot()).not.toHaveTextContent('%');
+  });
+});
+
+describe('useWaitClockSource', () => {
+  it('reads the provided clock, and the performance timeline without one', () => {
+    const clock = createTestClock(4200);
+    function Reader(): React.JSX.Element {
+      return <span data-testid='now'>{useWaitClockSource().now()}</span>;
+    }
+    const view = render(
+      <WaitClockProvider clock={clock}>
+        <Reader />
+      </WaitClockProvider>,
+    );
+    expect(screen.getByTestId('now')).toHaveTextContent('4200');
+    view.unmount();
+
+    const now = vi.spyOn(performance, 'now').mockReturnValue(17);
+    render(<Reader />);
+    expect(screen.getByTestId('now')).toHaveTextContent('17');
+    now.mockRestore();
   });
 });

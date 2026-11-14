@@ -9,18 +9,43 @@
       "dependsOn": ["^build"]
     },
     "test:e2e": {
-      "executor": "nx:run-commands",
+      "executor": "nx:noop",
+      "dependsOn": ["test:e2e:svg-viewer", "test:e2e:gltf-batches", "test:e2e:viewer-resize"],
       "metadata": {
-        "description": "Chromium suites for the viewer's SVG presentation, glTF batch pixels, section clipping and resize continuation. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
+        "description": "Chromium suites for the viewer's SVG presentation, glTF batch pixels, section clipping and resize continuation. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
+      }
+    },
+    "test:e2e:svg-viewer": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "The SVG viewer's Chromium suite (svg-viewer.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
         "cwd": "{projectRoot}",
-        "commands": [
-          "../../node_modules/.bin/vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
-        ],
-        "parallel": false
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:gltf-batches": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "The glTF batch pixel suite (gltf-batches.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:viewer-resize": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "The Three.js node frame, post-processing, section clipping and resize continuation suite (viewer-resize.vitest.browser.config.ts) under TAU_E2E_WEBGPU_PROFILE. One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
       }
     },
     "capture:viewer-parity": {

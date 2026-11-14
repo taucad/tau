@@ -375,6 +375,13 @@ describe('section cut defaults', () => {
       false,
     ]);
     expect(resolveSectionPlaneFlip(name, undefined)).toBe(false);
+    // A camera level with the plane up to rounding, as an overhead pose, is level.
+    expect([-1e-6, -1e-17, 1e-6].map((component) => resolveSectionPlaneFlip(name, along(component)))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(resolveSectionPlaneFlip(name, along(-1e-3))).toBe(true);
     // Either way, the side facing the camera is the side removed.
     for (const viewDirection of [along(-1), along(1)]) {
       const cut: SectionCut = {

@@ -562,6 +562,12 @@ describe('projectRun with the content grant (LW6)', () => {
     expect(JSON.stringify(outcome)).not.toContain(revision);
   });
 
+  it('names the kernel the run targeted on its outcome (LW17)', async () => {
+    const outcome = outcomeOf(await projectRun({ ...contentRun(), kernel: 'replicad' }, context({ host: 'browser' })))!;
+
+    expect(outcome.payload).toMatchObject({ plane: 'summary', fact: { turn: { kernel: 'replicad' } } });
+  });
+
   it('writes a tool’s arguments in and its result out, and nothing of either without the grant', async () => {
     const granted_ = await projectRun(contentRun(), granted());
     const [edit] = granted_.evidence;

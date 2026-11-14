@@ -202,8 +202,14 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
               chatId: next.chatId,
               ...(next.requestedChatId === undefined ? {} : { requestedChatId: next.requestedChatId }),
             });
-            /* Focus now holds this chat as the one the session was given, so a later request for it is no change. */
+            /* Focus now holds this chat as the one the session was given, and the route names it: the editor is asked
+             * for it too, as the provider's effect asked it for the route's chat before A6d, so its next focus change
+             * is a resolution of the chat the session was given. It already shows it, so nothing is ensured. */
             chat = { ...chat, chatId: next.chatId };
+            if (next.requestedChatId !== next.chatId) {
+              focused = { requestedChatId: next.chatId, chatId: next.chatId };
+              runtime.requestChat(chat);
+            }
           }
         }
       };
@@ -264,6 +270,10 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
             previous.runtime.close();
           }
           observe(runtime);
+          /* The choices may have moved on again while this one was built. */
+          if (!runtime.kernelIsCurrent()) {
+            build();
+          }
         };
         // async-iife: bootstrap -- `createCallbackLogic` is synchronous; the build settles through `sendBack`.
         void settle();
@@ -296,7 +306,13 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
             return;
           }
           chat = { chatId: requested.chatId, createdChatId: requested.createdChatId };
-          current?.runtime.requestChat(chat);
+          if (current !== undefined) {
+            current.runtime.requestChat(chat);
+            /* Each new request is answered with the chat the editor then shows, even one it already showed, as the
+             * provider's effect re-ran on its request before A6d: a route that names no chat gets one back (I2). */
+            focused = undefined;
+            observe(current.runtime);
+          }
         }
       });
 

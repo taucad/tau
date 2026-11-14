@@ -379,25 +379,128 @@
       }
     },
     "test:e2e": {
-      "executor": "nx:run-commands",
+      "executor": "nx:noop",
+      "dependsOn": [
+        "test:e2e:chat-viewer",
+        "test:e2e:agent-host",
+        "test:e2e:editor-layout",
+        "test:e2e:chat-message-queue",
+        "test:e2e:viewer-resize",
+        "test:e2e:chat-print",
+        "test:e2e:follow-latest-output",
+        "test:e2e:terminal-renderer",
+        "test:e2e:history-lanes"
+      ],
       "metadata": {
-        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
-      },
+        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
+      }
+    },
+    "test:e2e:chat-viewer": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
       "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The CAD viewer's real Dockview header and viewer bar suite (chat-viewer.vitest.browser.config.ts). One task of test:e2e."
+      },
       "options": {
         "cwd": "{projectRoot}",
-        "commands": [
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
-        ],
-        "parallel": false
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:agent-host": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The agent host worker suite for capabilities, recovery and channel diagnostics (agent-host.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:editor-layout": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The editor layout suite (editor-layout.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:chat-message-queue": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The chat message queue suite (chat-message-queue.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:viewer-resize": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The SVG and GPU viewer resize suite (viewer-resize.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:chat-print": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The chat print suite (chat-print.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:follow-latest-output": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The follow-latest-output suite (use-follow-latest-output.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:terminal-renderer": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The terminal renderer suite (terminal-renderer.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:history-lanes": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "History's lanes suite (history-lanes.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
       }
     },
     "sourcemaps": {

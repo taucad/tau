@@ -5,7 +5,10 @@ import { page, userEvent } from 'vitest/browser';
 import type { AcpActivityData } from '@taucad/chat';
 import { ChatAcpActivity } from '#components/chat/chat-acp-activity.js';
 
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
+vi.mock('#flags/use-feature.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useFeature: () => false,
+}));
 
 const data: AcpActivityData = { type: 'acp-activity', id: 'turn-observations', agentId: 'grok' };
 const evidence = '../../../../../out/research/grok-acp-parity';

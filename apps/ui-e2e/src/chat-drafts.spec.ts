@@ -110,6 +110,9 @@ test('restores an open message edit after a reload', async () => {
   await target.click(bubble);
   await target.expectVisible(editComposer);
   const revision = ' Revised before the reload.';
+  /* The edit composer opens with the caret at the start (5e74b24f48, #590), so typing there would prepend the
+   * revision and the restored bubble would read ` Revised before the reload.Original message…`. */
+  await target.press(editComposer, 'ControlOrMeta+End');
   await target.type(editComposer, revision);
 
   await expect

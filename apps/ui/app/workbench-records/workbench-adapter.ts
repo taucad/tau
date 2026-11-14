@@ -398,16 +398,12 @@ function runWorkbenchAdapter(
     editor.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || readOnly });
   };
   let attached = false;
-  let stopped = false;
-  const attachOnce = (): void => {
-    if (!attached && !stopped) {
-      attached = true;
-      attach();
-    }
-  };
   receive((event) => {
     if (event.type === 'attach') {
-      attachOnce();
+      if (!attached) {
+        attached = true;
+        attach();
+      }
       return;
     }
     if (event.type === 'dropped') {
@@ -572,13 +568,7 @@ function runWorkbenchAdapter(
     );
   }
 
-  // A host that had not started at the hand-over (a runtime replaced under a mounted Dockview, started by a passive
-  // effect) spawns the adapter only when it starts, and the Dockview found no adapter to attach. Its synchronous start
-  // is over by the next microtask, so the layout is idle there and the attach keeps the hand-over's order.
-  queueMicrotask(attachOnce);
-
   return () => {
-    stopped = true;
     for (const dispose of disposers.toReversed()) {
       dispose();
     }

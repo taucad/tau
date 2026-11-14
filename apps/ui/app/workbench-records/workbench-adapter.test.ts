@@ -204,11 +204,7 @@ function scriptedDock() {
 }
 
 /** A ready layout over `record`, its shim, and a Dockview that hands its adapter to the layout. */
-function hosted(
-  record: WorkbenchLayout,
-  open: readonly string[],
-  options: Readonly<{ opensAtOnce?: boolean; startsLater?: boolean }> = {},
-) {
+function hosted(record: WorkbenchLayout, open: readonly string[], options: Readonly<{ opensAtOnce?: boolean }> = {}) {
   let publish: ((event: WorkbenchLayoutEvent) => void) | undefined;
   const layoutRecord = createCallbackLogic<LayoutRecordCommand>(({ sendBack }) => {
     publish = sendBack;
@@ -217,24 +213,18 @@ function hosted(
   const layout = createActor(workbenchLayoutMachine.provide({ actors: { layoutRecord } }), {
     input: { device: 'desktop', adapters: ['workbench'], routeKey: 'route-1', workbenchOpen: true },
   });
+  layout.start();
   stops.add(() => {
     layout.stop();
   });
-  /** The runtime starts its layout (a lease's first retain), and the record is read. */
-  const startHost = (): void => {
-    layout.start();
-    publish!({
-      type: 'recordPublished',
-      layout: record,
-      digest: 'sha256:1',
-      origin: 'foreign',
-      refusal: undefined,
-      owed: false,
-    });
-  };
-  if (!options.startsLater) {
-    startHost();
-  }
+  publish!({
+    type: 'recordPublished',
+    layout: record,
+    digest: 'sha256:1',
+    origin: 'foreign',
+    refusal: undefined,
+    owed: false,
+  });
   const editor = scriptedEditor(open, options);
   const host = { facts: () => ({ routeKey: 'route-1', device: 'desktop' }) } as unknown as ProjectLayoutHost;
   const shim = createWorkbenchLayoutControllerShim({
@@ -261,16 +251,7 @@ function hosted(
     layout.send({ type: 'dockReady', adapter: 'workbench', dockId: 'dock-1', api: dock.api, ports });
     selectDockAdapter(layout, 'dock-1')?.send({ type: 'attach' });
   };
-  return {
-    layout,
-    editor,
-    dock,
-    mountDock,
-    startHost,
-    publish: (event: WorkbenchLayoutEvent) => {
-      publish!(event);
-    },
-  };
+  return { layout, editor, dock, mountDock, publish: publish! };
 }
 
 describe('workbench adapter hosted by the layout (A8c)', () => {
@@ -310,20 +291,6 @@ describe('workbench adapter hosted by the layout (A8c)', () => {
     expect(editor.sent.filter((event) => event.type === 'closeFile')).toEqual([]);
     expect(editor.openPaths()).toEqual(['a.ts', 'x.ts']);
     expect(dock.paths()).toEqual(expect.arrayContaining(['a.ts', 'x.ts']));
-  });
-
-  // D21 round 3: a runtime replaced under a mounted Dockview (a lease renewed after its grace) is started by a passive
-  // effect, after the Dockview's ref callback handed its adapter over: the host spawns the adapter only when it starts,
-  // so the hand-over found no adapter to attach. The adapter attaches itself once the step that spawned it is over.
-  it('should attach an adapter its host spawned only when it started after the hand-over', async () => {
-    const { editor, dock, mountDock, startHost } = hosted(recordOf('a.ts'), ['a.ts', 'x.ts'], { startsLater: true });
-    mountDock();
-
-    startHost();
-    await Promise.resolve();
-
-    expect(editor.sent.filter((event) => event.type === 'closeFile')).toEqual([]);
-    expect(dock.paths()).toEqual(['a.ts', 'x.ts']);
   });
 
   // D21 round 1, A2: a held apply that lands inside the editor's own step drops a panel whose `closeFile` the editor

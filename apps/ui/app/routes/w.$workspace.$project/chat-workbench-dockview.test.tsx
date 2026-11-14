@@ -1670,6 +1670,79 @@ describe('workbench adapter record apply (A0.3)', () => {
     }
   });
 
+  // D21 round 3: a runtime replaced under a mounted Dockview (a lease renewed after its grace) is started by its
+  // provider's passive effect, after the Dockview's commit. Handed over in that commit, the adapter was spawned only
+  // when its host started, and nothing attached it: the Dockview hands over to a host only once that host has started.
+  it('should attach the workbench adapter to a runtime that starts after the commit that replaced it', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      workspaceLayout.value = undefined;
+    });
+    /* A layout that queues what it is sent until it starts, as an unstarted actor does, and spawns an adapter on
+     * `dockReady`. */
+    const runtimeLayout = () => {
+      let started = false;
+      const queued: Array<{ type: string; dockId?: string }> = [];
+      const children = new Map<string, { send: (event: { type: string }) => void }>();
+      const attached = vi.fn();
+      const handle = (event: { type: string; dockId?: string }): void => {
+        const id = dockAdapterId('workbench', event.dockId ?? '');
+        if (event.type === 'dockReady') {
+          children.set(id, { send: attached });
+        } else if (event.type === 'dockReleased') {
+          children.delete(id);
+        }
+      };
+      return {
+        send: (event: { type: string; dockId?: string }) => {
+          if (started) {
+            handle(event);
+          } else {
+            queued.push(event);
+          }
+        },
+        getSnapshot: () => ({ children: Object.fromEntries(children) }),
+        start: () => {
+          started = true;
+          for (const event of queued.splice(0)) {
+            handle(event);
+          }
+        },
+        attached,
+      };
+    };
+    /* The project provider: its runtime starts in its passive effect, after its children's. */
+    function Runtime({ layout }: { readonly layout: ReturnType<typeof runtimeLayout> }) {
+      useEffect(() => {
+        layout.start();
+      }, [layout]);
+      // The workspace context re-renders the Dockview with the new runtime; the mocked hook needs a new prop for it.
+      return <WorkbenchDockview onApiChange={() => layout} />;
+    }
+    const first = runtimeLayout();
+    workspaceLayout.value = first;
+    const view = render(<Runtime layout={first} />);
+    expect(first.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+
+    const second = runtimeLayout();
+    workspaceLayout.value = second;
+    view.rerender(<Runtime layout={second} />);
+
+    expect(second.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+    view.unmount();
+  });
+
   // A8b review: a record apply waits for its files to open, and the layout holds every pane intent until the apply
   // lands. A file that fails to open (deleted since) would hold them forever: the apply lands without its tab.
   it('should land a held record apply without the tab of a file that failed to open', () => {

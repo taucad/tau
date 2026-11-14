@@ -31,6 +31,7 @@ import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import {
   createViewerAdapterFactsPort,
   createViewerAdapterLogic,
+  ensureViewerGroup,
   isViewerPanelParameters,
   selectViewerDockAdapter,
 } from '#workbench-records/viewer-adapter.js';
@@ -418,6 +419,50 @@ describe('viewer adapter (A8d)', () => {
     });
     expect(api.panels).toHaveLength(0);
     expect(api.groups).toHaveLength(1);
+  });
+
+  // A8d review round 5: an apply clears and rebuilds the dock's groups; the group the empty dock gets back must be one
+  // the grid shows, so closing the last viewer after an apply leaves the empty state on screen.
+  it('should show the empty state once the last viewer an apply placed is closed', async () => {
+    const harness = mountLayout('desktop');
+    let seeded: DockviewApi | undefined;
+    const rendered = render(
+      <DockviewReact
+        watermarkComponent={() => <div data-testid='viewer-empty'>Empty</div>}
+        components={{ viewer: () => <div>Model</div> }}
+        onReady={(event) => {
+          seeded = event.api;
+          ensureViewerGroup(event.api);
+        }}
+      />,
+    );
+    stops.push(() => {
+      rendered.unmount();
+    });
+    const api = seeded!;
+    api.layout(900, 600);
+    const project = mountProject();
+    const facts = createViewerAdapterFactsPort(baseFacts());
+    await act(async () => {
+      harness.layout.send({
+        type: 'dockReady',
+        adapter: 'viewer',
+        dockId: 'dock-1',
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
+      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({ type: 'attach' });
+      harness.publish(group('front'));
+    });
+    expect(viewIds(api)).toEqual(['front']);
+    await act(async () => {
+      api.getPanel('front')!.api.close();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
+    expect(api.groups.filter((shown) => shown.element.isConnected)).toHaveLength(1);
+    expect(rendered.getAllByTestId('viewer-empty').filter((node) => node.isConnected)).toHaveLength(1);
   });
 
   it('should open a requested file at once on a page without a layout', async () => {

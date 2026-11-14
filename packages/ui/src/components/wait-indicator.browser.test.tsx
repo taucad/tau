@@ -177,20 +177,26 @@ async function effectTime(name: string): Promise<number> {
   return Number(animation!.startTime) + Math.max(startDelay, 0);
 }
 
-it.fails('should hold a shown indicator 500 ms from its reveal when its content arrives at the end of a long task', async () => {
-  const startedAt = performance.now() - 1100;
-  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
-  await nextFrame();
-  await nextFrame();
-  const revealedAt = await effectTime('wait-reveal');
+it.fails('should count a hold from the timeline its animation runs on when a long task ran the clock ahead of it', () => {
+  /* Shown since 1,100 ms. Content arrives at the end of a 300 ms long task: the performance clock reads 1,400 ms, the
+     document timeline that the hold's animation starts on still reads 1,100 ms. */
+  const before = { now: () => 1100, animationNow: () => 1100 };
+  const after = { now: () => 1400, animationNow: () => 1100 };
+  const view = render(
+    <WaitClockProvider clock={before}>
+      <WaitIndicator active label='Loading chat' startedAt={0} />
+    </WaitClockProvider>,
+  );
+  view.rerender(
+    <WaitClockProvider clock={after}>
+      <WaitIndicator active={false} label='Loading chat' startedAt={0} />
+    </WaitClockProvider>,
+  );
 
-  await act(async () => {
-    holdMainThread(300);
-    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
-  });
-  await nextFrame();
-
-  expect((await effectTime('wait-conceal')) - revealedAt).toBeGreaterThanOrEqual(499);
+  seek(499);
+  expect(isShown(find('wait-indicator-body'))).toBe(true);
+  seek(501);
+  expect(isShown(find('wait-indicator-body'))).toBe(false);
 });
 
 it.fails('should hold an indicator that a long task revealed late 500 ms from the frame it showed in', async () => {

@@ -769,24 +769,24 @@ const resizeChatLane = async (dx: number): Promise<void> => {
 };
 
 /** The lanes' boxes on the settled page, as the recorder keeps them. */
-const readLanesNow = async (): Promise<ProjectLoadBox[]> =>
-  target
-    .evaluate(
-      (selector) =>
-        [...document.querySelectorAll(selector)]
-          .filter((node) => node.checkVisibility())
-          .map((node) => node.getBoundingClientRect())
-          .filter((rect) => rect.width > 0 && rect.height > 0)
-          .map((rect) => ({
-            x: Math.round(rect.x),
-            y: Math.round(rect.y),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-          }))
-          .toSorted((left, right) => left.x - right.x || left.y - right.y),
-      workspaceLanes.lanes,
-    )
-    .then(uniqueLanes);
+const readLanesNow = async (): Promise<ProjectLoadBox[]> => {
+  const boxes = await target.evaluate(
+    (selector) =>
+      [...document.querySelectorAll(selector)]
+        .filter((node) => node.checkVisibility())
+        .map((node) => node.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map((rect) => ({
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        }))
+        .toSorted((left, right) => left.x - right.x || left.y - right.y),
+    workspaceLanes.lanes,
+  );
+  return uniqueLanes(boxes);
+};
 
 /**
  * One box per lane: A15b's frame lanes stay under the split view's panes at the same boxes, so a box drawn twice within

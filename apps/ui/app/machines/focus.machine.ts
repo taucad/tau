@@ -200,7 +200,8 @@ export type FocusEvent =
       chatReady: boolean;
       availability: FocusAvailability;
     }>
-  | Readonly<{ type: 'focusedChatResolved'; projectId: string; chatId: string }>
+  /** The session resolved its focused chat for `requestedChatId`, the chat it was given (none when it was given none). */
+  | Readonly<{ type: 'focusedChatResolved'; projectId: string; requestedChatId?: string; chatId: string }>
   | Readonly<{ type: 'openRequested'; projectId: string }>
   | Readonly<{ type: 'retry' }>
   | Readonly<{ type: 'windowFocused' }>;
@@ -420,7 +421,7 @@ const focusEventSchemas = {
     chatReady: z.boolean(),
     availability: z.enum(['pending', 'settled']),
   }),
-  focusedChatResolved: z.object({ projectId: z.string(), chatId: z.string() }),
+  focusedChatResolved: z.object({ projectId: z.string(), requestedChatId: z.string().optional(), chatId: z.string() }),
   openRequested: z.object({ projectId: z.string() }),
   retry: z.object({}),
   windowFocused: z.object({}),
@@ -1007,9 +1008,14 @@ export const createFocusMachine = (policy: FocusPolicy) => {
       return result(value, patch, advance(patch, stateOf(value), effects));
     }
     const kernel = policy.nativeKernelOf(event.answer.project);
+    /* The chat comes from the route's request for the project focus is on, otherwise from the request focus last
+     * kept for it (plan § 4 A5a; rule 13). */
+    const chat = context.request?.projectId === projectId ? context.request : context.kept[projectId];
     const request: FocusOpenRequest = {
       workspace: slugs.workspaceSlug,
       ...(kernel === undefined ? {} : { nativeKernelId: kernel.runtimeKernelId }),
+      ...(chat?.chatId === undefined ? {} : { chatId: chat.chatId }),
+      ...(chat?.createdChatId === undefined ? {} : { createdChatId: chat.createdChatId }),
       epoch: event.epoch,
     };
     const next = personOpen({ context: patch, state: stateOf(value), effects }, projectId, request);
@@ -1391,6 +1397,10 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           }
           const kept = context.kept[event.projectId];
           const given = context.forwarded[event.projectId];
+          if (event.requestedChatId !== given?.chatId) {
+            // I18: a resolution of a chat the session was given before the route switched away from it.
+            return {};
+          }
           enq.sendTo(context.ports.route, {
             type: 'chatShown',
             projectId: event.projectId,

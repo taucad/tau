@@ -225,7 +225,7 @@ vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudP
 vi.mock('#hooks/use-file-manager.js', () => ({
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   /* This subtree *is* the project's resources: mounted means they exist. */
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  SessionFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     useEffect(() => {
       mounted.push(`mount:${projectId}`);
       return () => {

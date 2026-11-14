@@ -2,7 +2,7 @@ import { observeHomeProjectSaves } from '#filesystem/observe-home-project-saves.
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
-import type { FileSystemBridgeRootedProxy, FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
 import {
   createContext,
@@ -14,6 +14,7 @@ import {
   useLayoutEffect,
   useReducer,
   useRef,
+  useSyncExternalStore,
 } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
@@ -29,8 +30,9 @@ import type {
   ScopedStorageClient,
 } from '@taucad/fs-client/file-system-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { createRootedContentClient, rootedPathOf } from '@taucad/fs-client/rooted-content-client';
-import type { RootedContentClient, RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
+import { rootedPathOf } from '@taucad/fs-client/rooted-content-client';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
+import { recordConnectionsOf } from '#runtime/file-manager-record-connections.js';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import { watchByChangeSets } from '@taucad/filesystem';
 import type { MountConfig, WorkspaceMutationError, WorkspaceScope, WatchEvent } from '@taucad/filesystem';
@@ -52,6 +54,8 @@ import type { FileManagerActor, FileManagerSpec } from '#runtime/file-manager-ho
 import { awaitFileManager } from '#runtime/file-manager-host.wait.js';
 import type { FileManagerSnapshot } from '#runtime/file-manager-host.wait.js';
 import type { LeaseEntry } from '#runtime/leases.js';
+import { sessionFileManagerOf } from '#runtime/session-file-manager.js';
+import type { FileManagerOwner } from '#runtime/session-file-manager.js';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -62,86 +66,6 @@ import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import { ENV } from '#environment.config.js';
-
-type RecordBridgeOpener = (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
-
-type RecordConnections = Readonly<{
-  /** The owner for this opener: the current one, or a fresh one once a known opener was replaced. */
-  ownerFor: (opener: RecordBridgeOpener | undefined) => RootedContentOwner<RootedBridgeConsumer>;
-  /** Commit `owner` as the one in use, and release the one it replaced. */
-  install: (owner: RootedContentOwner<RootedBridgeConsumer>) => void;
-  /** Release the owner in use: the file manager's lease ended. */
-  dispose: () => void;
-}>;
-
-function recordConnectionsForIncarnation(
-  fallback: RecordBridgeOpener,
-  ready: () => Promise<unknown>,
-): RecordConnections {
-  let owner: RootedContentOwner<RootedBridgeConsumer> | undefined;
-  let previous: RecordBridgeOpener | undefined;
-  let installed: RootedContentOwner<RootedBridgeConsumer> | undefined;
-  const ownerFor = (opener: RecordBridgeOpener | undefined): RootedContentOwner<RootedBridgeConsumer> => {
-    if (!owner || (previous !== undefined && opener !== previous)) {
-      owner = createRootedContentClient({
-        open: async (root, consumer: RootedBridgeConsumer) => {
-          await ready();
-          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-          const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
-          try {
-            await proxy.ready;
-          } catch (error) {
-            // A failed handshake must not become this root's cached connection.
-            proxy.dispose();
-            throw error;
-          }
-          return {
-            files: proxy,
-            dispose: () => {
-              proxy.dispose();
-            },
-          };
-        },
-      });
-    }
-    previous = opener;
-    return owner;
-  };
-  return {
-    ownerFor,
-    install: (current) => {
-      if (installed !== undefined && installed !== current) {
-        installed.dispose();
-      }
-      installed = current;
-    },
-    dispose: () => {
-      installed?.dispose();
-      installed = undefined;
-    },
-  };
-}
-
-/*
- * One record-connection owner per file manager (charter D6, D12, W6). It outlives a remount of its scope, as the file
- * manager does, so a remount never opens a second set; a replaced owner is released when its successor is installed,
- * and the last one when the file manager's lease ends. This replaces the mount count and its microtask dispose.
- */
-const recordConnections = new WeakMap<FileManagerRef, RecordConnections>();
-
-function recordConnectionsOf(
-  fileManagerRef: FileManagerRef,
-  fallback: RecordBridgeOpener,
-  ready: () => Promise<unknown>,
-): RecordConnections {
-  const known = recordConnections.get(fileManagerRef);
-  if (known !== undefined) {
-    return known;
-  }
-  const connections = recordConnectionsForIncarnation(fallback, ready);
-  recordConnections.set(fileManagerRef, connections);
-  return connections;
-}
 
 function assertNotErrorState(snapshot: FileManagerSnapshot): void {
   if (snapshot.matches('error')) {
@@ -783,7 +707,47 @@ export function HomeFileManagerProvider({
       fileManagerRef={lease.actor}
       rootDirectory={rootDirectory}
       projectId={projectId}
-      lease={lease}
+      owner={lease}
+    >
+      {children}
+    </FileManagerScope>
+  );
+}
+
+/**
+ * A project session's file manager: a provider over the actor the session's `fileManager` child built through the
+ * host for `/projects/<id>` (A6c). It creates, starts and stops nothing: the child owns the actor, its connections and
+ * its working-copy client, and the session stops the child when it closes (I1, I23). Until the child reports an
+ * actor (once `rootFiles` holds the shared worker), and while it rebuilds one on a new worker, the provider renders
+ * nothing.
+ *
+ * @param props - The session's file manager, its root and project, and the subtree.
+ * @returns The provider element, or nothing before the session has a file manager.
+ * @public
+ */
+export function SessionFileManagerProvider({
+  children,
+  fileManagerRef,
+  rootDirectory,
+  projectId,
+}: {
+  readonly children: ReactNode;
+  /** The session's file manager (`selectProjectSessionFileManager`). */
+  readonly fileManagerRef: FileManagerRef | undefined;
+  readonly rootDirectory: string;
+  readonly projectId: string;
+}): React.ReactNode {
+  if (fileManagerRef === undefined) {
+    return null;
+  }
+  const opened = sessionFileManagerOf(fileManagerRef);
+  return (
+    <FileManagerScope
+      key={opened?.key}
+      fileManagerRef={fileManagerRef}
+      rootDirectory={rootDirectory}
+      projectId={projectId}
+      owner={opened?.owner}
     >
       {children}
     </FileManagerScope>
@@ -810,12 +774,16 @@ export function FileManagerProvider({
       fileManagerRef={lease.actor}
       rootDirectory={rootDirectory}
       projectId={projectId}
-      lease={lease}
+      owner={lease}
     >
       {children}
     </FileManagerScope>
   );
 }
+
+/** The external store of a scope whose owner holds no working-copy client: nothing to hear, nothing to read. */
+const subscribeToNothing = (): (() => void) => () => undefined;
+const readNothing = (): undefined => undefined;
 
 /** The ref's active workspace id, read in a callback. */
 const selectActiveWorkspaceId = (fileManagerRef: FileManagerRef): string | undefined =>
@@ -852,7 +820,7 @@ function FileManagerScope({
   rootDirectory,
   projectId,
   isRoot = false,
-  lease,
+  owner,
 }: {
   readonly children: ReactNode;
   readonly fileManagerRef: FileManagerRef;
@@ -860,13 +828,16 @@ function FileManagerScope({
   readonly projectId?: string;
   /** The root layout's scope over `rootFiles`, whose worker every other file manager shares. */
   readonly isRoot?: boolean;
-  /** The lease this scope's file manager came from; `rootFiles` has none and outlives every scope. */
-  readonly lease?: LeaseEntry<FileManagerActor>;
+  /**
+   * What owns this scope's file manager: its lease, or its session child (A6c). `rootFiles` has none and outlives
+   * every scope.
+   */
+  readonly owner?: FileManagerOwner | undefined;
 }): React.JSX.Element {
   const files = selectRuntimeFiles(useAppRuntime());
-  /* A scope over a lease that is dropped, before or during a wait (the late-commit case), ends the wait then, not at
-   * the bound. */
-  const gone = lease?.dropped;
+  /* A scope over an owner that ends, before or during a wait (a lease's late-commit case, a session's close), ends the
+   * wait then, not at the bound. */
+  const gone = owner?.dropped;
 
   const workspaceTelemetry = useWorkspaceTelemetry();
 
@@ -1113,20 +1084,38 @@ function FileManagerScope({
    * remount nor any other remount releases it. The consumer is half the key
    * because it is half the capability — an `'agent'` caller must never be
    * answered with the unmasked handle a record store opened first.
+   *
+   * A session's file manager (A6c) brings its own: its child holds the
+   * connections, installs each replacement and releases the last when it stops,
+   * and the scope reads the child's working-copy client instead.
    */
+  const ownedWorkingCopy = owner?.workingCopyFiles;
   const connections = useMemo(
     () => recordConnectionsOf(fileManagerRef, openRootedFileSystemBridge, whenServicesReady),
     [fileManagerRef, openRootedFileSystemBridge, whenServicesReady],
   );
-  const rootedConnections = useMemo(() => connections.ownerFor(bridgeOpener), [bridgeOpener, connections]);
+  const rootedConnections = useMemo(
+    () => (ownedWorkingCopy === undefined ? connections.ownerFor(bridgeOpener) : undefined),
+    [bridgeOpener, connections, ownedWorkingCopy],
+  );
 
   useLayoutEffect(() => {
-    connections.install(rootedConnections);
+    if (rootedConnections !== undefined) {
+      connections.install(rootedConnections);
+    }
   }, [connections, rootedConnections]);
 
   useLayoutEffect(() => {
-    lease?.attach(connections.dispose);
-  }, [connections, lease]);
+    if (ownedWorkingCopy === undefined) {
+      owner?.attach(connections.dispose);
+    }
+  }, [connections, owner, ownedWorkingCopy]);
+
+  const childWorkingCopy = useSyncExternalStore(
+    ownedWorkingCopy?.subscribe ?? subscribeToNothing,
+    ownedWorkingCopy?.get ?? readNothing,
+    ownedWorkingCopy?.get ?? readNothing,
+  );
 
   /*
    * The trusted stores' working copy, handed out one narrowed slice at a time
@@ -1135,7 +1124,10 @@ function FileManagerScope({
    * off the one `'working-copy'` client and each carries only what its own family
    * does — the context never exposes the whole surface.
    */
-  const workingCopyFiles = useMemo(() => rootedConnections.files('working-copy'), [rootedConnections]);
+  const workingCopyFiles = useMemo(
+    () => childWorkingCopy ?? (rootedConnections ?? connections.ownerFor(bridgeOpener)).files('working-copy'),
+    [bridgeOpener, childWorkingCopy, connections, rootedConnections],
+  );
 
   const watchRecordFile = useCallback(
     (

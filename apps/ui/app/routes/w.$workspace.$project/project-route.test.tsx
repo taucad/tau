@@ -256,7 +256,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     }
     return sharedWorkerState === 'ready' ? <div>{children}</div> : placeholder;
   },
-  HomeFileManagerProvider: ({
+  SessionFileManagerProvider: ({
     children,
     projectId,
     rootDirectory,

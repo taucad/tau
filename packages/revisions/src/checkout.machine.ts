@@ -1167,7 +1167,11 @@ const checkoutMachineDefinition = setup({
             onDone: ({ context, event }, enq) => {
               const { waitFor } = event.output;
               if (waitFor !== undefined) {
-                if (waitFor.kind !== context.waitFor?.kind || waitFor.branch !== context.waitFor.branch) {
+                if (
+                  waitFor.kind !== context.waitFor?.kind ||
+                  waitFor.branch !== context.waitFor.branch ||
+                  waitFor.runsCommands !== context.waitFor.runsCommands
+                ) {
                   reportStatus({ ...context, waitFor }, enq, 'waiting');
                 }
                 return { target: 'holding', context: { waitFor } };

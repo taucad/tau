@@ -1362,13 +1362,23 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
     const body = request.postDataBuffer();
     if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
       const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
-      const payload: unknown = JSON.parse(decoded);
+      /* The PostHog client also posts form bodies (`data=<base64 JSON>`, `compression=base64`), notably from `sendBeacon` on unload. */
+      const formData = decoded.startsWith('data=') ? new URLSearchParams(decoded).get('data') : null;
+      const json = formData === null ? decoded : Buffer.from(formData, 'base64').toString('utf8');
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(json);
+      } catch {
+        // A body this fixture cannot read records no event; throwing here would reject the route handler and fail the suite.
+      }
       /* PostHog posts one event, an array of them, or a batch envelope (`{ api_key, batch: [...] }`). */
       const events: unknown[] = Array.isArray(payload)
         ? (payload as unknown[])
         : payload !== null && typeof payload === 'object' && 'batch' in payload && Array.isArray(payload.batch)
           ? (payload.batch as unknown[])
-          : [payload];
+          : payload === null
+            ? []
+            : [payload];
       for (const event of events) {
         if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
           const compressed: string[] = [];

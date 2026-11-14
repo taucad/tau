@@ -132,17 +132,17 @@ describe('viewer kernel settings', () => {
     expect(screen.queryByRole('menuitem', { name: /Kernel settings/ })).not.toBeInTheDocument();
   });
 
-  it('starts closed and shows the view options as slider rows once opened', () => {
+  it('is one row reading Defaults, opening the view options as slider rows in a sub-view', () => {
     offer([model]);
     render(<SettingsMenu />);
-    const disclosure = screen.getByRole('menuitem', { name: /Kernel settings/ });
-    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    expect(disclosure).toHaveTextContent('Using kernel defaults');
+    const row = screen.getByRole('menuitem', { name: 'Kernel settings, Defaults' });
+    expect(row).toHaveAttribute('aria-haspopup', 'true');
     expect(screen.queryByRole('menuitem', { name: /Linear tolerance/ })).not.toBeInTheDocument();
 
-    fireEvent.click(disclosure);
+    fireEvent.click(row);
 
-    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('group', { name: 'Kernel settings' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Back to Options' })).toHaveTextContent(/^Back$/u);
     expect(screen.getByRole('group', { name: 'Tessellation' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Linear tolerance, 0.02mm' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Angular tolerance, 20°' })).toBeInTheDocument();
@@ -163,7 +163,8 @@ describe('viewer kernel settings', () => {
       viewId: 'model',
       options: { tessellation: { linearTolerance: 0.02, angularTolerance: 22 } },
     });
-    expect(screen.getByRole('menuitem', { name: /Kernel settings/ })).toHaveTextContent('1 changed from its default');
+    // The row under the open sub-view counts the change.
+    expect(screen.getByRole('menuitem', { name: /Kernel settings/, hidden: true })).toHaveTextContent('1 changed');
     act(() => {
       vi.advanceTimersByTime(viewOptionsSaveDelay - 1);
     });
@@ -224,9 +225,8 @@ describe('viewer kernel settings', () => {
     });
     offer([model]);
     render(<SettingsMenu />);
-    const disclosure = screen.getByRole('menuitem', { name: /Kernel settings/ });
-    expect(disclosure).toHaveTextContent('1 changed from its default');
-    fireEvent.click(disclosure);
+    const row = screen.getByRole('menuitem', { name: 'Kernel settings, 1 changed' });
+    fireEvent.click(row);
     // A saved value past the drag window still shows as it is.
     expect(screen.getByRole('menuitem', { name: 'Linear tolerance, 5mm' })).toBeInTheDocument();
 

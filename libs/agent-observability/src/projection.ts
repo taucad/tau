@@ -457,6 +457,8 @@ export const checksAssessor = 'cad-checks-v1';
 
 /* Tool classes that can change a model file; a check that ran before one of them settled did not see the final design. */
 const changingClasses: ReadonlySet<ToolFact['toolClass']> = new Set(['write', 'execute']);
+/* Write-class tools that change the agent's own state, never a model file: a todo list or the workbench layout. */
+const designNeutralTools: ReadonlySet<string> = new Set(['update_todos', 'arrange_workbench']);
 
 /**
  * Whether a completed run did its task, by rule `cad-checks-v1` (LW7): `verified` when at least one check at the final
@@ -473,7 +475,9 @@ const assessedSuccess = (
   if (run.termination !== 'completed') {
     return undecided;
   }
-  const changes = run.tools.filter((tool) => changingClasses.has(classOf(tool.toolName)));
+  const changes = run.tools.filter(
+    (tool) => changingClasses.has(classOf(tool.toolName)) && !designNeutralTools.has(tool.toolName),
+  );
   const results = new Set(
     run.tools.flatMap((tool) =>
       tool.check === undefined ||

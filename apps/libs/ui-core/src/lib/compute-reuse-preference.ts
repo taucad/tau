@@ -42,6 +42,8 @@ export const setComputeReuseMode = (next: ComputeReuseMode): void => {
 };
 
 const subscribe = (listener: () => void): (() => void) => topic.subscribe(listener);
+/** Listen for each change of the mode, which is also each change of its revision. */
+export const subscribeComputeReusePreference = subscribe;
 export const useComputeReuseMode = (): ComputeReuseMode =>
   useSyncExternalStore(subscribe, getComputeReuseMode, getComputeReuseMode);
 export const useComputeReuseRevision = (): number =>

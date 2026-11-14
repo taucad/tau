@@ -258,7 +258,10 @@ vi.mock('#hooks/use-kernel.js', () => ({
   }),
 }));
 
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
+  await import('#hooks/chat-session-store.fixture.js');
 const { ActiveChatProvider, ChatComposerProvider } = await import('#hooks/active-chat-provider.js');
 const { useChatActions, useChatContext, useChatSelector, useChatById, useDraftActions, useDraftSelector } =
   await import('#hooks/use-chat.js');

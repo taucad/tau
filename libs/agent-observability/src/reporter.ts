@@ -34,10 +34,19 @@ export type EffectivePurposesAnswer = Readonly<{
   purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean; allowedSince?: number | undefined }>>;
   /** The server's clock when it answered; with the host's receipt time it puts `allowedSince` on the host's clock. */
   answeredAt?: number | undefined;
+  /** The protection the server reads for the account now; a host without it claims `unknown`. */
+  protection?: string | undefined;
 }>;
 
 /** A purpose a host reports under; each is its own plane and grant. @public */
 export type ReportingPurpose = 'summary' | 'feedback';
+
+const isProtection = (value: string | undefined): value is ReportingGrant['protection'] =>
+  value === 'free' || value === 'pro' || value === 'unknown';
+
+/* A protection the server named, or `unknown` for an answer from a server that names none. */
+const protectionOf = (value: string | undefined): ReportingGrant['protection'] =>
+  isProtection(value) ? value : 'unknown';
 
 const isTime = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -83,12 +92,12 @@ export const purposeGrantOf = (
     purpose === 'summary'
       ? answer.purposes.find((candidate) => candidate.purpose === 'content' && candidate.allowed)
       : undefined;
-  /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
+  /* The server's own reading of the account's protection, or `unknown`, the strictest claim; the API only tightens it. */
   return {
     principal: subject.principal,
     project: subject.project,
     policyEpoch: answer.epoch,
-    protection: 'unknown',
+    protection: protectionOf(answer.protection),
     ...hostClockSince(state.allowedSince, answer.answeredAt, subject.receivedAt),
     ...(content === undefined
       ? {}

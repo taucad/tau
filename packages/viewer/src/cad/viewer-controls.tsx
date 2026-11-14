@@ -9,9 +9,7 @@ import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { FitViewControl } from '#cad/fit-view-control.jsx';
 import { FullscreenViewControl } from '#cad/fullscreen-view-control.jsx';
-import { GridSizeIndicator } from '#cad/grid-control.jsx';
 import { MeasureControl } from '#cad/measure-control.jsx';
-import { NavigationControls } from '#cad/navigation-controls.jsx';
 import { MeasurementList, MeasureOptions } from '#cad/measure-tool-row.jsx';
 import { SectionViewControl } from '#cad/section-view-control.jsx';
 import { SectionEditor, SectionOptions, focusFirstControl, useFocusHandOff } from '#cad/section-tool-row.jsx';
@@ -22,10 +20,7 @@ import { useViewerShortcuts } from '#hooks/use-viewer-shortcuts.js';
 
 type Tool = 'section' | 'measure';
 
-/**
- * Never the first thing on its line: the grid readout before it renders nothing until the grid has a size. Nor after
- * an empty leading group.
- */
+/** Never the first thing on its line, nor after an empty leading group. */
 const Hairline = ({ className = 'mx-0' }: { readonly className?: string }): React.JSX.Element => (
   <Separator
     orientation='vertical'
@@ -214,22 +209,17 @@ export type ViewerControlsProps = Readonly<{
    * leave the live graphics owner to the host; without them, they change the live owner as before.
    */
   viewFields?: ViewerViewFields;
-  /**
-   * The single-click camera controls beside the gizmo: orbit, the orbit and pan switch, zoom and fit (N2). Off by
-   * default; 3D geometry only.
-   */
-  navigation?: boolean;
   /** The navigation keys: the arrow keys orbit, Shift with an arrow key pans, plus and minus zoom (N1). Off by default. */
   navigationKeys?: boolean;
 }>;
 
 /**
  * The viewer's one bar, shared by the Tau app and the agent plugin viewer. A running tool adds its row above the controls row, Section's above Measure's, and the open
- * cut's editor and the section's status unfold above the Section row. The controls row holds the grid readout, the
- * Section and Measure toggles, Fit view and Fullscreen, Capture in its own section, and Viewer settings. Below 520 px of viewer width
- * (`@container/viewer`) the toggles and the grid readout drop to their glyphs. The bar never shrinks below its rows,
- * so a host strip narrower than the bar must start it at its left edge (`items-center-safe`), keeping the grid readout
- * and Section in view. The bar also owns the viewer's keyboard shortcuts, and speaks each one's result in a polite
+ * cut's editor and the section's status unfold above the Section row. The controls row holds the Section and Measure
+ * toggles, Fit view and Fullscreen, Capture in its own section, and Viewer settings, which holds the grid size and units.
+ * Below 520 px of viewer width (`@container/viewer`) the toggles drop to their glyphs. The bar never shrinks below its
+ * rows, so a host strip narrower than the bar must start it at its left edge (`items-center-safe`), keeping Section in
+ * view. The bar also owns the viewer's keyboard shortcuts, and speaks each one's result in a polite
  * live region.
  *
  * `leading` starts the controls line with the view menus and the build status; when it and the controls do not fit
@@ -293,7 +283,6 @@ function ViewerControlsBody({
   leading,
   aboveControls,
   actions,
-  navigation = false,
   navigationKeys = false,
 }: ViewerControlsProps): React.JSX.Element {
   const controlSize = useViewerControlSize();
@@ -408,8 +397,6 @@ function ViewerControlsBody({
           </>
         )}
         <div ref={controlsRef} className={layout.controls}>
-          <GridSizeIndicator />
-          <Hairline />
           {is2dGeometry ? null : (
             <>
               <SectionViewControl shortcut={keys.section} onStart={focusSectionRow} />
@@ -449,9 +436,6 @@ function ViewerControlsBody({
           )}
         </div>
       </div>
-      {navigation && !is2dGeometry ? (
-        <NavigationControls keys={navigationKeys ? keys.navigation : undefined} fitViewShortcut={keys.fitView} />
-      ) : null}
       <span role='status' className='sr-only'>
         <span key={announcement.count}>{announcement.phrase}</span>
       </span>

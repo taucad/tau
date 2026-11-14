@@ -3,8 +3,9 @@ title: 'Page Composition Policy'
 description: 'Page frame, title row, view controls, collection grid and pagination, card anatomy and states, button roles, busy and collection states, copy, view URL state, keyboard order and first-viewport budget for Tau product pages.'
 status: active
 created: '2026-09-28'
-updated: '2026-11-11'
+updated: '2026-11-13'
 related:
+  - docs/research/loading-states-ux-blueprint.md
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
   - docs/policy/ux-policy.md
@@ -96,7 +97,7 @@ Choose the filter control by its vocabulary:
 | Vocabulary                                                                        | Control                                                                                                                                                     | Current value                        |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | One value from a small closed set the visitor came to explore (up to six kernels) | Single-select `ToggleGroup` shelf: each tile shows the `SvgIcon` mark, catalog name, result count and catalog one-line `description`; two columns on phones | The pressed tile                     |
-| One value from a closed set of up to ten                                          | Outline trigger + `DropdownMenuRadioItem` (`geometry/cad/grid-control.tsx`)                                                                                 | The trigger label and the radio mark |
+| One value from a closed set of up to ten                                          | Outline trigger + `DropdownMenuRadioItem` (`routes/parts/route.tsx`)                                                                                        | The trigger label and the radio mark |
 | Several values from a closed set                                                  | Outline trigger + count `Badge` + `DropdownMenuCheckboxItem` (`routes/usage/route.tsx`)                                                                     | The badge and the checkbox marks     |
 | An open or growing set                                                            | `ComboBoxResponsive` (UX Policy Rule 6)                                                                                                                     | The field value                      |
 
@@ -177,7 +178,7 @@ const [selectedKernel, setSelectedKernel] = useState<KernelProvider | 'all'>('al
 
 ### 6. Render collections through one grid owner and paginate with the shared owner
 
-Render card collections through `projectGridClassName` (`components/project-grid.tsx`): `grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5`, adding `grid-flow-dense` when a featured card spans cells. Skeletons use the same owner. Mark the grid as a list: `<ul role='list'>` with one `<li>` per card. Page every collection with the app's standard: TanStack `useReactTable` with `getPaginationRowModel` and controlled `pagination` state, rendered by the shared `DataTablePagination` (`@taucad/ui-kit/components/data-table`) below the grid, page size remembered per device through `useCookie` (default 20; options 20, 50, 100), `withSelectedCount={false}` with an `itemName` so the row shows the visible range ("21–31 of 31 examples"). Never show "Load more", infinite scroll or a show-all switch.
+Render card collections through `projectGridClassName` (`components/project-grid.tsx`): `grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5`, adding `grid-flow-dense` when a featured card spans cells. A loading grid is the same owner, holding remembered cards or nothing (Rule 11). Mark the grid as a list: `<ul role='list'>` with one `<li>` per card. Page every collection with the app's standard: TanStack `useReactTable` with `getPaginationRowModel` and controlled `pagination` state, rendered by the shared `DataTablePagination` (`@taucad/ui-kit/components/data-table`) below the grid, page size remembered per device through `useCookie` (default 20; options 20, 50, 100), `withSelectedCount={false}` with an `itemName` so the row shows the visible range ("21–31 of 31 examples"). Never show "Load more", infinite scroll or a show-all switch.
 
 **Why**: the chain was written three times and the library skeleton had already lost `2xl:grid-cols-5`; `/community`'s "Load More Projects" never sliced the grid, and `/projects` already paginates through `DataTablePagination`, so one standard serves both.
 
@@ -328,21 +329,21 @@ INCORRECT (the pre-refresh community route):
 
 ### 11. Distinguish loading, empty, no-match and error
 
-| State    | When                                          | Presentation                                                                                                              | ARIA                                                                    |
-| -------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Loading  | Data is not yet known                         | Skeletons in the final geometry (same grid owner, same 4:3 media), after UI Policy §6's 150–300 ms delay                  | Container `role='status' aria-busy='true' aria-label='Loading <items>'` |
-| Results  | Items are shown                               | A results status beside the view controls: "20 examples", or "4 of 20 match" while filtered, with `Clear`                 | Polite `role='status'`                                                  |
-| Empty    | The collection has no items                   | `PanelEmptyState` (`components/ui/panel-empty-state.tsx`): icon tile, title, one sentence of orientation, one next action | None                                                                    |
-| No match | Items exist; the query or filters exclude all | `PanelEmptyState` "No examples match “gear”" with `Clear filters`; keep the view controls                                 | The results status carries "0 of M"                                     |
-| Error    | The load failed                               | Inline consequence and `Retry`; keep the last good data; recoverable failures use neutral surfaces, not destructive red   | `role='alert'`                                                          |
+| State    | When                                          | Presentation                                                                                                                                                                       | ARIA                                                           |
+| -------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Loading  | Data is not yet known                         | The region's frame in its final geometry; content or nothing inside it. Remembered items render as real items; after UI Policy §6's 1,000 ms, `WaitIndicator` in the header's slot | Container `aria-busy='true'`; the indicator slot is the status |
+| Results  | Items are shown                               | A results status beside the view controls: "20 examples", or "4 of 20 match" while filtered, with `Clear`                                                                          | Polite `role='status'`                                         |
+| Empty    | The collection has no items                   | `PanelEmptyState` (`components/ui/panel-empty-state.tsx`): icon tile, title, one sentence of orientation, one next action                                                          | None                                                           |
+| No match | Items exist; the query or filters exclude all | `PanelEmptyState` "No examples match “gear”" with `Clear filters`; keep the view controls                                                                                          | The results status carries "0 of M"                            |
+| Error    | The load failed                               | Inline consequence and `Retry`; keep the last good data; recoverable failures use neutral surfaces, not destructive red                                                            | `role='alert'`                                                 |
 
 Loading is not empty, and no match is not empty. A collection embedded in another page (the library on Home) renders nothing while it is known to be empty, and its host supplies the replacement; the collection's own page keeps its title row and controls. Do not frame a collection in the dashed `CollectionEmptyState`; keep dashed boundaries for real drop zones (DESIGN Surfaces › apps/ui).
 
 **Why**: both project grids rendered nothing when a search matched nothing, the library's load failure had no `role='alert'`, and its refresh failure used `border-destructive/40` for a recoverable error.
 
-**Enforced by**: Accessibility Policy's ARIA table (review); role tests (`project-route-notices.test.tsx` pattern); the route sweep; retiring `CollectionEmptyState` by deletion. Spinner delay: UI Policy §6 — default, unenforced.
+**Enforced by**: Accessibility Policy's ARIA table (review); role tests (`project-route-notices.test.tsx` pattern); the route sweep; retiring `CollectionEmptyState` by deletion. Indicator timing: UI Policy §6 and `WaitIndicator`; skeleton sites: `loading-state.ratchet.node.test.ts`.
 
-A page that is not a card collection follows the same loading rule: skeletons in the final layout, per [UI Policy](ui-policy.md) §5 Loading Placeholders and, in Settings, [Settings Policy](settings-policy.md) Rule 12.
+A page that is not a card collection follows the same loading rule: its frame in the final layout, content or nothing inside it, per [UI Policy](ui-policy.md) §5 Loading and, in Settings, [Settings Policy](settings-policy.md) Rule 12.
 
 ### 12. Write sentence-case, verb-first copy
 
@@ -405,7 +406,7 @@ Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, exclu
 - `w-[Npx]` triggers and menus; raw ids in trigger labels; menus that do not mark the current value.
 - A search field named only by its placeholder; a clear button under 24 px.
 - View state in `useState` that a reload or shared link should reproduce.
-- A copied grid class chain; a skeleton with a different grid; "Load more", infinite scroll or show-all in place of `DataTablePagination`.
+- A copied grid class chain; a skeleton in place of the grid's cards; "Load more", infinite scroll or show-all in place of `DataTablePagination`.
 - `onClick` on a card, a button nested in a link, placeholder authors and avatars, a "Preview" label on a link that opens a page.
 - `hover:text-primary` or `hover:border-primary/*` on neutral surfaces; muted text on an enabled action.
 - `className` that changes a Button's size, padding or text colour.
@@ -419,7 +420,7 @@ Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, exclu
 - [ ] One view-control row; content-sized controls; trigger labels and menu marks agree; catalog names and marks
 - [ ] Search has an accessible name; clear control is 24 px
 - [ ] Query, filters, sort and trash live in the URL through `useSearchParameter`; page size in a cookie
-- [ ] Grid and skeleton share `projectGridClassName`; the grid is a list; `DataTablePagination` pages it
+- [ ] The grid, loading or loaded, uses `projectGridClassName`; the grid is a list; `DataTablePagination` pages it
 - [ ] Cards use `ProjectCard`; titles are headings; one visible action plus a named overflow; authentic metadata only
 - [ ] Hover and selection stay achromatic and instant; focus uses `focus-outline`
 - [ ] Button variant by role; no size or colour overrides in `className`

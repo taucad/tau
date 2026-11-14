@@ -3,7 +3,7 @@ title: 'React Policy'
 description: 'Component composition, memoization, state management, and hook patterns for keeping React rendering efficient and predictable across Tau UI surfaces.'
 status: active
 created: '2026-03-19'
-updated: '2026-11-12'
+updated: '2026-11-13'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/rendering-policy.md
@@ -309,13 +309,15 @@ Effects and handlers that read, subscribe or time through a helper the counter c
 - `packages/viewer/src/hooks/use-viewer-shortcuts.ts` opens a subscription from a key handler (`watchShortcutWrite`) and keeps it until graphics shows the written value.
 - In `apps/ui`, `view-settings-sync-host.tsx` registers a producer and `workbench-records/record-issues.ts` publishes into a module store from effects.
 
-A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. In a project held at zero it is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. `packages/viewer` is held at zero with these exceptions, and its ceiling manifest is empty:
+A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. In a project held at zero it is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. The reason names the boundary's one external source, such as a context, a prop or the router's commit. A value with a second source is not a boundary, and a new boundary needs a ruling. `packages/viewer` is held at zero with these exceptions, and its ceiling manifest is empty:
 
 | File                                                | Boundary                                                                                                    | Ruling                             |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `packages/viewer/src/model-viewer.tsx`              | The standalone viewer's artifact prop sent as `updateArtifact` or `clearArtifact`                           | Inventory C10, 2026-11-12          |
 | `packages/viewer/src/hooks/use-graphics.tsx`        | The viewer environment's theme, accent and contrast, from React context, sent as `viewerEnvironmentChanged` | G8, 2026-11-12                     |
 | `packages/viewer/src/parameters/use-field-edits.ts` | A parameter field's authority prop sent as `observed`                                                       | Programme control, G12, 2026-11-12 |
+
+An instrument is the other kind of named exception: a debug probe, an e2e bridge or a profiling route that observes the app rather than runs it. It is held at zero and listed at its exact count with a reason that starts `instrument:`, so a new probe is a deliberate one-line edit. `apps/ui/app` lists three: `components/geometry/debug/section-view-test-bridge.tsx`, `routes/[__e2e].onshape-render-profile/route.tsx` and `chat-clients/debug-probes.tsx` (app state orchestration charter, D15).
 
 CORRECT (simplified from `section-handles.tsx`):
 
@@ -341,7 +343,7 @@ useEffect(() => {
 }, [graphicsRef]);
 ```
 
-This rule is checked by the `react-event-layer.policy.node.test.ts` in each project, through `@taucad/oxlint/react-event-layer`. The counter is lexical: it counts an effect whose callback calls `.send`, `.subscribe`, `.on`, `send`, `subscribe` or a timer, and a `getSnapshot()` call written inside a component or hook. A call hidden behind a helper declared elsewhere, of any name, is not seen, so a reviewer checks for one.
+This rule is checked by the `react-event-layer.policy.node.test.ts` in each project, through `@taucad/oxlint/react-event-layer`. The counter is lexical: it counts an effect whose callback calls `.send`, `.subscribe`, `.on`, `send`, `subscribe` or a timer, and a `getSnapshot()` call written inside a component or hook. A call hidden behind a helper declared elsewhere, of any name, is not seen, so a reviewer checks for one. A ceiling line whose file no longer exists fails the check: delete it, or carry it to the file's new path. A project that adds the test names the `reactEventLayer` named input in its `test` and `typecheck` inputs in `project.json`, so an edit to the counter reruns only the projects that run it (`scripts/src/nx-cache-inputs.test.ts` checks both).
 
 ## 6. Keys
 

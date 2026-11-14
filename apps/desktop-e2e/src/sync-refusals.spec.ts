@@ -18,6 +18,7 @@ import {
   revisionStatus,
   revisionStrip,
 } from '#support/revisions-pane.js';
+import { chooseNewProjectKernel } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauDatabaseCommand, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient, openCloudOnlyProject, uploadFileInPage } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
@@ -93,11 +94,12 @@ const required = <T>(value: T | undefined): T => {
   return value;
 };
 
-/** Create a project through *New project* and return its OPFS project id. */
+/** Create an OpenSCAD project, whose entry is `main.scad`, through *New project* and return its OPFS project id. */
 const createProject = async (client: BrowserClient, name: string): Promise<string> => {
   const { page } = client;
   await page.goto('/projects/new', { waitUntil: 'domcontentloaded' });
   await page.getByLabel('Project Name *').fill(name);
+  await chooseNewProjectKernel(page, 'OpenSCAD');
   await page
     .getByRole('button', { name: /^Create Project/u })
     .first()

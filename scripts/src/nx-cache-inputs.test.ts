@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, matchesGlob, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
@@ -260,5 +260,69 @@ describe('nx cache inputs', () => {
     expect(testEnvironment()).toContain('TAU_CI_SHARD');
     expect(declaredByEveryTarget('TAU_CI_SHARD')).toBe(true);
     expect(declaredByEveryTarget('DATABASE_URL')).toBe(false);
+  });
+});
+
+/*
+ * Nx marks every project affected whose target inputs name a changed `{workspaceRoot}/` file, so the
+ * React event-layer counter (`react-event-layer.ts`) is an input of the projects that run it and of no
+ * target default: as a `test` and `typecheck` default, and inside the `lint` default's oxlint glob, each
+ * edit to it made all 138 projects affected. The policy tests import it with `nx-ignore-next-line`, so the
+ * input is the only thing that reruns them.
+ */
+describe('react event-layer counter input', () => {
+  const helper = 'libs/oxlint/src/react-event-layer.ts';
+  const projectsRunningCounter = execFileSync('git', ['ls-files', '*react-event-layer.policy.node.test.ts'], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+    .split('\n')
+    .filter((file) => file !== '')
+    .map((file) => file.slice(0, file.search(/\/(?:src|app)\//u)));
+
+  /** The `{workspaceRoot}/` file globs an input list names, named inputs expanded. */
+  const workspaceGlobs = (inputs: readonly Input[]): readonly string[] =>
+    inputs.flatMap((input) => {
+      if (typeof input === 'object') {
+        return [];
+      }
+      if (input in nx.namedInputs) {
+        return workspaceGlobs(nx.namedInputs[input] ?? []);
+      }
+      return input.startsWith('{workspaceRoot}/') ? [input.slice('{workspaceRoot}/'.length)] : [];
+    });
+
+  it('should name the counter in no target default, so an edit to it touches only the projects that run it', () => {
+    const naming = Object.entries(nx.targetDefaults).filter(([, { inputs }]) =>
+      workspaceGlobs(inputs ?? []).some((glob) => matchesGlob(helper, glob)),
+    );
+    expect(naming.map(([target]) => target)).toEqual([]);
+  });
+
+  it('should name the counter in the test and typecheck inputs of every project that runs the policy test', () => {
+    expect(projectsRunningCounter.length).toBeGreaterThan(5);
+    const missing = projectsRunningCounter.flatMap((project) => {
+      const { targets } = JSON.parse(read(`${project}/project.json`)) as {
+        targets?: Record<string, { inputs?: readonly Input[] }>;
+      };
+      return ['test', 'typecheck'].flatMap((target) =>
+        workspaceGlobs(targets?.[target]?.inputs ?? []).includes(helper) ? [] : [`${project}:${target}`],
+      );
+    });
+    expect(missing).toEqual([]);
+  });
+});
+
+describe('lockfile changes', () => {
+  // With the default `all`, any `pnpm-lock.yaml` change marked every project affected, so a
+  // Dependabot bump ran every lane. `auto` marks the projects whose `importers` entry changed
+  // (and their dependents); a bump of `node-pty` in `libs/sandbox` still selects every shell
+  // project. A change outside `importers` alone selects no project, which did not happen in the
+  // 168 lockfile commits on `main` from 2026-10-10 to 2026-11-13.
+  it('marks only projects whose dependencies changed', () => {
+    const config = JSON.parse(read('nx.json')) as {
+      readonly pluginsConfig?: Record<string, { readonly projectsAffectedByDependencyUpdates?: unknown }>;
+    };
+    expect(config.pluginsConfig?.['@nx/js']?.projectsAffectedByDependencyUpdates).toBe('auto');
   });
 });

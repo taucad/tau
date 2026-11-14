@@ -69,7 +69,8 @@ export default function AuthCliRoute(): React.JSX.Element {
             </p>
           ) : (
             <>
-              <p className='font-mono text-2xl' aria-label='Confirmation code'>
+              {/* `ph-no-capture`: session replay never records the device sign-in code. */}
+              <p className='ph-no-capture font-mono text-2xl' aria-label='Confirmation code'>
                 {userCode}
               </p>
               <p>Account: {session?.user.email ?? 'Signing in…'}</p>

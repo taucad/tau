@@ -105,6 +105,9 @@ describe('TelemetryPurposeService', () => {
       expect(allowedPurposes(onFree.purposes)).toEqual(['summary', 'content', 'reuse', 'training']);
       expect(allowedPurposes(offFree.purposes)).toEqual([]);
       expect(allowedPurposes(onPaid.purposes)).toEqual([]);
+      /* The answer names the protection ingress records, so a host claims it instead of `unknown`. */
+      expect(onFree.protection).toBe('free');
+      expect(onPaid.protection).toBe('pro');
     });
 
     it('refuses content for every account while the capture mode is unset or off (default deny)', async () => {

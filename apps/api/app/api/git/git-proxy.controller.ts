@@ -574,12 +574,14 @@ export class GitProxyController {
     }
 
     void reply.status(response.status);
-    for (const header of ['content-type', 'content-encoding', 'cache-control']) {
+    for (const header of ['content-type', 'content-encoding']) {
       const value = response.headers.get(header);
       if (value !== null) {
         void reply.header(header, value);
       }
     }
+    // Never the upstream host's caching: this answer belongs to one signed-in caller and may carry a session snapshot.
+    void reply.header('cache-control', 'private, no-store');
 
     return new StreamableFile(
       response.body === null ? Readable.from([]) : Readable.fromWeb(response.body as unknown as WebReadableStream),

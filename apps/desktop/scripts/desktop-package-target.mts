@@ -106,6 +106,30 @@ export const desktopPackageOmissions = (
 ];
 
 /**
+ * Why this package may not be assembled, when a distribution archive would ship without the git payload.
+ *
+ * A shipped app records revisions with the binaries it carries: a machine with no `git-lfs` on `PATH`, which is most of
+ * them, cannot back a project up otherwise (OQ3). macOS refuses a release without the payload; this is the same rule
+ * for the Linux distribution archive. A development package (no `--archive`) still assembles and names the omission,
+ * and a target `prepare-git` cannot build (Windows) is never refused.
+ * @param plan - The selected package.
+ * @param archive - Whether a distribution archive is written.
+ * @param payload - Whether the prepared `git` and `git-lfs` are executable files, and where they were looked for.
+ * @returns The refusal, or `undefined` when the package may be assembled.
+ */
+export const desktopGitPayloadRefusal = (
+  plan: DesktopPackagePlan,
+  archive: boolean,
+  payload: Readonly<{ git: boolean; gitLfs: boolean; gitResourceRoot: string }>,
+): string | undefined => {
+  if (!archive || !plan.gitPayloadSupported || (payload.git && payload.gitLfs)) {
+    return undefined;
+  }
+  const missing = [payload.git ? [] : ['git'], payload.gitLfs ? [] : ['git-lfs']].flat().join(' and ');
+  return `A ${plan.target} release package must ship an executable bundled git and git-lfs; ${missing} missing at ${payload.gitResourceRoot} (OQ3). Run prepare-git first.`;
+};
+
+/**
  * The command that writes the distribution archive from the packaged app directory.
  * @param plan - The selected package.
  * @param outputRoot - Directory holding `plan.appDirectory`; the archive is written there.

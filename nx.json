@@ -62,14 +62,14 @@
   "targetDefaults": {
     "typecheck": {
       "executor": "nx:run-commands",
-      "inputs": ["default", "^production", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"],
+      "inputs": ["default", "^production"],
       "options": {
         "forwardAllArgs": false
       }
     },
     "test": {
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"]
+      "inputs": ["default", "^production", "serviceEnvironment"]
     },
     "build": {
       "inputs": ["production", "^production"]
@@ -84,7 +84,7 @@
         "^production",
         "{workspaceRoot}/eslint.config.mjs",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/libs/oxlint/src/**/*",
+        "{workspaceRoot}/libs/oxlint/src/**/*.js",
         {
           "externalDependencies": ["eslint", "oxlint"]
         }
@@ -108,7 +108,7 @@
     "nx-release-publish": {
       "dependsOn": ["pkgcheck"]
     },
-    "formal": {
+    "formal:tla": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node tools/formal/src/cli.ts check --tier pr {projectRoot}"
@@ -187,6 +187,7 @@
       { "env": "TAU_S3_CONFORMANCE_ENDPOINT" },
       { "env": "TAU_S3_CONFORMANCE_BUCKET" }
     ],
+    "reactEventLayer": ["{workspaceRoot}/libs/oxlint/src/react-event-layer.ts"],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [
       "default",
@@ -239,6 +240,11 @@
     },
     "git": {
       "commitMessage": "chore(root): Release the npm packages as v{version}"
+    }
+  },
+  "pluginsConfig": {
+    "@nx/js": {
+      "projectsAffectedByDependencyUpdates": "auto"
     }
   },
   "analytics": true

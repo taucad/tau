@@ -12,78 +12,6 @@
   },
   "components": [
     {
-      "bom-ref": "4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d",
-      "type": "library",
-      "supplier": {
-        "name": "Tau"
-      },
-      "name": "tau-picogk-layer",
-      "version": "picogk-layer-4e0bfb0a4dbcde8a",
-      "purl": "pkg:github/taucad/tau@picogk-layer-4e0bfb0a4dbcde8a?file_name=tau-picogk-layer-linux-x64.tar.gz",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d"
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://cdn.tau.new/blobs/sha256/4e0bfb0a4dbcde8a4e1238fa0f533af12b34f720dbfee801eb4118eacbf36c7d"
-        },
-        {
-          "type": "distribution",
-          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-4e0bfb0a4dbcde8a/tau-picogk-layer-linux-x64.tar.gz"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "linux-x64"
-        },
-        {
-          "name": "taucad:sbom",
-          "value": "tau-worker/tau-picogk-sbom.cdx.json"
-        }
-      ]
-    },
-    {
-      "bom-ref": "629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565",
-      "type": "library",
-      "supplier": {
-        "name": "Tau"
-      },
-      "name": "tau-picogk-layer",
-      "version": "picogk-layer-629eff24263a72e0",
-      "purl": "pkg:github/taucad/tau@picogk-layer-629eff24263a72e0?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565"
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://cdn.tau.new/blobs/sha256/629eff24263a72e0c56eb4f469a513874f9a228dd37e7116457e7a1e20f04565"
-        },
-        {
-          "type": "distribution",
-          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-629eff24263a72e0/tau-picogk-layer-darwin-arm64.tar.gz"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:sbom",
-          "value": "tau-worker/tau-picogk-sbom.cdx.json"
-        }
-      ]
-    },
-    {
       "bom-ref": "64c77a5f98d6dfc63393ed5d2fed47c2855c7cdd4322008b3b13e1d0b710aefc1fba7e56612f25f7e8a2b1b6cef5cf77cb3a834ff3685e723ad286703c3396d8",
       "type": "platform",
       "supplier": {
@@ -117,6 +45,42 @@
       ]
     },
     {
+      "bom-ref": "98a50727c2143456cd943f90798eee702afb207e7ca505de4fa6353679519baa",
+      "type": "library",
+      "supplier": {
+        "name": "Tau"
+      },
+      "name": "tau-picogk-layer",
+      "version": "picogk-layer-98a50727c2143456",
+      "purl": "pkg:github/taucad/tau@picogk-layer-98a50727c2143456?file_name=tau-picogk-layer-linux-x64.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "98a50727c2143456cd943f90798eee702afb207e7ca505de4fa6353679519baa"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://dependencies.tau.new/blobs/sha256/98a50727c2143456cd943f90798eee702afb207e7ca505de4fa6353679519baa"
+        },
+        {
+          "type": "distribution",
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-98a50727c2143456/tau-picogk-layer-linux-x64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64"
+        },
+        {
+          "name": "taucad:sbom",
+          "value": "tau-worker/tau-picogk-sbom.cdx.json"
+        }
+      ]
+    },
+    {
       "bom-ref": "e96a8a8108d5a3b70e827567b2493ede540f3705c1209e7f34736ba6aa398dd4d0d15f31eb667c9cca3dbcd30ad83b315a86d5e9a13fd2c370e2fc0cece72436",
       "type": "platform",
       "supplier": {
@@ -146,6 +110,42 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "f7767d236745fd316f79e92b8e239497ea9d44bfb1ce957c8cb3ce05db9cdc81",
+      "type": "library",
+      "supplier": {
+        "name": "Tau"
+      },
+      "name": "tau-picogk-layer",
+      "version": "picogk-layer-f7767d236745fd31",
+      "purl": "pkg:github/taucad/tau@picogk-layer-f7767d236745fd31?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f7767d236745fd316f79e92b8e239497ea9d44bfb1ce957c8cb3ce05db9cdc81"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://dependencies.tau.new/blobs/sha256/f7767d236745fd316f79e92b8e239497ea9d44bfb1ce957c8cb3ce05db9cdc81"
+        },
+        {
+          "type": "distribution",
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-f7767d236745fd31/tau-picogk-layer-darwin-arm64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:sbom",
+          "value": "tau-worker/tau-picogk-sbom.cdx.json"
         }
       ]
     }

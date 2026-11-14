@@ -665,10 +665,9 @@ jobs:
   # checks for the key first and a re-run verifies instead of writing; a refused write fails
   # the job rather than retrying. A missing credential, endpoint or bucket, or a bucket other
   # than the channel's own, fails the job: it never skips and never defaults a bucket.
-  # Until `dependencyBaseUrl` (`@taucad/dotnet-kernel-core/layer`) names dependencies.tau.new,
-  # the pin picogk-layer composes still names cdn.tau.new first: the base and the committed
-  # manifest switch together once this host serves the pinned digests, so `main` never pins a
-  # URL that does not serve (I13, `check-dependency-urls.yml`).
+  # The pin picogk-layer composes names dependencies.tau.new first (`dependencyBaseUrl`,
+  # `@taucad/dotnet-kernel-core/layer`), so a production layer is mirrored before its pin lands
+  # on `main`, and `main` never pins a URL that does not serve (I13, `check-dependency-urls.yml`).
   picogk-layer-mirror:
     needs: [resolve, desktop-macos, picogk-layer-linux]
     if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' }}

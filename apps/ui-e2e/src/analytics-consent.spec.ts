@@ -1,9 +1,11 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { filesPane } from '#support/file-tree.js';
+import { filesPane, treeItem } from '#support/file-tree.js';
 
 const consentCookieName = 'tau-cookie-consent';
+/** The entry file of a project made at `/projects/new` with its preselected kernel, replicad. */
+const newProjectEntry = 'main.ts';
 const consentStatus = async (): Promise<string | undefined> => {
   const cookies = await target.cookies();
   const cookie = cookies.find(({ name }) => name === consentCookieName);
@@ -189,7 +191,7 @@ test.each(['/invitations/Replay-Bearer-123', '/auth/sign-in?redirectTo=%2Finvita
   },
 );
 
-test('blocks replay from mounted editor, chat and file surfaces', async () => {
+test('records editor, chat and file text in replay but never a credential block', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
   await decide('accepted');
@@ -197,10 +199,6 @@ test('blocks replay from mounted editor, chat and file surfaces', async () => {
   await target.fill(selectors.getByCss('input#project-name'), 'Private workspace');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  const sourceTab = selectors.getByRole('tab', { name: 'main.scad', exact: true }).last();
-  await target.expectVisible(sourceTab, 60_000);
-  await target.click(sourceTab);
-  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   if (!(await target.isVisible(filesPane()))) {
     await target.click(selectors.getByRole('button', { name: /Search/u }));
     const search = selectors.getByPlaceholder('Search projects, chats, and actions…');
@@ -208,55 +206,60 @@ test('blocks replay from mounted editor, chat and file surfaces', async () => {
     await target.click(selectors.getByText('Open files', { exact: true }));
   }
   await target.expectVisible(filesPane(), 60_000);
+  /* A new project opens no file (53b887367b, #1386), and `/projects/new` preselects replicad, whose entry is
+   * `main.ts` (3948936544, #1825): open the entry from Files so the editor surface is mounted. */
+  await target.click(treeItem(newProjectEntry));
+  const sourceTab = selectors.getByRole('tab', { name: newProjectEntry, exact: true }).last();
+  await target.expectVisible(sourceTab, 60_000);
+  await target.click(sourceTab);
+  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
   if ((await target.getAttribute(chatToggle, 'aria-pressed')) === 'false') {
     await target.click(chatToggle);
   }
   await target.fill(
     selectors.getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]').last(),
-    'Private prompt sentinel',
+    'Private composer sentinel',
   );
   const surfaces = await target.evaluate(() => {
-    const blocks = [...document.querySelectorAll<HTMLElement>('.ph-no-capture')];
-    const editor = blocks.find((block) => block.classList.contains('editor-container'));
-    const chat = blocks.find((block) => block.classList.contains('overflow-hidden'));
-    const files = blocks.find((block) => block.querySelector('[role="treeitem"]') !== null);
-    for (const [block, sentinel] of [
-      [editor, 'Private source sentinel'],
-      [chat, 'Private chat sentinel'],
-      [files, 'Private filename sentinel'],
+    const editor = document.querySelector<HTMLElement>('.editor-container');
+    const files = document.querySelector<HTMLElement>('[role="treeitem"]')?.parentElement ?? null;
+    for (const [host, sentinel] of [
+      [editor, 'Visible source sentinel'],
+      [files, 'Visible filename sentinel'],
     ] as const) {
-      if (!block) {
+      if (!host) {
         continue;
       }
       const probe = document.createElement('span');
       probe.textContent = sentinel;
-      block.append(probe);
+      host.append(probe);
     }
+    // A credential surface (new API key, device sign-in code) carries the SDK's block class.
+    const credential = document.createElement('span');
+    credential.className = 'ph-no-capture';
+    credential.textContent = 'Private credential sentinel';
+    document.body.append(credential);
     const control = document.createElement('span');
     control.textContent = 'Public project control';
     document.body.append(control);
-    return { editor: Boolean(editor), chat: Boolean(chat), files: Boolean(files) };
+    return { editor: Boolean(editor), files: Boolean(files) };
   });
-  expect(surfaces).toStrictEqual({ editor: true, chat: true, files: true });
+  expect(surfaces).toStrictEqual({ editor: true, files: true });
   await expect.poll(async () => sentinelPresent('Public project control'), { timeout: 30_000 }).toBe(true);
   const summary = await target.readPostHogSummary([
-    'Private prompt sentinel',
-    'Private source sentinel',
-    'Private chat sentinel',
-    'Private filename sentinel',
+    'Visible source sentinel',
+    'Visible filename sentinel',
+    'Private credential sentinel',
+    'Private composer sentinel',
     'Public project control',
   ]);
   expect(summary.events).toContain('$snapshot');
   expect(summary.present['Public project control']).toBe(true);
-  for (const sensitive of [
-    'Private prompt sentinel',
-    'Private source sentinel',
-    'Private chat sentinel',
-    'Private filename sentinel',
-  ]) {
-    expect(summary.present[sensitive]).toBe(false);
-  }
+  expect(summary.present['Visible source sentinel']).toBe(true);
+  expect(summary.present['Visible filename sentinel']).toBe(true);
+  expect(summary.present['Private credential sentinel']).toBe(false);
+  expect(summary.present['Private composer sentinel']).toBe(false);
 });
 
 test('withdraws an accepted tab when the website announces a decline', async () => {

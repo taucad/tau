@@ -8,8 +8,9 @@ name: E2E nightly
 # night they run against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
 # nightly, never a merge gate.
-# `workflow_dispatch` takes an optional commit to run against instead, and `only` selects one
-# suite family (`packaged`: only the packaged desktop suite).
+# `workflow_dispatch` takes an optional commit to run against instead. The packaged desktop
+# suite runs on every staging candidate (`desktop-packaged.yml`, called from
+# `release-desktop-staging.yml`), not here (DS-4).
 
 on:
   schedule:
@@ -20,11 +21,6 @@ on:
         description: 'Commit to test; defaults to the head of main'
         required: false
         default: ''
-      only:
-        description: 'Run one suite family: all, or packaged (the packaged desktop suite alone)'
-        type: choice
-        options: [all, packaged]
-        default: all
 
 concurrency:
   group: e2e-nightly
@@ -56,8 +52,6 @@ jobs:
       suites: ${{ steps.suites.outputs.suites }}
       sharded: ${{ steps.suites.outputs.sharded }}
       webgpu: ${{ steps.suites.outputs.webgpu }}
-      packaged: ${{ steps.suites.outputs.packaged }}
-      everything: ${{ steps.suites.outputs.everything }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -74,8 +68,6 @@ jobs:
 
       - name: List the end-to-end suites
         id: suites
-        env:
-          ONLY: ${{ inputs.only || 'all' }}
         run: |
           # `tail -1` keeps the JSON array and drops Nx's log lines. A target splits into
           # `metadata.shards` jobs when it declares that count; each job passes
@@ -97,11 +89,6 @@ jobs:
             done
           done
           webgpu=$(pnpm nx show projects --with-target test:e2e:webgpu --json | tail -1)
-          packaged=$(pnpm nx show projects --with-target test:e2e:packaged --json | tail -1)
-          if [ "$ONLY" = packaged ]; then
-            suites='[]'
-            webgpu='[]'
-          fi
           echo "End-to-end suites: $suites"
           echo "suites=$suites" >> "$GITHUB_OUTPUT"
           # The sharded suites whose chat logs `e2e-chat-logs` validates once, across their shards.
@@ -110,9 +97,6 @@ jobs:
           echo "Sharded suites with chat logs: $sharded"
           echo "sharded=$sharded" >> "$GITHUB_OUTPUT"
           echo "webgpu=$([ "$webgpu" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
-          echo "Packaged desktop suites: $packaged"
-          echo "packaged=$(jq -r 'join(",")' <<< "$packaged")" >> "$GITHUB_OUTPUT"
-          echo "everything=$([ "$ONLY" = all ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   # One job per project and suite target: in one job they ran one after another for
   # over 105 min (run 37221169741, 2026-10-04). A target too long for one job declares
@@ -322,83 +306,42 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # The packaged desktop suite (charter D30, W15, W22's desktop consumer row): the ad-hoc signed
-  # darwin-arm64 package and every spec `test:e2e:packaged` lists, nightly and when dispatched with
-  # `only: packaged`. Projects join by declaring the target. GitHub's macOS runners have no Docker,
-  # so PostgreSQL, Redis and MinIO run as host processes (start-macos-services.sh), and
-  # TAU_E2E_SERVICES=host tells ensure-services.sh to migrate only and the account helpers to
-  # reach PostgreSQL with the host's psql.
-  desktop-packaged:
-    name: Packaged desktop end-to-end (darwin-arm64)
-    runs-on: macos-26
-    timeout-minutes: 180
+  # The cloud-build load tier (app state orchestration A0.11): the loading rows a self-host
+  # build cannot show, on the cloud UI variant with stand-ins answering the API by
+  # interception, so it needs no API, database or secret. Each row pins a known defect: it
+  # is a plain test that passes while its defect assertion fails, and records that failure
+  # as a notice annotation naming the defect (`cloudDefectRow`). The job goes red when an
+  # assertion passes (its defect fixed without flipping the row) or when anything else in a
+  # row faults: a load, a precondition, the timeout, setup or teardown.
+  cloud-load:
+    name: Cloud-build load tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [plan]
-    if: needs.plan.outputs.packaged != ''
     permissions:
       contents: 'read'
       actions: 'read'
-    outputs:
-      counts: ${{ steps.desktop-summary.outputs.counts }}
-    env:
-      GEOSPEC_WORKERS: 1
     steps:
       - *checkout
+      - *setup-nx
 
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-        with:
-          node-version: '24.10.0'
-          save-pnpm-store: 'false'
+      - name: Install Chromium for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium
 
-      # The build123d desktop producer installs its wheels with uv.
-      - name: Install uv
-        run: |
-          command -v uv || pipx install uv
-          uv --version
-
-      - name: Record package source identity
-        run: echo "TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-
-      - name: Prepare API env file
-        run: cp apps/api/.env.example apps/api/.env
-
-      - name: Start PostgreSQL, Redis and MinIO on the host
-        run: apps/desktop-e2e/scripts/start-macos-services.sh
-
-      - name: Run the packaged desktop suite
-        id: packaged
-        timeout-minutes: 150
+      - name: Run the cloud-build load tier
+        timeout-minutes: 45
         env:
-          PROJECTS: ${{ needs.plan.outputs.packaged }}
-          TAU_E2E_SERVICES: host
-        run: |
-          set -o pipefail
-          pnpm nx run-many -t test:e2e:packaged --projects "$PROJECTS" --parallel=1 --outputStyle=stream \
-            | tee "$RUNNER_TEMP/desktop-packaged.log"
-
-      # W22 (D33): one line per consumer in the nightly summary; this job owns the desktop's, and
-      # hands its test counts to the consumer parity table.
-      - name: Summarise the desktop consumer
-        id: desktop-summary
-        if: always()
-        env:
-          OUTCOME: ${{ steps.packaged.outcome }}
-        run: |
-          counts=$(sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/desktop-packaged.log" 2>/dev/null \
-            | grep -E '^desktop-e2e: +Tests ' | tail -1 | sed -E 's/^desktop-e2e: +Tests +//')
-          echo "- Desktop consumer (packaged darwin-arm64, macos-26, desktop-e2e:test:e2e:packaged): ${OUTCOME}${counts:+, ${counts}}" >> "$GITHUB_STEP_SUMMARY"
-          echo "counts=${counts}" >> "$GITHUB_OUTPUT"
+          TAU_E2E_WEBGPU_PROFILE: software
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:cloud-load --parallel=1 --outputStyle=stream
 
       - *root-hygiene
 
-      - name: Upload the packaged desktop diagnostics
+      - name: Upload Vitest Browser diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-packaged-diagnostics
-          path: |
-            out/test-results/desktop-e2e
-            ${{ runner.temp }}/desktop-e2e-services/*.log
+          name: vitest-browser-diagnostics-cloud-load
+          path: out/test-results/vitest-browser
           if-no-files-found: ignore
           retention-days: 7
 
@@ -412,7 +355,7 @@ jobs:
     name: Consumer parity (W22)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [plan, e2e, desktop-packaged]
+    needs: [plan, e2e]
     if: always() && needs.plan.result == 'success'
     permissions:
       contents: 'read'
@@ -428,8 +371,7 @@ jobs:
       - name: Write the consumer parity table
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          DESKTOP_COUNTS: ${{ needs.desktop-packaged.outputs.counts }}
-        run: node scripts/src/consumer-parity-summary.ts --summary "$GITHUB_STEP_SUMMARY" --detail "Packaged desktop=${DESKTOP_COUNTS}"
+        run: node scripts/src/consumer-parity-summary.ts --summary "$GITHUB_STEP_SUMMARY"
 
   # runtime-e2e's Darwin host suite, quarantined out of ci.yml until its 11 failing
   # tests pass here: https://github.com/taucad/tau/issues/342. The engine's
@@ -439,7 +381,6 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 150
     needs: [plan]
-    if: needs.plan.outputs.everything == 'true'
     permissions:
       contents: 'read'
       actions: 'read'
@@ -469,7 +410,6 @@ jobs:
     name: Desktop live LLM (launcher 2)
     runs-on: ubuntu-latest
     needs: [plan]
-    if: needs.plan.outputs.everything == 'true'
     permissions:
       contents: 'read'
       actions: 'read'
@@ -529,7 +469,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs: [plan]
-    if: needs.plan.outputs.everything == 'true'
     permissions:
       contents: 'read'
       actions: 'read'

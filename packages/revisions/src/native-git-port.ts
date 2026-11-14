@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
@@ -43,6 +43,7 @@ import {
   revisionCommitterSignature,
   revisionTagMessage,
   taggerSignature,
+  unrecordedAuthorOf,
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
@@ -61,6 +62,7 @@ import type {
   RevisionDivergence,
   RevisionDivergenceInput,
   RevisionEngineDescriptor,
+  RevisionGitOperation,
   RevisionHead,
   RevisionLogEntry,
   RevisionLogInput,
@@ -216,6 +218,8 @@ const tagRefPrefix = 'refs/tags';
 const tagWriteAttempts = 8;
 
 const symbolicRefPrefix = 'ref: ';
+/** A rebase todo line Git runs as a command: `exec` or `x`, after blanks, with an argument (git's `parse_insn_line`). */
+const rebaseExecLine = /^[ \t]*(?:exec|x)[ \t]+\S/mu;
 const stagingRefPrefix = 'refs/tau/transactions/port';
 const initialBranch = 'main';
 /** The store this port owns, relative to the project directory. */
@@ -237,12 +241,18 @@ const liveCheckoutId = 'live';
  *   path that is not a directory disables hooks on every platform.
  * - `init.templateDir` installs hooks and config into a repository this port
  *   creates. Empty is git's own "no template", and it is silent.
+ * - `core.fsmonitor` names a program git runs on `status`, `diff` and every
+ *   index refresh. A value in the store's own `config` is somebody else's
+ *   program run by Tau's plumbing; `false` is git's own "no monitor"
+ *   (linux-terminal-git-parity LP4, threat case 1).
  */
 const pinnedConfiguration: readonly string[] = Object.freeze([
   '-c',
   'core.autocrlf=false',
   '-c',
   'core.hooksPath=/dev/null',
+  '-c',
+  'core.fsmonitor=false',
   '-c',
   'init.templateDir=',
 ]);
@@ -317,15 +327,39 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         .map((name) => [name, undefined]),
     );
 
+  /** The store this port owns: every checkout's common directory. */
+  const storePath = join(repositoryPath, gitDirectoryName);
+
+  /**
+   * The cleared environment, pinned to this project's own store as its common
+   * directory, for a command in a linked checkout.
+   *
+   * A linked checkout finds its admin directory, `worktrees/<id>`, from its
+   * `.git` file, and git then reads the common directory — config, hooks,
+   * objects, refs — from that admin directory's `commondir` file, as it reads
+   * the store's own `commondir` when one is present. Either file, written by
+   * anything that can write the store, would re-point every command at a
+   * config of its choosing (linux-terminal-git-parity LP4, threat cases 3 and
+   * 5). `GIT_COMMON_DIR` wins over both, so the admin directory stays the
+   * checkout's own and the common directory stays the real store.
+   *
+   * @returns The environment a linked checkout's commands run under.
+   */
+  const linkedGitEnvironment = (): Record<string, string | undefined> => {
+    const pinned = clearedGitEnvironment();
+    pinned['GIT_COMMON_DIR'] = storePath;
+    return pinned;
+  };
+
   /**
    * The cleared environment, pinned to this project's own store and work tree.
    *
    * @returns The environment every command of this port runs under.
    */
   const gitEnvironment = (): Record<string, string | undefined> => {
-    const pinned = clearedGitEnvironment();
+    const pinned = linkedGitEnvironment();
     // Environment names, not identifiers: assigned rather than spelled as keys.
-    pinned['GIT_DIR'] = join(repositoryPath, gitDirectoryName);
+    pinned['GIT_DIR'] = storePath;
     pinned['GIT_WORK_TREE'] = repositoryPath;
     pinned['GIT_TERMINAL_PROMPT'] = '0';
     return pinned;
@@ -370,7 +404,56 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return classified.code === 'ENGINE_FAILED' ? undefined : classified;
   };
 
+  /**
+   * Refuse a command whose admin directory names a common directory other than the store.
+   *
+   * `GIT_COMMON_DIR` moves config, hooks and objects, but git's files ref
+   * backend reads `<admin>/commondir` for itself and ignores the variable
+   * (stock git 2.43, measured for LP4): a planted file would still send every
+   * branch read and write to the folder it names. The store's own admin
+   * directory never has one, and a linked checkout's must name the store, so
+   * either case is refused before git starts. A file planted between this
+   * check and git's own read is the plant LP4 cannot see; the store policy is
+   * the first line against it.
+   *
+   * @param args - The command, `-C <root>` first when it runs in a linked checkout.
+   * @returns Once the command may run.
+   */
+  const assertOwnCommonDirectory = async (args: readonly string[]): Promise<void> => {
+    const refusal = new RevisionPortError(
+      'INVALID_REPOSITORY',
+      "The project's Git folder names another folder as its common directory; Tau reads and writes only its own.",
+    );
+    const planted = await lstat(join(storePath, 'commondir')).then(
+      () => true,
+      () => false,
+    );
+    if (planted) {
+      throw refusal;
+    }
+    const root = args[0] === '-C' ? args[1] : undefined;
+    if (root === undefined) {
+      return;
+    }
+    const gitFile = await readFile(join(root, gitDirectoryName), 'utf8').catch(() => '');
+    const named = /^gitdir: (?<admin>.+)$/mu.exec(gitFile)?.groups?.['admin']?.trim();
+    if (named === undefined) {
+      /* Not a linked checkout yet: git refuses on its own. */
+      return;
+    }
+    const admin = resolvePath(root, named);
+    const commonFile = await readFile(join(admin, 'commondir'), 'utf8').catch(() => undefined);
+    const common = commonFile === undefined ? admin : resolvePath(admin, commonFile.trim());
+    const [actual, store] = await Promise.all(
+      [common, storePath].map(async (path) => realpath(path).catch(() => path)),
+    );
+    if (actual !== store) {
+      throw refusal;
+    }
+  };
+
   const run = async (args: readonly string[], options: GitRunOptions = {}): Promise<GitCommandResult> => {
+    await assertOwnCommonDirectory(args);
     try {
       return await runGitCommand({
         gitExecutable,
@@ -556,7 +639,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
       /* B3: a commit Tau did not record reads as its git author, as GitHub shows it. */
-      ...(trailer === undefined ? { authorName: commit.author.name } : {}),
+      ...(trailer === undefined ? unrecordedAuthorOf(commit) : {}),
       conflicted: commit.conflictedTrees !== undefined,
     });
   };
@@ -1764,6 +1847,194 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /**
+   * One environment with one more variable.
+   *
+   * @param environment - The environment to extend.
+   * @param name - The variable's name.
+   * @param value - Its value.
+   * @returns A copy of the environment with it set.
+   */
+  const withVariable = (
+    environment: Record<string, string | undefined>,
+    name: string,
+    value: string,
+  ): Record<string, string | undefined> => {
+    const extended = { ...environment };
+    // Environment names, not identifiers: assigned rather than spelled as keys.
+    extended[name] = value;
+    return extended;
+  };
+
+  /** The head a branch move replaced; `head` is `undefined` when the branch was unborn. */
+  type ReplacedHead = Readonly<{ head: string | undefined }>;
+
+  /**
+   * One worktree's admin directory: the store for the live checkout, its own
+   * `worktrees/<name>` for a linked one.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @returns The absolute directory, or `undefined` when Git cannot name one.
+   */
+  const adminDirectoryOf = async (root: string | undefined): Promise<string | undefined> => {
+    if (root === undefined) {
+      return join(repositoryPath, gitDirectoryName);
+    }
+    const result = await run(['-C', root, 'rev-parse', '--absolute-git-dir'], { env: linkedGitEnvironment() });
+    return result.exitCode === 0 ? textDecoder.decode(result.stdout).trim() : undefined;
+  };
+
+  /**
+   * Point one worktree's index at the tree its branch now names, carrying the
+   * person's staging forward onto it.
+   *
+   * Every path whose index entry differs from the tree of the head the move
+   * replaced holds the person's own staging (`git add -p`, a resolved
+   * conflict), and keeps that entry; every other path takes the new head's.
+   * So `git diff --cached` names only what the person staged, and a plain
+   * `git commit` records it on top of Tau's head instead of undoing Tau's
+   * saves of the paths they never staged. A path the person staged that the
+   * new head also changed keeps the person's entry, and `git status` shows it
+   * staged and modified: Tau never decides between the two, and never drops
+   * either. An index with unmerged entries, or one Git cannot compare, is
+   * left as it is.
+   *
+   * The comparison and the write happen under Git's own `index.lock`, taken
+   * here, so the person's Git cannot stage between them. The new index is
+   * written beside it and renamed through the lock, which is how Git itself
+   * writes one. A lock someone else holds means their Git is mid-operation,
+   * and the refresh is skipped.
+   *
+   * @param root - A linked checkout's root, or `undefined` for the live checkout.
+   * @param head - The commit the branch now names, or `undefined` on an unborn branch.
+   * @param replaced - The head the move replaced, whose `head` is `undefined`
+   *   when the branch was unborn; absent, the index is replaced without
+   *   comparing (an open that found none).
+   * @returns Once the index was refreshed or left.
+   */
+  const refreshIndex = async (
+    root: string | undefined,
+    head: string | undefined,
+    replaced: ReplacedHead | undefined,
+  ): Promise<void> => {
+    /* A linked worktree finds its own admin directory from its `.git` file. */
+    const prefix = root === undefined ? [] : ['-C', root];
+    const environment = root === undefined ? gitEnvironment() : linkedGitEnvironment();
+    const readTree = head === undefined ? ['read-tree', '--empty'] : ['read-tree', head];
+    if (replaced === undefined) {
+      await run([...prefix, ...readTree], { env: environment });
+      return;
+    }
+    const admin = await adminDirectoryOf(root);
+    if (admin === undefined) {
+      return;
+    }
+    const index = join(admin, 'index');
+    const lock = `${index}.lock`;
+    const held = await open(lock, 'wx').then(
+      async (handle) => {
+        await handle.close();
+        return true;
+      },
+      () => false,
+    );
+    if (!held) {
+      return;
+    }
+    let locked = true;
+    const temporary = `${index}.tau-${randomUUID()}`;
+    try {
+      const indexed = await access(index).then(
+        () => true,
+        () => false,
+      );
+      const staged = indexed ? await stagedEntries(prefix, environment, replaced.head) : [];
+      if (staged === undefined) {
+        return;
+      }
+      const writing = { env: withVariable(environment, 'GIT_INDEX_FILE', temporary) };
+      const written = await run([...prefix, ...readTree], writing);
+      if (written.exitCode !== 0) {
+        return;
+      }
+      if (staged.length > 0) {
+        const zero = await zeroObjectId();
+        const records = staged.map(({ mode, object, path }) =>
+          mode === undefined ? `0 ${zero}\t${path}\0` : `${mode} ${object}\t${path}\0`,
+        );
+        const carried = await run([...prefix, 'update-index', '-z', '--index-info'], {
+          ...writing,
+          input: [textEncoder.encode(records.join(''))],
+        });
+        if (carried.exitCode !== 0) {
+          return;
+        }
+      }
+      await rename(temporary, lock);
+      await rename(lock, index);
+      locked = false;
+    } finally {
+      await rm(temporary, { force: true });
+      if (locked) {
+        await rm(lock, { force: true });
+      }
+    }
+  };
+
+  /**
+   * The index entries a worktree's index holds that differ from the tree of one head: what the person staged.
+   *
+   * @param prefix - The arguments that select the worktree.
+   * @param environment - The environment its commands run under.
+   * @param replaced - The head, or `undefined` for an unborn one (the empty tree).
+   * @returns One entry per staged path, its `mode` absent where the person
+   *   staged a removal; `undefined` when the index has unmerged entries or Git
+   *   could not compare, and the index is not Tau's to rebuild.
+   */
+  const stagedEntries = async (
+    prefix: readonly string[],
+    environment: Record<string, string | undefined>,
+    replaced: string | undefined,
+  ): Promise<ReadonlyArray<Readonly<{ mode?: string; object: string; path: string }>> | undefined> => {
+    const reading = { env: withVariable(environment, 'GIT_OPTIONAL_LOCKS', '0') };
+    const fields = (result: GitCommandResult): string[] | undefined =>
+      result.exitCode === 0 ? textDecoder.decode(result.stdout).split('\0') : undefined;
+    if (replaced === undefined) {
+      /* Against an unborn head, every entry was staged by someone: `<mode> <object> <stage>\t<path>`. */
+      const listed = fields(await run([...prefix, 'ls-files', '--stage', '-z'], reading));
+      if (listed === undefined) {
+        return undefined;
+      }
+      const entries = listed
+        .filter((record) => record !== '')
+        .map((record) => {
+          const [meta = '', path = ''] = record.split('\t');
+          const [mode = '', object = '', stage = ''] = meta.split(' ');
+          return { mode, object, stage, path };
+        });
+      return entries.some((entry) => entry.stage !== '0')
+        ? undefined
+        : entries.map(({ mode, object, path }) => ({ mode, object, path }));
+    }
+    /* `:<old mode> <new mode> <old object> <new object> <status>`, then the path; the new side is the index's. */
+    const compared = fields(
+      await run([...prefix, 'diff-index', '--cached', '--raw', '-z', '--no-renames', replaced, '--'], reading),
+    );
+    if (compared === undefined) {
+      return undefined;
+    }
+    const entries: Array<Readonly<{ mode?: string; object: string; path: string }>> = [];
+    for (let at = 0; at + 1 < compared.length; at += 2) {
+      const [, mode = '', , object = '', status = ''] = (compared[at] ?? '').slice(1).split(' ');
+      const path = compared[at + 1] ?? '';
+      if (status.startsWith('U')) {
+        return undefined;
+      }
+      entries.push(status.startsWith('D') ? { object, path } : { mode, object, path });
+    }
+    return entries;
+  };
+
+  /**
    * Point each worktree's index at the tree its branch names (R14).
    *
    * Tau never reads the index: it applies trees through the filesystem provider
@@ -1772,8 +2043,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * reversed and `git commit -a` record it undone. So after a branch moves,
    * every worktree that has it checked out gets `read-tree` of the new head:
    * the state `git reset` leaves, with stat data zero for Git to fill in on
-   * its own next refresh. Anything the person staged is already in the working
-   * copy the next capture records.
+   * its own next refresh. What the person staged is carried onto the new
+   * head (see `refreshIndex`).
    *
    * One queue so the last refresh reads the last head, and every failure is
    * swallowed: the ref has already moved, and a held `index.lock` means the
@@ -1781,9 +2052,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * @param moved - The fully-qualified branch that moved, or `undefined` for
    *   the live worktree alone (an open that found no index).
+   * @param replaced - The head the move replaced; absent, each index is replaced without comparing.
    * @returns Once every matching worktree's index was refreshed or skipped.
    */
-  const syncIndexes = async (moved: string | undefined): Promise<void> =>
+  const syncIndexes = async (moved: string | undefined, replaced?: ReplacedHead): Promise<void> =>
     refQueue.queueFor(`${repositoryPath}:index`, async () => {
       const listing = await run(['worktree', 'list', '--porcelain']);
       if (listing.exitCode !== 0) {
@@ -1800,12 +2072,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         if (root === undefined || !wanted) {
           continue;
         }
-        const readTree = head === undefined || head === zero ? ['read-tree', '--empty'] : ['read-tree', head];
         // oxlint-disable-next-line no-await-in-loop -- at most one worktree holds a branch.
-        await (index === 0
-          ? run(readTree)
-          : // A linked worktree finds its own admin directory from its `.git` file.
-            run(['-C', root, ...readTree], { env: clearedGitEnvironment() }));
+        await refreshIndex(index === 0 ? undefined : root, head === zero ? undefined : head, replaced).catch(
+          () => undefined,
+        );
       }
     });
 
@@ -1946,8 +2216,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
     /* Discovery, not the pinned store: the question is what is *already* at
      * this path, so `GIT_DIR` must be absent here rather than pointed at the
-     * answer. Every `GIT_*` the caller exported is still stripped. */
-    const discovery = clearedGitEnvironment();
+     * answer. Every `GIT_*` the caller exported is still stripped. A store
+     * directory that is already here is the one discovery finds first, so its
+     * common directory is pinned to itself and a `commondir` planted in it
+     * cannot answer for it (LP4); with no store yet there is nothing to pin,
+     * and pinning a missing one would hide a bare repository at this path. */
+    const discovery = gitEntry?.isDirectory() === true ? linkedGitEnvironment() : clearedGitEnvironment();
     const bare = await run(['rev-parse', '--is-bare-repository'], { env: discovery });
     if (bare.exitCode === 0 && textDecoder.decode(bare.stdout).trim() === 'true') {
       // Review 4 R26: a bare repository has no work tree to snapshot, and
@@ -2189,7 +2463,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           root === undefined
             ? await output(command)
             : // A linked worktree finds its own admin directory from its `.git` file.
-              await output(['-C', root, ...command], { env: clearedGitEnvironment() });
+              await output(['-C', root, ...command], { env: linkedGitEnvironment() });
         return textDecoder
           .decode(listed)
           .split('\0')
@@ -2482,7 +2756,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         });
       });
       if (result.status === 'updated' && ref.startsWith(`${branchRefPrefix}/`)) {
-        await syncIndexes(ref);
+        await syncIndexes(ref, { head: input.expectedHead });
       }
       return result;
     },
@@ -2502,8 +2776,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     setHead: async (branch: string): Promise<void> => {
-      await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => output(['symbolic-ref', 'HEAD', refOf(branch)]));
-      await syncIndexes(refOf(branch));
+      /* The head the live worktree's index was read from, so staging into it survives the switch. */
+      const replaced = await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => {
+        const previous = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
+        await output(['symbolic-ref', 'HEAD', refOf(branch)]);
+        return previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : undefined;
+      });
+      await syncIndexes(refOf(branch), { head: replaced });
     },
 
     listRefs: async (prefix?: string): Promise<readonly RevisionRef[]> => {
@@ -3005,6 +3284,60 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
     listCheckouts: async (): Promise<readonly Checkout[]> => listWorktrees(),
 
+    /*
+     * The files stock Git leaves in a worktree's admin directory while an
+     * operation is stopped part-way, read without running Git so a poll costs
+     * a few stats. An operation outranks a detached head, since a rebase
+     * detaches one, and a held `index.lock` comes last: it is the shortest.
+     */
+    gitOperation: async (root?: string): Promise<RevisionGitOperation | undefined> => {
+      const admin = await adminDirectoryOf(root);
+      if (admin === undefined) {
+        return undefined;
+      }
+      const exists = async (name: string): Promise<boolean> => {
+        try {
+          await access(join(admin, name));
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      /* A todo that will run commands outranks every other marker, so a
+       * planted `MERGE_HEAD` cannot hide the warning (LP7, OD4). */
+      const todo = await readFile(join(admin, 'rebase-merge', 'git-rebase-todo'), 'utf8').catch(() => undefined);
+      if (todo !== undefined && rebaseExecLine.test(todo)) {
+        return Object.freeze({ kind: 'rebase', runsCommands: true });
+      }
+      const markers: ReadonlyArray<readonly [string, RevisionGitOperation['kind']]> = [
+        ['MERGE_HEAD', 'merge'],
+        ['CHERRY_PICK_HEAD', 'cherryPick'],
+        ['REVERT_HEAD', 'revert'],
+        ['rebase-merge', 'rebase'],
+        ['rebase-apply', 'rebase'],
+      ];
+      for (const [name, kind] of markers) {
+        // oxlint-disable-next-line no-await-in-loop -- in order: the first marker names the operation.
+        if (await exists(name)) {
+          return Object.freeze({ kind });
+        }
+      }
+      const head = await readFile(join(admin, 'HEAD'), 'utf8').catch(() => undefined);
+      if (head !== undefined && !head.startsWith(symbolicRefPrefix)) {
+        /* The way back: the branch Git's own log says this worktree left last. */
+        const previous = await run(
+          [...(root === undefined ? [] : ['-C', root]), 'rev-parse', '--symbolic-full-name', '@{-1}'],
+          root === undefined ? {} : { env: linkedGitEnvironment() },
+        );
+        const left = previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : '';
+        return Object.freeze({
+          kind: 'detached',
+          ...(left.startsWith(`${branchRefPrefix}/`) ? { branch: left.slice(branchRefPrefix.length + 1) } : {}),
+        });
+      }
+      return (await exists('index.lock')) ? Object.freeze({ kind: 'locked' }) : undefined;
+    },
+
     /**
      * One checkout per branch — the rule Git already enforces, refused here with
      * the port's own code so both legs answer the same way.
@@ -3026,7 +3359,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           `Branch ${input.branch} is unborn; a checkout of it needs an explicit base revision.`,
         );
       }
-      const tree = await port.readTree(base);
+      /* Paths are all the check below reads, so a large object that has not arrived stays its pointer. */
+      const tree = await port.readTree(base, { largeObjects: 'local' });
       if (tree === undefined) {
         throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for revision ${base}.`);
       }
@@ -3034,14 +3368,27 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       const id = await checkoutIdOf(input.branch);
       await mkdir(directory, { recursive: true });
       const root = join(directory, id);
+      /* Large files are written as their pointers. Git-lfs's download filter
+       * would fetch any object that has not arrived without this port's
+       * credentials, and a refused download aborts the whole checkout; the
+       * host's fill brings those bytes afterwards from the store or the
+       * remote (D16). */
       const add = async (): Promise<void> => {
-        await output([
-          'worktree',
-          'add',
-          ...(head === undefined ? ['-b', input.branch] : []),
-          root,
-          head === undefined ? base : input.branch,
-        ]);
+        await output(
+          [
+            'worktree',
+            'add',
+            ...(head === undefined ? ['-b', input.branch] : []),
+            root,
+            head === undefined ? base : input.branch,
+          ],
+          { env: withVariable(gitEnvironment(), 'GIT_LFS_SKIP_SMUDGE', '1') },
+        );
+        /* The index recorded each pointer's size, and Git reads a size that
+         * differs as modified without asking the filter, so once the fill writes
+         * the bytes `git status` would list every large file. `read-tree` leaves
+         * stat data zero, and Git compares contents on its next refresh (R14). */
+        await run(['-C', root, 'read-tree', 'HEAD'], { env: linkedGitEnvironment() });
       };
       await (withMutationAuthority?.(
         {

@@ -118,14 +118,13 @@ const phoneWidths = [
 
 describe('Viewer controls on phones in Chromium', () => {
   it.each(phoneWidths)(
-    'centres one group of 28px controls, Grid · Section, Measure · Fit, AR · Viewer settings, at $width px',
+    'centres one group of 28px controls, Section, Measure · Fit, AR · Viewer settings, at $width px',
     async ({ width, height }) => {
       await page.viewport(width, height);
       renderStage({ height: 360, mobileAction: <ArControl onActivate={() => undefined} /> });
 
-      // Grid is its glyph; the readout lives in its name and tooltip. Capture keeps its own section before Settings.
+      // The grid size and units are in Viewer settings. Capture keeps its own section before Settings.
       expect(controlNames()).toEqual([
-        'Grid 1 mm, units and grid',
         'Section view',
         'Measure',
         'Fit view',
@@ -135,7 +134,6 @@ describe('Viewer controls on phones in Chromium', () => {
       ]);
       expect(controlNames()).not.toContain('Enter fullscreen');
       expect(sections()).toEqual([
-        ['Grid 1 mm, units and grid'],
         ['Section view', 'Measure'],
         ['Fit view', 'View in your space'],
         ['Capture view to chat'],
@@ -192,14 +190,7 @@ describe('Viewer controls on phones in Chromium', () => {
     // The route's own AR button: Chromium has no Quick Look and there is no runtime document to export from.
     renderStage({ height: 360, mobileAction: <ArButton artifact={undefined} /> });
 
-    expect(controlNames()).toEqual([
-      'Grid 1 mm, units and grid',
-      'Section view',
-      'Measure',
-      'Fit view',
-      'Capture view to chat',
-      'Viewer settings',
-    ]);
+    expect(controlNames()).toEqual(['Section view', 'Measure', 'Fit view', 'Capture view to chat', 'Viewer settings']);
     const group = box(controlsGroup());
     const stage = box(frame());
     expect(Math.abs((group.left + group.right) / 2 - (stage.left + stage.right) / 2)).toBeLessThanOrEqual(1);
@@ -299,7 +290,6 @@ describe('Viewer controls on desktop in Chromium', () => {
     renderStage({ height: 480, mobileAction: <ArControl onActivate={() => undefined} /> });
 
     expect(controlNames()).toEqual([
-      'Grid 1 mm, units and grid',
       'Section view',
       'Measure',
       'Fit view',
@@ -313,5 +303,39 @@ describe('Viewer controls on desktop in Chromium', () => {
     }
     // Desktop bars are not bounded by the phone measurement.
     expect(bar().style.maxHeight).toBe('');
+  });
+
+  it('opens Viewer settings to the right of the bar, 8 px from it with the bottom edges aligned, when the pane has room', async () => {
+    await page.viewport(1280, 800);
+    renderStage({ height: 480 });
+    // Found before the menu opens, which hides the rest of the page from assistive technology.
+    const barElement = bar();
+    const pane = frame();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Viewer settings' }));
+    const menu = await screen.findByRole('menu');
+    // The menu snaps to whole pixels; a centred bar's edge may not.
+    await expect.poll(() => Math.abs(box(menu).left - (box(barElement).right + 8))).toBeLessThanOrEqual(1);
+    expect(Math.abs(box(menu).bottom - box(barElement).bottom)).toBeLessThanOrEqual(1);
+    expect(box(menu).right).toBeLessThanOrEqual(box(pane).right);
+
+    // A sub-view row's value sits against its chevron at the row's 8 px gap, not mid-row.
+    const grid = within(menu).getByRole('menuitem', { name: /^Grid & units, /u });
+    const chevron = grid.lastElementChild!;
+    expect(box(chevron).left - box(chevron.previousElementSibling!).right).toBeCloseTo(8, 0);
+    expect(box(grid).right - box(chevron).right).toBeCloseTo(12, 0);
+  });
+
+  it('opens Viewer settings above the gear when the menu would not fit beside the bar', async () => {
+    await page.viewport(800, 800);
+    renderStage({ height: 480 });
+
+    const gear = screen.getByRole('button', { name: 'Viewer settings' });
+    const gearBox = box(gear);
+    // The bar's right edge, the gap, the 288 px menu and the gap pass the pane's right edge.
+    expect(box(bar()).right + 8 + 288 + 8).toBeGreaterThan(box(frame()).right);
+    await userEvent.click(gear);
+    const menu = await screen.findByRole('menu');
+    await expect.poll(() => box(menu).bottom).toBeLessThanOrEqual(gearBox.top);
   });
 });

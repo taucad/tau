@@ -231,6 +231,8 @@ describe('ChatAgentSheet', () => {
     const trigger = screen.getByRole('button', { name: 'Agent and model: Model' });
     expect(trigger).not.toHaveTextContent(fable.id);
     expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('w-20');
+    // Cut like the name when the bar is narrow, so the bar's collapse sees it overflow (never squeezed under 24px).
+    expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('min-w-0', 'overflow-hidden');
     expect(trigger.querySelector('[data-slot="trigger-model"]')).toBeNull();
   });
 
@@ -371,7 +373,7 @@ describe('ChatAgentSheet', () => {
     /* Browsing an agent changes nothing, and the way back is to the agents. */
     expect(setActiveExecution).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText('Search Codex models…')).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Back to agents' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to agents' })).toHaveTextContent(/^Back$/u);
     await userEvent.click(screen.getByRole('option', { name: 'GPT-5.6-Sol' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({
@@ -671,7 +673,7 @@ describe('ChatAgentSheet', () => {
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
 
     await userEvent.click(settings);
-    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent('Settings');
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent(/^Back$/u);
     /* Focus lands on the first control: the chosen Collaboration mode. */
     expect(
       within(screen.getByRole('tablist', { name: 'Collaboration mode' })).getByRole('tab', { name: 'Plan' }),

@@ -1,0 +1,238 @@
+name: Drift check
+
+# The one time-based check of the CI throughput program (Brain research/ci-throughput-review.md, Q-7). Some
+# conformance inputs change without a commit: the GitHub-hosted runner images the shell and native rows run on, and
+# the distribution archives the stock Linux guests install their packages from. Once a day this workflow records them
+# (a few Linux minutes and two macOS minutes), compares them with the fingerprint of its newest green run on `main`
+# (`scripts/src/drift-fingerprint.ts`), and dispatches on `main` only the workflows whose inputs moved:
+# `shell-conformance.yml` (full tier) when a shell runner image or a guest's packages changed, `native-hosts.yml`
+# (every row) when a native host runner image changed. It then waits for each dispatched run and fails unless every one
+# is green, so the next green run's fingerprint becomes the baseline only once the rows passed on it; a red day
+# dispatches again the next day. The first run, with no earlier green fingerprint, dispatches both. A quiet day
+# dispatches nothing.
+#
+# - Runner images: `$ImageOS $ImageVersion` on each label the rows use (ubuntu-24.04 hosts the Linux shell guests and
+#   the native x64 rows, ubuntu-24.04-arm the native arm64 row, macos-26 the MAC-A row, macos-26-intel the MAC-X row
+#   and the Intel native row).
+# - Guests: the candidate version of every package `libs/sandbox/scripts/shell-conformance-guest.sh` installs, resolved
+#   in the distribution's own container image against the same archives the stock cloud images use; the guest image
+#   pins themselves are in the repository, so a change to them is a commit and the queue proves it.
+# - `postgres:17-alpine`: the tag's index digest is compared with the pin in `ci.yml` (BN-1). A moved tag is a warning
+#   that names the refresh, not a dispatch: the pinned image does not change until someone moves the pin.
+#
+# The nightly watchdog (`nightly-watchdog.yml`) alerts when this schedule's newest run is red or missing (WD-1b), which
+# covers a red dispatch too. The 02:17 shell and 03:17 native-hosts nightlies stay until two drift dispatches of each
+# have run green (resume § 5b).
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drift-check
+  cancel-in-progress: false
+
+jobs:
+  runner-image:
+    name: Runner image (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, macos-26-intel]
+    steps:
+      - name: Record the image
+        env:
+          RUNNER_LABEL: ${{ matrix.runner }}
+        run: |
+          test -n "$ImageOS" && test -n "$ImageVersion"
+          mkdir -p "$RUNNER_TEMP/drift"
+          printf '%s %s' "$ImageOS" "$ImageVersion" > "$RUNNER_TEMP/drift/$RUNNER_LABEL"
+          echo "$RUNNER_LABEL: $ImageOS $ImageVersion"
+      - name: Upload the image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drift-runner-${{ matrix.runner }}
+          path: ${{ runner.temp }}/drift
+          if-no-files-found: error
+          retention-days: 7
+
+  guests:
+    name: Guest packages and registry pins
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.10.0'
+
+      # Each guest's candidate versions, in its distribution's container (`apt-cache policy` after `apt-get update`
+      # against the image's own archives). A package the distribution lacks reads `(none)`, which is stable.
+      - name: Resolve the guests' package versions
+        run: |
+          set -o pipefail
+          packages=$(node scripts/src/drift-fingerprint.ts packages)
+          echo "Guest packages: $packages"
+          mkdir -p "$RUNNER_TEMP/drift"
+          for pair in ubuntu=ubuntu:24.04 ubuntu2604=ubuntu:26.04 debian=debian:trixie; do
+            guest=${pair%%=*} image=${pair#*=}
+            # shellcheck disable=SC2086 # The package list is one word per package.
+            docker run --rm "$image" sh -c "apt-get update -qq > /dev/null && apt-cache policy $packages" \
+              | awk '/^[^ ].*:$/ { name = substr($0, 1, length($0) - 1) } /^  Candidate:/ { print name "=" $2 }' \
+              | LC_ALL=C sort > "$RUNNER_TEMP/drift/$guest.versions"
+            test -s "$RUNNER_TEMP/drift/$guest.versions"
+            sha256sum "$RUNNER_TEMP/drift/$guest.versions" | cut -c1-64 > "$RUNNER_TEMP/drift/$guest"
+            echo "$guest ($image): $(wc -l < "$RUNNER_TEMP/drift/$guest.versions") packages, $(cat "$RUNNER_TEMP/drift/$guest")"
+          done
+
+      # BN-1's pin: report only. `ci.yml`'s billing step names how to refresh it.
+      - name: Compare the postgres:17-alpine tag with its pin
+        run: |
+          set -o pipefail
+          pin=$(grep -o 'postgres:17-alpine@sha256:[0-9a-f]\{64\}' .github/workflows/ci.yml | sort -u)
+          test "$(wc -l <<< "$pin")" = 1
+          token=$(curl -fsS 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/postgres:pull' | jq -r .token)
+          tag=$(curl -fsSI -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            https://registry-1.docker.io/v2/library/postgres/manifests/17-alpine \
+            | tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }')
+          echo "postgres:17-alpine pin ${pin#*@}, tag $tag"
+          if [ "postgres:17-alpine@$tag" != "$pin" ]; then
+            echo "::warning title=postgres:17-alpine moved::The tag is $tag; ci.yml pins ${pin#*@}. Refresh the pin as its billing step says."
+          fi
+
+      - name: Upload the guests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drift-guests
+          path: ${{ runner.temp }}/drift
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    name: Compare and dispatch
+    needs: [runner-image, guests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: write # Dispatch the drift workflows and read the previous run's fingerprint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24.10.0'
+
+      - name: Download today's inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: drift-*
+          path: ${{ runner.temp }}/inputs
+          merge-multiple: true
+
+      - name: Write today's fingerprint
+        run: |
+          set -o pipefail
+          dir="$RUNNER_TEMP/inputs"
+          mkdir -p "$RUNNER_TEMP/fingerprint"
+          jq -n \
+            --arg u "$(cat "$dir/ubuntu-24.04")" --arg a "$(cat "$dir/ubuntu-24.04-arm")" \
+            --arg m "$(cat "$dir/macos-26")" --arg i "$(cat "$dir/macos-26-intel")" \
+            --arg gu "$(cat "$dir/ubuntu")" --arg g26 "$(cat "$dir/ubuntu2604")" --arg gd "$(cat "$dir/debian")" \
+            '{runners: {"ubuntu-24.04": $u, "ubuntu-24.04-arm": $a, "macos-26": $m, "macos-26-intel": $i},
+              guests: {ubuntu: $gu, ubuntu2604: $g26, debian: $gd}}' > "$RUNNER_TEMP/fingerprint/fingerprint.json"
+          cp "$dir"/*.versions "$RUNNER_TEMP/fingerprint/"
+          cat "$RUNNER_TEMP/fingerprint/fingerprint.json"
+
+      # Uploaded before any dispatch, so a run that later fails still shows what it saw; only a green run's
+      # fingerprint is ever read back as the baseline.
+      - name: Upload today's fingerprint
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drift-fingerprint
+          path: ${{ runner.temp }}/fingerprint
+          if-no-files-found: error
+          retention-days: 90
+
+      # The newest successful run of this workflow on `main` (schedule or dispatch). None, or no artifact (expired or
+      # removed), sets the baseline: every drift workflow is dispatched.
+      - name: Read the last green fingerprint
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/drift-check.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+          path=''
+          if [ -n "$run" ] && gh run download "$run" --repo "$GITHUB_REPOSITORY" --name drift-fingerprint --dir "$RUNNER_TEMP/previous"; then
+            path="$RUNNER_TEMP/previous/fingerprint.json"
+          fi
+          echo "Last green drift run: ${run:-none}; fingerprint: ${path:-none}"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Compare
+        id: compare
+        env:
+          PREVIOUS: ${{ steps.previous.outputs.path }}
+        run: |
+          set -o pipefail
+          drift=$(node scripts/src/drift-fingerprint.ts compare --current "$RUNNER_TEMP/fingerprint/fingerprint.json" --previous "$PREVIOUS")
+          echo "$drift" | jq .
+          echo "dispatch=$(jq -r '.dispatch | join(" ")' <<< "$drift")" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Drift check"
+            echo
+            jq -r 'if .changes == [] then "No input changed since the last green run; nothing dispatched." else (.changes[] | "- \(.)") end' <<< "$drift"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Each dispatch on `main`, then its run found by event, branch and creation time, then awaited. A dispatched
+      # run that is not green fails this run (the watchdog then alerts).
+      - name: Dispatch and wait
+        if: steps.compare.outputs.dispatch != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH: ${{ steps.compare.outputs.dispatch }}
+        run: |
+          set -o pipefail
+          declare -A runs
+          for workflow in $DISPATCH; do
+            since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main
+            id=''
+            for _ in $(seq 1 30); do
+              sleep 10
+              id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=main&created=%3E%3D$since&per_page=1" \
+                --jq '.workflow_runs[0].id // empty')
+              [ -n "$id" ] && break
+            done
+            test -n "$id" || { echo "::error::no run of $workflow appeared after its dispatch"; exit 1; }
+            echo "Dispatched $workflow: run $id"
+            echo "- Dispatched \`$workflow\`: [run $id]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id)" >> "$GITHUB_STEP_SUMMARY"
+            runs[$workflow]=$id
+          done
+          status=0
+          for workflow in "${!runs[@]}"; do
+            id=${runs[$workflow]}
+            until [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .status)" = completed ]; do sleep 60; done
+            conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .conclusion)
+            echo "$workflow run $id: $conclusion"
+            echo "- \`$workflow\` run $id: $conclusion" >> "$GITHUB_STEP_SUMMARY"
+            [ "$conclusion" = success ] || status=1
+          done
+          exit "$status"

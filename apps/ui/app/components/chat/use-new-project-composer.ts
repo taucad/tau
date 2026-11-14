@@ -6,7 +6,6 @@ export type NewProjectComposerProperties = {
   readonly adoptedEarlyInput?: EarlyChatInput;
   readonly enableAutoFocus?: boolean;
   readonly className?: string;
-  readonly enableKernelChips?: boolean;
 };
 
 function reportComposerLoadFailure(error: unknown): void {

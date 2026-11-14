@@ -75,10 +75,15 @@ jobs:
       cli-e2e: ${{ steps.plan.outputs.cli-e2e }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
+      formal-nightly: ${{ steps.plan.outputs.formal-nightly }}
+      formal-nightly-projects: ${{ steps.plan.outputs.formal-nightly-projects }}
       geospec-examples: ${{ steps.plan.outputs.geospec-examples }}
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
+      native-intel: ${{ steps.plan.outputs.native-intel }}
+      native-darwin: ${{ steps.plan.outputs.native-darwin }}
+      native-darwin-projects: ${{ steps.plan.outputs.native-darwin-projects }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
       viewer-parity: ${{ steps.plan.outputs.viewer-parity }}
       desktop: ${{ steps.plan.outputs.desktop }}
@@ -132,7 +137,11 @@ jobs:
           # does not rebuild the production image.
           # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
           # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
-          # native rows it runs. Viewer parity (`viewer-parity.yml`): the project that owns the gate
+          # native rows it runs, and the former start its Intel row (`native-intel`).
+          # Native darwin rows (`native-darwin.yml`): a `test:native-darwin` project (Build123d, PicoGK, the
+          # CLI) is affected; `native-darwin-projects` names the rows. NATIVE_DARWIN_LANE_PATHS select every
+          # such project: that workflow and the nuget standalone oracle's sources outside the native closure,
+          # which its row's last steps read (go-live PRJ-1). Viewer parity (`viewer-parity.yml`): the project that owns the gate
           # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
           # Desktop lane: a `tag:ci:desktop` project (the Electron app and, after the split, its services
           # host). No job here runs it: the packaged suite runs on every staging candidate instead
@@ -143,6 +152,8 @@ jobs:
           # SHELL_LANE_PATHS select it too (with `sandbox`): the fixture producers and the workflow the graph
           # does not see, checked here rather than as target `inputs`, which would mark `sandbox` and every
           # project that depends on it affected in the ordinary lanes (shell split blueprint rows 15, 17).
+          # Formal nightly lane (`formal-nightly.yml`, CI throughput review Q-4): a project with a `formal:nightly`
+          # target is affected; the deep formal tiers run per project in the merge queue only, seeded by the commit.
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -154,11 +165,13 @@ jobs:
              "billing": {"targets": ["test:billing-foundation"], "pr": "queue"},
              "cli-e2e": {"targets": ["test:scenarios"], "pr": "queue"},
              "size": {"targets": ["size"]},
-             "formal": {"targets": ["formal"], "pr": "queue"},
+             "formal": {"targets": ["formal:tla"], "pr": "queue"},
+             "formal-nightly": {"targets": ["formal:nightly"], "pr": "queue"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
+             "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue"}}
@@ -167,6 +180,13 @@ jobs:
              "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
              "apps/desktop/scripts/linux-apt-package.mts",
              "apps/desktop/scripts/runtime-stage.mts"]
+          NATIVE_DARWIN_LANE_PATHS: >-
+            [".github/workflows/native-darwin.yml",
+             "scripts/src/check-standalone-project.ts",
+             "scripts/src/standalone-geometry.ts",
+             "apps/ui/app/constants/project.constants.ts",
+             "apps/ui/app/utils/kernel-libraries.ts",
+             "libs/tau-examples/src/standalone/picogk"]
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
           # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -197,6 +217,16 @@ jobs:
               || { echo "::error::the shell lane path check names sandbox, which is not a tag:ci:shell project"; exit 1; }
             lanes=$(jq -c '.shell |= (. + ["sandbox"] | unique)' <<< "$lanes")
             echo "Shell lane paths changed: $shell_paths"
+          fi
+          # The native darwin lane's path check: a change to its workflow or to a nuget oracle source outside
+          # the graph selects every `test:native-darwin` project (a path names a file or a directory).
+          darwin_paths=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
+            | jq -cRn --argjson paths "$NATIVE_DARWIN_LANE_PATHS" \
+                '[inputs | select(. as $file | any($paths[] as $path | $file == $path or ($file | startswith($path + "/")); .))]')
+          if [ "$darwin_paths" != '[]' ]; then
+            lanes=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" \
+              '."native-darwin" = ([$graph[0].graph.nodes[] | select(.data.targets // {} | has("test:native-darwin")) | .name] | sort)' <<< "$lanes")
+            echo "Native darwin lane paths changed: $darwin_paths"
           fi
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
@@ -236,23 +266,22 @@ jobs:
           api=$(flag api)
           billing=$(flag billing)
           formal=$(flag formal)
+          formal_nightly=$(flag formal-nightly)
+          formal_nightly_projects=$(jq -c '."formal-nightly"' <<< "$lanes")
           browser=$(flag browser)
           geospec_examples=$(flag geospec-examples)
           cli_e2e=$(flag cli-e2e)
           browser_projects=$(jq -c '.browser' <<< "$lanes")
           native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
           native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
+          native_intel=$(flag native-hosts)
+          native_darwin=$(flag native-darwin)
+          native_darwin_projects=$(jq -r '."native-darwin" | join(",")' <<< "$lanes")
           viewer_parity=$(flag viewer-parity)
           desktop=$(flag desktop)
           desktop_projects=$(jq -c '.desktop' <<< "$lanes")
           shell=$(flag shell)
           shell_projects=$(jq -c '.shell' <<< "$lanes")
-          # A push to `main` runs the native host rows from `native-hosts.yml`'s own push trigger:
-          # every Linux row, and the Intel row when affected since its last successful push run.
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            native_hosts=false
-            native_linux=''
-          fi
           # `api-image` keeps the PR-only Docker smoke test on the PRs that affect the API image.
           api_image=$(flag api-image)
           {
@@ -264,9 +293,14 @@ jobs:
             echo "cli-e2e=$cli_e2e"
             echo "size=$(flag size)"
             echo "formal=$formal"
+            echo "formal-nightly=$formal_nightly"
+            echo "formal-nightly-projects=$formal_nightly_projects"
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
             echo "native-hosts=$native_hosts"
+            echo "native-intel=$native_intel"
+            echo "native-darwin=$native_darwin"
+            echo "native-darwin-projects=$native_darwin_projects"
             echo "native-linux=$native_linux"
             echo "viewer-parity=$viewer_parity"
             echo "desktop=$desktop"
@@ -652,21 +686,41 @@ jobs:
     uses: ./.github/workflows/standalone-projects.yml
     secrets: inherit
 
-  # The Linux native host rows (`native-hosts.yml`), in the merge queue when the plan finds a
-  # `tag:ci:native-hosts` or `test:native-linux` project affected, with the affected
-  # `test:native-linux` projects. Its plan job is skipped when called; a push to `main`, the
-  # nightly and a dispatch run that workflow on their own. The required check waits for it.
+  # The native host rows (`native-hosts.yml`), in the merge queue and on a push the queue did not
+  # prove, when the plan finds a `tag:ci:native-hosts` or `test:native-linux` project affected: the
+  # Linux rows with the affected `test:native-linux` projects, and the Intel row when a
+  # `tag:ci:native-hosts` project is affected (CI throughput review Q-3). Its plan job is skipped when
+  # called; the nightly and a dispatch run that workflow on their own. The required check waits for it.
   native-hosts:
     name: Native hosts
     needs: [plan]
     if: needs.plan.outputs.native-hosts == 'true'
-    permissions: # The called workflow's plan job declares these, though it is skipped here
+    permissions:
       contents: 'read'
-      actions: 'read'
-      pull-requests: 'read'
     uses: ./.github/workflows/native-hosts.yml
     with:
       native-linux: ${{ needs.plan.outputs.native-linux }}
+      intel: ${{ needs.plan.outputs.native-intel }}
+
+  # The darwin-arm64 native rows (`native-darwin.yml`), in the merge queue and on a push the queue did
+  # not prove, when the plan finds a `test:native-darwin` project affected or a native darwin lane path
+  # changed (CI throughput review Q-2). A pull request keeps the `native-darwin` label for early signal;
+  # the desktop candidate gate runs the benchmarks. The required check waits for it.
+  native-darwin:
+    name: Native darwin
+    needs: [plan]
+    if: needs.plan.outputs.native-darwin == 'true'
+    permissions: # The called workflow's plan job declares these
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    uses: ./.github/workflows/native-darwin.yml
+    with:
+      ref: ${{ github.sha }}
+      projects: ${{ needs.plan.outputs.native-darwin-projects }}
+      benchmarks: false
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
   # The viewer parity gate (`viewer-parity.yml`), in the merge queue and on a push the queue did
   # not prove, when the plan finds a `test:viewer-parity` project affected. The required check
@@ -684,7 +738,9 @@ jobs:
   # projects' targets on the three stock Linux guests and the two macOS rows, with no Electron build
   # or application tier. A pull request keeps the `shell-conformance` label for early signal; a push
   # to `main` reuses the queue verdict, and the desktop candidate gate runs the full tier fresh.
-  # The required check waits for it (shell split blueprint PR 4).
+  # The required check waits for it (shell split blueprint PR 4). It passes the read token alone, never
+  # `secrets: inherit`; the called macOS job runs in `nx-cache-write`, whose write token replaces it, so the
+  # queue reads and writes the fingerprinted verdicts (CF-1, CP-5b follow-up).
   shell:
     name: Shell conformance
     needs: [plan]
@@ -696,11 +752,32 @@ jobs:
       ref: ${{ github.sha }}
       tier: semantics
       projects: ${{ needs.plan.outputs.shell-projects }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
+  # The formal nightly tiers (`formal-nightly.yml`: mutants, fresh-seed differentials and simulations, nightly
+  # configs), in the merge queue only, one job per affected `formal:nightly` project and target, each with
+  # its own 120-minute budget. The seed source is the queue commit's sha, so each landing explores a fresh
+  # seed and a re-run of the same commit replays it. A pull request leaves the lane to the queue, a push to
+  # `main` reuses the queue verdict, and the release gate (RG-1) runs every project with a seed of its own.
+  # The required check waits for it (CI throughput review, Q-4 step 2).
+  formal-nightly:
+    name: Formal nightly
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.formal-nightly == 'true' && github.event_name == 'merge_group' }}
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    uses: ./.github/workflows/formal-nightly.yml
+    with:
+      ref: ${{ github.sha }}
+      projects: ${{ needs.plan.outputs.formal-nightly-projects }}
+      seed: ${{ github.sha }}
 
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
   # end-to-end, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
-  # rows in the merge queue): a skip of a lane the plan selected fails it. It waits for every
+  # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. It waits for every
   # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
   # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
   # required check of their own as well, so the queue already waited for them; in the ten latest
@@ -716,11 +793,13 @@ jobs:
         geospec-examples,
         cli-e2e,
         native-hosts,
+        native-darwin,
         viewer-parity,
         formal,
         api,
         billing-e2e,
         shell,
+        formal-nightly,
       ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -737,6 +816,8 @@ jobs:
           CLI_E2E_RESULT: ${{ needs.cli-e2e.result }}
           NATIVE_HOSTS_REQUIRED: ${{ needs.plan.outputs.native-hosts }}
           NATIVE_HOSTS_RESULT: ${{ needs.native-hosts.result }}
+          NATIVE_DARWIN_REQUIRED: ${{ needs.plan.outputs.native-darwin }}
+          NATIVE_DARWIN_RESULT: ${{ needs.native-darwin.result }}
           VIEWER_PARITY_REQUIRED: ${{ needs.plan.outputs.viewer-parity }}
           VIEWER_PARITY_RESULT: ${{ needs.viewer-parity.result }}
           FORMAL_REQUIRED: ${{ needs.plan.outputs.formal }}
@@ -747,6 +828,8 @@ jobs:
           BILLING_RESULT: ${{ needs.billing-e2e.result }}
           SHELL_REQUIRED: ${{ needs.plan.outputs.shell }}
           SHELL_RESULT: ${{ needs.shell.result }}
+          FORMAL_NIGHTLY_REQUIRED: ${{ needs.plan.outputs.formal-nightly }}
+          FORMAL_NIGHTLY_RESULT: ${{ needs.formal-nightly.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -765,36 +848,42 @@ jobs:
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
           if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
           if [ "$NATIVE_HOSTS_REQUIRED" = true ]; then test "$NATIVE_HOSTS_RESULT" = success; fi
+          if [ "$NATIVE_DARWIN_REQUIRED" = true ]; then test "$NATIVE_DARWIN_RESULT" = success; fi
           if [ "$VIEWER_PARITY_REQUIRED" = true ]; then test "$VIEWER_PARITY_RESULT" = success; fi
           if [ "$FORMAL_REQUIRED" = true ]; then test "$FORMAL_RESULT" = success; fi
           if [ "$API_REQUIRED" = true ]; then test "$API_RESULT" = success; fi
           if [ "$BILLING_REQUIRED" = true ]; then test "$BILLING_RESULT" = success; fi
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
+          if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
-  # of every affected project with a `formal` target. A known counterexample is an
+  # of every affected project with a `formal:tla` or `formal:lean` target. A known counterexample is an
   # expected verdict and never turns this red; a changed verdict, a stale generated
   # file, a missing tool or a watchdog does. Toolchains come from setup-formal,
   # pinned by sha256 in tools/formal/toolchain.lock, never from `pnpm install`.
-  # Two shards deal the affected projects by measured uncached seconds with the test
-  # shards' dealer and its own snapshot (scripts/src/formal-shard-durations.json): a
-  # change to tools/formal makes every project affected, and on one runner that ran out
-  # of 15 minutes with ui still to go (queue run 43190779343, job 131090042426: 3.5 min
-  # of setup, then 11.7 min of checks). agent-host's 7.3 min is the floor of one shard.
+  # Three shards deal the affected formal tasks by measured uncached seconds with the test
+  # shards' dealer and its own snapshot (scripts/src/formal-shard-durations.json). A project
+  # whose TLA+ specs sit in families below specs/ has one `formal:tla:<family>` task per
+  # family and a `formal:tla` that only depends on them (tools/formal.plugin.ts), so its
+  # families are dealt to runners of their own and run in parallel, each held to the Java
+  # tier's 3 min per target (policy § 6, which names agent-host's unsplit `formal:tla` as over
+  # it). A change to tools/formal makes every project affected, and on one runner that ran out
+  # of 15 minutes with ui still to go (queue run 43190779343, job 131090042426: 3.5 min of
+  # setup, then 11.7 min of checks). agent-host's `formal:tla`, about 6.7 min, is the floor of one shard.
   formal:
-    name: Formal models (${{ matrix.shard }}/2)
+    name: Formal models (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
     needs: [plan]
     if: needs.plan.outputs.formal == 'true'
-    # The heavier shard measures about 11 min (3.5 of setup, agent-host's 7.3); 20 allows
+    # The heaviest shard measures about 10 min (3.5 of setup, agent-host's 6.7); 20 allows
     # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
       contents: 'read'
@@ -812,28 +901,55 @@ jobs:
           save-pnpm-store: 'false'
           affected-base: ${{ needs.plan.outputs.affected-base }}
 
+      - name: Deal affected formal tasks
+        id: deal
+        # The tasks are `<project>:<target>` ids (scripts/src/formal-tasks.ts). A `formal:tla` that is an
+        # `nx:noop` over family tasks (tools/formal.plugin.ts) is left out: its families are dealt instead.
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          pnpm nx affected -t formal:tla formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
+          tasks=$(node scripts/src/formal-tasks.ts "$RUNNER_TEMP/formal-graph.json")
+          shard=$(echo "$tasks" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 3 \
+            --durations scripts/src/formal-shard-durations.json)
+          echo "tasks=$shard" >> "$GITHUB_OUTPUT"
+          if [ -z "$shard" ]; then
+            echo "No affected formal tasks in this shard."
+          else
+            echo "Shard tasks: $shard"
+          fi
+
       - name: Setup formal toolchains
+        if: steps.deal.outputs.tasks != ''
         uses: ./.github/actions/setup-formal
         with:
           tools: tlc,lean
 
       - name: Run affected formal tiers
-        # FM-R15: at most two JVMs at once. The runner caps them per process, so one project at a time.
+        if: steps.deal.outputs.tasks != ''
+        # FM-R15: at most two JVMs at once. The runner caps them per process, so one task at a time.
         env:
-          SHARD: ${{ matrix.shard }}
+          TASKS: ${{ steps.deal.outputs.tasks }}
         run: |
-          pnpm nx affected -t formal formal:lean --graph="$RUNNER_TEMP/formal-graph.json" > /dev/null
-          projects=$(jq -c '
-            [.tasks.tasks[] | select(.target.target | IN("formal", "formal:lean")) | .target.project]
-            | unique' "$RUNNER_TEMP/formal-graph.json")
-          shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "$SHARD" --shards 2 \
-            --durations scripts/src/formal-shard-durations.json)
-          if [ -z "$shard" ]; then
-            echo "No affected formal projects in this shard."
-            exit 0
+          set -o pipefail
+          failed=()
+          log="$RUNNER_TEMP/formal-task.log"
+          IFS=',' read -ra tasks <<< "$TASKS"
+          for task in "${tasks[@]}"; do
+            # `<project>:<target>`; project names hold no colon, target names may.
+            project="${task%%:*}"
+            target="${task#*:}"
+            echo "::group::$task"
+            # run-many exits 0 when the task does not exist, so a task id that resolved to nothing fails too.
+            if ! pnpm nx run-many --targets="$target" --projects="$project" 2>&1 | tee "$log" || grep -q 'No tasks were run' "$log"; then
+              failed+=("$task")
+            fi
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "Failed formal tasks: ${failed[*]}"
+            exit 1
           fi
-          echo "Shard projects: $shard"
-          pnpm nx run-many -t formal formal:lean --projects "$shard" --parallel=1
 
       - name: Check workspace root hygiene
         if: always()
@@ -1343,6 +1459,12 @@ jobs:
       # the edit bench and needs the PostgreSQL this lane starts.
       - name: Run the durable-migration failure injection
         run: pnpm nx run-many -t test:models -- app/testing/git-storage-migration.integration.test.ts
+
+      # Auth session cookie blueprint, harness H2: the cookie cache over the real
+      # AuthModule, PostgreSQL and Redis (cases 2, 4, 5, 17 and 24). Lives under
+      # `app/testing/**`, so it runs through `test:models` like the edit bench.
+      - name: Run the session cookie cache cases on PostgreSQL
+        run: pnpm nx run-many -t test:models -- app/testing/session-cache.billing.integration.test.ts
 
       # Charter S2, end to end: two real API processes over one MinIO and one
       # PostgreSQL, driven by stock `git` and `git-lfs`. The target brings up its own

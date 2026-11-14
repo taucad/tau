@@ -2,4 +2,4 @@
 camera: minor
 ---
 
-Add the `CameraAuthority` TLA+ model of camera pose authority and its `formal` checks. No runtime change.
+Add the `CameraAuthority` TLA+ model of camera pose authority and its `formal:tla` checks. No runtime change.

@@ -28,6 +28,7 @@ import {
   registerProjectOverHttp,
   remoteCarriesLargeObjects,
   remoteKindOf,
+  remoteRefusalSaid,
   remoteOf,
   remoteTrackingRef,
   remoteTransportError,
@@ -41,7 +42,9 @@ import type { PublishPublicationActorInput } from '#publish.types.js';
    terminal class is what stops `sync.machine` retrying, and that classifier is
    the machine's, not this module's. */
 import {
+  commitRefusalMarker,
   incompleteRepositoryMarker,
+  isCommitRefusal,
   isCeilingRefusal,
   isStorageRefusal,
   quotaRefusalMarker,
@@ -488,6 +491,25 @@ describe('remoteTransportError', () => {
     expect(refusal.code).toBe('REMOTE_DAMAGED');
     expect(syncFailureReason(refusal)).toBe('damaged');
     expect(refusal.message).toContain(incompleteRepositoryMarker);
+  });
+
+  /* A commit the hosted remote refuses names its fix, and the person sees that sentence, not a class of Tau's. */
+  it('keeps the remote’s sentence for a refused commit, fix and address included, and marks it a commit refusal', () => {
+    const sentence = `${commitRefusalMarker} 0123456789ab — Tau did not record it. Commit with your Tau identity to back it up.`;
+    const address = 'Tau: your Tau no-reply address is user_1@users.noreply.tau.new.';
+    const refusal = remoteTransportError(new Error('git push failed'), {
+      remote: tauRemoteName,
+      stderr: [`remote: ${sentence}`, `remote: ${address}`, 'remote: error: hook declined'].join('\n'),
+    });
+
+    expect(refusal.code).toBe('REMOTE_REJECTED');
+    expect(refusal.message).toBe(`${sentence} ${address}`);
+    expect(isCommitRefusal(refusal.message)).toBe(true);
+    expect(remoteRefusalSaid('pre-receive hook declined', [sentence, address])).toBe(`${sentence} ${address}`);
+    /* The marker is the server's own spelling (`commitRefusalMarker` in api-git-core). */
+    expect(commitRefusalMarker).toBe('Tau: refused commit');
+    expect(isCommitRefusal('Tau: refused refs/heads/main — it does not fast-forward.')).toBe(false);
+    expect(isCommitRefusal(undefined)).toBe(false);
   });
 
   it('keeps a 503 race-lost and an unmarked 500 retryable', () => {

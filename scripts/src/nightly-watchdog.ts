@@ -11,7 +11,13 @@
  * It also checks the release gate (WD-1a of the CI affected-first program): every `desktop-staging@*` candidate tag
  * whose `release-desktop-staging.yml` run started in the last 36 hours must have a green "Shell gate" (the
  * `shell-conformance.yml` call that runs on the candidate commit before the tag exists, #1591). A tag with no such run,
- * or whose gate jobs are not all green, is a problem like a red nightly.
+ * or whose gate jobs are not all green, is a problem like a red nightly. WD-1c adds the second gate the same run holds:
+ * each such candidate must also have a green "Packaged desktop gate" (the `desktop-packaged.yml` call that runs the
+ * packaged suite on the candidate commit after the shell gate, DS-3 #1810). Each gate is reported as its own row.
+ *
+ * The daily drift check (`drift-check.yml`, Q-7) is watched as any scheduled workflow is (WD-1b): it waits for every
+ * workflow it dispatches and fails on a red one, so its newest scheduled run being green and in the 36-hour window
+ * means it ran and every dispatch it made is green.
  *
  * Usage: node scripts/src/nightly-watchdog.ts [--summary <file>] [--test-alert]
  * Env: GITHUB_TOKEN, GITHUB_REPOSITORY (`owner/name`), CI_ALERT_WEBHOOK_URL (unset: report only and exit 1 on a
@@ -135,12 +141,28 @@ export type CandidateRun = {
 /** A job of a run, as the Actions API reports it. */
 export type RunJob = { readonly name: string; readonly status: string; readonly conclusion: string | undefined };
 
-/** The workflow that cuts candidates, under which candidate verdicts are reported. */
+/** The workflow that cuts candidates, under which candidate shell gate verdicts are reported. */
 export const candidateWorkflow: ScheduledWorkflow = {
   file: 'release-desktop-staging.yml',
   name: 'Candidate shell gate',
   crons: [],
 };
+
+/** The same workflow, under which candidate packaged gate verdicts are reported (WD-1c). */
+export const candidatePackagedWorkflow: ScheduledWorkflow = {
+  file: 'release-desktop-staging.yml',
+  name: 'Candidate packaged gate',
+  crons: [],
+};
+
+/**
+ * The gates every candidate run must pass, by the job-name prefix GitHub gives a reusable workflow's jobs
+ * (`<caller job name> / <callee job name>`): `shell` and `packaged` in `release-desktop-staging.yml`.
+ */
+export const candidateGates: ReadonlyArray<{ readonly prefix: string; readonly workflow: ScheduledWorkflow }> = [
+  { prefix: 'Shell gate', workflow: candidateWorkflow },
+  { prefix: 'Packaged desktop gate', workflow: candidatePackagedWorkflow },
+];
 
 /** The build number a candidate tag carries: `desktop-staging@<version>-staging.<run number>`. */
 export const candidateRunNumber = (tag: string): number | undefined => {
@@ -149,7 +171,7 @@ export const candidateRunNumber = (tag: string): number | undefined => {
 };
 
 /**
- * Judge each candidate tag of the last 36 hours by its run's "Shell gate" jobs.
+ * Judge each candidate tag of the last 36 hours by its run's gate jobs: one verdict per gate in `candidateGates`.
  *
  * A tag is in the window when the run with its build number started in the last 36 hours. A tag whose build number is
  * newer than every listed run has no run at all (it was not cut by the workflow), and is judged `missing`.
@@ -183,19 +205,23 @@ export const judgeCandidates = ({
     if (now.getTime() - Date.parse(run.created_at) > 36 * hour) {
       continue;
     }
-    const gate = jobsOf(run).filter((job) => job.name.startsWith('Shell gate'));
-    const green =
-      gate.length > 0 &&
-      gate.every((job) => job.status === 'completed' && passing.has(job.conclusion ?? '')) &&
-      gate.some((job) => job.conclusion === 'success');
-    verdicts.push({
-      workflow: candidateWorkflow,
-      state: green ? 'ok' : 'failed',
-      detail: green
-        ? `${tag}: ${gate.length} gate jobs green`
-        : `${tag}: shell gate not green (${gate.map((job) => job.conclusion ?? job.status).join(', ') || 'no gate jobs'})`,
-      url: run.html_url,
-    });
+    const jobs = jobsOf(run);
+    for (const { prefix, workflow } of candidateGates) {
+      const gate = jobs.filter((job) => job.name.startsWith(prefix));
+      const green =
+        gate.length > 0 &&
+        gate.every((job) => job.status === 'completed' && passing.has(job.conclusion ?? '')) &&
+        gate.some((job) => job.conclusion === 'success');
+      const label = prefix.toLowerCase();
+      verdicts.push({
+        workflow,
+        state: green ? 'ok' : 'failed',
+        detail: green
+          ? `${tag}: ${gate.length} ${label} jobs green`
+          : `${tag}: ${label} not green (${gate.map((job) => job.conclusion ?? job.status).join(', ') || 'no gate jobs'})`,
+        url: run.html_url,
+      });
+    }
   }
   return verdicts;
 };

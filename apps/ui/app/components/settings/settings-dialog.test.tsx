@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarProvider } from '@taucad/ui/components/sidebar';
+import { ResponsiveSurfaceProvider } from '@taucad/ui/hooks/use-mobile';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -302,6 +303,29 @@ describe('SettingsDialog', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'General' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Back to Settings' })).not.toBeInTheDocument();
+  });
+
+  it('should keep the open section mounted when the viewport crosses the phone breakpoint', () => {
+    const surface = (isMobile: boolean): React.JSX.Element => (
+      <MemoryRouter initialEntries={['/settings/security']}>
+        <SidebarProvider>
+          <ResponsiveSurfaceProvider isMobile={isMobile} container={undefined}>
+            <SettingsSurface isEmbedded activeSection='security' openSection={vi.fn()} close={vi.fn()} />
+          </ResponsiveSurfaceProvider>
+        </SidebarProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(surface(false));
+    const section = screen.getByRole('region', { name: 'Security settings' });
+
+    rerender(surface(true));
+
+    expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Security settings' })).toBe(section);
+
+    rerender(surface(false));
+
+    expect(screen.getByRole('region', { name: 'Security settings' })).toBe(section);
   });
 
   describe('on a phone', () => {

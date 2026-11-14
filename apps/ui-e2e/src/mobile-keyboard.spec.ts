@@ -79,6 +79,10 @@ test.each([{ pan: true }, { pan: false }])(
 
 test('keeps the file filter above the keyboard', async () => {
   await openSurface('Files');
+  // A phone pane folds its filter row behind the header's search toggle (#1349).
+  await target.click(selectors.getByCss(drawer).getByRole('button', { name: 'Show filter', exact: true }).first(), {
+    touch: true,
+  });
   await expectTypable(selectors.getByCss(`${drawer} input[placeholder="Filter files…"]`).first());
 });
 

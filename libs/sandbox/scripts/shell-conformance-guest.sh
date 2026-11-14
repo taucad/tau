@@ -46,17 +46,19 @@ trap 'exit 1' INT TERM
 { cat /etc/os-release; uname -a; printf 'source=%s\nrun=%s\nrepository=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_REPOSITORY"; } > "$evidence/identity.txt"
 
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-# Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
+# Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with. The host rows
+# also need the distribution's Go: E14-guard-host builds the store guard prototype in the guest (Linux Terminal git
+# parity blueprint, LP0), against its checked-in go.sum, with no toolchain download.
 if [[ "$tier" == full ]]; then
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
+    apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux golang-go \
     xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
     libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
     libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io
 else
   # No Electron, xvfb or Vulkan prerequisites; Docker and the user session bus only for the host rows below.
   host_packages=()
-  if listed host; then host_packages=(dbus-user-session docker.io); fi
+  if listed host; then host_packages=(dbus-user-session docker.io golang-go); fi
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
     "${host_packages[@]}"
@@ -99,12 +101,12 @@ if [[ "$tier" == full ]]; then
   node node_modules/electron/install.js
   cp application-build.sha256 "$evidence/application-build.sha256"
   sha256sum --check application-build.sha256 > "$evidence/application-build-verification.txt"
-  dependencies=(bash rg socat bwrap git node pnpm xvfb-run docker)
+  dependencies=(bash rg socat bwrap git node pnpm xvfb-run docker go)
 else
   # The semantics tier expects no host-built artefact: the runner built none and transferred none.
   [[ ! -e application-build.sha256 && ! -e apps/desktop/dist && ! -e apps/ui/desktop/build ]]
   dependencies=(bash rg socat bwrap git node pnpm)
-  if listed host; then dependencies+=(docker); fi
+  if listed host; then dependencies+=(docker go); fi
 fi
 # Use the actual selector directory, not a path through its executable.
 export PATH="$(dirname "$bwrap"):$HOME/node/bin:/usr/local/bin:/usr/bin:/bin"

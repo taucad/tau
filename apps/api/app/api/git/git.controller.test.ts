@@ -263,8 +263,7 @@ describe('GitController cloud host budgets (RV-W10 F1, F2)', () => {
     await expect(
       controller.removeRef(
         'proj_w10',
-        'refs/tags/v1',
-        undefined,
+        'refs/heads/conflicts/main/device-b',
         'user-owner',
         hostRequest('proj_w10'),
         replyStub().reply,

@@ -3,8 +3,10 @@ import {
   createDesktopDownloadCatalog,
   desktopDownloadHref,
   desktopDownloadLabel,
+  archiveDownloads,
   desktopDownloads,
   desktopFileLabel,
+  isArchivePlatform,
 } from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
@@ -16,8 +18,12 @@ describe('qualified desktop download catalog', () => {
     expect(
       createDesktopDownloadCatalog({ enabled: false, channel: 'production', qualification: projection() }),
     ).toBeUndefined();
-    expect(desktopDownloads.mac.file).toBe('Tau-macos-arm64.zip');
-    expect(desktopDownloads.windows.file).toBe('Tau-win32-x64.zip');
+    expect(archiveDownloads.windows.file).toBe('Tau-win32-x64.zip');
+    // A Mac has no archive fallback: it is offered only as the catalog's qualified DMG.
+    expect(Object.hasOwn(desktopDownloads.mac, 'file')).toBe(false);
+    expect(isArchivePlatform('mac')).toBe(false);
+    expect(isArchivePlatform('macIntel')).toBe(false);
+    expect(isArchivePlatform('linux')).toBe(true);
     expect(desktopDownloadHref('linux')).toBe('https://downloads.tau.new/latest/Tau-linux-x64.tar.gz');
   });
   it('selects immutable installer links with retained archives and truthful update ownership', () => {
@@ -85,15 +91,12 @@ describe('qualified desktop download catalog', () => {
     expect(catalog?.[0]?.href).toContain('https://downloads.taucad.dev/releases/desktop-staging%400.1.0-staging.75/');
     expect(() => select(value)).toThrow();
   });
-  it('names the Mac file format a direct link serves and keeps Windows and Linux labels', () => {
-    expect(desktopFileLabel('mac')).toContain('<span>Download ZIP for Apple silicon</span>');
-    expect(desktopFileLabel('macIntel')).toContain('<span>Download ZIP for Intel Mac</span>');
-    expect(desktopFileLabel('mac', 'DMG')).toContain('<span>Download DMG for Apple silicon</span>');
-    expect(desktopFileLabel('macIntel', 'DMG')).toContain('<span>Download DMG for Intel Mac</span>');
-    expect(desktopFileLabel('windows', 'DMG')).toBe(desktopDownloadLabel('windows'));
+  it('labels a direct Mac link as its DMG and keeps Windows and Linux labels', () => {
+    expect(desktopFileLabel('mac')).toContain('<span>Download DMG for Apple silicon</span>');
+    expect(desktopFileLabel('macIntel')).toContain('<span>Download DMG for Intel Mac</span>');
+    expect(desktopFileLabel('windows')).toBe(desktopDownloadLabel('windows'));
     expect(desktopFileLabel('linux')).toBe(desktopDownloadLabel('linux'));
-    expect(desktopDownloads.mac.detail).toContain('ZIP');
-    expect(desktopDownloads.macIntel.detail).toContain('ZIP');
+    expect(JSON.stringify(desktopDownloads)).not.toContain('Tau-macos');
   });
   it('selects both Mac disk images from a Mac-only staging catalog with mount, drag, eject and launch steps', () => {
     const value = projection();
@@ -175,11 +178,19 @@ describe('qualified desktop download catalog', () => {
     expect(
       select(projection())!.every((choice) => choice.cleanHost === 'passed' && !choice.detail.includes('pending')),
     ).toBe(true);
-    // Production never admits pending clean-host acceptance, for any route.
+    // Production admits pending clean-host acceptance only on the Mac routes, and says so on each.
     for (const index of value.routes.keys()) {
       const production = projection();
       production.routes[index]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
-      expect(() => select(production)).toThrow(/release qualification/u);
+      if (production.routes[index]!.route === 'macos-zip') {
+        const admitted = select(production)!;
+        expect(admitted.filter((choice) => choice.cleanHost === 'pending')).toHaveLength(1);
+        expect(admitted.find((choice) => choice.cleanHost === 'pending')?.detail).toContain(
+          'clean-Mac install testing pending',
+        );
+      } else {
+        expect(() => select(production)).toThrow(/release qualification/u);
+      }
     }
     // Staging admits it only on Mac routes, and only as the exact `pending` marker with release CI evidence.
     for (const index of [2, 3, 4]) {

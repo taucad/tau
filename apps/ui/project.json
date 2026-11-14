@@ -352,7 +352,8 @@
       }
     },
     "typecheck": {
-      "dependsOn": ["typegen"]
+      "dependsOn": ["typegen"],
+      "inputs": ["default", "^production", "reactEventLayer"]
     },
     "lint": {
       "dependsOn": ["typegen"],
@@ -366,11 +367,15 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Real-browser source editor acceptance on the affected CI browser lane."
+        "description": "Real-browser source editor and chat lane acceptance on the affected CI browser lane."
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts"
+        "parallel": false,
+        "commands": [
+          "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'"
+        ]
       }
     },
     "test:e2e": {
@@ -425,6 +430,19 @@
       "options": {
         "cwd": "{projectRoot}",
         "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+      }
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "formal:wide": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The nightly-tier TLA+ configs under specs/ (the wide bounds), run on the schedule by formal-nightly.yml. Not named formal:nightly, which ci.yml runs in the merge queue for every affected project."
+      },
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier nightly apps/ui"
       }
     }
   }

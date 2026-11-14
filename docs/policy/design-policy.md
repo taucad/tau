@@ -3,7 +3,7 @@ title: 'Design Policy'
 description: 'Canonical Tau design principles, governance and review guidance.'
 status: active
 created: '2026-10-15'
-updated: '2026-11-10'
+updated: '2026-11-13'
 ---
 
 # Design Policy
@@ -325,7 +325,7 @@ Verify both desktop and browser behavior, not a screenshot from a stale build.
 - Pointer cursors are native hyperlink affordances by default. Actions use `--cursor-action` through the shared semantic selector or `cursor-action` utility, every action keeps visible hover and focus feedback, and specialized text/drag/resize/help/disabled cursors remain semantic. Sidebar navigation, including anchor-backed project/chat rows, follows the shared action-cursor preference; content hyperlinks retain native pointers. Enforced by `tau-lint/no-authored-pointer-cursor` and the computed-style sidebar regression.
 - Boolean props are named `is/has/should/enable/…` (lint-enforced); keyboard handling goes through the keyboard service (`event.key`, never `event.code`; the `mod` abstraction for Cmd/Ctrl).
 
-A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button; an icon beside text sits on the centre line of the text's first line; loading content is drawn as its own shape; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
+A repeated piece has one owner and every surface imports it; dialogs and sheets close from one ghost icon button; an icon beside text sits on the centre line of the text's first line; a loading region keeps its own frame at its final geometry and draws no skeleton; and a feature that is not available yet carries the coming-soon icon with a legend. [UI Policy](ui-policy.md) §5 states each rule and names the owners.
 
 ## Surfaces
 

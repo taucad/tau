@@ -10,7 +10,7 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 
-const mocks = vi.hoisted(() => ({ hasGridReadout: true, isMobile: false, viewerControls: false }));
+const mocks = vi.hoisted(() => ({ isMobile: false, viewerControls: false }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: string) => (flag === 'viewerControls' ? mocks.viewerControls : false),
 }));
@@ -21,11 +21,6 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ editorRef }) }));
 
 vi.mock('#components/geometry/cad/capture-view-control.js', () => ({
   CaptureViewControl: () => <button type='button' aria-label='Capture view to chat' />,
-}));
-vi.mock('@taucad/viewer/cad/grid-control', () => ({
-  // The readout renders nothing until the grid has a size.
-  GridSizeIndicator: () =>
-    mocks.hasGridReadout ? <button type='button' aria-label='Grid 10 mm, units and grid' /> : null,
 }));
 vi.mock('@taucad/viewer/cad/viewer-settings', () => ({
   ViewerSettings: ({ side, align }: { readonly side?: string; readonly align?: string }) => (
@@ -40,7 +35,6 @@ let activeActor: GraphicsActor | undefined;
 afterEach(() => {
   activeActor?.stop();
   activeActor = undefined;
-  mocks.hasGridReadout = true;
   mocks.isMobile = false;
   mocks.viewerControls = false;
   editorSnapshot.context.focusedChatId = 'chat-test';
@@ -110,17 +104,11 @@ const measuringRow = (): HTMLElement => screen.getByRole('group', { name: 'Measu
 
 describe('ChatViewerControls', () => {
   describe('with viewerControls (FL1)', () => {
-    it('should offer the single-click camera controls and navigation keys only with the flag on', () => {
-      renderBar(startGraphics());
-      expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
-    });
-
-    it('should add the camera controls beside the bar with the flag on', () => {
+    it('should add no camera button group with the flag on, leaving Fit view to the bar', () => {
       mocks.viewerControls = true;
       renderBar(startGraphics());
-      const camera = screen.getByRole('group', { name: 'Camera' });
-      expect(within(camera).getByRole('button', { name: 'Zoom in' })).toBeTruthy();
-      expect(within(camera).getByRole('button', { name: 'Pan with the arrows' })).toBeTruthy();
+      expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
+      expect(screen.getAllByRole('button', { name: 'Fit view' })).toHaveLength(1);
     });
   });
 
@@ -131,11 +119,10 @@ describe('ChatViewerControls', () => {
       expect(screen.getByRole('button', { name: 'Fit view' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Capture view to chat' })).not.toBeInTheDocument();
     });
-    it('should hold the grid readout, the tools, the actions and Viewer settings, in that order', () => {
+    it('should hold the tools, the actions and Viewer settings, in that order, and no grid readout', () => {
       renderBar(startGraphics());
 
       expect(controlNames()).toEqual([
-        'Grid 10 mm, units and grid',
         'Section view',
         'Measure',
         'Fit view',
@@ -179,7 +166,6 @@ describe('ChatViewerControls', () => {
       renderBar(startGraphics(), { mobileAction: <button type='button' aria-label='View in your space' /> });
 
       expect(controlNames()).toEqual([
-        'Grid 10 mm, units and grid',
         'Section view',
         'Measure',
         'Fit view',
@@ -227,14 +213,7 @@ describe('ChatViewerControls', () => {
     it('should leave Capture out when capture is not enabled', () => {
       renderBar(startGraphics(), { shouldEnableCapture: false });
 
-      expect(controlNames()).toEqual([
-        'Grid 10 mm, units and grid',
-        'Section view',
-        'Measure',
-        'Fit view',
-        'Enter fullscreen',
-        'Viewer settings',
-      ]);
+      expect(controlNames()).toEqual(['Section view', 'Measure', 'Fit view', 'Enter fullscreen', 'Viewer settings']);
     });
 
     it('should offer no Section or Measure toggle, and no rows, for 2D geometry', () => {
@@ -244,24 +223,16 @@ describe('ChatViewerControls', () => {
       showSvg(actor);
       renderBar(actor);
 
-      expect(controlNames()).toEqual([
-        'Grid 10 mm, units and grid',
-        'Fit view',
-        'Enter fullscreen',
-        'Capture view to chat',
-        'Viewer settings',
-      ]);
+      expect(controlNames()).toEqual(['Fit view', 'Enter fullscreen', 'Capture view to chat', 'Viewer settings']);
       expect(screen.queryByRole('group', { name: /options$/ })).not.toBeInTheDocument();
     });
 
-    it('should start the controls row with no divider while the grid readout shows nothing', () => {
-      mocks.hasGridReadout = false;
+    it('should start the controls row with Section, with no divider before it', () => {
       renderBar(startGraphics());
 
       const controls = screen.getByRole('group', { name: 'Viewer controls' }).firstElementChild!;
       expect(controlNames()[0]).toBe('Section view');
-      // The hairline that follows the readout hides itself when it starts its line.
-      expect(controls.firstElementChild).toHaveClass('first:hidden');
+      expect(controls.firstElementChild).not.toHaveAttribute('data-orientation', 'vertical');
     });
 
     it('should start the controls line with the leading group, divided from the controls', () => {

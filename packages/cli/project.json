@@ -58,7 +58,11 @@
           "projects": ["build123d"],
           "target": "seed"
         }
-      ]
+      ],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
     }
   }
 }

@@ -12,14 +12,26 @@ const hoisted = vi.hoisted(() => ({
   controllers: [] as GlassPrismLoaderController[],
   createOptions: [] as unknown[],
   probeResult: false,
+  loseNextWebGpuCanvas: false,
+  canvasLost: false,
 }));
 
 vi.mock('#components/geometry/loader/glass-prism-controller.js', () => ({
   createGlassPrismLoader: vi.fn((options: unknown) => {
     hoisted.createOptions.push(options);
+    const { backend } = options as { backend?: string };
+    const losesCanvas = hoisted.loseNextWebGpuCanvas && backend === 'webgpu';
+    if (losesCanvas) {
+      // What createRenderer does for a WebGPU canvas the browser cannot present: report the loss, then reject.
+      hoisted.loseNextWebGpuCanvas = false;
+      hoisted.canvasLost = true;
+      hoisted.probeResult = false;
+    }
     // A plain object rather than `mock<T>()`: the proxy would wrap `ready` and break `await`.
     const controller: GlassPrismLoaderController = {
-      ready: Promise.resolve(),
+      ready: losesCanvas
+        ? Promise.reject(new Error('The WebGPU canvas could not present a frame: Device was destroyed.'))
+        : Promise.resolve(),
       play: vi.fn(),
       pause: vi.fn(),
       renderOnce: vi.fn(),
@@ -75,6 +87,7 @@ vi.mock('@taucad/viewer/graphics/graphics-backend', async (importOriginal) => {
   return {
     ...actual,
     probeWebGpuSupport: vi.fn(async () => hoisted.probeResult),
+    webGpuFallbackReason: vi.fn(() => (hoisted.canvasLost ? 'canvas-loss' : undefined)),
   };
 });
 
@@ -95,6 +108,8 @@ describe('GlassPrismLoader', () => {
     hoisted.controllers.length = 0;
     hoisted.createOptions.length = 0;
     hoisted.probeResult = false;
+    hoisted.loseNextWebGpuCanvas = false;
+    hoisted.canvasLost = false;
     vi.stubGlobal(
       'IntersectionObserver',
       class {
@@ -138,6 +153,29 @@ describe('GlassPrismLoader', () => {
       initialShape: 'gem',
       seed: 3,
     });
+  });
+
+  it('should start again on a fresh canvas on WebGL when its WebGPU canvas cannot present', async () => {
+    hoisted.probeResult = true;
+    hoisted.loseNextWebGpuCanvas = true;
+    const { GlassPrismLoader } = await import('#components/geometry/loader/glass-prism-loader.js');
+    const onStatusChange = vi.fn();
+
+    render(<GlassPrismLoader onStatusChange={onStatusChange} />);
+
+    const status = screen.getByRole('status');
+    await waitFor(() => {
+      expect(status).toHaveAttribute('data-state', 'ready');
+    });
+    expect(onStatusChange).not.toHaveBeenCalledWith('failed');
+    const [lost, started] = hoisted.createOptions as Array<{ backend: string; canvas: HTMLCanvasElement }>;
+    expect(lost).toMatchObject({ backend: 'webgpu' });
+    expect(started).toMatchObject({ backend: 'webgl' });
+    expect(started?.canvas).not.toBe(lost?.canvas);
+    expect(lost?.canvas.isConnected).toBe(false);
+    expect(status.querySelector('canvas')).toBe(started?.canvas);
+    expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(hoisted.controllers).toHaveLength(2);
   });
 
   it('should forward theme and speed to the controller and dispose it on unmount', async () => {

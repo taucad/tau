@@ -1,5 +1,101 @@
 # Changelog
 
+## 0.4.0 (2026-11-13)
+
+### Features
+
+- feat(api-auth): Resolve sessions once per request through a single-flight resolver (#2027) (5617b2054)
+- feat(ui): Offer Undo on the Merged and Closed toasts (#2025) (56d89e740)
+
+### Fixes
+
+- fix(agent-tools): Keep test statuses and source revisions in a reduced test_model result (#2017) (7fe168ed2)
+- fix(agent-observability): Do not let a todo update after the last check hide task success (#2023) (89fa095c4)
+
+## 0.3.0 (2026-11-13)
+
+### Features
+
+- feat(ui): Turn automatic kernel selection on for everyone (AKS-11) (#1982) (00cc5c2e4)
+- feat(picogk): Pin the PicoGK layers to dependencies.tau.new (#1977) (1f869be28)
+- feat(chat): PR 9 of the onboarding plan, the person block and its switch (#1938) (a5a509d44)
+- feat(revisions): Name version tags by number (T1) (#1923) (668f9cf16)
+- feat(ui): PR 7b of the onboarding plan, setup's live preview and its end-to-end specs (#1926) (ef40512ea)
+- feat(ui): PR 7 of the onboarding plan, setup at /welcome with auto-open, invite and desktop first run (#1925) (bccbe3749)
+- feat(ui): Draw a lane per branch in History (D2) (#1921) (f42cb91a2)
+- feat(ui): PR 4b of the onboarding plan, the agent and the plugin page set view fields as commands (#1916) (c649e2c76)
+- feat(ui): PR 4 of the onboarding plan, view settings inherit from you, then the view (#1911) (5278d2439)
+- feat(revisions): Carry each branch's remote head for the boundary (D4) (#1920) (b2a57c813)
+- feat(revisions): Title an agent turn's History entry by the person's request (Q9) (#1914) (3ee36b240)
+- feat(telemetry): Report how automatic kernel selection resolves, and rank selector search (AKS-10, AKS-9) (#1905) (0f26bbd21)
+- feat(desktop): Compose one installer catalog per channel from platform candidates (#1896) (c34ff3524)
+- feat(ui): Create entry-less projects from Home Auto and adopt the first model (AKS-6) (#1890) (0bd287354)
+- feat(ui)!: Call a save a history entry and a named point a version (C1, C8) (#1878) (13ae1b6fa)
+- feat(desktop): Accept Mac and Linux platform scopes on the production channel (#1889) (21c00c1a1)
+- feat(revisions)!: Restore and switch at once and offer Undo (C7) (#1864) (54fcb140f)
+- feat(agent-host): Land compaction at a fifth of the context window (#1780) (59b0d4c5c)
+- feat(agent-host): Carry effort in the transcript, bind replay per model (#1803) (8f3d37c53)
+- feat(revisions)!: Type a history row's who and name its capture (B2) (#1833) (88796b065)
+- feat(desktop): Promote each platform on every route of its own candidate (#1838) (545e4dfd1)
+- feat(viewer): Make the view camera a graphics child presented by one controls adapter (G4) (#1814) (9302b5c47)
+- feat(revisions): Name imported commits by their git author and register linked projects as GitHub (B3, B4c) (#1827) (43ecc4fbd)
+- feat(chat): Route the kernel in turn from the chat's kernel preference (AKS M4) (#1825) (394893654)
+- feat(revisions): Number versions once per project, allocated by Tau Cloud (B6) (#1816) (2252cbe73)
+- feat(revisions)!: Require a typed identity and write trailer version 2 (B1) (#1818) (84e6d2c51)
+- feat(api-agent-observability): Carry ledger cost on each generation and drop tau.financial rows (LW4) (#1811) (618ca6da0)
+- feat(picovoxel): Teach stylised characters with smooth-union and ellipsoid helpers (AKS M3) (#1824) (a66becdff)
+- feat(api-agent-observability): Write ratings, run termination and task success as Langfuse scores (LW7) (#1809) (e286e92ea)
+- feat(agent-observability): Name tools and send run root and tool content from every host (LW5, LW6) (#1808) (b9b45beda)
+- feat(revisions): Start every project with V1 · Start (#1766) (1c9fd4ee3)
+- feat(api-agent-observability): Write generation input and output to Langfuse behind a staged capture gate (LW3) (#1807) (e4ec70d27)
+- feat(chat): Kernel routing facets, generated routing texts and eval corpus (AKS M1) (#1781) (fb3a219f0)
+- feat(api-agent-observability): Count Langfuse units and alert at 70% of Hobby's allowance (LW24) (#1806) (f56bc5601)
+- feat(ui): Redesign billing screens, copy and shared components (#1786) (91ffe6243)
+- feat(api-llm-gateway): Carry host, build, kernel and model labels into the provider fact (Langfuse LW17) (#1798) (a5440ce14)
+- feat(revisions): Read and write a turn's base cut as the person's (#1767) (dbabc0025)
+- feat(host): Give the agent's shell read-only git through a branch view (#1799) (8dde02b3e)
+- feat(api-agent-observability): Langfuse v5 mapping, one trace and root per run, and trust Langfuse's delete (LW1, LW2) (#1800) (87c6fc46e)
+- feat(desktop): Report the build id and ratings like the browser host (Langfuse LW8) (#1801) (fa6ab384d)
+- feat(tscircuit): Give the 3D board a soft lacquer solder mask (#1795) (bddd8f330)
+
+### Fixes
+
+- fix(runtime): Render a watched document's edit that a request revalidated first (#1962) (1ea013741)
+- fix(revisions): Never push over a branch that lacks the remote's head (#1954) (32f5b8a9e)
+- fix(chat): Read an empty question record as no record (#1932) (dbb4a543a)
+- fix(desktop): Replace a pending update with a newer release, and check on wake and network return (#1909) (750ab1662)
+- fix(agent-host): Bind transcript effort markers into the prefix stamp (#1893) (eb50e4f46)
+- fix(desktop): Bind Mac and Linux platform receipts to ancestor candidates on staging and production (#1897) (7383bea7f)
+- fix(formal): Make the formal nightly green: simulate every graph, split agent-host's nightly (#1871) (934db8cba)
+- fix(desktop): Retry failed update checks and restart from one request (#1847) (9e770caf4)
+- fix(revisions): retry thrown fill checks and keep Try again from filling twice (#1860) (286ad1069)
+- fix(api): Fit Postgres pools to the session pooler and count them (#1863) (507c65bcc)
+- fix(host): Keep the machine's system gitconfig out of the shell's git view (#1831) (5b24d1cf7)
+- fix(desktop): Bind staging Mac clean-host receipts to an ancestor candidate source (#1835) (58cde6fb6)
+- fix(desktop): Create the candidate directory's parent on receipt jobs (#1770) (9c7e8972d)
+- fix(revisions): Write nothing tracked at open and fold Tau's setup entries (#1756) (cf6478ef2)
+
+### Other changes
+
+- ci(root): Cache shell conformance only under the environment fingerprint (#1973) (8d52b145d)
+- ci(nx): Give the React event-layer counter only to the projects that run it (#1971) (6b8f4ab3c)
+- refactor(formal): Rename the formal Nx target to formal:tla (#1968) (27a0c168f)
+- refactor(viewer)!: Move the last graphics effects into actors and catch defects at each root (G12, part 2) (#1961) (57d2a258b)
+- ci(root): Run the shell rows in the merge queue in a semantics tier (#1900) (0b556ffc9)
+- test(host): qualify T12 through real revision custody (#1892) (f15472b8a)
+- refactor(formal): Infer the formal and formal:lean targets from specs (#1891) (19c0fb264)
+- refactor(desktop-terminal): Extract the Terminal concern into a library (#1885) (be5efe706)
+- refactor(shell-service): Extract the host shell service into libs/shell-service (#1876) (769f5bd62)
+- refactor(sandbox): Extract the OS sandbox and shell provider into libs/sandbox (#1858) (9fb9351e3)
+- ci(desktop): Run a Linux canary row first and replay real rows through linux-receipts (#1836) (423ca8eea)
+- Langfuse LW17: host labels from browser, desktop and daemon, and per-run release and tags (#1819) (d516ab2d9)
+- refactor(agent-host): Delete two model-call middlewares nothing calls (#1753) (b8a5e12a5)
+- Content evidence: cap parts in UTF-8 bytes, label interrupted output truncated (#1817) (2f39ceeac)
+- test(ui): Add the UI-wide React event-layer lint ceiling (#1710) (b4602c669)
+- ci(root): Select native hosts and viewer parity in the CI plan, merge queue only (#1773) (0dbd19d92)
+- chore(root): Apply the brand policy to names, one-liners and avatars (#1760) (ca9355b24)
+- refactor(revisions): Make revision identity changes events on the open client (#1707) (20abec4ff)
+
 ## 0.2.0 (2026-11-10)
 
 ### Features

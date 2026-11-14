@@ -176,7 +176,8 @@ Regenerate the graph, the suite and the manifest with `node tools/formal/src/cli
 ## Running
 
 ```bash
-pnpm nx run ui:formal
+pnpm nx run ui:formal:tla:record-sync   # this family
+pnpm nx run ui:formal:tla               # every ui family, one at a time
 ```
 
-The whole `apps/ui` run takes about 160 seconds on four workers. Most of it is record-sync: `target-lost-reply` (about 75 seconds), `today-slots-ForeignStaysForeign`, the two liveness configurations and `target-eager` (about 25 seconds each).
+This family runs in its own target, which CI runs in parallel with ui's other families (formal verification policy § 6). It takes about 155 seconds on four cores at the runner's flags, the longest ui family and close to the 3-minute budget per target. Most of it is `target-lost-reply` (about 75 seconds), `today-slots-ForeignStaysForeign`, the two liveness configurations and `target-eager` (about 25 seconds each).

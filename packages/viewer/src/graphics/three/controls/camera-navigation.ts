@@ -1,7 +1,7 @@
 /**
- * Camera navigation in steps: what one arrow key, plus or minus key, or single-click control does to the view's
- * camera (WCAG 2.5.7, the onboarding blueprint's N1 and N2). Every mouse preset needs a drag, often with a modifier,
- * to orbit, pan or zoom; these steps do the same without one, under every preset.
+ * Camera navigation in steps: what one arrow key or plus or minus key does to the view's camera (the onboarding
+ * blueprint's N1). Every mouse preset needs a drag, often with a modifier, to orbit, pan or zoom; these steps do the
+ * same from the keyboard, under every preset.
  *
  * A step moves the `camera-controls` instance at once, without a transition, as the input router does, so the pose
  * reaches the camera through the controls adapter's `update` as the person's input.

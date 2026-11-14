@@ -13,8 +13,6 @@ const composer = vi.hoisted((): { value: Record<string, unknown> } => ({ value: 
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => composer.value }));
 const picker = vi.hoisted(() => ({ available: true }));
 vi.mock('#constants/browser.constants.js', () => ({ directoryPicker: () => ({ available: picker.available }) }));
-const flags = vi.hoisted(() => ({ autoKernel: false }));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'autoKernel' && flags.autoKernel }));
 
 const haiku = {
   id: 'anthropic/claude-haiku',
@@ -35,10 +33,10 @@ const renderBar = (isEmpty = true): HTMLElement =>
 describe('ChatComposerStaticBar', () => {
   beforeEach(() => {
     picker.available = true;
-    flags.autoKernel = false;
     composer.value = {
       model: { model: haiku, effort: undefined },
       execution: { execution: { kind: 'tau' } },
+      kernel: { preference: 'auto' },
     };
   });
 
@@ -67,14 +65,15 @@ describe('ChatComposerStaticBar', () => {
 
   it('holds the model slot with a neutral bar while the name is unknown, and for another agent', () => {
     composer.value = {
+      ...composer.value,
       model: { model: { ...haiku, name: '' }, effort: undefined },
-      execution: { execution: { kind: 'tau' } },
     };
     const pending = renderBar();
     expect(pending.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('w-20');
     expect(pending.querySelector('[data-slot="trigger-model"]')).toBeNull();
 
     composer.value = {
+      ...composer.value,
       model: { model: haiku, effort: undefined },
       execution: { execution: { kind: 'acp', agentId: 'codex' } },
     };
@@ -90,10 +89,7 @@ describe('ChatComposerStaticBar', () => {
     expect(staticReasoningLevelNames).toEqual(reasoningLevelNames);
   });
 
-  it('draws the kernel pill beside the location in the location pill’s finish once Auto is on (D8)', () => {
-    expect(renderBar().querySelector('[data-slot="kernel-pill"]')).toBeNull();
-    flags.autoKernel = true;
-    composer.value = { ...composer.value, kernel: { preference: 'auto' } };
+  it('draws the kernel pill beside the location in the location pill’s finish (D8)', () => {
     const pill = renderBar().querySelector('[data-slot="kernel-pill"]');
     expect(pill).toHaveAttribute('aria-label', 'Kernel: Auto');
     expect(pill).toHaveTextContent('Auto');

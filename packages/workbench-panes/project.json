@@ -17,6 +17,12 @@
       "options": {
         "command": "node scripts/src/check-viewer-shell-parity.ts"
       }
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
     }
   }
 }

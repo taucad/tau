@@ -12,9 +12,6 @@ import { ViewerControls } from '#cad/viewer-controls.jsx';
 
 const mocks = vi.hoisted(() => ({ isMobile: false }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
-vi.mock('#cad/grid-control.jsx', () => ({
-  GridSizeIndicator: () => <button type='button' aria-label='Grid 10 mm, units and grid' />,
-}));
 vi.mock('#cad/viewer-settings.jsx', () => ({
   ViewerSettings: () => <button type='button' aria-label='Viewer settings' />,
 }));
@@ -27,7 +24,7 @@ afterEach(() => {
   mocks.isMobile = false;
 });
 
-function renderBar(mobileAction?: React.ReactNode, navigation?: Readonly<{ navigation?: boolean }>): void {
+function renderBar(mobileAction?: React.ReactNode, navigation?: Readonly<{ navigationKeys?: boolean }>): void {
   actor = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
     { input: {} },
@@ -49,6 +46,16 @@ const controlNames = (): string[] =>
     .map((button) => button.getAttribute('aria-label') ?? button.textContent);
 
 const arAction = <button type='button' aria-label='View in your space' />;
+
+describe('ViewerControls controls line', () => {
+  it('starts with Section and holds no grid readout: the grid size and units are in Viewer settings', () => {
+    renderBar();
+    const names = controlNames();
+    expect(names[0]).toBe('Section view');
+    expect(names.filter((name) => /grid|\bmm\b/iu.test(name))).toEqual([]);
+    expect(names.at(-1)).toBe('Viewer settings');
+  });
+});
 
 describe('ViewerControls host action', () => {
   it('shows the host action after Fullscreen in the desktop layout, as an iPad gets it', () => {
@@ -76,17 +83,11 @@ describe('ViewerControls host action', () => {
   });
 });
 
-describe('ViewerControls navigation (N2)', () => {
-  it('adds no camera controls unless the host asks for them', () => {
-    renderBar();
+describe('ViewerControls navigation keys', () => {
+  it('adds no camera button group beside the gizmo with the navigation keys on', () => {
+    renderBar(undefined, { navigationKeys: true });
     expect(screen.queryByRole('group', { name: 'Camera' })).toBeNull();
-  });
-
-  it('adds the camera controls, outside the controls line, when the host asks for them', () => {
-    renderBar(undefined, { navigation: true });
-    const camera = screen.getByRole('group', { name: 'Camera' });
-    expect(within(camera).getByRole('button', { name: 'Orbit left' })).toBeTruthy();
-    expect(screen.getByRole('group', { name: 'Viewer controls' }).contains(camera)).toBe(false);
+    expect(screen.getAllByRole('button', { name: 'Fit view' })).toHaveLength(1);
   });
 });
 

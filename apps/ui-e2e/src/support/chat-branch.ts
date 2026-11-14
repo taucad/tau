@@ -7,7 +7,8 @@ import * as target from '#support/external-target.js';
  *
  * The composer offers no branch (C3): the History header's branch chip makes
  * the branch, and the ⋮ on the branch's chip in History's lanes places the
- * chat there with *Run this chat here* (D3, bee2a79e41).
+ * chat there with *Run this chat here* (D3, bee2a79e41). The chip of a branch
+ * with no entries yet shows under *All branches* (D2).
  *
  * @param name - The new branch's name.
  * @returns Nothing.
@@ -47,6 +48,13 @@ export const placeChatOnNewBranch = async (name: string): Promise<void> => {
   await target.click(newBranch);
   await target.fill(selectors.getByLabelText('Branch name'), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
+  /* Making a branch leaves the files where they are, and *This branch* draws a branch with no entries of its own only
+   * while the files are on it (D2, f42cb91a2b): the new branch's chip, and its ⋮, show under *All branches*. */
+  const allBranches = selectors
+    .getByRole('group', { name: 'Which branches to show' })
+    .getByRole('radio', { name: 'All branches' });
+  await target.click(allBranches, { timeout: 60_000 });
+  await target.expectAttribute(allBranches, 'aria-checked', 'true');
   /* D3 (bee2a79e41) moved a branch's verbs onto its chip's ⋮ in History's lanes. Run this chat here is offered once
    * the new branch's checkout is in the projection and only while it would move the chat in focus, so the menu is
    * reopened until it is. */

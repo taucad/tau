@@ -3,7 +3,7 @@ title: 'Formal Verification Policy'
 description: 'Rules for TLA+ specs, Lean proofs and their TypeScript conformance: spec homes, expected verdicts, the formal runner, trace and log formats, differential tests, pinned toolchains and the drift gate.'
 status: active
 created: '2026-09-25'
-updated: '2026-09-25'
+updated: '2026-11-13'
 related:
   - docs/research/agent-substrate-formal-methods-blueprint.md
   - docs/research/verified-agent-substrate-charter.md
@@ -97,14 +97,14 @@ Liveness configurations use no `SYMMETRY`, and fairness applies only to actions 
 
 ### 6. Run Through the Runner, Bounded
 
-Run models only through `formal` Nx targets or `node tools/formal/src/cli.ts`. The runner gives each JVM a 1 GB heap, two workers and a watchdog (300 s in the pull-request tier, 900 s nightly), runs at most two JVMs at once, refuses to start below 3 GiB free disk, puts `-metadir` under `node_modules/.cache/formal/tlc/`, and passes `-noGenerateSpecTE`. Verdicts come from TLC's text, never from its exit code alone; unreadable output is an error, never a pass.
+Run models only through `formal:*` Nx targets or `node tools/formal/src/cli.ts`. The runner gives each JVM a 1 GB heap, two workers and a watchdog (300 s in the pull-request tier, 900 s nightly), runs at most two JVMs at once, refuses to start below 3 GiB free disk, puts `-metadir` under `node_modules/.cache/formal/tlc/`, and passes `-noGenerateSpecTE`. Verdicts come from TLC's text, never from its exit code alone; unreadable output is an error, never a pass.
 
 **Why**: An unbounded TLC run filled the disk in spike S1, and `-cleanup` deletes the whole `./states` directory, other models' runs included.
 
 CORRECT:
 
 ```bash
-pnpm nx run host:formal
+pnpm nx run host:formal:tla
 ```
 
 INCORRECT:
@@ -116,10 +116,12 @@ java -cp tla2tools.jar tlc2.TLC -cleanup AttachGeneration.tla   # -cleanup delet
 | Tier    | Target           | Budget                 | Contents                                                                                |
 | ------- | ---------------- | ---------------------- | --------------------------------------------------------------------------------------- |
 | Node    | `test`           | ≤ 15 s added per owner | Replay, walk, totality, drift, differential against goldens, committed simulator traces |
-| Java    | `formal`         | ≤ 3 min per owner      | SANY, pull-request configurations, graph staleness, logs and committed traces           |
+| Java    | `formal:tla`     | ≤ 3 min per target     | SANY, pull-request configurations, graph staleness, logs and committed traces           |
 | Lean    | `formal:lean`    | ≤ 60 s                 | Build, no `sorry`, axiom allowlist, goldens current                                     |
 | Field   | `formal:logs`    | ≤ 3 min                | Every captured `events.jsonl`                                                           |
 | Nightly | `formal:nightly` | ≤ 45 min in total      | Liveness, wide scopes, Apalache, fresh seeds, mutant matrices                           |
+
+The Java budget is per target, because an owner with several model families splits them into parallel targets. When every TLA+ directory of an owner is a family below `specs/` (`specs/record-sync/`), the formal plugin gives each family its own `formal:tla:<family>` target, and the owner's `formal:tla` only depends on them. CI deals the family targets to parallel runners. Keep each family within 3 minutes; when one outgrows it, narrow its `pr` configurations and move the wider bounds to the nightly tier. `agent-host`'s single `formal:tla` (about 400 s on a CI runner, its specs at `specs/` itself) predates the split and is over the budget until it moves into families or trims its `pr` configurations.
 
 ### 7. Generated Files Are Committed and Checked
 
@@ -180,7 +182,7 @@ Scratch and toolchains go under `node_modules/.cache/formal/`, reports under `ou
 - [ ] Liveness properties name their quiescence predicate
 - [ ] Generated files are regenerated and committed
 - [ ] `drift.json` is current and the spec was touched with the alphabet
-- [ ] `pnpm nx run <project>:formal` passes locally or reports `SKIPPED`
+- [ ] `pnpm nx run <project>:formal:tla` passes locally or reports `SKIPPED`
 
 ## References
 

@@ -3,7 +3,7 @@ title: 'Settings Policy'
 description: 'How Tau designs, words, organizes and co-locates settings: one registry entry and one row per setting, short user-facing copy, detail in tooltips, and a fixed section taxonomy.'
 status: active
 created: '2026-10-29'
-updated: '2026-11-12'
+updated: '2026-11-13'
 related:
   - docs/policy/ux-policy.md
   - docs/policy/ui-policy.md
@@ -11,6 +11,7 @@ related:
   - docs/policy/accessibility-policy.md
   - docs/policy/agent-observability-policy.md
   - docs/research/billing-redesign-blueprint.md
+  - docs/research/loading-states-ux-blueprint.md
 ---
 
 # Settings Policy
@@ -136,18 +137,19 @@ Data controls hold one switch per question a user would ask ("may Tau use my cha
 
 Give every control an accessible name equal to the row title. Status text that changes after an action uses `role='status'`; errors use `role='alert'`. Tests query by role and name, so renaming a title is a test change, not a selector hunt.
 
-### 12. Load as the Page's Shape
+### 12. Load in Place
 
-While a settings page or a group of rows loads, draw the rows that are about to appear. Use `SettingsPageSkeleton` for a whole page (the settings code or the session is still arriving), `SettingsRowsLoading` for rows arriving inside a group that is already on screen, and `Skeleton` bars sized to the control for a single value. Never show a centred spinner, an empty card or a "Loading…" line in a settings page. Keep one `role='status'` region that names the wait for screen readers.
+Settings loads as [UI Policy](ui-policy.md) §5 Loading says: the page's frame and its groups in their final geometry, with real rows whenever they are known, the row's control visible and disabled with a reason while its value arrives, and `WaitIndicator` in the group's header slot after 1,000 ms. Never show a centred spinner, an empty card or a "Loading…" line in a settings page, and never draw a new skeleton.
 
-| Waiting for                                | Draw                                                     |
-| ------------------------------------------ | -------------------------------------------------------- |
-| The settings code, or the session          | `SettingsPageSkeleton`                                   |
-| Rows of a list (repositories, connections) | `SettingsRowsLoading` with the expected number of rows   |
-| One value inside a row that is shown       | A `Skeleton` bar in place of the value; the row stays    |
-| A list with its own row shape (models)     | Rows of `Skeleton` in that shape, inside the list's card |
+| Waiting for                                | Draw                                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| The settings code, or the session          | The settings frame: navigation and the section header                |
+| Rows of a list (repositories, connections) | The group's frame; remembered rows if any; the indicator in its slot |
+| One value inside a row that is shown       | The row and its control, disabled with a reason; the row stays       |
 
-**Why**: settings pages each invented a loading treatment (spinner card, text line, nothing); the page jumped when data arrived. See [UI Policy](ui-policy.md) §5 Loading Placeholders.
+`SettingsPageSkeleton`, `SettingsRowsLoading` and the remaining `Skeleton` rows are converted route by route when Settings is next recorded and audited; until then `loading-state.ratchet.node.test.ts` caps them at today's count, so they only go down.
+
+**Why**: settings pages each invented a loading treatment (spinner card, text line, nothing), and the skeleton that replaced them is a second change on screen. Converting without recordings would repeat the guess, so the cap holds them until each route is recorded ([loading states UX blueprint](../research/loading-states-ux-blueprint.md)).
 
 ## Anti-Patterns
 
@@ -165,7 +167,7 @@ While a settings page or a group of rows loads, draw the rows that are about to 
 - [ ] Longer detail in `info`; legal text linked, not pasted
 - [ ] No release, ticket, internal or test vocabulary
 - [ ] Loading and error states keep the control visible and disabled with a reason
-- [ ] A loading page or list draws layout-matching skeletons (`SettingsPageSkeleton`, `SettingsRowsLoading`), never a spinner or "Loading…" text
+- [ ] A loading page or list keeps its frame and draws no new skeleton, spinner or "Loading…" text; a wait past 1,000 ms shows `WaitIndicator`
 - [ ] Destructive actions last, confirmed when irreversible, consequence stated truthfully
 - [ ] Unavailable settings filtered in the registry, not rendered dead
 

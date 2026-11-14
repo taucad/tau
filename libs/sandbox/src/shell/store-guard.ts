@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -83,6 +83,56 @@ export const storeGuardCommand = (
     quote(input.command),
   ].join(' ');
 
+/**
+ * The per-user folder that holds start checks' scratch stores, one `<pid>-<random>` folder per check. A check whose
+ * host was killed leaves its folder behind; the next check removes every folder whose process is gone.
+ *
+ * @internal
+ * @returns The folder's path.
+ */
+export const storeGuardCheckRoot = (): string =>
+  join(tmpdir(), `tau-store-guard-check-${String(process.getuid?.() ?? 0)}`);
+
+/** Whether a process with this id exists; one that belongs to another user still counts. */
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/**
+ * Create the check root as this user's own private folder, refusing anything else at its path, and remove the folders
+ * of checks whose process is gone.
+ */
+const ownCheckRoot = async (): Promise<string> => {
+  const root = storeGuardCheckRoot();
+  await mkdir(root, { mode: 0o700 }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error;
+    }
+  });
+  const status = await lstat(root);
+  if (!status.isDirectory() || (process.getuid !== undefined && status.uid !== process.getuid())) {
+    throw new Error(`${root} is not this user's own folder`);
+  }
+  /* `mkdir` leaves an existing folder's mode alone: one another user could write into is made private again. */
+  // oxlint-disable-next-line no-bitwise -- permission bits are a bit mask.
+  if ((status.mode & 0o777) !== 0o700) {
+    await chmod(root, 0o700);
+  }
+  for (const name of await readdir(root)) {
+    const pid = Number(name.split('-')[0]);
+    if (!Number.isSafeInteger(pid) || pid <= 0 || !alive(pid)) {
+      // oxlint-disable-next-line no-await-in-loop -- a handful of stale folders, removed one at a time.
+      await rm(join(root, name), { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+  return root;
+};
+
 /** The answer of one start check, with why it failed, for the host log. */
 export type StoreGuardProbe = Readonly<{ available: true }> | Readonly<{ available: false; reason: string }>;
 
@@ -101,6 +151,15 @@ export const probeStoreGuard = async (
   if (process.platform !== 'linux') {
     return { available: false, reason: `${process.platform} has no store guard` };
   }
+  let checkRoot: string;
+  try {
+    checkRoot = await ownCheckRoot();
+  } catch (error) {
+    return {
+      available: false,
+      reason: `no folder for the check: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
   try {
     await access(input.guardPath, constants.X_OK);
   } catch {
@@ -112,7 +171,15 @@ export const probeStoreGuard = async (
   } catch {
     return { available: false, reason: '/dev/fuse is absent or not readable and writable by this user' };
   }
-  const scratch = await mkdtemp(join(tmpdir(), 'tau-store-guard-check-'));
+  let scratch: string;
+  try {
+    scratch = await mkdtemp(join(checkRoot, `${String(process.pid)}-`));
+  } catch (error) {
+    return {
+      available: false,
+      reason: `no scratch store for the check: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
   try {
     const store = join(scratch, 'project', '.git');
     await mkdir(store, { recursive: true });

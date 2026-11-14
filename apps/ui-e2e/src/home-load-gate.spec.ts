@@ -1,22 +1,28 @@
 /* oxlint-disable no-await-in-loop -- The returning visitor's projects are created through the UI one after another, as a visitor would. */
+import { base64ToUint8Array } from 'uint8array-extras';
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type {
+  EarlyInput,
   HomeInspection,
   HomeLoadRecord,
   ProjectLoadRecord,
+  ProjectLoadRegionEntry,
   WorkerReadDelay,
 } from '#support/home-load-recorder.js';
 import {
   armWorkerReadDelay,
+  homeLoadProbe,
   inspectServerHtml,
+  openBeforeHydration,
   installHomeLoadRecorder,
   installProjectLoadRecorder,
   installWorkerReadDelay,
   knownDefectRows,
   precondition,
   projectRowMoves,
+  readDelayedRequests,
   readHomeLoad,
   readProjectLoad,
   firstDelayedRead,
@@ -214,18 +220,21 @@ const measureReturningReload = async ({
   delays,
   label,
   prepare,
+  regions,
 }: {
   readonly viewport: ViewportName;
   readonly delays: readonly WorkerReadDelay[];
   readonly label: string;
   /** What the visitor did on Home before the measured reload. */
   readonly prepare?: () => Promise<void>;
+  /** Regions the recorder watches in every frame (A15 frame rows). */
+  readonly regions?: Readonly<Record<string, string>>;
 }): Promise<{ readonly record: ProjectLoadRecord; readonly since: number }> => {
   await target.setViewport(viewports.wide);
   await target.installModelCatalogFixture(catalogLatency);
   await target.startModelCatalogApi();
   await installHomeLoadRecorder();
-  await installProjectLoadRecorder();
+  await installProjectLoadRecorder({ regions });
   await installWorkerReadDelay();
   await seedReturningVisitor();
   await target.setViewport(viewports[viewport]);
@@ -326,185 +335,6 @@ knownDefect(
 );
 
 /*
- * H-c and H-d (A15g, P-d and P-g): what Home shows while it does not know yet. A per-frame recorder of its own,
- * self-contained because it runs in the page: when the sidebar's "Loading projects" words were first visible,
- * whether the sidebar's list and the project grid were busy, when the "No saved preview" icon was first on screen,
- * and the first card's media box, each time it changed.
- */
-type WaitSlotRecord = {
-  recentsShownAt?: number;
-  sidebarBusyAt?: number;
-  gridStates: Array<{ t: number; busy: boolean }>;
-  noPreviewIconAt?: number;
-  /** How many "No saved preview" icons were on screen, each time the count changed. */
-  noPreviewIcons: Array<{ t: number; count: number }>;
-  mediaRects: Array<{ t: number; rect: string }>;
-};
-const recordWaitSlots = (): void => {
-  const record: WaitSlotRecord = { gridStates: [], noPreviewIcons: [], mediaRects: [] };
-  Object.defineProperty(globalThis, '__TAU_WAIT_SLOTS__', { value: record });
-  const now = (): number => Math.round(performance.now());
-  const sample = (): void => {
-    /* The app sidebar's own slot: other surfaces also mark themselves `data-sidebar="sidebar"`. */
-    const sidebar = document.querySelector('[data-slot="sidebar"]');
-    if (
-      record.recentsShownAt === undefined &&
-      [...(sidebar?.querySelectorAll('[data-slot="wait-indicator"]') ?? [])].some(
-        // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- the visible words only: the indicator lays its words out hidden.
-        (slot) => slot instanceof HTMLElement && slot.innerText.includes('Loading projects'),
-      )
-    ) {
-      record.recentsShownAt = now();
-    }
-    if (record.sidebarBusyAt === undefined && sidebar?.querySelector('ul[aria-busy="true"]')) {
-      record.sidebarBusyAt = now();
-    }
-    const grid = document.querySelector('main ul[aria-label="Projects"]');
-    const busy = grid?.getAttribute('aria-busy') === 'true';
-    if (grid && record.gridStates.at(-1)?.busy !== busy) {
-      record.gridStates.push({ t: now(), busy });
-    }
-    const icons = document.querySelectorAll('main [aria-label="No saved preview"]').length;
-    if (record.noPreviewIconAt === undefined && icons > 0) {
-      record.noPreviewIconAt = now();
-    }
-    if ((record.noPreviewIcons.at(-1)?.count ?? 0) !== icons) {
-      record.noPreviewIcons.push({ t: now(), count: icons });
-    }
-    const media = grid?.querySelector('li [class*="aspect-4/3"]');
-    if (media) {
-      const box = media.getBoundingClientRect();
-      const rect = `${Math.round(box.width)}x${Math.round(box.height)}`;
-      if (record.mediaRects.at(-1)?.rect !== rect) {
-        record.mediaRects.push({ t: now(), rect });
-      }
-    }
-    requestAnimationFrame(sample);
-  };
-  requestAnimationFrame(sample);
-};
-const readWaitSlots = async (): Promise<WaitSlotRecord> =>
-  target.evaluate(() => (globalThis as typeof globalThis & { __TAU_WAIT_SLOTS__: WaitSlotRecord }).__TAU_WAIT_SLOTS__);
-
-/** The indicator delay of the timing ladder (UI Policy § 6). Milliseconds. */
-const indicatorDelay = 1000;
-/** Every project's saved thumbnail, read from its working copy (the worker sees the path inside the project). */
-const thumbnailRead: WorkerReadDelay = {
-  method: 'readFile',
-  path: String.raw`^thumbnail\.webp$`,
-  milliseconds: 2000,
-};
-
-/* A guard: main meets it since A15g (#2214), measured 5 of 5 on its base. */
-knownDefect(
-  `H-c: Home with nothing stored draws no skeleton, says "Loading projects" in Recents from ${String(indicatorDelay)} ms and keeps the waiting lists busy, with the project listing 3 s late`,
-  {
-    artifact: 'h-c-wide',
-    expectedFailure: false,
-    budget: homeBudget,
-    measure: async () => {
-      await target.setViewport(viewports.wide);
-      await target.installModelCatalogFixture(catalogLatency);
-      await target.startModelCatalogApi();
-      await installProjectLoadRecorder();
-      await installWorkerReadDelay();
-      await target.addInitScript(recordWaitSlots);
-      await target.navigate('/');
-      await target.expectVisible(richComposer, 60_000);
-      /* Nothing stored: no listing snapshot, no remembered count and no layout hint survive into the measured load. */
-      await target.evaluate(async () => {
-        localStorage.clear();
-        const cookies = await cookieStore.getAll();
-        await Promise.all(cookies.map(async (cookie) => cookieStore.delete(cookie.name ?? '')));
-      });
-      await armWorkerReadDelay([projectListingRead]);
-      await target.reload();
-      await target.expectVisible(richComposer, 60_000);
-      await target.delay(readDelay + settleWindow);
-      const record = await readProjectLoad();
-      const slots = await readWaitSlots();
-      const deliveries = await readWorkerDeliveries();
-      await target.writeArtifact(
-        'home-load-gate/h-c-wide.json',
-        `${JSON.stringify({ record, slots, workerDeliveries: deliveries }, null, 2)}\n`,
-      );
-      const listedAt = firstDelayedRead(deliveries, projectListingRead);
-      precondition(listedAt !== undefined, 'H-c: the project listing was not answered late');
-      /* When that late listing reached the page: the lists wait until then. */
-      const deliveredAt =
-        deliveries.find((entry) => entry.method === projectListingRead.method && entry.sentAt === listedAt)?.t ??
-        Number.NaN;
-      precondition(Number.isFinite(deliveredAt), 'H-c: the late project listing has no delivery time');
-      precondition(
-        record.dropped['skeletonFrames'] === undefined,
-        'H-c: the record dropped skeleton frames past its frame limit',
-      );
-      return { record, slots, deliveredAt };
-    },
-    assert: ({ record, slots, deliveredAt }) => {
-      expect(
-        {
-          skeletonFrames: record.skeletonFrames.length,
-          recentsShownFromDelay: slots.recentsShownAt !== undefined && slots.recentsShownAt >= indicatorDelay,
-          sidebarBusy: slots.sidebarBusyAt !== undefined,
-          gridIdleWhileWaiting: slots.gridStates.some(
-            (state) => !state.busy && slots.recentsShownAt !== undefined && state.t < deliveredAt,
-          ),
-        },
-        `H-c: skeleton frames ${JSON.stringify(record.skeletonFrames.slice(0, 3))}, slots ${JSON.stringify(slots)}`,
-      ).toEqual({ skeletonFrames: 0, recentsShownFromDelay: true, sidebarBusy: true, gridIdleWhileWaiting: false });
-    },
-  },
-);
-
-/* A guard: main meets it since A15g (#2214), measured 5 of 5 on its base. */
-knownDefect(
-  'H-d: a returning visitor\'s Home card draws no "No saved preview" icon before its thumbnail read settles, its media box still, with the read 2 s late',
-  {
-    artifact: 'h-d-wide',
-    expectedFailure: false,
-    budget: homeBudget,
-    measure: async () => {
-      await target.addInitScript(recordWaitSlots);
-      const { record } = await measureReturningReload({
-        viewport: 'wide',
-        delays: [thumbnailRead],
-        label: 'h-d-wide',
-      });
-      const slots = await readWaitSlots();
-      const deliveries = await readWorkerDeliveries();
-      /* The worker's path names no project, so each card is matched by count: no more icons than settled reads. */
-      const settledTimes = deliveries
-        .filter(
-          (entry) =>
-            entry.method === thumbnailRead.method && new RegExp(thumbnailRead.path, 'u').test(entry.path ?? ''),
-        )
-        .map((entry) => entry.t)
-        .toSorted((a, b) => a - b);
-      const settledAt = settledTimes.at(0) ?? Number.NaN;
-      precondition(Number.isFinite(settledAt), 'H-d: no thumbnail read was answered late');
-      precondition(slots.mediaRects.length > 0, 'H-d: no card media box was on screen');
-      await target.writeArtifact(
-        'home-load-gate/h-d-slots.json',
-        `${JSON.stringify({ slots, settledTimes }, null, 2)}\n`,
-      );
-      return { record, slots, settledAt, settledTimes };
-    },
-    assert: ({ slots, settledAt, settledTimes }) => {
-      expect(
-        {
-          iconBeforeRead: slots.noPreviewIcons.some(
-            (sample) => sample.count > settledTimes.filter((settled) => settled <= sample.t).length,
-          ),
-          mediaResized: slots.mediaRects.length > 1,
-        },
-        `H-d: the thumbnail read answered at ${settledAt} ms; slots ${JSON.stringify(slots)}`,
-      ).toEqual({ iconBeforeRead: false, mediaResized: false });
-    },
-  },
-);
-
-/*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
  * (`#support/cloud-stand-ins.js`). Side lane N1 fixed both defects and set each `cloudDefectRow`'s
@@ -589,6 +419,394 @@ cloudDefectRow(
         `H7: the plain textarea replaced the rich composer (upgraded at ${String(record.composerUpgradedAt)} ms) at these times (ms)`,
       ).toEqual([]);
     });
+  },
+);
+
+/*
+ * A15a frame rows for Home (loading states UX blueprint, § Red-first tests, Home), on A0.10's recorder: added after
+ * A0.10 so later lanes only flip. H-a is S-flags' (#2180). The guards that hold on `main` assert as plain passing rows:
+ * H-g, and H-b, H-c and H-d since A13 (#2164) and A15g (#2214) landed. Every other row stands as an expected failure,
+ * and its title names the lane that flips it. H-f's cancel case is red until A15d: on `main` an Enter typed before
+ * hydration becomes a line break, so there is no send to cancel.
+ */
+
+/** A row's defect assertion, with what was measured in its message, so a failure names every frame it counted. */
+const expectMeasured = <Value>(actual: Value, message: string, expected: Value): void => {
+  expect(actual, `${message}: ${JSON.stringify(actual)}`).toEqual(expected);
+};
+
+/** A region's entries in one record. */
+const regionsOf = (record: ProjectLoadRecord, name: string): readonly ProjectLoadRegionEntry[] =>
+  record.regions[name] ?? [];
+const describeEntry = (entry: ProjectLoadRegionEntry): string =>
+  entry.present
+    ? `frame ${entry.frame} (${entry.t} ms): node ${entry.node} at ${entry.x},${entry.y} ${entry.width}x${entry.height}${entry.skeletons > 0 ? `, ${entry.skeletons} skeletons` : ''}${entry.text === '' ? '' : ` "${entry.text.slice(0, 40)}"`}`
+    : `frame ${entry.frame} (${entry.t} ms): absent`;
+/** The region's state in a frame: its last change at or before that frame. */
+const regionAt = (entries: readonly ProjectLoadRegionEntry[], frame: number): ProjectLoadRegionEntry | undefined =>
+  entries.findLast((entry) => entry.frame <= frame);
+
+/** Home's project grid: the list, or its loading stand-in. */
+const projectGrid = 'ul[aria-label="Projects"], [role="status"][aria-label="Loading projects"]';
+const homeRegions = {
+  firstCard: 'ul[aria-label="Projects"] [data-slot="card"]',
+  grid: projectGrid,
+  recentsIndicator: '[data-slot="sidebar"] [data-slot="wait-indicator-body"]',
+} as const;
+
+knownDefect(
+  'H-b (A13, A15g): a returning reload of Home with the project listing 3 s late shows the seeded rows and cards from the first frame after hydration, with no skeleton in any frame',
+  {
+    artifact: 'h-b-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () => {
+      const { record } = await measureReturningReload({
+        viewport: 'wide',
+        delays: [projectListingRead],
+        label: 'h-b-wide',
+        regions: homeRegions,
+      });
+      precondition(record.hydratedFirstFrame !== undefined, 'H-b: the rich composer never mounted');
+      precondition(record.projectRows.length > 0, 'H-b: the sidebar drew no project row');
+      precondition(
+        record.dropped['skeletonFrames'] === undefined,
+        'H-b: the record dropped skeleton frames past its frame limit',
+      );
+      return record;
+    },
+    assert: (record) => {
+      const hydrated = record.hydratedFirstFrame!;
+      const rows = new Set(
+        record.projectRows.filter((entry) => entry.frame <= hydrated.frame).map((entry) => entry.row),
+      );
+      const card = regionAt(regionsOf(record, 'firstCard'), hydrated.frame);
+      /* The rows the loaded sidebar draws: it pages, so not every seeded project has a row. */
+      const drawnRows = [...new Set(record.projectRows.map((entry) => entry.row))];
+      expectMeasured(
+        {
+          missingRows: drawnRows.filter((name) => !rows.has(name)),
+          firstCardNamed: card?.present === true && seededProjects.some((name) => card.text.includes(name)),
+          skeletonFrames: record.skeletonFrames
+            .slice(0, 3)
+            .map((entry) => `frame ${entry.frame} (${entry.t} ms): ${entry.count}`),
+        },
+        `H-b: hydrated by frame ${hydrated.frame} (${hydrated.t} ms); the first card then: ${card === undefined ? 'absent' : describeEntry(card)}; ${record.skeletonFrames.length} frames had skeleton blocks`,
+        { missingRows: [], firstCardNamed: true, skeletonFrames: [] },
+      );
+    },
+  },
+);
+
+knownDefect(
+  'H-c (A13, A15g): with nothing remembered and the project listing 3 s late, Home draws no skeleton, its Recents indicator shows from 1,000 ms, and the grid is busy',
+  {
+    artifact: 'h-c-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () => {
+      const { record, since } = await measureReturningReload({
+        viewport: 'wide',
+        delays: [projectListingRead],
+        label: 'h-c-wide',
+        regions: homeRegions,
+        /* Nothing remembered: the page's local storage is emptied, so no listing it kept can paint first. */
+        prepare: async () => {
+          await target.evaluate(() => {
+            localStorage.clear();
+          });
+        },
+      });
+      const answeredAt = since + projectListingRead.milliseconds;
+      precondition(
+        record.projectRows.every((entry) => entry.t >= answeredAt),
+        `H-c: a project row drew before the listing was answered at ${answeredAt} ms, so something was remembered`,
+      );
+      return record;
+    },
+    assert: (record) => {
+      const firstShown = regionsOf(record, 'recentsIndicator').find(
+        (entry) => entry.present && entry.visible && entry.text !== '',
+      );
+      expectMeasured(
+        {
+          skeletonFrames: record.skeletonFrames.length,
+          indicatorShown: firstShown !== undefined,
+          indicatorEarly: firstShown !== undefined && firstShown.t < 1000,
+          gridBusy: regionsOf(record, 'grid').some((entry) => entry.present && entry.busy),
+        },
+        `H-c: ${record.skeletonFrames.length} frames had skeleton blocks; the Recents indicator first showed ${firstShown === undefined ? 'never' : `at ${firstShown.t} ms`}`,
+        { skeletonFrames: 0, indicatorShown: true, indicatorEarly: false, gridBusy: true },
+      );
+    },
+  },
+);
+
+/** Every card's thumbnail read, answered 2 s late. */
+const thumbnailRead: WorkerReadDelay = { method: 'readFile', path: String.raw`thumbnail\.webp$`, milliseconds: 2000 };
+const thumbnailRegions = {
+  boxIcon: 'ul[aria-label="Projects"] svg[aria-label="No saved preview"]',
+  /* The media box by its structure, whatever it holds: the icon, an image, or nothing while the read is pending. */
+  media: 'ul[aria-label="Projects"] [data-slot="card"] div.overflow-hidden.bg-muted',
+  card: 'ul[aria-label="Projects"] [data-slot="card"]',
+} as const;
+
+knownDefect(
+  'H-d (A15g): with the thumbnail read 2 s late, no card draws the no-preview icon before the read settles, and the media box keeps its box',
+  {
+    artifact: 'h-d-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () =>
+      measureReturningReload({
+        viewport: 'wide',
+        delays: [thumbnailRead],
+        label: 'h-d-wide',
+        regions: thumbnailRegions,
+      }),
+    assert: ({ record, since }) => {
+      const settledAt = since + thumbnailRead.milliseconds;
+      const early = regionsOf(record, 'boxIcon').filter((entry) => entry.present && entry.t < settledAt);
+      /* From the first frame with a card: the media box as it stood then, and every change after. */
+      /* A visible card: A15g's invisible stand-in card (`ProjectCardRoom`) holds the grid's place but is not drawn. */
+      const firstCard = regionsOf(record, 'card').find((entry) => entry.present && entry.visible);
+      const allMedia = regionsOf(record, 'media');
+      const atCard = firstCard === undefined ? undefined : allMedia.findLast((entry) => entry.t <= firstCard.t);
+      const media =
+        firstCard === undefined
+          ? []
+          : [...(atCard === undefined ? [] : [atCard]), ...allMedia.filter((entry) => entry.t > firstCard.t)];
+      const last = allMedia.at(-1);
+      precondition(last?.present === true, 'H-d: the settled page has no card media box');
+      const settled = last!;
+      const moved = media.filter(
+        (entry) =>
+          !entry.present ||
+          Math.abs(entry.x - settled.x) > 1 ||
+          Math.abs(entry.y - settled.y) > 1 ||
+          Math.abs(entry.width - settled.width) > 1 ||
+          Math.abs(entry.height - settled.height) > 1,
+      );
+      const absentAtCard = firstCard !== undefined && atCard === undefined;
+      expectMeasured(
+        {
+          earlyIcon: early.slice(0, 3).map((entry) => describeEntry(entry)),
+          mediaMoves: [
+            ...(absentAtCard ? [`no media box when the first card drew at ${firstCard.t} ms`] : []),
+            ...moved.slice(0, 3).map((entry) => describeEntry(entry)),
+          ],
+        },
+        `H-d: the thumbnail read was sent at ${since} ms and answered from ${settledAt} ms`,
+        { earlyIcon: [], mediaMoves: [] },
+      );
+    },
+  },
+);
+
+const homeDraft = 'A bracket for the shelf';
+const composerRegions = { input: homeLoadProbe.composerEditor } as const;
+
+knownDefect('H-e (A15d): a stored Home draft is the composer value in the first frame it is painted', {
+  artifact: 'h-e-wide',
+  expectedFailure: true,
+  budget: homeBudget,
+  measure: async () => {
+    await target.setViewport(viewports.wide);
+    await target.installModelCatalogFixture(catalogLatency);
+    await target.startModelCatalogApi();
+    await installProjectLoadRecorder({ regions: composerRegions });
+    await target.navigate('/');
+    await target.expectVisible(richComposer, 60_000);
+    await target.type(richComposer, homeDraft);
+    /* The draft is in Home's composer record before the measured load. */
+    await target.delay(settleWindow * 2);
+    await target.reload();
+    await target.expectVisible(richComposer, 60_000);
+    await target.waitFor(
+      (selector) => document.querySelector(selector)?.textContent.includes('A bracket') === true,
+      '[aria-label="Ask Tau to build anything..."]',
+      { timeout: 60_000 },
+    );
+    const record = await readProjectLoad();
+    await target.writeArtifact('home-load-gate/h-e-wide.json', `${JSON.stringify({ record }, null, 2)}\n`);
+    precondition(
+      regionsOf(record, 'input').some((entry) => entry.present && entry.text === homeDraft),
+      'H-e: the draft never came back after the reload',
+    );
+    return record;
+  },
+  assert: (record) => {
+    const first = regionsOf(record, 'input').find((entry) => entry.present);
+    expectMeasured(
+      first?.text,
+      `H-e: the composer's first painted value, ${first === undefined ? 'absent' : describeEntry(first)}`,
+      homeDraft,
+    );
+  },
+});
+
+/** The entry chunk every page loads first: holding it holds hydration. */
+const entryChunk = String.raw`/assets/entry\.client-[\w-]+\.js(?:\?|$)`;
+const richComposerHydrated = '[aria-label="Ask Tau to build anything..."][contenteditable="true"]';
+const firstMessage = 'Make a bracket.';
+
+/** The entry chunk was held, so the acts before hydration had a window to land in. */
+const requireEntryChunkHeld = async (label: string): Promise<void> => {
+  const held = await readDelayedRequests();
+  precondition(
+    held.some((url) => new RegExp(entryChunk, 'u').test(url)),
+    `${label}: the entry chunk was never delayed`,
+  );
+};
+
+/** A fresh visitor types on Home before it hydrates, with the entry chunk 2 s late; what happened after adoption. */
+const typeBeforeHomeHydrates = async (
+  label: string,
+  input: { readonly enter: boolean; readonly afterEnter?: string },
+): Promise<{
+  readonly early: EarlyInput;
+  readonly onProject: boolean;
+  readonly text: string;
+  readonly paragraphs: number;
+  readonly projects: number;
+}> => {
+  await target.setViewport(viewports.wide);
+  await target.installModelCatalogFixture(catalogLatency);
+  await target.startModelCatalogApi();
+  await target.installAgentHostGatewayFixture([
+    { text: 'Started on the bracket.', usage: { inputTokens: 1, outputTokens: 1 } },
+  ]);
+  await target.navigate('/');
+  await target.expectVisible(richComposer, 60_000);
+  await target.commands.uiDelayTargetRequests(entryChunk, 2000);
+  const early = await openBeforeHydration({
+    path: '/',
+    input: homeLoadProbe.composerEditor,
+    hydrated: richComposerHydrated,
+    text: firstMessage,
+    enter: input.enter,
+    afterEnter: input.afterEnter,
+    wait: 1500,
+    settle: 0,
+  });
+  await target.expectVisible(richComposer, 60_000);
+  /* A send creates a project and opens it; time for it to happen, or not. */
+  await target.delay(settleWindow * 4);
+  const state = await target.evaluate(() => ({
+    onProject: /^\/w\/[^/]+\/[^/]+/u.test(location.pathname),
+    text: document.querySelector('[aria-label="Ask Tau to build anything..."]')?.textContent ?? '',
+    /* Enter taken as a line break leaves two paragraphs; taken as a send, one. */
+    paragraphs: document.querySelectorAll('[aria-label="Ask Tau to build anything..."] p').length,
+    projects: document.querySelectorAll('[data-slot="project-trigger"]').length,
+  }));
+  await target.writeArtifact(`home-load-gate/${label}.json`, `${JSON.stringify({ early, state }, null, 2)}\n`);
+  precondition(early.found, `${label}: the served composer was not on screen before hydration`);
+  precondition(!early.hydratedBeforeAct, `${label}: the page had hydrated before the typing`);
+  await requireEntryChunkHeld(label);
+  return { early, ...state };
+};
+
+knownDefect(
+  'H-f (A15d): Enter pressed before Home hydrates, with the entry chunk 2 s late, sends exactly once after adoption',
+  {
+    artifact: 'h-f-send-wide',
+    expectedFailure: true,
+    budget: homeBudget,
+    measure: async () => typeBeforeHomeHydrates('h-f-send-wide', { enter: true }),
+    assert: ({ onProject, projects, text }) => {
+      expectMeasured(
+        { onProject, projects },
+        `H-f: after adoption the page is ${onProject ? 'a project' : 'still Home'}, with ${projects} projects; the composer holds ${JSON.stringify(text)}`,
+        { onProject: true, projects: 1 },
+      );
+    },
+  },
+);
+
+knownDefect('H-f (A15d): an edit after Enter before Home hydrates cancels the queued send and keeps the text', {
+  artifact: 'h-f-cancel-wide',
+  expectedFailure: true,
+  budget: homeBudget,
+  measure: async () => typeBeforeHomeHydrates('h-f-cancel-wide', { enter: true, afterEnter: ' Twice' }),
+  assert: ({ onProject, projects, text, paragraphs }) => {
+    /* One paragraph: Enter was taken as a send (then cancelled), not as a line break. */
+    expectMeasured(
+      { onProject, projects, kept: text.includes(firstMessage) && text.includes('Twice'), paragraphs },
+      `H-f: after adoption the composer holds ${JSON.stringify(text)} in ${paragraphs} paragraphs`,
+      { onProject: false, projects: 0, kept: true, paragraphs: 1 },
+    );
+  },
+});
+
+/**
+ * Two PNG screenshots (base64) of one box, compared in this runner's page: the count of pixels whose colour differs.
+ *
+ * @returns The differing pixels, or the sizes when they do not match.
+ */
+const differingPixels = async (before: string, after: string): Promise<number | string> => {
+  const decode = async (base64: string): Promise<ImageData> => {
+    const bytes = base64ToUint8Array(base64);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext('2d')!;
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, bitmap.width, bitmap.height);
+  };
+  const [left, right] = await Promise.all([decode(before), decode(after)]);
+  if (left.width !== right.width || left.height !== right.height) {
+    return `${left.width}x${left.height} against ${right.width}x${right.height}`;
+  }
+  let differing = 0;
+  for (let index = 0; index < left.data.length; index += 4) {
+    if (
+      left.data[index] !== right.data[index] ||
+      left.data[index + 1] !== right.data[index + 1] ||
+      left.data[index + 2] !== right.data[index + 2] ||
+      left.data[index + 3] !== right.data[index + 3]
+    ) {
+      differing += 1;
+    }
+  }
+  return differing;
+};
+
+knownDefect(
+  'H-g (A15d, guard): the Home composer region is pixel-identical before and after adoption, the caret hidden, with the entry chunk 2 s late',
+  {
+    artifact: 'h-g-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () => {
+      await target.setViewport(viewports.wide);
+      await target.installModelCatalogFixture(catalogLatency);
+      await target.startModelCatalogApi();
+      await target.navigate('/');
+      await target.expectVisible(richComposer, 60_000);
+      await target.commands.uiDelayTargetRequests(entryChunk, 2000);
+      const early = await openBeforeHydration({
+        path: '/',
+        input: homeLoadProbe.composerEditor,
+        hydrated: richComposerHydrated,
+        /* The composer's box: its input and its bar. */
+        region: ':has(> [data-slot="composer-bar"])',
+        screenshots: true,
+        wait: 1500,
+        settle: settleWindow,
+      });
+      precondition(early.found, 'H-g: the served composer was not on screen before hydration');
+      precondition(!early.hydratedBeforeAct, 'H-g: the page had hydrated before the first screenshot');
+      await requireEntryChunkHeld('H-g');
+      precondition(early.before !== undefined && early.after !== undefined, 'H-g: a screenshot is missing');
+      const differing = await differingPixels(early.before!, early.after!);
+      await target.writeArtifact(
+        'home-load-gate/h-g-wide.json',
+        `${JSON.stringify({ box: early.box, differing }, null, 2)}\n`,
+      );
+      return differing;
+    },
+    assert: (differing) => {
+      expect(differing, 'H-g: pixels of the composer differ across adoption').toBe(0);
+    },
   },
 );
 

@@ -36,6 +36,19 @@
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --test"
       }
     },
+    "size": {
+      "dependsOn": ["build", "build:store-guard"],
+      "inputs": [
+        "{projectRoot}/.size-limit.json",
+        "{projectRoot}/dist/**/*",
+        {
+          "dependentTasksOutputFiles": "**/*"
+        },
+        {
+          "externalDependencies": ["size-limit"]
+        }
+      ]
+    },
     "test": {
       "dependsOn": ["test:store-guard"]
     },

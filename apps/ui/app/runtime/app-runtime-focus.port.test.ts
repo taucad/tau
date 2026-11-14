@@ -6,7 +6,8 @@
  */
 import { afterEach, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
-import type { AnyActorRef } from 'xstate';
+import type { AnyActorRef, AnyEventObject } from 'xstate';
+import { mock } from 'vitest-mock-extended';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import {
@@ -50,7 +51,10 @@ it('should an open that displaces the waiting one answers only itself (one slot,
     clock: new StepClock(),
   }).start();
   const told: Array<{ type: string } & Record<string, unknown>> = [];
-  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const fakeFocus = mock<AnyActorRef>();
+  fakeFocus.send.mockImplementation((event: AnyEventObject) => {
+    told.push(event);
+  });
   const composition = createFocusComposition({
     library: {
       routeAccess: async () => ({ status: 'missing' }),
@@ -91,7 +95,10 @@ it('should a queued open that lands waiting is answered when the registry resume
     clock: new StepClock(),
   }).start();
   const told: Array<{ type: string } & Record<string, unknown>> = [];
-  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const fakeFocus = mock<AnyActorRef>();
+  fakeFocus.send.mockImplementation((event: AnyEventObject) => {
+    told.push(event);
+  });
   const composition = createFocusComposition({
     library: {
       routeAccess: async () => ({ status: 'missing' }),
@@ -146,7 +153,10 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
     clock: new StepClock(),
   }).start();
   const told: Array<{ type: string } & Record<string, unknown>> = [];
-  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const fakeFocus = mock<AnyActorRef>();
+  fakeFocus.send.mockImplementation((event: AnyEventObject) => {
+    told.push(event);
+  });
   const composition = createFocusComposition({
     library: {
       routeAccess: async () => ({ status: 'missing' }),
@@ -188,7 +198,10 @@ it('should a return to a closing project refused by another close that came back
     clock: new StepClock(),
   }).start();
   const told: Array<{ type: string } & Record<string, unknown>> = [];
-  const fakeFocus = { send: (event: { type: string }) => told.push(event) } as unknown as AnyActorRef;
+  const fakeFocus = mock<AnyActorRef>();
+  fakeFocus.send.mockImplementation((event: AnyEventObject) => {
+    told.push(event);
+  });
   const composition = createFocusComposition({
     library: {
       routeAccess: async () => ({ status: 'missing' }),

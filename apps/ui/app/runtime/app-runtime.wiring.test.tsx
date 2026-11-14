@@ -177,10 +177,8 @@ describe('round 13: the runtime hands focus its route and flush ports', () => {
     const { focus, bindings } = selectRuntimeFocus(runtime);
     const flush = vi.fn(async () => undefined);
     bindings.registerLeaveFlush({ projectId: 'proj_a', flush });
-    const { ports } = focus.getSnapshot().context as unknown as {
-      ports: Record<string, { send: (event: AnyEventObject) => void }>;
-    };
-    ports['flush']?.send({ type: 'leaveFlushAsked', requestId: 'flush:1', projectId: 'proj_a' });
+    const { ports } = focus.getSnapshot().context;
+    ports.flush.send({ type: 'leaveFlushAsked', requestId: 'flush:1', projectId: 'proj_a' });
     expect(flush).toHaveBeenCalledTimes(1);
     runtime.stop();
   });
@@ -189,10 +187,8 @@ describe('round 13: the runtime hands focus its route and flush ports', () => {
     const host = createFakeEnvironmentHost();
     const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
     const { focus } = selectRuntimeFocus(runtime);
-    const { ports } = focus.getSnapshot().context as unknown as {
-      ports: Record<string, { send: (event: AnyEventObject) => void }>;
-    };
-    ports['registry']?.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a' });
+    const { ports } = focus.getSnapshot().context;
+    ports.registry.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a' });
     expect(selectSessionsRegistry(runtime.getSnapshot()).getSnapshot().context.refs['proj_a']).toBeDefined();
     runtime.stop();
   });

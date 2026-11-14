@@ -19,8 +19,9 @@ vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test
 
 const fetchMock = vi.fn<typeof fetch>();
 
+let client: QueryClient;
 const createWrapper = () => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Wrapper({ children }: PropsWithChildren): React.JSX.Element {
     return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
   }
@@ -62,7 +63,8 @@ describe('H6: the cloud listing state', () => {
   });
 
   it('H6: reports failed when the listing request fails, and fetching while its retry is in flight', async () => {
-    fetchMock.mockImplementation(async () => new Response(undefined, { status: 503 }));
+    /* A status the listing does not ask again for on its own, so the failure is reported at once. */
+    fetchMock.mockImplementation(async () => new Response(undefined, { status: 400 }));
     const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
 
     await waitFor(() => {
@@ -72,7 +74,7 @@ describe('H6: the cloud listing state', () => {
     const retried = Promise.withResolvers<Response>();
     fetchMock.mockImplementation(async () => retried.promise);
     act(() => {
-      result.current.retry();
+      void result.current.retry();
     });
     await waitFor(() => {
       expect(cloudOf(result)).toBe('fetching');
@@ -93,5 +95,92 @@ describe('H6: the cloud listing state', () => {
 
     expect(cloudOf(result)).toBe('ready');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  /* D21 round 1: a 5xx from Tau Cloud is often transient (a deploy), so the listing asks again on its own. */
+  it('H6: asks again on its own when Tau Cloud answers 503, and settles when it recovers', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(undefined, { status: 503 }));
+    fetchMock.mockResolvedValue(Response.json([]));
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(
+      () => {
+        expect(cloudOf(result)).toBe('ready');
+        expect(result.current.isSettled).toBe(true);
+      },
+      { timeout: 4000 },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  /* K-c: a person's Retry is one request, even when Tau Cloud answers it with a 5xx again. */
+  it('H6: asks once for a Retry, whatever Tau Cloud answers', async () => {
+    fetchMock.mockResolvedValue(new Response(undefined, { status: 400 }));
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('failed');
+    });
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(new Response(undefined, { status: 503 }));
+    act(() => {
+      void result.current.retry();
+    });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('failed');
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1500);
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  /* D21 round 2 (guard): a person's Retry is one request, and later refreshes keep the listing's own retries. */
+  it("H6: still asks again on its own for a later refresh after a person's Retry", async () => {
+    fetchMock.mockResolvedValue(new Response(undefined, { status: 400 }));
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('failed');
+    });
+    fetchMock.mockResolvedValue(Response.json([]));
+    await act(async () => {
+      await result.current.retry();
+    });
+    await waitFor(() => {
+      expect(result.current.isSettled).toBe(true);
+    });
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(new Response(undefined, { status: 503 }));
+    fetchMock.mockResolvedValue(Response.json([]));
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    await waitFor(
+      () => {
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(cloudOf(result)).toBe('ready');
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  /* D21 round 2: Retry beside the slow words asks again even while the first request hangs. */
+  it('H6: asks again for a Retry while the first listing request hangs', async () => {
+    fetchMock.mockImplementation(
+      async () =>
+        new Promise<Response>(() => {
+          /* Never answers. */
+        }),
+    );
+    const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
+    await waitFor(() => {
+      expect(cloudOf(result)).toBe('fetching');
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    act(() => {
+      void result.current.retry();
+    });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(cloudOf(result)).toBe('fetching');
   });
 });

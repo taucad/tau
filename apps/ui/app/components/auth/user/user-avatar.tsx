@@ -4,7 +4,6 @@ import { User2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@taucad/ui/components/avatar';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type UserAvatarProps = {
@@ -20,11 +19,13 @@ export function UserAvatar({ className, user, isPending, fallback }: UserAvatarP
     enabled: !user && !isPending,
   });
 
-  if ((isPending ?? sessionPending) && !user) {
-    return <Skeleton className={cn('size-8 rounded-full', className)} />;
-  }
-
   const resolvedUser = user ?? session?.user;
+
+  /* The account row's box is held and left empty until the session names someone: no avatar block stands in for
+     a person not known yet (loading-states blueprint, app shell). */
+  if (!resolvedUser && (isPending ?? sessionPending)) {
+    return <span aria-hidden data-slot='user-avatar-frame' className={cn('size-8 shrink-0 rounded-full', className)} />;
+  }
 
   const initials = (resolvedUser?.name ?? resolvedUser?.email)?.slice(0, 2).toUpperCase();
 

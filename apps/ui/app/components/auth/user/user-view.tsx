@@ -3,7 +3,6 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
 import type { User } from 'better-auth';
 
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import { UserAvatar } from '#components/auth/user/user-avatar.js';
 
@@ -21,25 +20,16 @@ export function UserView({ className, isCompact = false, isPending, user }: User
   });
 
   const resolvedUser = user ?? session?.user;
-
-  if ((isPending ?? sessionPending) && !user) {
-    return (
-      <div data-compact={isCompact} className={cn('group/user-view flex items-center gap-2', className)}>
-        <UserAvatar className='group-data-[compact=true]/user-view:size-4' isPending />
-
-        <div className='grid flex-1 gap-1 text-left text-sm group-data-[compact=true]/user-view:gap-0'>
-          <Skeleton className='h-4 w-24 group-data-[compact=true]/user-view:h-3' />
-          <Skeleton className='h-3 w-32 group-data-[compact=true]/user-view:hidden' />
-        </div>
-      </div>
-    );
-  }
+  /* While the session is unknown the row keeps its frame: an empty avatar box and no words, never skeleton bars.
+     What the session already gives is shown at once. */
+  const isUnknown = !resolvedUser && (isPending ?? sessionPending);
 
   return (
     <div data-compact={isCompact} className={cn('group/user-view flex items-center gap-2', className)}>
       <UserAvatar
         className='group-data-[compact=true]/user-view:size-4 group-data-[compact=true]/user-view:text-[10px]'
         user={resolvedUser}
+        isPending={isUnknown}
       />
 
       <div className='grid flex-1 text-left text-sm leading-tight'>

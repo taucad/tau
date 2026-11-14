@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { createContext, useContext, useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
@@ -1622,6 +1622,75 @@ describe('ProjectLibrary', () => {
       expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
       expect(retry).toHaveFocus();
       cloudListing.retry.mockReset();
+    });
+
+    /* D21 round 5: a refetch of a failed listing that no Retry started (a window focus) keeps the failure's Retry. */
+    it.fails("C14: keeps the failure's Retry seen and focused through a refetch the person did not start", async () => {
+      cloudListing.isFailed = true;
+      const slot = renderSlot();
+      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      retry.focus();
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      expect(retry).toBeInTheDocument();
+      expect(retry).toHaveFocus();
+      expect(retry).not.toHaveClass('wait-after-slow');
+    });
+
+    /* D21 round 5: a Retry over a failed refresh of listed projects is a wait the person sees and hears. */
+    it.fails('C14: says a Retry over a failed refresh of listed projects is loading, and its answer again', async () => {
+      cloudListing.current = [
+        { id: 'cloud-1', name: 'Listed cube', role: 'owner', canDeleteCloud: true, cloudState: 'active' },
+      ];
+      cloudListing.isFailed = true;
+      let answer: () => void = () => undefined;
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>((resolve) => {
+            answer = resolve;
+          }),
+      );
+      const slot = renderSlot();
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      /* React-query keeps a refresh with data in error while it asks again. */
+      cloudListing.isFetching = true;
+      slot.rerender();
+      expect(within(slot.header()).queryByRole('alert')).toBeNull();
+      expect(
+        within(slot.header())
+          .queryAllByRole('status')
+          .filter((status) => status.textContent.includes('Loading Tau Cloud projects')),
+      ).toHaveLength(1);
+      cloudListing.isFetching = false;
+      await act(async () => {
+        answer();
+      });
+      slot.rerender();
+      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
+    });
+
+    /* D21 round 5: a Retry's wait is announced by the slot's status region, present before the press. */
+    it.fails("C14: announces a Retry's wait in the status region that was already there", async () => {
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
+      cloudListing.isFetching = true;
+      const clock = { at: 0 };
+      const slot = renderSlot({ clock });
+      const region = within(slot.header()).getByRole('status');
+      clock.at = 11_000;
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud', hidden: true }));
+      expect(region).toBeInTheDocument();
+      expect(region).toHaveTextContent('Loading Tau Cloud projects');
+      expect(
+        within(slot.header())
+          .queryAllByRole('status')
+          .filter((status) => status.textContent.includes('Tau Cloud')),
+      ).toEqual([region]);
     });
 
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */

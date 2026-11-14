@@ -3,14 +3,14 @@
  * The store guard's launch text and the start check's refusals that need no FUSE. The mounted guard itself is proven by
  * `store-guard/tests/acceptance.sh` and the Linux shell-conformance rows.
  */
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { probeStoreGuard, storeGuardBypass, storeGuardCommand } from '#shell/store-guard.js';
+import { probeStoreGuard, storeGuardBypass, storeGuardCheckRoot, storeGuardCommand } from '#shell/store-guard.js';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -88,4 +88,28 @@ describe('probeStoreGuard', () => {
           : `${process.platform} has no store guard`,
     });
   });
+
+  it.runIf(process.platform === 'linux')(
+    "should remove the scratch store a killed host left behind, and keep a live process's",
+    async () => {
+      /* A process that has exited: its id names no process now, as a killed host's would. */
+      const gone = spawnSync('/bin/sh', ['-c', 'echo $$'], { encoding: 'utf8' }).stdout.trim();
+      const root = storeGuardCheckRoot();
+      mkdirSync(root, { recursive: true, mode: 0o700 });
+      const stale = join(root, `${gone}-leftover`);
+      const live = join(root, `${String(process.pid)}-in-use`);
+      mkdirSync(join(stale, 'project', '.git'), { recursive: true });
+      mkdirSync(live, { recursive: true });
+      roots.push(live);
+      /* A root another user could write into is made private again before it is read. */
+      chmodSync(root, 0o777);
+
+      await probeStoreGuard({ guardPath: join(root, 'absent'), bwrapPath: '/usr/bin/bwrap' });
+
+      expect(existsSync(stale)).toBe(false);
+      expect(existsSync(live)).toBe(true);
+      // oxlint-disable-next-line no-bitwise -- permission bits are a bit mask.
+      expect(statSync(root).mode & 0o777).toBe(0o700);
+    },
+  );
 });

@@ -29,6 +29,7 @@ import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess }
 import {
   bindOwnPty,
   createSandboxShellProvider,
+  guardedVector,
   seatbeltReadDenies,
   shellSandboxCommand,
   shellSandboxProfile,
@@ -262,12 +263,46 @@ describe('createSandboxShellProvider admission', () => {
     },
   );
 
+  it('should spawn an agent launch with the very vector the runtime built, whether or not a store guard is configured', () => {
+    const argv = ['/bin/sh', '-c', "exec /usr/bin/bwrap --die-with-parent -- /bin/bash -c 'git status'"] as const;
+    const agent = launchOf({ arguments: ['-c', 'git status'] });
+    const vectors = [{}, { storeGuardPath: '/opt/tau/tau-store-guard' }].map((options) =>
+      guardedVector(argv, agent, options),
+    );
+    expect(vectors[0]).toBe(argv);
+    expect(vectors[1]).toBe(argv);
+  });
+
   it('should answer that no store guard can start without its path or with a path that is not an executable', async () => {
     expect(await createSandboxShellProvider({ supervisor }).storeGuard?.()).toBe(false);
     expect(
       await createSandboxShellProvider({ supervisor, storeGuardPath: join(fixtureRoot(), 'absent') }).storeGuard?.(),
     ).toBe(false);
   });
+
+  it.runIf(process.platform === 'linux')(
+    'should check a failed store guard again only once its refusal has stood for the recheck interval',
+    async () => {
+      const reasons: unknown[] = [];
+      const listener = (message: unknown): void => {
+        reasons.push(message);
+      };
+      subscribe('taucad.native-process.shell.store-guard', listener);
+      try {
+        const storeGuardPath = join(fixtureRoot(), 'absent');
+        const held = createSandboxShellProvider({ supervisor, storeGuardPath, storeGuardRecheckMilliseconds: 60_000 });
+        expect(await held.storeGuard?.()).toBe(false);
+        expect(await held.storeGuard?.()).toBe(false);
+        expect(reasons).toHaveLength(1);
+        const rechecked = createSandboxShellProvider({ supervisor, storeGuardPath, storeGuardRecheckMilliseconds: 0 });
+        expect(await rechecked.storeGuard?.()).toBe(false);
+        expect(await rechecked.storeGuard?.()).toBe(false);
+        expect(reasons).toHaveLength(3);
+      } finally {
+        unsubscribe('taucad.native-process.shell.store-guard', listener);
+      }
+    },
+  );
 
   it('should reject an already aborted launch with the abort reason', async () => {
     const controller = new AbortController();

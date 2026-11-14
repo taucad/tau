@@ -1,0 +1,9 @@
+[
+  {
+    "name": "tau-store-guard (static musl, linux-x64, uncompressed: the bytes the APT package and AppImage ship) — measured 627,360 B on 2026-11-14",
+    "path": "../../out/store-guard/linux-x64/tau-store-guard",
+    "brotli": false,
+    "gzip": false,
+    "limit": "680 kB"
+  }
+]

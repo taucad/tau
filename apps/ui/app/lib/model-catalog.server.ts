@@ -10,6 +10,16 @@ const prefetchTimeout = 1500;
 /** How long a failed fetch keeps documents from waiting on the API again. Milliseconds. */
 const failureBackoff = 30_000;
 
+/**
+ * How a read found the per-process cache, for the document's `Server-Timing` (LB0a). `warm`: a fresh copy, no wait.
+ * `stale`: an expired copy served at once while one refresh runs. `cold-fetch`: no copy, so the read waits on a fetch
+ * (at most {@link prefetchTimeout}). `backoff`: no copy and a recent failure, so the read renders without one.
+ */
+export type ModelCatalogCacheState = 'warm' | 'stale' | 'cold-fetch' | 'backoff';
+
+/** Told, synchronously and once per read, how that read found the cache. */
+export type ModelCatalogStateReporter = (state: ModelCatalogCacheState) => void;
+
 /** A catalog the server fetched, and when: the client measures its freshness from the same instant. */
 export type ServerModelCatalog = {
   readonly models: readonly Model[];
@@ -21,7 +31,8 @@ export type ServerModelCatalog = {
  * query; a stale copy is served while one refresh runs, and a failure backs off instead of making every document wait.
  *
  * @param options - The catalog fetcher and clock; tests inject both.
- * @returns A reader that resolves to the catalog, or `undefined` when none could be had in time.
+ * @returns A reader that resolves to the catalog, or `undefined` when none could be had in time, and tells an optional
+ *   reporter how it found the cache.
  */
 export const createModelCatalogCache = ({
   fetchCatalog,
@@ -29,7 +40,7 @@ export const createModelCatalogCache = ({
 }: {
   readonly fetchCatalog: () => Promise<readonly Model[]>;
   readonly now?: () => number;
-}): (() => Promise<ServerModelCatalog | undefined>) => {
+}): ((reportState?: ModelCatalogStateReporter) => Promise<ServerModelCatalog | undefined>) => {
   let cached: ServerModelCatalog | undefined;
   let failedAt: number | undefined;
   let inFlight: Promise<ServerModelCatalog | undefined> | undefined;
@@ -53,15 +64,18 @@ export const createModelCatalogCache = ({
     return inFlight;
   };
 
-  return async () => {
+  return async (reportState) => {
     const time = now();
     const isBackingOff = failedAt !== undefined && time - failedAt < failureBackoff;
     if (cached !== undefined) {
-      if (time - cached.fetchedAt >= catalogFreshness && !isBackingOff) {
+      const isStale = time - cached.fetchedAt >= catalogFreshness;
+      reportState?.(isStale ? 'stale' : 'warm');
+      if (isStale && !isBackingOff) {
         void refresh();
       }
       return cached;
     }
+    reportState?.(isBackingOff ? 'backoff' : 'cold-fetch');
     return isBackingOff ? undefined : refresh();
   };
 };
@@ -108,9 +122,12 @@ export const dehydrateModelCatalog = (catalog: ServerModelCatalog): DehydratedSt
  * The root loader's query state: the model catalog when the server has one, so the composer's model label renders
  * with its display name on the server and on hydration.
  *
+ * @param reportState - Told how this read found the cache, for `Server-Timing`.
  * @returns The dehydrated state, or `undefined` when the catalog is unavailable.
  */
-export const prefetchModelCatalog = async (): Promise<DehydratedState | undefined> => {
-  const catalog = await getServerModelCatalog();
+export const prefetchModelCatalog = async (
+  reportState?: ModelCatalogStateReporter,
+): Promise<DehydratedState | undefined> => {
+  const catalog = await getServerModelCatalog(reportState);
   return catalog === undefined ? undefined : dehydrateModelCatalog(catalog);
 };

@@ -555,6 +555,7 @@ describe('ProjectNavigation', () => {
     render(<ProjectNavigation />);
 
     expect(screen.getByText('No projects yet')).toBeInTheDocument();
+    expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
   });
 
   /* D3, D11, D16: a collapsed project carries its chats' rollup on the

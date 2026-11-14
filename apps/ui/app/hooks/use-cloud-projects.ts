@@ -456,9 +456,10 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
 };
 
 /**
- * The Tau Cloud listing as one state (A13, H6's state part): `fetching` while a request is in flight (a retry after a
- * failure included: react-query clears the error when the retry starts), `failed` once the last request failed, and
- * `ready` otherwise, including a listing not asked yet. These are the cases Home's cloud line draws.
+ * The Tau Cloud listing as one state (A13, H6's state part): `failed` while react-query reports the listing errored,
+ * `fetching` while a request is otherwise in flight, and `ready` otherwise, including a listing not asked yet. This is
+ * the order Home's cloud line has always drawn: a retry of a listing that never answered reads `fetching`, because
+ * react-query clears its error when that retry starts; a refetch over earlier data that failed keeps `failed`.
  *
  * @public
  */

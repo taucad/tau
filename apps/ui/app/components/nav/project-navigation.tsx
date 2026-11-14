@@ -90,7 +90,8 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const isAwaitingListing = isLoading && projects.length === 0;
   const rememberedProjects = isAwaitingListing ? rememberedShape?.projects : undefined;
   const rows: readonly SidebarProject[] = rememberedProjects ?? projects;
-  const isAwaitingRows = isAwaitingListing && rows.length === 0;
+  /* A last listing that had none says "No projects yet" up front, so its list is not also shown as waiting. */
+  const isAwaitingRows = isAwaitingListing && rows.length === 0 && rememberedShape?.count !== 0;
   /* A29's temporal hiding: what is live now sits above what is not, and the
    * rest keeps its recency order. */
   const sortedProjects = useMemo(() => {
@@ -121,7 +122,15 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   };
 
   const handleDuplicate = async (project: SidebarProject): Promise<void> => {
-    const duplicate = await duplicateProject(project.id);
+    let duplicate: Awaited<ReturnType<typeof duplicateProject>>;
+    try {
+      duplicate = await duplicateProject(project.id);
+    } catch (error) {
+      /* A remembered row can name a project the listing no longer has (A13). */
+      toast.error(`Could not duplicate ${project.name}`);
+      console.error('Error duplicating project:', error);
+      return;
+    }
     toast.success(`Duplicated ${project.name}`, {
       action: {
         label: 'Open',

@@ -28,7 +28,11 @@ import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import type { WorkspaceConnectionServices, WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
+import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import type { ListedChat } from '#lib/project-list-shape.lib.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 
 /** What the library takes from the runtime's composition. @public */
@@ -100,6 +104,10 @@ export type ProjectManagerRef = Actor<typeof projectManagerMachine>;
 /** The workspace-connection actor's ref. @public */
 export type WorkspaceConnectionRef = Actor<typeof workspaceConnectionMachine>;
 
+/** A project listing as the `['projects']` query holds it: its entries, among other fields. */
+const isProjectListing = (data: unknown): data is { readonly projects: readonly ProjectLibraryEntry[] } =>
+  typeof data === 'object' && data !== null && Array.isArray((data as { projects?: unknown }).projects);
+
 const isLoadingOf = (snapshot: SnapshotFrom<typeof projectManagerMachine>): boolean =>
   snapshot.matches('initializing') || snapshot.matches('creatingWorker');
 
@@ -127,6 +135,13 @@ export class ProjectLibrary {
   public readonly workspaceConnection: WorkspaceConnectionRef;
   /** The root file facade's record client and watch, from the binding; `undefined` until the first one. */
   public readonly files: ProjectLibraryObservable<ProjectLibraryFiles | undefined>;
+  /**
+   * The listing snapshot (A13): the remembered shape of the last project listing and its chat listings, which the
+   * sidebar draws before they answer. The library writes it whenever a listing lands in its `QueryClient`, fetched or
+   * set (a workspace connect or disconnect publishes the listing with `setQueryData`).
+   */
+  public readonly listingSnapshot = projectListShapeStore;
+  #stopWatchingListings: (() => void) | undefined;
 
   #binding: ProjectLibraryBinding | undefined;
   #bound = Promise.withResolvers<void>();
@@ -194,6 +209,7 @@ export class ProjectLibrary {
       return;
     }
     this.#started = true;
+    this.#stopWatchingListings = this.#watchListings();
     this.projectManager.start();
     this.workspaceConnection.start();
     this.projectManager.send({ type: 'initialize' });
@@ -201,6 +217,8 @@ export class ProjectLibrary {
 
   /** Stop the actors; the worker is terminated by the project-manager machine's exit. */
   public stop(): void {
+    this.#stopWatchingListings?.();
+    this.#stopWatchingListings = undefined;
     this.projectManager.stop();
     this.workspaceConnection.stop();
     /* `stop()` runs no `exit`: release the worker the stopped actor's context still holds, as the file-manager host
@@ -336,6 +354,30 @@ export class ProjectLibrary {
   /** A project's chat listing changed. */
   public readonly invalidateChatListing = async (projectId: string): Promise<unknown> =>
     this.queryClient.invalidateQueries({ queryKey: ['chats', projectId] });
+
+  /**
+   * Remember each project and chat listing that lands in the cache, fetched or set, in the listing snapshot (A13).
+   *
+   * @returns The unsubscribe.
+   */
+  #watchListings(): () => void {
+    return this.queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success') {
+        return;
+      }
+      const [scope, resourceId, kind] = event.query.queryKey as readonly unknown[];
+      const data: unknown = event.query.state.data;
+      if (scope === 'projects' && resourceId === undefined && isProjectListing(data)) {
+        this.listingSnapshot.remember(projectListShapeOf(data.projects.map(projectLibraryEntryToListItem)));
+      } else if (scope === 'chats' && typeof resourceId === 'string' && kind === 'records' && Array.isArray(data)) {
+        this.listingSnapshot.rememberChats(
+          resourceId,
+          data as readonly ListedChat[],
+          (chatId) => !isUnownedChatObservation(chatId),
+        );
+      }
+    });
+  }
 
   #publish(snapshot: ProjectLibrarySnapshot): void {
     this.#snapshot = snapshot;

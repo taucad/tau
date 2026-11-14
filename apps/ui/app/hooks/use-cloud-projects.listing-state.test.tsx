@@ -3,8 +3,9 @@
  * H6, the state part (app state orchestration plan § 4 A13): the library reports the Tau Cloud listing as one of
  * three states, `fetching | ready | failed`, and Home's cloud line reads that state rather than two flags.
  *
- * `fetching` is a request in flight, a retry after a failure included; `failed` is a listing whose last request failed;
- * `ready` is every other case, including a listing not asked yet. These are the cases the cloud line draws today.
+ * `failed` is a listing react-query reports as errored; `fetching` is otherwise a request in flight (a retry of a listing
+ * that never answered included, as react-query clears its error when that retry starts); `ready` is every other case,
+ * including a listing not asked yet. These are the cases, in the order, that the cloud line draws today.
  */
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

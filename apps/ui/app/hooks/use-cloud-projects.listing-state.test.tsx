@@ -62,7 +62,8 @@ describe('H6: the cloud listing state', () => {
   });
 
   it('H6: reports failed when the listing request fails, and fetching while its retry is in flight', async () => {
-    fetchMock.mockImplementation(async () => new Response(undefined, { status: 503 }));
+    /* A status the listing does not ask again for on its own, so the failure is reported at once. */
+    fetchMock.mockImplementation(async () => new Response(undefined, { status: 400 }));
     const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });
 
     await waitFor(() => {
@@ -96,7 +97,7 @@ describe('H6: the cloud listing state', () => {
   });
 
   /* D21 round 1: a 5xx from Tau Cloud is often transient (a deploy), so the listing asks again on its own. */
-  it.fails('H6: asks again on its own when Tau Cloud answers 503, and settles when it recovers', async () => {
+  it('H6: asks again on its own when Tau Cloud answers 503, and settles when it recovers', async () => {
     fetchMock.mockResolvedValueOnce(new Response(undefined, { status: 503 }));
     fetchMock.mockResolvedValue(Response.json([]));
     const { result } = renderHook(() => useCloudProjects(), { wrapper: createWrapper() });

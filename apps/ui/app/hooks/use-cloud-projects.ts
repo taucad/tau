@@ -345,7 +345,7 @@ const toCloudProject = (value: unknown): CloudProject | undefined => {
   };
 };
 
-/** Tau Cloud answered the listing with an error status: asking again at once gets the same answer (P-k, K-c). */
+/** Tau Cloud answered the listing with an error status. */
 class CloudListingAnswerError extends Error {
   public readonly status: number;
 
@@ -356,16 +356,17 @@ class CloudListingAnswerError extends Error {
 }
 
 /**
- * Whether a failed listing is asked again on its own: a request that never reached Tau Cloud is, up to three times
- * as react-query's default; an answer from Tau Cloud is not. That answer is said at once in the Projects header's
- * slot, and its Retry asks once (K-c).
+ * Whether a failed listing is asked again on its own, up to three times as react-query's default: a request that never
+ * reached Tau Cloud, or one it answered with a status that may pass (408, 429, 5xx, such as during a deploy), is; any
+ * other answer is not, because asking again gets the same one.
  *
  * @param failureCount - The failures so far.
  * @param error - The last one.
  * @returns Whether to ask again.
  */
 const retryCloudListing = (failureCount: number, error: unknown): boolean =>
-  !(error instanceof CloudListingAnswerError) && failureCount < 3;
+  failureCount < 3 &&
+  (!(error instanceof CloudListingAnswerError) || error.status === 408 || error.status === 429 || error.status >= 500);
 
 /**
  * The caller's projects on Tau Cloud, or none at all.
@@ -464,6 +465,26 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
 };
 
 /**
+ * Ask Tau Cloud for the listing once, with no retries of its own, into the shared query. A failure is the query's
+ * state, which the library shows; nothing else is done with it here.
+ *
+ * @param queryClient - The client holding the listing.
+ * @param account - The signed-in account the listing belongs to.
+ */
+const askOnce = async (queryClient: QueryClient, account: string | undefined): Promise<void> => {
+  try {
+    await queryClient.query({
+      queryKey: cloudProjectsQueryKeyFor(account),
+      queryFn: async ({ signal }) => fetchCloudProjects(signal),
+      retry: false,
+      staleTime: 0,
+    });
+  } catch {
+    /* Reported through the query's error state. */
+  }
+};
+
+/**
  * The Tau Cloud listing as one state (A13, H6's state part): `failed` while react-query reports the listing errored,
  * `fetching` while a request is otherwise in flight, and `ready` otherwise, including a listing not asked yet. This is
  * the order Home's cloud line has always drawn: a retry of a listing that never answered reads `fetching`, because
@@ -531,7 +552,6 @@ export const useCloudProjects = (
     isSuccess,
     isError,
     isFetching,
-    refetch,
   } = useQuery({
     queryKey: cloudProjectsQueryKeyFor(account),
     queryFn: async ({ signal }) => fetchCloudProjects(signal),
@@ -554,8 +574,9 @@ export const useCloudProjects = (
     isFailed: isError,
     isFetching,
     cloud: selectCloudListingState({ isError, isFetching }),
+    /* A person's Retry (K-c) is one request: its answer is said at once, and they can ask again. */
     retry: () => {
-      void refetch();
+      void askOnce(queryClient, account);
     },
   };
 };

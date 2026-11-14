@@ -282,12 +282,35 @@ export function ProjectLibrary({
   const cloudPending = auth === 'authed' && !isCloudSettled && !isCloudFailed;
   const isOnline = useNetworkConnectivity();
   const waitClock = useWaitClockSource();
-  /* P-k: a Retry is a new wait, timed from the gesture; the first listing's wait started with the document. */
-  const [cloudRetriedAt, setCloudRetriedAt] = useState<number>();
+  /* P-k: Tau Cloud's state shares the header's slot. Its first listing, or one a Retry asks for, is a wait; a later
+     refresh over listed projects is not, because the cards are already the answer. Offline and failed are said in
+     words, with Retry for the failure. */
+  const isCloudShown = !showDeleted && auth === 'authed';
+  const cloudNotice: CloudNotice | undefined = isCloudShown
+    ? cloudNoticeOf({ isOnline, isCloudSettled, cloud })
+    : undefined;
+  const isAwaitingCloud = isCloudShown && cloudPending && cloud === 'fetching';
+  /* A wait is timed from when this library saw it begin, so one that begins well into the page (a client navigation
+     to Home, a Retry, another account) starts its own 1,000 ms. Only a wait a Retry started is announced: the first
+     belongs to the page's open, which the sidebar announces. */
+  const [isCloudRetried, setIsCloudRetried] = useState(false);
+  const [cloudWait, setCloudWait] = useState<{ readonly startedAt: number; readonly isAnnounced: boolean }>();
+  if (isAwaitingCloud && cloudWait === undefined) {
+    setCloudWait({ startedAt: waitClock.now(), isAnnounced: isCloudRetried });
+  } else if (!isAwaitingCloud && cloudWait !== undefined) {
+    setCloudWait(undefined);
+    setIsCloudRetried(false);
+  }
+  /* On a phone whose top bar carries the /projects header, the header row is hidden until a notice has to be said;
+     once said, it stays for this page view, so a Retry or a recovery does not move the grid again. */
+  const [hasShownCloudNotice, setHasShownCloudNotice] = useState(false);
+  if (cloudNotice !== undefined && !hasShownCloudNotice) {
+    setHasShownCloudNotice(true);
+  }
   const retryCloudListing = useCallback(() => {
-    setCloudRetriedAt(waitClock.now());
+    setIsCloudRetried(true);
     retryCloud();
-  }, [retryCloud, waitClock]);
+  }, [retryCloud]);
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
     cloud: cloudProjects,
@@ -569,23 +592,18 @@ export function ProjectLibrary({
   /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
      empty frames alike; the grid itself is busy for as long. */
   const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
-  /* P-k: Tau Cloud's state shares the slot. Its first listing (or a Retry) is a wait; a later refresh over listed
-     projects is not, because the cards are already the answer. Offline and failed are said in words, with Retry. */
-  const isCloudShown = !showDeleted && auth === 'authed';
-  const cloudNotice: CloudNotice | undefined = isCloudShown
-    ? cloudNoticeOf({ isOnline, isCloudSettled, cloud })
-    : undefined;
-  const isAwaitingCloud = isCloudShown && cloudPending && cloud === 'fetching';
   /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
   const statusSlot = (
-    <LibraryStatusSlot notice={cloudNotice} onRetryCloud={retryCloudListing}>
+    /* The listing's own wait keeps the slot while it runs: until it answers, there are no projects on this device to
+       speak of, and its slow words and Retry stay reachable. */
+    <LibraryStatusSlot notice={isAwaitingListing ? undefined : cloudNotice} onRetryCloud={retryCloudListing}>
       <WaitIndicator
         className='min-w-0 justify-end overflow-hidden'
         /* The listing's wait is seen, not announced: the sidebar's Recents label announces it (one announcement per
-           group). Nothing else announces Tau Cloud's. */
-        live={!isAwaitingListing}
+           group), as it does the page's first Tau Cloud wait. */
+        live={!isAwaitingListing && cloudWait?.isAnnounced === true}
         active={isAwaitingListing || isAwaitingCloud}
-        startedAt={isAwaitingListing ? 0 : (cloudRetriedAt ?? 0)}
+        startedAt={isAwaitingListing ? 0 : (cloudWait?.startedAt ?? 0)}
         label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}
         slowLabel={isAwaitingListing ? 'Still loading projects' : 'Still loading Tau Cloud projects'}
         onRetry={
@@ -611,8 +629,8 @@ export function ProjectLibrary({
             <div
               className={cn(
                 'flex min-w-0 flex-1 basis-0 items-center justify-end gap-2',
-                /* A notice is said even on a phone, where it gives the row its height; a wait is not. */
-                isHeaderInPhoneBar && cloudNotice === undefined && 'max-md:hidden',
+                /* A notice is said even on a phone, where it gives the row its height from then on; a wait is not. */
+                isHeaderInPhoneBar && !hasShownCloudNotice && 'max-md:hidden',
               )}
             >
               {statusSlot}
@@ -1039,11 +1057,11 @@ function LibraryStatusSlot({
       data-slot='project-library-status'
       className='flex min-h-6 min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 overflow-hidden text-xs text-muted-foreground'
     >
-      {notice === 'offline' ? (
-        <span role='status' className='truncate'>
-          Offline. Showing projects on this device.
-        </span>
-      ) : notice === 'failed' ? (
+      {/* One status region, always present, so the offline words are announced when they arrive. */}
+      <span role='status' className='min-w-0 truncate empty:hidden'>
+        {notice === 'offline' ? 'Offline. Showing projects on this device.' : null}
+      </span>
+      {notice === 'offline' ? null : notice === 'failed' ? (
         <>
           <span role='alert' className='flex min-w-0 items-center gap-1.5'>
             <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />

@@ -111,10 +111,12 @@ export const useCloudProjectPreview = (
       URL.revokeObjectURL(url);
     };
   }, [query.data]);
+  const url = !query.isError && query.data && source?.blob === query.data ? source.url : undefined;
   return {
-    url: !query.isError && query.data && source?.blob === query.data ? source.url : undefined,
+    url,
     isLoading: query.isFetching,
-    isSettled: (query.isSuccess || query.isError) && !query.isFetching,
+    /* Held through a refetch (react-query keeps the last answer); an image counts once its URL exists. */
+    isSettled: query.isError || (query.isSuccess && (query.data === null || url !== undefined)),
     isFailed: query.isError,
     // Access/client failures need the project or service repaired, not repeated image requests.
     canRetry:

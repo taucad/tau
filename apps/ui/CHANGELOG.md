@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.11.0 (2026-11-14)
+
+### Features
+
+- feat(ui): Paint Home cards from the listing snapshot with no skeleton (A15g) (#2214) (7dcbabd2b)
+- feat(sandbox): Write the Linux Terminal's git store through a FUSE store guard (LP2, LP3, LP5, LP8) (#2187) (277277b3a)
+- feat(ui): run the viewer Dockview adapter as a runtime child actor and fix the M2 phone watermark (A8d) (#2213) (71175a269)
+- feat(ui): run the workbench Dockview adapter as a runtime child actor (A8c) (#2211) (fb5b95a53)
+- feat(ui): Move the workspace commands and root file facade into ProjectLibrary (A4b) (#2212) (f74574e2d)
+- feat(ui): serve the listing snapshot and the cloud listing state (A13) (#2164) (118205f8d)
+- feat(ui): Run the entries record session as a project runtime child (A9) (#2200) (2f317e890)
+- feat(ui): Move the project commands into ProjectLibrary (A4a) (#2207) (7d91d68be)
+- feat(ui): host the workbench layout in the project runtime and deliver pane intents through it (A8b) (#2202) (55295309e)
+- feat(ui): Run the library's discovery, recovery and access machines in ProjectLibrary (A3b) (#2203) (fbdd3621d)
+- feat(ui): Build the project file manager as a session child (A6c) (#2201) (63da51047)
+- feat(ui): report the chat transcript's load state and reserve the tray (A12) (#2177) (4933acd4c)
+- feat(ui): Add the focus machine and the project route-state selector (A5a) (#2117) (a772c957f)
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+- feat(ui): Write tau.load measures on deployed pages, with no network export (LB0b) (#2120) (d50cbbd3e)
+- feat(ui): Lease the project runtime from the app runtime and own its producers (A6b) (#2181) (dcab0102b)
+
+### Fixes
+
+- fix(sandbox): Close the store guard's follow-up review nits (#2216) (ed5fc1389)
+- fix(shell-service): never admit a shell call whose signal aborted before the gate (E09) (#2215) (8352062ed)
+- fix(picogk): Pin the .NET runtime archives by sha256 for locked prepare (#2208) (47c0292ce)
+- fix(ui): Decide or hold Home's suggestions row on the server (H2) (#2180) (32bb3c794)
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(ui): Keep a file pane's Files tree mounted while its file is re-read or gone (#2182) (739301dde)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(ui): Paint the phone sheet where it rests on load, with no slide or fade (#2114) (39205cc24)
+- fix(ui): Let webmail load the email wordmark and fonts cross-origin (#2192) (442a4573d)
+
+### Performance
+
+- perf(ui): Acquire editor types in parallel, bounded, with no malformed @types path (LB3b) (#2113) (875074843)
+- perf(ui): Load compiled skill bodies on first use, not with the composer (LB4c) (#2118) (b2aed0809)
+
+### Other changes
+
+- test(ui): Keep the ProjectFocus pr target within 3 minutes on CI (#2149) (e8a22553d)
+- build(ui): Stop retaining and pinning the PicoGK browser host (#2206) (27a370637)
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+- test(viewer): Run each Vitest Browser config of test:e2e as its own Nx task (#2169) (b01ac3873)
+
 ## 0.10.0 (2026-11-14)
 
 ### Features

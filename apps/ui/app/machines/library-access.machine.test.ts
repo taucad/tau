@@ -405,6 +405,27 @@ describe('libraryAccess', () => {
       expect(harness.discovery.calls).toHaveLength(1);
     });
 
+    it.each([
+      ['a current listing from a pass the bootstrap did not run', { type: 'epochMoved', epoch: 1, current: true }],
+      [
+        'a row this tab holds for another project',
+        { type: 'recoveriesChanged', recoveries: [recovery('p2', 'recovering')] },
+      ],
+    ] as const)(
+      'should ask for the bootstrap pass when %s skips the verification before it has run, and wait for it',
+      (_case, fact) => {
+        const harness = start();
+        harness.send(fact);
+        harness.send({ type: 'journalReady', pending: 0 });
+        ask(harness);
+        expect(harness.verify.calls).toHaveLength(0);
+        expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+        expect(harness.discovery.calls).toHaveLength(0);
+        harness.send({ type: 'discoveryReady' });
+        expect(harness.discovery.calls).toHaveLength(1);
+      },
+    );
+
     it('should wait for the bootstrap pass when rows were pending, even with a row held, and answer the row if it fails', () => {
       const harness = start();
       harness.send({ type: 'recoveriesChanged', recoveries: [recovery('p1', 'recovering')] });

@@ -118,13 +118,13 @@
   ],
   "sources": {
     "apps/ui/app/hooks/use-project-manager.tsx": "b97381dec1e72f862da2549e18e5b3d4bba52e671a7b75953eb6b36c090edaf4",
-    "apps/ui/app/machines/library-access.machine.ts": "7f1299e195047e14f2122baff5a1987a95a14f6fb38355c270b456644902ca30",
+    "apps/ui/app/machines/library-access.machine.ts": "b764c3c7d60b7cc86dc7b3fa2f42c9d2eac7555553f0820bdec0744129e224ed",
     "apps/ui/app/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
     "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/ui/app/runtime/project-library.ts": "dfbe66a96f51a9919d5b5d294910cb1cd9f8ae56704f45918750efb53cc12c38"
+    "apps/ui/app/runtime/project-library.ts": "9baaa8245d1cc1d19b7171a0c49c1fab223ca7514bab7f789b15201d51679c51"
   },
   "specs": {
-    "LibraryCatalog.tla": "7e2c7a5ab5e0e960f41f1e7ad54d546d9c8a19a9f61faf85a3a3783b353598b0"
+    "LibraryCatalog.tla": "21b609ed7ef4b4fbaed7c6b3a2ebe846eaf9eab873805a8f068f107f45235d70"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

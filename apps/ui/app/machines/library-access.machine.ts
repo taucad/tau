@@ -321,6 +321,17 @@ const answer = (context: QueryContext, io: QueryIo, result: AccessAnswer): Query
   return { target: '#library-access-query.answered', context: {} };
 };
 
+/**
+ * The question is going to a pass, which waits for the bootstrap pass: ask the parent to run it if it has not run and
+ * has not failed (a failure is asked for again at the gate). Today's `getProjectRouteAccess` awaited
+ * `ensureDiscoveryReady` itself before every pass, so a question never waits on a pass that nobody starts.
+ */
+const wantDiscovery = (context: QueryContext, io: QueryIo): void => {
+  if (!context.facts.discoveryReady && context.facts.discoveryError === undefined) {
+    io.enq.sendTo(context.parentRef, { type: 'queryWantsDiscovery', requestId: context.requestId, gen: context.gen });
+  }
+};
+
 /** The top of the loop (rule 8): a held row answers, otherwise the turn's first read starts at the current epoch. */
 const top = (context: QueryContext, io: QueryIo): QueryStep => {
   const held = heldRow(context);
@@ -333,6 +344,9 @@ const top = (context: QueryContext, io: QueryIo): QueryStep => {
   const { facts } = context;
   const pending = facts.journal.status === 'ready' ? facts.journal.pending : 0;
   const verify = pending === 0 && facts.recoveries.length === 0 && !facts.current;
+  if (!verify) {
+    wantDiscovery(context, io);
+  }
   return {
     target: verify ? '#library-access-query.verifying' : '#library-access-query.discovering',
     reenter: true,
@@ -552,13 +566,7 @@ export const libraryAccessQueryMachine = setup({
           }
           // The question goes on to a pass, which waits for the bootstrap pass: the parent runs it now, as today's
           // `ensureDiscoveryReady` after a `discovery-required` verification.
-          if (!context.facts.discoveryReady && context.facts.discoveryError === undefined) {
-            enq.sendTo(context.parentRef, {
-              type: 'queryWantsDiscovery',
-              requestId: context.requestId,
-              gen: context.gen,
-            });
-          }
+          wantDiscovery(context, io);
           return { target: 'discovering' };
         }),
         onError: portFailed,

@@ -933,6 +933,8 @@ export class ProjectLibrary {
       const subscription = this.recovery.on('replaySettled', (event) => {
         if (event.requestId === requestId) {
           subscription.unsubscribe();
+          // A replay the loop skipped leaves the person's copy unread: a later one reads the journal.
+          this.#operations.delete(operation.operationId);
           resolve(event.held);
         }
       });
@@ -1197,18 +1199,17 @@ export class ProjectLibrary {
   async #replay(operationId: string): Promise<ReplayOutcome> {
     const known = this.#operations.get(operationId);
     let operation: PendingProjectOperation | undefined;
+    // The copy is taken out either way: a later attempt reads the journal again, so a kept one would only hold bytes.
+    this.#operations.delete(operationId);
     if (known?.fresh === true) {
-      this.#operations.set(operationId, { operation: known.operation, fresh: false });
       ({ operation } = known);
     } else {
       const worker = await this.getReadiedWorker();
       const journal = await worker.getPendingProjectOperations();
       operation = journal.find((candidate) => candidate.operationId === operationId);
       if (operation === undefined) {
-        this.#operations.delete(operationId);
         return { status: 'absent' };
       }
-      this.#operations.set(operationId, { operation, fresh: false });
     }
     try {
       await this.#commit(operation);
@@ -1221,7 +1222,6 @@ export class ProjectLibrary {
           execution: operation.chat.activeExecution,
         });
       }
-      this.#operations.delete(operationId);
       return { status: 'recovered' };
     } catch (error) {
       return replayOutcomeOf(error);

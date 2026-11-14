@@ -66,9 +66,10 @@
 \* A3b: `ProjectLibrary` runs the three machines and the hook delegates to it. The `today` configurations
 \* keep describing the hook at 7918b118, before that wiring. A discovery `apply` reports a write it
 \* skipped at a write-stop gate, so a stop that ended while the deletes ran redoes the pass at once,
-\* as `WriteStopEnded` would (rule 3); a `discovery-required` verification asks for the bootstrap pass,
-\* an `Unmodelled` emission. A mutation's own copy of its operation is dropped once it settles; a
-\* replay reads the journal again. No action or correspondence changes.
+\* as `WriteStopEnded` would (rule 3); a `discovery-required` verification, or a question that skips
+\* verification, asks for the bootstrap pass, an `Unmodelled` emission. A mutation's or replay's copy of
+\* its operation is dropped once taken; a later attempt reads the journal. No action or correspondence
+\* changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

@@ -32,6 +32,13 @@ const hostSpecs = [
   'src/daemon-agent-host.spec.ts',
 ];
 const hostExcluded = process.env['TAU_E2E_HOST_TIER'] === 'true' ? [] : hostSpecs;
+/**
+ * The PicoGK browser consumer spec needs a prepared bundle (`PICOGK_BROWSER_ASSETS_ROOT`) that only
+ * `picogk-browser-host.yml` can build, so it runs only in `test:e2e:picogk`, which sets
+ * `TAU_E2E_PICOGK_TIER` and is given the bundle by `picogk-browser-archive.yml` (north star P7). The
+ * tier marker, not the bundle variable, admits the spec, so that tier without a bundle still fails.
+ */
+const picogkExcluded = process.env['TAU_E2E_PICOGK_TIER'] === 'true' ? [] : ['src/picogk-browser.spec.ts'];
 /* Only the snapshot production server honours TAU_E2E_DISABLE_COI (`production-server.ts`): the
  * development server and `apps/ui/server.ts` stay isolated, so the specs would assert a
  * non-isolated page against an isolated one. Refuse the combination instead. */
@@ -143,6 +150,7 @@ export default defineConfig({
             'src/headless-chat-image-capture.no-webgpu.spec.ts',
             ...(liveProvidersEnabled ? [] : liveProviderSpecs),
             ...hostExcluded,
+            ...picogkExcluded,
           ],
           provider: playwright({
             actionTimeout: 10_000,

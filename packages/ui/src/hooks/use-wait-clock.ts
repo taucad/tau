@@ -14,11 +14,26 @@ import type { WaitIndicatorTiming } from '#utils/wait-timing.js';
  * navigation start. It is read when a wait starts or ends, never polled; the indicator's own CSS animation does the
  * waiting.
  *
+ * `animationNow()`, when given, is the time on the same timeline that a CSS animation started now counts its delay
+ * from. In a browser that is the document timeline's current time: it holds still through a task while
+ * `performance.now()` runs on, so after a long task a delay measured from `now()` would end early by the task's length.
+ * The indicator's delays are measured from it. Clocks without it (tests, hosts with their own clock) use `now()`.
+ *
  * @public
  */
-export type WaitClock = Readonly<{ now: () => number }>;
+export type WaitClock = Readonly<{ now: () => number; animationNow?: () => number }>;
 
-const performanceClock: WaitClock = { now: () => performance.now() };
+/**
+ * The document timeline's current time, or the performance clock where the page has no active timeline.
+ *
+ * @returns Milliseconds on the performance timeline.
+ */
+function documentTimelineNow(): number {
+  const time = globalThis.document?.timeline?.currentTime;
+  return typeof time === 'number' ? time : performance.now();
+}
+
+const performanceClock: WaitClock = { now: () => performance.now(), animationNow: documentTimelineNow };
 
 const waitClockContext = createContext<WaitClock>(performanceClock);
 
@@ -64,12 +79,14 @@ const isServer = (): boolean => false;
 /**
  * One wait as the hook tracks it. `shownAt` is when its indicator became, or becomes, visible, measured from
  * `startedAt`: the delay, the activation time for a region that activates after the delay, or a negative time for a
- * wait that took over an indicator already showing.
+ * wait that took over an indicator already showing. Once the reveal is seen (`isRevealSeen`), it is the frame the
+ * reveal painted in, which a long task can make later than predicted.
  */
 type TrackedWait = Readonly<{
   active: boolean;
   startedAt: number;
   shownAt: number;
+  isRevealSeen: boolean;
   wait: number;
   timing: WaitIndicatorTiming;
 }>;
@@ -87,6 +104,13 @@ export type WaitClockState = Readonly<{
    * `startedAt`, or a wait that starts again) restarts the animation instead of resuming the old one.
    */
   wait: number;
+  /**
+   * Call when the indicator's reveal animation starts (its `animationstart`), which is the frame its words first show
+   * in, so the minimum is served from that frame. A long task can paint the reveal later than the delay; a minimum
+   * counted from the delay would then end early. Call it synchronously with the event (`flushSync`), so a wait that
+   * settles in the next task already counts from it.
+   */
+  revealed: () => void;
 }>;
 
 /**
@@ -127,24 +151,41 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
   const clock = useContext(waitClockContext);
   // The server render and the hydration pass read `false`: the page has no script clock there.
   const hasClientClock = useSyncExternalStore(subscribeToNothing, isClient, isServer);
+  /* Every delay this hook writes is a CSS animation delay, so it is measured from the time that animation counts from. */
+  const readNow = (): number => (clock.animationNow === undefined ? clock.now() : clock.animationNow());
   const [tracked, setTracked] = useState<TrackedWait>(() => {
-    const now = hasClientClock ? clock.now() : undefined;
+    const now = hasClientClock ? readNow() : undefined;
     return {
       active,
       startedAt,
       shownAt: shownAtFor(startedAt, now),
+      isRevealSeen: false,
       wait: 0,
       timing: active ? waitingTiming(now === undefined ? { startedAt } : { startedAt, now }) : idleWaitTiming(),
     };
   });
 
+  const revealed = (): void => {
+    // The event runs in the frame the reveal starts in, where the timeline reads that frame's time.
+    const revealedAt = readNow();
+    setTracked((previous) =>
+      previous.active && !previous.isRevealSeen
+        ? {
+            ...previous,
+            isRevealSeen: true,
+            shownAt: Math.max(previous.shownAt, revealedAt - previous.startedAt),
+          }
+        : previous,
+    );
+  };
+
   // While no wait runs, `startedAt` means nothing: a consumer that moves it after the wait ends must not cut a hold.
   if (tracked.active === active && (!active || Object.is(tracked.startedAt, startedAt))) {
-    return { timing: tracked.timing, wait: tracked.wait };
+    return { timing: tracked.timing, wait: tracked.wait, revealed };
   }
 
   // A wait started or ended: read the clock once, as React's "information from previous renders" pattern.
-  const now = clock.now();
+  const now = readNow();
   let next: TrackedWait;
   if (active) {
     // A new wait that replaces an indicator still owing its minimum keeps it on screen until that minimum is served.
@@ -153,6 +194,8 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       active,
       startedAt,
       shownAt: isShowing ? tracked.startedAt + tracked.shownAt - startedAt : shownAtFor(startedAt, now),
+      // A wait that takes over a showing indicator was revealed already; its new element's entrance is not a reveal.
+      isRevealSeen: isShowing,
       wait: tracked.wait + 1,
       timing: waitingTiming({ startedAt, now, isShowing }),
     };
@@ -164,7 +207,7 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
     };
   }
   setTracked(next);
-  return { timing: next.timing, wait: next.wait };
+  return { timing: next.timing, wait: next.wait, revealed };
 }
 
 /**

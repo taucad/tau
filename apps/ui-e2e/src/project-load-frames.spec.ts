@@ -1345,7 +1345,7 @@ knownDefect(
   "F9 (A15f follow-up): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
   {
     artifact: 'f9-after-mount-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureSourcePaneLoad,
     assert: ({ record, mounted }) => {
@@ -1443,7 +1443,7 @@ knownDefect(
   'History minimum (A15f2): with History open, a long task across its reveal and its read answered as "Loading history" shows, the words stay at least 500 ms',
   {
     artifact: 'history-minimum-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('wide', { regions: historyRegions, frameTimes: true });
@@ -1607,7 +1607,7 @@ knownDefect(
   'Opening file minimum (A15f2): a file opened from the tree, its read answered at the end of a long task as "Opening file" shows, keeps the words at least 500 ms',
   {
     artifact: 'opening-file-minimum-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       const measured = await measureSourceOpen('opening-file-minimum-wide', 0, {

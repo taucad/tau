@@ -1338,7 +1338,7 @@ it.each([
  * A15f2 (F9's follow-up row): a diagnostic that arrives after the mount, as the language service's does seconds later,
  * moves no line of text; the lint gutter has its width before any marker is in it.
  */
-it.fails('keeps the first line in place when the first diagnostic arrives after the mount', async () => {
+it('keeps the first line in place when the first diagnostic arrives after the mount', async () => {
   await page.viewport(1000, 600);
   await document.fonts.ready;
   const sourceDocument = new EditorDocument('main.kcl', lintSource);

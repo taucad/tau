@@ -177,7 +177,7 @@ async function effectTime(name: string): Promise<number> {
   return Number(animation!.startTime) + Math.max(startDelay, 0);
 }
 
-it.fails('should count a hold from the timeline its animation runs on when a long task ran the clock ahead of it', () => {
+it('should count a hold from the timeline its animation runs on when a long task ran the clock ahead of it', () => {
   /* Shown since 1,100 ms. Content arrives at the end of a 300 ms long task: the performance clock reads 1,400 ms, the
      document timeline that the hold's animation starts on still reads 1,100 ms. */
   const before = { now: () => 1100, animationNow: () => 1100 };
@@ -199,7 +199,7 @@ it.fails('should count a hold from the timeline its animation runs on when a lon
   expect(isShown(find('wait-indicator-body'))).toBe(false);
 });
 
-it.fails('should hold an indicator that a long task revealed late 500 ms from the frame it showed in', async () => {
+it('should hold an indicator that a long task revealed late 500 ms from the frame it showed in', async () => {
   const startedAt = performance.now() - 900;
   const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
   holdMainThread(300);

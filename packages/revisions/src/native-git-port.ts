@@ -2611,7 +2611,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         tree: treeId,
         parents: [...input.parents],
         /* A26: the person wrote it, Tau recorded it — git's own split. */
-        author: revisionAuthorSignature(input.provenance),
+        author: revisionAuthorSignature(input.provenance, input.commitAuthor),
         committer: revisionCommitterSignature(input.provenance),
         message: revisionCommitMessage(trailer),
         changeId: deriveChangeId(await format(), { treeId, parents: input.parents, trailer }),

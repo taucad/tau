@@ -15,13 +15,14 @@
  * next deploy reads in turn. Netlify stores files by content, so a retained
  * asset is not uploaded again.
  *
- * Besides `/assets/*`, it keeps the content-addressed runtime bundles a page starts later: the PicoGK
- * browser host (`picogk-browser/<sha256>/`) and the C# language service (`csharp-language/<sha256>/`).
- * A tab loaded before a deploy that changed one fetches the old bundle by the address its build named,
- * so dropping it would fail PicoGK or the C# service in that tab. They are listed in their own index,
+ * Besides `/assets/*`, it keeps the content-addressed runtime bundles a page starts later: the C#
+ * language service (`csharp-language/<sha256>/`). A tab loaded before a deploy that changed it fetches
+ * the old bundle by the address its build named, so dropping it would fail the C# service in that tab.
+ * The PicoGK browser host was such a bundle until it moved to the dependency hosts; a live index that
+ * still lists it is read without it ({@link retiredRuntimeBundleRoots}). They are listed in their own index,
  * `tau-served-runtimes.json`: a build from before them refuses any path outside `assets/` in
- * `tau-served-assets.json`, and a rollback to such a build must still deploy. These bundles are large (PicoGK is about
- * 150 MB per generation) and rarely change, so they are not downloaded again each deploy: with
+ * `tau-served-assets.json`, and a rollback to such a build must still deploy. These bundles are large and
+ * rarely change, so they are not downloaded again each deploy: with
  * `TAU_RETAIN_ASSETS_STORE` set, the deploy reads them from that directory (a CI cache `deploy-ui.yml`
  * restores) when their integrity matches, and leaves in it exactly the runtime bundle files this deploy
  * serves, its own included, for the next deploy.
@@ -105,9 +106,17 @@ const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
 
 /**
  * Roots of the content-addressed runtime bundles a deploy serves beside `/assets/*`, each under a
- * `<sha256>/` directory: the PicoGK browser host and the C# language service (their Vite plugins).
+ * `<sha256>/` directory: the C# language service (its Vite plugin).
  */
-export const runtimeBundleRoots = ['picogk-browser', 'csharp-language'] as const;
+export const runtimeBundleRoots = ['csharp-language'] as const;
+
+/**
+ * Runtime bundle roots a deploy no longer serves. The PicoGK browser host loads by digest from the
+ * dependency hosts (`dependencies.tau.new`, `dependencies.taucad.dev`) since `ui@0.7.0`, so no page a
+ * live deploy can hand out names `/picogk-browser/`. A live index written while it was retained still
+ * lists its files: they are dropped from that index rather than refused, so the next deploy serves none.
+ */
+export const retiredRuntimeBundleRoots = ['picogk-browser'] as const;
 
 const contentAddress = /^[a-f\d]{64}$/u;
 
@@ -152,13 +161,30 @@ export const isServableAssetPath = (path: string): boolean =>
  */
 export const isServableRuntimePath = (path: string): boolean => isRuntimeBundlePath(path) && isSafePath(path);
 
+/**
+ * Whether a live runtime index entry belongs to a retired runtime bundle root.
+ *
+ * @param path - A path relative to the client root, with `/` separators.
+ * @returns `true` for a file under a retired root's content address.
+ */
+export const isRetiredRuntimePath = (path: string): boolean => {
+  const [root, address, ...rest] = path.split('/');
+  return (
+    (retiredRuntimeBundleRoots as readonly string[]).includes(root ?? '') &&
+    contentAddress.test(address ?? '') &&
+    rest.length > 0
+  );
+};
+
 /** Which index a retention pass reads and writes. */
 type IndexKind = {
   readonly fileName: string;
   readonly isServable: (path: string) => boolean;
   /** The top-level directories the build's own files are listed from. */
   readonly roots: readonly string[];
-  /** Whether a build may lack every root (a build without the PicoGK or C# bundle). */
+  /** Whether a live index entry belongs to a retired root, and is dropped rather than refused. */
+  readonly isRetired: (path: string) => boolean;
+  /** Whether a build may lack every root (a build without the C# bundle). */
   readonly optional: boolean;
   /**
    * Whether a 200 that is not JSON means "no index yet": the live deploy's assets index was read just
@@ -171,6 +197,7 @@ const assetsKind: IndexKind = {
   fileName: servedAssetsIndexFileName,
   isServable: isServableAssetPath,
   roots: ['assets'],
+  isRetired: () => false,
   optional: false,
   catchAllMeansNone: false,
 };
@@ -179,6 +206,7 @@ const runtimesKind: IndexKind = {
   fileName: servedRuntimesIndexFileName,
   isServable: isServableRuntimePath,
   roots: runtimeBundleRoots,
+  isRetired: isRetiredRuntimePath,
   optional: true,
   catchAllMeansNone: true,
 };
@@ -242,14 +270,17 @@ const assertServedAsset = (entry: unknown, isServable: (path: string) => boolean
  *
  * @param value - The parsed JSON.
  * @param source - Where it came from, for the error.
+ * @param kind - Which paths the index may list (`isServable`, by default `/assets/*`) and which belong
+ * to a retired root and are dropped rather than refused (`isRetired`, by default none).
  * @returns The index with checked entries.
  * @throws When the schema, an entry or a path is not one this script publishes.
  */
 export const parseServedAssetsIndex = (
   value: unknown,
   source: string,
-  isServable: (path: string) => boolean = isServableAssetPath,
+  kind: Partial<Pick<IndexKind, 'isServable' | 'isRetired'>> = {},
 ): ServedAssetsIndex => {
+  const { isServable = isServableAssetPath, isRetired = (): boolean => false } = kind;
   const index = (typeof value === 'object' && value !== null ? value : {}) as Partial<
     Record<'schema' | 'assets', unknown>
   >;
@@ -258,6 +289,10 @@ export const parseServedAssetsIndex = (
   }
   const youngest = new Map<string, ServedAsset>();
   for (const entry of index.assets as readonly unknown[]) {
+    const path = typeof entry === 'object' && entry !== null ? (entry as { path?: unknown }).path : undefined;
+    if (typeof path === 'string' && isRetired(path)) {
+      continue;
+    }
     const asset = assertServedAsset(entry, isServable);
     const known = youngest.get(asset.path);
     if (known === undefined || asset.generation < known.generation) {
@@ -505,7 +540,7 @@ const readLiveIndex = async (
   } catch (error) {
     throw unreadableIndex(origin, fileName, `answered JSON that does not parse (${String(error)})`);
   }
-  return parseServedAssetsIndex(parsed, `${origin}/${fileName}`, kind.isServable);
+  return parseServedAssetsIndex(parsed, `${origin}/${fileName}`, kind);
 };
 
 type Download = {

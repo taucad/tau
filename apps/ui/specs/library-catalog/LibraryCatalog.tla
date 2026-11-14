@@ -63,6 +63,10 @@
 \* changes an action. The observation effect releases and resumes the library's binding around its reads.
 \* A3a, after A2: the machines' citations of `use-project-manager.tsx` lines moved with A2's additions
 \* above them; the code they name is unchanged, so no action or correspondence changes.
+\* A12 (app state orchestration, I21): `createProject` tells the chat store when the first chat it writes
+\* holds no message, so that chat shows empty at once. It is a call to the chat store after the operation
+\* commits, and the creating callback lists the store among its inputs; no root, row or read changes,
+\* so every action is unchanged.
 \* A3b: `ProjectLibrary` runs the three machines and the hook delegates to it. The `today` configurations
 \* keep describing the hook at 7918b118, before that wiring. A discovery `apply` reports a write it
 \* skipped at a write-stop gate, so a stop that ended while the deletes ran redoes the pass at once,

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { RevisionIdentity, RevisionProvenance, RevisionTrigger, RevisionVia } from '#revision-authority.js';
+import type {
+  RevisionActor,
+  RevisionIdentity,
+  RevisionProvenance,
+  RevisionTrigger,
+  RevisionUserActor,
+  RevisionVia,
+} from '#revision-authority.js';
 import {
   parseRevisionCommitMessage,
   parseRevisionTagMessage,
@@ -7,11 +14,12 @@ import {
   revisionCommitMessage,
   revisionCommitterSignature,
   revisionTagMessage,
+  taggerSignature,
   tagTrailerPrefix,
   tauNoreplyAccountOf,
   unrecordedAuthorOf,
 } from '#revision-headers.js';
-import type { RevisionTrailer } from '#revision-headers.js';
+import type { RevisionCommitAuthor, RevisionTrailer } from '#revision-headers.js';
 
 const createdAt = Date.UTC(2026, 10, 11, 9, 30, 0);
 const person = { kind: 'user', id: 'usr_ada', name: 'Ada Lovelace' } as const;
@@ -274,5 +282,149 @@ describe('the version tag trailer (B6)', () => {
   it('reads the last Tau-Tag line, as the server does', () => {
     const message = `Lid\n\n${tagTrailerPrefix}{"version":2,"id":"${id}","name":"A"}\n${tagTrailerPrefix}{"version":2,"id":"${id}","name":"B"}\n`;
     expect(parseRevisionTagMessage(message)?.name).toBe('B');
+  });
+});
+
+/*
+ * I3 by construction (audit N4): no address of a person enters a Tau identity
+ * record. The type has no field for one, the readers refuse a record that
+ * carries one (I7: no reader for that shape), the writers copy only the fields
+ * a record has, and a linked forge's no-reply address reaches the git author
+ * line alone, as its own input.
+ */
+describe('no address enters an identity record (I3)', () => {
+  const linked: RevisionCommitAuthor = { name: 'octo', email: '42+octo@users.noreply.github.com' };
+  const withAddress = { kind: 'user', id: 'usr_ada', name: 'Ada Lovelace', email: 'ada@example.com' };
+
+  it('has no field to type an address into a person, an agent’s person or a version’s actor', () => {
+    // @ts-expect-error -- I3: a person has no address field, written out or spread in.
+    const spread: RevisionUserActor = { kind: 'user', id: 'usr_ada', ...linked };
+    // @ts-expect-error -- I3: a person has no address field.
+    const literal: RevisionUserActor = { kind: 'user', id: 'usr_ada', email: 'ada@example.com' };
+    const agent: RevisionIdentity = {
+      kind: 'agent',
+      id: 'agent',
+      runId: 'run-1',
+      // @ts-expect-error -- I3: the person an agent ran for has no address field either.
+      onBehalfOf: { kind: 'user', id: 'usr_ada', ...linked },
+    };
+    // @ts-expect-error -- I3: a version's actor is a person or an agent, neither with an address.
+    const tagged: RevisionActor = { kind: 'user', id: 'usr_ada', ...linked };
+
+    expect([spread, literal, agent, tagged]).toHaveLength(4);
+  });
+
+  it('reads a commit whose person carries an address as one Tau did not record', () => {
+    const record = written();
+    const provenance = { ...(record['provenance'] as Record<string, unknown>), actor: withAddress };
+
+    expect(parseRevisionCommitMessage(messageWith({ ...record, provenance }))).toBeUndefined();
+  });
+
+  it('reads a commit whose agent ran for a person with an address as one Tau did not record', () => {
+    const record = written();
+    const provenance = {
+      ...(record['provenance'] as Record<string, unknown>),
+      source: 'agent',
+      actor: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: withAddress },
+    };
+
+    expect(parseRevisionCommitMessage(messageWith({ ...record, provenance }))).toBeUndefined();
+  });
+
+  it('reads no version from a tag whose actor carries an address', () => {
+    const id = '0123456789abcdef0123456789abcdef';
+    const message = `Lid\n\n${tagTrailerPrefix}${JSON.stringify({ version: 2, id, name: 'Lid', actor: withAddress })}\n`;
+
+    expect(parseRevisionTagMessage(message)).toBeUndefined();
+  });
+
+  it('writes no address an untyped caller hands it into a commit trailer or a tag trailer', () => {
+    /* A JavaScript caller, or a structured clone from another context, is not held to the type. */
+    const smuggled = withAddress as unknown as RevisionUserActor;
+    const commit = revisionCommitMessage(
+      trailerOf({
+        source: 'agent',
+        actor: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: smuggled },
+        capture: 'turn',
+        via: 'browser',
+        runId: 'run-1',
+        createdAt,
+      }),
+    );
+    const tag = revisionTagMessage({
+      id: '0123456789abcdef0123456789abcdef',
+      name: 'Lid',
+      note: undefined,
+      actor: smuggled,
+    });
+
+    expect(commit).not.toContain('example.com');
+    expect(tag).not.toContain('example.com');
+    expect(parseRevisionCommitMessage(commit)?.provenance.actor).toStrictEqual({
+      kind: 'agent',
+      id: 'agent',
+      runId: 'run-1',
+      onBehalfOf: person,
+    });
+    expect(parseRevisionTagMessage(tag)?.actor).toStrictEqual(person);
+  });
+
+  it('authors a person under a linked forge’s no-reply address, given as its own input', () => {
+    const provenance: RevisionProvenance = {
+      source: 'user',
+      actor: person,
+      capture: 'save',
+      via: 'browser',
+      createdAt,
+    };
+
+    expect(revisionAuthorSignature(provenance, linked)).toStrictEqual({
+      name: 'octo',
+      email: '42+octo@users.noreply.github.com',
+      seconds: createdAt / 1000,
+      offsetMinutes: 0,
+    });
+    /* The record is the same either way: the address is the author line's alone. */
+    expect(revisionCommitMessage(trailerOf(provenance))).not.toContain('noreply.github.com');
+  });
+
+  it('authors nobody under an address that is not a forge’s no-reply address', () => {
+    const provenance: RevisionProvenance = {
+      source: 'user',
+      actor: person,
+      capture: 'save',
+      via: 'browser',
+      createdAt,
+    };
+
+    for (const email of ['ada@example.com', 'octo@users.noreply.github.com.example.com', 'noreply@tau.new']) {
+      expect(revisionAuthorSignature(provenance, { name: 'octo', email }), email).toMatchObject({
+        name: 'Ada Lovelace',
+        email: 'usr_ada@users.noreply.tau.new',
+      });
+    }
+  });
+
+  it('never authors an anonymous person under a forge address', () => {
+    const provenance: RevisionProvenance = {
+      source: 'agent',
+      actor: { kind: 'agent', id: 'agent', runId: 'run-1', onBehalfOf: anonymous },
+      capture: 'turn',
+      via: 'browser',
+      createdAt,
+    };
+
+    expect(revisionAuthorSignature(provenance, linked)).toMatchObject({
+      name: 'Anonymous',
+      email: 'anon:3fa9c1d2@users.noreply.tau.new',
+    });
+  });
+
+  it('tags as the person under the Tau no-reply address, whatever an untyped caller hands it', () => {
+    expect(taggerSignature(withAddress as unknown as RevisionUserActor, createdAt)).toMatchObject({
+      name: 'Ada Lovelace',
+      email: 'usr_ada@users.noreply.tau.new',
+    });
   });
 });

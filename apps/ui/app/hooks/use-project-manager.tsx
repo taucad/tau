@@ -89,7 +89,7 @@ import {
 } from '#runtime/project-library-storage.js';
 import type { PersistentStorageRoot, ProjectListing } from '#runtime/project-library-storage.js';
 import type { ProjectLibrary, ProjectRouteAccess, WorkspaceConnectionTrace } from '#runtime/project-library.js';
-import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
+import { selectRuntimeChatSessions, selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { tauCloudIntent, withNamedLock } from '#hooks/use-cloud-projects.js';
@@ -400,6 +400,7 @@ export function ProjectManagerProvider({
 }): React.JSX.Element {
   const runtime = useOptionalAppRuntime();
   const library = composed ?? (runtime === undefined ? undefined : selectRuntimeProjectLibrary(runtime));
+  const chatSessions = runtime === undefined ? undefined : selectRuntimeChatSessions(runtime);
   if (library === undefined) {
     throw new Error('ProjectManagerProvider must be used within <AppRuntimeProvider>, or be given a library');
   }
@@ -687,6 +688,10 @@ export function ProjectManagerProvider({
           chatId: operation.chat.id,
           execution: seededActiveExecution,
         });
+        if (chatMessages.length === 0) {
+          // Created empty here: its lane shows the empty state at once, not after its log answers (A12, I21).
+          chatSessions?.noteCreatedEmpty(operation.chat.id);
+        }
       }
       /* D19: a project born with no remote backs up to Tau Cloud from its first
          revision — a template, a fork, a file or zip import. A caller that
@@ -713,7 +718,15 @@ export function ProjectManagerProvider({
         slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) },
       };
     },
-    [fileManager.client, fileManager.recordFiles, getReadiedWorker, library, namingImageUrls, projectNameClient],
+    [
+      chatSessions,
+      fileManager.client,
+      fileManager.recordFiles,
+      getReadiedWorker,
+      library,
+      namingImageUrls,
+      projectNameClient,
+    ],
   );
 
   /**

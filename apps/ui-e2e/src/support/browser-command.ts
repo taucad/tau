@@ -2201,6 +2201,35 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
   });
 };
 
+/** Each target context's requests that `uiDelayTargetRequests` held, by URL, in the order they were held. */
+const delayedTargetRequests = new WeakMap<object, string[]>();
+
+/**
+ * Holds every request of the target context whose URL matches `pattern` for `milliseconds` before it goes on
+ * (A0.10: a slow chunk). Routing turns the context's HTTP cache off, so a reload fetches the chunk again and is held.
+ * The delay stays for the rest of the session.
+ */
+export const uiDelayTargetRequests: BrowserCommand<[pattern: string, milliseconds: number]> = async (
+  commandContext,
+  pattern,
+  milliseconds,
+) => {
+  const session = sessionFor(commandContext);
+  const held = delayedTargetRequests.get(session.context) ?? [];
+  delayedTargetRequests.set(session.context, held);
+  await session.context.route(new RegExp(pattern, 'u'), async (route) => {
+    held.push(route.request().url());
+    await new Promise((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
+    await route.fallback();
+  });
+};
+
+/** The URLs `uiDelayTargetRequests` held in the target context so far. */
+export const uiReadDelayedTargetRequests: BrowserCommand = async (commandContext) =>
+  delayedTargetRequests.get(sessionFor(commandContext).context) ?? [];
+
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
 export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
   const session = sessionFor(commandContext);
@@ -3790,6 +3819,8 @@ export const uiBrowserCommands = {
   uiReadTarget,
   uiReadAgentHostGatewayRequests,
   uiReadTauVertexOperations,
+  uiDelayTargetRequests,
+  uiReadDelayedTargetRequests,
   uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,

@@ -117,14 +117,14 @@
     "writeStopEnded"
   ],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "b97381dec1e72f862da2549e18e5b3d4bba52e671a7b75953eb6b36c090edaf4",
+    "apps/ui/app/hooks/use-project-manager.tsx": "e16ee9bb2541ce30d08443fdec522fe8e47d7d0ce05431efdc1aa61b8d782384",
     "apps/ui/app/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
     "apps/ui/app/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
     "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
     "apps/ui/app/runtime/project-library.ts": "18df559aad88b7f4727df40120d4047c2f992d799d05120d680c3a36d0f65c4a"
   },
   "specs": {
-    "LibraryCatalog.tla": "c51946d1931aaf175df034759a65d388afa6070d132213c3882496e08a90ff18"
+    "LibraryCatalog.tla": "ce2160e321c9443c44948b2d48b83e9e161bb2e3e5e4e6a9938eb0bebca92f39"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

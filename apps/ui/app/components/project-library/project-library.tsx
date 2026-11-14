@@ -69,6 +69,7 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { indicatorDelayMilliseconds } from '@taucad/ui/utils/wait-timing';
 import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
@@ -324,12 +325,24 @@ export function ProjectLibrary({
     /* A Retry pressed during a wait, slow or not, starts a wait of its own, timed and announced from the press. */
     setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt, followsFailure: true });
   }
+  /* When the local listing's wait handed the slot to a running Tau Cloud wait, so a shown indicator stays shown. */
+  const [wasAwaitingListing, setWasAwaitingListing] = useState(isAwaitingListing);
+  const [listingHandoverAt, setListingHandoverAt] = useState<number>();
+  if (wasAwaitingListing !== isAwaitingListing) {
+    setWasAwaitingListing(isAwaitingListing);
+    if (!isAwaitingListing && isAwaitingCloud) {
+      setListingHandoverAt(waitClock.now());
+    }
+  } else if (!isAwaitingCloud && listingHandoverAt !== undefined) {
+    setListingHandoverAt(undefined);
+  }
+  const cloudShownFrom = shownFromOf({ wait: cloudWait, listingHandoverAt });
   /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
   /* Active once the wait's start is recorded, so this render, which may still be recording it, times nothing from 0. */
   const { timing: cloudWaitTiming } = useWaitClock({
     /* The listing's own wait holds the slot until it answers, so the Retry is timed from when it can show. */
     active: isAwaitingCloud && cloudWait !== undefined && !isAwaitingListing,
-    startedAt: cloudWait?.startedAt ?? 0,
+    startedAt: cloudShownFrom,
   });
   /* A shown wait that ends keeps its indicator for its 500 ms minimum, so a failure is said once that hold is over. */
   const [releasedCloudHold, setReleasedCloudHold] = useState<WaitIndicatorTiming>();
@@ -678,7 +691,7 @@ export function ProjectLibrary({
            announcement per group); the indicator announces any other Tau Cloud wait, once its words are revealed. */
         live={!isAwaitingListing && cloudWait?.isAnnounced !== true}
         active={isAwaitingListing || isAwaitingCloud}
-        startedAt={isAwaitingListing ? 0 : (cloudWait?.startedAt ?? 0)}
+        startedAt={isAwaitingListing ? 0 : cloudShownFrom}
         label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}
         slowLabel={isAwaitingListing ? 'Still loading projects' : 'Still loading Tau Cloud projects'}
         onRetry={
@@ -1124,6 +1137,29 @@ type CloudWait = Readonly<{
   /** Whether it followed a failure, whose Retry it keeps in view. */
   followsFailure: boolean;
 }>;
+
+/**
+ * When the slot times a Tau Cloud wait from: its start, or, for a first wait that took over a shown local listing wait
+ * (shown from 1,000 ms), early enough that it counts as already shown, so the slot does not blink empty at the hand-over.
+ *
+ * @param state - The Tau Cloud wait and when the local listing's wait handed the slot over, if it did.
+ * @returns The start on the wait clock's timeline, or 0 when no wait runs. Milliseconds.
+ */
+function shownFromOf({
+  wait,
+  listingHandoverAt,
+}: {
+  readonly wait: CloudWait | undefined;
+  readonly listingHandoverAt: number | undefined;
+}): number {
+  if (wait === undefined) {
+    return 0;
+  }
+  if (wait.isAnnounced || listingHandoverAt === undefined || listingHandoverAt < indicatorDelayMilliseconds) {
+    return wait.startedAt;
+  }
+  return Math.min(wait.startedAt, listingHandoverAt - indicatorDelayMilliseconds);
+}
 
 /** Tau Cloud's Retry in the slot: shown, or, for the first wait, revealed at its slow mark (`slowDelay`). */
 type CloudRetry = Readonly<{ slowDelay?: string }>;

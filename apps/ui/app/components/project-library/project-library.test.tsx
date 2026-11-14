@@ -1781,7 +1781,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 9: a shown local listing wait hands the slot to a running Tau Cloud wait without blinking off. */
-    it.fails("C14: keeps the slot's indicator shown when the local listing's wait hands over to Tau Cloud's", () => {
+    it("C14: keeps the slot's indicator shown when the local listing's wait hands over to Tau Cloud's", () => {
       mockRememberedShape = { count: 2, projects: [] };
       mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
       const clock = { at: 0 };

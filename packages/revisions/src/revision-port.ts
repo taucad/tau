@@ -19,6 +19,7 @@ import type {
   RevisionDiffEntry as ComparisonDiffEntry,
 } from '#algorithms/revision-comparison.js';
 import type { ObjectFormat } from '#object-hash.js';
+import type { RevisionCommitAuthor } from '#revision-headers.js';
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
 
@@ -199,6 +200,12 @@ export type WriteRevisionInput = Readonly<{
    * the caller — not the engine — computed the conflict.
    */
   conflict?: Readonly<{ trees: readonly string[]; labels: readonly string[] }>;
+  /**
+   * The linked forge's no-reply identity for the person recording (D33), for
+   * the commit's git author line alone: the trailer never carries it (I3).
+   * Absent, the author is the Tau no-reply address the person's id gives.
+   */
+  commitAuthor?: RevisionCommitAuthor;
 }>;
 
 /** Input for one expected-old ref publication. @public */

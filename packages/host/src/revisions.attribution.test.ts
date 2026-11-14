@@ -59,7 +59,7 @@ describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', ()
       tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('export const size = 1;\n')]]),
       provenance: {
         source: 'user',
-        actor: { kind: 'user', id: 'user-lane', name: 'Lane Person', email: 'lane@example.com' },
+        actor: { kind: 'user', id: 'user-lane', name: 'Lane Person' },
         capture: 'save',
         via: 'desktop',
         createdAt: Date.UTC(2026, 8, 8, 12, 0, 0),
@@ -76,7 +76,7 @@ describe.runIf(gitToolchainOnPath)('attribution on a clone of a Tau project', ()
       cwd: clone,
       encoding: 'utf8',
     }).trim();
-    expect(line).toBe('Lane Person|lane@example.com|Tau|noreply@tau.new');
+    expect(line).toBe('Lane Person|user-lane@users.noreply.tau.new|Tau|noreply@tau.new');
 
     const trailers = execFileSync('git', ['log', '-1', '--format=%B'], { cwd: clone, encoding: 'utf8' });
     expect(trailers).toContain('Tau-Actor: user Lane Person');
@@ -211,6 +211,79 @@ describe.runIf(gitToolchainOnPath)('a Node host records the account it is handed
     try {
       await expect(
         revisions.channel.request({ command: 'setActor', actor: { kind: 'agent', id: 'agent' } }),
+      ).rejects.toThrow();
+    } finally {
+      await revisions.release();
+    }
+  }, 30_000);
+
+  /* D33 with I3 (audit N4): the linked forge's identity reaches the author line beside the person, never in it. */
+  it('authors a close cut under the linked forge identity `setActor` carries beside the person', async () => {
+    const workspaceRoot = await workspace();
+    await configDirectory();
+    const line = await closeCut(workspaceRoot, 'project-linked-actor', async (revisions) => {
+      await revisions.channel.request({
+        command: 'setActor',
+        actor: { kind: 'user', id: 'usr_lane1', name: 'Lane Person' },
+        commitAuthor: { name: 'octo', email: '7+octo@users.noreply.github.com' },
+      });
+    });
+    expect(line).toBe('octo|7+octo@users.noreply.github.com|Tau|noreply@tau.new');
+    const message = execFileSync(
+      'git',
+      ['-C', join(workspaceRoot, '.git'), 'log', '-1', '--format=%B', 'refs/heads/main'],
+      { encoding: 'utf8' },
+    );
+    expect(message).not.toContain('noreply.github.com');
+    expect(message).toContain('"actor":{"kind":"user","id":"usr_lane1","name":"Lane Person"}');
+  }, 60_000);
+
+  it('refuses a `setActor` whose commit author is not a forge no-reply address', async () => {
+    const workspaceRoot = await workspace();
+    await configDirectory();
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'project-private-author',
+      watchWorkspace: false,
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-private-author', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    try {
+      await expect(
+        revisions.channel.request({
+          command: 'setActor',
+          actor: { kind: 'user', id: 'usr_lane1', name: 'Lane Person' },
+          commitAuthor: { name: 'Lane Person', email: 'lane@example.com' },
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await revisions.release();
+    }
+  }, 30_000);
+
+  /* I3 by construction (audit N4): a person has no address, so a request that names one is refused, not stripped. */
+  it('refuses a `setActor` whose person carries an address', async () => {
+    const workspaceRoot = await workspace();
+    await configDirectory();
+    const revisions = createProjectRevisions({
+      via: 'desktop',
+      workspaceRoot,
+      projectId: 'project-address-actor',
+      watchWorkspace: false,
+      port: createIsomorphicGitRevisionPort({
+        filesystem: new NodeFsProvider(workspaceRoot),
+        checkouts: { projectId: 'project-address-actor', root: () => new NodeFsProvider(workspaceRoot) },
+      }),
+    });
+    try {
+      await expect(
+        revisions.channel.request({
+          command: 'setActor',
+          actor: { kind: 'user', id: 'usr_lane1', name: 'octo', email: '7+octo@users.noreply.github.com' },
+        }),
       ).rejects.toThrow();
     } finally {
       await revisions.release();

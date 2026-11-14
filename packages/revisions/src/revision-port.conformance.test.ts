@@ -26,11 +26,15 @@ import type {
   RevisionProvenance,
   RevisionSummary,
   RevisionTrigger,
+  RevisionUserActor,
   RevisionVia,
 } from '#revision-authority.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
-import { parseChangeId } from '#git-objects.js';
+import { encodeCommit, parseChangeId } from '#git-objects.js';
+import type { GitSignature } from '#git-objects.js';
+import { withCommitAuthor } from '#commit-author.js';
+import { deriveChangeId, revisionCommitMessage, revisionCommitterSignature } from '#revision-headers.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { LfsFetchReport } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
@@ -398,12 +402,7 @@ const conformance = (adapter: Adapter): void => {
      * number, the entry, the time and who made it.
      */
     it('round-trips a version named with spaces, and renames it at the same ref', async () => {
-      const actor = {
-        kind: 'user',
-        id: 'user-lane',
-        name: 'Lane Person',
-        email: 'lane@example.com',
-      } as const;
+      const actor = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
       const created = await port.tag({
         name: 'Ready for print',
         revisionId: child,
@@ -500,7 +499,7 @@ const conformance = (adapter: Adapter): void => {
         tree: tree({ 'a.txt': 'a-attributed\n' }),
         provenance: {
           ...provenance('user'),
-          actor: { kind: 'user', id: 'user-lane', name: 'Lane Person', email: 'lane@example.com' },
+          actor: { kind: 'user', id: 'user-lane', name: 'Lane Person' },
           capture: 'save',
         },
         summary: summary('Attributed revision'),
@@ -508,17 +507,111 @@ const conformance = (adapter: Adapter): void => {
       const attributed = revisionId(receipt.commitId);
       const record = await port.readRevision(attributed);
 
-      expect(record?.provenance.actor).toStrictEqual({
-        kind: 'user',
-        id: 'user-lane',
-        name: 'Lane Person',
-        email: 'lane@example.com',
-      });
+      expect(record?.provenance.actor).toStrictEqual({ kind: 'user', id: 'user-lane', name: 'Lane Person' });
       expect(record?.provenance.capture).toBe('save');
 
       /* The same fields through the graph read the pane uses. */
       const [row] = await port.log({ heads: [attributed], limit: 1 });
       expect(row?.provenance.actor).toStrictEqual(record?.provenance.actor);
+    }, 180_000);
+
+    /**
+     * I3 by construction (audit N4): an address an untyped caller hands the
+     * engine never reaches the record, the git author line or a tag, so it
+     * cannot come back out of the store.
+     */
+    it('records no address an untyped caller hands it, in the commit or the version tag', async () => {
+      const smuggled = {
+        kind: 'user',
+        id: 'user-lane',
+        name: 'Lane Person',
+        email: 'lane@example.com',
+      } as unknown as RevisionUserActor;
+      const receipt = await port.writeRevision({
+        parents: [child],
+        tree: tree({ 'a.txt': 'a-smuggled\n' }),
+        provenance: {
+          ...provenance('agent'),
+          actor: { kind: 'agent', id: 'agent', runId: 'run-lane', onBehalfOf: smuggled },
+          capture: 'turn',
+        },
+        summary: summary('Smuggled address'),
+      });
+      const smuggledRevision = revisionId(receipt.commitId);
+      const tagged = await port.tag({ name: 'Smuggled', revisionId: smuggledRevision, actor: smuggled, createdAt });
+      const person = { kind: 'user', id: 'user-lane', name: 'Lane Person' };
+
+      const record = await port.readRevision(smuggledRevision);
+      expect(record?.provenance.actor).toStrictEqual({
+        kind: 'agent',
+        id: 'agent',
+        runId: 'run-lane',
+        onBehalfOf: person,
+      });
+      const listed = await port.listTags();
+      expect(listed.find((tag) => tag.id === tagged.id)?.actor).toStrictEqual(person);
+      await port.deleteTag(tagged.number);
+    }, 180_000);
+
+    /**
+     * D33 and I3 together (audit N4): a project linked to GitHub authors its
+     * revisions under the account's GitHub no-reply identity, handed to the
+     * store beside the revision, and the record names the Tau person alone.
+     *
+     * The port has no raw object read, so the author line is proven by the
+     * commit id: it is the hash of the exact bytes, author line included.
+     */
+    it('authors a linked person under the forge identity it is handed, and records none of it', async () => {
+      const linked = { name: 'octo', email: '42+octo@users.noreply.github.com' };
+      const person = { kind: 'user', id: 'user-lane', name: 'Lane Person' } as const;
+      const anonymous = { kind: 'user', id: 'anon:1a2b3c4d', name: 'Anonymous', anonymous: true } as const;
+      const linkedPort = withCommitAuthor(port, (who) => (who.id === person.id ? linked : undefined));
+      const authorOf = async (
+        actor: RevisionIdentity,
+        content: string,
+      ): Promise<Readonly<{ actual: string; expected: (author: GitSignature) => string }>> => {
+        const written: RevisionProvenance = { ...provenance('agent'), actor, capture: 'turn' };
+        const receipt = await linkedPort.writeRevision({
+          parents: [child],
+          tree: tree({ 'a.txt': content }),
+          provenance: written,
+          summary: summary('Linked revision'),
+        });
+        const record = await port.readRevision(revisionId(receipt.commitId));
+        expect(JSON.stringify(record?.provenance)).not.toContain('noreply.github.com');
+        const trailer = { parents: [child], provenance: written, summary: summary('Linked revision') };
+        return {
+          actual: receipt.commitId,
+          expected: (author) =>
+            encodeCommit({
+              objectFormat: receipt.objectFormat,
+              tree: record!.treeId,
+              parents: [child],
+              author,
+              committer: revisionCommitterSignature(written),
+              message: revisionCommitMessage(trailer),
+              changeId: deriveChangeId(receipt.objectFormat, { treeId: record!.treeId, parents: [child], trailer }),
+            }).id,
+        };
+      };
+      const seconds = Math.floor(createdAt / 1000);
+
+      const forPerson = await authorOf(
+        { kind: 'agent', id: 'agent', runId: 'run-lane', onBehalfOf: person },
+        'a-linked\n',
+      );
+      expect(forPerson.actual).toBe(forPerson.expected({ ...linked, seconds, offsetMinutes: 0 }));
+
+      /* Anyone the host does not hold the identity for, and anyone anonymous, keeps the Tau no-reply address. */
+      const forAnonymous = await authorOf(anonymous, 'a-anonymous\n');
+      expect(forAnonymous.actual).toBe(
+        forAnonymous.expected({
+          name: 'Anonymous',
+          email: 'anon:1a2b3c4d@users.noreply.tau.new',
+          seconds,
+          offsetMinutes: 0,
+        }),
+      );
     }, 180_000);
 
     it('round-trips a tree', async () => {

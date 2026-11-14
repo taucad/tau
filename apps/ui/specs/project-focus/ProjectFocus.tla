@@ -93,6 +93,9 @@
 (***************************************************************************)
 \* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
 \* route gate imports the type from there. No action or correspondence changes.
+\* A4b: `tauCloudIntent` and its type moved from `hooks/use-cloud-projects.ts` to
+\* `lib/tau-cloud-intent.ts`; the route gate and the live sessions import them from there. No action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

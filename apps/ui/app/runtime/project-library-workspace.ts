@@ -129,7 +129,7 @@ export class WorkspaceCommands {
         conflictCount: 0,
       };
       this.#connectionTrace = trace;
-      const completion = this.#settled(operationId);
+      const completion = this.#settled(operationId, workspaceConnection.getSnapshot().context.faults);
       workspaceConnection.send({ type: 'workspaceSelected', operationId, selection });
       try {
         const connected = await completion;
@@ -163,8 +163,10 @@ export class WorkspaceCommands {
         return undefined;
       }
     }
+    /* The fault count is read before the retry, so a defect the retry itself meets ends this wait too. */
+    const { faults } = snapshot.context;
     workspaceConnection.send({ type: 'retry' });
-    return this.#settled(current.operationId);
+    return this.#settled(current.operationId, faults);
   };
 
   /** Publish a fresh catalog of every connected workspace. */
@@ -269,11 +271,20 @@ export class WorkspaceCommands {
     this.#host.telemetry?.workspaceConnection({ ...metrics, outcome, totalMs: performance.now() - startedAt });
   }
 
-  /** Settles when the operation is ready, failed, or superseded by a later `beginSelection`. */
-  async #settled(operationId: string): Promise<ConnectedWorkspace> {
+  /**
+   * Settles when the operation is ready, failed, superseded by a later `beginSelection`, or met a defect the machine's
+   * root `onError` caught after `faultsBefore`: the machine keeps answering where it was, so this operation can no
+   * longer settle (B2).
+   */
+  async #settled(operationId: string, faultsBefore: number): Promise<ConnectedWorkspace> {
     const { workspaceConnection } = this.#host;
     return new Promise<ConnectedWorkspace>((resolve, reject) => {
       const settle = (snapshot: ConnectionSnapshot): void => {
+        if (snapshot.context.faults > faultsBefore) {
+          subscription.unsubscribe();
+          reject(new Error(`Workspace connection fault: ${snapshot.context.fault ?? 'unknown'}`));
+          return;
+        }
         if (snapshot.context.operationId !== operationId) {
           /* Only a later `beginSelection` sets another id: this operation was superseded, so it settles. */
           if (snapshot.context.operationId !== undefined) {

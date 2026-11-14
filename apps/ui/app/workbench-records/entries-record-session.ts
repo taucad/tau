@@ -603,12 +603,12 @@ export function createEntriesRecordSession(
         const observed = bound;
         const unitId = createSourceModelInteractionUnitId(path);
         /* Only a change of the slices an entry holds is observed, as the owner's selectors re-rendered on those. */
-        let timeout = cad.getSnapshot().context.operationTimeout;
+        let { operationTimeout } = cad.getSnapshot().context;
         let display = modelInteractionRef.getSnapshot().context.unitsById[unitId];
         bound.subscriptions = [
           cad.subscribe(({ context }) => {
-            if (context.operationTimeout !== timeout) {
-              timeout = context.operationTimeout;
+            if (context.operationTimeout !== operationTimeout) {
+              operationTimeout = context.operationTimeout;
               observe(observed);
             }
           }),

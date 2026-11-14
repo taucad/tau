@@ -564,6 +564,42 @@ test(
       /** Why the sample has no count. It stays in n. */
       readonly error?: string;
     }> = [];
+    /* Written after every sample, so a run that times out still reports the samples it took. */
+    const writeReport = async (): Promise<void> => {
+      /* K, as the mapping states it, counts loads whose header mounted more than once. `rebuilt` is the stricter
+       * reading: loads that mounted more headers than the settled page holds. A sample that failed stays in n. */
+      const k = samples.filter((entry) => (entry.mounts ?? 0) > 1).length;
+      const rebuilt = samples.filter((entry) => (entry.mounts ?? 0) > Math.max(entry.settled ?? 0, 1)).length;
+      const failed = samples.filter((entry) => entry.error !== undefined).length;
+      const warm = samples.filter((entry) => entry.warm === true).length;
+      /* Mounts in more than one sampled frame: a person could have seen the first header before its rebuild. */
+      const painted = samples.filter((entry) => new Set(entry.frames ?? []).size > 1).length;
+      const perSample = samples.map((entry) => ({
+        ...entry,
+        /* This load mounted more headers than its settled page holds: one was built, removed and built again. */
+        rebuilt: entry.mounts !== undefined && entry.mounts > Math.max(entry.settled ?? 0, 1),
+      }));
+      const statement = [
+        `U16: ${k} of ${samples.length} opens mounted a viewer dock header more than once, ${rebuilt} of them rebuilt one the settled page holds, ${painted} mounted in more than one frame; ${warm} were warm (workspace chunk from the HTTP cache), ${failed} failed to sample`,
+        ...perSample.map((entry) =>
+          entry.error === undefined
+            ? `sample ${entry.sample} (${entry.warm === true ? 'warm' : 'not warm'}): ${String(entry.mounts)} mounts in frames ${(entry.frames ?? []).join(', ') || 'none'}, ${String(entry.settled)} settled, rebuilt ${String(entry.rebuilt)}`
+            : `sample ${entry.sample}: not sampled (${entry.error})`,
+        ),
+      ];
+      const report = {
+        defect: 'U16',
+        k,
+        rebuilt,
+        painted,
+        warm,
+        failed,
+        n: samples.length,
+        statement,
+        samples: perSample,
+      };
+      await target.writeArtifact('project-load-frames/u16-report.json', `${JSON.stringify(report, null, 2)}\n`);
+    };
     for (let sample = 1; sample <= warmOpens; sample += 1) {
       try {
         await target.reload();
@@ -588,28 +624,8 @@ test(
       } catch (error) {
         samples.push({ sample, error: error instanceof Error ? error.message : String(error) });
       }
+      await writeReport();
     }
-    /* K, as the mapping states it, counts loads whose header mounted more than once. `rebuilt` is the stricter
-     * reading: loads that mounted more headers than the settled page holds. A sample that failed stays in n. */
-    const k = samples.filter((entry) => (entry.mounts ?? 0) > 1).length;
-    const rebuilt = samples.filter((entry) => (entry.mounts ?? 0) > Math.max(entry.settled ?? 0, 1)).length;
-    const failed = samples.filter((entry) => entry.error !== undefined).length;
-    const warm = samples.filter((entry) => entry.warm === true).length;
-    const perSample = samples.map((entry) => ({
-      ...entry,
-      /* This load mounted more headers than its settled page holds: one was built, removed and built again. */
-      rebuilt: entry.mounts !== undefined && entry.mounts > Math.max(entry.settled ?? 0, 1),
-    }));
-    const statement = [
-      `U16: ${k} of ${samples.length} opens mounted a viewer dock header more than once, ${rebuilt} of them rebuilt one the settled page holds; ${warm} were warm (workspace chunk from the HTTP cache), ${failed} failed to sample`,
-      ...perSample.map((entry) =>
-        entry.error === undefined
-          ? `sample ${entry.sample} (${entry.warm === true ? 'warm' : 'not warm'}): ${String(entry.mounts)} mounts in frames ${(entry.frames ?? []).join(', ') || 'none'}, ${String(entry.settled)} settled, rebuilt ${String(entry.rebuilt)}`
-          : `sample ${entry.sample}: not sampled (${entry.error})`,
-      ),
-    ];
-    const report = { defect: 'U16', k, rebuilt, warm, failed, n: samples.length, statement, samples: perSample };
-    await target.writeArtifact('project-load-frames/u16-report.json', `${JSON.stringify(report, null, 2)}\n`);
     expect(samples).toHaveLength(warmOpens);
   },
 );

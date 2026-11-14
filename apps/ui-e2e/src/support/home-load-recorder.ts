@@ -374,8 +374,11 @@ type ProjectLoadGlobal = typeof globalThis & {
   __TAU_PROJECT_LOAD__: ProjectLoadRecord & { mark(name: string): void; scanLaneBorders(): number[] };
 };
 
-/** How many frames of one kind a record keeps; the count past it is still right in `frames`. */
-const projectLoadFrameLimit = 400;
+/**
+ * How many frames of one kind a record keeps; the count past it is in `dropped`. Lists such as the absent-wrapper and
+ * skeleton frames count from frame 1, so the limit leaves a slow runner about 30 s of frames at 60 Hz.
+ */
+const projectLoadFrameLimit = 2000;
 
 /**
  * Installed before any page script: watches the shell, the placeholder, the composer and the viewer dock on every

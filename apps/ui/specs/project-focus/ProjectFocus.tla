@@ -100,7 +100,8 @@
 \* answered `dropped`. Those ports are the environment this spec assumes, so they join the drift sources.
 \* The route sink applies a `chatShown` only once the router is at rest on the commit focus answered (I2):
 \* the model's route steps are atomic, and the sink's deferral is what keeps the app's ones so.
-\* A held `chatShown` is dropped when the move changed the route's chat: focus answers that commit (I18).
+\* A held `chatShown` is dropped when the person's move changed the route's chat: focus answers that commit
+\* (I18). The sink's own replace is not such a move, so the last chat shown still wins.
 \* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 

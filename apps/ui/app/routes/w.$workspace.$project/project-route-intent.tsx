@@ -137,9 +137,8 @@ export function ProjectRouteIntent({
   return undefined;
 }
 
-/** The `chat` parameter of a route's URL. */
-const chatOf = (url: string): string | undefined =>
-  new URLSearchParams(url.split('?')[1] ?? '').get('chat') ?? undefined;
+/** The route's chat in a URL, read as the route reads it (an empty `chat=` is none). */
+const chatOf = (url: string): string | undefined => projectChatIdFromSearch(url.split('?')[1] ?? '');
 
 /**
  * The route port's sink over the app's router: the focused chat's URL replace and the `cloudOpen` latch.
@@ -175,8 +174,13 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
     slugs,
   });
   /* A command that arrives while the router is moving waits for the commit that ends the move, then is checked again.
-   * It keeps the chat the route showed when it arrived: a move that changed it is a request focus has not answered. */
-  const deferred = useRef<Readonly<{ command: FocusRouteCommand; chatId: string | undefined }> | undefined>(undefined);
+   * It keeps the chat the route showed when it arrived: a move the person made that changed it is a request focus has
+   * not answered. A move this sink made itself (its own replace) is not the person's, so it never drops a command. */
+  const deferred = useRef<
+    Readonly<{ command: FocusRouteCommand; chatId: string | undefined; acrossOwnMove: boolean }> | undefined
+  >(undefined);
+  /* The URL of the sink's own last replace, to tell its move from the person's. */
+  const ownTarget = useRef<string | undefined>(undefined);
   /* A layout effect: every one runs before any passive effect, so the commit's report to focus, and the commands
    * focus answers it with, find this commit's route here. */
   useLayoutEffect(() => {
@@ -203,7 +207,12 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
       live !== undefined &&
       (live.navigation.state !== 'idle' || `${live.location.pathname}${live.location.search}` !== current.currentUrl)
     ) {
-      deferred.current = { command, chatId: chatOf(current.currentUrl) };
+      const heading = live.navigation.location ?? live.location;
+      deferred.current = {
+        command,
+        chatId: chatOf(current.currentUrl),
+        acrossOwnMove: `${heading.pathname}${heading.search}` === ownTarget.current,
+      };
       return;
     }
     if (command.type === 'cloudOpenTaken') {
@@ -218,6 +227,7 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
     const path = projectUrl(current.canonicalSlugs ?? current.slugs ?? { workspaceSlug: '', projectSlug: '' });
     const target = `${path}?${parameters.toString()}`;
     if (current.currentUrl !== target) {
+      ownTarget.current = target;
       void current.navigate(target, { replace: true });
     }
   });
@@ -228,7 +238,7 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
       return;
     }
     deferred.current = undefined;
-    if (held.command.type === 'chatShown' && chatOf(latest.current.currentUrl) !== held.chatId) {
+    if (held.command.type === 'chatShown' && !held.acrossOwnMove && chatOf(latest.current.currentUrl) !== held.chatId) {
       /* The move asked for another chat (I18): focus answers that commit, not this one. */
       return;
     }

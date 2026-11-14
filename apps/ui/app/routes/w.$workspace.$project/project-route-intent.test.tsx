@@ -175,4 +175,141 @@ describe('useRouterRouteSink under a data router (I2)', () => {
     });
     expect(router.state.location.search).toBe('?chat=chat-2');
   });
+
+  it('should apply a correction held across its own replace (the last chat wins, as on main)', async () => {
+    const loading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            if (new URL(request.url).searchParams.has('chat')) {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/b'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+    });
+    expect(router.state.navigation.state).toBe('loading');
+    /* The person starts a new chat while the sink's own replace is loading. */
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-3' });
+    });
+    await act(async () => {
+      loading.resolve();
+      await loading.promise;
+    });
+
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toBe('?chat=chat-3');
+    });
+    expect(router.state.navigation.state).toBe('idle');
+  });
+
+  it('should hold a correction while the router is at rest ahead of the commit React shows', async () => {
+    const router = createMemoryRouter([{ path: '/w/:workspace/:project', element: <Probe /> }], {
+      initialEntries: ['/w/ws/b'],
+    });
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+
+    /* Outside `act`, React applies the router's state in a transition it has not committed yet. */
+    void router.navigate('/w/ws/b?chat=chat-2');
+    for (let turn = 0; turn < 20 && router.state.location.search !== '?chat=chat-2'; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- Each turn lets the router settle one step.
+      await Promise.resolve();
+    }
+    expect(router.state.navigation.state).toBe('idle');
+    sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+
+    expect(router.state.location.search).toBe('?chat=chat-2');
+  });
+
+  it('should keep a held correction across a move from an empty chat parameter to none', async () => {
+    const loading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            if (!new URL(request.url).searchParams.has('chat')) {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/b?chat='] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+
+    act(() => {
+      void router.navigate('/w/ws/b');
+    });
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+    });
+    await act(async () => {
+      loading.resolve();
+      await loading.promise;
+    });
+
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toBe('?chat=chat-1');
+    });
+  });
+
+  it('should replay a held correction when the move ends back on the same URL as a new history entry', async () => {
+    const router = createMemoryRouter([{ path: '/w/:workspace/:project', element: <Probe /> }], {
+      initialEntries: ['/w/ws/b'],
+    });
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+    const settle = async (search: string): Promise<void> => {
+      for (let turn = 0; turn < 20 && router.state.location.search !== search; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- Each turn lets the router settle one step.
+        await Promise.resolve();
+      }
+    };
+
+    /* Two moves React commits as one: away to `?x=1` and back to the same URL, a new entry with a new key. */
+    void router.navigate('/w/ws/b?x=1');
+    await settle('?x=1');
+    sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+    void router.navigate('/w/ws/b');
+    await settle('');
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toBe('?chat=chat-1');
+    });
+  });
 });

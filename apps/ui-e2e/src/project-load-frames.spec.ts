@@ -770,20 +770,38 @@ const resizeChatLane = async (dx: number): Promise<void> => {
 
 /** The lanes' boxes on the settled page, as the recorder keeps them. */
 const readLanesNow = async (): Promise<ProjectLoadBox[]> =>
-  target.evaluate(
-    (selector) =>
-      [...document.querySelectorAll(selector)]
-        .filter((node) => node.checkVisibility())
-        .map((node) => node.getBoundingClientRect())
-        .filter((rect) => rect.width > 0 && rect.height > 0)
-        .map((rect) => ({
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        }))
-        .toSorted((left, right) => left.x - right.x || left.y - right.y),
-    workspaceLanes.lanes,
+  target
+    .evaluate(
+      (selector) =>
+        [...document.querySelectorAll(selector)]
+          .filter((node) => node.checkVisibility())
+          .map((node) => node.getBoundingClientRect())
+          .filter((rect) => rect.width > 0 && rect.height > 0)
+          .map((rect) => ({
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          }))
+          .toSorted((left, right) => left.x - right.x || left.y - right.y),
+      workspaceLanes.lanes,
+    )
+    .then(uniqueLanes);
+
+/**
+ * One box per lane: A15b's frame lanes stay under the split view's panes at the same boxes, so a box drawn twice within
+ * 1 px is one lane.
+ */
+const uniqueLanes = (boxes: readonly ProjectLoadBox[]): ProjectLoadBox[] =>
+  boxes.filter(
+    (box, index) =>
+      boxes.findIndex(
+        (other) =>
+          Math.abs(other.x - box.x) <= 1 &&
+          Math.abs(other.y - box.y) <= 1 &&
+          Math.abs(other.width - box.width) <= 1 &&
+          Math.abs(other.height - box.height) <= 1,
+      ) === index,
   );
 
 const describeBoxes = (boxes: readonly ProjectLoadBox[]): string =>
@@ -802,7 +820,9 @@ const lanesFromFirstPaint = (
   record: ProjectLoadRecord,
 ): Array<{ readonly label: string; readonly boxes: readonly ProjectLoadBox[] }> => {
   const entries = record.boxSets['lanes'] ?? [];
-  const content = regionsOf(record, 'content').find((entry) => entry.present);
+  const content = regionsOf(record, 'content').find(
+    (entry) => entry.present && entry.visible && entry.width > 0 && entry.height > 0,
+  );
   const start = content?.frame ?? entries.find((entry) => entry.boxes.length > 0)?.frame;
   if (start === undefined) {
     return [];
@@ -811,10 +831,10 @@ const lanesFromFirstPaint = (
   return [
     standing === undefined
       ? { label: `frame ${start}`, boxes: [] }
-      : { label: describeFrame(standing), boxes: standing.boxes },
+      : { label: describeFrame(standing), boxes: uniqueLanes(standing.boxes) },
     ...entries
       .filter((entry) => entry.frame > start)
-      .map((entry) => ({ label: describeFrame(entry), boxes: entry.boxes })),
+      .map((entry) => ({ label: describeFrame(entry), boxes: uniqueLanes(entry.boxes) })),
   ];
 };
 
@@ -1000,6 +1020,7 @@ knownDefect(
       await settleProject();
       await requireChunkDelayed('F5');
       const record = await keepRecord('f5-phone');
+      precondition(record.firstPaint !== undefined, 'F5: no first-paint entry');
       precondition(
         regionsOf(record, 'tabBar').at(-1)?.present === true,
         'F5: the settled page has no Workbench tab bar',
@@ -1011,9 +1032,20 @@ knownDefect(
       return record;
     },
     assert: (record) => {
-      const moved = Object.keys(phoneFrameRegions).flatMap((name) =>
-        boxChanges(regionsOf(record, name)).map((change) => `${name} ${change}`),
-      );
+      /* From first paint: a frame sampled before the document was parsed can hold no served part. */
+      const painted = record.firstPaint ?? 0;
+      const moved = Object.keys(phoneFrameRegions).flatMap((name) => {
+        const entries = regionsOf(record, name);
+        const standing = entries.findLast((entry) => entry.t <= painted);
+        const fromPaint = [
+          ...(standing === undefined ? [] : [standing]),
+          ...entries.filter((entry) => entry.t > painted),
+        ];
+        return [
+          ...(standing === undefined ? [`${name} at first paint (${painted} ms): absent`] : []),
+          ...boxChanges(fromPaint).map((change) => `${name} ${change}`),
+        ];
+      });
       const sheetAnimations = regionsOf(record, 'sheet').filter((entry) => entry.animations > 0);
       expectMeasured(
         {

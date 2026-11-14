@@ -29,7 +29,8 @@ const sharedDependencyIndicators: ReadonlySet<string> = new Set(['redis', 'datab
 /**
  * Probes in a row a shared dependency must be down on this Machine before it is reported to Sentry. One slow answer
  * is the dependency's tail latency (TAU-API-6: R2 occasionally misses the 1.5 s deadline once and answers the next
- * probe); two in a row, 10 s apart on Fly, is a degradation worth an event. Every down probe is still logged and
+ * probe); two in a row is a degradation worth an event. The streak counts probes from any caller of this
+ * Machine's `/health/ready`; with Fly's 10 s check as the only caller that is about 10 s of failure. Every down probe is still logged and
  * counted, so the metric keeps the full rate.
  */
 const sharedDependencyReportStreak = 2;

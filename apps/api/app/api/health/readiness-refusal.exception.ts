@@ -34,6 +34,8 @@ export const readinessFailures = (result: HealthCheckResult): ReadinessFailure[]
       indicator,
       ...(typeof message === 'string' ? { message } : {}),
       ...(typeof responseTimeMs === 'number' ? { responseTimeMs } : {}),
-      ...(Array.isArray(waitingOn) && waitingOn.every((head) => typeof head === 'string') ? { waitingOn } : {}),
+      ...(Array.isArray(waitingOn) && waitingOn.every((head): head is string => typeof head === 'string')
+        ? { waitingOn }
+        : {}),
     };
   });

@@ -161,12 +161,34 @@ describe('HealthController', () => {
         .mockResolvedValueOnce({ redis: { status: 'down', message: 'Connection refused' } });
 
       for (let probe = 0; probe < 5; probe += 1) {
-        // eslint-disable-next-line no-await-in-loop -- probes are sequential by definition
+        // oxlint-disable-next-line no-await-in-loop -- probes are sequential by definition
         await controller.checkReady();
       }
 
       expect(readinessFailureCount).toHaveBeenCalledTimes(4);
       expect(reportReadinessFailure).not.toHaveBeenCalled();
+    });
+
+    it('should end a shared dependency streak on a probe where only a Machine check is down', async () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const down = { s3: { status: 'down', message: 'Storage readiness timed out after 1500 ms' } } as const;
+      vi.spyOn(s3Health, 'isHealthy')
+        .mockResolvedValueOnce(down)
+        .mockResolvedValueOnce({ s3: { status: 'up', responseTimeMs: 3 } })
+        .mockResolvedValueOnce(down);
+      vi.spyOn(gitToolchainHealth, 'isHealthy')
+        .mockResolvedValueOnce({
+          git: { status: 'up', git: 'git version 2.55.0' },
+        })
+        .mockResolvedValueOnce({ git: { status: 'down', message: 'git is not installed in this image' } });
+
+      await controller.checkReady();
+      await expect(controller.checkReady()).rejects.toBeInstanceOf(ReadinessRefusalException);
+      await controller.checkReady();
+
+      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([
+        [{ indicator: 'git', message: 'git is not installed in this image', consecutiveFailures: 1 }],
+      ]);
     });
 
     it('should refuse when the git toolchain is missing from this Machine', async () => {

@@ -26,6 +26,10 @@ export type WorkbenchLayoutSnapshot = Readonly<{
   restoreTarget?: string;
   restoreUnavailable?: string;
   restoring?: boolean;
+  /** The layout revision this page acknowledged on screen (rule 4); absent while unknown, as while no adapter is attached. */
+  appliedDigest?: `sha256:${string}` | 'missing';
+  /** The latest restore notice for the page's live region. */
+  notice?: Readonly<{ text: string; version: number }>;
 }>;
 
 /** Project-scoped page commands. Restore writes the saved projection as an authoritative record edit. */
@@ -38,20 +42,9 @@ export type WorkbenchLayoutController = Readonly<{
   registerViewer: (apply: (node: ViewerNode, applied: () => void) => void) => () => void;
   registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
   personViewerChanged: (node: ViewerNode) => void;
-  /**
-   * The person changed the workbench arrangement. A change given as a function is applied to the record's arrangement;
-   * `unapplied` runs instead when the record cannot take it (its first read failed, or it holds a refused record), so
-   * the caller can show the pane another way.
-   */
-  personWorkbenchChanged: (
-    node: WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode),
-    unapplied?: () => void,
-  ) => void;
-  /**
-   * Whether the record's first read has finished. Until then the record's arrangement replaces whatever the workbench
-   * shows when it arrives, so a pane opened earlier must be asked for as a change ({@link personWorkbenchChanged} with a
-   * function), which is applied on top of the record once it is read.
-   */
+  /** The person changed the workbench arrangement. */
+  personWorkbenchChanged: (node: WorkbenchLaneNode) => void;
+  /** Whether the record's first read has finished. Until then a pane intent waits in the layout (A8b). */
   ready: () => boolean;
 }>;
 

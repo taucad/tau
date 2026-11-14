@@ -1,56 +1,73 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable typescript/no-confusing-void-expression -- Testing Library and adapter callbacks assert observable state. */
-import type { WatchEvent } from '@taucad/filesystem';
 // @vitest-environment jsdom
+/*
+ * The layout record's rows over the project runtime's layout (A8b). Until A8b the record host owned the layout store
+ * and these rows mounted it; the record session, its watch, its issue and its producer are the runtime's
+ * `workbenchLayout` child now, and the page reaches it through the controller shim. Each row mounts that child with the
+ * runtime's own host and bridge, the shim over it, and the record host's live region.
+ *
+ * Old row → new row (A8b):
+ * - "keeps the live layout after code switches to a checkout and adopts a live-root edit" → "keeps the record at the
+ *   live root and adopts a live-root edit": the runtime's record is the live root's; a checkout no longer reaches it.
+ * - "merges explicit pre-read pane requests onto the authored layout after the first read" → "applies pane intents
+ *   sent before the first read on top of the authored layout": a pre-read pane request is a pane intent now (D14).
+ * - "retries an initial IO failure when the service arrives before applying an explicit pane request" and "hands a
+ *   pane request back when the first read fails" → "keeps a pane intent queued while the first read fails and applies
+ *   it after a read succeeds": the layout keeps the intent; there is no hand-back.
+ * - "carries a pre-read pane request when the old read rejects %s the new read" → "keeps a pane intent queued when the
+ *   file host is replaced and the old read rejects %s the new read".
+ * - "keeps rapid pre-adapter pane requests in the intended layout until the adapter mounts" and "seeds a workbench
+ *   adapter that mounts before a pending pane request is written with that request" → "applies rapid pane intents in
+ *   order once the workbench attaches, and acknowledges the written arrangement".
+ * - "shows a pane asked for before the first read on a workbench that mounted before the read" → same name, as an
+ *   intent.
+ * - "shows a pane requested before the read together with the read, so the read cannot replace it" → "applies a pane
+ *   intent sent before the read after the read, so the read cannot replace it".
+ * - "hands a pane request back and shows only the stored arrangement while the record is refused" → "shows only the
+ *   stored arrangement while the record is refused".
+ * - "should keep one producer under StrictMode whose flush settles a layout write in flight" → same name; the runtime
+ *   registers the producer once, and a StrictMode host registers none.
+ * - `it.fails` "I10: …" and "I13: …" → asserting rows of the same names.
+ * Every other row keeps its name.
+ */
+import type { WatchEvent } from '@taucad/filesystem';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createActor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { workbenchRecords, workbenchPaths } from '@taucad/workbench';
 import type { WorkbenchLaneNode, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 import type { PreviousWorkbenchLayout } from '@taucad/ui-core/types/editor.types';
-import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
-import type * as LayoutControllerModule from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import type { CheckedFileWriteResult } from '@taucad/types';
+import type { editorMachine } from '#machines/editor.machine.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
+import { createWorkbenchLayoutControllerShim } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
+import type { WorkbenchLayoutControllerShim } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
+import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
+import {
+  createLayoutBridgeLogic,
+  createProjectLayoutHost,
+  createProjectShellPort,
+  sendPaneIntent,
+} from '#runtime/project-runtime.layout.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
+import { createViewRecordPorts } from '#workbench-records/view-record-session.js';
+import { flushWorkbenchLayout, selectAppliedLayoutDigest } from '#workbench-records/workbench-layout.machine.js';
 
 let fileManager: unknown;
 let project: unknown;
-let workspace: unknown;
-vi.mock('@xstate/react', () => ({
-  useSelector: (actor: { getSnapshot: () => unknown }, selector: (state: unknown) => unknown) =>
-    selector(actor.getSnapshot()),
-}));
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => fileManager,
-}));
+let controller: WorkbenchLayoutControllerShim | undefined;
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => project }));
-vi.mock('./project-workspace-context.js', () => ({
-  useProjectWorkspace: () => workspace,
-}));
-vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({
-  useFlushOnClose: () => undefined,
-}));
-/** Every layout store the host builds, and whether it was disposed: one record session per file (I13). */
-const layoutStores = vi.hoisted((): Array<{ disposed: boolean }> => []);
-vi.mock('./workbench-layout-controller.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof LayoutControllerModule>();
-  return {
-    ...actual,
-    createWorkbenchLayoutStore: (...input: Parameters<typeof actual.createWorkbenchLayoutStore>) => {
-      const store = actual.createWorkbenchLayoutStore(...input);
-      const tracked = { disposed: false };
-      layoutStores.push(tracked);
-      return {
-        ...store,
-        dispose: () => {
-          tracked.disposed = true;
-          store.dispose();
-        },
-      };
-    },
-  };
-});
+vi.mock('./project-workspace-context.js', () => ({ useWorkbenchLayoutController: () => controller }));
+vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: () => false }));
+vi.mock('#flags/use-feature.js', () => ({ subscribeFeatureFlags: () => () => undefined }));
+
+type EditorRef = ActorRefFrom<typeof editorMachine>;
+type Apply = (node: WorkbenchLaneNode, applied: () => void) => void;
 
 const encoder = new TextEncoder();
 const first = (): WorkbenchLayout => ({
@@ -72,6 +89,18 @@ const viewSeed = (): WorkbenchView =>
     name: 'Other',
   });
 
+/** The group a Dockview shows after opening `pane` (the workbench's opener, as Dockview answers it). */
+const withPane = (node: WorkbenchLaneNode, pane: string): WorkbenchLaneNode =>
+  node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane }] } : node;
+
+const mounted = new Set<() => void>();
+afterEach(() => {
+  for (const stop of mounted) {
+    stop();
+  }
+  mounted.clear();
+});
+
 function mount(
   options: {
     layout?: WorkbenchLayout;
@@ -80,12 +109,10 @@ function mount(
     initialRead?: Promise<void>;
     pendingFirstRead?: Promise<void>;
     failInitialRead?: boolean;
-    initialServiceMissing?: boolean;
-    branchScenario?: boolean;
     pendingLayoutAck?: Promise<void>;
     onLayoutWriteStarted?: () => void;
     strict?: boolean;
-    registerProducer?: (flush: () => Promise<unknown>) => () => void;
+    lanes?: WorkbenchLayout['lanes'];
   } = {},
 ) {
   let bytes: Uint8Array<ArrayBuffer> | undefined = encoder.encode(
@@ -93,15 +120,21 @@ function mount(
   );
   let viewBytes: Uint8Array<ArrayBuffer> | undefined =
     options.viewExists === false ? undefined : encoder.encode(workbenchRecords.view.serialize(viewSeed()));
-  let liveWatch: (() => void) | undefined;
-  let selectedRoot = options.branchScenario ? '/projects/p' : '/root';
+  const liveWatches = new Set<() => void>();
   let failNextRead = options.failInitialRead ?? false;
   let firstFileRead = true;
-  let controller: WorkbenchLayoutController | undefined;
+  const firstReadStarted = Promise.withResolvers<void>();
   let previousLayout = options.previous;
   const editorListeners = new Set<() => void>();
-  let desktopLayout = { chatOpen: true, workbenchOpen: true };
+  let desktopLayout: { chatOpen: boolean; workbenchOpen: boolean; compactAuxiliary?: string } = {
+    chatOpen: options.lanes?.chat ?? true,
+    workbenchOpen: options.lanes?.workbench ?? true,
+  };
   let { pendingLayoutAck } = options;
+  let watchesOpened = 0;
+  /* While set, the editor takes a lane change but does not show it yet. */
+  let heldLanes: typeof desktopLayout | undefined;
+  let holdingLanes = false;
   const writes = vi.fn(
     async ({
       path,
@@ -113,7 +146,7 @@ function mount(
       preconditions: ReadonlyArray<{
         expected: Uint8Array<ArrayBuffer> | null;
       }>;
-    }) => {
+    }): Promise<CheckedFileWriteResult> => {
       const current = path.endsWith(workbenchPaths.layout) ? bytes : viewBytes;
       const expected = preconditions[0]?.expected;
       if (
@@ -139,12 +172,58 @@ function mount(
       return { status: 'applied', content: next };
     },
   );
+  const files = {
+    exists: async (path: string) => {
+      if (path.endsWith(workbenchPaths.layout)) {
+        await options.initialRead;
+      }
+      return path.endsWith(workbenchPaths.layout) ? bytes !== undefined : viewBytes !== undefined;
+    },
+    readFile: async (path: string) => {
+      if (firstFileRead && options.pendingFirstRead) {
+        firstFileRead = false;
+        firstReadStarted.resolve();
+        await options.pendingFirstRead;
+        throw new Error('old worker closed');
+      }
+      if (failNextRead) {
+        failNextRead = false;
+        throw new Error('offline');
+      }
+      return path.endsWith(workbenchPaths.layout) ? bytes! : viewBytes!;
+    },
+    writeFileChecked: writes,
+  };
+  const watch = (path: string, listener: (event: WatchEvent) => void) => {
+    watchesOpened += 1;
+    const notify = () => listener({ type: 'change', path });
+    liveWatches.add(notify);
+    return {
+      ready: Promise.resolve(),
+      closed: new Promise<void>(() => {
+        /* This watch stays open until it is disposed. */
+      }),
+      dispose: () => {
+        liveWatches.delete(notify);
+      },
+    };
+  };
+  const ports = createViewRecordPorts({
+    projectId: 'p',
+    root: '/projects/p',
+    host: { files, watch },
+    setViewRecord: () => undefined,
+    setViewEntryPath: () => undefined,
+    setAppliedWorkbenchRevision: () => undefined,
+  });
+  const layoutHost = createProjectLayoutHost({ projectId: 'p', ports });
+  if (options.viewExists !== false) {
+    // A view session read the view's record: the rollback a foreign change saves keeps it.
+    layoutHost.viewRecordPorts.setViewRecord('v-abcd1234', viewSeed());
+  }
   const send = vi.fn((event: { type: string; layout?: PreviousWorkbenchLayout; panelState?: unknown }) => {
     if (event.type === 'setPreviousLayout') {
       previousLayout = event.layout;
-      for (const listener of editorListeners) {
-        listener();
-      }
     }
     if (
       event.type === 'setPanelState' &&
@@ -152,95 +231,103 @@ function mount(
       typeof event.panelState === 'object' &&
       'desktopLayout' in event.panelState
     ) {
-      desktopLayout = event.panelState.desktopLayout as typeof desktopLayout;
+      const next = { ...desktopLayout, ...(event.panelState.desktopLayout as typeof desktopLayout) };
+      if (holdingLanes) {
+        heldLanes = next;
+        return;
+      }
+      desktopLayout = next;
+    }
+    for (const listener of editorListeners) {
+      listener();
     }
   });
-  const makeService = () => ({ subscribe: () => () => undefined });
-  const fileManagerState = {
-    fileManagerRef: {
-      getSnapshot: () => ({ context: { rootDirectory: selectedRoot } }),
+  const editorSnapshot = () => ({
+    context: { previousLayout, panelState: { desktopLayout }, openFiles: [] as Array<{ path: string }> },
+  });
+  const editor = {
+    subscribe: (listener: (state: unknown) => void) => {
+      const notify = () => listener(editorSnapshot());
+      editorListeners.add(notify);
+      return { unsubscribe: () => editorListeners.delete(notify) };
     },
-    parameterFiles: {
-      exists: async (path: string) => {
-        if (path.endsWith(workbenchPaths.layout)) {
-          await options.initialRead;
-        }
-        if (options.branchScenario && !path.startsWith('/projects/p/')) {
-          return false;
-        }
-        return path.endsWith(workbenchPaths.layout) ? bytes !== undefined : viewBytes !== undefined;
-      },
-      readFile: async (path: string) => {
-        if (options.branchScenario && !path.startsWith('/projects/p/')) {
-          throw new Error('candidate record read');
-        }
-        if (firstFileRead && options.pendingFirstRead) {
-          firstFileRead = false;
-          await options.pendingFirstRead;
-          throw new Error('old worker closed');
-        }
-        if (failNextRead) {
-          failNextRead = false;
-          throw new Error('offline');
-        }
-        return path.endsWith(workbenchPaths.layout) ? bytes! : viewBytes!;
-      },
-      writeFileChecked: writes,
+    on: () => ({ unsubscribe: () => undefined }),
+    send,
+    getSnapshot: editorSnapshot,
+  } as unknown as EditorRef;
+  const layout = createActor(layoutHost.logic, {
+    input: {
+      ...layoutHost.input,
+      workbenchOpen: desktopLayout.workbenchOpen,
+      lanes: { chat: desktopLayout.chatOpen, workbench: desktopLayout.workbenchOpen },
     },
-    workbenchFiles: { deleteFileChecked: vi.fn(), writeFileChecked: writes },
-    contentService: options.initialServiceMissing ? undefined : makeService(),
-    watchRecordFile: (path: string, listener: (event: WatchEvent) => void) => {
-      liveWatch = () => listener({ type: 'change', path });
-      return {
-        ready: Promise.resolve(),
-        closed: new Promise<void>(() => {
-          /* This watch stays open until fixture disposal. */
-        }),
-        dispose: () => {
-          liveWatch = undefined;
-        },
-      };
-    },
+  });
+  const shell = createProjectShellPort();
+  const bridge = createActor(createLayoutBridgeLogic({ shell, host: layoutHost }), { input: { editor, layout } });
+  layout.start();
+  bridge.start();
+  const stop = (): void => {
+    bridge.stop();
+    layout.stop();
   };
-  fileManager = fileManagerState;
-  const applied = new Map<string, `sha256:${string}`>();
-  const setAppliedWorkbenchRevision = vi.fn((path: string, digest: `sha256:${string}` | undefined) => {
-    if (digest) {
-      applied.set(path, digest);
-    } else {
-      applied.delete(path);
-    }
-  });
+  mounted.add(stop);
+  /* The producer the runtime registers for its layout child, once per runtime (A8b). */
+  const producer = async (): Promise<void> =>
+    confirmFlush(async () => flushWorkbenchLayout(layout), 'Pane layout is not confirmed saved.');
+  const shim = createWorkbenchLayoutControllerShim({ layout, editor, host: layoutHost });
+  controller = shim;
+  fileManager = { parameterFiles: files, workbenchFiles: { ...files, deleteFileChecked: vi.fn() } };
   project = {
     projectId: 'p',
-    editorRef: {
-      subscribe: (listener: (state: unknown) => void) => {
-        const notify = () => listener({ context: { previousLayout, panelState: { desktopLayout } } });
-        editorListeners.add(notify);
-        return { unsubscribe: () => editorListeners.delete(notify) };
-      },
-      send,
-      getSnapshot: () => ({
-        context: { previousLayout, panelState: { desktopLayout } },
-      }),
-    },
-    viewRecords: options.viewExists === false ? new Map() : new Map([['v-abcd1234', viewSeed()]]),
-    registerWorkbenchRecordProducer: options.registerProducer ?? (() => () => undefined),
-    setAppliedWorkbenchRevision,
-  };
-  workspace = {
-    registerLayoutController: (value: WorkbenchLayoutController) => {
-      controller = value;
-      return () => {
-        controller = undefined;
-      };
+    projectRuntime: {
+      layout: layoutHost,
+      shell,
+      actor: { getSnapshot: () => ({ context: { layoutRef: layout } }) },
     },
   };
   const rendered = render(<WorkbenchRecordHost />, options.strict ? { wrapper: StrictMode } : undefined);
+  const notifyWatches = async (): Promise<void> => {
+    await act(async () => {
+      for (const notify of liveWatches) {
+        notify();
+      }
+    });
+  };
+  /* The workbench's Dockview: it shows what it is handed, and its opener opens a pane in what it shows. */
+  let workbenchShows: WorkbenchLaneNode | undefined;
+  const dockview = {
+    attach: (apply?: Apply) => {
+      const detach = shim.registerWorkbench((node, applied) => {
+        workbenchShows = node;
+        (apply ?? ((_node, landed) => landed()))(node, applied);
+      });
+      const disconnect = shim.connectIntents({
+        openPanel: (panel: WorkbenchPanelId) => {
+          const showing = workbenchShows ?? layout.getSnapshot().context.arrangement?.workbench;
+          if (showing === undefined) {
+            return;
+          }
+          workbenchShows = withPane(showing, panel);
+          shim.personWorkbenchChanged(workbenchShows);
+        },
+      });
+      return () => {
+        disconnect();
+        detach();
+      };
+    },
+    get shows() {
+      return workbenchShows;
+    },
+  };
   return {
     ...rendered,
-    get controller() {
-      return controller!;
+    layout,
+    controller: shim,
+    dockview,
+    producer,
+    get appliedDigest() {
+      return selectAppliedLayoutDigest(layout.getSnapshot());
     },
     get bytes() {
       return bytes;
@@ -248,31 +335,35 @@ function mount(
     get viewBytes() {
       return viewBytes;
     },
+    get openWatches() {
+      return liveWatches.size;
+    },
+    firstReadStarted: firstReadStarted.promise,
+    get watchesOpened() {
+      return watchesOpened;
+    },
+    intent: (pane: WorkbenchPanelId) =>
+      sendPaneIntent(layout, layoutHost.facts(), {
+        source: 'person',
+        target: { kind: 'pane', adapter: 'workbench', pane },
+      }),
     set: async (next: Uint8Array<ArrayBuffer>) => {
       bytes = next;
-      await act(async () => {
-        liveWatch?.();
-      });
+      await notifyWatches();
     },
     setLive: async (next: Uint8Array<ArrayBuffer>) => {
       bytes = next;
-      await act(async () => {
-        liveWatch?.();
-      });
-    },
-    selectCheckout: () => {
-      selectedRoot = '/checkouts/c';
-      rendered.rerender(<WorkbenchRecordHost />);
+      await notifyWatches();
     },
     failRead: async () => {
       failNextRead = true;
-      await act(async () => {
-        liveWatch?.();
-      });
+      await notifyWatches();
     },
-    readyService: () => {
-      fileManagerState.contentService = makeService();
-      rendered.rerender(<WorkbenchRecordHost />);
+    replaceHost: () => {
+      act(() => {
+        // New connections to the same files: the session reopens its watch on them.
+        ports.replaceHost({ files: { ...files }, watch: (path, listener) => watch(path, listener) });
+      });
     },
     deleteView: () => {
       viewBytes = undefined;
@@ -286,14 +377,39 @@ function mount(
         listener();
       }
     },
+    holdLanes: () => {
+      holdingLanes = true;
+    },
+    showHeldLanes: () => {
+      holdingLanes = false;
+      if (heldLanes !== undefined) {
+        desktopLayout = heldLanes;
+        heldLanes = undefined;
+        for (const listener of editorListeners) {
+          listener();
+        }
+      }
+    },
+    get lanesHeld() {
+      return heldLanes;
+    },
+    remount: () => {
+      rendered.unmount();
+      return render(<WorkbenchRecordHost />, options.strict ? { wrapper: StrictMode } : undefined);
+    },
     writes,
     send,
-    applied,
-    setAppliedWorkbenchRevision,
+    stop,
   };
 }
 
+const landAtOnce = () => vi.fn((_node: unknown, applied: () => void) => applied());
+
 describe('live workbench record host', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('should refresh restore availability without changing the layout digest and reject a stale target', async () => {
     const host = mount();
     await waitFor(() => expect(host.controller.snapshot()).toBeDefined());
@@ -354,17 +470,10 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('keeps the live layout after code switches to a checkout and adopts a live-root edit', async () => {
-    const host = mount({ branchScenario: true });
+  it('keeps the record at the live root and adopts a live-root edit', async () => {
+    const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
-    });
-    act(() => {
-      host.selectCheckout();
     });
     await host.setLive(encoder.encode(workbenchRecords.layout.serialize(second())));
     await waitFor(() => {
@@ -372,14 +481,11 @@ describe('live workbench record host', () => {
     });
     expect(host.writes).not.toHaveBeenCalled();
     act(() => {
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group'
-          ? {
-              ...node,
-              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
-            }
-          : node,
-      );
+      host.dockview.attach();
+      host.controller.registerViewer((_node, applied) => applied());
+    });
+    act(() => {
+      host.controller.personWorkbenchChanged(withPane(second().workbench, 'revisions'));
     });
     await waitFor(
       () => {
@@ -418,22 +524,15 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
-  it('merges explicit pre-read pane requests onto the authored layout after the first read', async () => {
+  it('applies pane intents sent before the first read on top of the authored layout', async () => {
     const gate = Promise.withResolvers<void>();
     const authored = second();
     const host = mount({ layout: authored, initialRead: gate.promise });
     act(() => {
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group'
-          ? {
-              ...node,
-              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
-            }
-          : node,
-      );
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'details' }] } : node,
-      );
+      host.intent('revisions');
+      host.intent('details');
+      host.dockview.attach();
+      host.controller.registerViewer((_node, applied) => applied());
     });
     gate.resolve();
     await waitFor(
@@ -453,29 +552,17 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
-  it('retries an initial IO failure when the service arrives before applying an explicit pane request', async () => {
+  it('keeps a pane intent queued while the first read fails and applies it after a read succeeds', async () => {
     const authored = second();
-    const host = mount({
-      layout: authored,
-      failInitialRead: true,
-      initialServiceMissing: true,
+    const host = mount({ layout: authored, failInitialRead: true });
+    act(() => {
+      host.dockview.attach();
+      host.controller.registerViewer((_node, applied) => applied());
+      host.intent('revisions');
     });
-    // A bounded retry is not a problem yet: the header stays empty.
     await act(async () => undefined);
-    expect(readRecordIssues('p')).toEqual([]);
-    act(() => {
-      host.readyService();
-    });
-    act(() => {
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group'
-          ? {
-              ...node,
-              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
-            }
-          : node,
-      );
-    });
+    expect(host.dockview.shows).toBeUndefined();
+    await host.set(host.bytes!);
     await waitFor(
       () => {
         expect(host.controller.snapshot()?.layout.workbench).toEqual({
@@ -493,34 +580,25 @@ describe('live workbench record host', () => {
   });
 
   it.each(['before', 'after'] as const)(
-    'carries a pre-read pane request when the old read rejects %s the new read',
+    'keeps a pane intent queued when the file host is replaced and the old read rejects %s the new read',
     async (order) => {
       const gate = Promise.withResolvers<void>();
       const authored = second();
-      const host = mount({
-        layout: authored,
-        pendingFirstRead: gate.promise,
-        initialServiceMissing: true,
-      });
+      const host = mount({ layout: authored, pendingFirstRead: gate.promise });
       act(() => {
-        host.controller.personWorkbenchChanged((node) =>
-          node.kind === 'group'
-            ? {
-                ...node,
-                tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
-              }
-            : node,
-        );
+        host.dockview.attach();
+        host.controller.registerViewer((_node, applied) => applied());
+        host.intent('revisions');
       });
-      act(() => {
-        host.readyService();
-      });
+      // The old connections' read has started and hangs; then the file host is replaced.
+      await host.firstReadStarted;
+      host.replaceHost();
       if (order === 'after') {
         await waitFor(() => {
-          expect(host.controller.snapshot()?.layout).toEqual(authored);
+          expect(host.controller.snapshot()?.layout).toBeDefined();
         });
       }
-      gate.reject(new Error('old worker closed'));
+      gate.resolve();
       await waitFor(
         () => {
           expect(host.controller.snapshot()?.layout.workbench).toEqual({
@@ -550,132 +628,81 @@ describe('live workbench record host', () => {
       host.controller.registerViewer(apply);
       host.controller.registerWorkbench(apply);
     });
-    expect(host.applied.has(workbenchPaths.layout)).toBe(true);
+    expect(host.appliedDigest).toBeDefined();
     await host.failRead();
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    expect(readRecordIssues('p')).toEqual([]);
-    const priorApplications = apply.mock.calls.length;
+    await waitFor(() => {
+      expect(readRecordIssues('p')).toEqual([]);
+    });
     await host.set(host.bytes!);
     await waitFor(() => {
-      expect(host.applied.has(workbenchPaths.layout)).toBe(true);
+      expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
     });
     await waitFor(() => {
       expect(readRecordIssues('p')).toEqual([]);
     });
-    expect(apply.mock.calls.length).toBeGreaterThan(priorApplications);
     expect(host.writes).not.toHaveBeenCalled();
     host.unmount();
   });
 
-  it('keeps rapid pre-adapter pane requests in the intended layout until the adapter mounts', async () => {
+  it('applies rapid pane intents in order once the workbench attaches, and acknowledges the written arrangement', async () => {
     const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
     });
     act(() => {
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group'
-          ? {
-              ...node,
-              tabs: [...node.tabs, { kind: 'pane', pane: 'revisions' }],
-            }
-          : node,
-      );
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'details' }] } : node,
-      );
+      host.intent('revisions');
+      host.intent('details');
     });
-    await waitFor(
-      () => {
-        expect(host.controller.snapshot()?.layout.workbench).toEqual({
-          kind: 'group',
-          tabs: [
-            { kind: 'pane', pane: 'parameters' },
-            { kind: 'pane', pane: 'revisions' },
-            { kind: 'pane', pane: 'details' },
-          ],
-        });
-      },
-      { timeout: 1500 },
-    );
-    const apply = vi.fn((_node, applied: () => void) => {
-      applied();
-    });
+    expect(host.writes).not.toHaveBeenCalled();
+    const apply = landAtOnce();
     act(() => {
-      host.controller.registerWorkbench(apply);
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(apply);
     });
-    expect(apply).toHaveBeenCalledExactlyOnceWith(host.controller.snapshot()?.layout.workbench, expect.any(Function));
-    host.unmount();
-  });
-
-  it('seeds a workbench adapter that mounts before a pending pane request is written with that request', async () => {
-    const host = mount();
-    await waitFor(() => {
-      expect(host.controller.snapshot()?.layout).toEqual(first());
-    });
-    act(() => {
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
-      );
-    });
-    const apply = vi.fn((_node, applied: () => void) => {
-      applied();
-    });
-    act(() => {
-      host.controller.registerViewer((_node, applied) => {
-        applied();
-      });
-      host.controller.registerWorkbench(apply);
-    });
-    // The shown arrangement is not the stored record yet, so the stored digest is not reported as applied.
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
     const requested = {
       kind: 'group',
       tabs: [
         { kind: 'pane', pane: 'parameters' },
-        { kind: 'pane', pane: 'share' },
+        { kind: 'pane', pane: 'revisions' },
+        { kind: 'pane', pane: 'details' },
       ],
     };
-    expect(host.writes).not.toHaveBeenCalled();
-    expect(apply).toHaveBeenCalledExactlyOnceWith(requested, expect.any(Function));
+    // The workbench is shown the stored arrangement, which is acknowledged, and opens the panes on it.
+    const stored = host.controller.snapshot()?.layoutDigest;
+    expect(apply).toHaveBeenCalledExactlyOnceWith(first().workbench, expect.any(Function));
+    expect(host.dockview.shows).toEqual(requested);
+    expect(host.appliedDigest).toBe(stored);
     await waitFor(
       () => {
         expect(host.controller.snapshot()?.layout.workbench).toEqual(requested);
       },
-      { timeout: 1500 },
+      { timeout: 1600 },
     );
+    // The written arrangement is acknowledged once its own publication is on screen.
     await waitFor(() => {
-      expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+      expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
     });
+    expect(host.appliedDigest).not.toBe(stored);
+    expect(host.writes).toHaveBeenCalledOnce();
     host.unmount();
   });
 
   it('shows a pane asked for before the first read on a workbench that mounted before the read', async () => {
     const gate = Promise.withResolvers<void>();
     const host = mount({ initialRead: gate.promise });
-    const shown: unknown[] = [];
-    const apply = vi.fn((node: unknown, applied: () => void) => {
-      shown.push(node);
-      applied();
-    });
     act(() => {
-      host.controller.registerWorkbench(apply);
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
-      );
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach();
+      host.intent('share');
     });
     gate.resolve();
     await waitFor(() => {
-      expect(shown).not.toHaveLength(0);
+      expect(host.dockview.shows).toEqual(withPane(first().workbench, 'share'));
     });
-    await act(async () => undefined);
-    // The mounted workbench reports what it shows on its next change (here a file opening) before the debounced pane
-    // request is written: what it shows must already hold the pane, or that report replaces the request.
-    const showing = shown.at(-1) as WorkbenchLaneNode;
+    // The mounted workbench reports what it shows on its next change (here another pane) before the debounced edit
+    // is written: what it shows already holds the pane.
     act(() => {
-      host.controller.personWorkbenchChanged(
-        showing.kind === 'group' ? { ...showing, tabs: [...showing.tabs, { kind: 'pane', pane: 'details' }] } : showing,
-      );
+      host.controller.personWorkbenchChanged(withPane(host.dockview.shows!, 'details'));
     });
     await waitFor(
       () => {
@@ -693,19 +720,17 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
-  it('shows a pane requested before the read together with the read, so the read cannot replace it', async () => {
+  it('applies a pane intent sent before the read after the read, so the read cannot replace it', async () => {
     const gate = Promise.withResolvers<void>();
     const host = mount({ initialRead: gate.promise });
     const shown: unknown[] = [];
-    const apply = vi.fn((node: unknown, applied: () => void) => {
-      shown.push(node);
-      applied();
-    });
     act(() => {
-      host.controller.registerWorkbench(apply);
-      host.controller.personWorkbenchChanged((node) =>
-        node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node,
-      );
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((node, applied) => {
+        shown.push(node);
+        applied();
+      });
+      host.intent('share');
     });
     gate.resolve();
     const requested = {
@@ -721,28 +746,13 @@ describe('live workbench record host', () => {
       },
       { timeout: 1600 },
     );
-    // The mounted workbench is never handed the saved arrangement without the pane, so nothing applied late can
-    // leave it showing that.
-    expect(shown).toEqual([requested]);
+    // The read is shown first and the pane opens on it; nothing the read brings later replaces it.
+    expect(shown).toEqual([first().workbench]);
+    expect(host.dockview.shows).toEqual(requested);
     host.unmount();
   });
 
-  it('hands a pane request back when the first read fails', async () => {
-    const host = mount({ failInitialRead: true });
-    const unapplied = vi.fn();
-    act(() => {
-      host.controller.personWorkbenchChanged(
-        (node) => (node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node),
-        unapplied,
-      );
-    });
-    await waitFor(() => {
-      expect(unapplied).toHaveBeenCalledOnce();
-    });
-    host.unmount();
-  });
-
-  it('hands a pane request back and shows only the stored arrangement while the record is refused', async () => {
+  it('shows only the stored arrangement while the record is refused', async () => {
     const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
@@ -751,22 +761,20 @@ describe('live workbench record host', () => {
     await waitFor(() => {
       expect(host.controller.snapshot()).toBeUndefined();
     });
-    const unapplied = vi.fn();
     act(() => {
       host.controller.personWorkbenchChanged({ kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] });
-      host.controller.personWorkbenchChanged(
-        (node) => (node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane: 'share' }] } : node),
-        unapplied,
-      );
     });
-    expect(unapplied).toHaveBeenCalledOnce();
-    const apply = vi.fn((_node, applied: () => void) => {
-      applied();
-    });
+    const apply = landAtOnce();
     act(() => {
       host.controller.registerWorkbench(apply);
     });
     expect(apply).toHaveBeenCalledExactlyOnceWith(first().workbench, expect.any(Function));
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 650);
+      });
+    });
+    expect(host.writes).not.toHaveBeenCalled();
     host.unmount();
   });
 
@@ -797,8 +805,8 @@ describe('live workbench record host', () => {
   it('should leave the viewer adapter untouched when only the workbench lane changes', async () => {
     const host = mount();
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
-    const viewer = vi.fn((_node, applied: () => void) => applied());
-    const workbench = vi.fn((_node, applied: () => void) => applied());
+    const viewer = landAtOnce();
+    const workbench = landAtOnce();
     act(() => {
       host.controller.registerViewer(viewer);
       host.controller.registerWorkbench(workbench);
@@ -809,7 +817,7 @@ describe('live workbench record host', () => {
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
     expect(viewer).not.toHaveBeenCalled();
     expect(workbench).toHaveBeenCalledOnce();
-    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
     host.unmount();
   });
 
@@ -822,7 +830,7 @@ describe('live workbench record host', () => {
     });
     try {
       await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
-      const apply = vi.fn((_node, applied: () => void) => applied());
+      const apply = landAtOnce();
       act(() => {
         host.controller.registerViewer(apply);
         host.controller.registerWorkbench(apply);
@@ -837,7 +845,7 @@ describe('live workbench record host', () => {
       };
       act(() => host.controller.personWorkbenchChanged(a));
       await started.promise;
-      act(() => host.controller.personWorkbenchChanged(() => b));
+      act(() => host.controller.personWorkbenchChanged(b));
       apply.mockClear();
       await host.setLive(host.bytes!);
       await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(a));
@@ -853,12 +861,8 @@ describe('live workbench record host', () => {
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
     });
-    const viewer = vi.fn((_node, applied: () => void) => {
-      applied();
-    });
-    const workbench = vi.fn((_node, applied: () => void) => {
-      applied();
-    });
+    const viewer = landAtOnce();
+    const workbench = landAtOnce();
     act(() => {
       host.controller.registerViewer(viewer);
       host.controller.registerWorkbench(workbench);
@@ -879,13 +883,21 @@ describe('live workbench record host', () => {
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout.lanes.chat).toBe(false);
     });
-    expect(viewer).not.toHaveBeenCalled();
-    expect(host.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'setPanelState',
-        panelState: { desktopLayout: { chatOpen: false, workbenchOpen: true } },
-      }),
+    // The foreign change is fenced while the viewer edit is owed; the edit's write keeps the foreign lanes, and its
+    // publication brings them to the editor.
+    await waitFor(
+      () => {
+        expect(host.send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'setPanelState',
+            panelState: { desktopLayout: { chatOpen: false, workbenchOpen: true } },
+          }),
+        );
+      },
+      { timeout: 1600 },
     );
+    expect(viewer).not.toHaveBeenCalled();
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ record: { viewer: edited } });
     host.unmount();
   });
 
@@ -896,39 +908,43 @@ describe('live workbench record host', () => {
     });
     const viewerCallbacks: Array<() => void> = [];
     const workbenchCallbacks: Array<() => void> = [];
-    host.controller.registerViewer((_node, applied) => {
-      viewerCallbacks.push(applied);
+    act(() => {
+      host.controller.registerViewer((_node, applied) => {
+        viewerCallbacks.push(applied);
+      });
     });
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false); // Mobile editor drawer may not be mounted yet.
-    host.controller.registerWorkbench((_node, applied) => {
-      workbenchCallbacks.push(applied);
+    expect(host.appliedDigest).toBeUndefined(); // Mobile editor drawer may not be mounted yet.
+    act(() => {
+      host.controller.registerWorkbench((_node, applied) => {
+        workbenchCallbacks.push(applied);
+      });
     });
-    viewerCallbacks.at(-1)?.();
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    workbenchCallbacks.at(-1)?.();
-    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    act(() => viewerCallbacks.at(-1)?.());
+    expect(host.appliedDigest).toBeUndefined();
+    act(() => workbenchCallbacks.at(-1)?.());
+    expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
     const staleWorkbench = workbenchCallbacks.at(-1)!;
     await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(second());
     });
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    viewerCallbacks.at(-1)?.();
-    staleWorkbench();
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    workbenchCallbacks.at(-1)?.();
-    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    expect(host.appliedDigest).toBeUndefined();
+    act(() => {
+      viewerCallbacks.at(-1)?.();
+      staleWorkbench();
+    });
+    expect(host.appliedDigest).toBeUndefined();
+    act(() => workbenchCallbacks.at(-1)?.());
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
     const staleViewer = viewerCallbacks.at(-1)!;
     await host.set(encoder.encode('{bad'));
     await waitFor(() => {
       expect(host.controller.snapshot()).toBeUndefined();
     });
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    staleViewer();
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
+    expect(host.appliedDigest).toBeUndefined();
+    act(() => staleViewer());
+    expect(host.appliedDigest).toBeUndefined();
     host.unmount();
-    workbenchCallbacks.at(-1)?.();
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
   });
 
   it('adopts one arrangement without stealing focus, reports refused debug panes, and restores prior bytes', async () => {
@@ -941,8 +957,12 @@ describe('live workbench record host', () => {
     });
     const adoptViewer = vi.fn();
     const adoptWorkbench = vi.fn();
-    const unsubViewer = host.controller.registerViewer(adoptViewer);
-    const unsubWorkbench = host.controller.registerWorkbench(adoptWorkbench);
+    let unsubViewer = (): void => undefined;
+    let unsubWorkbench = (): void => undefined;
+    act(() => {
+      unsubViewer = host.controller.registerViewer(adoptViewer);
+      unsubWorkbench = host.controller.registerWorkbench(adoptWorkbench);
+    });
     const changed = vi.fn();
     const unsubscribe = host.controller.subscribe(changed);
     await host.set(encoder.encode(JSON.stringify(second(), null, 2)));
@@ -978,14 +998,16 @@ describe('live workbench record host', () => {
     });
     expect(host.writes).toHaveBeenCalledTimes(1);
     unsubscribe();
-    unsubViewer();
-    unsubWorkbench();
+    act(() => {
+      unsubViewer();
+      unsubWorkbench();
+    });
     editor.remove();
     host.unmount();
   });
 
   it('clears the reactive snapshot for invalid/newer bytes and offers Reset only for invalid bytes', async () => {
-    // Offered through the settings trigger: the host publishes the issue and renders no page text.
+    // Offered through the settings trigger: the layout publishes the issue and the page renders no text.
     const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
@@ -1016,6 +1038,11 @@ describe('live workbench record host', () => {
     const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    // The page shows the arrangement: the closing change is applied, and the restore is asked over it.
+    act(() => {
+      host.controller.registerViewer(landAtOnce());
+      host.controller.registerWorkbench(landAtOnce());
     });
     host.deleteView();
     const closed: WorkbenchLayout = {
@@ -1080,10 +1107,8 @@ describe('live workbench record host', () => {
 describe('layout host rows (A0.3)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    layoutStores.length = 0;
   });
 
-  const landAtOnce = () => vi.fn((_node: unknown, applied: () => void) => applied());
   const restoreCommand = (host: ReturnType<typeof mount>) => ({
     layoutDigest: host.controller.snapshot()!.layoutDigest,
     target: host.controller.snapshot()!.restoreTarget!,
@@ -1103,17 +1128,17 @@ describe('layout host rows (A0.3)', () => {
       detachViewer = host.controller.registerViewer(viewer);
       detachWorkbench = host.controller.registerWorkbench(workbench);
     });
-    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest);
     act(() => {
       detachWorkbench();
     });
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
+    expect(host.appliedDigest).toBeUndefined();
     act(() => {
       detachViewer();
     });
     await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
-    expect(host.applied.has(workbenchPaths.layout)).toBe(false);
+    expect(host.appliedDigest).toBeUndefined();
     viewer.mockClear();
     workbench.mockClear();
     act(() => {
@@ -1122,13 +1147,13 @@ describe('layout host rows (A0.3)', () => {
     });
     expect(viewer).toHaveBeenCalledExactlyOnceWith(second().viewer, expect.any(Function));
     expect(workbench).toHaveBeenCalledExactlyOnceWith(second().workbench, expect.any(Function));
-    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
     host.unmount();
   });
 
   // A0.3 row 3, Y2/I10: a foreign publication lands while the person's pane edit is not yet written. The person's
   // arrangement wins: the workbench is never handed an arrangement without the person's edit.
-  it.fails('I10: should not show a foreign arrangement over an unwritten person edit', async () => {
+  it('I10: should not show a foreign arrangement over an unwritten person edit', async () => {
     const host = mount();
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
     const shown: WorkbenchLaneNode[] = [];
@@ -1167,7 +1192,7 @@ describe('layout host rows (A0.3)', () => {
     expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ status: 'current', record: first() });
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
     expect(workbench).toHaveBeenLastCalledWith(first().workbench, expect.any(Function));
-    expect(host.applied.get(workbenchPaths.layout)).toBe(host.controller.snapshot()?.layoutDigest);
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
     host.unmount();
   });
 
@@ -1197,6 +1222,10 @@ describe('layout host rows (A0.3)', () => {
     async (edit) => {
       const host = mount({ layout: second(), previous: { layout: first(), views: { 'v-abcd1234': viewSeed() } } });
       await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+      act(() => {
+        host.controller.registerViewer(landAtOnce());
+        host.controller.registerWorkbench(landAtOnce());
+      });
       const command = restoreCommand(host);
       const moved: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
       act(() => {
@@ -1216,24 +1245,22 @@ describe('layout host rows (A0.3)', () => {
     },
   );
 
-  // A0.3 row 5, Y3/S25: under a StrictMode double mount the host registers one producer, and its flush settles a
-  // layout write in flight, which lands once.
+  // A0.3 row 5, Y3/S25: the runtime registers the layout's producer once, a StrictMode host registers none, and the
+  // producer's flush settles a layout write in flight, which lands once.
   it('should keep one producer under StrictMode whose flush settles a layout write in flight', async () => {
     const started = Promise.withResolvers<void>();
     const ack = Promise.withResolvers<void>();
-    const producers = new Set<() => Promise<unknown>>();
     const host = mount({
       strict: true,
       pendingLayoutAck: ack.promise,
       onLayoutWriteStarted: started.resolve,
-      registerProducer: (flush) => {
-        producers.add(flush);
-        return () => producers.delete(flush);
-      },
     });
     try {
       await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
-      expect(producers.size).toBe(1);
+      act(() => {
+        host.controller.registerViewer(landAtOnce());
+        host.controller.registerWorkbench(landAtOnce());
+      });
       const edited: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
       await act(async () => {
         host.controller.personWorkbenchChanged(edited);
@@ -1241,7 +1268,7 @@ describe('layout host rows (A0.3)', () => {
       });
       let settled = false;
       const flushing = (async () => {
-        await [...producers][0]!();
+        await host.producer();
         settled = true;
       })();
       await act(async () => undefined);
@@ -1259,16 +1286,139 @@ describe('layout host rows (A0.3)', () => {
       ack.resolve();
       host.unmount();
     }
-    expect(producers.size).toBe(0);
   });
 
-  // A0.3 row 5, Y3/I13: one record session per record file. Today StrictMode's double render builds a second layout
-  // store (and starts its record actor) that is never disposed.
-  it.fails('I13: should hold one live layout record session under a StrictMode double mount', async () => {
+  // A0.3 row 5, Y3/I13: one record session per record file. The session is the runtime's child, so a StrictMode
+  // double mount of the page's host opens no second one.
+  it('I13: should hold one live layout record session under a StrictMode double mount', async () => {
     const host = mount({ strict: true });
     await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
     await act(async () => undefined);
-    expect(layoutStores.filter((store) => !store.disposed)).toHaveLength(1);
+    expect(host.watchesOpened).toBe(1);
+    expect(host.openWatches).toBe(1);
+    host.unmount();
+  });
+});
+
+describe('the layout across a host remount (A8b)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // §11 (A8b): a write still in flight when the host remounts lands once, and nothing writes it again.
+  it('should land a layout write in flight during a remount once', async () => {
+    const started = Promise.withResolvers<void>();
+    const ack = Promise.withResolvers<void>();
+    const host = mount({ pendingLayoutAck: ack.promise, onLayoutWriteStarted: started.resolve });
+    try {
+      await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+      let detachViewer = (): void => undefined;
+      let detachWorkbench = (): void => undefined;
+      act(() => {
+        detachViewer = host.controller.registerViewer(landAtOnce());
+        detachWorkbench = host.controller.registerWorkbench(landAtOnce());
+      });
+      const edited: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
+      await act(async () => {
+        host.controller.personWorkbenchChanged(edited);
+        await started.promise;
+      });
+      act(() => {
+        detachWorkbench();
+        detachViewer();
+      });
+      const remounted = host.remount();
+      act(() => {
+        host.controller.registerViewer(landAtOnce());
+        host.controller.registerWorkbench(landAtOnce());
+      });
+      await act(async () => {
+        ack.resolve();
+      });
+      await waitFor(() => expect(host.controller.snapshot()?.layout.workbench).toEqual(edited));
+      expect(host.writes).toHaveBeenCalledOnce();
+      expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
+        status: 'current',
+        record: { ...first(), workbench: edited },
+      });
+      remounted.unmount();
+    } finally {
+      ack.resolve();
+    }
+  });
+
+  // §11 (A8b): a person's edit still in its debounce when the host remounts is written, not dropped with the host.
+  it('should write a debounced edit when the host remounts within the debounce', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    let detachViewer = (): void => undefined;
+    let detachWorkbench = (): void => undefined;
+    act(() => {
+      detachViewer = host.controller.registerViewer(landAtOnce());
+      detachWorkbench = host.controller.registerWorkbench(landAtOnce());
+    });
+    const edited: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] };
+    act(() => {
+      host.controller.personWorkbenchChanged(edited);
+    });
+    act(() => {
+      detachWorkbench();
+      detachViewer();
+    });
+    const remounted = host.remount();
+    await waitFor(
+      () => {
+        expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({
+          status: 'current',
+          record: { ...first(), workbench: edited },
+        });
+      },
+      { timeout: 1600 },
+    );
+    expect(host.writes).toHaveBeenCalledOnce();
+    remounted.unmount();
+  });
+
+  // B1: a foreign change reaches a live project whose workbench has never mounted, and is applied when it attaches.
+  it('should apply a foreign change made while no workbench was mounted when the workbench attaches', async () => {
+    const host = mount();
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(second())));
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(second()));
+    expect(host.appliedDigest).toBeUndefined();
+    const viewer = landAtOnce();
+    const workbench = landAtOnce();
+    act(() => {
+      host.controller.registerViewer(viewer);
+      host.controller.registerWorkbench(workbench);
+    });
+    expect(workbench).toHaveBeenCalledExactlyOnceWith(second().workbench, expect.any(Function));
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
+    host.unmount();
+  });
+
+  // D14, rule 4: the acknowledgement waits for the editor's lanes to show the record's lanes as well as both adapters.
+  it('should acknowledge a publication only once the editor shows its lanes', async () => {
+    const host = mount({ lanes: { chat: true, workbench: true } });
+    await waitFor(() => expect(host.controller.snapshot()?.layout).toEqual(first()));
+    act(() => {
+      host.controller.registerViewer(landAtOnce());
+      host.controller.registerWorkbench(landAtOnce());
+    });
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
+    // A foreign change closes the chat lane: the adapters show its trees at once, the lanes only once the editor has.
+    host.holdLanes();
+    await host.set(
+      encoder.encode(workbenchRecords.layout.serialize({ ...first(), lanes: { chat: false, workbench: true } })),
+    );
+    await waitFor(() => expect(host.lanesHeld).toEqual({ chatOpen: false, workbenchOpen: true }));
+    expect(host.controller.snapshot()?.layout.lanes.chat).toBe(false);
+    expect(host.appliedDigest).toBeUndefined();
+    // The editor shows the lanes: the publication is acknowledged.
+    act(() => {
+      host.showHeldLanes();
+    });
+    await waitFor(() => expect(host.appliedDigest).toBe(host.controller.snapshot()?.layoutDigest));
     host.unmount();
   });
 });

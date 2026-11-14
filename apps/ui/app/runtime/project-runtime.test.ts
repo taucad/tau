@@ -33,6 +33,7 @@ import {
   selectManifestObservationError,
   selectProjectRef,
   selectProjectRuntimeFault,
+  selectWorkbenchLayoutRef,
 } from '#runtime/project-runtime.js';
 import type {
   ProjectChildInput,
@@ -44,6 +45,11 @@ import type {
   ObservablePort,
 } from '#runtime/project-runtime.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
+import { createViewRecordPorts } from '#workbench-records/view-record-session.js';
+import { workbenchRecords } from '@taucad/workbench';
+import type { CheckedFileWriteResult } from '@taucad/types';
+import type { WorkbenchLayout } from '@taucad/workbench';
+import { selectArrangement } from '#workbench-records/workbench-layout.machine.js';
 import type * as CadMachineModule from '#machines/cad.machine.js';
 import type * as ParameterSetServiceModule from '@taucad/ui-core/services/parameter-set-service';
 
@@ -247,6 +253,87 @@ describe('createProjectRuntime', () => {
       expect(selectProjectRuntimeFault(actor.getSnapshot())).toBeUndefined();
     },
   );
+
+  /* A8b exit: the layout is the runtime's child, not the focused page's. A project that is not focused is flushed
+   * through its runtime's producers (its persistence guard's `hidden` flush), and the runtime's stop (a session's
+   * close or leave) writes an edit still in its debounce. */
+  it('should flush its layout through its producers and write an owed edit when it stops', async () => {
+    const stored: WorkbenchLayout = {
+      version: 1,
+      lanes: { chat: true, workbench: true },
+      viewer: { kind: 'group', tabs: [] },
+      workbench: { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] },
+    };
+    const encoder = new TextEncoder();
+    let bytes = encoder.encode(workbenchRecords.layout.serialize(stored));
+    const writes: string[] = [];
+    const files = {
+      exists: async () => true,
+      readFile: async () => bytes,
+      writeFileChecked: async ({ data }: { path: string; data: string }): Promise<CheckedFileWriteResult> => {
+        writes.push(data);
+        bytes = encoder.encode(data);
+        return { status: 'applied', content: bytes };
+      },
+    };
+    const viewRecordPorts = createViewRecordPorts({
+      projectId: project.id,
+      root: `/projects/${project.id}`,
+      host: {
+        files,
+        watch: () => ({
+          ready: Promise.resolve(),
+          closed: new Promise<void>(() => {
+            /* Stays open: the watch is never closed by its host. */
+          }),
+          dispose: () => undefined,
+        }),
+      },
+      setViewRecord: () => undefined,
+      setViewEntryPath: () => undefined,
+      setAppliedWorkbenchRevision: () => undefined,
+    });
+    const content = createContent();
+    const clock = new StepClock();
+    const runtime = createProjectRuntime({
+      projectId: project.id,
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
+      library: createLibrary(),
+      profile: 'editor',
+      viewRecordPorts,
+      input: { shouldLoadModelOnStart: false },
+      clock,
+    });
+    runtime.actor.start();
+    await settle();
+    const layout = selectWorkbenchLayoutRef(runtime.actor.getSnapshot())!;
+    expect(selectArrangement(layout.getSnapshot())).toEqual(stored);
+    // No page shows the project: its adapters attach and the person's edit is owed, as a page left behind it.
+    for (const adapter of ['workbench', 'viewer'] as const) {
+      layout.send({ type: 'adapterAttaching', adapter });
+      layout.send({ type: 'adapterAttached', adapter });
+    }
+    const edited = { kind: 'group', tabs: [{ kind: 'pane', pane: 'details' }] } as const;
+    layout.send({ type: 'personEdited', adapter: 'workbench', node: edited });
+    for (const adapter of ['workbench', 'viewer'] as const) {
+      layout.send({ type: 'adapterDetached', adapter });
+    }
+    // The hidden flush walks the producers: the edit is written before its debounce.
+    await runtime.producers.flushAll();
+    expect(writes).toHaveLength(1);
+    expect(workbenchRecords.layout.read(bytes)).toMatchObject({ record: { ...stored, workbench: edited } });
+    // A second edit, then the session closes within its debounce: the stop writes it.
+    layout.send({ type: 'adapterAttaching', adapter: 'workbench' });
+    layout.send({ type: 'adapterAttached', adapter: 'workbench' });
+    layout.send({ type: 'personEdited', adapter: 'workbench', node: stored.workbench });
+    runtime.actor.stop();
+    await settle();
+    expect(writes).toHaveLength(2);
+    expect(workbenchRecords.layout.read(bytes)).toMatchObject({ record: stored });
+  });
 
   it("should release each geometry unit's kernel runtime when it stops", async () => {
     const guard = guardActors({ ignore });

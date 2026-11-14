@@ -255,6 +255,8 @@ vi.mock('#hooks/use-project.js', () => ({
     editorRef: mockEditorRef,
     geometryUnits: new Map(),
     mainEntryPath: 'main.ts',
+    /* A shared project's runtime has no layout; the shell port is all the workspace asks of it here. */
+    projectRuntime: { layout: undefined, shell: { set: () => undefined, release: () => undefined } },
     projectRef: {
       send: mockProjectSend,
       getSnapshot: () => ({ context: { project: undefined } }),

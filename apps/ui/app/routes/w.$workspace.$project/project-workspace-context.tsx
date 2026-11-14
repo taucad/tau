@@ -1,17 +1,27 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { useProject } from '#hooks/use-project.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
 import type { PanelState } from '@taucad/ui-core/types/editor.types';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
-import { useLocation } from 'react-router';
+import { NavigationType, useLocation, useNavigationType } from 'react-router';
 import { useSelector } from '@xstate/react';
+import type { ActorRefFrom } from 'xstate';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
-import type { WorkbenchLaneNode } from '@taucad/workbench';
+import { createWorkbenchLayoutControllerShim } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
+import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
+import type {
+  WorkbenchPanelId,
+  WorkbenchUtilityPanelId,
+} from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
-import { holdUnheardFileReveal, holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
+import type { PaneIntentSource } from '#workbench-records/pane-intents.js';
+import { selectWorkbenchLayoutRef } from '#runtime/project-runtime.js';
+import type { ProjectRuntime } from '#runtime/project-runtime.js';
+import { sendPaneIntent } from '#runtime/project-runtime.layout.js';
+import type { ProjectLayoutFacts, ProjectShellHandlers, WorkbenchLayoutRef } from '#runtime/project-runtime.layout.js';
+import type { editorMachine } from '#machines/editor.machine.js';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
@@ -23,36 +33,18 @@ export const projectWorkspaceKeyCombinations = {
   export: { key: 'd', ctrlKey: true },
 } as const;
 
-export type WorkbenchPanelId =
-  | 'browser'
-  | 'parameters'
-  | 'kinematics'
-  | 'files'
-  | 'model'
-  | 'print'
-  | 'revisions'
-  | 'agents'
-  | 'jobs'
-  | 'export'
-  | 'share'
-  | 'details'
-  | 'kernel'
-  | 'console'
-  | 'terminal';
-export type WorkbenchUtilityPanelId = Exclude<WorkbenchPanelId, 'files'>;
-
 type ProjectWorkspaceContextValue = {
   /** Survives Dockview header replacement during reviewed layout recovery. */
   registerRecordRecoveryFocus: React.RefCallback<HTMLButtonElement>;
   restoreRecordRecoveryFocus: () => void;
-  openPanel: (panelId: WorkbenchPanelId) => void;
+  /** Open a Workbench surface: a pane intent from `source` (the person, unless named) on a live project's layout. */
+  openPanel: (panelId: WorkbenchPanelId, source?: PaneIntentSource) => void;
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
   connectWorkbench: (
     openPanel: (panelId: WorkbenchPanelId) => void,
     activateFile?: (path: string) => void,
   ) => () => void;
-  registerLayoutController: (controller: WorkbenchLayoutController) => () => void;
   layoutController: WorkbenchLayoutController;
 };
 
@@ -125,51 +117,33 @@ export function useWorkbenchLayoutController(): WorkbenchLayoutController {
   return useProjectWorkspace().layoutController;
 }
 
-const containsPane = (node: WorkbenchLaneNode, pane: WorkbenchUtilityPanelId): boolean =>
-  node.kind === 'group'
-    ? node.tabs.some((tab) => tab.kind === 'pane' && tab.pane === pane)
-    : node.children.some((child) => containsPane(child, pane));
+type EditorRef = ActorRefFrom<typeof editorMachine>;
 
-const addPane = (node: WorkbenchLaneNode, pane: WorkbenchUtilityPanelId): WorkbenchLaneNode => {
-  if (node.kind === 'group') {
-    const index = node.tabs.findIndex((tab) => tab.kind === 'pane' && tab.pane === pane);
-    return index === -1
-      ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane }], active: node.tabs.length }
-      : { ...node, active: index };
-  }
-  const childIndex = Math.max(
-    0,
-    node.children.findIndex((child) => containsPane(child, pane)),
-  );
-  return {
-    ...node,
-    children: node.children.map((child, index) => (index === childIndex ? addPane(child, pane) : child)),
-  };
+/** Without a live project's layout there is no record to wait for, and nothing is registered. */
+const noLayoutController: WorkbenchLayoutController = {
+  snapshot: () => undefined,
+  subscribe: () => () => undefined,
+  restorePreviousArrangement: async () => false,
+  registerViewer: () => () => undefined,
+  registerWorkbench: () => () => undefined,
+  personViewerChanged: () => undefined,
+  personWorkbenchChanged: () => undefined,
+  ready: () => true,
 };
 
-/**
- * The phone surface each Workbench surface opens as. Total over `WorkbenchPanelId`, so a pane added to the desktop
- * registry does not compile until it has a phone surface, and `openPanel` never no-ops on a phone (I1). A surface the
- * desktop gates (Print behind Machines, Telemetry and Console behind debug mode) still opens: its body shows the same
- * refusal the desktop pane does.
- */
-export const mobilePanelByWorkbenchPanel = {
-  browser: 'browser',
-  parameters: 'parameters',
-  kinematics: 'kinematics',
-  files: 'files',
-  model: 'model-tree',
-  print: 'print',
-  revisions: 'revisions',
-  agents: 'agents',
-  jobs: 'jobs',
-  export: 'converter',
-  share: 'share',
-  details: 'details',
-  kernel: 'kernel',
-  console: 'console',
-  terminal: 'terminal',
-} as const satisfies Record<WorkbenchPanelId, MobilePanelId>;
+/** A live project's layout actor; it is spawned with the runtime and never replaced, so one read is enough. */
+const selectProjectLayout = (runtime: ProjectRuntime | undefined): WorkbenchLayoutRef | undefined =>
+  runtime === undefined ? undefined : selectWorkbenchLayoutRef(runtime.actor.getSnapshot());
+
+/** The paths of the editor's open files now. */
+const selectOpenFilePaths = (editorRef: EditorRef): readonly string[] =>
+  editorRef.getSnapshot().context.openFiles.map((file) => file.path);
+
+/** The path of the editor's active file now, if any. */
+const selectActiveFilePath = (editorRef: EditorRef): string | undefined => {
+  const { openFiles, activePaneId } = editorRef.getSnapshot().context;
+  return openFiles.find((file) => file.paneId === activePaneId)?.path;
+};
 
 export function ProjectWorkspaceProvider({
   children,
@@ -180,7 +154,7 @@ export function ProjectWorkspaceProvider({
   readonly workbenchMode?: 'responsive' | 'pane';
   readonly onWorkbenchOpen?: () => void;
 }): React.JSX.Element {
-  const { editorRef, mainEntryPath } = useProject();
+  const { editorRef, mainEntryPath, projectRuntime } = useProject();
   const providerActiveRef = useRef(true);
   const recordRecoveryFocusRef = useRef<HTMLButtonElement>(null);
   const pendingRecordRecoveryFocus = useRef(false);
@@ -224,19 +198,52 @@ export function ProjectWorkspaceProvider({
     }
   }, []);
   const location = useLocation();
+  const navigationType = useNavigationType();
   const routeKey = location.key;
   const isMobile = useIsMobile();
   const isEditorReady = useSelector(editorRef, (snapshot) => snapshot.matches('ready'));
+
+  /* The route key a pane intent is queued under (rule 6). A replace, such as a route intent's own parameter cleanup or
+   * the focused chat's URL correction, corrects its navigation rather than starting one, so it keeps the key: an
+   * intent survives it (I11, A0.1 row 2). A push or a pop is a new navigation and drops what is still queued. */
+  const [intentRoute, setIntentRoute] = useState({ locationKey: routeKey, intentKey: routeKey });
+  const intentRouteKey =
+    intentRoute.locationKey === routeKey || navigationType === NavigationType.Replace
+      ? intentRoute.intentKey
+      : routeKey;
+  if (intentRoute.locationKey !== routeKey) {
+    setIntentRoute({ locationKey: routeKey, intentKey: intentRouteKey });
+  }
+  const facts = useMemo<ProjectLayoutFacts>(
+    () => ({ routeKey: intentRouteKey, device: isMobile ? 'phone' : 'desktop' }),
+    [intentRouteKey, isMobile],
+  );
+
+  /* A live project's layout: the runtime's child, which outlives this provider (A8b). */
+  const layoutHost = workbenchMode === 'responsive' ? projectRuntime.layout : undefined;
+  const layoutRef = layoutHost === undefined ? undefined : selectProjectLayout(projectRuntime);
+  const layoutShim = useMemo(
+    () =>
+      layoutRef === undefined || layoutHost === undefined
+        ? undefined
+        : createWorkbenchLayoutControllerShim({ layout: layoutRef, editor: editorRef, host: layoutHost }),
+    [editorRef, layoutHost, layoutRef],
+  );
+  const layoutController = layoutShim ?? noLayoutController;
+  /* The shell's facts reach the runtime as a value before any passive effect of this commit sends an intent. */
+  useLayoutEffect(() => {
+    layoutHost?.setFacts(facts);
+  }, [facts, layoutHost]);
+
   const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
-  const pendingFilesRef = useRef<string | undefined>(undefined);
   const fileActivationRef = useRef<{ activate: (path: string) => void } | undefined>(undefined);
+  /* Without a layout (a preview's pane mode), the one pane and the one file asked for before the workbench connects. */
   const pendingUserFileRef = useRef<{ route: string; path: string } | undefined>(undefined);
-  const committedEditorRef = useRef(editorRef);
   const pendingPreviewPanel = useRef<{ route: string; panel: WorkbenchPanelId } | undefined>(undefined);
+  const committedEditorRef = useRef(editorRef);
   const committedRouteKeyRef = useRef(routeKey);
   useLayoutEffect(() => {
     if (committedRouteKeyRef.current !== routeKey || committedEditorRef.current !== editorRef) {
-      pendingFilesRef.current = undefined;
       pendingPreviewPanel.current = undefined;
       openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
@@ -254,49 +261,8 @@ export function ProjectWorkspaceProvider({
       pendingRecordRecoveryFocus.current = false;
       recordRecoveryHadFocus.current = false;
       pendingPreviewPanel.current = undefined;
-      pendingFilesRef.current = undefined;
       fileActivationRef.current = undefined;
       pendingUserFileRef.current = undefined;
-    };
-  }, []);
-
-  const layoutControllerRef = useRef<WorkbenchLayoutController | undefined>(undefined);
-  const layoutListenersRef = useRef(new Set<() => void>());
-  const layoutController = useMemo<WorkbenchLayoutController>(
-    () => ({
-      snapshot: () => layoutControllerRef.current?.snapshot(),
-      subscribe: (listener) => {
-        layoutListenersRef.current.add(listener);
-        return () => {
-          layoutListenersRef.current.delete(listener);
-        };
-      },
-      restorePreviousArrangement: async (expected) =>
-        layoutControllerRef.current?.restorePreviousArrangement(expected) ?? false,
-      registerViewer: (apply) => layoutControllerRef.current?.registerViewer(apply) ?? (() => undefined),
-      registerWorkbench: (apply) => layoutControllerRef.current?.registerWorkbench(apply) ?? (() => undefined),
-      personViewerChanged: (node) => layoutControllerRef.current?.personViewerChanged(node),
-      personWorkbenchChanged: (node, unapplied) => layoutControllerRef.current?.personWorkbenchChanged(node, unapplied),
-      // Without a record host there is no record to wait for.
-      ready: () => layoutControllerRef.current?.ready() ?? true,
-    }),
-    [],
-  );
-  const registerLayoutController = useCallback((controller: WorkbenchLayoutController) => {
-    layoutControllerRef.current = controller;
-    const unsubscribe = controller.subscribe(() => {
-      for (const listener of layoutListenersRef.current) {
-        listener();
-      }
-    });
-    for (const listener of layoutListenersRef.current) {
-      listener();
-    }
-    return () => {
-      if (layoutControllerRef.current === controller) {
-        layoutControllerRef.current = undefined;
-      }
-      unsubscribe();
     };
   }, []);
 
@@ -335,9 +301,17 @@ export function ProjectWorkspaceProvider({
 
   const setWorkbenchOpen = useCallback(
     (open: boolean) => {
+      if (!open && isMobile && layoutRef !== undefined) {
+        // A phone has no Workbench lane: closing its last pane leaves the desktop lane, and the intents queued for the
+        // workbench, as they are (A8b, spec-la round 4).
+        return;
+      }
       if (!open) {
-        pendingFilesRef.current = undefined;
+        // Rule 7: a lane close drops the file intents, held Files among them; any other pane waits for the lane.
         pendingUserFileRef.current = undefined;
+        if (pendingPreviewPanel.current?.panel === 'files') {
+          pendingPreviewPanel.current = undefined;
+        }
       }
       editorRef.send({
         type: 'setPanelState',
@@ -346,23 +320,31 @@ export function ProjectWorkspaceProvider({
         },
       });
     },
-    [editorRef],
+    [editorRef, isMobile, layoutRef],
   );
 
   const openPanel = useCallback(
-    (panelId: WorkbenchPanelId) => {
+    (panelId: WorkbenchPanelId, source: PaneIntentSource = 'person') => {
       if (!isSurfaceShipped(panelId)) {
         return;
       }
-      pendingFilesRef.current = undefined;
-      pendingUserFileRef.current = undefined;
       if (workbenchMode === 'pane') {
         onWorkbenchOpen?.();
         if (openerRef.current) {
           openerRef.current(panelId);
         } else {
+          // ponytail: one slot, the latest pane asked for before the preview's workbench connects (named in A8b).
           pendingPreviewPanel.current = { route: routeKey, panel: panelId };
         }
+        return;
+      }
+      if (layoutRef !== undefined) {
+        // A pane intent: the layout applies it once its record is read and the workbench shows, opens the lane for it,
+        // or shows the phone's tab, and accounts for it either way (I11).
+        if (!isMobile) {
+          setWorkbenchOpen(true);
+        }
+        sendPaneIntent(layoutRef, facts, { source, target: { kind: 'pane', adapter: 'workbench', pane: panelId } });
         return;
       }
       if (isMobile) {
@@ -373,32 +355,13 @@ export function ProjectWorkspaceProvider({
         return;
       }
       setWorkbenchOpen(true);
-      // Before the layout record's first read, a pane opened straight into the workbench is replaced by the record's
-      // arrangement when the read lands (a Share deep link would show Share, then lose it). It is asked for as a change
-      // instead, applied on top of the saved arrangement once that is read, whatever the saved arrangement holds.
-      if (openerRef.current && (panelId === 'files' || layoutController.ready())) {
+      if (openerRef.current) {
         openerRef.current(panelId);
-      } else if (panelId === 'files') {
-        pendingFilesRef.current = routeKey;
       } else {
-        // When the record cannot take the change, the pane opens straight into the workbench, or once it connects.
-        layoutController.personWorkbenchChanged(
-          (node) => addPane(node, panelId),
-          () => {
-            // The record answers after its first read; the route may have changed since.
-            if (!providerActiveRef.current || committedRouteKeyRef.current !== routeKey) {
-              return;
-            }
-            if (openerRef.current) {
-              openerRef.current(panelId);
-            } else {
-              pendingPreviewPanel.current = { route: routeKey, panel: panelId };
-            }
-          },
-        );
+        pendingPreviewPanel.current = { route: routeKey, panel: panelId };
       }
     },
-    [editorRef, isMobile, layoutController, setWorkbenchOpen, routeKey, workbenchMode, onWorkbenchOpen],
+    [editorRef, facts, isMobile, layoutRef, onWorkbenchOpen, routeKey, setWorkbenchOpen, workbenchMode],
   );
 
   const connectWorkbench = useCallback(
@@ -413,25 +376,25 @@ export function ProjectWorkspaceProvider({
       openerRef.current = opener;
       const activation = activateFile ? { activate: activateFile } : undefined;
       fileActivationRef.current = activation;
+      const disconnectIntents = layoutShim?.connectIntents({
+        openPanel: opener,
+        ...(activateFile === undefined ? {} : { activateFile }),
+      });
       const pendingPreview = pendingPreviewPanel.current;
       pendingPreviewPanel.current = undefined;
       if (pendingPreview?.route === routeKey) {
         opener(pendingPreview.panel);
       }
-      const pendingFiles = pendingFilesRef.current;
-      pendingFilesRef.current = undefined;
-      if (pendingFiles !== undefined && pendingFiles === routeKey) {
-        opener('files');
-      }
       const pendingFile = pendingUserFileRef.current;
       if (activation && pendingFile?.route === routeKey) {
         // Claim before delivery: reconnects and reentrant opens cannot replay this intent.
         pendingUserFileRef.current = undefined;
-        if (editorRef.getSnapshot().context.openFiles.some((file) => file.path === pendingFile.path)) {
+        if (selectOpenFilePaths(editorRef).includes(pendingFile.path)) {
           activation.activate(pendingFile.path);
         }
       }
       return () => {
+        disconnectIntents?.();
         if (openerRef.current === opener) {
           openerRef.current = undefined;
         }
@@ -440,7 +403,7 @@ export function ProjectWorkspaceProvider({
         }
       };
     },
-    [editorRef, routeKey],
+    [editorRef, layoutShim, routeKey],
   );
 
   useKeybinding(
@@ -490,9 +453,7 @@ export function ProjectWorkspaceProvider({
   useKeybinding(
     projectWorkspaceKeyCombinations.editor,
     () => {
-      const snapshot = editorRef.getSnapshot();
-      const activePath = snapshot.context.openFiles.find((file) => file.paneId === snapshot.context.activePaneId)?.path;
-      const path = activePath ?? mainEntryPath;
+      const path = selectActiveFilePath(editorRef) ?? mainEntryPath;
       if (path) {
         editorRef.send({ type: 'openFile', path, source: 'user' });
       }
@@ -516,59 +477,59 @@ export function ProjectWorkspaceProvider({
   }, [openPanel, returnTo]);
   const fileReturn = useMemo(() => ({ returnTo, openFileFrom, back }), [back, openFileFrom, returnTo]);
 
-  useEffect(() => {
-    const subscription = editorRef.on('fileOpened', (event) => {
-      if (
-        !providerActiveRef.current ||
-        committedRouteKeyRef.current !== routeKey ||
-        committedEditorRef.current !== editorRef
-      ) {
-        return;
-      }
-      /* Another file opening ends the way back; the preview's own open may report after the code editor loads it.
-       * ponytail: reopening the same file from the tree keeps it, until back or another file. */
-      setReturnTo((current) => (current === undefined || current.path === event.path ? current : undefined));
-      if (event.source !== 'user') {
-        return;
-      }
-      // This owner survives the lazy Editor mount that the open itself requests.
-      const activation = fileActivationRef.current;
-      if (activation) {
-        pendingUserFileRef.current = undefined;
-        activation.activate(event.path);
-      } else {
-        pendingUserFileRef.current = { route: routeKey, path: event.path };
-      }
-      if (isMobile) {
-        editorRef.send({ type: 'setPanelState', panelState: { mobileActiveTab: 'editor' } });
-      } else {
-        setWorkbenchOpen(true);
-      }
-    });
+  /* What this workspace does with the editor's opens and reveals. The runtime's bridge, the editor's sibling, calls
+   * these handlers (A8b); the provider subscribes to nothing. */
+  const shellHandlers = useMemo<ProjectShellHandlers>(
+    () => ({
+      openPanel: (panelId, source) => {
+        openPanel(panelId, source);
+      },
+      fileOpened: (path, source) => {
+        if (
+          !providerActiveRef.current ||
+          committedRouteKeyRef.current !== routeKey ||
+          committedEditorRef.current !== editorRef
+        ) {
+          return;
+        }
+        /* Another file opening ends the way back; the preview's own open may report after the code editor loads it.
+         * ponytail: reopening the same file from the tree keeps it, until back or another file. */
+        setReturnTo((current) => (current === undefined || current.path === path ? current : undefined));
+        if (source !== 'user') {
+          return;
+        }
+        if (layoutRef !== undefined) {
+          // A file intent: shown in the workbench lane's editor once the workbench connects, or on the phone's editor
+          // tab, and dropped with a reason if the lane closes or the route moves first (I11).
+          if (!isMobile) {
+            setWorkbenchOpen(true);
+          }
+          sendPaneIntent(layoutRef, facts, { source: 'person', target: { kind: 'file', path } });
+          return;
+        }
+        // This owner survives the lazy Editor mount that the open itself requests.
+        const activation = fileActivationRef.current;
+        if (activation) {
+          pendingUserFileRef.current = undefined;
+          activation.activate(path);
+        } else {
+          pendingUserFileRef.current = { route: routeKey, path };
+        }
+        if (isMobile) {
+          editorRef.send({ type: 'setPanelState', panelState: { mobileActiveTab: 'editor' } });
+        } else {
+          setWorkbenchOpen(true);
+        }
+      },
+    }),
+    [editorRef, facts, isMobile, layoutRef, openPanel, routeKey, setWorkbenchOpen],
+  );
+  useLayoutEffect(() => {
+    projectRuntime.shell.set(shellHandlers);
     return () => {
-      subscription.unsubscribe();
+      projectRuntime.shell.release(shellHandlers);
     };
-  }, [editorRef, isMobile, routeKey, setWorkbenchOpen]);
-
-  useEffect(() => {
-    // The pane may mount only because of this reveal, after the emit: hold it for that pane's first subscribe.
-    const fileSubscription = editorRef.on('fileRevealRequested', (event) => {
-      holdUnheardFileReveal(editorRef, event);
-    });
-    const modelSubscription = editorRef.on('modelComponentRevealRequested', (event) => {
-      holdUnheardReveal(editorRef, 'model', event);
-      openPanel('model');
-    });
-    const kinematicsSubscription = editorRef.on('kinematicsRevealRequested', (event) => {
-      holdUnheardReveal(editorRef, 'kinematics', event);
-      openPanel('kinematics');
-    });
-    return () => {
-      fileSubscription.unsubscribe();
-      modelSubscription.unsubscribe();
-      kinematicsSubscription.unsubscribe();
-    };
-  }, [editorRef, openPanel]);
+  }, [projectRuntime, shellHandlers]);
 
   const value = useMemo(
     () => ({
@@ -576,7 +537,6 @@ export function ProjectWorkspaceProvider({
       setWorkbenchOpen,
       setChatOpen,
       connectWorkbench,
-      registerLayoutController,
       layoutController,
       registerRecordRecoveryFocus,
       restoreRecordRecoveryFocus,
@@ -585,7 +545,6 @@ export function ProjectWorkspaceProvider({
       connectWorkbench,
       layoutController,
       openPanel,
-      registerLayoutController,
       setChatOpen,
       setWorkbenchOpen,
       registerRecordRecoveryFocus,

@@ -124,7 +124,7 @@ import {
 import type {
   WorkbenchPanelId,
   WorkbenchUtilityPanelId,
-} from '#routes/w.$workspace.$project/project-workspace-context.js';
+} from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { OpenFile } from '@taucad/ui-core/types/editor.types';

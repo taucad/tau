@@ -1161,6 +1161,8 @@ describe('totality', () => {
     personEdited: { type: 'personEdited', adapter: 'viewer', node: viewer('top') },
     lanesEdited: { type: 'lanesEdited', lanes: { chat: false, workbench: true } },
     workbenchLaneChanged: { type: 'workbenchLaneChanged', open: false },
+    lanesApplied: { type: 'lanesApplied', lanes: { chat: true, workbench: true } },
+    deviceChanged: { type: 'deviceChanged', device: 'phone' },
     routeChanged: { type: 'routeChanged', routeKey: 'route-2' },
     intent: { type: 'intent', intentId: 'i1', source: 'person', target: modelPane },
     intentApplied: { type: 'intentApplied', intentId: 'i1', deliveryId: 1, node: panes('model') },

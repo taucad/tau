@@ -80,6 +80,7 @@ import { createActor, createCallbackLogic, setup, types } from 'xstate';
 import type {
   Actor,
   ActorOptions,
+  ActorRefFrom,
   AnyActorLogic,
   AnyActorRef,
   CallbackActorLogic,
@@ -88,6 +89,11 @@ import type {
   StateValue,
 } from 'xstate';
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
+import { workbenchPaths } from '@taucad/workbench';
+import type { WatchEvent } from '@taucad/filesystem';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { ObservationWatch } from '@taucad/fs-client/observation-service';
+import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
@@ -129,6 +135,12 @@ export type WorkbenchLayoutInput = Readonly<{
   routeKey: string;
   /** Whether the workbench lane is open when the actor starts. */
   workbenchOpen: boolean;
+  /**
+   * The editor's chat and workbench lane flags when the actor starts. Given, rule 4 also waits for the lanes on screen
+   * to match the revision's (`lanesApplied`), as the record host's acknowledgement did (A8b, D14). Omitted, the device
+   * has no lane flags to check.
+   */
+  lanes?: WorkbenchLayout['lanes'];
 }>;
 
 /** The public event alphabet of {@link workbenchLayoutMachine}. */
@@ -173,6 +185,10 @@ export type WorkbenchLayoutEvent =
   | Readonly<{ type: 'lanesEdited'; lanes: WorkbenchLayout['lanes'] }>
   /** The workbench lane opened or closed (the editor's panel state). */
   | Readonly<{ type: 'workbenchLaneChanged'; open: boolean }>
+  /** The chat and workbench lane flags now on screen (the editor's panel state): rule 4 waits for them (A8b, D14). */
+  | Readonly<{ type: 'lanesApplied'; lanes: WorkbenchLayout['lanes'] }>
+  /** The shell the layout is shown on changed (the phone breakpoint): intents follow it from the next one (rule 7). */
+  | Readonly<{ type: 'deviceChanged'; device: WorkbenchLayoutDevice }>
   /** The route key changed. */
   | Readonly<{ type: 'routeChanged'; routeKey: string }>
   /** A pane intent. */
@@ -245,6 +261,8 @@ type Publication = Readonly<{
   layout: WorkbenchLayout | undefined;
   digest: LayoutDigest;
   refused: boolean;
+  /** Whether the record published its own write or a change it read (the previous layout follows a foreign one). */
+  origin: 'own' | 'foreign';
   /** The edit count when it arrived (rule 2). */
   editCount: number;
   /** It arrived while a local edit was owed (rule 8): it is never applied. */
@@ -300,6 +318,10 @@ type LayoutContext = Readonly<{
   recordError: string | undefined;
   /** The first defect the root `onError` caught; later ones are usually its consequences (MC-R12, D23). */
   fault: string | undefined;
+  /** Whether rule 4 waits for the lanes on screen (the input gave them). */
+  checksLanes: boolean;
+  /** The lane flags on screen, as last reported. */
+  appliedLanes: WorkbenchLayout['lanes'] | undefined;
 }>;
 
 type LayoutEnqueue = EnqueueObject<WorkbenchLayoutEvent, WorkbenchLayoutEmitted>;
@@ -375,6 +397,11 @@ const show = (
   return { ...context, shows, awaiting };
 };
 
+/** Rule 4 on a device with lane flags: the lanes on screen are the revision's (the record host's check, D14). */
+const lanesShown = (context: LayoutContext, layout: WorkbenchLayout): boolean =>
+  !context.checksLanes ||
+  (context.appliedLanes?.chat === layout.lanes.chat && context.appliedLanes.workbench === layout.lanes.workbench);
+
 /** Rule 4's conditions on the arrangement, with every adapter's report still to check. */
 const acknowledgeable = (context: LayoutContext, view: View): boolean =>
   context.adapters.every((adapter) => view.adapters[adapter] === 'attached') &&
@@ -385,7 +412,8 @@ const acknowledgeable = (context: LayoutContext, view: View): boolean =>
   context.latest.digest !== 'missing' &&
   context.recordError === undefined &&
   context.acknowledged !== context.latest.revision &&
-  sameLayout(context.arrangement, context.latest.layout);
+  sameLayout(context.arrangement, context.latest.layout) &&
+  lanesShown(context, context.latest.layout);
 
 const reported = (context: LayoutContext): boolean =>
   context.adapters.every((adapter) => context.awaiting[adapter] === undefined);
@@ -538,6 +566,7 @@ const published = ({ context, event, value }: Step<'recordPublished'>, enq: Layo
       layout: refused ? undefined : event.layout,
       digest: event.digest,
       refused,
+      origin: event.origin,
       editCount: context.editCount,
       held,
       done: false,
@@ -684,7 +713,7 @@ const workbenchLayoutDefinition = setup({
   actors: { layoutRecord },
 }).createMachine({
   id: 'workbenchLayout',
-  version: '1',
+  version: '2',
   // A defect is recorded and the layout keeps answering; the first is kept, since later ones are usually its
   // consequences (MC-R12, D23).
   onError: refines('Unmodelled', ({ context, event }) => ({
@@ -715,6 +744,8 @@ const workbenchLayoutDefinition = setup({
     health: undefined,
     recordError: undefined,
     fault: undefined,
+    checksLanes: input.lanes !== undefined,
+    appliedLanes: input.lanes,
   }),
   type: 'parallel',
   // Rule 9: one record session for the file, for the actor's whole life.
@@ -822,6 +853,21 @@ const workbenchLayoutDefinition = setup({
       }
       return {};
     }),
+    lanesApplied: refines('Unmodelled', ({ context, event, value }: Step<'lanesApplied'>, enq: LayoutEnqueue) => {
+      if (context.appliedLanes?.chat === event.lanes.chat && context.appliedLanes.workbench === event.lanes.workbench) {
+        // The lanes already reported.
+        return {};
+      }
+      // Rule 4 may now hold: the adapters are asked to confirm what they show.
+      const next: LayoutContext = {
+        ...context,
+        appliedLanes: { chat: event.lanes.chat, workbench: event.lanes.workbench },
+      };
+      return { context: finished(context, settle(next, viewOf(value), enq), enq) };
+    }),
+    deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
+      event.device === context.device ? {} : { context: { device: event.device } },
+    ),
     recordHealthChanged: refines('Unmodelled', ({ event }: Step<'recordHealthChanged'>) => ({
       context: { health: event.health },
     })),
@@ -1136,6 +1182,8 @@ export const workbenchLayoutEventTypes = [
   'personEdited',
   'lanesEdited',
   'workbenchLaneChanged',
+  'lanesApplied',
+  'deviceChanged',
   'routeChanged',
   'intent',
   'intentApplied',
@@ -1155,52 +1203,70 @@ export const workbenchLayoutMachine: WorkbenchLayoutMachine = workbenchLayoutDef
 /** A layout actor's snapshot. */
 export type WorkbenchLayoutSnapshot = SnapshotFrom<WorkbenchLayoutMachine>;
 
+/** What the selectors read: an actor's and a spawned ref's snapshots both carry it. */
+export type WorkbenchLayoutView = Pick<WorkbenchLayoutSnapshot, 'context' | 'value'>;
+
 /** A layout actor. */
 export type WorkbenchLayoutActor = Actor<WorkbenchLayoutMachine>;
 
 /** The acknowledged layout digest, or `undefined` while the applied revision is unknown (I12). */
-export const selectAppliedLayoutDigest = (snapshot: WorkbenchLayoutSnapshot): LayoutDigest | undefined =>
+export const selectAppliedLayoutDigest = (snapshot: WorkbenchLayoutView): LayoutDigest | undefined =>
   appliedDigestOf(snapshot.context);
 
 /** The arrangement the adapters show, or `undefined` before the record's first read. */
-export const selectArrangement = (snapshot: WorkbenchLayoutSnapshot): WorkbenchLayout | undefined =>
+export const selectArrangement = (snapshot: WorkbenchLayoutView): WorkbenchLayout | undefined =>
   snapshot.context.arrangement;
 
 /** The digest of the record bytes the arrangement holds: what a restore command names as `expected`. */
-export const selectArrangementDigest = (snapshot: WorkbenchLayoutSnapshot): LayoutDigest | undefined =>
+export const selectArrangementDigest = (snapshot: WorkbenchLayoutView): LayoutDigest | undefined =>
   snapshot.context.arrangementDigest;
 
 /** Whether the record's first read has published. */
-export const selectLayoutReady = (snapshot: WorkbenchLayoutSnapshot): boolean => snapshot.matches({ record: 'ready' });
+export const selectLayoutReady = (snapshot: WorkbenchLayoutView): boolean => snapshot.value.record === 'ready';
 
 /** An intent's outcome, once it settled. */
-export const selectIntentOutcome = (
-  snapshot: WorkbenchLayoutSnapshot,
-  intentId: string,
-): PaneIntentOutcome | undefined => {
+export const selectIntentOutcome = (snapshot: WorkbenchLayoutView, intentId: string): PaneIntentOutcome | undefined => {
   const entry = intentOf(snapshot.context.intents, intentId);
   return entry === undefined ? undefined : outcomeOf(entry);
 };
 
 /** A restore's outcome, once it settled. */
 export const selectRestoreOutcome = (
-  snapshot: WorkbenchLayoutSnapshot,
+  snapshot: WorkbenchLayoutView,
   restoreId: string,
 ): 'applied' | 'refused' | undefined => ownValue(snapshot.context.restores, restoreId);
 
 /** The refusal the record holds, if any. */
-export const selectLayoutRefusal = (snapshot: WorkbenchLayoutSnapshot): RecordRefusal | undefined =>
+export const selectLayoutRefusal = (snapshot: WorkbenchLayoutView): RecordRefusal | undefined =>
   snapshot.context.refusal;
 
 /** The record's health, once the record child reported it. */
-export const selectLayoutHealth = (snapshot: WorkbenchLayoutSnapshot): RecordHealth | undefined =>
-  snapshot.context.health;
+export const selectLayoutHealth = (snapshot: WorkbenchLayoutView): RecordHealth | undefined => snapshot.context.health;
 
 /** The first defect the root `onError` caught (D23). */
-export const selectLayoutFault = (snapshot: WorkbenchLayoutSnapshot): string | undefined => snapshot.context.fault;
+export const selectLayoutFault = (snapshot: WorkbenchLayoutView): string | undefined => snapshot.context.fault;
 
 /** The record's file ports, as the layout store takes them. */
 export type WorkbenchLayoutFiles = Parameters<typeof createWorkbenchLayoutStore>[0]['files'];
+
+/** A watch on one record file, as the project's file manager opens it. */
+export type LayoutRecordWatch = (absolutePath: string, listener: (event: WatchEvent) => void) => ObservationWatch;
+
+/**
+ * The record session of a live project (A8b): the file's watch, which the filesystem replaces with its connections, and
+ * the project the record's issue is published for. Given, the record child follows the file on disk and publishes the
+ * record's issue (refused, newer, unconfirmed or unreadable) with its recoveries, as `WorkbenchRecordHost` did.
+ */
+export type LayoutRecordSession = Readonly<{
+  projectId: string;
+  /** The watch port now. */
+  watch: () => LayoutRecordWatch;
+  /** Hear of a replaced watch port: the session reopens its watch on it. */
+  onWatchReplaced: (listener: () => void) => () => void;
+}>;
+
+/* What a reviewed reset writes when no arrangement was ever read (the record host's fallback). */
+const resetFallbackLayout = (): WorkbenchLayout => emptyLayout();
 
 /**
  * The store-backed record child: the layout store over the project's file ports, in this callback's closure (D4).
@@ -1209,7 +1275,13 @@ export type WorkbenchLayoutFiles = Parameters<typeof createWorkbenchLayoutStore>
  * @returns The `layoutRecord` logic.
  */
 export const createLayoutRecordLogic = (
-  options: Readonly<{ root: string; files: WorkbenchLayoutFiles; editDebounce?: number }> &
+  options: Readonly<{
+    root: string;
+    files: WorkbenchLayoutFiles;
+    editDebounce?: number;
+    /** A live project's record session: the watch and the record's issue (A8b). */
+    session?: LayoutRecordSession;
+  }> &
     Pick<ActorOptions<AnyActorLogic>, 'clock'>,
 ): CallbackActorLogic<LayoutRecordCommand> =>
   createCallbackLogic<LayoutRecordCommand>(({ sendBack, receive }) => {
@@ -1219,6 +1291,48 @@ export const createLayoutRecordLogic = (
         sendBack(event);
       }
     };
+    /* The record's issue: the codec's refusal, the store's health and the watch's error (the record host's). */
+    let refusal: (RecordRefusal & Readonly<{ bytes: Uint8Array<ArrayBuffer> | null }>) | undefined;
+    let health: RecordHealth | undefined;
+    let observedError: string | undefined;
+    /* The last arrangement read: a reviewed reset writes it. */
+    let lastRead: WorkbenchLayout | undefined;
+    let observation: ObservationService<boolean> | undefined;
+    const publishIssue = (): void => {
+      const { session } = options;
+      if (session === undefined || stopped) {
+        return;
+      }
+      const sourceHealth: RecordHealth | undefined =
+        observedError === undefined
+          ? health
+          : { ...(health ?? store.health()), read: 'unavailable', error: observedError };
+      const state = recordIssueState(refusal, sourceHealth);
+      const current = observation;
+      publishRecordIssue(
+        session.projectId,
+        workbenchPaths.layout,
+        state === undefined
+          ? undefined
+          : {
+              kind: 'layout',
+              path: workbenchPaths.layout,
+              state,
+              message: refusal?.message ?? sourceHealth?.error,
+              bytes: refusal?.bytes ?? null,
+              writing: health?.writing ?? false,
+              retryRead: async () => {
+                if (observedError !== undefined && current !== undefined) {
+                  current.refresh();
+                  return false;
+                }
+                return store.retryRead();
+              },
+              retrySave: async () => store.flush(),
+              reset: async (reviewed) => store.reset(lastRead ?? resetFallbackLayout(), reviewed),
+            },
+      );
+    };
     /* Edits since a restore was asked make it ineligible (rule 5): the arrangement moved under it. */
     let edits = 0;
     const store = createWorkbenchLayoutStore({
@@ -1227,6 +1341,11 @@ export const createLayoutRecordLogic = (
       ...(options.editDebounce === undefined ? {} : { editDebounce: options.editDebounce }),
       ...(options.clock === undefined ? {} : { clock: options.clock }),
       onChange: (state, source) => {
+        refusal = state.refusal === undefined ? undefined : { ...state.refusal, bytes: state.bytes };
+        if (state.refusal === undefined && state.layout !== undefined) {
+          lastRead = state.layout;
+        }
+        publishIssue();
         // Rule 8: owed when the store's intended arrangement is not what it published.
         const owed = !sameLayout(store.intendedLayout(), state.layout);
         answer({
@@ -1241,8 +1360,10 @@ export const createLayoutRecordLogic = (
       onError: (error) => {
         answer({ type: 'recordFailed', message: messageOf(error) });
       },
-      onHealth: (health) => {
-        answer({ type: 'recordHealthChanged', health });
+      onHealth: (next) => {
+        health = next;
+        publishIssue();
+        answer({ type: 'recordHealthChanged', health: next });
       },
     });
     /* Each command's answer is sent back unless the child stopped; a command that rejects answers `ok: false`. */
@@ -1294,10 +1415,65 @@ export const createLayoutRecordLogic = (
         }
       }
     });
-    void store.read(true);
+    const { session } = options;
+    if (session === undefined) {
+      void store.read(true);
+      return () => {
+        stopped = true;
+        store.dispose();
+      };
+    }
+    /* A live project's record follows the file on disk (rule 9: one store, whichever watch reports it). The watch's
+     * first answer reads it, and each change or reset reads it again, as the record host's observation did. */
+    const path = `${options.root}/${workbenchPaths.layout}`;
+    const openWatch = (): (() => void) => {
+      const watch = session.watch();
+      const opened = new ObservationService<boolean>({
+        resource: path,
+        watch: (invalidate, reset) =>
+          watch(path, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => store.read(!store.ready()),
+      });
+      observation = opened;
+      const lease = opened.acquire();
+      const unsubscribe = lease.subscribe(() => {
+        const { error } = lease.getSnapshot();
+        if (error !== observedError) {
+          observedError = error;
+          publishIssue();
+        }
+      });
+      return () => {
+        unsubscribe();
+        lease.release();
+      };
+    };
+    let closeWatch = openWatch();
+    const stopFollowing = session.onWatchReplaced(() => {
+      closeWatch();
+      closeWatch = openWatch();
+    });
     return () => {
+      stopFollowing();
+      closeWatch();
       stopped = true;
-      store.dispose();
+      publishRecordIssue(session.projectId, workbenchPaths.layout, undefined);
+      // A debounced edit is written before the store closes (the record host's dispose dropped one, A0.3).
+      const flushThenClose = async (): Promise<void> => {
+        try {
+          await store.flush();
+        } finally {
+          store.dispose();
+        }
+      };
+      void flushThenClose();
     };
   });
 
@@ -1313,12 +1489,21 @@ export function createWorkbenchLayoutActor(
     root: string;
     files: WorkbenchLayoutFiles;
     editDebounce?: number;
+    session?: LayoutRecordSession;
   }> &
     Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
 ): WorkbenchLayoutActor {
-  const { input, root, files, editDebounce, clock, inspect, onRejectedEvent } = options;
+  const { input, root, files, editDebounce, session, clock, inspect, onRejectedEvent } = options;
   const machine = workbenchLayoutMachine.provide({
-    actors: { layoutRecord: createLayoutRecordLogic({ root, files, editDebounce, clock }) },
+    actors: {
+      layoutRecord: createLayoutRecordLogic({
+        root,
+        files,
+        editDebounce,
+        clock,
+        ...(session === undefined ? {} : { session }),
+      }),
+    },
   });
   // An explicit `undefined` would replace xstate's own default, so only what was given is passed on.
   return createActor(machine, {
@@ -1338,7 +1523,7 @@ let flushRequests = 0;
  * @param actor - A started layout actor.
  * @returns Whether the record holds every local change.
  */
-export async function flushWorkbenchLayout(actor: WorkbenchLayoutActor): Promise<boolean> {
+export async function flushWorkbenchLayout(actor: ActorRefFrom<WorkbenchLayoutMachine>): Promise<boolean> {
   if (actor.getSnapshot().status !== 'active') {
     return false;
   }

@@ -1,5 +1,7 @@
 import '#components/select.browser.css';
 import { act, cleanup, render } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterEach, expect, it } from 'vitest';
 import { WaitIndicator } from '#components/wait-indicator.js';
 import { WaitClockProvider } from '#hooks/use-wait-clock.js';
@@ -255,6 +257,12 @@ it('should reveal the second of two waits started in one long render 1,000 ms af
   expect(revealed).toBeLessThan(1034);
 });
 
+/**
+ * A frame at 60 Hz. A hold's animation counts from the start of the frame it starts in, which can come before the
+ * moment that frame's script reads the performance clock.
+ */
+const oneFrame = 17;
+
 it('should hold a wait that took over an indicator not yet painted 500 ms from the frame it showed in', async () => {
   /* The first wait's reveal is due, but no frame has drawn it when a second wait takes over, and a long task holds
      the first frame that does. The takeover keeps the words; their minimum must run from that frame. */
@@ -285,8 +293,77 @@ it('should hold a wait that took over an indicator not yet painted 500 ms from t
     view.rerender(<WaitIndicator active={false} label='Loading history' startedAt={takenOverAt} />);
   });
 
+  expect(find('wait-indicator').dataset['state']).toBe('holding');
   expect(
     (await effectTime('wait-conceal')) - shownAt,
     'the takeover held the words from a reveal no frame had drawn',
-  ).toBeGreaterThanOrEqual(499);
+  ).toBeGreaterThanOrEqual(500 - oneFrame);
+});
+
+it('should hold a wait that settled before any frame drew its reveal 500 ms from the frame it showed in', async () => {
+  /* The reveal is due when the indicator mounts, its content arrives in the same task, and a long task holds the first
+     frame, which draws the words already holding. */
+  const startedAt = Number(document.timeline.currentTime) - 1100;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  /* The first frame after the task is read off the performance clock, at its first animation event or its animation
+     frame callbacks, whichever comes first. That is later in the frame than its start, which the hold's animation
+     counts from, by the work the frame does after a long task. */
+  let shownAt = Number.NaN;
+  const onFrame = (): void => {
+    if (Number.isNaN(shownAt)) {
+      shownAt = performance.now();
+    }
+  };
+  document.addEventListener('animationstart', onFrame, { capture: true });
+  requestAnimationFrame(onFrame);
+  holdMainThread(400);
+  const heldUntil = performance.now();
+  await act(async () => {
+    await nextFrame();
+    await nextFrame();
+  });
+  document.removeEventListener('animationstart', onFrame, { capture: true });
+  expect(shownAt, 'the words paint after the long task').toBeGreaterThanOrEqual(heldUntil);
+
+  expect(find('wait-indicator').dataset['state']).toBe('holding');
+  expect(
+    (await effectTime('wait-conceal')) - shownAt,
+    'the hold counted its minimum from a reveal no frame had drawn',
+  ).toBeGreaterThanOrEqual(500 - oneFrame);
+});
+
+it('should not serve the minimum again when a wait takes over an indicator the server-rendered page revealed', async () => {
+  /* Before hydration the reveal runs on CSS alone, so no handler sees it start. A wait that takes over after
+     hydration keeps words that are already on screen; their minimum runs from the reveal, not from the takeover. */
+  const startedAt = Number(document.timeline.currentTime);
+  document.documentElement.style.setProperty('--wait-offset', `${-startedAt}ms`);
+  const element = <WaitIndicator active label='Loading history' startedAt={startedAt} />;
+  const container = document.createElement('div');
+  container.innerHTML = renderToString(element);
+  document.body.append(container);
+  const shownAt = await frameAtOrAfter(startedAt + 1000);
+  await frameAtOrAfter(shownAt + 200);
+  const root = hydrateRoot(container, element);
+  try {
+    await act(async () => {
+      await nextFrame();
+    });
+    const takenOverAt = Number(document.timeline.currentTime);
+    await act(async () => {
+      root.render(<WaitIndicator active label='Loading history' startedAt={takenOverAt} />);
+      await frameAtOrAfter(takenOverAt + 200);
+    });
+    await act(async () => {
+      root.render(<WaitIndicator active={false} label='Loading history' startedAt={takenOverAt} />);
+    });
+
+    const concealedAt = await effectTime('wait-conceal');
+    expect(concealedAt - shownAt, 'the words hold their minimum').toBeGreaterThanOrEqual(499);
+    expect(concealedAt - shownAt, 'the takeover served the minimum again from its own frame').toBeLessThan(534);
+  } finally {
+    root.unmount();
+    container.remove();
+    document.documentElement.style.removeProperty('--wait-offset');
+  }
 });

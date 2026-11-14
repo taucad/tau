@@ -2240,25 +2240,37 @@ export const WorkbenchDockview = memo(function ({
     if (!api) {
       return;
     }
+    /* What the Dockview shows now, read as its layout report reads it: its model changes synchronously, and only the
+     * report is deferred, so an intent's answer carries the pane it opened. */
+    const shownNode = (): WorkbenchLaneNode | undefined => {
+      try {
+        return fromDockview('workbench', api.toJSON());
+      } catch {
+        // Dockview can hold a temporary unsupported group mid-drag: the layout falls back to its arrangement.
+        return undefined;
+      }
+    };
     return connectWorkbench(
       (panelId) => {
+        // A pane this view does not offer is refused: its intent is unavailable, not applied.
         if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
-          return;
+          return false;
         }
         if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
-          return;
+          return false;
         }
         pendingUserFilePathRef.current = undefined;
         if (panelId === 'files') {
           openWorkbenchFiles({ api });
-          return;
+        } else {
+          openWorkbenchUtility(api, panelId);
         }
-        openWorkbenchUtility(api, panelId);
+        return shownNode();
       },
       (path) => {
         pendingUserFilePathRef.current = path;
         if (isRestoringLayout.current) {
-          return;
+          return undefined;
         }
         // Connection can follow the first reconcile: consume the retained user intent against the current state.
         const snapshot = editorRef.getSnapshot().context;
@@ -2270,6 +2282,7 @@ export const WorkbenchDockview = memo(function ({
           pendingUserFilePath: path,
           pendingFilePlacements: pendingFilePlacementRef.current,
         });
+        return shownNode();
       },
     );
   }, [api, connectWorkbench, editorRef, isMobile, isTauDebugEnabled, profile]);

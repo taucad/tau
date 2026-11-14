@@ -164,8 +164,11 @@ type ProjectRuntimeInput = Readonly<{
   profile: ProjectRuntimeProfile;
   project: ProjectMachineInput;
   editor: NonNullable<InputFrom<typeof editorMachine>>;
-  /** A project that writes view records has a workbench layout (A8b); its lanes start as the editor's. */
-  layout: Omit<WorkbenchLayoutInput, 'workbenchOpen' | 'lanes'> | undefined;
+  /**
+   * A project that writes view records has a workbench layout (A8b). It starts before the editor has loaded its lanes,
+   * so it awaits them: the bridge seeds them once the editor is ready.
+   */
+  layout: Omit<WorkbenchLayoutInput, 'workbenchOpen' | 'lanes' | 'awaitsLanes'> | undefined;
 }>;
 
 export type ProjectRuntimeContext = {
@@ -283,6 +286,7 @@ export const projectRuntimeMachine = setup({
   onError: recordFault,
   context: ({ input, spawn, actors }) => {
     const editorRef = spawn(actors.editor, { id: 'editor', input: input.editor });
+    // The editor's lanes are its defaults until `load` hydrates them: the layout awaits the ones it loads.
     const { desktopLayout } = editorRef.getSnapshot().context.panelState;
     const lanes = { chat: desktopLayout.chatOpen, workbench: desktopLayout.workbenchOpen };
     return {
@@ -295,7 +299,7 @@ export const projectRuntimeMachine = setup({
           ? undefined
           : spawn(actors.workbenchLayout, {
               id: 'workbenchLayout',
-              input: { ...input.layout, workbenchOpen: lanes.workbench, lanes },
+              input: { ...input.layout, workbenchOpen: lanes.workbench, lanes, awaitsLanes: true },
             }),
       manifestObservationError: undefined,
       fault: undefined,

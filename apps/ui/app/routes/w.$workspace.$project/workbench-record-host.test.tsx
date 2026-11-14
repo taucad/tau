@@ -55,7 +55,11 @@ import {
 import { confirmFlush } from '#workbench-records/record-health.js';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
 import { createViewRecordPorts } from '#workbench-records/view-record-session.js';
-import { flushWorkbenchLayout, selectAppliedLayoutDigest } from '#workbench-records/workbench-layout.machine.js';
+import {
+  flushWorkbenchLayout,
+  selectAppliedLayoutDigest,
+  selectIntentOutcome,
+} from '#workbench-records/workbench-layout.machine.js';
 
 let fileManager: unknown;
 let project: unknown;
@@ -244,6 +248,8 @@ function mount(
   });
   const editorSnapshot = () => ({
     context: { previousLayout, panelState: { desktopLayout }, openFiles: [] as Array<{ path: string }> },
+    // The editor has loaded its lanes: the bridge seeds the layout with them at once.
+    matches: (state: string) => state === 'ready',
   });
   const editor = {
     subscribe: (listener: (state: unknown) => void) => {
@@ -255,11 +261,18 @@ function mount(
     send,
     getSnapshot: editorSnapshot,
   } as unknown as EditorRef;
+  /* What the layout hears, in order: the adapter protocol the shim speaks for the Dockview. */
+  const received: Array<{ type: string; node?: WorkbenchLaneNode }> = [];
   const layout = createActor(layoutHost.logic, {
     input: {
       ...layoutHost.input,
       workbenchOpen: desktopLayout.workbenchOpen,
       lanes: { chat: desktopLayout.chatOpen, workbench: desktopLayout.workbenchOpen },
+    },
+    inspect: (event) => {
+      if (event.type === '@xstate.transition' && event.actorRef === layout) {
+        received.push(event.event as { type: string; node?: WorkbenchLaneNode });
+      }
     },
   });
   const shell = createProjectShellPort();
@@ -293,22 +306,41 @@ function mount(
       }
     });
   };
-  /* The workbench's Dockview: it shows what it is handed, and its opener opens a pane in what it shows. */
+  /* The workbench's Dockview: it shows what it is handed, and its opener opens a pane in what it shows. As Dockview's
+   * `onDidLayoutChange` (an `AsapEvent`), it reports the change in a microtask, not while the opener runs. */
   let workbenchShows: WorkbenchLaneNode | undefined;
+  let reportQueued = false;
+  const reportLayoutChange = (): void => {
+    if (reportQueued) {
+      return;
+    }
+    reportQueued = true;
+    queueMicrotask(() => {
+      reportQueued = false;
+      if (workbenchShows !== undefined) {
+        shim.personWorkbenchChanged(workbenchShows);
+      }
+    });
+  };
   const dockview = {
     attach: (apply?: Apply) => {
       const detach = shim.registerWorkbench((node, applied) => {
-        workbenchShows = node;
-        (apply ?? ((_node, landed) => landed()))(node, applied);
+        // Dockview shows what it is handed once the apply lands, in place of whatever it showed before.
+        (apply ?? ((_node, landed) => landed()))(node, () => {
+          workbenchShows = node;
+          applied();
+        });
       });
       const disconnect = shim.connectIntents({
         openPanel: (panel: WorkbenchPanelId) => {
           const showing = workbenchShows ?? layout.getSnapshot().context.arrangement?.workbench;
           if (showing === undefined) {
-            return;
+            return undefined;
           }
+          // Dockview's model changes at once: the opener answers with it, and the layout report follows.
           workbenchShows = withPane(showing, panel);
-          shim.personWorkbenchChanged(workbenchShows);
+          reportLayoutChange();
+          return workbenchShows;
         },
       });
       return () => {
@@ -400,6 +432,7 @@ function mount(
     writes,
     send,
     stop,
+    received,
   };
 }
 
@@ -775,6 +808,123 @@ describe('live workbench record host', () => {
       });
     });
     expect(host.writes).not.toHaveBeenCalled();
+    host.unmount();
+  });
+
+  /* A8b review: Dockview reports an opened pane in a microtask (`onDidLayoutChange` is an `AsapEvent`), after the
+   * opener returns, but its model has the pane at once. The opener answers with it, so the pane is the intent's applied
+   * arrangement, and the deferred report that follows is not a person's edit. */
+  it("answers a delivered pane intent with what the opener shows, and its deferred report is not a person's edit", async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(landAtOnce());
+    });
+    await act(async () => {
+      host.intent('details');
+    });
+    const opened = withPane(first().workbench, 'details');
+    expect(host.received.filter((event) => event.type === 'intentApplied')).toEqual([
+      expect.objectContaining({ type: 'intentApplied', node: opened }),
+    ]);
+    expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([]);
+    expect(host.layout.getSnapshot().context.arrangement?.workbench).toEqual(opened);
+    host.unmount();
+  });
+
+  /* A8b review: Dockview may hold an apply (a file it shows opens first). A pane an intent opened meanwhile would be
+   * replaced when the apply lands, so the delivery waits for it. */
+  it('opens a delivered pane intent only once the workbench has landed what it was shown', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    let land: (() => void) | undefined;
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((_node, applied) => {
+        land = applied;
+      });
+    });
+    await act(async () => {
+      host.intent('details');
+    });
+    // The apply lands, and shows what it was handed in place of anything opened before it.
+    await act(async () => {
+      land?.();
+    });
+    const opened = withPane(first().workbench, 'details');
+    expect(host.dockview.shows).toEqual(opened);
+    expect(host.layout.getSnapshot().context.arrangement?.workbench).toEqual(opened);
+    host.unmount();
+  });
+
+  /* A8b review: a pane an intent opens while the record is refused has no arrangement to join. It shows, the intent is
+   * unavailable, and nothing becomes an edit the refused record owes, so a flush still settles. */
+  it('opens a pane intent on a refused record without owing an edit, so a flush settles', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(landAtOnce());
+    });
+    await host.set(encoder.encode('{"version":2}'));
+    await waitFor(() => {
+      expect(host.controller.snapshot()).toBeUndefined();
+    });
+    let intentId = '';
+    await act(async () => {
+      intentId = host.intent('details');
+    });
+    expect(host.dockview.shows).toEqual(withPane(first().workbench, 'details'));
+    expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({
+      outcome: 'dropped',
+      reason: 'unavailable',
+    });
+    expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([]);
+    await expect(host.producer()).resolves.toBeUndefined();
+    expect(host.writes).not.toHaveBeenCalled();
+    host.unmount();
+  });
+
+  /* A8b review: an intent the workbench cannot show is unavailable, not applied: a pane its opener refuses, and a file
+   * the editor closed before the intent was delivered. */
+  it('reports a refused pane and a closed file unavailable instead of applied', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    const activateFile = vi.fn();
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.controller.registerWorkbench(landAtOnce());
+      host.controller.connectIntents({ openPanel: () => false, activateFile });
+    });
+    let pane = '';
+    let file = '';
+    await act(async () => {
+      pane = host.intent('kernel');
+      file = sendPaneIntent(
+        host.layout,
+        { routeKey: '', device: 'desktop' },
+        {
+          source: 'person',
+          target: { kind: 'file', path: 'closed.ts' },
+        },
+      );
+    });
+    expect(activateFile).not.toHaveBeenCalled();
+    for (const intentId of [pane, file]) {
+      expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({
+        outcome: 'dropped',
+        reason: 'unavailable',
+      });
+    }
     host.unmount();
   });
 

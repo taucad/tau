@@ -97,6 +97,8 @@ function mount(input: Partial<WorkbenchLayoutInput> = {}) {
       adapters: input.adapters ?? ['workbench', 'viewer'],
       routeKey: input.routeKey ?? 'route-1',
       workbenchOpen: input.workbenchOpen ?? true,
+      ...(input.lanes === undefined ? {} : { lanes: input.lanes }),
+      ...(input.awaitsLanes === undefined ? {} : { awaitsLanes: input.awaitsLanes }),
     },
     inspect: guard.inspect,
   });
@@ -812,6 +814,82 @@ describe('workbenchLayout', () => {
     });
   });
 
+  /* A8b review: a project runtime's layout starts before its editor has loaded its lanes, and the editor takes no panel
+   * change until it is ready. The intents wait for the lanes the editor loads (`lanesSeeded`), which are a baseline:
+   * neither a lane close (rule 7) nor an edit (rule 1). */
+  describe('the lanes the editor loads', () => {
+    const defaults = { chat: true, workbench: true } as const;
+    const filesPane: PaneIntentTarget = { kind: 'pane', adapter: 'workbench', pane: 'files' };
+
+    it('should open the lane the editor loaded closed for an intent sent before it loaded, and drop nothing', () => {
+      const harness = mount({ lanes: defaults, awaitsLanes: true });
+      harness.publish(stored);
+      harness.attach('workbench');
+      harness.attach('viewer');
+      harness.intent('files', filesPane);
+      // The lanes are the editor's defaults: the intent neither opens the lane nor reaches the workbench yet.
+      expect(harness.of('workbenchOpenRequested')).toEqual([]);
+      expect(harness.deliveries('files')).toEqual([]);
+      harness.actor.send({ type: 'lanesSeeded', lanes: { chat: true, workbench: false } });
+      expect(harness.of('workbenchOpenRequested')).toEqual([{ type: 'workbenchOpenRequested', intentId: 'files' }]);
+      expect(harness.deliveries('files')).toHaveLength(1);
+      expect(harness.of('intentSettled')).toEqual([]);
+      expect(harness.record.commands.filter((command) => command.type === 'edit')).toEqual([]);
+    });
+
+    it('should open the lane the first read closes for an intent the seeded lanes left waiting for it', () => {
+      const closed = { ...stored, lanes: { chat: true, workbench: false } };
+      const harness = mount({ lanes: defaults, awaitsLanes: true });
+      harness.actor.send({ type: 'lanesSeeded', lanes: defaults });
+      harness.intent('files', filesPane);
+      // The record's lanes are shown with its first read: the lane is not opened before them, or they would close it.
+      expect(harness.of('workbenchOpenRequested')).toEqual([]);
+      harness.publish(closed);
+      expect(harness.context().workbenchOpen).toBe(true);
+      expect(harness.of('workbenchOpenRequested')).toEqual([{ type: 'workbenchOpenRequested', intentId: 'files' }]);
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'files')).toBeUndefined();
+    });
+
+    it('should not settle a phone pane intent before the editor can show its tab', () => {
+      const harness = mount({ device: 'phone', lanes: defaults, awaitsLanes: true });
+      harness.intent('model', modelPane);
+      expect(harness.of('mobileTabRequested')).toEqual([]);
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toBeUndefined();
+      harness.actor.send({ type: 'lanesSeeded', lanes: defaults });
+      expect(harness.of('mobileTabRequested')).toEqual([
+        { type: 'mobileTabRequested', intentId: 'model', target: modelPane },
+      ]);
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toEqual({ outcome: 'applied' });
+    });
+
+    it('should acknowledge nothing before the lanes are seeded', () => {
+      const harness = mount({ lanes: defaults, awaitsLanes: true });
+      harness.publish(stored);
+      harness.attach('workbench');
+      harness.attach('viewer');
+      harness.reportAll();
+      expect(harness.applied()).toBeUndefined();
+      harness.actor.send({ type: 'lanesSeeded', lanes: defaults });
+      harness.reportAll();
+      expect(harness.applied()).toBe(digestOf(stored));
+    });
+  });
+
+  /* A8b review: a live project's runtime holds its layout for its whole life, so a settled intent keeps its outcome
+   * only (I11), not its entry. */
+  it('should retire a settled intent to its outcome and still answer its re-sent id from it', () => {
+    const harness = ready();
+    harness.intent('model', modelPane);
+    harness.applyIntent('model', panes('parameters', 'model'));
+    expect(harness.context().intents).toEqual({});
+    harness.intent('model', modelPane);
+    expect(harness.deliveries('model')).toHaveLength(1);
+    expect(harness.of('intentSettled')).toEqual([
+      { type: 'intentSettled', intentId: 'model', outcome: 'applied' },
+      { type: 'intentSettled', intentId: 'model', outcome: 'applied' },
+    ]);
+  });
+
   describe('attach cycles with a queued intent and a pending apply', () => {
     it('should keep both across a detach and reattach, and settle each once', () => {
       const harness = ready();
@@ -1162,6 +1240,7 @@ describe('totality', () => {
     lanesEdited: { type: 'lanesEdited', lanes: { chat: false, workbench: true } },
     workbenchLaneChanged: { type: 'workbenchLaneChanged', open: false },
     lanesApplied: { type: 'lanesApplied', lanes: { chat: true, workbench: true } },
+    lanesSeeded: { type: 'lanesSeeded', lanes: { chat: true, workbench: false } },
     deviceChanged: { type: 'deviceChanged', device: 'phone' },
     routeChanged: { type: 'routeChanged', routeKey: 'route-2' },
     intent: { type: 'intent', intentId: 'i1', source: 'person', target: modelPane },

@@ -8,6 +8,7 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { createWorkbenchLayoutControllerShim } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
+import type { WorkbenchIntentTarget } from '#routes/w.$workspace.$project/workbench-layout-controller.shim.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import type {
   WorkbenchPanelId,
@@ -41,9 +42,13 @@ type ProjectWorkspaceContextValue = {
   openPanel: (panelId: WorkbenchPanelId, source?: PaneIntentSource) => void;
   setWorkbenchOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
+  /**
+   * Connect the workbench's opener and file activation. Each answers with the workbench node Dockview shows after it,
+   * and the opener `false` when it refuses a pane (see `WorkbenchIntentTarget`).
+   */
   connectWorkbench: (
-    openPanel: (panelId: WorkbenchPanelId) => void,
-    activateFile?: (path: string) => void,
+    openPanel: WorkbenchIntentTarget['openPanel'],
+    activateFile?: WorkbenchIntentTarget['activateFile'],
   ) => () => void;
   layoutController: WorkbenchLayoutController;
 };
@@ -235,8 +240,10 @@ export function ProjectWorkspaceProvider({
     layoutHost?.setFacts(facts);
   }, [facts, layoutHost]);
 
-  const openerRef = useRef<((panelId: WorkbenchPanelId) => void) | undefined>(undefined);
-  const fileActivationRef = useRef<{ activate: (path: string) => void } | undefined>(undefined);
+  const openerRef = useRef<WorkbenchIntentTarget['openPanel'] | undefined>(undefined);
+  const fileActivationRef = useRef<{ activate: NonNullable<WorkbenchIntentTarget['activateFile']> } | undefined>(
+    undefined,
+  );
   /* Without a layout (a preview's pane mode), the one pane and the one file asked for before the workbench connects. */
   const pendingUserFileRef = useRef<{ route: string; path: string } | undefined>(undefined);
   const pendingPreviewPanel = useRef<{ route: string; panel: WorkbenchPanelId } | undefined>(undefined);
@@ -365,7 +372,7 @@ export function ProjectWorkspaceProvider({
   );
 
   const connectWorkbench = useCallback(
-    (opener: (panelId: WorkbenchPanelId) => void, activateFile?: (path: string) => void) => {
+    (opener: WorkbenchIntentTarget['openPanel'], activateFile?: WorkbenchIntentTarget['activateFile']) => {
       if (
         !providerActiveRef.current ||
         committedRouteKeyRef.current !== routeKey ||

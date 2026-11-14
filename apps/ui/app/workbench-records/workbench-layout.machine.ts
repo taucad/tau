@@ -69,6 +69,10 @@
  * Before the record's first read nothing is shown: the first publication becomes the arrangement and seeds every
  * attached adapter, person edits are ignored (as the host ignores them today) and intents wait.
  *
+ * A project runtime's layout starts before its editor has loaded its lanes (`awaitsLanes`, A8b): until the editor
+ * reports them with `lanesSeeded`, intents wait unrouted and undelivered, and nothing is acknowledged, since the editor
+ * takes no panel change before it is ready and its lanes so far are defaults.
+ *
  * Context holds no durable fact of its own: the arrangement, the publications and the acknowledgement are rebuilt from
  * the record's next read by a new actor (MC-R5).
  *
@@ -108,6 +112,7 @@ import {
   openIntents,
   outcomeOf,
   queued,
+  retired,
   settleWhere,
   withState,
 } from '#workbench-records/pane-intents.js';
@@ -116,6 +121,7 @@ import type {
   PaneIntent,
   PaneIntentEntry,
   PaneIntentOutcome,
+  PaneIntentOutcomes,
   PaneIntents,
   PaneIntentTarget,
 } from '#workbench-records/pane-intents.js';
@@ -141,6 +147,12 @@ export type WorkbenchLayoutInput = Readonly<{
    * has no lane flags to check.
    */
   lanes?: WorkbenchLayout['lanes'];
+  /**
+   * The editor is still loading its lanes, so `workbenchOpen` and `lanes` are its defaults, not what will show. Until
+   * `lanesSeeded` reports them, intents wait without opening the lane, showing a phone tab or reaching an adapter, and
+   * nothing is acknowledged (A8b): the editor takes no panel change before it is ready.
+   */
+  awaitsLanes?: boolean;
 }>;
 
 /** The public event alphabet of {@link workbenchLayoutMachine}. */
@@ -187,6 +199,11 @@ export type WorkbenchLayoutEvent =
   | Readonly<{ type: 'workbenchLaneChanged'; open: boolean }>
   /** The chat and workbench lane flags now on screen (the editor's panel state): rule 4 waits for them (A8b, D14). */
   | Readonly<{ type: 'lanesApplied'; lanes: WorkbenchLayout['lanes'] }>
+  /**
+   * The lanes the editor loaded, once it is ready (`awaitsLanes`): what is on screen and whether the workbench lane is
+   * open. A baseline, not a lane change: it drops no intent (rule 7) and is not an edit (rule 1).
+   */
+  | Readonly<{ type: 'lanesSeeded'; lanes: WorkbenchLayout['lanes'] }>
   /** The shell the layout is shown on changed (the phone breakpoint): intents follow it from the next one (rule 7). */
   | Readonly<{ type: 'deviceChanged'; device: WorkbenchLayoutDevice }>
   /** The route key changed. */
@@ -309,7 +326,10 @@ type LayoutContext = Readonly<{
   /** Per adapter, the `show` it has not yet reported. */
   awaiting: Readonly<Partial<Record<LayoutAdapterId, number | undefined>>>;
   shows: number;
+  /** The open intents, and the dropped ones a late answer may still reach. */
   intents: PaneIntents;
+  /** The outcomes of the intents retired from `intents` (I11: a re-sent id is answered from them). */
+  outcomes: PaneIntentOutcomes;
   deliveries: number;
   restores: Readonly<Record<string, 'applied' | 'refused'>>;
   restoring: Restoring | undefined;
@@ -322,6 +342,10 @@ type LayoutContext = Readonly<{
   checksLanes: boolean;
   /** The lane flags on screen, as last reported. */
   appliedLanes: WorkbenchLayout['lanes'] | undefined;
+  /** Whether the editor's lanes are known (`lanesSeeded`, when the input awaits them): until then intents wait. */
+  lanesKnown: boolean;
+  /** The intents whose rule 7 step waits for the lanes it depends on ({@link routable}), in the order they were sent. */
+  unrouted: readonly string[];
 }>;
 
 type LayoutEnqueue = EnqueueObject<WorkbenchLayoutEvent, WorkbenchLayoutEmitted>;
@@ -400,7 +424,9 @@ const show = (
 /** Rule 4 on a device with lane flags: the lanes on screen are the revision's (the record host's check, D14). */
 const lanesShown = (context: LayoutContext, layout: WorkbenchLayout): boolean =>
   !context.checksLanes ||
-  (context.appliedLanes?.chat === layout.lanes.chat && context.appliedLanes.workbench === layout.lanes.workbench);
+  (context.lanesKnown &&
+    context.appliedLanes?.chat === layout.lanes.chat &&
+    context.appliedLanes.workbench === layout.lanes.workbench);
 
 /** Rule 4's conditions on the arrangement, with every adapter's report still to check. */
 const acknowledgeable = (context: LayoutContext, view: View): boolean =>
@@ -452,7 +478,8 @@ const settle = (context: LayoutContext, view: View, enq: LayoutEnqueue): LayoutC
       enq.emit({ type: 'applyOffered', applyId });
     }
   }
-  if (view.ready) {
+  next = routeWaiting(next, view, enq);
+  if (view.ready && next.lanesKnown) {
     next = deliver(next, attached, enq);
   }
   if (acknowledgeable(next, view) && reported(next)) {
@@ -490,6 +517,70 @@ const reportIntents = (settled: readonly PaneIntentEntry[], enq: LayoutEnqueue):
       enq.emit({ type: 'intentSettled', intentId: entry.intentId, ...outcome });
     }
   }
+};
+
+/** Hold `intents`, retiring each settled entry no late answer can reach to its outcome. */
+const withIntents = (context: LayoutContext, intents: PaneIntents): LayoutContext => {
+  const next = retired(intents, context.outcomes);
+  return { ...context, intents: next.intents, outcomes: next.outcomes };
+};
+
+/**
+ * Rule 7 for one queued intent on the device now: a phone shows its tab (a pane intent settles there, a file intent
+ * waits for the workbench), an intent for an adapter the device lacks is dropped, and on a desktop a workbench intent
+ * opens the lane.
+ */
+const routed = (context: LayoutContext, intent: PaneIntent, enq: LayoutEnqueue): LayoutContext => {
+  const adapter = intentAdapter(intent.target);
+  const workbenchPane = intent.target.kind === 'pane' && intent.target.adapter === 'workbench';
+  const workbenchFile = intent.target.kind === 'file' && context.adapters.includes(adapter);
+  if (context.device === 'phone' && (workbenchPane || workbenchFile)) {
+    // Rule 7 on a phone: the tab port shows the pane, or the editor tab for a file, which then waits for the workbench.
+    enq.emit({ type: 'mobileTabRequested', intentId: intent.intentId, target: intent.target });
+    if (!workbenchPane) {
+      return context;
+    }
+    const settled = settleWhere(context.intents, (entry) => entry.intentId === intent.intentId, { state: 'applied' });
+    reportIntents(settled.settled, enq);
+    return withIntents(context, settled.intents);
+  }
+  if (!context.adapters.includes(adapter)) {
+    const settled = settleWhere(context.intents, (entry) => entry.intentId === intent.intentId, {
+      state: 'dropped',
+      reason: 'unavailable',
+    });
+    reportIntents(settled.settled, enq);
+    return withIntents(context, settled.intents);
+  }
+  if (adapter === 'workbench' && !context.workbenchOpen) {
+    // Rule 7 on a desktop: a workbench intent opens the lane.
+    enq.emit({ type: 'workbenchOpenRequested', intentId: intent.intentId });
+    return { ...context, workbenchOpen: true };
+  }
+  return context;
+};
+
+/**
+ * Whether rule 7 can route an intent now. A phone's tab waits for an editor that takes it; on a desktop whose lanes the
+ * record holds, the lane also waits for the record's first read, whose lanes are shown first, so the lane an intent
+ * opens is not closed again by them.
+ */
+const routable = (context: LayoutContext, view: View): boolean =>
+  context.lanesKnown && (context.device === 'phone' || view.ready || !context.checksLanes);
+
+/** Route the intents that waited, once they can be: in the order they were sent, each once. */
+const routeWaiting = (context: LayoutContext, view: View, enq: LayoutEnqueue): LayoutContext => {
+  if (context.unrouted.length === 0 || !routable(context, view)) {
+    return context;
+  }
+  let next: LayoutContext = { ...context, unrouted: [] };
+  for (const intentId of context.unrouted) {
+    const entry = intentOf(next.intents, intentId);
+    if (entry !== undefined && isOpen(entry)) {
+      next = routed(next, entry, enq);
+    }
+  }
+  return next;
 };
 
 /** Rule 1: a local change of the arrangement counts one edit and is written to the record. */
@@ -577,13 +668,15 @@ const published = ({ context, event, value }: Step<'recordPublished'>, enq: Layo
   };
   const view = viewOf(value, {}, true);
   if (context.arrangement === undefined && !refused && event.layout !== undefined) {
-    // The first read is the arrangement; every attached adapter is seeded with it.
+    // The first read is the arrangement; every attached adapter is seeded with it. On a device with lane flags its
+    // lanes are shown with it (`arranged`), so its workbench lane is the baseline: not a close (rule 7).
     next = {
       ...next,
       arrangement: event.layout,
       arrangementDigest: event.digest,
       moves: next.moves + 1,
       latest: { ...next.latest!, done: true },
+      workbenchOpen: next.checksLanes ? event.layout.lanes.workbench : next.workbenchOpen,
     };
     next = show(next, attachedIn(next, view), event.layout, enq);
     enq.emit({ type: 'arranged', layout: event.layout });
@@ -613,7 +706,7 @@ const left = (context: LayoutContext, adapter: LayoutAdapterId, view: View, enq:
     }
   }
   const awaiting = { ...context.awaiting, [adapter]: undefined };
-  return settle({ ...context, intents, awaiting, acknowledged: undefined }, view, enq);
+  return settle({ ...withIntents(context, intents), awaiting, acknowledged: undefined }, view, enq);
 };
 
 /** Rule 5: a restore settles against the arrangement it was asked over. */
@@ -713,7 +806,7 @@ const workbenchLayoutDefinition = setup({
   actors: { layoutRecord },
 }).createMachine({
   id: 'workbenchLayout',
-  version: '2',
+  version: '3',
   // A defect is recorded and the layout keeps answering; the first is kept, since later ones are usually its
   // consequences (MC-R12, D23).
   onError: refines('Unmodelled', ({ context, event }) => ({
@@ -737,6 +830,7 @@ const workbenchLayoutDefinition = setup({
     awaiting: {},
     shows: 0,
     intents: {},
+    outcomes: {},
     deliveries: 0,
     restores: {},
     restoring: undefined,
@@ -746,6 +840,8 @@ const workbenchLayoutDefinition = setup({
     fault: undefined,
     checksLanes: input.lanes !== undefined,
     appliedLanes: input.lanes,
+    lanesKnown: input.awaitsLanes !== true,
+    unrouted: [],
   }),
   type: 'parallel',
   // Rule 9: one record session for the file, for the actor's whole life.
@@ -903,44 +999,29 @@ const workbenchLayoutDefinition = setup({
       initial: 'idle',
       on: {
         intent: refines('IntentSent', ({ context, event, value }: Step<'intent'>, enq: LayoutEnqueue) => {
+          const outcome = ownValue(context.outcomes, event.intentId);
+          if (outcome !== undefined) {
+            // A re-sent id: answered again by its first outcome, never applied twice (I11).
+            enq.emit({ type: 'intentSettled', intentId: event.intentId, ...outcome });
+            return {};
+          }
           const sent = intentOf(context.intents, event.intentId);
           if (sent !== undefined) {
-            // A re-sent id: answered again by its first outcome once settled, never applied twice (I11).
+            // A re-sent id still open, or dropped with a late answer owed: answered by its outcome once it has one.
             reportIntents([sent], enq);
             return {};
           }
           const intent: PaneIntent = { intentId: event.intentId, source: event.source, target: event.target };
-          const adapter = intentAdapter(intent.target);
-          let next: LayoutContext = {
-            ...context,
-            intents: queued(context.intents, intent),
-          };
-          const workbenchPane = intent.target.kind === 'pane' && intent.target.adapter === 'workbench';
-          const workbenchFile = intent.target.kind === 'file' && context.adapters.includes(adapter);
-          if (context.device === 'phone' && (workbenchPane || workbenchFile)) {
-            // Rule 7 on a phone: the tab port shows the pane, or the editor tab for a file, which then waits for the
-            // workbench.
-            enq.emit({ type: 'mobileTabRequested', intentId: intent.intentId, target: intent.target });
-            if (workbenchPane) {
-              const settled = settleWhere(next.intents, (entry) => entry.intentId === intent.intentId, {
-                state: 'applied',
-              });
-              reportIntents(settled.settled, enq);
-              next = { ...next, intents: settled.intents };
-            }
-          } else if (!context.adapters.includes(adapter)) {
-            const settled = settleWhere(next.intents, (entry) => entry.intentId === intent.intentId, {
-              state: 'dropped',
-              reason: 'unavailable',
-            });
-            reportIntents(settled.settled, enq);
-            next = { ...next, intents: settled.intents };
-          } else if (adapter === 'workbench' && !context.workbenchOpen) {
-            // Rule 7 on a desktop: a workbench intent opens the lane.
-            enq.emit({ type: 'workbenchOpenRequested', intentId: intent.intentId });
-            next = { ...next, workbenchOpen: true };
-          }
-          const settled = settle(next, viewOf(value), enq);
+          const view = viewOf(value);
+          const next: LayoutContext = { ...context, intents: queued(context.intents, intent) };
+          // Until the lanes it depends on are known, the intent waits: the step that makes it routable routes it (A8b).
+          const settled = settle(
+            routable(next, view)
+              ? routed(next, intent, enq)
+              : { ...next, unrouted: [...next.unrouted, intent.intentId] },
+            view,
+            enq,
+          );
           return { target: intentsTarget(settled), context: finished(context, settled, enq) };
         }),
         intentApplied: refines(
@@ -955,7 +1036,7 @@ const workbenchLayoutDefinition = setup({
             ) {
               // The one late answer for an intent dropped while it was delivered (rules 6 and 7): the adapter shows the
               // pane, so its node is the arrangement, counted as a person's edit is. The intent stays dropped (I11).
-              const answered: LayoutContext = { ...context, intents: lateAnswered(context.intents, entry.intentId) };
+              const answered = withIntents(context, lateAnswered(context.intents, entry.intentId));
               const arrangement = withPart(answered.arrangement, intentAdapter(entry.target), event.node);
               return sameLayout(arrangement, answered.arrangement)
                 ? { context: answered }
@@ -973,7 +1054,7 @@ const workbenchLayoutDefinition = setup({
               state: 'applied',
             });
             reportIntents(settled.settled, enq);
-            const applied: LayoutContext = { ...context, intents: settled.intents };
+            const applied = withIntents(context, settled.intents);
             const arrangement = withPart(applied.arrangement, intentAdapter(entry.target), event.node);
             const next = sameLayout(arrangement, applied.arrangement)
               ? applied
@@ -995,7 +1076,7 @@ const workbenchLayoutDefinition = setup({
               reason: 'unavailable',
             });
             reportIntents(settled.settled, enq);
-            const done = settle({ ...context, intents: settled.intents }, viewOf(value), enq);
+            const done = settle(withIntents(context, settled.intents), viewOf(value), enq);
             return { target: intentsTarget(done), context: finished(context, done, enq) };
           },
         ),
@@ -1007,7 +1088,10 @@ const workbenchLayoutDefinition = setup({
           // Rule 6: every open intent is dropped in this step.
           const settled = settleWhere(context.intents, () => true, { state: 'dropped', reason: 'routeChanged' });
           reportIntents(settled.settled, enq);
-          return { target: '.idle', context: { intents: settled.intents, routeKey: event.routeKey } };
+          return {
+            target: '.idle',
+            context: { ...withIntents(context, settled.intents), unrouted: [], routeKey: event.routeKey },
+          };
         }),
         workbenchLaneChanged: refines(
           'WorkbenchClosed',
@@ -1026,10 +1110,27 @@ const workbenchLayoutDefinition = setup({
               reason: 'workbenchClosed',
             });
             reportIntents(settled.settled, enq);
-            const next: LayoutContext = { ...context, intents: settled.intents, workbenchOpen: false };
+            const next: LayoutContext = { ...withIntents(context, settled.intents), workbenchOpen: false };
             return { target: intentsTarget(next), context: next };
           },
         ),
+        lanesSeeded: refines('Unmodelled', ({ context, event, value }: Step<'lanesSeeded'>, enq: LayoutEnqueue) => {
+          if (context.lanesKnown) {
+            // Seeded already, or never awaited: later lane changes arrive as lane reports.
+            return {};
+          }
+          // The lanes the editor loaded are on screen, and the workbench lane is as they say. The intents that waited
+          // for them are routed once they can be (rule 7), in the order they were sent, and may then reach their
+          // adapters.
+          const next: LayoutContext = {
+            ...context,
+            lanesKnown: true,
+            workbenchOpen: event.lanes.workbench,
+            appliedLanes: { chat: event.lanes.chat, workbench: event.lanes.workbench },
+          };
+          const done = settle(next, viewOf(value), enq);
+          return { target: intentsTarget(done), context: finished(context, done, enq) };
+        }),
       },
       states: { idle: {}, waiting: {} },
     },
@@ -1183,6 +1284,7 @@ export const workbenchLayoutEventTypes = [
   'lanesEdited',
   'workbenchLaneChanged',
   'lanesApplied',
+  'lanesSeeded',
   'deviceChanged',
   'routeChanged',
   'intent',
@@ -1227,7 +1329,7 @@ export const selectLayoutReady = (snapshot: WorkbenchLayoutView): boolean => sna
 /** An intent's outcome, once it settled. */
 export const selectIntentOutcome = (snapshot: WorkbenchLayoutView, intentId: string): PaneIntentOutcome | undefined => {
   const entry = intentOf(snapshot.context.intents, intentId);
-  return entry === undefined ? undefined : outcomeOf(entry);
+  return ownValue(snapshot.context.outcomes, intentId) ?? (entry === undefined ? undefined : outcomeOf(entry));
 };
 
 /** A restore's outcome, once it settled. */

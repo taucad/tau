@@ -46,6 +46,8 @@ const editorRef = {
       openFiles: editorFiles,
       panelState: { desktopLayout: { ...editorLanes } },
     },
+    // The editor has loaded its lanes: the bridge seeds the layout with them at once.
+    matches: (value: string) => value === 'ready',
   }),
   on: vi.fn((type: string, listener: (event: EditorOutputEvent) => void) => {
     listeners.set(type, listener);

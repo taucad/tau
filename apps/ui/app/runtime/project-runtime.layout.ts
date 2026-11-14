@@ -237,6 +237,12 @@ export const rollbackOf = (
   ),
 });
 
+/** Whether the editor takes panel changes: before `ready` it ignores `setPanelState`, and its lanes are not yet loaded. */
+const selectEditorReady = (snapshot: ReturnType<EditorRef['getSnapshot']>): boolean => snapshot.matches('ready');
+
+const sameLanes = (left: WorkbenchLayout['lanes'], right: WorkbenchLayout['lanes']): boolean =>
+  left.chat === right.chat && left.workbench === right.workbench;
+
 /** The editor's lane flags now. */
 const selectEditorLanes = (snapshot: ReturnType<EditorRef['getSnapshot']>): WorkbenchLayout['lanes'] => {
   const { desktopLayout } = snapshot.context.panelState;
@@ -331,6 +337,19 @@ export const createLayoutBridgeLogic = (
         panelState: { desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' } },
       });
     };
+    /* The lanes last reported to the layout; `undefined` until the editor is ready and they are seeded. */
+    let lanes: WorkbenchLayout['lanes'] | undefined;
+    /* Whether the layout has arranged anything yet: its first arrangement is the record's first read. */
+    let arranged = false;
+    /* Show `shown` lanes on the editor, unless it shows them already. */
+    const showLanes = (shown: WorkbenchLayout['lanes']): void => {
+      if (!sameLanes(selectEditorLanes(editor.getSnapshot()), shown)) {
+        editor.send({
+          type: 'setPanelState',
+          panelState: { desktopLayout: { chatOpen: shown.chat, workbenchOpen: shown.workbench } },
+        });
+      }
+    };
     const subscriptions = [
       // What the layout asks of the editor.
       layout.on('workbenchOpenRequested', () => {
@@ -347,23 +366,44 @@ export const createLayoutBridgeLogic = (
       }),
       // An applied arrangement brings its lanes; a lane the person changed since is theirs (rule 8 fences it).
       layout.on('arranged', ({ layout: arrangement }) => {
-        const lanes = selectEditorLanes(editor.getSnapshot());
-        if (lanes.chat !== arrangement.lanes.chat || lanes.workbench !== arrangement.lanes.workbench) {
-          editor.send({
-            type: 'setPanelState',
-            panelState: {
-              desktopLayout: { chatOpen: arrangement.lanes.chat, workbenchOpen: arrangement.lanes.workbench },
-            },
-          });
+        const first = !arranged;
+        arranged = true;
+        if (lanes === undefined) {
+          // The editor would ignore them before it is ready: the seed shows the arrangement's lanes then.
+          return;
         }
+        if (first) {
+          // The record's first read: the layout holds its lanes as the baseline, so showing them is neither a closed
+          // lane (rule 7) nor a person's edit (rule 1), only lanes on screen (rule 4).
+          lanes = arrangement.lanes;
+          showLanes(arrangement.lanes);
+          layout.send({ type: 'lanesApplied', lanes: arrangement.lanes });
+          return;
+        }
+        showLanes(arrangement.lanes);
       }),
     ];
-    /* The editor's lanes: what is on screen (rule 4), a closed lane (rule 7) and a person's lane edit (rule 1). */
-    let lanes = selectEditorLanes(editor.getSnapshot());
-    layout.send({ type: 'lanesApplied', lanes });
-    const editorSubscription = editor.subscribe((snapshot) => {
+    /* The editor's lanes once it is ready. An arrangement read before then brought lanes the editor ignored, so they
+     * are shown now, ahead of anything the seed asks of the editor; and the lanes on screen are the layout's baseline
+     * (`lanesSeeded`): not a closed lane (rule 7) nor a person's edit (rule 1), and the intents that waited for them
+     * are routed. */
+    const seed = (snapshot: ReturnType<EditorRef['getSnapshot']>): void => {
+      const shown = layout.getSnapshot().context.arrangement?.lanes ?? selectEditorLanes(snapshot);
+      lanes = shown;
+      showLanes(shown);
+      layout.send({ type: 'lanesSeeded', lanes: shown });
+    };
+    /* After the seed, the editor's lanes: what is on screen (rule 4), a closed lane (rule 7) and a person's lane edit
+     * (rule 1). */
+    const follow = (snapshot: ReturnType<EditorRef['getSnapshot']>): void => {
+      if (lanes === undefined) {
+        if (selectEditorReady(snapshot)) {
+          seed(snapshot);
+        }
+        return;
+      }
       const next = selectEditorLanes(snapshot);
-      if (next.chat === lanes.chat && next.workbench === lanes.workbench) {
+      if (sameLanes(next, lanes)) {
         return;
       }
       const workbenchChanged = next.workbench !== lanes.workbench;
@@ -373,13 +413,12 @@ export const createLayoutBridgeLogic = (
       }
       layout.send({ type: 'lanesApplied', lanes: next });
       const { arrangement } = layout.getSnapshot().context;
-      if (
-        arrangement !== undefined &&
-        (arrangement.lanes.chat !== next.chat || arrangement.lanes.workbench !== next.workbench)
-      ) {
+      if (arrangement !== undefined && !sameLanes(arrangement.lanes, next)) {
         layout.send({ type: 'lanesEdited', lanes: next });
       }
-    });
+    };
+    const editorSubscription = editor.subscribe(follow);
+    follow(editor.getSnapshot());
     /* A foreign publication that changes the record saves the arrangement it replaced as the editor's previous layout. */
     let previous = selectLatestLayout(layout.getSnapshot());
     const layoutSubscription = layout.subscribe((snapshot) => {

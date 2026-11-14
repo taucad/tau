@@ -32,10 +32,14 @@ import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-wor
 
 type EditorRef = ActorRefFrom<typeof editorMachine>;
 
-/** The workbench's two ways to answer a pane intent: open a pane, and activate an open file's tab. */
+/**
+ * The workbench's two ways to answer a pane intent: open a pane, and activate an open file's tab. Each answers at once
+ * with the workbench node Dockview shows after it (its model changes synchronously; only its layout report is deferred),
+ * `undefined` when it cannot read one, and the opener `false` when it refuses the pane (one the view does not offer).
+ */
 export type WorkbenchIntentTarget = Readonly<{
-  openPanel: (panelId: WorkbenchPanelId) => void;
-  activateFile?: (path: string) => void;
+  openPanel: (panelId: WorkbenchPanelId) => WorkbenchLaneNode | false | undefined;
+  activateFile?: (path: string) => WorkbenchLaneNode | undefined;
 }>;
 
 /** The controller, with the workbench's intent target the workspace connects. */
@@ -132,21 +136,16 @@ export function createWorkbenchLayoutControllerShim(
     return next;
   };
 
+  /* What each registered adapter shows: what it last applied, or what the person last arranged on it, or what
+   * an intent opened on it. */
+  const onScreen = new Map<LayoutAdapterId, string>();
+
   /* The workbench's intent target, and the deliveries that wait for it to connect. */
   let intentTarget: WorkbenchIntentTarget | undefined;
   const held = new Map<string, Readonly<{ deliveryId: number; target: DeliveredTarget }>>();
-  /* The workbench node the person's Dockview reported while an intent was being applied, if it reported one. */
-  let reportedDuringDelivery: WorkbenchLaneNode | undefined;
-  let delivering = false;
-
-  /** The node reported while the intent was applied, read once. */
-  const takeReported = (): WorkbenchLaneNode | undefined => {
-    const reported = reportedDuringDelivery;
-    reportedDuringDelivery = undefined;
-    return reported;
-  };
-
-  const arrangedWorkbench = (): WorkbenchLaneNode | undefined => layout.getSnapshot().context.arrangement?.workbench;
+  /* The show the workbench is applying, if any: Dockview may hold an apply (a file it shows opens first), and a pane
+   * opened on what it shows before then would be replaced by it, so deliveries wait for the apply to land. */
+  let workbenchApplying: number | undefined;
 
   function deliverNow(
     delivery: Readonly<{
@@ -162,28 +161,43 @@ export function createWorkbenchLayoutControllerShim(
       syncLayoutFacts(layout, facts);
       return;
     }
-    reportedDuringDelivery = undefined;
-    delivering = true;
-    try {
-      if (delivery.target.kind === 'pane') {
-        target.openPanel(delivery.target.pane as WorkbenchPanelId);
-      } else if (target.activateFile !== undefined && selectOpenFilePaths(editor).includes(delivery.target.path)) {
-        // A file the editor holds is shown; one it closed since is not reopened by its old intent.
-        target.activateFile(delivery.target.path);
-      }
-    } finally {
-      delivering = false;
+    let answer: WorkbenchLaneNode | false | undefined = false;
+    if (delivery.target.kind === 'pane') {
+      answer = target.openPanel(delivery.target.pane as WorkbenchPanelId);
+    } else if (target.activateFile !== undefined && selectOpenFilePaths(editor).includes(delivery.target.path)) {
+      // A file the editor holds is shown; one it closed since is not reopened by its old intent.
+      answer = target.activateFile(delivery.target.path);
     }
-    const node = takeReported() ?? arrangedWorkbench();
-    if (node === undefined) {
+    const { latest, arrangement } = layout.getSnapshot().context;
+    const node = answer === false ? undefined : (answer ?? arrangement?.workbench);
+    if (node !== undefined) {
+      // Dockview reports this change later (its layout event is deferred): the report then matches what is on screen
+      // and is not sent again as the person's edit.
+      onScreen.set('workbench', JSON.stringify(node));
+    }
+    if (node === undefined || latest === undefined || latest.refused || arrangement === undefined) {
+      // The opener refused the pane, the file closed before its intent arrived, or the record is refused or unread and
+      // holds no arrangement to open the pane in: whatever shows is not an edit.
       layout.send({ type: 'intentUnavailable', intentId: delivery.intentId });
       return;
     }
     layout.send({ type: 'intentApplied', intentId: delivery.intentId, deliveryId: delivery.deliveryId, node });
   }
 
-  /* What each registered adapter shows: what it last applied, or what the person last arranged on it. */
-  const onScreen = new Map<LayoutAdapterId, string>();
+  /** Deliver the held intents the workbench can take now, in the order they were held. */
+  const deliverHeld = (): void => {
+    const target = intentTarget;
+    if (target === undefined || workbenchApplying !== undefined) {
+      return;
+    }
+    for (const [intentId, delivery] of held) {
+      if (delivery.target.kind === 'file' && target.activateFile === undefined) {
+        continue;
+      }
+      held.delete(intentId);
+      deliverNow({ intentId, ...delivery }, target);
+    }
+  };
 
   const register = <Node extends ViewerNode | WorkbenchLaneNode>(
     adapter: LayoutAdapterId,
@@ -210,10 +224,18 @@ export function createWorkbenchLayoutControllerShim(
           layout.send({ type: 'adapterShown', adapter, showId: event.showId });
           return;
         }
+        if (adapter === 'workbench') {
+          workbenchApplying = event.showId;
+        }
         apply(node, () => {
           if (registered) {
             onScreen.set(adapter, shown);
             layout.send({ type: 'adapterShown', adapter, showId: event.showId });
+          }
+          // A newer apply replaces this one, and only the newest lands.
+          if (adapter === 'workbench' && workbenchApplying === event.showId) {
+            workbenchApplying = undefined;
+            deliverHeld();
           }
         });
       }),
@@ -232,8 +254,12 @@ export function createWorkbenchLayoutControllerShim(
           return;
         }
         const target = intentTarget;
-        if (target === undefined || (event.target.kind === 'file' && target.activateFile === undefined)) {
-          // Applied once the workbench's opener connects.
+        if (
+          target === undefined ||
+          (event.target.kind === 'file' && target.activateFile === undefined) ||
+          workbenchApplying !== undefined
+        ) {
+          // Applied once the workbench's opener connects and what it was shown has landed.
           held.set(event.intentId, { deliveryId: event.deliveryId, target: event.target });
           return;
         }
@@ -254,6 +280,7 @@ export function createWorkbenchLayoutControllerShim(
       if (adapter === 'workbench') {
         // The layout queues its delivered intents again for the next attach (rule 4).
         held.clear();
+        workbenchApplying = undefined;
       }
       layout.send({ type: 'adapterDetached', adapter });
     };
@@ -306,22 +333,18 @@ export function createWorkbenchLayoutControllerShim(
       layout.send({ type: 'personEdited', adapter: 'viewer', node });
     },
     personWorkbenchChanged: (node) => {
-      onScreen.set('workbench', JSON.stringify(node));
-      if (delivering) {
-        reportedDuringDelivery = node;
+      const shown = JSON.stringify(node);
+      if (onScreen.get('workbench') === shown) {
+        // Dockview's deferred report of what an intent's answer already carried, or of what it was shown.
+        return;
       }
+      onScreen.set('workbench', shown);
       layout.send({ type: 'personEdited', adapter: 'workbench', node });
     },
     ready: () => selectLayoutReady(layout.getSnapshot()),
     connectIntents: (target) => {
       intentTarget = target;
-      for (const [intentId, delivery] of held) {
-        if (delivery.target.kind === 'file' && target.activateFile === undefined) {
-          continue;
-        }
-        held.delete(intentId);
-        deliverNow({ intentId, ...delivery }, target);
-      }
+      deliverHeld();
       return () => {
         if (intentTarget === target) {
           intentTarget = undefined;

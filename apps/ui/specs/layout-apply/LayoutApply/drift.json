@@ -7,6 +7,7 @@
     "workbenchLayout.intents.intent": "IntentSent",
     "workbenchLayout.intents.intentApplied": "IntentApplied",
     "workbenchLayout.intents.intentUnavailable": "IntentDropped",
+    "workbenchLayout.intents.lanesSeeded": "Unmodelled",
     "workbenchLayout.intents.routeChanged": "RouteKeyChanged",
     "workbenchLayout.intents.workbenchLaneChanged": "WorkbenchClosed",
     "workbenchLayout.lanesApplied": "Unmodelled",
@@ -57,6 +58,7 @@
     "intentUnavailable",
     "lanesApplied",
     "lanesEdited",
+    "lanesSeeded",
     "personEdited",
     "recordEditAnswered",
     "recordFailed",
@@ -70,10 +72,10 @@
     "workbenchLaneChanged"
   ],
   "specs": {
-    "LayoutApply.tla": "f9fd4d768127e41cf2e409497aa48856022d2bde2e8aaed8f48003f5151362a8"
+    "LayoutApply.tla": "ffc6498d5d28d518995dbc615a062b41e68f1adfda80bbac9e064bb632e28385"
   },
   "tables": {},
   "versions": {
-    "workbenchLayout": "2"
+    "workbenchLayout": "3"
   }
 }

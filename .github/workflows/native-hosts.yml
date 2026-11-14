@@ -19,15 +19,14 @@
 # `tag:ci:native-hosts` project is affected as `intel`, which starts the Intel row (it joins the queue at
 # the native lane's rate instead of on every push). The plan job here is then skipped, and the required
 # check fails when a row does. Never on a pull request: the queue proves the rows on the exact commit that
-# lands, and a push that reuses the queue verdict runs none again. The push trigger is gone; the nightly
-# and a dispatch run the plan here, which selects every row, and are not a required check. The nightly
-# stays until the drift check (Q-7) dispatches this workflow and the queue has run the Intel row green
-# twice (resume § 5b).
+# lands, and a push that reuses the queue verdict runs none again. The push and schedule triggers are
+# gone: the daily drift check (`drift-check.yml`, Q-7) dispatches this workflow when a runner image or
+# registry digest changed, and that dispatch or a manual one runs the plan here, which selects every row
+# and is not a required check. The 03:17 nightly was retired once the drift check dispatched this workflow
+# green and the queue had run the Intel row green twice (resume § 5b).
 name: Native hosts
 
 on:
-  schedule:
-    - cron: '17 3 * * *'
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -56,8 +55,8 @@ env:
 
 # Nothing here is cancelled. A run called from `ci.yml` (where `inputs.intel` is set) gets a group of its own
 # (`github.run_id`): `ci.yml`'s group already holds the run, and a shared group would let a newer push
-# replace a `main` run's rows still waiting for a runner, which `ci.yml` never cancels. The nightly and each
-# dispatch keep groups of their own. The group names this workflow literally: called from `ci.yml`,
+# replace a `main` run's rows still waiting for a runner, which `ci.yml` never cancels. Each dispatch keeps
+# a group of its own. The group names this workflow literally: called from `ci.yml`,
 # `github.workflow` is `CI`, and a group equal to the caller's would cancel the call.
 concurrency:
   group: native-hosts-${{ inputs.intel != '' && github.run_id || format('{0}-{1}', github.event_name, github.ref) }}
@@ -66,7 +65,7 @@ concurrency:
 jobs:
   plan:
     name: Select the native host rows
-    # Called from `ci.yml` (`inputs.intel` set), its plan selected the rows; the nightly and a dispatch run this.
+    # Called from `ci.yml` (`inputs.intel` set), its plan selected the rows; a dispatch runs this.
     if: inputs.intel == ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -316,7 +315,7 @@ jobs:
   intel:
     name: Native kernels on darwin-x64
     needs: [plan]
-    # Called from `ci.yml`, when its plan finds a `tag:ci:native-hosts` project affected; every nightly and dispatch.
+    # Called from `ci.yml`, when its plan finds a `tag:ci:native-hosts` project affected; every dispatch.
     if: ${{ !cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true') }}
     runs-on: macos-26-intel
     timeout-minutes: 60

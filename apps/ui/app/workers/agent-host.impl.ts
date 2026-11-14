@@ -617,7 +617,7 @@ export const hostBuildOf = (release: string | undefined): string | undefined => 
 /**
  * The host labels every gateway call from this worker carries (LW17): the browser host, and the same build its evidence
  * reports, so a run's generations and its host facts read one release. The transport adds each call's model; the run's
- * kernel is not known to the host, so none is sent.
+ * kernel comes from each run's turn snapshot, which the session adds.
  *
  * @param release - The page's label, absent from an older page.
  * @returns The labels for the gateway transport.

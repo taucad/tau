@@ -116,7 +116,7 @@ const agentSessionKey = 'tau-agent';
 
 /**
  * The host labels every gateway call from this utility carries (LW17): the desktop host and its stamped build. The
- * transport adds each call's model; the run's kernel is not known to the host, so none is sent.
+ * transport adds each call's model, and the session each run's kernel from its turn's snapshot.
  *
  * @returns The labels for the gateway transport.
  */

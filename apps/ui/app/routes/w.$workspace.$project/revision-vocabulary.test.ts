@@ -386,6 +386,14 @@ describe('a save waiting on the person’s Git', () => {
     expect(waitingSentence({ kind: 'locked' })).toBe('Saving paused · Git is busy');
   });
 
+  it('should say a rebase will run commands, and where to end it, only when its todo holds an exec line', () => {
+    expect(selectRevisionFacts(waitingOn({ kind: 'rebase', runsCommands: true }), where)).toMatchObject({
+      mark: 'attention',
+      sentence: 'Saving paused · The rebase will run commands · Finish or abort it in Tau’s Terminal',
+    });
+    expect(waitingSentence({ kind: 'rebase' })).toBe('Saving paused · Finish or abort the rebase in Git');
+  });
+
   it('should give a detached head its way back', () => {
     expect(selectRevisionFacts(waitingOn({ kind: 'detached', branch: 'main' }), where).sentence).toBe(
       'Not on a branch · Run git switch main to go back',

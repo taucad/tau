@@ -1527,3 +1527,45 @@ describe('focus: a session replaced by a resume no snapshot showed absent', () =
     ]);
   });
 });
+
+describe("focus: the person's Not now on the budget dialog (A5b round 15, D14)", () => {
+  const closedRegistry: FocusRegistryView = { status: {}, closed: {} };
+  const kindOn = (harness: FocusHarness, projectId: string) =>
+    selectProjectRouteState(harness.focus.getSnapshot(), closedRegistry, {
+      slugs: slugsOf(projectId),
+      projectId,
+      chatId: undefined,
+    })?.kind;
+  const declinedOn = (harness: FocusHarness) => {
+    harness.focusOn('r1', 'a');
+    harness.route('r2', 'b');
+    harness.ready('r2', 'b');
+    if (harness.ofType('flush', 'leaveFlushAsked').length > 0) {
+      harness.settleFlush(true);
+    }
+    const open = harness.lastOpen();
+    harness.settleOpen('waiting', open.requestId);
+    harness.settleOpen('declined', open.requestId);
+  };
+
+  it("should settle on the project closed with the reopen offer when focus's own waiting open is declined", () => {
+    const harness = createFocusHarness();
+    declinedOn(harness);
+    expect(harness.state()).toBe('focused');
+    expect(kindOn(harness, 'b')).toBe('closed');
+  });
+
+  it("should stay closed when the person's own Reopen is declined, and open again on the next Reopen", () => {
+    const harness = createFocusHarness();
+    declinedOn(harness);
+    harness.send({ type: 'openRequested', projectId: 'b' });
+    const reopen = harness.lastOpen();
+    harness.settleOpen('waiting', reopen.requestId);
+    harness.settleOpen('declined', reopen.requestId);
+    expect(harness.state()).toBe('focused');
+    expect(kindOn(harness, 'b')).toBe('closed');
+    const opens = harness.opens().length;
+    harness.send({ type: 'openRequested', projectId: 'b' });
+    expect(harness.opens()).toHaveLength(opens + 1);
+  });
+});

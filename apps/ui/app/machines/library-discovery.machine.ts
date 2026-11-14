@@ -21,7 +21,7 @@
  *
  * `passRequested{requestId, reuse}` is answered with `passSettled{requestId, epoch, result}`, or `passFailed` when a
  * port rejected. Requests join the pass in flight (single flight). With `reuse`, a request is answered at once from
- * the last listing when its epoch is still current, as the cache at `use-project-manager.tsx` line 2474 does today.
+ * the last listing when its epoch is still current, as the cache at `use-project-manager.tsx` line 2495 does today.
  * `poll` starts a pass when none is in flight: an explicit refresh.
  *
  * An owed pass starts when someone asks for one, as today: an invalidation refetches the active `projects` query

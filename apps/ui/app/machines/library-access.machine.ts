@@ -2,8 +2,8 @@
  * `libraryAccess`: the library's answer to a route's question "may this project open, and as what?" (app state
  * orchestration charter D2, D3, D4, D10, D13, D23; invariants I4, I17, I18; plan § 4 A3a; inventory L8).
  *
- * Route access is not a function of state. Today's `getProjectRouteAccess` (`use-project-manager.tsx` lines 2419 to
- * 2545) awaits up to three storage reads and a discovery pass, and starts over when the discovery epoch moved under
+ * Route access is not a function of state. Today's `getProjectRouteAccess` (`use-project-manager.tsx` lines 2440 to
+ * 2566) awaits up to three storage reads and a discovery pass, and starts over when the discovery epoch moved under
  * one. This machine ports it step for step, one query child per request id, and keeps the
  * `apps/ui/specs/library-catalog/LibraryCatalog.tla` README's rules 8 and 9:
  *

@@ -61,6 +61,8 @@
 \* The provider hands the library its binding in render; a port called before it waits for it, and
 \* its children are optional, and a connection wait superseded by a later selection rejects; neither
 \* changes an action. The observation effect releases and resumes the library's binding around its reads.
+\* A3a, after A2: the machines' citations of `use-project-manager.tsx` lines moved with A2's additions
+\* above them; the code they name is unchanged, so no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

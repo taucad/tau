@@ -14,9 +14,9 @@
  * 6. A row that fails with `workspace-unavailable` keeps its attempts and is replayed again only when its workspace
  *    is back: `workspaceReturned`, or a `retryRequested` whose workspace check finds it present. That second path is
  *    a named change (programme control, 2026-11-13T08:13Z): today every cross-tab or desktop root-configuration
- *    message (`use-project-manager.tsx` 2135 to 2151) and every `prepareCurrentWorkspaceCatalog` (2840 to 2846) replay
+ *    message (`use-project-manager.tsx` 2156 to 2172) and every `prepareCurrentWorkspaceCatalog` (2861 to 2867) replay
  *    such a row with no check. A lapsed permission (`'prompt'`) with its handle held counts as present (D14); the check
- *    port decides. `replayAsked`, the replay `createProject(id)` makes under its named lock (2302 to 2306), is the one
+ *    port decides. `replayAsked`, the replay `createProject(id)` makes under its named lock (2323 to 2327), is the one
  *    replay outside this rule, kept as today.
  * 7. Replays run one at a time. A row re-armed by a workspace check or return joins the one loop; today
  *    `retryFailedRecoveries` settles them in a loop of its own that can overlap the startup loop (named difference).

@@ -1,5 +1,5 @@
 /**
- * `libraryAccess` against today's `getProjectRouteAccess` (`hooks/use-project-manager.tsx` 2419 to 2545) and rules 8
+ * `libraryAccess` against today's `getProjectRouteAccess` (`hooks/use-project-manager.tsx` 2440 to 2566) and rules 8
  * and 9 of the LibraryCatalog README: one row per answer, an epoch that moves during each of the three reads, a
  * recovery that starts during `ensureProjectLibraryState`, the `today-access-loop` fix (a recovery that starts during
  * the route-config read), two questions in flight answered to their own ids, and the generation rules. Every port is

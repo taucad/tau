@@ -307,7 +307,7 @@ export const createFocusComposition = ({ library, loadModule }: FocusComposition
         return;
       }
       /* The person declined the budget's choice (`cancelPendingOpen` from its dialog): nothing will open it. */
-      answer(requestId, projectId, 'start-failed');
+      answer(requestId, projectId, 'declined');
     };
 
     /* The queued open, once a snapshot shows it: waiting in the slot, or a session (new, touched or failed). */

@@ -147,7 +147,7 @@ it('should a queued open that lands waiting is answered when the registry resume
   expect(settled).toEqual(['r1:live', 'r2:waiting', 'r2:live']);
 });
 
-it("should the person's Not now on the budget dialog answers focus's waiting open start-failed", async () => {
+it("should the person's Not now on the budget dialog answers focus's waiting open declined", async () => {
   const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
     input: { budget: 1 },
     clock: new StepClock(),
@@ -189,7 +189,7 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
   const settled = told
     .filter((event) => event.type === 'openSettled')
     .map((event) => `${String(event['requestId'])}:${String(event['result'])}`);
-  expect(settled).toEqual(['r1:live', 'r2:waiting', 'r2:start-failed']);
+  expect(settled).toEqual(['r1:live', 'r2:waiting', 'r2:declined']);
 });
 
 it('should a return to a closing project refused by another close that came back live is answered refused (rule 12)', async () => {

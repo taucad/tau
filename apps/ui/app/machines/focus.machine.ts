@@ -120,10 +120,11 @@ export type FocusSessionStatus = 'absent' | 'starting' | 'live' | 'closing' | 'f
  * - `on-failed`: the open landed on a session that failed to close and holds its slot;
  * - `dropped`: the registry dropped the waiting open (stale under A5c), so focus sends it again;
  * - `refused`: `budgetRefused` named the waiting open while its project is still in the live set.
+ * - `declined`: the person turned the waiting open down (the budget dialog's Not now), so nothing opens it.
  *
  * @public
  */
-export type FocusOpenResult = 'live' | 'waiting' | 'start-failed' | 'on-failed' | 'dropped' | 'refused';
+export type FocusOpenResult = 'live' | 'waiting' | 'start-failed' | 'on-failed' | 'dropped' | 'refused' | 'declined';
 
 /** Session availability: the first file check settled, or not yet. @public */
 export type FocusAvailability = 'pending' | 'settled';
@@ -408,7 +409,7 @@ const focusEventSchemas = {
   moduleLoaded: z.object({}),
   openSettled: z.object({
     requestId: z.string(),
-    result: z.enum(['live', 'waiting', 'start-failed', 'on-failed', 'dropped', 'refused']),
+    result: z.enum(['live', 'waiting', 'start-failed', 'on-failed', 'dropped', 'refused', 'declined']),
   }),
   sessionFacts: z.object({
     projectId: z.string(),
@@ -1317,6 +1318,21 @@ export const createFocusMachine = (policy: FocusPolicy) => {
               break;
             }
             case 'on-failed': {
+              const target = context.answer?.projectId;
+              patch.open = { ...context.open, live: true };
+              if (state === 'opening' && target !== undefined) {
+                next = settleOn(patch, target);
+              }
+              break;
+            }
+            case 'declined': {
+              /* The person chose not to open it: focus settles on the project as for a failed session, which derives
+               * `closed` with the reopen offer, as main does (D14). A person's own declined open leaves focus put. */
+              if (context.open.person) {
+                patch.open = { ...context.open, openId: undefined };
+                next = 'focused';
+                break;
+              }
               const target = context.answer?.projectId;
               patch.open = { ...context.open, live: true };
               if (state === 'opening' && target !== undefined) {

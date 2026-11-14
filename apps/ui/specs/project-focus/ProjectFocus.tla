@@ -106,6 +106,10 @@
 \* A held `chatShown` is dropped when the person's move changed the route's chat: focus answers that commit
 \* (I18). The sink's own replace, judged where it lands and used once, is not such a move, so the last chat
 \* shown still wins. Where that replace lands, even while another move loads, a held command is judged against it.
+\* The person's Not now on the budget dialog empties `pendingOpen` and is not modelled (a person step, like
+\* `PersonClosed`, outside the registry's own replies). The port answers focus's waiting open `declined`,
+\* and focus settles on the project as it does for `TOpenOnFailed`, deriving `closed` with the reopen offer,
+\* as main does. No action or verdict changes.
 \* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 

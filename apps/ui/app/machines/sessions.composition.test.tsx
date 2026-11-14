@@ -1828,6 +1828,30 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
     expect(registry.received).not.toContain('close');
   });
+  it("should show the project closed with Reopen, as on main, after the budget dialog's Not now (round 15, D14)", async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-running-a');
+    await act(async () => {
+      registry.actor.getSnapshot().context.refs['one-running-a']?.send({
+        type: 'projectedRunsChanged',
+        runs: ['chat-run'],
+        stoppableRuns: ['chat-run'],
+      });
+      await Promise.resolve();
+    });
+    await view.navigate('/w/workspace/one-running-b');
+    expect(registry.actor.getSnapshot().context.pendingOpen?.projectId).toBe('one-running-b');
+    /* `BudgetRefusedDialog`'s Not now: straight to the registry. The person chose not to open, so nothing failed. */
+    await act(async () => {
+      registry.actor.send({ type: 'cancelPendingOpen' });
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+    expect(screen.getByTestId('route-state').textContent).toMatch(/^closed/u);
+    expect(document.body.textContent).not.toContain('could not open');
+    expect(registry.actor.getSnapshot().context.refs['one-running-b']).toBeUndefined();
+  });
 });
 
 /**

@@ -142,6 +142,7 @@ Programme control ruled on these five statements. A5a implements them as written
 - The length of the open bound and of the idle window. Both are steps that may happen.
 - The held answer's kinds, `Touch`, the registry's recency order, and today's retained kernel (`project-route.tsx` 211 to 219).
 - The registry's answer to a refused budget close for another project's open. When a close fails and `pendingOpen` names another project, the built registry emits `budgetRefused` for it and waits for the person, while the model's `BudgetSwitchClose` closes the retained session again under fairness. Liveness does not depend on that difference. A failed close whose `pendingOpen` is focus's open of the retained session itself is modelled, not abstracted: `CloseFlushFailed` reopens it and `CloseFailed` gives focus the `budgetRefused` it re-sends on (rule 12).
+- The person's Not now on the budget dialog (`cancelPendingOpen` sent by `BudgetRefusedDialog`). It is a person step like `PersonClosed`, so `NoSpuriousClosed`, which holds in a config with no person close, does not cover it. The registry port answers focus's waiting open `declined`, and focus settles `focused` on the project as rule 10 does for a failed session, deriving `closed` with the reopen offer, as main does (A5b round 15, programme control's D14 ruling).
 - The registry's internals. Its steps (the single `pendingOpen` slot, the budget-1 close, idle expiry) are pinned by A0.2's rows against `sessions.machine` as it is.
 
 ## Drift

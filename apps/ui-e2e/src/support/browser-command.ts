@@ -65,6 +65,7 @@ import type {
   CloudRequestName,
   CloudStandInDelays,
   CloudStandInEndpoint,
+  CloudStandInFailures,
 } from './cloud-stand-ins.ts';
 import type { LinkedGithubFixture } from './linked-github-fixture.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
@@ -170,6 +171,8 @@ const sessions = new Map<string, Session>();
 /** The cloud-build tier's stand-in API for one target context: how long each answer is held, and what was asked. */
 type CloudStandIns = {
   delays: CloudStandInDelays;
+  /** The HTTP status each endpoint answers with instead of its body, for the requests that arrive from now on. */
+  failures: CloudStandInFailures;
   readonly counts: Record<CloudRequestName, number>;
   /** The answers parked by a `'held'` delay, each given when the spec releases its endpoint. */
   readonly parked: Array<{ readonly endpoint: CloudStandInEndpoint; readonly release: (answer: boolean) => void }>;
@@ -933,6 +936,7 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
   }
   const standIns: CloudStandIns = {
     delays: { ...delays },
+    failures: {},
     counts: { session: 0, projects: 0, agents: 0, fileManagerWorker: 0 },
     parked: [],
   };
@@ -991,11 +995,20 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
           setTimeout(resolve, delay);
         });
       }
-      await route.fulfill({
-        status: 200,
-        headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify(cloudStandInBody(endpoint)),
-      });
+      const failure = standIns.failures[endpoint];
+      await route.fulfill(
+        failure === undefined
+          ? {
+              status: 200,
+              headers: { ...headers, 'content-type': 'application/json' },
+              body: JSON.stringify(cloudStandInBody(endpoint)),
+            }
+          : {
+              status: failure,
+              headers: { ...headers, 'content-type': 'application/json' },
+              body: JSON.stringify({ error: 'stand-in failure' }),
+            },
+      );
     },
   );
 };
@@ -1007,6 +1020,18 @@ export const uiSetCloudStandInDelays: BrowserCommand<[delays: CloudStandInDelays
     throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
   }
   standIns.delays = { ...delays };
+};
+
+/** Answer each endpoint named in `failures` with that HTTP status, for the requests that arrive from now on. */
+export const uiSetCloudStandInFailures: BrowserCommand<[failures: CloudStandInFailures]> = (
+  commandContext,
+  failures,
+) => {
+  const standIns = cloudStandIns.get(sessionFor(commandContext).context);
+  if (!standIns) {
+    throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
+  }
+  standIns.failures = { ...failures };
 };
 
 /** Give every held answer for `endpoint` now, and answer its later requests at once. */
@@ -3794,6 +3819,7 @@ export const uiBrowserCommands = {
   uiIsCloudLoadTier,
   uiInstallCloudStandIns,
   uiSetCloudStandInDelays,
+  uiSetCloudStandInFailures,
   uiReleaseCloudStandIn,
   uiReadCloudRequestCounts,
   uiInstallPostHogFixture,

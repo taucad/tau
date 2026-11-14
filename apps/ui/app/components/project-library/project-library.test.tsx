@@ -210,6 +210,7 @@ const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
     isFetching: false,
     current: [] as CloudProject[],
     openOverride: undefined as ((entry: CloudProject) => Promise<void>) | undefined,
+    retry: vi.fn(),
   },
   mockOpenCloudProject: vi.fn(async () => undefined),
 }));
@@ -224,7 +225,7 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
     isFailed: cloudListing.isFailed,
     isFetching: cloudListing.isFetching,
     cloud: cloudListing.isFailed ? 'failed' : cloudListing.isFetching ? 'fetching' : 'ready',
-    retry: vi.fn(),
+    retry: cloudListing.retry,
   }),
 }));
 vi.mock('#hooks/use-open-cloud-project.js', async (importOriginal) => ({
@@ -1440,6 +1441,60 @@ describe('ProjectLibrary', () => {
       expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
     });
     expect(mockCookieValues['project-page-size']).toBe(100);
+  });
+
+  /*
+   * C14 (P-k, H6 view): Tau Cloud's state lives in the Projects header's trailing slot, which the header row always
+   * has, so the grid below never moves for it. No status or alert row sits between the header and the grid.
+   */
+  describe('the Tau Cloud state in the header slot (C14)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+    const renderLibrary = (): HTMLElement => {
+      render(
+        <TestRouter>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+      const title = screen.getByRole('heading', { name: 'Projects' }).closest('[data-slot="page-header-title"]');
+      expect(title?.parentElement).toBeInstanceOf(HTMLElement);
+      return title!.parentElement!;
+    };
+    /** Every live region and alert in the library, other than those in the header row, in document order. */
+    const regionsOutside = (header: HTMLElement): HTMLElement[] =>
+      [...screen.queryAllByRole('status'), ...screen.queryAllByRole('alert')].filter(
+        (region) => !header.contains(region),
+      );
+
+    it.fails('C14: keeps the Tau Cloud wait inside the header slot, with no row above the grid', () => {
+      cloudListing.isFetching = true;
+      const header = renderLibrary();
+      expect(header).toHaveTextContent('Loading Tau Cloud projects');
+      expect(regionsOutside(header)).toEqual([]);
+    });
+
+    it.fails('C14: reports a failed Tau Cloud listing as an alert in the same slot, whose Retry asks once', async () => {
+      cloudListing.isFailed = true;
+      const header = renderLibrary();
+      const alert = within(header).getByRole('alert');
+      expect(alert).toHaveTextContent('Tau Cloud projects not loaded');
+      expect(regionsOutside(header)).toEqual([]);
+      await userEvent.click(within(header).getByRole('button', { name: 'Retry Tau Cloud' }));
+      expect(cloudListing.retry).toHaveBeenCalledOnce();
+      /* The projects on this device stay. */
+      expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
+    });
+
+    it.fails('C14: says it is offline in the same slot and keeps the projects on this device', () => {
+      vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      const header = renderLibrary();
+      expect(within(header).getByRole('status')).toHaveTextContent('Offline. Showing projects on this device.');
+      expect(regionsOutside(header)).toEqual([]);
+      expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
+    });
   });
 
   /*

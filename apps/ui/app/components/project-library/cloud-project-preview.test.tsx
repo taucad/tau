@@ -7,13 +7,14 @@ const preview = vi.hoisted(() => ({
   url: undefined as string | undefined,
   isLoading: false,
   isFailed: false,
+  isSettled: false,
   canRetry: true,
   retry: vi.fn(async () => undefined),
 }));
 vi.mock('#hooks/use-cloud-project-preview.js', () => ({ useCloudProjectPreview: () => preview }));
 
 beforeEach(() => {
-  Object.assign(preview, { url: undefined, isLoading: false, isFailed: false, canRetry: true });
+  Object.assign(preview, { url: undefined, isLoading: false, isFailed: false, isSettled: false, canRetry: true });
   preview.retry.mockClear();
   vi.stubGlobal(
     'IntersectionObserver',
@@ -65,5 +66,25 @@ describe('cloud project preview recovery', () => {
     fireEvent.error(screen.getByRole('img', { name: 'Saved preview of Cloud cube' }));
     fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
     expect(preview.retry).toHaveBeenCalledOnce();
+  });
+
+  /* C15 (P-g, H-d): a Tau Cloud card's media box stays plain until its saved preview's read has settled. */
+  it.fails('C15: draws no icon and no skeleton before the saved preview is asked for', () => {
+    const { container } = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
+    expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+  });
+
+  it.fails('C15: draws no icon and no skeleton while the saved preview is read', () => {
+    preview.isLoading = true;
+    const { container } = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
+    expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+  });
+
+  it('C15: draws the "no saved preview" icon once the read has settled as absent', () => {
+    preview.isSettled = true;
+    render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
+    expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
   });
 });

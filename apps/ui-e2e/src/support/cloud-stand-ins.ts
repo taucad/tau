@@ -28,6 +28,9 @@ export type CloudRequestCounts = Readonly<Record<CloudRequestName, number>>;
  */
 export type CloudStandInDelays = Readonly<Partial<Record<CloudStandInEndpoint, number | 'held'>>>;
 
+/** The HTTP status an endpoint answers with in place of its body, as a failing API would (K-c). */
+export type CloudStandInFailures = Readonly<Partial<Record<CloudStandInEndpoint, number>>>;
+
 /** Whether this run is the cloud-build load tier, so a spec runs its cloud-only cases there and nowhere else. */
 export const cloudLoadTierVariable = 'TAU_E2E_CLOUD_LOAD';
 
@@ -113,6 +116,8 @@ export type CloudStandInCommands = {
   uiInstallCloudStandIns(delays?: CloudStandInDelays): Promise<void>;
   /** Change how long each answer is held, for the requests that arrive from now on. */
   uiSetCloudStandInDelays(delays: CloudStandInDelays): Promise<void>;
+  /** Answer each named endpoint with its status instead of its body, for the requests that arrive from now on. */
+  uiSetCloudStandInFailures(failures: CloudStandInFailures): Promise<void>;
   /** Give every `'held'` answer for `endpoint` now, and answer its later requests at once. */
   uiReleaseCloudStandIn(endpoint: CloudStandInEndpoint): Promise<void>;
   /** The counts since install or the last reset; with `reset`, start again from zero. */
@@ -197,6 +202,8 @@ export type CloudLoadProbe = {
   readonly projectGrid: string;
   /** The line Home shows while the Tau Cloud listing is read, by its words. */
   readonly cloudListingText: string;
+  /** Words every Tau Cloud listing state Home shows carries: its wait, its slow words and its failure. */
+  readonly cloudStateText: string;
   /** The session request's path, so its answer's arrival is timed on the page's own clock. */
   readonly sessionPath: string;
 };
@@ -207,6 +214,7 @@ export const cloudLoadProbe: CloudLoadProbe = {
   plainComposer: 'textarea[aria-label="Chat message"]',
   projectGrid: 'ul[aria-label="Projects"]',
   cloudListingText: 'Loading Tau Cloud projects',
+  cloudStateText: 'Tau Cloud projects',
   sessionPath: '/v1/auth/get-session',
 };
 
@@ -224,6 +232,17 @@ export type CloudLoadRecord = {
   readonly composerReplacements: readonly number[];
   /** The project grid's top offset, in CSS pixels, each time it or the cloud listing line changed. */
   readonly gridTops: ReadonlyArray<{ readonly t: number; readonly top: number; readonly cloudListing: boolean }>;
+  /**
+   * Each change of what the Tau Cloud listing's state shows on screen (P-k): a live region or alert carrying
+   * `cloudStateText`, its visible words (`innerText`, so words a wait indicator still hides are left out), its role,
+   * and whether it sits in the row of the Projects heading.
+   */
+  readonly cloudStates: ReadonlyArray<{
+    readonly t: number;
+    readonly role: string;
+    readonly text: string;
+    readonly inHeader: boolean;
+  }>;
 };
 
 type CloudLoadGlobal = typeof globalThis & { __TAU_CLOUD_LOAD__: CloudLoadRecord };
@@ -251,6 +270,7 @@ export const recordCloudLoad = (probe: CloudLoadProbe): void => {
     composerUpgradedAt: undefined as number | undefined,
     composerReplacements: [] as number[],
     gridTops: [] as Array<{ t: number; top: number; cloudListing: boolean }>,
+    cloudStates: [] as Array<{ t: number; role: string; text: string; inHeader: boolean }>,
   };
   Object.defineProperty(globalThis, '__TAU_CLOUD_LOAD__', { value: record });
 
@@ -304,7 +324,36 @@ export const recordCloudLoad = (probe: CloudLoadProbe): void => {
         record.gridTops.push({ t: now(), top, cloudListing });
       }
     }
+    sampleCloudState();
     requestAnimationFrame(sample);
+  };
+  /* The heading's row: the title cell's parent holds the header's trailing slot (`page-header.tsx`). */
+  const headerRow = (): Element | undefined =>
+    [...document.querySelectorAll('main h1, main h2, main h3')]
+      .find((heading) => heading.textContent.trim() === 'Projects')
+      ?.closest('[data-slot="page-header-title"]')?.parentElement ?? undefined;
+  let lastCloudState = '';
+  const sampleCloudState = (): void => {
+    const row = headerRow();
+    const shown = [...document.querySelectorAll('[role="status"], [role="alert"]')]
+      .filter((region) => region.textContent.includes(probe.cloudStateText))
+      .map((region) => ({
+        role: region.getAttribute('role') ?? '',
+        // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- the visible words only: a wait indicator lays its words out hidden.
+        text: region instanceof HTMLElement ? region.innerText.replaceAll(/\s+/gu, ' ').trim() : '',
+        inHeader: row?.contains(region) === true,
+      }))
+      .filter((region) => region.text.includes(probe.cloudStateText));
+    const key = JSON.stringify(shown);
+    if (key !== lastCloudState) {
+      lastCloudState = key;
+      if (shown.length === 0) {
+        record.cloudStates.push({ t: now(), role: '', text: '', inHeader: false });
+      }
+      for (const region of shown) {
+        record.cloudStates.push({ t: now(), ...region });
+      }
+    }
   };
   requestAnimationFrame(sample);
 };
@@ -315,8 +364,15 @@ export const recordCloudLoad = (probe: CloudLoadProbe): void => {
  * @returns The record, as JSON.
  */
 export const readCloudLoadRecord = (): CloudLoadRecord => {
-  const { bodyChildRemovals, sessionAnsweredAt, wrapperRemovals, composerUpgradedAt, composerReplacements, gridTops } =
-    (globalThis as CloudLoadGlobal).__TAU_CLOUD_LOAD__;
+  const {
+    bodyChildRemovals,
+    sessionAnsweredAt,
+    wrapperRemovals,
+    composerUpgradedAt,
+    composerReplacements,
+    gridTops,
+    cloudStates,
+  } = (globalThis as CloudLoadGlobal).__TAU_CLOUD_LOAD__;
   return {
     bodyChildRemovals,
     sessionAnsweredAt,
@@ -324,5 +380,6 @@ export const readCloudLoadRecord = (): CloudLoadRecord => {
     ...(composerUpgradedAt === undefined ? {} : { composerUpgradedAt }),
     composerReplacements,
     gridTops,
+    cloudStates,
   };
 };

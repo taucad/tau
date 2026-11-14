@@ -989,16 +989,29 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
-  it('should only touch a live project on an open whose request carries no chat', async () => {
+  it('should only touch a live project on an open with no request', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-1' }));
+    actor.stop();
+  });
+
+  /* A6d (D14): the route of a chatless open names no chat, so the session hears it and answers with the chat its
+   * editor shows; before A6d the provider's prop carried that to the editor. */
+  it('should hand a live project the chat of an open whose request carries none, clearing its chat', async () => {
     const { actor } = harness();
     actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
     await settle();
 
     actor.send({ type: 'open', projectId: 'projA', request: { workspace: 'ws-projA' } });
-    actor.send({ type: 'open', projectId: 'projA' });
     await settle();
 
-    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-1' }));
+    expect(sessionRequest(actor, 'projA')).toMatchObject({ chatId: undefined, createdChatId: undefined });
     actor.stop();
   });
 

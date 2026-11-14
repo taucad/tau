@@ -191,6 +191,26 @@ describe('the session builds its project runtime as a child (A6d)', () => {
     ]);
   });
 
+  it('should tell the route its chat when a live project is opened again with no chat (A0.1 I2 witness)', async () => {
+    const { registry, opener } = harness();
+    const focused: unknown[] = [];
+    registry.on('chatFocused', (event) => {
+      focused.push(event);
+    });
+    await open(registry, { workspace: 'ws' });
+    opener.built[0]?.set({ focusedChat: { requestedChatId: undefined, chatId: 'chat-x' } });
+    await flush();
+
+    /* Focus opens the retained project again through a link with no chat. */
+    registry.send({ type: 'open', projectId, request: { workspace: 'ws' } });
+    await flush();
+
+    expect(focused).toEqual([
+      { type: 'chatFocused', projectId, chatId: 'chat-x' },
+      { type: 'chatFocused', projectId, chatId: 'chat-x' },
+    ]);
+  });
+
   it('should report the focused chat again when the route asks for no chat while the editor shows one (I2 witness)', async () => {
     const { registry, opener } = harness();
     const focused: unknown[] = [];

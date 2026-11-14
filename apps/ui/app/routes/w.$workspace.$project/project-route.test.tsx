@@ -2097,6 +2097,35 @@ describe('A6d the editor follows the chat the route shows (D21 round 1)', () => 
   });
 });
 
+describe('A6d a chatless return shows the chat the editor kept (A0.1 I2 witness, D21 round 2)', () => {
+  beforeEach(() => {
+    listing.set([listed(projectA, 'ws', 'alpha'), listed(projectB, 'ws', 'beta')]);
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it('should put the retained chat back in the URL when the person returns through a link with no chat', async () => {
+    renderHost('/w/ws/alpha');
+    await flushTasks();
+    await act(async () => {
+      resolveFocusedChat(projectA, 'chat-1');
+      await Promise.resolve();
+    });
+    await flushTasks();
+    expect(router.location).toMatchObject({ search: '?chat=chat-1' });
+
+    await navigateTo('/w/ws/beta');
+    await navigateTo('/w/ws/alpha');
+    await flushTasks();
+
+    expect(focusedSessionId()).toBe(projectA);
+    expect(router.location).toMatchObject({ pathname: '/w/ws/alpha', search: '?chat=chat-1' });
+  });
+});
+
 describe('A0.2 the chat request reaches the provider after open (S12, route half)', () => {
   beforeEach(() => {
     listing.set([listed(projectA, 'ws', 'alpha'), listed(projectB, 'ws', 'beta')]);

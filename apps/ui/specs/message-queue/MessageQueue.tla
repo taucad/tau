@@ -106,6 +106,9 @@
 \* partial page never settles, and trays are remembered only once that scan has read and this
 \* device's log has answered; a chat opened after its foreign watch closed settles at once.
 \* Admission, delivery, persistence and the queue barrier are unchanged.
+\* A dispatched continue whose resumed attempt's running and failed rows fold into one read
+\* presents that attempt as running before its terminal, so the session settles as the run
+\* ended (Observe of a terminal run); delivery still waits for the same terminal observation.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -3519,6 +3519,7 @@ export class ChatSessionStore {
     /* The run and phase last presented, compared per snapshot: a replay's earlier pages are history and present
      * nothing, so a phase moves only once the projection holds the log to its end. */
     let presented: string | undefined;
+    let presentedAttempt: Readonly<{ runId: string; attempt: number }> | undefined;
     let attention: RowKey | undefined;
     let published: ChatProjection | undefined;
     projection.subscribe(({ context }) => {
@@ -3547,8 +3548,14 @@ export class ChatSessionStore {
       const run = selectCaughtUp(context) ? selectCurrentRun(context) : undefined;
       const key = run === undefined ? presented : `${run.runId}:${run.lifecycle}`;
       const moved = key !== presented;
+      /* A later attempt of the run already presented reopened it, even when its `running` row folded in the same read
+       * as its end (a refusal ends a resumed attempt at once): the key alone cannot see a `failed` follow a `failed`. */
+      const previousAttempt = presentedAttempt?.runId === run?.runId ? presentedAttempt?.attempt : undefined;
+      const reopened =
+        previousAttempt !== undefined && (run?.attempt ?? 0) > previousAttempt && !opensRun(selectRunPhase(context));
       presented = key;
-      this.#syncProjection(chatId, moved ? 'moved' : 'none');
+      presentedAttempt = run === undefined ? presentedAttempt : { runId: run.runId, attempt: run.attempt };
+      this.#syncProjection(chatId, reopened ? 'reopened' : moved ? 'moved' : 'none');
       this.#projectionTopics.get(chatId)?.emit();
     });
     projection.start();
@@ -3564,10 +3571,11 @@ export class ChatSessionStore {
    * per row, and the run's phase from its lifecycle rows. Nothing here reads the SDK's status or the transcript.
    *
    * @param chatId - The chat whose projection moved, or whose machine was just created.
-   * @param present - `moved`: the current run or its phase changed; `open`: a new machine, shown a run still open;
-   * `none`: the run did not move.
+   * @param present - `moved`: the current run or its phase changed; `reopened`: a later attempt of the presented run
+   * reached a phase that does not open a run, so a dispatched `continue` is shown its reopening first; `open`: a new
+   * machine, shown a run still open; `none`: the run did not move.
    */
-  #syncProjection(chatId: string, present: 'moved' | 'open' | 'none'): void {
+  #syncProjection(chatId: string, present: 'moved' | 'reopened' | 'open' | 'none'): void {
     const session = this.#sessions.get(chatId);
     const projection = this.#projectionContext(chatId);
     const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
@@ -3689,6 +3697,12 @@ export class ChatSessionStore {
       session.transcriptMaterialization = this.#watchProjectedRun(session, projection, run.runId);
     }
     if (run !== undefined && present !== 'none' && (present !== 'open' || opensRun(phase) || phase === 'paused')) {
+      if (present === 'reopened' && session.stateActorRef.getSnapshot().matches({ run: { queued: 'dispatched' } })) {
+        /* A dispatched `continue` names no run, so it waits to see its run open again before an end is its own
+         * (`#presentRun`). Show it the reopening its read folded away; otherwise it would wait for good, holding every
+         * later gesture. */
+        this.#presentRun(session, { runId: run.runId, phase: 'running', reason: undefined });
+      }
       this.#presentRun(session, { runId: run.runId, phase, reason: selectRunFailure(projection, run.runId) });
     }
     if (session.watchedRunId !== undefined && session.watchedRunId === run?.runId && !opensRun(phase)) {

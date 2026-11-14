@@ -1998,6 +1998,62 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
   }
 
+  it('should end a resumed attempt whose running and failed rows fold in one read', async () => {
+    const store = createStore();
+    const chatId = 'chat_retry_folded_end';
+    const projectId = 'project_retry_folded_end';
+    const runId = 'req_retry_folded_end';
+    const command: HostCommand = { type: 'resume', commandId: 'req_resume_folded_end', payload: { chatId, runId } };
+    const hostCommand = vi.fn(
+      async (): Promise<CommandAnswer> => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 3,
+      }),
+    );
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close: vi.fn(async () => undefined) }),
+    );
+    startTurnOwner(store, projectId);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const refused = { code: 'INVALID_REQUEST', message: 'Refused.', status: 400 };
+    publishLogRows(store, chatId, [
+      ...runningUserRows(runId),
+      logRow(2, { runId, type: 'run.lifecycle', state: 'failed', attempt: 1, detail: refused }),
+    ]);
+    const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
+      runId: undefined,
+      leaseTurnId: undefined,
+      request: { kind: 'continue', command },
+    }));
+    await store.requestTurn(chatId, { kind: 'continue' });
+    expect(hostCommand).toHaveBeenCalledOnce();
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'queued' })).toBe(true);
+
+    /* A refusal ends the resumed attempt at once, so one read answer carries its reopening and its end. */
+    publishLogRows(
+      store,
+      chatId,
+      [
+        logRow(3, { runId, type: 'run.lifecycle', state: 'running', attempt: 2 }),
+        logRow(4, { runId, type: 'run.lifecycle', state: 'failed', attempt: 2, detail: refused }),
+      ],
+      3,
+    );
+
+    await vi.waitFor(() => {
+      expect(session.stateActorRef.getSnapshot().matches({ run: 'failed' })).toBe(true);
+    });
+    unpublishAdmission();
+    unpublish();
+    store.release(chatId);
+  });
+
   it('retires a hydrated legacy connection card after read-only catch-up, fresh output, and reload', async () => {
     const chatId = 'chat_recovered_connection';
     const projectId = 'project_recovered_connection';

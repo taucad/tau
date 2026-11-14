@@ -901,6 +901,65 @@ describe('ProjectLibrary', () => {
     expect(screen.queryByTestId('project-pagination-placeholder')).not.toBeInTheDocument();
   });
 
+  /* C14 (P-g, H1 cards): the listing snapshot's projects are real cards in the first client commit, not skeletons. */
+  it.fails('C14: paints the remembered projects as named card links while the listing loads, with no skeleton', () => {
+    mockRememberedShape = {
+      count: 2,
+      projects: [
+        {
+          id: 'proj_remembered_b',
+          name: 'Remembered Bravo',
+          lastActivityAt: 1,
+          slugs: { workspaceSlug: 'home', projectSlug: 'bravo' },
+        },
+        {
+          id: 'proj_remembered_a',
+          name: 'Remembered Alpha',
+          lastActivityAt: 2,
+          slugs: { workspaceSlug: 'home', projectSlug: 'alpha' },
+        },
+      ],
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    const { container } = render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    expect(grid).toHaveAttribute('aria-busy', 'true');
+    expect(
+      within(grid)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('aria-label') ?? link.textContent),
+    ).toEqual(['Open Remembered Alpha', 'Open Remembered Bravo']);
+    expect(within(grid).getByRole('link', { name: 'Open Remembered Alpha' })).toHaveAttribute('href', '/w/home/alpha');
+    expect(container.querySelectorAll('[data-slot=skeleton]')).toHaveLength(0);
+  });
+
+  /* C14 (P-g): a count with no remembered names holds the grid's card frames, empty, with no skeleton. */
+  it.fails('C14: holds one empty card frame per remembered project when only the count is known', () => {
+    mockRememberedShape = { count: 3 };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    const { container } = render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    expect(grid).toHaveAttribute('aria-busy', 'true');
+    expect(grid.children).toHaveLength(3);
+    expect(container.querySelectorAll('[data-slot=skeleton]')).toHaveLength(0);
+  });
+
   /* R14: the paging row is reserved with the grid when the remembered list spans pages. */
   it('reserves a page of cards and the paging row when the remembered list spans pages', () => {
     mockRememberedShape = { count: 45 };

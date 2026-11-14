@@ -243,6 +243,14 @@ describe('ProjectLibraryCard live preview', () => {
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
   });
 
+  /* C15 (P-g): the "no saved preview" icon says the read settled as absent, so it never stands in while it is pending. */
+  it.fails('C15: keeps the media box plain while the thumbnail read is pending, then names the absence', async () => {
+    renderCard();
+
+    expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('No saved preview')).toBeInTheDocument();
+  });
+
   it('shows the Home and project slugs in the location row', () => {
     renderCard();
 

@@ -167,6 +167,10 @@ const openPrintProject = async (
     env: { TAU_MACHINES_ENABLED: '1' },
   });
   const { page } = session;
+  /* The runs need the chat (prompt, banner) beside the Print pane. Under xvfb the window takes the 1280 px screen,
+   * which leaves the project workspace under `compactWorkspaceWidth` (1120 px) once the 224 px sidebar is open, and
+   * a compact workspace shows one lane beside the viewer: the Workbench stays hidden behind the chat. */
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await fixture.routeThrough(page);
   await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
   await expectSignedIn(page);
@@ -194,7 +198,14 @@ const openPrintProject = async (
   await page.keyboard.press('Escape');
 
   /* A built project's Workbench holds its model, so no empty group offers its *Print* button; Print is the Workbench's
-   * *Open workbench tab* menu item (`WorkbenchLeftActions` in chat-workbench-dockview.tsx), offered with Machines on. */
+   * *Open workbench tab* menu item (`WorkbenchLeftActions` in chat-workbench-dockview.tsx), offered with Machines on.
+   * While the lane is hidden its Dockview stays mounted at zero width under the top-right *Toggle Workbench lane*
+   * button, so the menu button resolves but every click lands on the toggle; open the lane first when it is closed. */
+  const workbenchToggle = page.getByRole('button', { name: 'Toggle Workbench lane', exact: true }).first();
+  if ((await workbenchToggle.getAttribute('aria-pressed')) !== 'true') {
+    await workbenchToggle.click();
+    await expect.poll(async () => workbenchToggle.getAttribute('aria-pressed'), { timeout: 60_000 }).toBe('true');
+  }
   await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
   await page.getByRole('menuitem', { name: 'Print', exact: true }).click();
   await expectVisible(page.getByRole('article', { name: new RegExp(`^${machineName}, `, 'u') }), 60_000);

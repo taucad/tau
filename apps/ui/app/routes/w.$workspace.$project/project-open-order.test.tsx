@@ -170,19 +170,42 @@ const projectValue = {
 
 /**
  * The layout record as the record host serves it (`workbench-record-host.tsx`, `registerViewer`): a viewer that
- * registers after the record was read is applied at once. The phone rows read it before the route mounts.
+ * registers after the record was read is applied at once, and one that registered before it is applied when it is read
+ * (`readLayoutRecord`). The phone rows read it before the route mounts, except the A8d rows, which read it later.
  */
 const mainViewer: ViewerNode = { kind: 'group', tabs: [{ kind: 'view', view: 'view-main' }] };
-const layoutRecord: { viewer: ViewerNode | undefined } = { viewer: undefined };
+const layoutRecord: {
+  viewer: ViewerNode | undefined;
+  applyViewer: ((node: ViewerNode, applied: () => void) => void) | undefined;
+  listeners: Set<() => void>;
+} = { viewer: undefined, applyViewer: undefined, listeners: new Set() };
+/** The record's first read lands: the registered viewer applies it, and the page's readers hear it. */
+const readLayoutRecord = (viewer: ViewerNode): void => {
+  layoutRecord.viewer = viewer;
+  layoutRecord.applyViewer?.(viewer, () => undefined);
+  for (const listener of layoutRecord.listeners) {
+    listener();
+  }
+};
 const layoutController: WorkbenchLayoutController = {
   snapshot: () => undefined,
-  subscribe: () => () => undefined,
+  subscribe(listener) {
+    layoutRecord.listeners.add(listener);
+    return () => {
+      layoutRecord.listeners.delete(listener);
+    };
+  },
   restorePreviousArrangement: async () => false,
   registerViewer(apply) {
+    layoutRecord.applyViewer = apply;
     if (layoutRecord.viewer) {
       apply(layoutRecord.viewer, () => undefined);
     }
-    return () => undefined;
+    return () => {
+      if (layoutRecord.applyViewer === apply) {
+        layoutRecord.applyViewer = undefined;
+      }
+    };
   },
   registerWorkbench: () => () => undefined,
   personViewerChanged: () => undefined,
@@ -564,6 +587,8 @@ beforeEach(() => {
   facts.isMobile = false;
   facts.isRealViewerBox = false;
   layoutRecord.viewer = undefined;
+  layoutRecord.applyViewer = undefined;
+  layoutRecord.listeners.clear();
   facts.viewer.mounts = 0;
   facts.viewer.removals = 0;
   revisionStatus.set(undefined);
@@ -731,5 +756,50 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     expect(boxes.length === 0 || screen.queryByTestId('chat-pane-skeleton-ensuring') !== null).toBe(true);
     expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
     expect(added.map((node) => node.textContent)).toEqual([]);
+  });
+
+  /** Render the phone route over the real viewer dock with the editor ready and the layout record not yet read. */
+  const openOnPhoneUnread = async (): Promise<ReturnType<typeof recordAdditions>> => {
+    facts.isMobile = true;
+    facts.isRealViewerBox = true;
+    revisionStatus.set(statusAt('filled'));
+    editorFact.set({ value: editorReady, focusedChatId: 'chat-1' });
+    const emptyStates = recordAdditions(emptyState, isInViewerBoxAt);
+    render(<OpenRoute />);
+    await settle();
+    return emptyStates;
+  };
+
+  it('M2 (A8d): should render no empty-state panel in the phone viewer box before the viewer layout record is applied', async () => {
+    const emptyStates = await openOnPhoneUnread();
+    try {
+      // The dock is mounted and waits for the record: what it will show is not known yet, so it offers no choice.
+      expect(viewerBoxes()).toHaveLength(1);
+      expect(
+        emptyStates.read().map((node) => node.textContent),
+        'M2: the viewer watermark was shown before the layout record was applied',
+      ).toEqual([]);
+
+      await act(async () => {
+        readLayoutRecord(mainViewer);
+      });
+      await settle();
+      expect(emptyStates.read().map((node) => node.textContent)).toEqual([]);
+    } finally {
+      emptyStates.stop();
+    }
+  });
+
+  it('should show the empty state once the applied layout record names no view (A8d guard)', async () => {
+    const emptyStates = await openOnPhoneUnread();
+    try {
+      await act(async () => {
+        readLayoutRecord({ kind: 'group', tabs: [] });
+      });
+      await settle();
+      expect(viewerBoxes().filter((box) => box.querySelector(emptyState) !== null)).toHaveLength(1);
+    } finally {
+      emptyStates.stop();
+    }
   });
 });

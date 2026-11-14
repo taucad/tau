@@ -807,11 +807,6 @@ describe('ProjectNavigation', () => {
     );
 
     /*
-     * H1 with nothing remembered (blueprint P-d): no row stands in for a project
-     * the device has never listed. The list is empty and busy, and the wait is
-     * the label's trailing slot, so the arriving rows displace nothing.
-     */
-    /*
      * P-d's Slow and accessibility lines, with remembered rows (programme-control
      * ruling, 2026-11-14T01:20Z): the list is busy while its listing is pending,
      * and the label's wait says it is slow at 10 s, with Retry.
@@ -843,6 +838,11 @@ describe('ProjectNavigation', () => {
       expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
     });
 
+    /*
+     * H1 with nothing remembered (blueprint P-d): no row stands in for a project
+     * the device has never listed. The list is empty and busy, and the wait is
+     * the label's trailing slot, so the arriving rows displace nothing.
+     */
     it('H1: with nothing remembered the first list is empty and busy, with the wait in the label slot', () => {
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
       render(<ProjectNavigation />);

@@ -169,8 +169,9 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
   });
 
   const revealed = (): void => {
-    // The event runs in the frame the reveal starts in, where the timeline reads that frame's time.
-    const revealedAt = readNow();
+    /* The event runs in the frame the reveal starts in, just before it paints. After a long task that frame can
+       carry a time from before the task, so the timeline reads early there; the performance clock reads the paint. */
+    const revealedAt = Math.max(readNow(), clock.now());
     setTracked((previous) =>
       previous.active && !previous.isRevealSeen
         ? {
@@ -197,8 +198,9 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       active,
       startedAt,
       shownAt: isShowing ? tracked.startedAt + tracked.shownAt - startedAt : shownAtFor(startedAt, now),
-      // A wait that takes over a showing indicator was revealed already; its new element's entrance is not a reveal.
-      isRevealSeen: isShowing,
+      /* A wait that takes over a showing indicator keeps its reveal only if a frame drew it: its new element's
+         entrance is not a reveal. If none had, the first frame that draws the words still starts the minimum. */
+      isRevealSeen: isShowing && tracked.isRevealSeen,
       wait: tracked.wait + 1,
       timing: waitingTiming({ startedAt, now, isShowing }),
     };
@@ -206,7 +208,11 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
     next = {
       ...tracked,
       active,
-      timing: settledTiming({ settledAt: now - tracked.startedAt, shownAt: tracked.shownAt }),
+      /* A seen reveal is on screen, even where the timeline still reads before the paint the reveal recorded. */
+      timing: settledTiming({
+        settledAt: Math.max(now - tracked.startedAt, tracked.isRevealSeen ? tracked.shownAt : Number.NEGATIVE_INFINITY),
+        shownAt: tracked.shownAt,
+      }),
     };
   }
   setTracked(next);
@@ -225,7 +231,8 @@ function shownAtFor(startedAt: number, now: number | undefined): number {
 }
 
 /**
- * Whether the tracked indicator is on screen at `now` and has not yet served its minimum.
+ * Whether the tracked indicator is on screen at `now` and has not yet served its minimum. A seen reveal is on screen
+ * even where `now` still reads before the paint it recorded.
  *
  * @param tracked - The wait as tracked so far.
  * @param now - The current time on the performance timeline. Milliseconds.
@@ -235,7 +242,7 @@ function owesMinimum(tracked: TrackedWait, now: number): boolean {
   const elapsed = now - tracked.startedAt;
   return (
     tracked.timing.state !== 'idle' &&
-    elapsed >= tracked.shownAt &&
+    (tracked.isRevealSeen || elapsed >= tracked.shownAt) &&
     elapsed < tracked.shownAt + indicatorMinimumMilliseconds
   );
 }

@@ -431,8 +431,7 @@ describe('ProjectNavigation', () => {
     search = '?chat=chat_1&keep=1';
     render(<ProjectNavigation />);
 
-    /* The open project is drawn first (U6). */
-    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[1]!);
 
     expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=share');
   });
@@ -442,7 +441,7 @@ describe('ProjectNavigation', () => {
     search = '?chat=chat_1';
     render(<ProjectNavigation />);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[1]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[0]!);
 
     expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?workbench=share');
   });
@@ -822,7 +821,7 @@ describe('ProjectNavigation', () => {
      * (an open the live budget refused, a route that cannot open it) is not
      * drawn as live.
      */
-    it.fails('R1: once the listing answers, an open project whose session never opened sorts with the rest', () => {
+    it('R1: once the listing answers, an open project whose session never opened sorts with the rest', () => {
       pathname = '/w/home/one';
       liveProjectIds = ['proj_two'];
       mockUseProjects.mockReturnValue({

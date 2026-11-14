@@ -44,7 +44,7 @@ import {
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
-import { useLiveProjectIds, useProjectLiveness } from '#hooks/use-sessions.js';
+import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import {
@@ -72,23 +72,22 @@ export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
 /**
- * The projects the list draws as live: the live sessions, and the open project from the first frame until its session
- * closes. Its session goes live after the remembered rows are drawn, and it would otherwise move above them then (U6).
- * Once closed (a policy or the person closed it), it is not live, on its own page too (R1/P46).
+ * The projects the list draws as live: the live sessions, and, while the remembered rows stand in for the listing,
+ * the open project. A reload draws the remembered rows before the open project's session goes live, and that project
+ * would otherwise move above them then (U6). Once the listing answers, only the registry says what is live (R1/P46):
+ * a session that closed, or never opened, is not drawn as live.
  */
 const useShownLiveIds = (
-  rows: readonly SidebarProject[],
   liveProjectIds: readonly string[],
+  rememberedProjects: readonly SidebarProject[] | undefined,
   pathname: string,
 ): ReadonlySet<string> => {
-  const openProjectId = rows.find(
+  const openRememberedId = rememberedProjects?.find(
     (project) => project.slugs !== undefined && pathname === projectUrlOr(project.slugs),
   )?.id;
-  const isOpenProjectClosed = useProjectLiveness(openProjectId ?? '').closedReason !== undefined;
-  const shownOpenId = isOpenProjectClosed ? undefined : openProjectId;
   return useMemo(
-    () => new Set(shownOpenId === undefined ? liveProjectIds : [...liveProjectIds, shownOpenId]),
-    [liveProjectIds, shownOpenId],
+    () => new Set(openRememberedId === undefined ? liveProjectIds : [...liveProjectIds, openRememberedId]),
+    [liveProjectIds, openRememberedId],
   );
 };
 
@@ -116,9 +115,9 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const rows: readonly SidebarProject[] = rememberedProjects ?? projects;
   const isWaiting = isAwaitingListing && rememberedShape?.count !== 0;
   /* A29's temporal hiding: what is live now sits above what is not, and the
-   * rest keeps its recency order. The open project counts as live from the
-   * first frame (U6). */
-  const shownLiveIds = useShownLiveIds(rows, liveProjectIds, location.pathname);
+   * rest keeps its recency order. Over remembered rows the open project
+   * counts as live from the first frame (U6). */
+  const shownLiveIds = useShownLiveIds(liveProjectIds, rememberedProjects, location.pathname);
   const sortedProjects = useMemo(
     () =>
       sortProjectsByActivity(rows).sort(

@@ -1110,9 +1110,12 @@ const workbenchLayoutDefinition = setup({
               reason: 'unavailable',
             });
             reportIntents(settled.settled, enq);
-            // This answer is the delivery's own, so no late answer to it is still owed and the entry retires.
+            // An answer that names the delivery is that delivery's own: no late answer to it is still owed, so the
+            // entry retires. A drop that names none keeps the delivery's late answer open.
             const intents =
-              entry.state === 'delivered' ? lateAnswered(settled.intents, entry.intentId) : settled.intents;
+              entry.state === 'delivered' && event.deliveryId !== undefined
+                ? lateAnswered(settled.intents, entry.intentId)
+                : settled.intents;
             const done = settle(withIntents(context, intents), viewOf(value), enq);
             return { target: intentsTarget(done), context: finished(context, done, enq) };
           },

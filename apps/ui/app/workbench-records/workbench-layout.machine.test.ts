@@ -358,6 +358,14 @@ describe('workbenchLayout', () => {
       expect(harness.context().editCount).toBe(edits);
     });
 
+    it('should keep the late answer of a delivered intent dropped unavailable without naming its delivery', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model' });
+      expect(harness.context().intents['model']).toMatchObject({ state: 'dropped', late: delivery!.deliveryId });
+    });
+
     it('should treat ids that name inherited object properties as new ids', () => {
       const harness = ready();
       harness.intent('constructor', modelPane);

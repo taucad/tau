@@ -148,6 +148,11 @@ export type SandboxShellProviderOptions = Readonly<{
    * answers `false` and the host keeps the stores read-only (blueprint OD2).
    */
   storeGuardPath?: string;
+  /**
+   * How long a failed store guard start check stands before {@link ShellProvider.storeGuard} checks again, so a
+   * one-off failure does not keep the stores read-only until restart. Defaults to one minute.
+   */
+  storeGuardRecheckMilliseconds?: number;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
@@ -880,8 +885,9 @@ const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[
  * @param launch - The launch, whose `guardedStores` decide.
  * @param options - The provider's bubblewrap and guard paths.
  * @returns The vector to spawn, or `undefined` when a guarded launch's vector is not the shape Tau recognises.
+ * @internal
  */
-const guardedVector = (
+export const guardedVector = (
   argv: readonly string[],
   launch: ShellLaunch,
   options: SandboxShellProviderOptions,
@@ -1281,9 +1287,22 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     useStandInJournal(options.standInJournal);
   }
   const custody = createShellCustody(options.custody ?? defaultCustody());
-  /* One start check per process (blueprint R3): a host without the guard keeps read-only stores. */
+  /*
+   * One start check, reused (blueprint R3): a host without the guard keeps read-only stores. A failed check stands for
+   * `storeGuardRecheckMilliseconds`, then runs again; a guarded launch whose sandbox could not be set up forgets a
+   * passed check, so the host's retry checks afresh and opens the stores read-only if the guard no longer starts (OD2).
+   */
   let storeGuard: Promise<boolean> | undefined;
+  let storeGuardRefusedAt: number | undefined;
+  const storeGuardRecheck = options.storeGuardRecheckMilliseconds ?? 60_000;
+  const forgetStoreGuard = (): void => {
+    storeGuard = undefined;
+    storeGuardRefusedAt = undefined;
+  };
   const storeGuardAvailable = async (): Promise<boolean> => {
+    if (storeGuardRefusedAt !== undefined && Date.now() - storeGuardRefusedAt >= storeGuardRecheck) {
+      forgetStoreGuard();
+    }
     storeGuard ??= (async () => {
       if (process.platform !== 'linux' || options.storeGuardPath === undefined) {
         return false;
@@ -1298,6 +1317,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         }),
       );
       if (!probe.available) {
+        storeGuardRefusedAt = Date.now();
         storeGuardDiagnostics.publish({ available: false, reason: probe.reason });
       }
       return probe.available;
@@ -1446,8 +1466,14 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       if (refusal !== undefined) {
         return refusal;
       }
-      if (launch.filesystem.guardedStores !== undefined && !(await storeGuardAvailable())) {
-        return { status: 'sandbox-unavailable', message: 'the store guard cannot start on this device.' };
+      const guarded = launch.filesystem.guardedStores !== undefined;
+      if (guarded && !(await storeGuardAvailable())) {
+        /* Nothing ran: the host's retry asks again and opens the stores read-only. */
+        return {
+          status: 'sandbox-unavailable',
+          message: 'the store guard cannot start on this device.',
+          retryable: true,
+        };
       }
       let binding: PtyBinding | undefined;
       if (launch.stdio.kind === 'terminal') {
@@ -1463,7 +1489,11 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
           return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
         }
       }
-      return stage(launch, binding);
+      const outcome = await stage(launch, binding);
+      if (guarded && outcome.status === 'sandbox-unavailable' && outcome.retryable === true) {
+        forgetStoreGuard();
+      }
+      return outcome;
     },
   };
 };

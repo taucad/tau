@@ -385,7 +385,11 @@ const unavailableOf = (outcome: Exclude<ShellLaunchOutcome, { status: 'started' 
   }
 };
 
-/** A counting gate: at most `limit` holders, later ones wait in order; a waiter whose signal aborts leaves the line. */
+/**
+ * A counting gate: at most `limit` holders, later ones wait in order; a waiter whose signal aborts leaves the line. A
+ * signal that aborted before `enter` gets no slot at all: an `abort` listener added after the abort never fires, so it
+ * would otherwise wait for a slot and launch a command its caller had withdrawn (E09).
+ */
 const createGate = (limit: number) => {
   let held = 0;
   const waiting: Array<() => void> = [];
@@ -394,6 +398,9 @@ const createGate = (limit: number) => {
     waiting.shift()?.();
   };
   const enter = async (signal: AbortSignal): Promise<(() => void) | undefined> => {
+    if (signal.aborted) {
+      return undefined;
+    }
     if (held < limit) {
       held++;
       return release;
@@ -854,6 +861,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
             ...(approval === undefined ? {} : { approval }),
           }
         : notStarted(code, message);
+    /* Read live: the signal can abort while any await below is pending. */
+    const withdrawn = (): boolean => request.signal.aborted;
     const fingerprints = new Map<string, string>([[admitted.root, admitted.fingerprint]]);
     for (const folder of [...admitted.access.read, ...admitted.access.write]) {
       // oxlint-disable-next-line no-await-in-loop -- a handful of granted folders.
@@ -894,6 +903,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           'The project folder or a granted folder was replaced before the command started, so it did not run.',
         );
       }
+      /* A call withdrawn while its launch was staged is never prepared (E09); `didNotStart` answers `cancelled`. */
+      if (withdrawn()) {
+        return didNotStart('launch-failed', 'The command was cancelled before it started.');
+      }
       let executionId: string;
       try {
         ({ executionId } = await provider.prepare({
@@ -924,6 +937,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           return didNotStart('checkout-unavailable', `${answer.message} The command did not run.`);
         }
         custody = { executionId, holds };
+      }
+      /* Nor launched, when it was withdrawn while custody was recorded; the receipt is released as for any refusal. */
+      if (withdrawn()) {
+        return didNotStart('launch-failed', 'The command was cancelled before it started.');
       }
       const controller = new AbortController();
       /* Set by the timer; an object so the check after the awaits reads it live. */

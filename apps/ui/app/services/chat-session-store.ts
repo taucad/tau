@@ -550,17 +550,15 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
 
 /**
  * The transcript's load state (I21). Turns shown are `loaded`, so the first turns and `loaded` arrive in one snapshot
- * (U19). With none, it is `empty` only once a materialization of the log has settled, or once the host refused or lost
- * the read, which nothing then answers; until then it is `loading` (U7).
+ * (U19). With none, it is `empty` only once its load has settled, which latches: a materialization of the log applied
+ * or failed, the host refused the read for good, or this tab created the chat empty. A lost read is retried, so it
+ * stays `loading` (U7).
  */
-const transcriptOf = (
-  session: Pick<InternalSession, 'messages' | 'transcriptSettled'>,
-  attachment: ObservedChat['status'] | undefined,
-): ChatTranscriptState => {
+const transcriptOf = (session: Pick<InternalSession, 'messages' | 'transcriptSettled'>): ChatTranscriptState => {
   if (session.messages.length > 0) {
     return 'loaded';
   }
-  return session.transcriptSettled || attachment === 'refused' || attachment === 'lost' ? 'empty' : 'loading';
+  return session.transcriptSettled ? 'empty' : 'loading';
 };
 
 type InternalSession = ChatSession & {
@@ -890,6 +888,8 @@ export class ChatSessionStore {
   readonly #deletedProjections = new WeakSet<Actor<typeof chatProjectionLogic>>();
   /** A read answer, not the projection's initially empty cursor, proves this chat's log was checked. */
   readonly #answeredLogReads = new Set<string>();
+  /** Chats this tab created empty and has not acquired yet: their transcript is settled `empty` at once (I21). */
+  readonly #createdEmpty = new Set<string>();
   /** Display eligibility for the existing validated projection; never command or read authority. */
   readonly #validatedDisplays = new WeakMap<
     Actor<typeof chatProjectionLogic>,
@@ -1759,6 +1759,10 @@ export class ChatSessionStore {
       const observed = this.#observed.get(chatId);
       if (observed !== undefined) {
         observed.status = answer.reason === 'unreadable' ? 'refused' : 'lost';
+      }
+      if (answer.reason === 'unreadable' && session !== undefined) {
+        // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it.
+        this.#latchTranscriptSettled(session);
       }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
@@ -2782,6 +2786,9 @@ export class ChatSessionStore {
             session.watchedRunId = undefined;
           }
           if (event.type === 'attachment.refused') {
+            if (session !== undefined) {
+              this.#latchTranscriptSettled(session);
+            }
             queueMicrotask(() => {
               if (observed.attachment === attachment) {
                 attachment.stop();
@@ -3858,8 +3865,9 @@ export class ChatSessionStore {
         return;
       }
       session.failedTranscriptProjection = projection;
-      // A failed read has settled too: the lane is not held in `loading` by a transcript that cannot arrive.
-      this.#settleTranscript(session, session.messages);
+      // A failed read has settled too: the lane is not held in `loading` by a transcript that cannot arrive. What the
+      // device remembers of the trays stays, since nothing was read.
+      this.#latchTranscriptSettled(session);
       console.warn('[ChatSessionStore] projected transcript could not be materialized', {
         chatId: session.chatId,
         runId: selectCurrentRun(projection)?.runId,
@@ -3887,6 +3895,31 @@ export class ChatSessionStore {
     session.composerTrays = trays;
     writeRememberedComposerTrays(session.chatId, trays);
     this.#chatTopics.get(session.chatId)?.emit();
+  }
+
+  /** Settle the transcript without a read to remember trays from (I21). */
+  #latchTranscriptSettled(session: InternalSession): void {
+    if (session.transcriptSettled) {
+      return;
+    }
+    session.transcriptSettled = true;
+    this.#chatTopics.get(session.chatId)?.emit();
+  }
+
+  /**
+   * Note a chat this tab has just created with no messages, before it is opened: its transcript is `empty` at once
+   * rather than `loading` until its log answers (I21, plan A12). A later log answer with turns still shows them.
+   *
+   * @param chatId - The new chat.
+   * @public
+   */
+  public noteCreatedEmpty(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      this.#createdEmpty.add(chatId);
+    } else {
+      this.#latchTranscriptSettled(session);
+    }
   }
 
   async #clearAcceptedSeed(chatId: string, requestId: string): Promise<void> {
@@ -4585,7 +4618,6 @@ export class ChatSessionStore {
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
     let loading: 'before' | 'loading' | 'loaded' = 'before';
     const chatRoot = createActor(this.#chatSessionLogic, { ...this.#rootOptions, input: { chatId, projectId } });
-    const observedChats = this.#observed;
     session = {
       chatId,
       chat,
@@ -4593,7 +4625,7 @@ export class ChatSessionStore {
         return session.presentationHold?.messages ?? chat.messages;
       },
       get transcript() {
-        return transcriptOf(session, observedChats.get(chatId)?.status);
+        return transcriptOf(session);
       },
       get rememberedComposerTrays() {
         return session.composerTrays;
@@ -4629,7 +4661,7 @@ export class ChatSessionStore {
       presentationHold: undefined,
       materializeVersion: 0,
       transcriptMaterialization: undefined,
-      transcriptSettled: false,
+      transcriptSettled: this.#createdEmpty.delete(chatId),
       composerTrays: readRememberedComposerTrays(chatId),
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,

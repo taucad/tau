@@ -36,6 +36,9 @@ vi.mock('#hooks/use-chat-records.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatSelector: () => undefined }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ noteCreatedEmpty: vi.fn() }),
+}));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { readonly kind: string }, selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({

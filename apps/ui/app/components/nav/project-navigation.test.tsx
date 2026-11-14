@@ -176,7 +176,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
   };
 });
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan }),
+  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan, noteCreatedEmpty: vi.fn() }),
 }));
 
 const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => ({

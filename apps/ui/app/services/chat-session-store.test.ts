@@ -5646,6 +5646,84 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    it('does not go back to loading once a retried read answers, and latches a refused read as settled (I21)', async () => {
+      const projectId = 'project_retried_read';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const retried = store.acquire('chat_retried_read', projectId);
+      const refused = store.acquire('chat_refused_read', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const record = (): void => {
+        reports.push(retried.transcript);
+      };
+      const unsubscribeChat = store.subscribeChat('chat_retried_read', record);
+      const unsubscribeProjection = store.subscribeProjection('chat_retried_read', record);
+      try {
+        await settle();
+        // A read that is retried has not settled: the chat stays loading through it, never empty then loading.
+        store.receiveHostReadAnswer('chat_retried_read', { status: 'refused', reason: 'owner-fenced' });
+        record();
+        expect(retried.transcript).toBe('loading');
+        publishLogRows(store, 'chat_retried_read', [
+          ...runningRows('run_retried'),
+          logRow(2, {
+            runId: 'run_retried',
+            type: 'message.appended',
+            message: { id: 'retried-reply', role: 'assistant', content: 'Back again.' },
+          }),
+          lifecycleRow(3, 'completed', 'run_retried'),
+        ]);
+        await vi.waitFor(() => {
+          expect(retried.transcript).toBe('loaded');
+        });
+        const left = reports.findIndex((report) => report !== 'loading');
+        expect(reports.slice(left)).not.toContain('loading');
+        expect(reports).not.toContain('empty');
+
+        // Nothing answers a read the host refuses for good: that load has settled, and it stays settled.
+        store.receiveHostReadAnswer('chat_refused_read', { status: 'refused', reason: 'unreadable' });
+        expect(refused.transcript).toBe('empty');
+      } finally {
+        unsubscribeChat();
+        unsubscribeProjection();
+        store.release('chat_retried_read');
+        store.release('chat_refused_read');
+      }
+    });
+
+    it('shows a chat this tab created empty as empty at once, and its turns once the log has them (I21)', async () => {
+      const projectId = 'project_created_empty';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      store.noteCreatedEmpty('chat_created_empty');
+      const session = store.acquire('chat_created_empty', projectId);
+      // A chat acquired without the note still waits for its log.
+      const other = store.acquire('chat_not_noted', projectId);
+      try {
+        expect(session.transcript).toBe('empty');
+        expect(other.transcript).toBe('loading');
+        publishLogRows(store, 'chat_created_empty', [
+          ...runningRows('run_created'),
+          logRow(2, {
+            runId: 'run_created',
+            type: 'message.appended',
+            message: { id: 'created-reply', role: 'assistant', content: 'Hello.' },
+          }),
+          lifecycleRow(3, 'completed', 'run_created'),
+        ]);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('loaded');
+        });
+      } finally {
+        store.release('chat_created_empty');
+        store.release('chat_not_noted');
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();

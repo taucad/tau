@@ -97,7 +97,8 @@
 \* when the root worker is replaced. The closures it calls are the same; queue paths unchanged.
 \* The session store reports its transcript's load state and the composer trays a chat remembers
 \* (app state orchestration A12, I21): read-only derivations of the applied transcript and a
-\* per-device memory. Admission, delivery, persistence and the queue barrier are unchanged.
+\* per-device memory, latched once the load settles (a refused read, or a chat this tab created
+\* empty). Admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

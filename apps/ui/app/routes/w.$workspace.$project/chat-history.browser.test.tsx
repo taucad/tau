@@ -298,6 +298,42 @@ describe('chat composer across the transcript load', () => {
     expect(textarea.bottom).toBeLessThanOrEqual(after.composerTop + after.composer);
   });
 
+  it('keeps the composer region height while the task-list file answers after the transcript (U10)', async () => {
+    // In production the tray's file is a separate read: hold it past the transcript, as the frame row does.
+    await page.viewport(640, 800);
+    const trays = taskListTray;
+    publishChatSession({
+      messages: [],
+      transcript: 'loading',
+      todoList: { kind: 'loading' },
+      rememberedComposerTrays: trays,
+    });
+    render(
+      <TooltipProvider>
+        <ChatHistory />
+      </TooltipProvider>,
+    );
+    const loading = readLaneLayout();
+    act(() => {
+      publishChatSession({
+        messages: history,
+        transcript: 'loaded',
+        todoList: { kind: 'loading' },
+        rememberedComposerTrays: trays,
+      });
+    });
+    await expect.element(page.getByText('u1')).toBeVisible();
+    const transcriptOnly = readLaneLayout();
+    act(() => {
+      publishChatSession({ messages: history, transcript: 'loaded', todoList, rememberedComposerTrays: trays });
+    });
+    await expect.element(page.getByRole('button', { name: /Tasks:/u })).toBeVisible();
+    const settled = readLaneLayout();
+
+    expect(transcriptOnly).toEqual(loading);
+    expect(settled).toEqual(loading);
+  });
+
   it('keeps the composer region height when the transcript resolves, for a chat without a tray (U10)', async () => {
     const { before, after } = await laneLayoutAcrossLoad({
       rememberedComposerTrays: [],

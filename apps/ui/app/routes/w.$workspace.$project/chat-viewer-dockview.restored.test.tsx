@@ -492,6 +492,26 @@ describe('restored viewer layout admission', () => {
     expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ entryPath: 'other.ts' }));
   });
 
+  // A8d review round 3: a dock handed to a new project actor attaches its new adapter on that render's facts, so it
+  // admits nothing for a model still downloading, and admits it once it is ready.
+  it('should admit a re-handed project only on its own availability', () => {
+    render(<ViewerDockview profile='shared' />);
+    fixture.switchProject();
+    fixture.availability = 'downloading';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+    expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', entryPath: 'main.ts' }),
+    );
+    fixture.availability = 'ready';
+    act(() => {
+      fixture.notifyAvailability();
+    });
+    expect(fixture.nextProjectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+  });
+
   it('releases only the hidden secondary viewer demand after reveal', () => {
     render(<ViewerDockview />);
     act(() => {

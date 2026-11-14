@@ -2,7 +2,11 @@ import { useSyncExternalStore } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatStorage } from '#types/storage.types.js';
-import type { ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import { mock } from 'vitest-mock-extended';
+import type { Chat } from '@taucad/chat';
+import type { ProjectCommands, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import type { ProjectClosePlan } from '#services/chat-session-store.js';
 
 const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(() => {
   const listeners = new Set<
@@ -79,24 +83,30 @@ vi.mock('@tanstack/react-query', () => ({
 
 /* The quiescence check and the session close are the library's commands since A4a (row L7): the real ones, over the
  * registry and chat-store doubles below. */
-const commands = vi.hoisted(() => ({ current: undefined as unknown as Record<string, unknown> }));
+const commands = vi.hoisted(() => ({
+  current: undefined as Pick<ProjectCommands, 'verifyProjectQuiescent' | 'closeProjectSession'> | undefined,
+}));
 
 vi.mock('#hooks/use-project-manager.js', async () => {
   const commandsModule = await import('#runtime/project-library-commands.js');
   const notCalled = async (): Promise<never> => {
     throw new Error('not called in this test');
   };
-  const chatStore = {
+  const chatStore = mock<ProjectLibraryChatSessions>({
     observedChatIdsOf: () => chats.observed,
-    getProjection: () => chats.projection,
-    getProjectClosePlan: async () => chats.plan,
-    noteCreatedEmpty: () => undefined,
-  };
-  const chatSource = { getChatsForResource: projectManager.getChatsForResource };
+    getProjection: () => (chats.projection === undefined ? undefined : mock<ChatProjection>(chats.projection)),
+    getProjectClosePlan: async () => mock<ProjectClosePlan>(chats.plan),
+  });
+  const chatSource = mock<ChatStorage>({
+    getChatsForResource: async () => {
+      const stored = await projectManager.getChatsForResource();
+      return stored.map(({ id }) => mock<Chat>({ id }));
+    },
+  });
   const built = new commandsModule.ProjectCommands({
     facade: notCalled,
     chatStore: () => undefined,
-    readChats: async (operation) => operation(chatSource as unknown as ChatStorage),
+    readChats: async (operation) => operation(chatSource),
     readiedWorker: notCalled,
     whenDiscoveryReady: notCalled,
     whenReplaysDrained: notCalled,
@@ -107,7 +117,7 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     invalidateListing: () => undefined,
     noteLibraryChanged: () => undefined,
     sessions: () => registry.actor,
-    chatSessions: () => chatStore as unknown as ProjectLibraryChatSessions,
+    chatSessions: () => chatStore,
   });
   commands.current = {
     verifyProjectQuiescent: built.verifyProjectQuiescent,

@@ -79,7 +79,8 @@
 \* (`runtime/project-library-commands.ts`), moved from the hook unchanged with the create-project named lock.
 \* They begin, journal, apply and abandon a mutation through the same library calls, so `MutationJournaled`,
 \* `MutationApplied` and rule 4's gate keep their correspondence. The delete's quiescence check and session
-\* close ask the registry and the chat store, outside the model. No action changes.
+\* close ask the registry and the chat store, outside the model; the check's chat read is not asked again
+\* after a release, as the hook's was not. No action changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

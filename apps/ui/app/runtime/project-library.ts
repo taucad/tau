@@ -500,7 +500,7 @@ export class ProjectLibrary {
     this.commands = new ProjectCommands({
       facade: async () => this.#facade(),
       chatStore: () => this.chatStore,
-      readChats: async (operation, projectId) => this.readChats(operation, projectId),
+      readChats: async (operation, projectId, readOptions) => this.readChats(operation, projectId, readOptions),
       readiedWorker: async () => this.getReadiedWorker(),
       whenDiscoveryReady: async () => this.whenDiscoveryReady(),
       whenReplaysDrained: async () => this.whenReplaysDrained(),

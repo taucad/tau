@@ -8,6 +8,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
+import { mock } from 'vitest-mock-extended';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import type { Chat } from '@taucad/chat';
 import { ProjectLibrary } from '#runtime/project-library.js';
 import type { ProjectLibraryBinding } from '#runtime/project-library.js';
@@ -46,11 +49,9 @@ const chatOf = (id: string): Chat => ({ id, resourceId: 'p1', name: id, messages
 
 /** A binding whose chat store holds `chats` for every project. */
 const bindingWith = (chats: readonly Chat[]): ProjectLibraryBinding => {
-  const recordFiles = {};
-  stores.set(recordFiles, {
-    getChatsForResource: async () => [...chats],
-  } satisfies Pick<ChatStorage, 'getChatsForResource'>);
-  return { fileManager: { recordFiles } as unknown as ProjectLibraryBinding['fileManager'] };
+  const fileManager = mock<ProjectLibraryBinding['fileManager']>();
+  stores.set(fileManager.recordFiles, mock<ChatStorage>({ getChatsForResource: async () => [...chats] }));
+  return { fileManager };
 };
 
 type LiveSessions = Readonly<Record<string, unknown>>;
@@ -91,19 +92,11 @@ const chatSessionsOf = ({
   caughtUp = true,
   liveChatIds = [],
 }: Readonly<{ observed?: readonly string[]; caughtUp?: boolean; liveChatIds?: readonly string[] }>) =>
-  ({
+  mock<ProjectLibraryChatSessions>({
     observedChatIdsOf: () => observed,
-    getProjection: () =>
-      ({
-        ledger: { position: { cursor: caughtUp ? 1 : 0 } },
-        endCursor: 1,
-      }) as unknown as ReturnType<ProjectLibraryChatSessions['getProjection']>,
-    getProjectClosePlan: async () =>
-      ({ liveChatIds: [...liveChatIds] }) as unknown as Awaited<
-        ReturnType<ProjectLibraryChatSessions['getProjectClosePlan']>
-      >,
-    noteCreatedEmpty: () => undefined,
-  }) satisfies ProjectLibraryChatSessions;
+    getProjection: () => mock<ChatProjection>({ ledger: { position: { cursor: caughtUp ? 1 : 0 } }, endCursor: 1 }),
+    getProjectClosePlan: async () => mock<ProjectClosePlan>({ liveChatIds: [...liveChatIds] }),
+  });
 
 const libraries: ProjectLibrary[] = [];
 const createLibrary = (
@@ -172,5 +165,21 @@ describe('ProjectLibrary project commands (A4a, row L7)', () => {
     const library = createLibrary(registry, chatSessionsOf({}), []);
     await library.commands.closeProjectSession('p1');
     expect(registry.sent).toEqual([]);
+  });
+
+  it('should read the registry and the chat store the app runtime composed it with', async () => {
+    const { createAppRuntime, selectRuntimeProjectLibrary } = await import('#runtime/app-runtime.js');
+    const runtime = createAppRuntime({ idleFileManagers: true });
+    const library = selectRuntimeProjectLibrary(runtime);
+    library.bind(bindingWith([]));
+    /* Neither refuses for want of the registry or the chat store, which a library built without them would. */
+    await expect(library.commands.closeProjectSession('p1')).resolves.toBeUndefined();
+    await expect(library.commands.verifyProjectQuiescent('p1')).resolves.toBeUndefined();
+    const bare = createLibrary(registryOf([]), chatSessionsOf({}), []);
+    const unwired = new ProjectLibrary({ queryClient: new QueryClient() });
+    libraries.push(unwired);
+    unwired.bind(bindingWith([]));
+    await expect(unwired.commands.closeProjectSession('p1')).rejects.toThrow('built without the sessions registry');
+    await expect(bare.commands.closeProjectSession('p1')).resolves.toBeUndefined();
   });
 });

@@ -265,7 +265,11 @@ export type ProjectLibraryChatSessions = Pick<
 export type ProjectCommandsHost = Readonly<{
   facade: () => Promise<ProjectLibraryFileManager>;
   chatStore: () => ChatStorage | undefined;
-  readChats: <Value>(operation: (source: ChatStorage) => Promise<Value>, projectId?: string) => Promise<Value>;
+  readChats: <Value>(
+    operation: (source: ChatStorage) => Promise<Value>,
+    projectId: string | undefined,
+    options: Readonly<{ retry: boolean }>,
+  ) => Promise<Value>;
   readiedWorker: () => Promise<Remote<ObjectStoreWorker>>;
   whenDiscoveryReady: () => Promise<void>;
   whenReplaysDrained: () => Promise<void>;
@@ -493,16 +497,6 @@ export class ProjectCommands {
   };
 
   /**
-   * Rename a project: {@link ProjectCommands.updateProject} with its name.
-   *
-   * @param projectId - The project.
-   * @param name - The new name.
-   * @returns The renamed project, or `undefined` when there is no manifest.
-   */
-  public readonly renameProject = async (projectId: string, name: string): Promise<Project | undefined> =>
-    this.updateProject(projectId, { name });
-
-  /**
    * Rewrite a degraded `tau.json` as its normalized strict manifest; refuses a JSON syntax error.
    *
    * @param projectId - The project.
@@ -708,6 +702,8 @@ export class ProjectCommands {
     const chats = await this.#host.readChats(
       async (source) => source.getChatsForResource(projectId, { includeDeleted: true }),
       projectId,
+      /* The person's read ends with the provider that serves it, as the hook's own read did: it is not asked again. */
+      { retry: false },
     );
     if (chats.length > 0) {
       if (!selectProjectLive(sessions.getSnapshot(), projectId)) {

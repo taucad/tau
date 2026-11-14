@@ -119,18 +119,18 @@ const createActorDouble = <Context extends Record<string, unknown>>(
   context: Context,
   onSend: (state: Context, event: { type: string } & Record<string, unknown>) => void,
 ) => {
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(snapshot: { context: Context }) => void>();
   const state = { context };
   const emit = (): void => {
     /* A listener that unsubscribes while it is called must not skip the next one. */
     for (const listener of new Set(listeners)) {
-      listener();
+      listener({ context: state.context });
     }
   };
   return {
     state,
     getSnapshot: () => ({ context: state.context }),
-    subscribe: (listener: () => void): Subscription => {
+    subscribe: (listener: (snapshot: { context: Context }) => void): Subscription => {
       listeners.add(listener);
       return {
         unsubscribe: () => {
@@ -488,6 +488,60 @@ describe('the entries record session', () => {
     await vi.waitFor(() => {
       expect(records.at(-1)).toMatchObject({ entries: { 'a.ts': { renderTimeout: 45_000 } } });
     });
+  });
+
+  // Round 1 defect 1: a rename reaches the model-interaction actor before the project's observers hear of the moved
+  // units. The applier for the gone path must not write empty components, which the rename would carry to b.ts.
+  it("keeps a renamed entry's component visibility when the model is rekeyed before the units move", async () => {
+    hostFiles.set(
+      recordBytes({ 'a.ts': { renderTimeout: 30_000, components: { hidden: ['x'], isolated: [], opacity: [] } } }),
+    );
+    const unit = { hiddenComponentIds: ['x'], isolatedComponentIds: [], opacityByComponentId: {} };
+    const cad = createCad(30_000);
+    const model = createModel({ 'file:a.ts': unit });
+    const project = createProject([['a.ts', cad]], model);
+    const { session } = startSession(project);
+    await vi.waitFor(() => {
+      expect(session.getSnapshot().appliedEntryRevisions.has('a.ts')).toBe(true);
+    });
+    /* As xstate delivers it: the project's context already holds the moved units when the rekeyed model notifies
+     * its observers, and the project's own observers hear of them after. */
+    project.state.context = {
+      ...project.state.context,
+      geometryUnits: new Map([['b.ts', cad]]) as unknown as ReadonlyMap<string, CadRef>,
+    };
+    model.change({ unitsById: { 'file:b.ts': unit } });
+    project.change({});
+    await session.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1200);
+    });
+    expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
+      status: 'current',
+      record: { entries: { 'b.ts': { components: { hidden: ['x'] } } } },
+    });
+  });
+
+  // Round 1 defect 2: a keyed remount builds a second runtime while the first runs out its lease grace. The newer
+  // session holds the record alone (I13), and the older one's stop leaves the newer one's issue published.
+  it("yields to a newer session for the project and never withdraws that session's issue", async () => {
+    hostFiles.set(new TextEncoder().encode('{ not json'));
+    const first = startSession();
+    await vi.waitFor(() => {
+      expect(readRecordIssues('p')[0]?.state).toBe('invalid');
+    });
+    const second = startSession();
+    await vi.waitFor(() => {
+      expect(entriesStores.map(({ disposed }) => disposed)).toEqual([true, false]);
+    });
+    expect(first.producers.producers.size).toBe(0);
+    await vi.waitFor(() => {
+      expect(readRecordIssues('p')[0]?.state).toBe('invalid');
+    });
+    first.stop();
+    expect(readRecordIssues('p')[0]?.state).toBe('invalid');
+    second.stop();
+    expect(readRecordIssues('p')).toEqual([]);
   });
 
   describe('one producer (A0.3 row 5, S25)', () => {

@@ -29,12 +29,12 @@
     "SessionClosed"
   ],
   "sources": {
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "9182cb72fcb01c1744446775e2092be71fe1b075490d82f5f0590a4a15ac51dd",
+    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "a1b33826b714573edbb8e0fb0e5451acf2a939e37d590fb182f4ab431f1f9d35",
     "apps/ui/app/routes/w.$workspace.$project/project-route-state.ts": "27da214e00f98eac9a8ab1d42e1e8b5467ddaed534c580d5d7410cdb99af07f2",
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "4cea41ab878b3d473d4df2709bd04504409e7bb8f68d329514ae47e798a01685"
   },
   "specs": {
-    "ProjectFocus.tla": "5ad1c36fd6c54143ff1785a81b4c7fccb04c44ce0a2b535817e21024840f4296"
+    "ProjectFocus.tla": "4f3a82f638927b6f2677e377e2306509a1870e32082f7e4a424b194aff62fed3"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",

@@ -33,7 +33,7 @@ import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js
 import type { EntryPathChange, EntryRecordPatch } from '#workbench-records/entries-store.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
-import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
+import { publishRecordIssue, readRecordIssues, recordIssueState } from '#workbench-records/record-issues.js';
 import type { RecordIssue } from '#workbench-records/record-issues.js';
 import type { ViewRecordHost } from '#workbench-records/view-record-session.js';
 
@@ -83,6 +83,13 @@ export type EntriesRecordSession = Readonly<{
    */
   start: (input: Readonly<{ project: EntriesRecordProject; producers: EntriesRecordProducers }>) => () => void;
 }>;
+
+/*
+ * The live session of each project, by its yield. A runtime outlives its mount by the lease grace (B3), so a keyed
+ * remount builds a second runtime while the first still runs: the newer session takes the record, and the older one
+ * yields at once (I13), as the host's unmount ran before the next host's mount.
+ */
+const liveSessions = new Map<string, () => void>();
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 const emptyEntries = (): WorkbenchEntries => workbenchRecords.entries.schema.parse({ version: 1, entries: {} });
@@ -316,6 +323,8 @@ export function createEntriesRecordSession(
     if (changePaths !== undefined) {
       throw new Error('The entries record session is already running.');
     }
+    /* An older runtime's session for this project yields before this one opens the record (I13). */
+    liveSessions.get(projectId)?.();
     let stopped = false;
     let notice:
       | Readonly<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string; bytes: Uint8Array<ArrayBuffer> | null }>
@@ -410,8 +419,17 @@ export function createEntriesRecordSession(
     };
 
     /* A person's change of a unit's timeout or component visibility is written to the record. */
-    const observe = ({ applier }: BoundApplier): void => {
-      if (applying || stopped || !ready()) {
+    /* Whether the applier's actors are still the project's for its path. A rename or delete reaches the
+     * model-interaction actor before the project's own observers hear of the moved units; an applier for a unit
+     * that has gone reads nothing and writes nothing, as the host's owner unmounted in the same render. */
+    const isCurrent = ({ applier }: BoundApplier): boolean => {
+      const { geometryUnits, modelInteractionRef } = project.getSnapshot().context;
+      return geometryUnits.get(applier.path) === applier.cad && modelInteractionRef === applier.model;
+    };
+
+    const observe = (bound: BoundApplier): void => {
+      const { applier } = bound;
+      if (applying || stopped || !ready() || !isCurrent(bound)) {
         return;
       }
       const { store } = current;
@@ -422,6 +440,9 @@ export function createEntriesRecordSession(
 
     /* Each applier in turn applies, acknowledges, then observes, as the host's owners ran their effects. */
     const settle = (bound: BoundApplier): void => {
+      if (!isCurrent(bound)) {
+        return;
+      }
       applying = true;
       try {
         apply(bound);
@@ -580,12 +601,22 @@ export function createEntriesRecordSession(
           bound.applier.model = modelInteractionRef;
         }
         const observed = bound;
+        const unitId = createSourceModelInteractionUnitId(path);
+        /* Only a change of the slices an entry holds is observed, as the owner's selectors re-rendered on those. */
+        let timeout = cad.getSnapshot().context.operationTimeout;
+        let display = modelInteractionRef.getSnapshot().context.unitsById[unitId];
         bound.subscriptions = [
-          cad.subscribe(() => {
-            observe(observed);
+          cad.subscribe(({ context }) => {
+            if (context.operationTimeout !== timeout) {
+              timeout = context.operationTimeout;
+              observe(observed);
+            }
           }),
-          modelInteractionRef.subscribe(() => {
-            observe(observed);
+          modelInteractionRef.subscribe(({ context }) => {
+            if (context.unitsById[unitId] !== display) {
+              display = context.unitsById[unitId];
+              observe(observed);
+            }
           }),
         ];
         settle(bound);
@@ -623,9 +654,15 @@ export function createEntriesRecordSession(
     changePaths = async (change) => current.store.changePaths(change);
     publishIssue();
 
-    return () => {
+    const stop = (flushFirst: boolean): void => {
+      if (stopped) {
+        return;
+      }
       stopped = true;
       changePaths = undefined;
+      if (liveSessions.get(projectId) === yieldToSuccessor) {
+        liveSessions.delete(projectId);
+      }
       unregisterProducer();
       unsubscribeHost();
       projectSubscription.unsubscribe();
@@ -636,8 +673,33 @@ export function createEntriesRecordSession(
       }
       appliers.clear();
       watching.release();
-      retireStore(current);
-      publishRecordIssue(projectId, recordPath, undefined);
+      const last = current;
+      if (flushFirst) {
+        /* A yielding session writes what it still owes before its store closes. */
+        last.retired = true;
+        const flushThenClose = async (): Promise<void> => {
+          try {
+            await last.store.flush();
+          } finally {
+            last.store.dispose();
+          }
+        };
+        void flushThenClose();
+      } else {
+        retireStore(last);
+      }
+      /* Only this session's own issue is withdrawn: a successor's stays published. */
+      if (issue !== undefined && readRecordIssues(projectId).includes(issue)) {
+        publishRecordIssue(projectId, recordPath, undefined);
+      }
+    };
+    function yieldToSuccessor(): void {
+      stop(true);
+    }
+    liveSessions.set(projectId, yieldToSuccessor);
+
+    return () => {
+      stop(false);
     };
   };
 

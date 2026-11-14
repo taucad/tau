@@ -70,6 +70,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const { createChat } = useProjectManager();
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
   const queryClient = useQueryClient();
+  const chatSessions = useChatSessionStore();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const location = useLocation();
@@ -107,6 +108,8 @@ export function ProjectNavigation({ className }: { readonly className?: string }
       return;
     }
     const chat = await createChat(project.id, { name: 'New chat', messages: [] });
+    // Created empty here, so the lane shows its empty state at once rather than waiting for the log (I21).
+    chatSessions.noteCreatedEmpty(chat.id);
     void queryClient.invalidateQueries({ queryKey: ['chats', project.id] });
     await navigate(projectChatUrl(project.slugs, chat.id, isActive ? location.search : undefined), {
       state: { focusChatComposer: true },

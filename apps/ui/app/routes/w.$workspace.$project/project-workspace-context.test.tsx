@@ -1235,6 +1235,33 @@ describe('ProjectWorkspaceProvider', () => {
       expect(opener).toHaveBeenCalledOnce();
     });
 
+    // A8b review: the Dockview stays attached while the desktop workbench lane is hidden. A file the person opens then
+    // asks the editor to open the lane, which it has not shown yet when the layout delivers the intent in the same step;
+    // the lane is being opened, not closed, so the file is shown.
+    it('should show a file the person opens while the desktop workbench lane is closed', async () => {
+      renderLive();
+      currentRuntime?.answerRead();
+      await settle();
+      act(() => {
+        setEditorLanes({ workbenchOpen: false });
+      });
+      const opener = vi.fn();
+      const activate = vi.fn();
+      act(() => {
+        attachWorkbench();
+        workspace.connectWorkbench(opener, activate);
+      });
+      editorFiles.push({ path: 'chosen.md' });
+      act(() => {
+        listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'chosen.md', source: 'user' });
+      });
+      expect(activate).toHaveBeenCalledExactlyOnceWith('chosen.md');
+      expect(opener).not.toHaveBeenCalled();
+      expect(Object.values(currentRuntime!.layout!.actor.getSnapshot().context.outcomes)).toEqual([
+        { outcome: 'applied' },
+      ]);
+    });
+
     // §11 (A8b): opening a pane keeps a file the person opened before it; both are applied when the workbench connects.
     it('should keep a file intent when a pane is opened after it', async () => {
       renderLive();

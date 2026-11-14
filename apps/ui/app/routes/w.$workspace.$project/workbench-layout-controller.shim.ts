@@ -151,6 +151,25 @@ export function createWorkbenchLayoutControllerShim(
    * what it lands is not then counted as an edit too, which would write it over the person's edit. */
   let editedWhileApplying = false;
 
+  /**
+   * Whether the layout will drop a delivery once it hears what the shell and editor say now. A delivery made inside the
+   * layout's own step (an apply that lands at once releases what it held) reads the layout before the events sent in
+   * that step, so what it has heard is compared with what is true: a route the shell has left (rule 6), or a lane the
+   * editor has closed (rule 7). The lane is closing when the editor hides a lane the bridge last reported shown; a lane
+   * the layout has just asked to open is not, since the editor shows it only after this step.
+   */
+  const droppedUnheard = (delivered: DeliveredTarget, routeKey: string): boolean => {
+    const heard = layout.getSnapshot().context;
+    if (heard.routeKey !== routeKey) {
+      return true;
+    }
+    return (
+      (heard.appliedLanes?.workbench ?? heard.workbenchOpen) &&
+      !editor.getSnapshot().context.panelState.desktopLayout.workbenchOpen &&
+      (delivered.kind === 'file' || delivered.pane === 'files')
+    );
+  };
+
   function deliverNow(
     delivery: Readonly<{
       intentId: string;
@@ -161,27 +180,12 @@ export function createWorkbenchLayoutControllerShim(
   ): void {
     const { intentId, deliveryId } = delivery;
     const facts = host.facts();
-    const heard = layout.getSnapshot().context;
-    // A delivery made inside the layout's own step (an apply that lands at once releases what it held) reads the layout
-    // before the events sent in that step: what the shell and editor say now is compared with what the layout has
-    // heard. A route the shell has left (rule 6) and a lane the editor has closed (rule 7) drop the delivery once the
-    // layout hears them, so it opens nothing now.
-    const routeLeft = heard.routeKey !== facts.routeKey;
-    const laneClosing =
-      heard.workbenchOpen &&
-      !editor.getSnapshot().context.panelState.desktopLayout.workbenchOpen &&
-      (delivery.target.kind === 'file' || delivery.target.pane === 'files');
+    const unheard = droppedUnheard(delivery.target, facts.routeKey);
     // Rule 6: the layout hears the route the shell is on now, which drops what was queued under another.
     syncLayoutFacts(layout, facts);
     const { latest, arrangement, intents } = layout.getSnapshot().context;
     const entry = intentOf(intents, intentId);
-    if (
-      routeLeft ||
-      laneClosing ||
-      entry?.state !== 'delivered' ||
-      entry.deliveryId !== deliveryId ||
-      latest?.refused === true
-    ) {
+    if (unheard || entry?.state !== 'delivered' || entry.deliveryId !== deliveryId || latest?.refused === true) {
       // A delivery dropped while it was held, or about to be, opens nothing; nor does one on a refused record, whose
       // workbench shows only what is on disk, as the record host did. The answer names the delivery and reaches the
       // layout after the route or lane change, so the dropped intent's late answer is taken and nothing is counted.

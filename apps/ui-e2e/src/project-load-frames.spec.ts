@@ -1274,11 +1274,10 @@ knownDefect(
 
 /*
  * F9's clause past the mount: on `main` the editor's first line moves 14 px about 2 s after the editor mounts, as
- * CodeMirror lays out its gutters. A15f has merged and no lane owns this, so it is carried to A10, as other ownerless
- * defects were; programme control may name another owner.
+ * CodeMirror lays out its gutters. The code pane is A15f's; an A15f follow-up lane flips this row.
  */
 knownDefect(
-  "F9 (A10, carried): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
+  "F9 (A15f follow-up): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
   {
     artifact: 'f9-after-mount-wide',
     expectedFailure: true,

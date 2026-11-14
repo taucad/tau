@@ -26,6 +26,7 @@ import {
   readDelayedRequests,
   requireFrameTimes,
   readLongTasks,
+  untilHidden,
   holdRequestsUntilReleased,
   releaseHeldRequests,
   readProjectLoad,
@@ -1432,15 +1433,12 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
  * from the first frame with the words to the first without.
  */
 /** A15f2's assertion for both minimums (`minimumBreaches`). */
-const expectMinimum = (
-  label: string,
-  measured: { shown: readonly ShownSpan[]; answeredAt: number; stamps: readonly number[] },
-): void => {
-  const { shown, answeredAt, stamps } = measured;
+type MinimumMeasure = { shown: readonly ShownSpan[]; answeredAt: number; stamps: readonly number[] };
+const expectMinimum = (label: string, { shown, answeredAt, stamps }: MinimumMeasure): void => {
   expectMeasured(
     minimumBreaches(shown, answeredAt, stamps),
     `${label} showed ${shown.map((span) => `${Math.round(span.from)}-${Math.round(span.to)}`).join(', ')}; the read was answered at ${answeredAt} ms`,
-    { short: [], lingering: [], unstamped: [] },
+    { short: [], lingering: [], unended: [], unstamped: [] },
   );
 };
 
@@ -1474,6 +1472,7 @@ knownDefect(
         undefined,
         { timeout: 60_000 },
       );
+      await untilHidden(historyRegions.historyIndicator);
       await target.delay(1500);
       const record = await keepRecord('history-minimum-wide');
       requireFrameTimes('History minimum', record);

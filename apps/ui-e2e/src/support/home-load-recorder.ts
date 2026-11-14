@@ -956,7 +956,7 @@ export type ShownSpan = { readonly from: number; readonly to: number };
 /**
  * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or drawn in
  * a frame more than 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it
- * served; and any span with no frame stamp, which no check could read. Lingering is read from frames, as the span is:
+ * served; any span still open when the record ended; and any span with no frame stamp, which no check could read. Lingering is read from frames, as the span is:
  * a long task after the hold ended delays the first frame without the words, but draws no frame with them.
  *
  * @param shown - The indicator's spans (`shownOnFrames`).
@@ -968,12 +968,19 @@ export const minimumBreaches = (
   shown: readonly ShownSpan[],
   answeredAt: number,
   frameStamps: readonly number[],
-): { readonly short: string[]; readonly lingering: string[]; readonly unstamped: string[] } => {
+): {
+  readonly short: string[];
+  readonly lingering: string[];
+  readonly unended: string[];
+  readonly unstamped: string[];
+} => {
   const describe = (span: ShownSpan): string => `${Math.round(span.from)}-${Math.round(span.to)}`;
   return {
     /* A span on a frame with no stamp (frame times off, or past the record's frame limit) reads NaN and would pass. */
     unstamped: shown.filter((span) => Number.isNaN(span.from) || Number.isNaN(span.to)).map((span) => describe(span)),
     short: shown.filter((span) => span.to - span.from < 500).map((span) => describe(span)),
+    /* Still shown when the record ended: never hidden, whatever frames the record caught after it was due to go. */
+    unended: shown.filter((span) => span.to === Infinity).map((span) => describe(span)),
     lingering: shown
       .filter((span) => {
         const overdue = Math.max(span.from + 500, answeredAt) + 1000;
@@ -1384,6 +1391,25 @@ export const armWorkerReadDelay = async (rules: readonly WorkerReadDelay[]): Pro
 /** The worker calls the current document made, and which were answered late. */
 export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
+
+/**
+ * A15f2: wait until `selector`'s node is gone or not visible, up to 5 s, so a record kept next takes in the frame its
+ * indicator went in. One that never goes is left to the row: its span reads as unended.
+ *
+ * @param selector - The indicator's selector.
+ */
+export const untilHidden = async (selector: string): Promise<void> => {
+  try {
+    await target.waitFor(
+      (query) =>
+        document.querySelector(query)?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) !== true,
+      selector,
+      { timeout: 5000 },
+    );
+  } catch {
+    /* Never hidden: the span stays open and the row reports it. */
+  }
+};
 
 /** When each `longTask` started on the page (`WorkerReadDelay.longTask`), in milliseconds from navigation start. */
 export const readLongTasks = async (): Promise<readonly number[]> =>

@@ -1318,6 +1318,7 @@ describe('totality', () => {
       ports: 'ports' as unknown as WorkbenchDockReady['ports'],
     },
     dockReleased: { type: 'dockReleased', adapter: 'workbench', dockId: 'dock_1' },
+    dockSettled: { type: 'dockSettled', adapter: 'workbench', dockId: 'dock_1' },
   };
   const stubbed = workbenchLayoutMachine.provide({
     actors: { workbenchAdapter: createCallbackLogic(() => () => undefined) },

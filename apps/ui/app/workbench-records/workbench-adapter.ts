@@ -151,14 +151,16 @@ export type WorkbenchAdapterPorts = Readonly<{
 }>;
 
 /** A workbench adapter's input. The `DockviewApi` lives only here and in the closure built from it (D4). */
-export type WorkbenchAdapterInput = Readonly<{ api: DockviewApi; ports: WorkbenchAdapterPorts }>;
+export type WorkbenchAdapterInput = Readonly<{ api: DockviewApi; dockId: string; ports: WorkbenchAdapterPorts }>;
 
 /** What the workbench's own handlers tell its adapter. */
 export type WorkbenchAdapterEvent =
   /** The person opened a file from the Dockview: its panel takes `placement` when given. */
   | Readonly<{ type: 'openFile'; path: string; readOnly?: boolean; placement?: PendingFilePlacement }>
   /** Something was dropped on the workbench from outside it. */
-  | Readonly<{ type: 'dropped'; event: DockviewDidDropEvent }>;
+  | Readonly<{ type: 'dropped'; event: DockviewDidDropEvent }>
+  /** The host has handled what the adapter sent it at start (its attach): the rest of the start runs now. */
+  | Readonly<{ type: 'settled' }>;
 
 /** The Dockview hands its adapter to a host (`onReady`, through its ref callback). */
 export type WorkbenchDockReady = Readonly<{
@@ -172,6 +174,13 @@ export type WorkbenchDockReady = Readonly<{
 
 /** The Dockview that made `dockId` is gone (its ref cleanup): its adapter stops. */
 export type WorkbenchDockReleased = Readonly<{ type: 'dockReleased'; adapter: 'workbench'; dockId: string }>;
+
+/**
+ * The adapter has started (`sendBack`): its host answers with `settled`, after the events the adapter's start sent it.
+ * An adapter starts inside its host's `dockReady` step, so a layout host hears the adapter's attach only after that
+ * step: the reconciler and the opener wait for the attach's apply, as they did when each was a component effect.
+ */
+export type WorkbenchDockSettled = Readonly<{ type: 'dockSettled'; adapter: 'workbench'; dockId: string }>;
 
 /** The child id a host spawns a Dockview's adapter under. */
 export const dockAdapterId = (adapter: string, dockId: string): string => `${adapter}Adapter:${dockId}`;
@@ -241,6 +250,7 @@ type HeldApply = {
 function runWorkbenchAdapter(
   input: WorkbenchAdapterInput,
   receive: (listener: (event: WorkbenchAdapterEvent) => void) => void,
+  started: () => void,
 ): () => void {
   const { api, ports } = input;
   const { editor, dock, profile } = ports;
@@ -257,6 +267,10 @@ function runWorkbenchAdapter(
   let held: HeldApply | undefined;
   let previousOpenPaths: ReadonlySet<string> = new Set(editor.getSnapshot().context.openFiles.map((file) => file.path));
   let reconciled: Readonly<{ openFiles: OpenFile[]; activePaneId: string | undefined }> | undefined;
+  /* Files whose panel was removed and whose `closeFile` the editor has not taken yet: a panel removed inside the
+   * editor's own step (an apply landing on its change) sends a close the editor takes only after that step, and the
+   * reconciler must not put the panel back from the snapshot before it. */
+  const closing = new Set<string>();
 
   const shownNode = (): WorkbenchLaneNode | undefined => {
     try {
@@ -267,12 +281,22 @@ function runWorkbenchAdapter(
     }
   };
 
+  /** Forget the closes the editor has taken: a file it no longer holds. */
+  const settleClosing = (openFiles: readonly OpenFile[]): void => {
+    for (const path of closing) {
+      if (!openFiles.some((file) => file.path === path)) {
+        closing.delete(path);
+      }
+    }
+  };
+
   const reconcile = (snapshot: EditorSnapshot): void => {
     const { openFiles, activePaneId } = snapshot.context;
     reconciled = { openFiles, activePaneId };
+    settleClosing(openFiles);
     pendingUserFilePath = dock.reconcile({
       api,
-      openFiles,
+      openFiles: closing.size === 0 ? openFiles : openFiles.filter((file) => !closing.has(file.path)),
       activePaneId,
       isMobile: ports.isMobile,
       pendingUserFilePath,
@@ -292,7 +316,15 @@ function runWorkbenchAdapter(
     );
     const missing = workbenchFilePaths(node).filter((path) => files[path] === undefined);
     if (missing.length > 0) {
+      // A file the editor is materialising already is not asked for again, which would open it twice: its
+      // materialisation is followed like the apply's own.
+      const materialising = materialisingPath(editor.getSnapshot());
       for (const path of missing) {
+        if (path === materialising) {
+          held.materialising.add(path);
+          continue;
+        }
+        closing.delete(path);
         editor.send({ type: 'openFile', path, source: 'record' });
       }
       return;
@@ -357,6 +389,7 @@ function runWorkbenchAdapter(
       return;
     }
     for (const path of dropped) {
+      closing.delete(path);
       editor.send({ type: 'openFile', path, source: 'record' });
     }
   };
@@ -394,85 +427,19 @@ function runWorkbenchAdapter(
     );
   }
 
-  // The reconciler: the editor is the one source of the open tabs and the active one, and the Dockview converges on it.
-  // It is idempotent, so a change it causes (a removed panel closing its file) finds the panels already in step.
-  const editorSubscription = editor.subscribe((snapshot) => {
-    if (writesLayout) {
-      followHeldApply(snapshot);
-    }
-    const { openFiles, activePaneId } = snapshot.context;
-    if (isRestoring || (reconciled?.openFiles === openFiles && reconciled.activePaneId === activePaneId)) {
-      return;
-    }
-    reconcile(snapshot);
-  });
-  disposers.push(() => {
-    editorSubscription.unsubscribe();
-  });
-  reconcile(editor.getSnapshot());
-
-  // A file opened with a line is revealed there; a record's own opens carry none.
-  const opened = editor.on('fileOpened', (event) => {
-    if (event.source !== 'record' && event.lineNumber) {
-      ports.navigate({
-        projectId: ports.projectId,
-        path: event.path,
-        paneId: editor.getSnapshot().context.activePaneId,
-        line: event.lineNumber,
-        column: event.column ?? 1,
-      });
-    }
-  });
-  const failed = editor.on('fileOpenFailed', (event) => {
-    if (pendingFilePlacements.get(event.path)?.placeholderId) {
-      pendingFilePlacements.delete(event.path);
-    }
-    // A record apply held for this file would wait for it forever, and the layout holds every pane intent until the
-    // apply lands: it lands now without the file's tab.
-    if (held !== undefined && workbenchFilePaths(held.node).includes(event.path)) {
-      held.materialising.delete(event.path);
-      applyRecordNode(withoutFileTab(held.node, event.path));
-    }
-  });
-  disposers.push(() => {
-    opened.unsubscribe();
-    failed.unsubscribe();
-  });
-
-  // The person's own changes reach the editor: the reconciler then finds the panels already in step.
-  const activeChange = api.onDidActivePanelChange((event) => {
-    const path = event.panel === undefined ? undefined : dock.filePathOf(event.panel);
-    if (path !== undefined) {
-      editor.send({ type: 'setActiveFile', path });
-    }
-  });
-  const removal = api.onDidRemovePanel((panel: IDockviewPanel) => {
-    for (const [path, placement] of pendingFilePlacements) {
-      if (placement.placeholderId === panel.id) {
-        pendingFilePlacements.delete(path);
-      }
-    }
-    dock.panelRemoved({
-      panel,
-      remainingPanelCount: api.panels.length,
-      isRestoringLayout: isRestoring,
-      closeFile: (path) => {
-        editor.send({ type: 'closeFile', path });
-      },
-      closeWorkbench: () => {
-        ports.setWorkbenchOpen(false);
-      },
-    });
-  });
-  disposers.push(() => {
-    activeChange.dispose();
-    removal.dispose();
-  });
-
   const openFile = (path: string, readOnly: boolean | undefined): void => {
+    closing.delete(path);
     editor.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || readOnly });
   };
+  let attached = false;
   receive((event) => {
+    if (event.type === 'settled') {
+      if (!attached) {
+        attached = true;
+        attach();
+      }
+      return;
+    }
     if (event.type === 'dropped') {
       dock.drop({
         event: event.event,
@@ -489,30 +456,121 @@ function runWorkbenchAdapter(
     openFile(event.path, event.readOnly);
   });
 
-  // The workbench's answers to pane intents. Each returns what the Dockview shows after it (its model changes
-  // synchronously, and only its layout report is deferred), so an intent's answer carries the pane it opened.
-  disposers.push(
-    ports.connectWorkbench(
-      (panelId) => {
-        // A pane this view does not offer is refused: its intent is unavailable, not applied.
-        if (!dock.isPanelOffered(panelId)) {
-          return false;
+  /**
+   * The rest of the start, once the host has handled the attach the start sent (`settled`): the attach's apply shows
+   * first, and the reconciler then adds the open files it lacks. Run at once, the reconciler would put every open file on
+   * the Dockview, and the apply would remove the ones it lacks and close them.
+   */
+  function attach(): void {
+    // The reconciler: the editor is the one source of the open tabs and the active one, and the Dockview converges on it.
+    // It is idempotent, so a change it causes (a removed panel closing its file) finds the panels already in step.
+    const editorSubscription = editor.subscribe((snapshot) => {
+      settleClosing(snapshot.context.openFiles);
+      if (writesLayout) {
+        followHeldApply(snapshot);
+      }
+      const { openFiles, activePaneId } = snapshot.context;
+      if (isRestoring || (reconciled?.openFiles === openFiles && reconciled.activePaneId === activePaneId)) {
+        return;
+      }
+      reconcile(snapshot);
+    });
+    disposers.push(() => {
+      editorSubscription.unsubscribe();
+    });
+    // The editor may have moved before this observer existed (a record file that opened at once): an apply held at
+    // attach follows it now, then the reconciler, in the observer's order.
+    if (writesLayout) {
+      followHeldApply(editor.getSnapshot());
+    }
+    reconcile(editor.getSnapshot());
+
+    // A file opened with a line is revealed there; a record's own opens carry none.
+    const opened = editor.on('fileOpened', (event) => {
+      if (event.source !== 'record' && event.lineNumber) {
+        ports.navigate({
+          projectId: ports.projectId,
+          path: event.path,
+          paneId: editor.getSnapshot().context.activePaneId,
+          line: event.lineNumber,
+          column: event.column ?? 1,
+        });
+      }
+    });
+    const failed = editor.on('fileOpenFailed', (event) => {
+      if (pendingFilePlacements.get(event.path)?.placeholderId) {
+        pendingFilePlacements.delete(event.path);
+      }
+      // A record apply held for this file would wait for it forever, and the layout holds every pane intent until the
+      // apply lands: it lands now without the file's tab.
+      if (held !== undefined && workbenchFilePaths(held.node).includes(event.path)) {
+        held.materialising.delete(event.path);
+        applyRecordNode(withoutFileTab(held.node, event.path));
+      }
+    });
+    disposers.push(() => {
+      opened.unsubscribe();
+      failed.unsubscribe();
+    });
+
+    // The person's own changes reach the editor: the reconciler then finds the panels already in step.
+    const activeChange = api.onDidActivePanelChange((event) => {
+      const path = event.panel === undefined ? undefined : dock.filePathOf(event.panel);
+      if (path !== undefined) {
+        editor.send({ type: 'setActiveFile', path });
+      }
+    });
+    const removal = api.onDidRemovePanel((panel: IDockviewPanel) => {
+      for (const [path, placement] of pendingFilePlacements) {
+        if (placement.placeholderId === panel.id) {
+          pendingFilePlacements.delete(path);
         }
-        pendingUserFilePath = undefined;
-        dock.openPanel(api, panelId);
-        return shownNode();
-      },
-      (path) => {
-        pendingUserFilePath = path;
-        if (isRestoring) {
-          return undefined;
-        }
-        // Connection can follow the first reconcile: consume the retained person's intent against the current state.
-        reconcile(editor.getSnapshot());
-        return shownNode();
-      },
-    ),
-  );
+      }
+      dock.panelRemoved({
+        panel,
+        remainingPanelCount: api.panels.length,
+        isRestoringLayout: isRestoring,
+        closeFile: (path) => {
+          closing.add(path);
+          editor.send({ type: 'closeFile', path });
+        },
+        closeWorkbench: () => {
+          ports.setWorkbenchOpen(false);
+        },
+      });
+    });
+    disposers.push(() => {
+      activeChange.dispose();
+      removal.dispose();
+    });
+
+    // The workbench's answers to pane intents. Each returns what the Dockview shows after it (its model changes
+    // synchronously, and only its layout report is deferred), so an intent's answer carries the pane it opened.
+    disposers.push(
+      ports.connectWorkbench(
+        (panelId) => {
+          // A pane this view does not offer is refused: its intent is unavailable, not applied.
+          if (!dock.isPanelOffered(panelId)) {
+            return false;
+          }
+          pendingUserFilePath = undefined;
+          dock.openPanel(api, panelId);
+          return shownNode();
+        },
+        (path) => {
+          pendingUserFilePath = path;
+          if (isRestoring) {
+            return undefined;
+          }
+          // Connection can follow the first reconcile: consume the retained person's intent against the current state.
+          reconcile(editor.getSnapshot());
+          return shownNode();
+        },
+      ),
+    );
+  }
+
+  started();
 
   return () => {
     for (const dispose of disposers.toReversed()) {
@@ -523,11 +581,15 @@ function runWorkbenchAdapter(
 
 /** The workbench adapter's logic. A host spawns it with the Dockview's `dockReady` and stops it on `dockReleased`. */
 export const workbenchAdapterLogic: CallbackActorLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput> =
-  createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input, receive }) =>
-    runWorkbenchAdapter(input, receive),
+  createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input, receive, sendBack }) =>
+    runWorkbenchAdapter(input, receive, () => {
+      sendBack({ type: 'dockSettled', adapter: 'workbench', dockId: input.dockId } satisfies WorkbenchDockSettled);
+    }),
   );
 
 /** Narrow a host's event to a workbench dock event. */
-export const isWorkbenchDockEvent = (event: EventObject): event is WorkbenchDockReady | WorkbenchDockReleased =>
-  (event.type === 'dockReady' || event.type === 'dockReleased') &&
+export const isWorkbenchDockEvent = (
+  event: EventObject,
+): event is WorkbenchDockReady | WorkbenchDockReleased | WorkbenchDockSettled =>
+  (event.type === 'dockReady' || event.type === 'dockReleased' || event.type === 'dockSettled') &&
   (event as Partial<WorkbenchDockReady>).adapter === 'workbench';

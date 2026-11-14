@@ -5,6 +5,7 @@
     "workbenchLayout.deviceChanged": "Unmodelled",
     "workbenchLayout.dockReady": "Unmodelled",
     "workbenchLayout.dockReleased": "Unmodelled",
+    "workbenchLayout.dockSettled": "Unmodelled",
     "workbenchLayout.flush": "Unmodelled",
     "workbenchLayout.intents.intent": "IntentSent",
     "workbenchLayout.intents.intentApplied": "IntentApplied",
@@ -56,6 +57,7 @@
     "deviceChanged",
     "dockReady",
     "dockReleased",
+    "dockSettled",
     "flush",
     "intent",
     "intentApplied",
@@ -76,7 +78,7 @@
     "workbenchLaneChanged"
   ],
   "specs": {
-    "LayoutApply.tla": "c0808b59329bc4c1a012d4801b59cd0e787f0158028940c6ba1b1efc555b89a9"
+    "LayoutApply.tla": "c434b248c362101489a80c9c2a8784536bcc9ae1672a39ede9d8bd2d6c9c4829"
   },
   "tables": {},
   "versions": {

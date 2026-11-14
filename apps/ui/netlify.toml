@@ -207,11 +207,24 @@ for = "/csharp-language/*"
 Cache-Control = "public, max-age=31536000, immutable"
 Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
 
+# Email assets. Transactional email templates (apps/libs/api-email templates/shared.ts)
+# load /wordmark.png and the Geist /fonts/*.woff2 from this origin. Webmail that
+# renders images in the reader's browser (Outlook on the web loads them directly
+# from tau.new) refuses a `same-origin` resource, so these paths allow any origin.
+# Fonts also need CORS for a cross-origin @font-face. Both are public, static and
+# credential-free; the site-wide isolation headers on documents are unchanged.
 [[headers]]
 for = "/fonts/*"
 [headers.values]
 Cache-Control = "public, max-age=2592000"
 Netlify-CDN-Cache-Control = "public, durable, max-age=2592000"
+Cross-Origin-Resource-Policy = "cross-origin"
+Access-Control-Allow-Origin = "*"
+
+[[headers]]
+for = "/wordmark.png"
+[headers.values]
+Cross-Origin-Resource-Policy = "cross-origin"
 
 [[headers]]
 for = "/*.svg"

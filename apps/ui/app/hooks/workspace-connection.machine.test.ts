@@ -17,8 +17,29 @@ Object.defineProperties(handle, {
 });
 const selection: DirectoryPick = { backend: 'webaccess', handle };
 
+const faults = vi.hoisted(() => ({ reported: [] as unknown[] }));
+
+vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  reportAppRuntimeFault: (error: unknown) => {
+    faults.reported.push(error);
+  },
+}));
+
+/** A webaccess pick whose folder name throws when the machine reads it: a defect no transition models. */
+const faultingSelection = (error: Error): DirectoryPick => {
+  const broken = Object.create(null) as FileSystemDirectoryHandle;
+  Object.defineProperty(broken, 'name', {
+    get: () => {
+      throw error;
+    },
+  });
+  return { backend: 'webaccess', handle: broken };
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  faults.reported.length = 0;
 });
 
 describe('workspaceConnectionMachine', () => {
@@ -196,5 +217,42 @@ describe('workspaceConnectionMachine', () => {
       projectCount: 2,
     });
     actor.stop();
+  });
+
+  // Root onError (charter D23, B2; plan § 4 A4b)
+  describe('root onError', () => {
+    it('should keep the first fault, report it once, and keep answering', () => {
+      const first = new Error('first fault');
+      const second = new Error('second fault');
+      const actor = createActor(workspaceConnectionMachine, {
+        input: {
+          registerWorkspace: vi.fn(async () => new Promise<never>(() => undefined)),
+          mountWorkspace: vi.fn(),
+          prepareWorkspaceCatalog: vi.fn(),
+        },
+      });
+      /* Without a root onError the fault stops the actor; the observer keeps it from being rethrown. */
+      actor.subscribe({ error: () => undefined });
+      actor.start();
+      actor.send({ type: 'beginSelection', operationId: 'req_first' });
+      actor.send({ type: 'workspaceSelected', operationId: 'req_first', selection: faultingSelection(first) });
+      expect(actor.getSnapshot().status).toBe('active');
+      expect(actor.getSnapshot().context.fault).toBe('first fault');
+
+      actor.send({ type: 'beginSelection', operationId: 'req_second' });
+      actor.send({ type: 'workspaceSelected', operationId: 'req_second', selection: faultingSelection(second) });
+      expect(actor.getSnapshot().status).toBe('active');
+      expect(actor.getSnapshot().context.fault).toBe('first fault');
+      expect(faults.reported).toEqual([first]);
+
+      /* It still answers: a good pick registers. */
+      actor.send({ type: 'beginSelection', operationId: 'req_good' });
+      actor.send({ type: 'workspaceSelected', operationId: 'req_good', selection });
+      expect(selectWorkspaceConnectionState(actor.getSnapshot())).toMatchObject({
+        phase: 'registering',
+        operationId: 'req_good',
+      });
+      actor.stop();
+    });
   });
 });

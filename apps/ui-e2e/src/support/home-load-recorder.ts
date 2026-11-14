@@ -956,8 +956,9 @@ export type ShownSpan = { readonly from: number; readonly to: number };
 /**
  * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or drawn in
  * a frame more than 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it
- * served; any span still open when the record ended; and any span with no frame stamp, which no check could read. Lingering is read from frames, as the span is:
- * a long task after the hold ended delays the first frame without the words, but draws no frame with them.
+ * served; any span still open when the record ended; and any span with no frame stamp, which no check could read.
+ * Lingering is read from frames, as the span is: a long task after the hold ended delays the first frame without the
+ * words, but draws no frame with them.
  *
  * @param shown - The indicator's spans (`shownOnFrames`).
  * @param answeredAt - When the wait's answer reached the page. Milliseconds.
@@ -1006,23 +1007,29 @@ export const shownOnFrames = (
   removals: readonly ProjectLoadFrame[] = [],
 ): ShownSpan[] => {
   const stampOf = (frame: number): number => frameStamps[frame - 1] ?? Number.NaN;
-  const removedAfter = (time: number): number =>
-    Math.min(...removals.filter((removal) => removal.t > time).map((removal) => removal.t));
+  /* A removal ends a span only after the span's last frame with the words: a node a new wait took over is removed in
+     the frame its successor shows the words in, and the span goes on. */
+  const removedAfter = (time: number, lastShown: number): number =>
+    Math.min(
+      ...removals.filter((removal) => removal.t > time && removal.frame > lastShown).map((removal) => removal.t),
+    );
   const spans: Array<{ from: number; to: number }> = [];
   let open: ProjectLoadRegionEntry | undefined;
+  let lastShown = 0;
   for (const entry of entries) {
     const shown = entry.present && entry.visible && entry.text !== '';
-    if (shown && open === undefined) {
-      open = entry;
-    } else if (!shown && open !== undefined) {
+    if (shown) {
+      open ??= entry;
+      lastShown = entry.frame;
+    } else if (open !== undefined) {
       const from = stampOf(open.frame);
-      spans.push({ from, to: Math.min(stampOf(entry.frame), removedAfter(from)) });
+      spans.push({ from, to: Math.min(stampOf(entry.frame), removedAfter(from, lastShown)) });
       open = undefined;
     }
   }
   if (open !== undefined) {
     const from = stampOf(open.frame);
-    spans.push({ from, to: removedAfter(from) });
+    spans.push({ from, to: removedAfter(from, lastShown) });
   }
   return spans;
 };

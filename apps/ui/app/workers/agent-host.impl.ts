@@ -685,7 +685,7 @@ const composeProjectHost = async (
    * without the system skills overlay: a kernel never resolves `.agents/skills`,
    * and only the agent's tools serve the bundles (I1). This is the executor view
    * every host composes (`executorViewFor` in packages/host/src/host-daemon.ts and
-   * apps/desktop/src/tau/services-host.impl.ts). */
+   * apps/libs/desktop-services-host/src/services-host.impl.ts). */
   const workspaceProvider = createRelayedFileSystemProvider(fileSystem);
   const workbenchRootProvider = createRelayedFileSystemProvider(projectRoot);
   const workbenchRootView = composeView(

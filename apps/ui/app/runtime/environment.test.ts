@@ -22,7 +22,12 @@ const createFakeFocus = (initial: FocusRequest) => {
   ref.subscribe.mockImplementation((listener) => {
     /* `environment` subscribes with a plain listener and reads the request from the snapshot itself; an observer
      * object is not a shape it uses, so it is never notified here. */
-    const notify = typeof listener === 'function' ? listener : (): void => undefined;
+    const notify =
+      typeof listener === 'function'
+        ? (): void => {
+            listener(ref.getSnapshot());
+          }
+        : (): void => undefined;
     listeners.add(notify);
     return {
       unsubscribe: () => {

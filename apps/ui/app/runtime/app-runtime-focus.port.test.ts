@@ -35,6 +35,9 @@ const servicesFor = (projectId: string): void => {
     }),
   );
 };
+/** Focus's `open` command, as focus's own `sendTo` hands it to the port. */
+type OpenCommand = Readonly<{ type: 'open'; requestId: string; projectId: string }>;
+const open = (requestId: string, projectId: string): OpenCommand => ({ type: 'open', requestId, projectId });
 const flushTasks = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
     globalThis.setTimeout(resolve, 0);
@@ -66,15 +69,15 @@ it('should an open that displaces the waiting one answers only itself (one slot,
   for (const id of ['p1', 'p2', 'p3']) {
     servicesFor(id);
   }
-  port.send({ type: 'open', requestId: 'r1', projectId: 'p1' });
+  port.send(open('r1', 'p1'));
   await flushTasks();
   reportRegionReady('p1', 'runtime');
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
   await flushTasks();
-  port.send({ type: 'open', requestId: 'r2', projectId: 'p2' });
+  port.send(open('r2', 'p2'));
   await flushTasks();
   expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
-  port.send({ type: 'open', requestId: 'r3', projectId: 'p3' });
+  port.send(open('r3', 'p3'));
   await flushTasks();
   const settled = told
     .filter((event) => event.type === 'openSettled')
@@ -107,7 +110,7 @@ it('should a queued open that lands waiting is answered when the registry resume
   for (const id of ['p1', 'p2']) {
     servicesFor(id);
   }
-  port.send({ type: 'open', requestId: 'r1', projectId: 'p1' });
+  port.send(open('r1', 'p1'));
   await flushTasks();
   reportRegionReady('p1', 'runtime');
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
@@ -117,7 +120,7 @@ it('should a queued open that lands waiting is answered when the registry resume
   const inside = registry.subscribe(() => {
     if (armed) {
       armed = false;
-      port.send({ type: 'open', requestId: 'r2', projectId: 'p2' });
+      port.send(open('r2', 'p2'));
     }
   });
   registry.send({ type: 'touch', projectId: 'p1' });
@@ -162,12 +165,12 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
   for (const id of ['p1', 'p2']) {
     servicesFor(id);
   }
-  port.send({ type: 'open', requestId: 'r1', projectId: 'p1' });
+  port.send(open('r1', 'p1'));
   await flushTasks();
   reportRegionReady('p1', 'runtime');
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
   await flushTasks();
-  port.send({ type: 'open', requestId: 'r2', projectId: 'p2' });
+  port.send(open('r2', 'p2'));
   await flushTasks();
   expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
   /* `BudgetRefusedDialog`'s Not now: straight to the registry, not through focus. */
@@ -225,8 +228,8 @@ it('should a return to a closing project refused by another close that came back
       closeRuntime: async () => undefined,
     }),
   );
-  port.send({ type: 'open', requestId: 'r1', projectId: 'px' });
-  port.send({ type: 'open', requestId: 'r2', projectId: 'py' });
+  port.send(open('r1', 'px'));
+  port.send(open('r2', 'py'));
   await flushTasks();
   reportRegionReady('px', 'runtime');
   reportRegionReady('py', 'runtime');
@@ -236,7 +239,7 @@ it('should a return to a closing project refused by another close that came back
     registry.getSnapshot().context.refs[id]?.send({ type: 'confirmClose' });
   }
   await flushTasks();
-  port.send({ type: 'open', requestId: 'r3', projectId: 'px' });
+  port.send(open('r3', 'px'));
   await flushTasks();
   refuse(new Error('producer refused'));
   await flushTasks();

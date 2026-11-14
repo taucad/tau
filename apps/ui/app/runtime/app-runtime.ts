@@ -268,13 +268,18 @@ export const createAppRuntime = ({
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
   const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
   const table = createLeaseTable();
+  /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
+  const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore } = {};
   const projectLibrary = new ProjectLibrary({
     queryClient,
+    sessions: () => (composed.runtime === undefined ? undefined : selectRuntimeSessions(composed.runtime)),
+    chatSessions: () => composed.chatSessions,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
   });
   const chatSessions = createChatSessions(projectLibrary, options);
+  composed.chatSessions = chatSessions;
   const unload = createUnloadSequencer();
   /* Focus's five ports (A5b): the library's route access at its epoch, the registry, the leave flush React registers,
    * the session module and the route boundary. */
@@ -369,6 +374,7 @@ export const createAppRuntime = ({
     unload,
     focus: { focus: runtime.getSnapshot().context.focus, bindings: focusComposition.bindings },
   });
+  composed.runtime = runtime;
   runtimeLeases.set(runtime, store);
   return runtime;
 };

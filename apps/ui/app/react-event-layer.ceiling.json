@@ -49,7 +49,6 @@
   "apps/ui/app/hooks/use-project-availability.ts": 1,
   "apps/ui/app/hooks/use-project-manager.tsx": 3,
   "apps/ui/app/hooks/use-project.tsx": 3,
-  "apps/ui/app/hooks/use-projects.ts": 2,
   "apps/ui/app/hooks/use-revision-status.ts": 2,
   "apps/ui/app/hooks/use-sidebar-status.ts": 2,
   "apps/ui/app/hooks/use-thumbnail-generator.ts": 3,
@@ -84,11 +83,9 @@
   "apps/ui/app/routes/w.$workspace.$project/project-route-notices.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-share-action.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/project-workspace-context.tsx": 4,
   "apps/ui/app/routes/w.$workspace.$project/record-issues-action.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/revision-save-shortcut.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/use-chat-interface-state.ts": 1,
   "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx": 8,
   "apps/ui/app/routes/w.$workspace.$project/workbench-toggle.tsx": 1
 }

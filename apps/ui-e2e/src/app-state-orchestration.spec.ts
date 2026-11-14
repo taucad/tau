@@ -253,17 +253,14 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip that
 });
 
 /*
- * Report-only (I11, `LayoutApply` `IntentAccounted`; owner A8b). On a cold load the intent is consumed but
- * the pane mostly never opens: before the layout record's first read, `openPanel` defers it through
- * `layoutController.personWorkbenchChanged`, whose callback drops it when the route key moved
- * (`project-workspace-context.tsx`), and the intent's own parameter cleanup and the `?chat=` correction
- * both move it. It is a race, not a rule: Print opened in 2 of the 20 runs at `279a3a30` (3 of 20 at
- * `4ff549a9`), so as `test.fails` it could not be red every run (D25), and it cannot be forced from here:
- * the record's first read and the route corrections are both local, with no network request to hold. So
- * the row records whether Print opened and never fails on it. The fix direction is to keep the intent across those route-key moves; A8b turns
- * this row into an asserting `test` once the pane always opens.
+ * I11 (`LayoutApply` `IntentAccounted`; flipped by A8b). On a cold load the pane a project link asks for opens
+ * once the workbench is ready. Until A8b this row was report-only: before the layout record's first read,
+ * `openPanel` deferred the intent through a callback that dropped it when the route key moved, and the intent's
+ * own parameter cleanup and the `?chat=` correction both move it, so Print opened in only 2 of 20 runs at
+ * `279a3a30` (3 of 20 at `4ff549a9`). The runtime's layout now queues the intent until the first read and an
+ * attached workbench, and a replace navigation keeps the route key it is queued under, so the row asserts.
  */
-test('A0.1 row 2 (I11 report-only, A8b): the Print pane intent of a cold project link, opened or lost once the workbench is ready', async ({
+test('A0.1 row 2 (I11, A8b): the Print pane intent of a cold project link opens once the workbench is ready', async ({
   annotate,
 }) => {
   /* The intent is read only where machines are enabled; the page's own environment opts in before
@@ -295,7 +292,7 @@ test('A0.1 row 2 (I11 report-only, A8b): the Print pane intent of a cold project
   const reading = { opened: isOpened, visible: print.visible, waited: Math.round(performance.now() - startedAt) };
   await annotate(`I11 Print opened: ${String(isOpened)} (waited ${String(reading.waited)} ms)`);
   await target.writeArtifact(`a01-i11-report-${String(Date.now())}.json`, JSON.stringify(reading));
-  expect(typeof isOpened).toBe('boolean');
+  expect(reading).toMatchObject({ opened: true, visible: true });
 });
 
 test('A0.1 row 3 (I8): a reload during a pending library operation recovers or reports it, and the project opens', async ({

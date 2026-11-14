@@ -19,8 +19,7 @@ describe('ProjectFocus.tla implementation correspondence', () => {
         actions: machineActions([machine]),
         tables: hashFiles(specs, ['expected.json', ...readdirSync(specs).filter((file) => file.endsWith('.cfg'))]),
         // The today code the model describes, the target's selector, which has no alphabet of its own, and the ports
-        // that compose focus with its environment (A5b). The
-        // registry (sessions.machine) is environment here.
+        // that compose focus with its environment (A5b). The registry (sessions.machine) is environment here.
         sources: hashFiles(workspace, [
           'apps/ui/app/machines/focus.route-state.ts',
           'apps/ui/app/routes/w.$workspace.$project/project-route.tsx',

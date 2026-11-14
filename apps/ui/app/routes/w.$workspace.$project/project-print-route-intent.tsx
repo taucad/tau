@@ -14,8 +14,8 @@ export function ProjectPrintRouteIntent(): undefined {
     if (!requested) {
       return;
     }
-    // The workspace queues this intent until its workbench connects.
-    openPanel('print');
+    // A pane intent from the route: the layout keeps it across this replace and applies it once the workbench shows.
+    openPanel('print', 'route');
     setParameters(
       (previous) => {
         const next = new URLSearchParams(previous);

@@ -29,7 +29,8 @@ import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ConnectedWorkspace, CreateProjectOptions } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace } from '#hooks/use-project-manager.js';
+import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
 import type { ProjectListing } from '#runtime/project-library-storage.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
@@ -254,7 +255,8 @@ const mockFileManager = {
   scopedStorage: { readShallowDirectory: mockReadScopedShallowDirectory },
 };
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
-/* A12: the app runtime's chat store hears of a first chat created empty. Rows run with no runtime unless one sets it. */
+/* A12: the app runtime's chat store hears of a first chat created empty. Since A4a the library reads the store the
+ * runtime built it with. Rows run with no runtime unless one sets it. */
 const appRuntime = vi.hoisted(() => ({
   current: undefined as Record<string, unknown> | undefined,
   notedEmpty: [] as string[],
@@ -262,14 +264,6 @@ const appRuntime = vi.hoisted(() => ({
 vi.mock('#runtime/app-runtime-provider.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useOptionalAppRuntime: () => appRuntime.current,
-}));
-vi.mock('#runtime/app-runtime.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  selectRuntimeChatSessions: () => ({
-    noteCreatedEmpty: (chatId: string) => {
-      appRuntime.notedEmpty.push(chatId);
-    },
-  }),
 }));
 
 const recordConfigWrite = async (_config: ProjectFileSystemConfig): Promise<void> => {
@@ -603,10 +597,20 @@ const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-p
 const { ProjectLibrary } = await import('#runtime/project-library.js');
 /* A2: the provider is over a library the runtime builds with its query client; each wrapper's client gets one here. */
 const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>();
+/* The chat store the A12 row reads: it notes each chat created empty. */
+const notingChatStore: Pick<ProjectLibraryChatSessions, 'noteCreatedEmpty'> = {
+  noteCreatedEmpty: (chatId: string) => {
+    appRuntime.notedEmpty.push(chatId);
+  },
+};
 const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
   let library = libraries.get(queryClient);
   if (library === undefined) {
-    library = new ProjectLibrary({ queryClient });
+    library = new ProjectLibrary({
+      queryClient,
+      chatSessions: () =>
+        appRuntime.current === undefined ? undefined : (notingChatStore as ProjectLibraryChatSessions),
+    });
     library.start();
     libraries.set(queryClient, library);
     startedLibraries.push(library);

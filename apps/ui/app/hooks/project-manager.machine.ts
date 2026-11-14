@@ -6,11 +6,14 @@ import { safeDispose } from '@taucad/utils/dispose';
 import ObjectStoreWorker from '#hooks/object-store.worker.js?worker';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 type ProjectManagerContext = {
   worker: Worker | undefined;
   wrappedWorker: Remote<ObjectStoreWorkerType> | undefined;
   error: Error | undefined;
+  /** The first defect the root `onError` caught (MC-R12, D23); later ones are its consequences and are not kept. */
+  fault: string | undefined;
 };
 
 type WorkerInitializedEvent = {
@@ -87,10 +90,22 @@ export const projectManagerMachine = setup({
   actors: projectManagerActors,
 }).createMachine({
   id: 'projectManager',
+  /* A defect no transition modelled is recorded and reported once, and the machine stays where it was and keeps
+   * answering (MC-R12, D23, B2). Its host objects in context are accepted debt (D4): the machine is not rewritten. */
+  onError: ({ context, event }, enq) => {
+    if (context.fault !== undefined) {
+      return {};
+    }
+    enq(() => {
+      reportAppRuntimeFault(event.error);
+    });
+    return { context: { fault: faultMessage(event.error, 'project manager fault') } };
+  },
   context: {
     worker: undefined,
     wrappedWorker: undefined,
     error: undefined,
+    fault: undefined,
   },
   initial: 'initializing',
   exit: ({ context }, enq) => {

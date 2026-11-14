@@ -103,7 +103,7 @@ vi.mock('#components/panes/dockview-split-action.js', () => ({
   ),
 }));
 const mockConnectWorkbench = vi.fn<
-  (openPanel: (id: string) => void, activateFile?: (path: string) => void) => () => void
+  (openPanel: (id: string) => unknown, activateFile?: (path: string) => unknown) => () => void
 >(() => () => undefined);
 const mockLayoutController = { registerWorkbench: vi.fn(() => () => undefined), personWorkbenchChanged: vi.fn() };
 const mockSetWorkbenchOpen = vi.fn();
@@ -240,8 +240,21 @@ const publishOpenFiles = (openFiles: typeof editorMachineSnapshot.context.openFi
   }
 };
 
+/* The editor's emitted events, by type: a row emits one with `emitEditor`. */
+const editorEventListeners = new Map<string, Set<(event: { type: string }) => void>>();
+const emitEditor = (event: { type: string; path?: string; error?: Error }): void => {
+  for (const listener of editorEventListeners.get(event.type) ?? []) {
+    listener(event);
+  }
+};
+
 const mockEditorRef = {
-  on: () => ({ unsubscribe: () => undefined }),
+  on: (type: string, listener: (event: { type: string }) => void) => {
+    const listeners = editorEventListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    editorEventListeners.set(type, listeners);
+    return { unsubscribe: () => listeners.delete(listener) };
+  },
   send: vi.fn(),
   getSnapshot: () => currentEditorSnapshot,
   subscribe: (listener: EditorListener) => {
@@ -255,6 +268,8 @@ vi.mock('#hooks/use-project.js', () => ({
     editorRef: mockEditorRef,
     geometryUnits: new Map(),
     mainEntryPath: 'main.ts',
+    /* A shared project's runtime has no layout; the shell port is all the workspace asks of it here. */
+    projectRuntime: { layout: undefined, shell: { set: () => undefined, release: () => undefined } },
     projectRef: {
       send: mockProjectSend,
       getSnapshot: () => ({ context: { project: undefined } }),
@@ -1572,6 +1587,249 @@ describe('workbench adapter record apply (A0.3)', () => {
     expect(detach).toHaveBeenCalledOnce();
   });
 
+  // A8b review: a record apply waits for its files to open, and the layout holds every pane intent until the apply
+  // lands. A file that fails to open (deleted since) would hold them forever: the apply lands without its tab.
+  it('should land a held record apply without the tab of a file that failed to open', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    let shown: SerializedDockview | undefined;
+    Object.assign(dockview.api, {
+      width: 900,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview API spelling
+      toJSON: () => shown,
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    dockview.restoreJson.mockImplementation((json: SerializedDockview) => {
+      shown = json;
+    });
+    readyDockviewApi = dockview.api;
+    type ApplyRecord = (node: WorkbenchLaneNode, applied: () => void) => void;
+    let applyRecord: ApplyRecord | undefined;
+    mockLayoutController.registerWorkbench.mockImplementation((...registered: unknown[]) => {
+      applyRecord = registered[0] as ApplyRecord;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      editorEventListeners.clear();
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+    });
+
+    render(<WorkbenchDockview />);
+    const applied = vi.fn();
+    act(() => {
+      applyRecord!(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'file', path: 'gone.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    expect(dockview.restoreJson).not.toHaveBeenCalled();
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    // It reports what it shows, which is less than it was handed: the layout takes that as an edit (I12).
+    expect(applied).toHaveBeenCalledExactlyOnceWith({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+    expect(fromDockview('workbench', shown!)).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+  });
+
+  /* A Dockview whose record apply a row drives: it shows what `fromJSON` hands it, and the adapter's apply and its
+   * connected file activation are captured. */
+  const mountRecordApply = () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    let shown: SerializedDockview | undefined;
+    Object.assign(dockview.api, {
+      width: 900,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview API spelling
+      toJSON: () => shown,
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    dockview.restoreJson.mockImplementation((json: SerializedDockview) => {
+      shown = json;
+    });
+    readyDockviewApi = dockview.api;
+    type ApplyRecord = (node: WorkbenchLaneNode, applied: (landed?: WorkbenchLaneNode) => void) => void;
+    let applyRecord: ApplyRecord | undefined;
+    mockLayoutController.registerWorkbench.mockImplementation((...registered: unknown[]) => {
+      applyRecord = registered[0] as ApplyRecord;
+      return () => undefined;
+    });
+    let activateFile: ((path: string) => unknown) | undefined;
+    mockConnectWorkbench.mockImplementation((_openPanel, activate) => {
+      activateFile = activate;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      currentEditorSnapshot = editorMachineSnapshot;
+      mockConnectWorkbench.mockReset();
+      mockConnectWorkbench.mockImplementation(() => () => undefined);
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+    });
+    render(<WorkbenchDockview />);
+    return {
+      dockview,
+      apply: (node: WorkbenchLaneNode, applied: (landed?: WorkbenchLaneNode) => void) => {
+        applyRecord!(node, applied);
+      },
+      activate: (path: string) => activateFile!(path),
+      get shown() {
+        return shown === undefined ? undefined : fromDockview('workbench', shown);
+      },
+    };
+  };
+
+  // A8b review: a landed apply releases the pane and file intents held behind it. They open once the restore is over,
+  // so a file activation answers with what the Dockview shows, not as a step of the restore.
+  it('should answer a file activation made as a record apply lands with what the Dockview shows', () => {
+    const host = mountRecordApply();
+    const recorded: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] };
+    let answer: unknown = 'not activated';
+    act(() => {
+      host.apply(recorded, () => {
+        answer = host.activate('a.ts');
+      });
+    });
+    expect(answer).toEqual(recorded);
+  });
+
+  // A8b review: a file that failed to open loses its tab in the group that held it, and nowhere else. The groups that
+  // never held it keep their active tab, and the group that did keeps its active tab where it moves.
+  it("should keep every active tab but the failed file's when a held record apply drops its tab", () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'split',
+          direction: 'row',
+          children: [
+            {
+              kind: 'group',
+              tabs: [
+                { kind: 'pane', pane: 'parameters' },
+                { kind: 'pane', pane: 'details' },
+              ],
+              active: 0,
+            },
+            {
+              kind: 'group',
+              tabs: [
+                { kind: 'file', path: 'gone.ts' },
+                { kind: 'pane', pane: 'share' },
+                { kind: 'pane', pane: 'export' },
+              ],
+              active: 1,
+            },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(applied).toHaveBeenCalledOnce();
+    expect(host.shown).toMatchObject({
+      kind: 'split',
+      children: [
+        { kind: 'group', active: 0 },
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'share' },
+            { kind: 'pane', pane: 'export' },
+          ],
+          active: 0,
+        },
+      ],
+    });
+  });
+
+  // A8b review: an apply that lost a tab reports what the Dockview shows, not what it was handed: a pane this build does
+  // not ship is pruned from what it shows as well, and is not written back as part of the arrangement.
+  it("should report what the Dockview shows when a held record apply drops a failed file's tab", () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'pane', pane: 'jobs' },
+            { kind: 'file', path: 'gone.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(host.shown).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+    expect(applied).toHaveBeenCalledExactlyOnceWith(host.shown);
+  });
+
+  // A8b review: a held apply waits for its files to open. A file the person opened for it and then closed is no longer
+  // wanted: the apply lands without its tab once the rest are open, and reports that it shows less.
+  it('should land a held record apply without the tab of a file the person closed meanwhile', () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'file', path: 'a.ts' },
+            { kind: 'file', path: 'b.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      publishOpenFiles([openFile('pane-a', 'a.ts')]);
+    });
+    act(() => {
+      publishOpenFiles([]);
+    });
+    expect(host.dockview.restoreJson).not.toHaveBeenCalled();
+    act(() => {
+      publishOpenFiles([openFile('pane-b', 'b.ts')]);
+    });
+    const landed: WorkbenchLaneNode = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'file', path: 'b.ts' },
+      ],
+    };
+    expect(applied).toHaveBeenCalledExactlyOnceWith(landed);
+    expect(host.shown).toEqual(landed);
+  });
+
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
   // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
   it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {
@@ -1874,6 +2132,7 @@ describe('Workbench file reconciliation', () => {
             if (id === 'files') {
               openWorkbenchFiles({ api: dockview.api });
             }
+            return undefined;
           });
         }, [mounted, workspace]);
         return (

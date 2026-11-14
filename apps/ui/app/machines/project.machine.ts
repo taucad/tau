@@ -13,7 +13,7 @@ import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
-import { reportUiError } from '#lib/error-reporting.js';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsOwnedSettings, GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -632,17 +632,6 @@ const reconcileUnitRuntime = (
 };
 
 /**
- * Report the project's first fault through the app's error reporter, as the route error boundary reports what it
- * catches. The project runtime's single fault hook replaces this (A6b).
- *
- * @param error - What the root `onError` was handed.
- */
-export const reportProjectFault = (error: unknown): void => {
-  // async-iife: bootstrap -- an effect cannot await the report, and a report that fails is not retried.
-  void reportUiError(error);
-};
-
-/**
  * Project Machine
  *
  * Manages project lifecycle, storage operations, and filesystem coordination.
@@ -676,10 +665,11 @@ export const projectMachine = setup({
 }).createMachine({
   id: 'project',
   // A defect is recorded and the project stays in the state it was in, which still answers every public event (MC-R12,
-  // charter B2). The first is kept and reported once: the root cause matters more than the defects it sets off.
+  // charter B2). The first is kept and reported once, through the app runtime's one fault hook (D23): the root cause
+  // matters more than the defects it sets off.
   onError: ({ context, event }, enq) => {
     if (context.fault === undefined) {
-      enq(reportProjectFault, event.error);
+      enq(reportAppRuntimeFault, event.error);
     }
     return {
       context: {

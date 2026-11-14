@@ -95,6 +95,8 @@
 \* The app runtime builds the session store with its dependencies at construction (app state
 \* orchestration A2): the library's chat-record ports, and its record client and watch, taken again
 \* when the root worker is replaced. The closures it calls are the same; queue paths unchanged.
+\* A chat a sidebar row only observes answers unread from its observation's project, as an
+\* acquired chat answers from its session's; admission, delivery and the queue never read it.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

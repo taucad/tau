@@ -9,6 +9,7 @@
       "apps/ui/app/hooks/use-projects.ts",
       "apps/ui/app/hooks/use-revision-status.ts",
       "apps/ui/app/hooks/use-sessions.tsx",
+      "apps/ui/app/hooks/use-wait-start.ts",
       "apps/ui/app/routes/w.$workspace.$project/chat-viewer-dockview.tsx",
       "apps/ui/app/routes/w.$workspace.$project/chat-workbench-dockview.tsx",
       "apps/ui/app/routes/w.$workspace.$project/entries-sync-host.tsx",
@@ -28,6 +29,9 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/machines/library-access.machine.ts",
+      "apps/ui/app/machines/library-discovery.machine.ts",
+      "apps/ui/app/machines/library-recovery.machine.ts",
       "apps/ui/app/runtime/app-runtime-faults.ts",
       "apps/ui/app/runtime/app-runtime-holder.ts",
       "apps/ui/app/runtime/app-runtime.machine.ts",
@@ -50,7 +54,9 @@
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
       "apps/ui/app/runtime/project-library.ts",
+      "apps/ui/app/runtime/project-runtime.helpers.ts",
       "apps/ui/app/runtime/project-runtime.ts",
+      "apps/ui/app/runtime/project-runtime.view-records.ts",
       "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
@@ -66,7 +72,6 @@
     ]
   },
   "counts": {
-    "apps/ui/app/hooks/use-project.tsx#useActorRef": 2,
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
     "apps/ui/app/hooks/use-revision-status.ts#useFlushOnClose": 1,

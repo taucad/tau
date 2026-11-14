@@ -144,6 +144,8 @@ export {
   tauRemoteUrl,
 } from '#remotes.js';
 export type { GitRemoteCredential, Remote, RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
+/* B4c: the one rule every host registers a GitHub-linked project by. */
+export { registrationOrigin } from '#registration-origin.js';
 /* D13: the client half of a project's `revision` stream, which both hosts bind to their own auth. */
 export { watchRevisionStream } from '#revision-stream.js';
 export type { RevisionStreamHandlers } from '#revision-stream.js';

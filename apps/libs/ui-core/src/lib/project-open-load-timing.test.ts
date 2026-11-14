@@ -63,8 +63,9 @@ afterEach(() => {
 });
 
 describe('project-open window probe', () => {
-  it('should observe and subscribe to nothing without a harness injection', async () => {
+  it('should observe and subscribe to nothing outside a browser page', async () => {
     const { measure, observed } = stubPage();
+    vi.stubGlobal('location', undefined);
 
     expect(installProjectOpenLoadTiming()).toBe(false);
     await vi.dynamicImportSettled();
@@ -72,6 +73,25 @@ describe('project-open window probe', () => {
     expect(observed).toEqual([]);
     expect(mocks.handlers).toEqual([]);
     expect(measure).not.toHaveBeenCalled();
+  });
+
+  it('should bridge the viewer spans on a deployed page without observing long frames', async () => {
+    const { measure, observed } = stubPage();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+    vi.stubGlobal('document', {});
+
+    expect(installProjectOpenLoadTiming()).toBe(true);
+    await vi.dynamicImportSettled();
+    expect(observed).toEqual([]);
+
+    for (const handler of mocks.handlers) {
+      handler({ phase: 'canvas.mount', start: 4000, end: 4250, outcome: 'ok' });
+    }
+
+    expect(measure.mock.calls.map(([name, options]) => [name, options.start, options.end])).toEqual([
+      ['tau.load.viewer.mount', 4000, 4250],
+    ]);
+    expect(measure.mock.calls[0]?.[1]?.detail).toMatchObject({ environment: 'deployed', runId: null });
   });
 
   it('should record long frames and the viewer spans under the project-open vocabulary', async () => {

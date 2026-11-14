@@ -193,7 +193,10 @@ const openPrintProject = async (
   expect(await bound.textContent()).toMatch(/^Simulated X1C\s*Bambu Lab X1C · Simulated$/u);
   await page.keyboard.press('Escape');
 
-  await page.getByRole('button', { name: 'Print', exact: true }).click();
+  /* A built project's Workbench holds its model, so no empty group offers its *Print* button; Print is the Workbench's
+   * *Open workbench tab* menu item (`WorkbenchLeftActions` in chat-workbench-dockview.tsx), offered with Machines on. */
+  await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
+  await page.getByRole('menuitem', { name: 'Print', exact: true }).click();
   await expectVisible(page.getByRole('article', { name: new RegExp(`^${machineName}, `, 'u') }), 60_000);
   return { page, root: join(session.homeRoot, slug) };
 };

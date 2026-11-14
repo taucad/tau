@@ -156,9 +156,11 @@ describe('runtime import boundary', () => {
   });
 
   it('should find a static edge to a lazy-only module when one exists', () => {
+    /* `ProjectProvider` builds its runtime (A6b), so it reaches the runtime and, through it, both machines. */
     expect(lazyOnlyEdges(staticGraph(['hooks/use-project.tsx']))).toEqual([
-      'machines/project.machine is reached statically: hooks/use-project.tsx -> machines/project.machine.ts',
-      'machines/editor.machine is reached statically: hooks/use-project.tsx -> machines/editor.machine.ts',
+      'runtime/project-runtime is reached statically: hooks/use-project.tsx -> runtime/project-runtime.ts',
+      'machines/project.machine is reached statically: hooks/use-project.tsx -> runtime/project-runtime.ts -> machines/project.machine.ts',
+      'machines/editor.machine is reached statically: hooks/use-project.tsx -> runtime/project-runtime.ts -> machines/editor.machine.ts',
     ]);
   });
 });

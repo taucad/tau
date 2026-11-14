@@ -1218,19 +1218,150 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.queryByRole('region', { name: 'History' })).not.toBeInTheDocument();
   });
 
-  /* M2 (I6, S20): an unlocated line is loading geometry, never *No revisions yet*, never `main`. */
-  it('renders History’s loading geometry while the line is unknown', async () => {
+  /* M2 (I6, S20): an unlocated line is History's busy frame, never *No revisions yet*, never `main`. */
+  it('renders History’s busy frame while the line is unknown', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
 
     renderPane();
 
-    expect(await screen.findByRole('status', { name: 'Loading history' })).toHaveAttribute('aria-busy', 'true');
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    /* The header's trailing slot holds the wait; the strip's status line is the pane's one announcement. */
+    const indicator = card.querySelector('[data-slot="wait-indicator"]');
+    expect(indicator).toHaveAttribute('data-state', 'waiting');
+    expect(indicator).toHaveTextContent('Loading history…');
+    expect(indicator).not.toHaveAttribute('role');
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Where you are' })).not.toHaveTextContent('main');
     /* HQ7: nothing is offered over a line nobody has located yet. */
     expect(screen.queryByRole('button', { name: /Switch branch/u })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
+  });
+
+  /* Blueprint row C13 (U17): History while it loads is its frame, never bars (frames 9/11). */
+  it('draws no Skeleton in History or the branch chip while History loads (C13)', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(document.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton shapes in the History pane').toHaveLength(0);
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
+  });
+
+  /* S20 (I6): a wait that ends in an empty History ends its indicator at once: *Loading history…* is never on screen
+     with *No history yet*, even after the indicator has shown. */
+  it('never shows Loading history with No history yet when a shown wait ends empty', async () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toHaveAttribute('aria-busy', 'true');
+
+    now.mockReturnValue(1200);
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
+    rerender(<RevisionsPanelBody />);
+
+    await waitFor(() => {
+      expect(card).toHaveTextContent('No history yet');
+    });
+    expect(card).not.toHaveTextContent('Loading history');
+  });
+
+  /* A History read that hangs offers Retry at the slow mark: a second read, timed from the Retry, with focus kept. */
+  it('reads History again on Retry while the first read is pending, keeping focus in the card', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.logRead = async () => Promise.withResolvers<never>().promise;
+    render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    await waitFor(() => {
+      expect(revisionStatusHarness.logRequests).toHaveLength(1);
+    });
+
+    const now = vi.spyOn(performance, 'now').mockReturnValue(30_000);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    await user.click(within(card).getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(revisionStatusHarness.logRequests).toHaveLength(2);
+    });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(card).toContainElement(document.activeElement as HTMLElement);
+    const body = card.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
+  /* A Retry is a gesture: in a History restored with the route open (seen, not announced) its new wait is announced. */
+  it('announces the wait a Retry starts in a History restored without a gesture', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, {
+        userActivation: { isActive: false, hasBeenActive: false },
+      }),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    revisionStatusHarness.logRead = async () => Promise.withResolvers<never>().promise;
+    render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    const slot = card.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).not.toHaveAttribute('role');
+
+    const now = vi.spyOn(performance, 'now').mockReturnValue(30_000);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    await user.click(within(card).getByRole('button', { name: 'Retry' }));
+
+    expect(card.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('role', 'status');
+  });
+
+  /* One announcement per group: a History a person opens is announced by its card's indicator, not by the strip. */
+  it('announces a History a person opened through its card, keeping the strip quiet while it loads', async () => {
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, { userActivation: { isActive: true, hasBeenActive: true } }),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('status', { name: 'History status' })).toHaveAttribute('aria-live', 'off');
+  });
+
+  /* A later wait in the same mount (a branch switch, a reconnect) is timed from its own start, not the mount's. */
+  it('times a later History wait from when it starts, not from when the pane mounted', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    await waitFor(() => {
+      expect(card).not.toHaveAttribute('aria-busy');
+    });
+
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    rerender(<RevisionsPanelBody />);
+
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    const body = card.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
   });
 
   /*

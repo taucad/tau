@@ -18,6 +18,12 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 
 const reporter = vi.hoisted(() => ({ reportUiError: vi.fn(async () => undefined) }));
 vi.mock('#lib/error-reporting.js', () => reporter);
+/* The app runtime's one fault hook (D23), which the composed machines and the runtime root report through. */
+const runtimeFaults = vi.hoisted(() => ({ reportAppRuntimeFault: vi.fn() }));
+vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#runtime/app-runtime-faults.js')>()),
+  reportAppRuntimeFault: runtimeFaults.reportAppRuntimeFault,
+}));
 
 type RootErrorHandler = (
   args: Readonly<{ context: unknown; event: Readonly<{ type: string; error: unknown }> }>,
@@ -200,6 +206,68 @@ describe('the project runtime root', () => {
     );
     actor.start();
     expect(selectProjectRuntimeFault(actor.getSnapshot())).toBe('the resources child failed');
+    actor.stop();
+  });
+});
+
+/* A6b: the interim reporter of A6a (`reportUiError` behind each machine's own effect) is replaced by the app runtime's
+ * single D23 hook, and the project runtime root reports its first child fault through it once. */
+describe('the single D23 fault hook (A6b)', () => {
+  /** Run what a root `onError` enqueued, as the interpreter would. */
+  const runEnqueued = (fn: (...args: unknown[]) => void, ...args: unknown[]): void => {
+    fn(...args);
+  };
+
+  it.each([
+    ['project', projectMachine],
+    ['editor', editorMachine],
+  ] as const)("D23: %s reports its first fault through the app runtime's fault hook once", (_name, machine) => {
+    runtimeFaults.reportAppRuntimeFault.mockClear();
+    const { onError } = machine.config as { onError?: RootErrorHandler };
+    const first = new Error('boom');
+    onError!({ context: { fault: undefined }, event: { type: 'xstate.error.execution', error: first } }, runEnqueued);
+    onError!(
+      { context: { fault: 'boom' }, event: { type: 'xstate.error.actor', error: new Error('later') } },
+      runEnqueued,
+    );
+    expect(runtimeFaults.reportAppRuntimeFault.mock.calls).toEqual([[first]]);
+  });
+
+  it("D23: the project runtime root reports its first child fault through the app runtime's fault hook once", () => {
+    runtimeFaults.reportAppRuntimeFault.mockClear();
+    const guard = guardActors({ ignore: { project: projectIgnoredEvents, editor: editorIgnoredEvents } });
+    const first = new Error('the first child failed');
+    const actor = createActor(
+      projectRuntimeMachine.provide({
+        actors: {
+          project: projectMachine.provide({ guards: { isNotBrowser: () => false, shouldAutoLoad: () => false } }),
+          parameterObservers: createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => {
+            throw first;
+          }),
+          manifestObservation: createCallbackLogic<ManifestObservationEvent, ProjectChildInput>(() => {
+            throw new Error('a later child failed');
+          }),
+        },
+      }),
+      {
+        clock: new StepClock(),
+        inspect: guard.inspect,
+        input: {
+          projectId,
+          profile: 'shared',
+          project: {
+            projectId,
+            fileManagerRef: createFileManager(),
+            fileSystemRoot: '/',
+            kernelOptionsFactory: vi.fn(),
+          },
+          editor: { projectId },
+        },
+      },
+    );
+    actor.start();
+    expect(selectProjectRuntimeFault(actor.getSnapshot())).toBe('the first child failed');
+    expect(runtimeFaults.reportAppRuntimeFault.mock.calls).toEqual([[first]]);
     actor.stop();
   });
 });

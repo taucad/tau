@@ -42,6 +42,10 @@ import { ChatSessionStore } from '#services/chat-session-store.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { createEnvironmentLogic } from '#runtime/environment.js';
 import { sessionsRegistryLogic } from '#services/sessions-store.js';
+import { store as preferences } from '#hooks/use-cookie.js';
+import { metaConfig } from '#constants/meta.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { modelsQueryKey } from '#lib/model-catalog.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -260,6 +264,36 @@ describe('app runtime root', () => {
     }).start();
     expect(selectRuntimeProjectLibrary(runtime).projectManager.getSnapshot().value).toBe('initializing');
     runtime.stop();
+  });
+
+  /* A6b: `choices` is attached with its real ports (plan § 4 A6b): the preference store, the runtime's query cache, the
+   * flag store and this tab's loopback admissions. It reads the catalog from the cache and never fetches it. */
+  it('A6b: attaches choices with its real ports, reads the stored preferences and the cached catalog, and follows a change', () => {
+    const queryClient = new QueryClient();
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      idleFileManagers: true,
+      queryClient,
+    });
+    const read = (): Record<string, unknown> | undefined =>
+      (runtime.getSnapshot().context as { choices?: Record<string, unknown> }).choices;
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`, false);
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.cadKernel}`, 'openscad');
+    runtime.start();
+    expect(read()).toMatchObject({
+      testingEnabled: false,
+      defaultKernel: 'openscad',
+      modelCatalog: { status: 'loading' },
+    });
+    // The catalog comes from the cache, so attaching `choices` asks the API for nothing.
+    expect(queryClient.getQueryState(modelsQueryKey)?.fetchStatus ?? 'idle').toBe('idle');
+
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`, true);
+    queryClient.setQueryData(modelsQueryKey, [{ id: 'model-a', default: true }]);
+    expect(read()).toMatchObject({ testingEnabled: true, modelCatalog: { status: 'loaded' } });
+    runtime.stop();
+    preferences.remove(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`);
+    preferences.remove(`${metaConfig.cookiePrefix}${cookieName.cadKernel}`);
   });
 
   it('should keep the first fault and keep answering (D23)', async () => {

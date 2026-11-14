@@ -1366,6 +1366,13 @@ export const selectArrangementDigest = (snapshot: WorkbenchLayoutView): LayoutDi
 /** Whether the record's first read has published. */
 export const selectLayoutReady = (snapshot: WorkbenchLayoutView): boolean => snapshot.value.record === 'ready';
 
+/**
+ * Whether the record's first read has settled: it was read, or it stopped retrying (A8d, M2). Until then an adapter has
+ * not been shown what the record arranges, so its empty state would offer a choice the record is about to make.
+ */
+export const selectLayoutReadSettled = (snapshot: WorkbenchLayoutView): boolean =>
+  selectLayoutReady(snapshot) || unreadable(snapshot.context);
+
 /** An intent's outcome, once it settled. */
 export const selectIntentOutcome = (snapshot: WorkbenchLayoutView, intentId: string): PaneIntentOutcome | undefined => {
   const entry = intentOf(snapshot.context.intents, intentId);

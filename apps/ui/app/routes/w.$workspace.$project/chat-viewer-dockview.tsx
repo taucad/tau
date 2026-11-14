@@ -500,7 +500,30 @@ function ViewerEmptyState({
   );
 }
 
-function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element {
+/** Whether the layout record's first read has settled; without a project layout there is nothing to wait for. */
+function useLayoutReadSettled(): boolean {
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
+  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
+  return useSyncExternalStore(
+    useCallback(
+      (listener: () => void) => layoutController?.subscribe(listener) ?? (() => undefined),
+      [layoutController],
+    ),
+    () => layoutController?.ready() ?? true,
+    () => layoutController?.ready() ?? true,
+  );
+}
+
+/**
+ * The dock's empty state. Before the layout record's first read settles the dock is empty only because the record has
+ * not arranged it yet, so it shows nothing in place rather than offering a file choice the record is about to make
+ * (A8d, staging M2). Once the read settles, an empty group is really empty.
+ */
+function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element | null {
+  const isSettled = useLayoutReadSettled();
+  if (!isSettled) {
+    return null;
+  }
   return (
     <ViewerEmptyState
       containerApi={containerApi}

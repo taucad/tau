@@ -23,7 +23,7 @@ import {
   viewIdsIn,
 } from '#runtime/project-runtime.layout.js';
 import type { ProjectLayoutHost, WorkbenchLayoutRef } from '#runtime/project-runtime.layout.js';
-import { selectAppliedLayoutDigest, selectLayoutReady } from '#workbench-records/workbench-layout.machine.js';
+import { selectAppliedLayoutDigest, selectLayoutReadSettled } from '#workbench-records/workbench-layout.machine.js';
 import { intentOf } from '#workbench-records/pane-intents.js';
 import type { LayoutAdapterId } from '#workbench-records/pane-intents.js';
 import type {
@@ -386,7 +386,7 @@ export function createWorkbenchLayoutControllerShim(
       }
       layout.send({ type: 'personEdited', adapter: 'workbench', node });
     },
-    ready: () => selectLayoutReady(layout.getSnapshot()),
+    ready: () => selectLayoutReadSettled(layout.getSnapshot()),
     connectIntents: (target) => {
       intentTarget = target;
       deliverHeld();

@@ -50,7 +50,10 @@ export type WorkbenchLayoutController = Readonly<{
   personViewerChanged: (node: ViewerNode) => void;
   /** The person changed the workbench arrangement. */
   personWorkbenchChanged: (node: WorkbenchLaneNode) => void;
-  /** Whether the record's first read has finished. Until then a pane intent waits in the layout (A8b). */
+  /**
+   * Whether the record's first read has settled: it was read, or it stopped retrying. Until then a pane intent waits in
+   * the layout (A8b), and the viewer shows no empty state, since the record has not yet arranged it (A8d, M2).
+   */
   ready: () => boolean;
 }>;
 

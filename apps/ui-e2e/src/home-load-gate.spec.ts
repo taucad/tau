@@ -431,10 +431,10 @@ knownDefect(
       const listedAt = firstDelayedRead(deliveries, projectListingRead);
       precondition(listedAt !== undefined, 'H-c: the project listing was not answered late');
       /* When that late listing reached the page: the lists wait until then. */
-      const deliveredAt = deliveries.find(
-        (entry) => entry.method === projectListingRead.method && entry.sentAt === listedAt,
-      )?.t;
-      precondition(deliveredAt !== undefined, 'H-c: the late project listing has no delivery time');
+      const deliveredAt =
+        deliveries.find((entry) => entry.method === projectListingRead.method && entry.sentAt === listedAt)?.t ??
+        Number.NaN;
+      precondition(Number.isFinite(deliveredAt), 'H-c: the late project listing has no delivery time');
       precondition(
         record.dropped['skeletonFrames'] === undefined,
         'H-c: the record dropped skeleton frames past its frame limit',

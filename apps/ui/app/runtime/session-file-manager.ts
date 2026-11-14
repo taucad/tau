@@ -121,9 +121,15 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
     }
     return opener(root, consumer);
   };
-  /* As the scope's `whenServicesReady`: a wait that settles on a file manager in `error`, or without its services,
-   * refuses, so a record read fails fast rather than opening a bridge the file manager has given up on. */
+  /* As the scope's `whenServicesReady`: services already bound serve at once; otherwise a wait that settles on a file
+   * manager in `error`, or without its services, refuses, so a record read fails fast rather than opening a bridge the
+   * file manager has given up on. */
   const connections = recordConnectionsOf(fileManagerRef, fallback, async () => {
+    /* Services already bound serve, even in `error`: a failed workspace reload keeps them and the bridge alive. */
+    const bound = fileManagerRef.getSnapshot().context;
+    if (bound.contentService && bound.treeService) {
+      return;
+    }
     const settled = await ports.awaitServices(fileManagerRef, drop.signal);
     if (settled.matches('error')) {
       throw new FileManagerNotReadyError('machine-error', { cause: settled.context.error });

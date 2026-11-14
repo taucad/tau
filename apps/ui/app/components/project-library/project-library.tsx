@@ -682,8 +682,9 @@ export function ProjectLibrary({
               notice: isFailureHeld ? 'failed' : shownCloudNotice,
               wait: cloudWait,
               timing: cloudWaitTiming,
-              /* A follow-up request that paused (a hidden tab) has not answered the failure, so its Retry stays. */
-              isFailureUnanswered: hasCloudFailed && !isCloudSettled,
+              /* A follow-up request that paused (a hidden tab) has not answered the failure, so its Retry stays, where
+                 the slot shows Tau Cloud at all. */
+              isFailureUnanswered: isCloudShown && hasCloudFailed && !isCloudSettled,
             })
       }
       onRetryCloud={handleRetryCloud}

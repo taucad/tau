@@ -1675,6 +1675,19 @@ describe('ProjectLibrary', () => {
       expect(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' })).toBe(retry);
     });
 
+    /* D21 round 12: the Trash view does not show Tau Cloud, so a failed listing offers no Retry there. */
+    it('C14: offers no Tau Cloud Retry in the Trash view after a failed listing', () => {
+      cloudListing.isFailed = true;
+      render(
+        <TestRouter initialEntries={['/projects?trash=1']}>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </TestRouter>,
+      );
+      expect(screen.queryByRole('button', { name: 'Retry Tau Cloud' })).toBeNull();
+    });
+
     /* D21 round 5: a Retry over a failed refresh of listed projects is a wait the person sees and hears. */
     it('C14: says a Retry over a failed refresh of listed projects is loading, and its answer again', async () => {
       cloudListing.current = [

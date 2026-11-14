@@ -1524,6 +1524,8 @@ export class ChatSessionStore {
     }
     // A retained sidebar observation may already be caught up and emit no new answer.
     this.#syncProjection(chatId, 'open');
+    // Nor will a foreign watch that closed before this session existed: its load may already have settled (I21).
+    this.#latchIfForeignScanLost(chatId);
     // The root bound before the session was registered; its first read of the chat's waits is now.
     session.offerChatWaits();
     this.#refreshSnapshot();
@@ -2679,12 +2681,10 @@ export class ChatSessionStore {
         case 'ready': {
           return 'read';
         }
-        case 'error': {
-          return 'failed';
-        }
+        // A watch that closed reads nothing more, and closing invalidated its last read: the lane cannot present it.
+        case 'error':
         case 'closed': {
-          const completed = this.#remoteReadCompletedVersions.get(chatId);
-          return completed !== undefined && completed === version ? 'read' : 'failed';
+          return 'failed';
         }
       }
     }
@@ -2751,7 +2751,7 @@ export class ChatSessionStore {
     // A local log the lane can still present settles through its own materialization.
     // A page that is not the log's end is not settled yet; nor is a log the lane can still present.
     const projection = this.#projectionContext(chatId);
-    if (projection === undefined || !selectCaughtUp(projection) || this.#foreignDisplayReady(chatId, projection)) {
+    if (projection === undefined || !selectCaughtUp(projection) || this.#hasDisplayAuthority(chatId, projection)) {
       return;
     }
     session.transcriptAwaitsForeignScan = false;
@@ -5078,6 +5078,7 @@ export class ChatSessionStore {
           this.#remoteReadFailedVersions.delete(chatId);
         }
         this.#resumeTranscriptAfterForeignScan(chatId);
+        this.#latchIfForeignScanLost(chatId);
       }
     }
   }

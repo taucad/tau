@@ -5986,6 +5986,54 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    it('settles a listed chat opened, or opened again, after its foreign watch closed (I21)', async () => {
+      const projectId = 'project_listed_watch_closed';
+      const closings = new Map<string, PromiseWithResolvers<void>>();
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path) => {
+        const closing = Promise.withResolvers<void>();
+        closings.set(path, closing);
+        return { ready: Promise.resolve(), closed: closing.promise, dispose: vi.fn() };
+      };
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const stopListed = store.observe('chat_listed_closed', projectId);
+      const stopReopened = store.observe('chat_reopened_closed', projectId);
+      try {
+        // Only listed when its watch closed and its log answered: opening it finds nothing more to wait for.
+        await settle();
+        closings.get(eventsOf('chat_listed_closed'))?.resolve();
+        await settle();
+        publishLogPage(store, 'chat_listed_closed', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        const listed = store.acquire('chat_listed_closed', projectId);
+        await settle();
+        expect(listed.transcript).toBe('empty');
+
+        // Open when its watch closed, then left and opened again while the sidebar still lists it.
+        const first = store.acquire('chat_reopened_closed', projectId);
+        await settle();
+        closings.get(eventsOf('chat_reopened_closed'))?.resolve();
+        await settle();
+        publishLogPage(store, 'chat_reopened_closed', [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(first.transcript).toBe('empty');
+        });
+        store.release('chat_reopened_closed');
+        await settle();
+        const reopened = store.acquire('chat_reopened_closed', projectId);
+        await settle();
+        expect(reopened.transcript).toBe('empty');
+      } finally {
+        store.release('chat_listed_closed');
+        store.release('chat_reopened_closed');
+        stopListed();
+        stopReopened();
+      }
+    });
+
     it('settles a chat whose foreign watch closed after it read, without forgetting the tray (I21, U10)', async () => {
       const projectId = 'project_watch_closed_after_read';
       const closed = Promise.withResolvers<void>();

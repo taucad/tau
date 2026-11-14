@@ -104,7 +104,7 @@
 \* it settles, and a refused or failed read waits for it too; a scan that fails or never reads
 \* latches, as does a chat refused before it was opened or whose watch closed after it read; a
 \* partial page never settles, and trays are remembered only once that scan has read and this
-\* device's log has answered.
+\* device's log has answered; a chat opened after its foreign watch closed settles at once.
 \* Admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,

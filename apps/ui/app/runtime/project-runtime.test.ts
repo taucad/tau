@@ -159,7 +159,7 @@ const createLibrary = () => {
     touchProject: vi.fn(async () => undefined),
     getChatRecordsForResource: vi.fn(async () => []),
     createNavigationRepairChat: vi.fn(async () => mock<Chat>({ id: 'chat_created' })),
-    getEditorState: vi.fn(async () => undefined),
+    getEditorState: vi.fn(async (): Promise<EditorState | undefined> => undefined),
     updateEditorState: vi.fn(async () => undefined),
     invalidateProjectListing: vi.fn(async () => undefined),
     invalidateChatListing: vi.fn(async () => undefined),
@@ -408,7 +408,7 @@ describe('createProjectRuntime', () => {
       // oxlint-disable-next-line typescript/consistent-type-assertions -- the editor merges a saved panel state over its defaults.
       library.getEditorState.mockImplementation(async () => {
         await loaded;
-        return { panelState: saved } as unknown as EditorState as never;
+        return { panelState: saved } as unknown as EditorState;
       });
       const runtime = createProjectRuntime({
         projectId: project.id,

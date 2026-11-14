@@ -12,6 +12,7 @@
  */
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout, WorkbenchTab } from '@taucad/workbench';
 import type { ActorRefFrom } from 'xstate';
+import { Topic } from '@taucad/events';
 import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { subscribeFeatureFlags } from '#flags/use-feature.js';
 import type { editorMachine } from '#machines/editor.machine.js';
@@ -94,11 +95,9 @@ export function createWorkbenchLayoutControllerShim(
 ): WorkbenchLayoutControllerShim {
   const { layout, editor, host } = options;
   /* Plain notifications to the page's readers: the restore flag and its notices change here, not in an actor. */
-  const listeners = new Set<() => void>();
+  const changed = new Topic<void>({ name: 'workbenchLayoutControllerShim' });
   const notify = (): void => {
-    for (const listener of listeners) {
-      listener();
-    }
+    changed.emit();
   };
   let restoring = false;
   let notice: Readonly<{ text: string; version: number }> | undefined;
@@ -332,12 +331,12 @@ export function createWorkbenchLayoutControllerShim(
   return {
     snapshot,
     subscribe: (listener) => {
-      listeners.add(listener);
+      const unsubscribeChanged = changed.subscribe(listener);
       const layoutSubscription = layout.subscribe(listener);
       const editorSubscription = editor.subscribe(listener);
       const unsubscribeFlags = subscribeFeatureFlags(listener);
       return () => {
-        listeners.delete(listener);
+        unsubscribeChanged();
         layoutSubscription.unsubscribe();
         editorSubscription.unsubscribe();
         unsubscribeFlags();

@@ -18,6 +18,13 @@ type ProjectCardProps = React.ComponentProps<typeof Card> & {
 
 type ProjectCardMediaProps = {
   readonly thumbnailSource?: string;
+  /**
+   * The thumbnail read has not settled: the box stays plain, because the "no saved preview" icon says the read
+   * settled as absent (P-g).
+   */
+  readonly isThumbnailPending?: boolean;
+  /** The preview control keeps its look but takes no input, as on a remembered card before its listing answers. */
+  readonly isPreviewInert?: boolean;
   readonly isPreviewVisible: boolean;
   readonly onPreviewVisibilityChange: (isVisible: boolean) => void;
   /**
@@ -98,6 +105,8 @@ export function ProjectCard({
 
 export function ProjectCardMedia({
   thumbnailSource,
+  isThumbnailPending = false,
+  isPreviewInert = false,
   isPreviewVisible,
   onPreviewVisibilityChange,
   shouldFill = false,
@@ -134,7 +143,7 @@ export function ProjectCardMedia({
         <div className='relative z-20 size-full'>{children}</div>
       ) : thumbnailSource ? (
         <img src={thumbnailSource} alt='' className='size-full object-cover' loading='lazy' />
-      ) : (
+      ) : isThumbnailPending ? null : (
         <div className='flex size-full items-center justify-center text-muted-foreground'>
           <Box aria-label='No saved preview' className='size-8' />
         </div>
@@ -147,6 +156,7 @@ export function ProjectCardMedia({
             size='icon'
             aria-label='Preview model'
             aria-pressed={isPreviewVisible}
+            inert={isPreviewInert}
             /* R13: a deliberate action (it starts a CAD worker), shown when the card is reached:
                hover or focus on fine pointers, always on coarse ones, and while it is on. It stays
                in the tab order and under the pointer, so revealing it never moves anything. */

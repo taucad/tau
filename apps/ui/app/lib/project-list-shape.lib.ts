@@ -51,12 +51,19 @@ export type RememberedChat = {
   readonly recencyAt?: number;
 };
 
+/** Where a remembered project lives: Home in this browser, or a connected folder by its name. @public */
+export type RememberedPlace =
+  | { readonly kind: 'home' }
+  | { readonly kind: 'workspace'; readonly workspaceName?: string };
+
 /** A remembered project row, with its newest chats once its chat listing has answered. @public */
 export type RememberedProject = {
   readonly id: string;
   readonly name: string;
   readonly lastActivityAt: number;
   readonly slugs?: { readonly workspaceSlug: string; readonly projectSlug: string };
+  /** Where the project lives, as its Home card's location row names it (A15g); absent in a record written before. */
+  readonly place?: RememberedPlace;
   /** How many live chats the project's last chat listing held; absent until one answered. */
   readonly chatCount?: number;
   readonly chats?: readonly RememberedChat[];
@@ -86,6 +93,12 @@ const rememberedProjectSchema = z.object({
   name: z.string(),
   lastActivityAt: timestampSchema,
   slugs: z.object({ workspaceSlug: z.string(), projectSlug: z.string() }).optional(),
+  place: z
+    .discriminatedUnion('kind', [
+      z.object({ kind: z.literal('home') }),
+      z.object({ kind: z.literal('workspace'), workspaceName: z.string().optional() }),
+    ])
+    .optional(),
   chatCount: z.number().int().min(0).optional(),
   chats: z.array(rememberedChatSchema).max(rememberedChatLimit).optional(),
 });
@@ -140,6 +153,24 @@ type ListedProject = {
   readonly lastActivityAt?: number;
   readonly deletedAt?: number;
   readonly slugs?: { readonly workspaceSlug: string; readonly projectSlug: string };
+  readonly locator?: { readonly backend: string };
+  readonly workspaceName?: string;
+};
+
+/**
+ * Where a listed project lives, as its card names it.
+ *
+ * @param project - The listed project.
+ * @returns The place, or `undefined` when the listing names no locator.
+ */
+const placeOf = ({ locator, workspaceName }: ListedProject): RememberedPlace | undefined => {
+  if (locator === undefined) {
+    return undefined;
+  }
+  if (locator.backend !== 'webaccess') {
+    return { kind: 'home' };
+  }
+  return workspaceName === undefined ? { kind: 'workspace' } : { kind: 'workspace', workspaceName };
 };
 
 /** A chat listing's row, as the chat records read gives it. @public */
@@ -163,16 +194,19 @@ export const projectListShapeOf = (projects: readonly ListedProject[]): ProjectL
     .filter((project) => isRow(project))
     .sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id))
     .slice(0, rememberedProjectLimit)
-    .map(
-      ({ id, name, lastActivityAt, slugs }): RememberedProject => ({
+    .map((project): RememberedProject => {
+      const { id, name, lastActivityAt, slugs } = project;
+      const place = placeOf(project);
+      return {
         id,
         name,
         lastActivityAt,
         ...(slugs === undefined
           ? {}
           : { slugs: { workspaceSlug: slugs.workspaceSlug, projectSlug: slugs.projectSlug } }),
-      }),
-    );
+        ...(place === undefined ? {} : { place }),
+      };
+    });
   return { count: live.length, projects: rows };
 };
 

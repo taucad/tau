@@ -259,7 +259,7 @@ for (const viewport of ['wide', 'phone'] as const) {
     `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
     {
       artifact: `h1-${viewport}`,
-      expectedFailure: true,
+      expectedFailure: false,
       budget: homeBudget,
       measure: async () => {
         const { record } = await measureReturningReload({

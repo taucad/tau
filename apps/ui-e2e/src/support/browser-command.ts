@@ -1368,7 +1368,15 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
       };
       (globalThis as typeof globalThis & { _POSTHOG_REMOTE_CONFIG?: Record<string, unknown> })._POSTHOG_REMOTE_CONFIG =
         {
-          [key]: { config: { sessionRecording: { sampleRate: 1, minimumDurationMilliseconds: 0 } } },
+          /* PostHog's remote config always states `autocapture_opt_out`; posthog-js 1.438 keeps autocapture off
+           * while it is undefined (`Autocapture.isEnabled`), so a config without it captured no `$autocapture`. */
+          [key]: {
+            config: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog's remote config wire name.
+              autocapture_opt_out: false,
+              sessionRecording: { sampleRate: 1, minimumDurationMilliseconds: 0 },
+            },
+          },
         };
     },
     { key: apiKey },

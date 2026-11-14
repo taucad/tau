@@ -19,6 +19,8 @@ import { createHash } from 'node:crypto';
 import { chmod, copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
+import { z } from 'zod';
+
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const crateRoot = resolve(workspaceRoot, 'libs/sandbox/store-guard');
 const outputRoot = resolve(workspaceRoot, 'out/store-guard');
@@ -34,11 +36,12 @@ const parseArguments = (): Readonly<{ test: boolean; resources: string | undefin
   let test = false;
   let resources: string | undefined;
   for (let index = 0; index < arguments_.length; index += 1) {
-    const flag = arguments_[index];
+    const flag = arguments_.at(index);
+    const value = arguments_.at(index + 1);
     if (flag === '--test') {
       test = true;
-    } else if (flag === '--resources' && arguments_[index + 1] !== undefined) {
-      resources = resolve(arguments_[index + 1]!);
+    } else if (flag === '--resources' && value !== undefined) {
+      resources = resolve(value);
       index += 1;
     } else {
       throw new TypeError(usage);
@@ -50,7 +53,7 @@ const parseArguments = (): Readonly<{ test: boolean; resources: string | undefin
 const cargo = (args: readonly string[]): void => {
   // In CI, pin the lockfile: `--locked` is a cargo option, so it goes before any `--` that starts the tool's own options.
   const separator = args.includes('--') ? args.indexOf('--') : args.length;
-  const locked = process.env['CI'] ? ['--locked'] : [];
+  const locked = process.env.CI === undefined || process.env.CI === '' ? [] : ['--locked'];
   execFileSync('cargo', [...args.slice(0, separator), ...locked, ...args.slice(separator)], {
     cwd: crateRoot,
     stdio: 'inherit',
@@ -73,7 +76,7 @@ const ensureToolchain = (): void => {
  * Whether an ELF image is a static linux-x64 executable: 64-bit little-endian, machine x86-64, and no `PT_INTERP`
  * program header, so it needs no dynamic loader and runs on every supported distribution.
  */
-const staticElfProblem = (image: Uint8Array): string | undefined => {
+const staticElfProblem = (image: Uint8Array<ArrayBuffer>): string | undefined => {
   const view = new DataView(image.buffer, image.byteOffset, image.byteLength);
   if (view.getUint32(0) !== 0x7f_45_4c_46 || image[4] !== 2 || image[5] !== 1) {
     return 'not a 64-bit little-endian ELF image';
@@ -92,36 +95,49 @@ const staticElfProblem = (image: Uint8Array): string | undefined => {
   return undefined;
 };
 
-type CargoPackage = Readonly<{
-  id: string;
-  name: string;
-  version: string;
-  license: string | null;
-  repository: string | null;
-  manifest_path: string;
-}>;
-type CargoMetadata = Readonly<{
-  packages: readonly CargoPackage[];
-  resolve: Readonly<{
-    root: string;
-    nodes: ReadonlyArray<
-      Readonly<{
-        id: string;
-        deps: ReadonlyArray<Readonly<{ pkg: string; dep_kinds: ReadonlyArray<Readonly<{ kind: string | null }>> }>>;
-      }>
-    >;
-  }>;
-}>;
+const cargoPackage = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.string(),
+  license: z.string().nullish(),
+  repository: z.string().nullish(),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- cargo metadata's wire name.
+  manifest_path: z.string(),
+});
+type CargoPackage = z.infer<typeof cargoPackage>;
+const cargoMetadata = z.object({
+  packages: z.array(cargoPackage),
+  resolve: z.object({
+    root: z.string(),
+    nodes: z.array(
+      z.object({
+        id: z.string(),
+        deps: z.array(
+          z.object({
+            pkg: z.string(),
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- cargo metadata's wire name.
+            dep_kinds: z.array(z.object({ kind: z.string().nullable() })),
+          }),
+        ),
+      }),
+    ),
+  }),
+});
+
+const byNameAndVersion = (left: CargoPackage, right: CargoPackage): number =>
+  left.name.localeCompare(right.name) || left.version.localeCompare(right.version);
 
 /** Every crate the guard is built from: the normal dependency closure of the crate for the musl target. */
 const linkedCrates = (): readonly CargoPackage[] => {
-  const metadata = JSON.parse(
-    execFileSync('cargo', ['metadata', '--format-version', '1', '--filter-platform', target, '--locked'], {
-      cwd: crateRoot,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    }),
-  ) as CargoMetadata;
+  const metadata = cargoMetadata.parse(
+    JSON.parse(
+      execFileSync('cargo', ['metadata', '--format-version', '1', '--filter-platform', target, '--locked'], {
+        cwd: crateRoot,
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+    ),
+  );
   const packages = new Map(metadata.packages.map((entry) => [entry.id, entry]));
   const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
   const seen = new Set<string>();
@@ -133,14 +149,15 @@ const linkedCrates = (): readonly CargoPackage[] => {
     }
     seen.add(id);
     for (const dependency of nodes.get(id)?.deps ?? []) {
+      /* A normal dependency has no kind; dev and build dependencies are not linked into the guard. */
       if (dependency.dep_kinds.some(({ kind }) => kind === null)) {
         pending.push(dependency.pkg);
       }
     }
   }
-  return [...seen]
-    .map((id) => packages.get(id)!)
-    .toSorted((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version));
+  const crates = [...seen].map((id) => packages.get(id)).filter((entry) => entry !== undefined);
+  // oxlint-disable-next-line no-array-sort -- sorting a fresh copy.
+  return crates.sort(byNameAndVersion);
 };
 
 /** The NOTICE: every crate with its licence expression, then the licence and notice texts each crate ships. */
@@ -151,13 +168,15 @@ const notice = async (crates: readonly CargoPackage[]): Promise<string> => {
     '',
     ...crates.map(
       (entry) =>
-        `- ${entry.name} ${entry.version}: ${entry.license ?? 'no licence expression'}${entry.repository === null ? '' : ` (${entry.repository})`}`,
+        `- ${entry.name} ${entry.version}: ${entry.license ?? 'no licence expression'}${entry.repository ? ` (${entry.repository})` : ''}`,
     ),
   ];
   for (const entry of crates) {
     const directory = resolve(entry.manifest_path, '..');
     // oxlint-disable-next-line no-await-in-loop -- one listing per crate, in order, so the NOTICE is deterministic.
-    const files = (await readdir(directory)).filter((name) => /^(?:licen[cs]e|copying|notice)/iu.test(name)).toSorted();
+    const listing = await readdir(directory);
+    // oxlint-disable-next-line no-array-sort -- sorting the filtered copy.
+    const files = listing.filter((name) => /^(?:licen[cs]e|copying|notice)/iu.test(name)).sort();
     for (const file of files) {
       // oxlint-disable-next-line no-await-in-loop -- see above.
       const text = await readFile(join(directory, file), 'utf8').catch(() => undefined);
@@ -205,7 +224,11 @@ if (test) {
         rust: toolchain ?? 'unknown',
         sha256: createHash('sha256').update(image).digest('hex'),
         bytes: image.byteLength,
-        crates: crates.map(({ name, version: crateVersion, license }) => ({ name, version: crateVersion, license })),
+        crates: crates.map(({ name, version: crateVersion, license }) => ({
+          name,
+          version: crateVersion,
+          license: license ?? null,
+        })),
       },
       undefined,
       2,

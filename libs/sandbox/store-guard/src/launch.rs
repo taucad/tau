@@ -97,9 +97,8 @@ fn mount_fuse(store: &Path) -> io::Result<OwnedFd> {
     let fuse = unsafe { OwnedFd::from_raw_fd(fd) };
     // SAFETY: plain calls.
     let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
-    let options = sys::c_string(
-        format!("fd={},rootmode=40000,user_id={uid},group_id={gid}", fuse.as_raw_fd()).as_bytes(),
-    )?;
+    let options =
+        sys::c_string(format!("fd={},rootmode=40000,user_id={uid},group_id={gid}", fuse.as_raw_fd()).as_bytes())?;
     let source = sys::c_string(b"tau-store-guard")?;
     let kind = sys::c_string(b"fuse.tau-store-guard")?;
     let target = sys::c_string(store.as_os_str().as_bytes())?;

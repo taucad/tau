@@ -52,6 +52,7 @@ import {
 } from '#shell/shell-start-barrier.js';
 import type { LaunchAnnouncement } from '#shell/shell-start-barrier.js';
 import { probeStoreGuard, storeGuardCommand } from '#shell/store-guard.js';
+import type { StoreGuardProbe } from '#shell/store-guard.js';
 import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
@@ -1088,6 +1089,52 @@ const startMacTerminal = ({ argv, launch, size, owner }: TerminalStart, binding:
 };
 
 /**
+ * Why a launch's guarded stores may not start: only a Linux Terminal launch with the store guard takes them, and each
+ * store must lie inside a writable root, outside every read-only and denied path, under a policy of plain names.
+ *
+ * @param launch - The launch.
+ * @param options - The provider's options, for the guard's path.
+ * @param roots - The launch's absolute writable, read-only and denied roots.
+ * @returns The refusal, or `undefined` when the launch has none or they may start.
+ */
+const guardedStoresRefusal = (
+  launch: ShellLaunch,
+  options: SandboxShellProviderOptions,
+  roots: Readonly<{ writable: readonly string[]; readOnly: readonly string[]; denied: readonly string[] }>,
+): ShellLaunchOutcome | undefined => {
+  const { guardedStores } = launch.filesystem;
+  if (guardedStores === undefined) {
+    return undefined;
+  }
+  const { writable, readOnly, denied } = roots;
+  if (process.platform !== 'linux' || launch.stdio.kind !== 'terminal' || options.storeGuardPath === undefined) {
+    return unsupported(
+      'filesystem-mask',
+      'only a Linux Terminal launch with the store guard may write guarded stores.',
+    );
+  }
+  const plain = /^[^/\0]+$/u;
+  if (
+    guardedStores.stores.length === 0 ||
+    guardedStores.protect.length === 0 ||
+    guardedStores.protect.some((name) => !plain.test(name) || name === '.' || name === '..') ||
+    guardedStores.stores.some(
+      (store) =>
+        !isAbsolute(store) ||
+        store.includes('\0') ||
+        !writable.some((root) => store !== root && inside(store, root)) ||
+        [...readOnly, ...denied].some((path) => inside(store, path) || inside(path, store)),
+    )
+  ) {
+    return unsupported(
+      'filesystem-mask',
+      'each guarded store must lie inside a writable root, outside every read-only and denied path, with a plain policy.',
+    );
+  }
+  return undefined;
+};
+
+/**
  * Refuse a launch whose shape the provider cannot enforce, before anything starts.
  */
 const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): ShellLaunchOutcome | undefined => {
@@ -1121,32 +1168,9 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (launch.toolchainBins !== undefined && launch.startupFiles === undefined) {
     return unsupported('environment', 'only the Terminal Zsh with its startup files takes toolchain folders.');
   }
-  const { guardedStores } = launch.filesystem;
-  if (guardedStores !== undefined) {
-    if (process.platform !== 'linux' || launch.stdio.kind !== 'terminal' || options.storeGuardPath === undefined) {
-      return unsupported(
-        'filesystem-mask',
-        'only a Linux Terminal launch with the store guard may write guarded stores.',
-      );
-    }
-    const plain = /^[^/\0]+$/u;
-    if (
-      guardedStores.stores.length === 0 ||
-      guardedStores.protect.length === 0 ||
-      guardedStores.protect.some((name) => !plain.test(name) || name === '.' || name === '..') ||
-      guardedStores.stores.some(
-        (store) =>
-          !isAbsolute(store) ||
-          store.includes('\0') ||
-          !writable.some((root) => store !== root && inside(store, root)) ||
-          [...readOnly, ...denied].some((path) => inside(store, path) || inside(path, store)),
-      )
-    ) {
-      return unsupported(
-        'filesystem-mask',
-        'each guarded store must lie inside a writable root, outside every read-only and denied path, with a plain policy.',
-      );
-    }
+  const guardRefusal = guardedStoresRefusal(launch, options, { writable, readOnly, denied });
+  if (guardRefusal !== undefined) {
+    return guardRefusal;
   }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
@@ -1266,10 +1290,12 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       const probe = await probeStoreGuard({
         guardPath: options.storeGuardPath,
         bwrapPath: options.bwrapPath ?? '/usr/bin/bwrap',
-      }).catch((error: unknown) => ({
-        available: false as const,
-        reason: error instanceof Error ? error.message : String(error),
-      }));
+      }).catch(
+        (error: unknown): StoreGuardProbe => ({
+          available: false,
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+      );
       if (!probe.available) {
         storeGuardDiagnostics.publish({ available: false, reason: probe.reason });
       }

@@ -140,7 +140,11 @@ const files = await buildLinuxAptPackages({
 console.log(files.join('\\n'));
 PRODUCER
 (umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register "$work/bwrap-app/build.mts" "$work/bwrap-app/app" "$work/bwrap-fixture-production")
-ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/bwrap-fixture-production ~/node ~/tau'
+# The Linux Terminal's git store guard, built here from its pinned toolchain and locked crates as a release builds it
+# (sandbox:build:store-guard, blueprint LP2); the guest runs it under the selector's bwrap and never compiles it.
+(umask 022 && cd "$REPO_ROOT" && CI=true node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts)
+ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/bwrap-fixture-production ~/node ~/tau ~/store-guard'
+tar -C "$REPO_ROOT/out/store-guard/linux-x64" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/store-guard'
 for fixture in bwrap-fixture bwrap-fixture-production; do
   for deb in "$work/$fixture"/*.deb; do
     # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.

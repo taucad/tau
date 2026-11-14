@@ -203,6 +203,72 @@ describe('createSandboxShellProvider admission', () => {
     expect(outcome).toMatchObject({ status: 'unsupported', requirement: 'network-isolation' });
   });
 
+  it('should refuse guarded stores on a pipe launch or without the store guard, before starting anything', async () => {
+    const root = fixtureRoot();
+    const store = join(root, '.git');
+    const guardedStores = { stores: [store], protect: ['config', 'hooks'] };
+    const filesystem = { readable: [], writable: [root], denied: [], guardedStores };
+    const pipes = await createSandboxShellProvider({ supervisor, storeGuardPath: '/opt/tau/tau-store-guard' }).launch(
+      launchOf({ arguments: ['-c', 'true'], filesystem }),
+    );
+    const unguarded = await createSandboxShellProvider({ supervisor }).launch(
+      launchOf({ arguments: ['-c', 'true'], filesystem, stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } } }),
+    );
+
+    for (const outcome of [pipes, unguarded]) {
+      expect(outcome).toStrictEqual({
+        status: 'unsupported',
+        requirement: 'filesystem-mask',
+        message: 'only a Linux Terminal launch with the store guard may write guarded stores.',
+      });
+    }
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'should refuse a guarded store outside the writable roots, inside a denied path or with a policy name that is a path',
+    async () => {
+      const root = fixtureRoot();
+      const provider = createSandboxShellProvider({ supervisor, storeGuardPath: '/opt/tau/tau-store-guard' });
+      const terminal = { kind: 'terminal', size: { columns: 80, rows: 24 } } as const;
+      const cases = [
+        {
+          readable: [],
+          writable: [root],
+          denied: [],
+          guardedStores: { stores: ['/srv/other/.git'], protect: ['config'] },
+        },
+        {
+          readable: [],
+          writable: [root],
+          denied: [join(root, '.git')],
+          guardedStores: { stores: [join(root, '.git')], protect: ['config'] },
+        },
+        {
+          readable: [],
+          writable: [root],
+          denied: [],
+          guardedStores: { stores: [join(root, '.git')], protect: ['hooks/pre-commit'] },
+        },
+        { readable: [], writable: [root], denied: [], guardedStores: { stores: [root], protect: ['config'] } },
+      ];
+      for (const filesystem of cases) {
+        // oxlint-disable-next-line no-await-in-loop -- one refusal per case.
+        const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], filesystem, stdio: terminal }));
+        expect(outcome, JSON.stringify(filesystem)).toMatchObject({
+          status: 'unsupported',
+          requirement: 'filesystem-mask',
+        });
+      }
+    },
+  );
+
+  it('should answer that no store guard can start without its path or with a path that is not an executable', async () => {
+    expect(await createSandboxShellProvider({ supervisor }).storeGuard?.()).toBe(false);
+    expect(
+      await createSandboxShellProvider({ supervisor, storeGuardPath: join(fixtureRoot(), 'absent') }).storeGuard?.(),
+    ).toBe(false);
+  });
+
   it('should reject an already aborted launch with the abort reason', async () => {
     const controller = new AbortController();
     controller.abort(new Error('cancelled before start'));

@@ -26,7 +26,9 @@ const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\
 
 /**
  * The outer bubblewrap's arguments: a private user, mount and process namespace keeping `CAP_SYS_ADMIN` inside it,
- * the host's own filesystem and devices, and death with its parent.
+ * the host's own filesystem and devices, and death with its parent. Its own `/proc` matches its process namespace: the
+ * nested bubblewrap finds its child by the number this namespace gives it, and under the host's `/proc` that number
+ * names some other process.
  */
 const outerArguments = (bwrapPath: string): readonly string[] => [
   bwrapPath,
@@ -38,6 +40,8 @@ const outerArguments = (bwrapPath: string): readonly string[] => [
   '--dev-bind',
   '/',
   '/',
+  '--proc',
+  '/proc',
   '--',
 ];
 
@@ -103,6 +107,7 @@ export const probeStoreGuard = async (
     return { available: false, reason: `${input.guardPath} is not an executable file` };
   }
   try {
+    // oxlint-disable-next-line no-bitwise -- POSIX access mode bits.
     await access('/dev/fuse', constants.R_OK | constants.W_OK);
   } catch {
     return { available: false, reason: '/dev/fuse is absent or not readable and writable by this user' };
@@ -132,7 +137,7 @@ export const probeStoreGuard = async (
       'config',
     ];
     const [executable, ...rest] = vector;
-    const result = await new Promise<Readonly<{ code: number | null; output: string }>>((resolve) => {
+    const result = await new Promise<Readonly<{ code: number | undefined; output: string }>>((resolve) => {
       const child = spawn(executable!, rest, {
         cwd: scratch,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
@@ -149,10 +154,10 @@ export const probeStoreGuard = async (
         output += chunk;
       });
       child.once('error', (error) => {
-        resolve({ code: null, output: error.message });
+        resolve({ code: undefined, output: error.message });
       });
       child.once('close', (code) => {
-        resolve({ code, output });
+        resolve({ code: code ?? undefined, output });
       });
     });
     if (result.code === 0 && result.output.split('\n').includes('ok')) {

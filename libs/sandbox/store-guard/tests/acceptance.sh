@@ -52,7 +52,7 @@ guarded() {
   local launch=("$guard" launch)
   for name in "${policy[@]}"; do launch+=(--protect "$name"); done
   for name in "${bypass[@]}"; do launch+=(--bypass "$name"); done
-  "$bwrap" --unshare-user --unshare-pid --die-with-parent --cap-add CAP_SYS_ADMIN --dev-bind / / -- \
+  "$bwrap" --unshare-user --unshare-pid --die-with-parent --cap-add CAP_SYS_ADMIN --dev-bind / / --proc /proc -- \
     "${launch[@]}" --store "$project/.git" -- \
     "$bwrap" --unshare-user --unshare-pid --unshare-net --die-with-parent --dev-bind / / --proc /proc --chdir "$project" \
     -- bash "$@"
@@ -111,6 +111,11 @@ printf 'branches-rmdir=%s\n' "$(rc rmdir .git/branches)"
 printf 'rename-onto-hooks=%s\n' "$(rc sh -c 'mkdir .git/tmp-hooks && mv -T .git/tmp-hooks .git/hooks')"
 rmdir .git/tmp-hooks 2> /dev/null
 printf 'move-store=%s\n' "$(rc mv .git .git-moved)"
+# Each spelling a case-folding directory (ext4 or f2fs casefold) reads as a policy name is refused as that name.
+printf 'folded-case=%s\n' "$(rc mkdir .git/HOOKS)"
+printf 'folded-kelvin=%s\n' "$(rc mkdir $'.git/hoo\xe2\x84\xaas')"
+printf 'folded-long-s=%s\n' "$(rc mkdir $'.git/remote\xc5\xbf')"
+printf 'folded-ligature=%s\n' "$(rc sh -c 'printf x > "$1"' _ $'.git/con\xef\xac\x81g')"
 printf 'info-exclude=%s\n' "$(rc sh -c 'printf "*.tmp\n" >> .git/info/exclude')"
 printf 'status=%s\n' "$(rc git status --porcelain)"
 EOF
@@ -120,7 +125,8 @@ value() { sed -n "s/^$1=//p" <<< "$transcript" | head -n 1; }
 expect 'workflow: add, commit, switch -c, stash, stash pop, merge' 0 "$(value workflow)"
 for case in git-config config-append config-truncate config-rename-over config-rename-away config-unlink config-chmod \
   config-touch config-hard-link config-symlink-write hook-write hooks-rename-away commondir commondir-symlink \
-  config-worktree worktrees modules remotes branches branches-rmdir rename-onto-hooks move-store; do
+  config-worktree worktrees modules remotes branches branches-rmdir rename-onto-hooks move-store folded-case \
+  folded-kelvin folded-long-s folded-ligature; do
   [[ "$(value "$case")" != 0 && -n "$(value "$case")" ]] && pass "$case refused (rc $(value "$case"))" ||
     fail "$case: rc $(value "$case"), wanted a refusal"
 done

@@ -30,7 +30,8 @@ import type {
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import { openSessionFileManager } from '#runtime/session-file-manager.js';
+import { faultMessage } from '#runtime/app-runtime-faults.js';
+import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
 import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
@@ -164,40 +165,105 @@ const relayRegion = (region: RelayedRegion) =>
 export type SessionFileManagerOpener = (projectId: string) => SessionFileManager;
 
 /**
+ * The file-manager host's shared worker, which a session's file manager is built on (A6c): the worker `rootFiles` holds
+ * now, and a listener called after each change. @public
+ */
+export type SessionFileManagerWorker = Readonly<{
+  current: () => Worker | undefined;
+  subscribe: (listener: (worker: Worker | undefined) => void) => () => void;
+}>;
+
+/**
  * The `fileManager` child: it builds the project's file manager through the host for `/projects/<id>`, owns it for
  * the session's life and closes it when the session stops the child (I23). It tells the session the file manager's
  * ref, then reports the views region each time the file manager comes up, from its snapshot rather than from a mount
- * (I5). A build that throws fails the region with its reason.
+ * (I5), and fails the region when the file manager goes to `error`. A build that throws fails the region with its
+ * reason.
+ *
+ * With the host's shared worker it follows `rootFiles`, as the shared-worker gate made the mounted subtree follow it
+ * before A6c: it builds only once `rootFiles` holds a worker, so a session opened while the root connects or restarts
+ * never starts a second worker on the same store, and when the worker is lost or replaced it closes the file manager
+ * built on the old one and builds a fresh one on the new one. A nested file manager never restarts its parent's
+ * worker, so the one built on a dead worker would otherwise stay down for the session's life.
  */
-const fileManagerRegionOn = (open: SessionFileManagerOpener) =>
+const fileManagerRegionOn = (open: SessionFileManagerOpener, worker: SessionFileManagerWorker | undefined) =>
   createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
-    let opened: SessionFileManager;
-    try {
-      opened = open(input.projectId);
-    } catch (error) {
-      sendBack({
-        type: 'childFailed',
-        region: 'views',
-        reason: error instanceof Error ? error.message : String(error),
-      });
-      return undefined;
-    }
-    const fileManager: FileManagerRef = opened.fileManagerRef;
-    sendBack({ type: 'fileManagerOpened', fileManagerRef: fileManager });
-    /* Edge-triggered, as the binding's effect was: one report each time the file manager enters `ready`. */
-    let ready = false;
-    const observe = (snapshot: ReturnType<FileManagerRef['getSnapshot']>): void => {
-      const now = snapshot.matches('ready');
-      if (now && !ready) {
-        sendBack({ type: 'childReady', region: 'views' });
+    let current: Readonly<{ opened: SessionFileManager; release: () => void }> | undefined;
+
+    const closeCurrent = (): void => {
+      if (current === undefined) {
+        return;
       }
-      ready = now;
+      const { release } = current;
+      current = undefined;
+      sendBack({ type: 'fileManagerChanged', fileManagerRef: undefined });
+      release();
     };
-    const subscription = fileManager.subscribe(observe);
-    observe(fileManager.getSnapshot());
+
+    const openCurrent = (): void => {
+      let opened: SessionFileManager;
+      try {
+        opened = open(input.projectId);
+      } catch (error) {
+        sendBack({
+          type: 'childFailed',
+          region: 'views',
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      const fileManager: FileManagerRef = opened.fileManagerRef;
+      const untrack = trackSessionFileManager(opened);
+      sendBack({ type: 'fileManagerChanged', fileManagerRef: fileManager });
+      /* Edge-triggered, as the binding's effect was: one report each time the file manager enters `ready` or `error`. */
+      let last: 'ready' | 'error' | undefined;
+      const observe = (snapshot: ReturnType<FileManagerRef['getSnapshot']>): void => {
+        const now = snapshot.matches('ready') ? 'ready' : snapshot.matches('error') ? 'error' : undefined;
+        if (now === 'ready' && last !== 'ready') {
+          sendBack({ type: 'childReady', region: 'views' });
+        }
+        if (now === 'error' && last !== 'error') {
+          sendBack({
+            type: 'childFailed',
+            region: 'views',
+            reason: faultMessage(snapshot.context.error, 'file manager error'),
+          });
+        }
+        last = now;
+      };
+      const subscription = fileManager.subscribe(observe);
+      current = {
+        opened,
+        release: () => {
+          subscription.unsubscribe();
+          untrack();
+          opened.close();
+        },
+      };
+      observe(fileManager.getSnapshot());
+    };
+
+    if (worker === undefined) {
+      openCurrent();
+      return closeCurrent;
+    }
+    let builtOn = worker.current();
+    if (builtOn !== undefined) {
+      openCurrent();
+    }
+    const unsubscribe = worker.subscribe((next) => {
+      if (next === builtOn) {
+        return;
+      }
+      builtOn = next;
+      closeCurrent();
+      if (next !== undefined) {
+        openCurrent();
+      }
+    });
     return () => {
-      subscription.unsubscribe();
-      opened.close();
+      unsubscribe();
+      closeCurrent();
     };
   });
 
@@ -301,7 +367,7 @@ const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(
 // The registry actor
 // ---------------------------------------------------------------------------
 
-const projectSessionOn = ({ sharedWorker, openFileManager }: SessionsRegistryFiles) =>
+const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker }: SessionsRegistryFiles) =>
   projectSessionMachine.provide({
     actors: {
       cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
@@ -330,7 +396,8 @@ const projectSessionOn = ({ sharedWorker, openFileManager }: SessionsRegistryFil
           }
         },
       }),
-      fileManager: openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager),
+      fileManager:
+        openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager, fileManagerWorker),
       project: relayRegion('runtime'),
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
@@ -348,6 +415,11 @@ export type SessionsRegistryFiles = Readonly<{
   sharedWorker: () => Worker | undefined;
   /** Opens each session's file manager (A6c). Without it the views region is up with no file manager. */
   openFileManager?: SessionFileManagerOpener;
+  /**
+   * The shared worker each session's file manager is built on (A6c). With it a file manager is built once `rootFiles`
+   * holds a worker and rebuilt when the worker is replaced; without it, at once.
+   */
+  fileManagerWorker?: SessionFileManagerWorker;
 }>;
 
 /**
@@ -388,22 +460,22 @@ export const sessionsRegistryInput = (): SessionsMachineInput => ({
  * is for compositions that run the registry alone.
  *
  * @param options - The clock, inspector and rejected-event hook for this root, the shared worker its compute
- *   regions admit on (none by default), and the session file-manager opener (none by default).
+ *   regions admit on (none by default), the session file-manager opener (none by default) and the shared worker its
+ *   file managers are built on (none: each is built at once).
  * @returns The registry actor; the caller starts it once.
  * @public
  */
 export const createSessionsActor = ({
   sharedWorker,
   openFileManager,
+  fileManagerWorker,
   ...options
-}: SessionsActorOptions &
-  Readonly<{ sharedWorker?: () => Worker | undefined; openFileManager?: SessionFileManagerOpener }> = {}): Actor<
-  typeof sessionsMachine
-> =>
+}: SessionsActorOptions & Partial<SessionsRegistryFiles> = {}): Actor<typeof sessionsMachine> =>
   createActor(
     createSessionsRegistryLogic({
       sharedWorker: sharedWorker ?? (() => undefined),
       ...(openFileManager === undefined ? {} : { openFileManager }),
+      ...(fileManagerWorker === undefined ? {} : { fileManagerWorker }),
     }),
     { ...options, input: sessionsRegistryInput() },
   );

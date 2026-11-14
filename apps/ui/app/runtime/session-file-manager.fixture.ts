@@ -2,20 +2,33 @@
  * A session file manager stand-in for rows that compose the real app runtime or registry without a worker (A6c).
  *
  * The session's `fileManager` child reads only the ref, its snapshot's `ready` state and its subscription, and closes
- * what it opened, so a small machine that a test moves between `starting` and `ready` stands in for the file manager.
+ * what it opened, so a small machine that a test moves between `starting`, `ready` and `error` stands in for the file
+ * manager.
  */
-import { createActor, setup } from 'xstate';
+import { createActor, setup, types } from 'xstate';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { SessionFileManager, SessionFilesPort } from '#runtime/session-file-manager.js';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 
-const standInMachine = setup({}).createMachine({
+type StandInContext = { openFileSystemBridge: undefined; error: Error | undefined };
+type StandInEvent = { type: 'ready' } | { type: 'lost' } | { type: 'fail'; error: Error };
+
+const standInMachine = setup({
+  schemas: { context: types<StandInContext>(), events: eventSchemas<StandInEvent>() },
+}).createMachine({
   id: 'fileManager',
   initial: 'starting',
-  context: { openFileSystemBridge: undefined },
+  context: { openFileSystemBridge: undefined, error: undefined },
   states: {
     starting: { on: { ready: { target: 'ready' } } },
-    ready: { on: { lost: { target: 'starting' } } },
+    ready: {
+      on: {
+        lost: { target: 'starting' },
+        fail: ({ event }) => ({ target: 'error', context: { error: event.error } }),
+      },
+    },
+    error: { on: { ready: { target: 'ready', context: { error: undefined } } } },
   },
 });
 
@@ -24,6 +37,8 @@ export type SessionFileManagerStandIn = SessionFileManager &
   Readonly<{
     /** Move the file manager into `ready`, or back out of it. */
     setReady: (ready: boolean) => void;
+    /** Move the file manager into `error`, as a lost worker does a nested one. */
+    fail: (error: Error) => void;
     /** Whether `close` ran. */
     isClosed: () => boolean;
   }>;
@@ -61,6 +76,9 @@ export function openSessionFileManagerStandIn(
     },
     setReady: (next) => {
       actor.send({ type: next ? 'ready' : 'lost' });
+    },
+    fail: (error) => {
+      actor.send({ type: 'fail', error });
     },
     isClosed: () => drop.signal.aborted,
   };

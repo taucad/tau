@@ -19,9 +19,11 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  * (I27 — browser and desktop share the machine with different actors).
  *
  * A6c: the `fileManager` child is real. It builds the project's file manager through the file-manager host for
- * `/projects/<id>`, owns it for the session's life and reports the views region from its snapshot, with nothing
- * mounted (I5). It tells the session the file manager's ref (`fileManagerOpened`), which the session keeps so the
- * subtree's provider and later children read it; the child, never the session, stops it. A root fault is recorded
+ * `/projects/<id>` once `rootFiles` holds the shared worker, owns it for the session's life and reports the views
+ * region from its snapshot, with nothing mounted (I5). It tells the session the file manager's ref
+ * (`fileManagerChanged`), which the session keeps so the subtree's provider and later children read it, and tells it
+ * again when the shared worker is lost or replaced and it rebuilds the file manager; the child, never the session,
+ * stops it. A root fault is recorded
  * once, the first kept, and reported through the app runtime's one hook (D23, B2).
  */
 
@@ -139,8 +141,11 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'confirmClose' }
   | { readonly type: 'cancelClose' }
   | { readonly type: 'childReady'; readonly region: ProjectSessionRegion }
-  /** The `fileManager` child built and started the project's file manager (A6c). */
-  | { readonly type: 'fileManagerOpened'; readonly fileManagerRef: FileManagerRef }
+  /**
+   * The `fileManager` child built and started the project's file manager, or closed it while `rootFiles` has no worker
+   * (A6c).
+   */
+  | { readonly type: 'fileManagerChanged'; readonly fileManagerRef: FileManagerRef | undefined }
   | { readonly type: 'childFailed'; readonly region: ProjectSessionRegion; readonly reason: string }
   | {
       readonly type: 'projectedRunsChanged';
@@ -183,7 +188,7 @@ export const projectSessionEventTypes = [
   'confirmClose',
   'cancelClose',
   'childReady',
-  'fileManagerOpened',
+  'fileManagerChanged',
   'childFailed',
   'projectedRunsChanged',
   'activity',
@@ -266,7 +271,7 @@ const releaseAgentHost = createAsyncLogic<void, { projectId: string }>({ run: un
  * agent-host registration; the desktop gets the same session with a Node-served
  * file manager and the always-on launcher. Same machine, different actors. Each
  * reports `childReady` or `childFailed` to this parent, and the `fileManager` child
- * also `fileManagerOpened`; the defaults here do neither, so an unprovided child
+ * also `fileManagerChanged`; the defaults here do neither, so an unprovided child
  * fails its region at the start bound rather than pretending to be up.
  */
 const fileManager = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
@@ -480,7 +485,7 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '2',
+  version: '3',
   /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
    * later ones are usually its consequences (MC-R12, D23; B2). */
   onError: ({ context, event }, enq) => {
@@ -532,7 +537,7 @@ export const projectSessionMachine = setup({
     },
     /* The child reports its file manager once, as it starts (A6c). A child that stopped tells nothing more, so a
      * report reaches only a session whose child runs; a report from a stopped child's predecessor cannot arrive. */
-    fileManagerOpened: ({ event }) => ({ context: { fileManagerRef: event.fileManagerRef } }),
+    fileManagerChanged: ({ event }) => ({ context: { fileManagerRef: event.fileManagerRef } }),
     /* Answered in every state: the request is a fact the session keeps, whatever it is doing (MC-R16). */
     chatRequested: ({ context, event }) =>
       context.request === undefined

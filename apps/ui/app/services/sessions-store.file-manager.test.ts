@@ -8,7 +8,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flush } from '@taucad/xstate-testing/clock';
+import { Topic } from '@taucad/events';
 import { createSessionsActor, reportRegionReady } from '#services/sessions-store.js';
+import type { SessionFileManagerWorker } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { createAppRuntime, selectRuntimeSessions } from '#runtime/app-runtime.js';
@@ -27,19 +29,41 @@ type Harness = Readonly<{
 
 let current: Harness | undefined;
 
-const harness = (open: (id: string) => SessionFileManagerStandIn): Harness => {
+const harness = (open: (id: string) => SessionFileManagerStandIn, worker?: SessionFileManagerWorker): Harness => {
   const opened: SessionFileManagerStandIn[] = [];
   const opener = vi.fn((id: string) => {
     const standIn = open(id);
     opened.push(standIn);
     return standIn;
   });
-  const registry = createSessionsActor({ openFileManager: opener }).start();
+  const registry = createSessionsActor({
+    openFileManager: opener,
+    ...(worker === undefined ? {} : { fileManagerWorker: worker }),
+  }).start();
   current = { registry, opened, opener };
   return current;
 };
 
 const sessionOf = (registry: Harness['registry']) => registry.getSnapshot().context.refs[projectId];
+
+/** The host's shared worker as a row moves it: `rootFiles` connecting, replacing its worker, or losing it. */
+const sharedWorkerOf = (initial: Worker | undefined) => {
+  let current = initial;
+  const changes = new Topic<Worker | undefined>({ name: 'test.sharedWorker' });
+  const port: SessionFileManagerWorker = {
+    current: () => current,
+    subscribe: (listener) => changes.subscribe(listener),
+  };
+  return {
+    port,
+    set: (worker: Worker | undefined) => {
+      current = worker;
+      changes.emit(worker);
+    },
+  };
+};
+const workerA = { name: 'worker-a' } as unknown as Worker;
+const workerB = { name: 'worker-b' } as unknown as Worker;
 
 afterEach(() => {
   current?.registry.stop();
@@ -122,26 +146,89 @@ describe('the session builds its file manager as a child (A6c)', () => {
   });
 });
 
+describe("the session's file manager follows the host's shared worker (A6c)", () => {
+  it('should build no file manager while rootFiles holds no worker, and build it once the worker is up', () => {
+    const worker = sharedWorkerOf(undefined);
+    const { registry, opener, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
+    registry.send({ type: 'open', projectId });
+
+    expect(opener).not.toHaveBeenCalled();
+    expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBeUndefined();
+
+    worker.set(workerA);
+
+    expect(opener.mock.calls).toEqual([[projectId]]);
+    expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBe(opened[0]?.fileManagerRef);
+  });
+
+  it('should close the file manager built on a replaced worker and build a fresh one on the new worker', async () => {
+    const worker = sharedWorkerOf(workerA);
+    const { registry, opener, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
+    registry.send({ type: 'open', projectId });
+    reportRegionReady(projectId, 'runtime');
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+
+    worker.set(undefined);
+
+    expect(opened[0]?.isClosed()).toBe(true);
+    expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBeUndefined();
+
+    worker.set(workerB);
+    await flush();
+
+    expect(opener).toHaveBeenCalledTimes(2);
+    expect(opened[1]?.isClosed()).toBe(false);
+    expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBe(opened[1]?.fileManagerRef);
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it('should rebuild when the worker is swapped in one step, and close the last one with the session', async () => {
+    const worker = sharedWorkerOf(workerA);
+    const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id), worker.port);
+    registry.send({ type: 'open', projectId });
+
+    worker.set(workerB);
+    expect(opened[0]?.isClosed()).toBe(true);
+    expect(sessionOf(registry)?.getSnapshot().context.fileManagerRef).toBe(opened[1]?.fileManagerRef);
+
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    expect(opened[1]?.isClosed()).toBe(true);
+    worker.set(workerA);
+    expect(opened).toHaveLength(2);
+  });
+});
+
+describe("the session's file manager reports its failure (A6c)", () => {
+  it('should fail the views region when the file manager goes to error, and clear it when it is ready again', async () => {
+    const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id));
+    registry.send({ type: 'open', projectId });
+    reportRegionReady(projectId, 'runtime');
+    await flush();
+
+    opened[0]?.fail(new Error('worker lost'));
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().context.failures).toMatchObject({ views: 'worker lost' });
+
+    opened[0]?.setReady(true);
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().context.failures).toEqual({});
+  });
+});
+
 describe("the app runtime's registry builds each session's file manager through its host (A6c)", () => {
-  it('should build the file manager for /projects/<id> on Home, start it, and stop it with the session', async () => {
-    /* Idle file managers: Home is never read, so the built file manager waits as `pending` and starts no worker. */
+  it('should build no session file manager while rootFiles holds no worker, so no second worker starts', async () => {
+    /* Idle file managers: `rootFiles` never connects, so it holds no worker for a session's file manager to share. */
     const runtime = createAppRuntime({ idleFileManagers: true }).start();
     const registry = selectRuntimeSessions(runtime);
     registry.send({ type: 'open', projectId });
 
-    const fileManager = registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.fileManagerRef;
-    expect(fileManager?.getSnapshot().context).toMatchObject({
-      rootDirectory: `/projects/${projectId}`,
-      projectId,
-      backendType: undefined,
-    });
-    expect(fileManager?.getSnapshot().status).toBe('active');
+    expect(registry.getSnapshot().context.refs[projectId]?.getSnapshot().context.fileManagerRef).toBeUndefined();
 
     registry.send({ type: 'close', projectId, reason: 'user' });
     await flush();
-
     expect(registry.getSnapshot().context.refs[projectId]).toBeUndefined();
-    expect(fileManager?.getSnapshot().status).toBe('stopped');
     runtime.stop();
   });
 });

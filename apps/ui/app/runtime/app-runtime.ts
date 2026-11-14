@@ -279,6 +279,7 @@ export const createAppRuntime = ({
          * file manager through the host, and waits for it on this runtime's clock. */
         sessions: createSessionsRegistryLogic({
           sharedWorker: host.sharedWorker,
+          fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
           openFileManager: sessionFileManagerOpener({
             build: (spec) => {
               if (builtHost.current === undefined) {

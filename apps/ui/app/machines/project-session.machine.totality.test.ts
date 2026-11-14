@@ -59,7 +59,10 @@ const samples: Samples = {
   cancelClose: [{ type: 'cancelClose' }],
   childReady: regions.map((region) => ({ type: 'childReady', region })),
   /* The child's report carries the file manager it built; the session only keeps the ref, so a stand-in serves. */
-  fileManagerOpened: [{ type: 'fileManagerOpened', fileManagerRef: createActor(fileManagerStandIn) }],
+  fileManagerChanged: [
+    { type: 'fileManagerChanged', fileManagerRef: createActor(fileManagerStandIn) },
+    { type: 'fileManagerChanged', fileManagerRef: undefined },
+  ],
   childFailed: [{ type: 'childFailed', region: 'runtime', reason: 'refused' }],
   projectedRunsChanged: [
     { type: 'projectedRunsChanged', runs: ['chat_1'], stoppableRuns: ['chat_1'] },

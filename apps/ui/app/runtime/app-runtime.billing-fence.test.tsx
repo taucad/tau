@@ -17,13 +17,27 @@ import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
+import type * as FileManagerHostModule from '#runtime/file-manager-host.js';
 import { reportRegionReady } from '#services/sessions-store.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: async () => undefined }));
-/* A6c: the session builds its file manager through the runtime's host; jsdom has no worker, so a ready stand-in opens. */
+/* A6c: the session builds its file manager through the runtime's host once `rootFiles` holds the shared worker. jsdom
+ * has no worker, so the host reports an inert one and a ready stand-in opens. */
+vi.mock('#runtime/file-manager-host.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof FileManagerHostModule>();
+  const inertWorker = { postMessage: () => undefined } as unknown as Worker;
+  return {
+    ...actual,
+    createFileManagerHost: (...args: Parameters<typeof actual.createFileManagerHost>) => ({
+      ...actual.createFileManagerHost(...args),
+      sharedWorker: () => inertWorker,
+      onSharedWorker: () => () => undefined,
+    }),
+  };
+});
 vi.mock('#runtime/session-file-manager.js', async (importOriginal) => {
   const { openSessionFileManagerStandIn } = await import('#runtime/session-file-manager.fixture.js');
   return {

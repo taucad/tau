@@ -65,7 +65,7 @@ export type SessionFileManagerPorts = Readonly<{
   awaitServices: (fileManagerRef: FileManagerRef, gone: AbortSignal) => Promise<unknown>;
 }>;
 
-/* Each open session file manager, by its ref: the provider over the session child reads its owner here. */
+/* Each session file manager a session's child holds, by its ref: the provider over the child reads its owner here. */
 const openFileManagers = new WeakMap<FileManagerRef, SessionFileManager>();
 let openings = 0;
 
@@ -100,6 +100,7 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
   const drop = new AbortController();
   /* What the scope attached to the owner: each is released once, as the file manager closes, and one failing release
    * does not keep the rest from releasing what they hold. */
+  const attached = new WeakSet<() => void>();
   const releases = new Topic<void>({
     name: `sessions.${projectId}.fileManager.releases`,
     onError: (error) => {
@@ -153,6 +154,10 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
           dispose();
           return;
         }
+        if (attached.has(dispose)) {
+          return;
+        }
+        attached.add(dispose);
         releases.subscribe(dispose);
       },
       dropped: drop.signal,
@@ -179,9 +184,24 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
       releases.dispose();
     },
   };
-  openFileManagers.set(fileManagerRef, opened);
   return opened;
 }
+
+/**
+ * Record a session file manager under its ref for the provider over the session child, whichever opener built it.
+ *
+ * @param opened - The file manager a session's child opened.
+ * @returns The removal, which the child runs before it closes the file manager.
+ * @public
+ */
+export const trackSessionFileManager = (opened: SessionFileManager): (() => void) => {
+  openFileManagers.set(opened.fileManagerRef, opened);
+  return () => {
+    if (openFileManagers.get(opened.fileManagerRef) === opened) {
+      openFileManagers.delete(opened.fileManagerRef);
+    }
+  };
+};
 
 /**
  * The open session file manager behind a ref, for the provider over the session child.

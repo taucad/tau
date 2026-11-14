@@ -17,11 +17,11 @@ import { skewProtectionCookieName } from '../app/lib/skew-protection.server.ts';
 
 /** The Frameworks API configuration: which paths are pinned, and where the token is read from. */
 export const skewProtectionConfig = {
-  // The runtime bundles (PicoGK, the C# service) a page starts later are pinned like its chunks: the
-  // address a page's build named must answer from that deploy (`retain-previous-assets.mts` also keeps them).
+  // The runtime bundle (the C# service) a page starts later is pinned like its chunks: the address a
+  // page's build named must answer from that deploy (`retain-previous-assets.mts` also keeps it). PicoGK
+  // loads by digest from the dependency hosts, which no deploy pins.
   patterns: [
     String.raw`^/assets/.*`,
-    String.raw`^/picogk-browser/.*`,
     String.raw`^/csharp-language/.*`,
     String.raw`.*\.data$`,
     String.raw`^/__manifest$`,

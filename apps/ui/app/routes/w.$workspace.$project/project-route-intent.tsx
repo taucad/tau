@@ -137,6 +137,10 @@ export function ProjectRouteIntent({
   return undefined;
 }
 
+/** The `chat` parameter of a route's URL. */
+const chatOf = (url: string): string | undefined =>
+  new URLSearchParams(url.split('?')[1] ?? '').get('chat') ?? undefined;
+
 /**
  * The route port's sink over the app's router: the focused chat's URL replace and the `cloudOpen` latch.
  *
@@ -170,8 +174,9 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
     setCloudOpen,
     slugs,
   });
-  /* A command that arrives while the router is moving waits for the commit that ends the move, then is checked again. */
-  const deferred = useRef<FocusRouteCommand | undefined>(undefined);
+  /* A command that arrives while the router is moving waits for the commit that ends the move, then is checked again.
+   * It keeps the chat the route showed when it arrived: a move that changed it is a request focus has not answered. */
+  const deferred = useRef<Readonly<{ command: FocusRouteCommand; chatId: string | undefined }> | undefined>(undefined);
   /* A layout effect: every one runs before any passive effect, so the commit's report to focus, and the commands
    * focus answers it with, find this commit's route here. */
   useLayoutEffect(() => {
@@ -194,8 +199,11 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
     /* I2: a navigation the person started (a click to another project) is in flight, or has moved the router past the
      * commit this sink last saw. A replace now would cancel it and land the person back here, so the command waits. */
     const live = router?.state;
-    if (live !== undefined && (live.navigation.state !== 'idle' || live.location.pathname !== current.pathname)) {
-      deferred.current = command;
+    if (
+      live !== undefined &&
+      (live.navigation.state !== 'idle' || `${live.location.pathname}${live.location.search}` !== current.currentUrl)
+    ) {
+      deferred.current = { command, chatId: chatOf(current.currentUrl) };
       return;
     }
     if (command.type === 'cloudOpenTaken') {
@@ -215,11 +223,16 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
   });
   /* After the latest-route effect above: the replay reads the commit that ended the move. */
   useLayoutEffect(() => {
-    const command = deferred.current;
-    if (command !== undefined && navigationState !== 'loading' && navigationState !== 'submitting') {
-      deferred.current = undefined;
-      sink(command);
+    const held = deferred.current;
+    if (held === undefined || navigationState === 'loading' || navigationState === 'submitting') {
+      return;
     }
-  }, [currentUrl, navigationState, projectId, sink]);
+    deferred.current = undefined;
+    if (held.command.type === 'chatShown' && chatOf(latest.current.currentUrl) !== held.chatId) {
+      /* The move asked for another chat (I18): focus answers that commit, not this one. */
+      return;
+    }
+    sink(held.command);
+  }, [currentUrl, location.key, navigationState, projectId, sink]);
   return sink;
 }

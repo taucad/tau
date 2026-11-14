@@ -135,4 +135,44 @@ describe('useRouterRouteSink under a data router (I2)', () => {
     });
     expect(router.state.location.pathname).toBe('/w/ws/b');
   });
+
+  it('should drop a held correction when the move it waited for asked for another chat (I18)', async () => {
+    const loading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            if (new URL(request.url).searchParams.has('chat')) {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/b'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+
+    /* The person opens chat 2 from a link; the editor resolves the chat the route had before it. */
+    act(() => {
+      void router.navigate('/w/ws/b?chat=chat-2');
+    });
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+    });
+    await act(async () => {
+      loading.resolve();
+      await loading.promise;
+    });
+
+    await vi.waitFor(() => {
+      expect(router.state.navigation.state).toBe('idle');
+    });
+    expect(router.state.location.search).toBe('?chat=chat-2');
+  });
 });

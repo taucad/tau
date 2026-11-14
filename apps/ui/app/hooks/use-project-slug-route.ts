@@ -10,7 +10,7 @@
  * it generates.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { idPrefix } from '@taucad/types/constants';
 import { useProjects } from '#hooks/use-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -93,7 +93,8 @@ export function useProjectUrl(projectId: string | undefined): string {
  * @param projectId - The open project, once resolved.
  * @param suffix - Path appended to the canonical project URL (e.g. `/preview`).
  * @param from - The path the project was resolved from. When given, the correction writes only while the address
- * bar still shows it: a person who navigated on before the slugs resolved keeps the URL they went to (I2).
+ * bar still shows it, or the URL this hook last wrote (a later rename follows, D8): a person who navigated on before
+ * the slugs resolved keeps the URL they went to (I2).
  */
 export function useCanonicalProjectUrlCorrection(
   projectId: string | undefined,
@@ -103,11 +104,15 @@ export function useCanonicalProjectUrlCorrection(
   const canonical = useProjectSlugs(projectId);
   const canonicalSlugs = canonical.status === 'resolved' ? canonical.value : undefined;
   const target = canonicalSlugs ? `${projectUrl(canonicalSlugs)}${suffix}` : undefined;
+  /* `replaceState` is invisible to the router, so after a write the bar shows this path, not `from`. */
+  const written = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (from !== undefined && globalThis.location.pathname !== from) {
+    const shown = globalThis.location.pathname;
+    if (from !== undefined && shown !== from && shown !== written.current) {
       return;
     }
-    if (target !== undefined && globalThis.location.pathname !== target) {
+    if (target !== undefined && shown !== target) {
+      written.current = target;
       globalThis.history.replaceState(
         globalThis.history.state,
         '',

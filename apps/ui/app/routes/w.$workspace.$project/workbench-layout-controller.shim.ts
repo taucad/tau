@@ -2,7 +2,9 @@
  * The page's layout controller over a live project's `workbenchLayout` actor (app state orchestration plan § 4 A8b).
  *
  * The workbench and viewer Dockviews, the file tree and the arrange-workbench card still speak the
- * {@link WorkbenchLayoutController} contract the record host offered. Until A8c and A8d write the real adapters, this
+ * {@link WorkbenchLayoutController} contract the record host offered. The viewer's adapter (A8d) speaks it too, with
+ * a viewer opener for viewer intents and a request port for files shown in the viewer. Until A8c writes the workbench's
+ * adapter, this
  * shim speaks the layout actor's adapter protocol on their behalf: a registered `apply` is an adapter that attaches at
  * once, answers each `show` when its arrangement is on screen and takes every offered apply; a person's rearrangement
  * is `personEdited`; and the workbench's opener and file activation answer the layout's delivered pane intents. It
@@ -19,11 +21,12 @@ import type { editorMachine } from '#machines/editor.machine.js';
 import {
   restorePreviousLayout,
   selectLatestLayout,
+  sendPaneIntent,
   syncLayoutFacts,
   viewIdsIn,
 } from '#runtime/project-runtime.layout.js';
 import type { ProjectLayoutHost, WorkbenchLayoutRef } from '#runtime/project-runtime.layout.js';
-import { selectAppliedLayoutDigest, selectLayoutReady } from '#workbench-records/workbench-layout.machine.js';
+import { selectAppliedLayoutDigest, selectLayoutReadSettled } from '#workbench-records/workbench-layout.machine.js';
 import { intentOf } from '#workbench-records/pane-intents.js';
 import type { LayoutAdapterId } from '#workbench-records/pane-intents.js';
 import type {
@@ -44,8 +47,9 @@ export type WorkbenchIntentTarget = Readonly<{
   activateFile?: (path: string) => WorkbenchLaneNode | undefined;
 }>;
 
-/** The controller, with the workbench's intent target the workspace connects. */
+/** The controller, with the workbench's intent target the workspace connects and the viewer adapter's port (A8d). */
 export type WorkbenchLayoutControllerShim = WorkbenchLayoutController &
+  Required<Pick<WorkbenchLayoutController, 'connectViewerIntents' | 'requestViewerFile'>> &
   Readonly<{
     /** Connect the workbench's opener and file activation: delivered intents are applied through them. */
     connectIntents: (target: WorkbenchIntentTarget) => () => void;
@@ -139,6 +143,48 @@ export function createWorkbenchLayoutControllerShim(
   /* What each registered adapter shows: what it last applied, or what the person last arranged on it, or what
    * an intent opened on it. */
   const onScreen = new Map<LayoutAdapterId, string>();
+
+  /* The viewer adapter's opener for viewer intents (A8d); it connects before the viewer attaches. */
+  let viewerOpener: ((entryPath: string) => ViewerNode | undefined) | undefined;
+
+  /**
+   * Apply a delivered viewer intent through the viewer adapter's opener: it opens or activates the entry's viewer and
+   * answers with what the viewer then shows, which Dockview reports later and which is then not the person's edit.
+   */
+  const deliverToViewer = (
+    delivery: Readonly<{ intentId: string; deliveryId: number; target: DeliveredTarget }>,
+  ): void => {
+    const { intentId, deliveryId, target } = delivery;
+    // Rule 6: the layout hears the route the shell is on now, which drops what was queued under another. A delivery
+    // made inside the layout's own step reads it before that drop lands, so a route it has not heard yet drops it here.
+    const facts = host.facts();
+    const unheard = layout.getSnapshot().context.routeKey !== facts.routeKey;
+    syncLayoutFacts(layout, facts);
+    const { latest, intents } = layout.getSnapshot().context;
+    const entry = intentOf(intents, intentId);
+    const open = viewerOpener;
+    if (
+      unheard ||
+      open === undefined ||
+      target.kind !== 'pane' ||
+      entry?.state !== 'delivered' ||
+      entry.deliveryId !== deliveryId
+    ) {
+      layout.send({ type: 'intentUnavailable', intentId, deliveryId });
+      return;
+    }
+    const node = open(target.pane);
+    if (node !== undefined) {
+      onScreen.set('viewer', JSON.stringify(node));
+    }
+    if (node === undefined || latest === undefined || latest.refused) {
+      // The record could not be read, or was refused: the viewer opens, as it did before a request was an intent, but
+      // there is no record to hold it, so no edit.
+      layout.send({ type: 'intentUnavailable', intentId, deliveryId });
+      return;
+    }
+    layout.send({ type: 'intentApplied', intentId, deliveryId, node });
+  };
 
   /* The workbench's intent target, and the deliveries that wait for it to connect. */
   let intentTarget: WorkbenchIntentTarget | undefined;
@@ -291,8 +337,7 @@ export function createWorkbenchLayoutControllerShim(
           return;
         }
         if (adapter === 'viewer') {
-          // No viewer intent has a sender until A8d writes the viewer adapter.
-          layout.send({ type: 'intentUnavailable', intentId: event.intentId, deliveryId: event.deliveryId });
+          deliverToViewer(event);
           return;
         }
         const target = intentTarget;
@@ -386,7 +431,21 @@ export function createWorkbenchLayoutControllerShim(
       }
       layout.send({ type: 'personEdited', adapter: 'workbench', node });
     },
-    ready: () => selectLayoutReady(layout.getSnapshot()),
+    ready: () => selectLayoutReadSettled(layout.getSnapshot()),
+    connectViewerIntents: (open) => {
+      viewerOpener = open;
+      return () => {
+        if (viewerOpener === open) {
+          viewerOpener = undefined;
+        }
+      };
+    },
+    requestViewerFile: (entryPath) => {
+      sendPaneIntent(layout, host.facts(), {
+        source: 'person',
+        target: { kind: 'pane', adapter: 'viewer', pane: entryPath },
+      });
+    },
     connectIntents: (target) => {
       intentTarget = target;
       deliverHeld();

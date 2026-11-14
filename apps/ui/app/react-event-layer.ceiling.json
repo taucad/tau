@@ -74,7 +74,6 @@
   "apps/ui/app/routes/w.$workspace.$project/chat-parameters.tsx": 5,
   "apps/ui/app/routes/w.$workspace.$project/chat-print-prepare.tsx": 4,
   "apps/ui/app/routes/w.$workspace.$project/chat-print-program.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/chat-viewer-dockview.tsx": 5,
   "apps/ui/app/routes/w.$workspace.$project/chat-viewer.tsx": 6,
   "apps/ui/app/routes/w.$workspace.$project/project-command-items.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": 8,

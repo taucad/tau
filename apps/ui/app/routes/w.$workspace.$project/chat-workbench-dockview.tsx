@@ -4,6 +4,12 @@ import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sy
 import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
+import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
+import type {
+  PendingFilePlacement,
+  WorkbenchAdapterPorts,
+  WorkbenchDockOperations,
+} from '#workbench-records/workbench-adapter.js';
 import type { BrowserPanelParameters } from '#components/browser/browser-workbench.js';
 import {
   createContext,
@@ -55,7 +61,6 @@ import type {
 import { positionToDirection } from 'dockview-react';
 import { toast } from 'sonner';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { isSurfaceShipped, withoutUnshippedPanes } from '#workbench-records/surface-availability.js';
@@ -183,14 +188,6 @@ export type EditorPanelParameters = FilePaneState & {
   filePath: string;
   paneId?: string;
   readOnly?: boolean;
-};
-
-export type PendingFilePlacement = {
-  readonly position?: DockviewDidDropEvent['position'];
-  readonly group: DockviewGroupPanel | undefined;
-  readonly index?: number;
-  readonly placeholderId?: string;
-  readonly paneState?: FilePaneState;
 };
 
 type WorkbenchPlaceholderParameters = FilePaneState & { mode: 'launcher' | 'open-file' };
@@ -594,36 +591,6 @@ export function openFilesFromPlaceholder({ placeholder }: { readonly placeholder
   placeholder.api.updateParameters({ mode: 'open-file', filesOpen: true });
   placeholder.api.setTitle('Open file');
 }
-
-/** The file paths a workbench node's tabs show. */
-const workbenchFilePaths = (node: WorkbenchLaneNode): string[] =>
-  node.kind === 'group'
-    ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
-    : node.children.flatMap(workbenchFilePaths);
-
-/**
- * A workbench node without the tabs of the file at `path`. Only a group that held the file changes: its active tab
- * stays active, and only a removed active tab leaves the group to Dockview's choice.
- */
-const withoutFileTab = (node: WorkbenchLaneNode, path: string): WorkbenchLaneNode => {
-  if (node.kind !== 'group') {
-    return { ...node, children: node.children.map((child) => withoutFileTab(child, path)) };
-  }
-  const removed = (index: number): boolean => {
-    const tab = node.tabs[index];
-    return tab?.kind === 'file' && tab.path === path;
-  };
-  const tabs = node.tabs.filter((_tab, index) => !removed(index));
-  if (tabs.length === node.tabs.length) {
-    return node;
-  }
-  const { active, ...rest } = node;
-  if (active === undefined || removed(active)) {
-    return { ...rest, tabs };
-  }
-  const shift = node.tabs.slice(0, active).filter((_tab, index) => removed(index)).length;
-  return { ...rest, tabs, active: active - shift };
-};
 
 export function openWorkbenchFiles({
   api,
@@ -1200,6 +1167,57 @@ export function handleWorkbenchDrop({
   }
 }
 
+/** The workbench's Dockview operations for one view, which its adapter calls (A8c). */
+const dockOperationsFor = (profile: WorkbenchProfile): WorkbenchDockOperations => ({
+  reconcile: reconcileWorkbenchFiles,
+  filePathOf: (panel) => getFileParameters(panel)?.filePath,
+  panelRemoved: handleWorkbenchPanelRemoved,
+  openPanel: (api, panelId) => {
+    if (panelId === 'files') {
+      openWorkbenchFiles({ api });
+    } else {
+      openWorkbenchUtility(api, panelId);
+    }
+  },
+  isPanelOffered: (panelId) =>
+    isWorkbenchSurfaceAllowed(panelId, profile) &&
+    ((panelId !== 'kernel' && panelId !== 'console') || isFeatureEnabled('tauDebug')),
+  drop: handleWorkbenchDrop,
+  launcherId: (api) => api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id,
+  shownNode: (api) => fromDockview('workbench', api.toJSON()),
+  showNode: (api, node, { files, launcherId }) => {
+    api.fromJSON(
+      toDockview('workbench', withoutUnshippedPanes(node), {
+        dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
+        files,
+        ...(launcherId === undefined ? {} : { launcherId }),
+      }),
+      { reuseExistingPanels: true },
+    );
+  },
+});
+
+const workbenchDockOperations: Readonly<Record<WorkbenchProfile, WorkbenchDockOperations>> = {
+  editor: dockOperationsFor('editor'),
+  shared: dockOperationsFor('shared'),
+};
+
+/** The desktop Browser's tabs follow the workbench while it is not showing a record. */
+const connectWorkbenchBrowser: NonNullable<WorkbenchAdapterPorts['connectBrowser']> = (api, isRestoring) => {
+  const bridge = getBrowserBridge();
+  if (!bridge) {
+    return () => undefined;
+  }
+  return connectBrowserWorkbench({
+    api,
+    bridge,
+    isRestoring,
+    onError: (message) => {
+      toast.error(message);
+    },
+  });
+};
+
 function FileWorkbenchPane({
   paneId,
   filePath,
@@ -1344,6 +1362,10 @@ function isPaneReadOnly(fromDispatch: boolean | undefined, provenance: FileProve
   return (fromDispatch ?? false) || (provenance !== undefined && provenance.source !== 'project');
 }
 
+/** The path the editor holds for a pane now: a rename moves it in place, so an edit is checked against it. */
+const selectPanePath = (editorRef: WorkbenchAdapterPorts['editor'], paneId: string): string | undefined =>
+  editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId)?.path;
+
 export const FileEditor = memo(function ({
   paneId,
   filePath: filePathFromParams,
@@ -1461,8 +1483,7 @@ export const FileEditor = memo(function ({
   /* The pane's own flush points (D17): its editor losing focus, the pane hidden
    * by a tab switch, and the pane closing. */
   const flushPaneSave = useCallback((): void => {
-    const live = editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId);
-    documentSession?.flushSaves(live?.path ?? filePath);
+    documentSession?.flushSaves(selectPanePath(editorRef, paneId) ?? filePath);
   }, [documentSession, editorRef, filePath, paneId]);
   /* A flush is idempotent, so one also running when the pane is shown again, or its path changes, is harmless. */
   useEffect(() => {
@@ -1479,13 +1500,13 @@ export const FileEditor = memo(function ({
       if (readOnly || isAwaitingLargeObject || !documentSession) {
         return undefined;
       }
-      const live = editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId);
-      if (!live || live.path !== document.path) {
+      const livePath = selectPanePath(editorRef, paneId);
+      if (livePath !== document.path) {
         return undefined;
       }
-      const accepted = documentSession.apply(live.path, transaction);
+      const accepted = documentSession.apply(livePath, transaction);
       if (accepted) {
-        reportSave(live.path);
+        reportSave(livePath);
       }
       return accepted;
     },
@@ -1497,13 +1518,13 @@ export const FileEditor = memo(function ({
       if (readOnly || !documentSession) {
         return undefined;
       }
-      const live = editorRef.getSnapshot().context.openFiles.find((file) => file.paneId === paneId);
-      if (!live || live.path !== document.path || documentSession.get(live.path) !== document) {
+      const livePath = selectPanePath(editorRef, paneId);
+      if (livePath !== document.path || documentSession.get(livePath) !== document) {
         return undefined;
       }
       const changed = document[kind](paneId);
       if (changed) {
-        reportSave(live.path);
+        reportSave(livePath);
       }
       return changed;
     },
@@ -1877,6 +1898,19 @@ export function WorkbenchRightHeaderActions(properties: IDockviewHeaderActionsPr
   );
 }
 
+/* A key per adapter host: a Dockview made under one host is not reused under another. */
+const dockHostKeys = new WeakMap<WeakKey, number>();
+let nextDockHostKey = 0;
+const dockHostKey = (host: WeakKey): number => {
+  let key = dockHostKeys.get(host);
+  if (key === undefined) {
+    nextDockHostKey += 1;
+    key = nextDockHostKey;
+    dockHostKeys.set(host, key);
+  }
+  return key;
+};
+
 /**
  * WorkbenchDockview
  *
@@ -1896,26 +1930,19 @@ export const WorkbenchDockview = memo(function ({
   readonly onApiChange?: (api: DockviewApi | undefined) => void;
 } = {}): React.JSX.Element {
   const { editorRef, projectId } = useProject();
-  const { connectWorkbench, setWorkbenchOpen, layoutController } = useProjectWorkspace();
+  const workspace = useProjectWorkspace();
+  const { connectWorkbench, setWorkbenchOpen, layoutController } = workspace;
+  /* The adapter's host: the project's layout, or on a page without one (share and preview) the editor (A8c). */
+  const dockHost = workspace.layout ?? editorRef;
   const isMobile = useIsMobile();
   const isTauDebugEnabled = useFeature('tauDebug');
-  const [api, setApi] = useState<DockviewApi>();
-  const isRestoringLayout = useRef(false);
-
-  useEffect(() => {
-    const bridge = getBrowserBridge();
-    if (!api || !bridge || profile === 'shared') {
-      return;
-    }
-    return connectBrowserWorkbench({
-      api,
-      bridge,
-      isRestoring: () => isRestoringLayout.current,
-      onError: (message) => {
-        toast.error(message);
-      },
-    });
-  }, [api, profile]);
+  /* The Dockview and the host it was made under. A host replaced under this component (a new project runtime) remounts
+   * the Dockview (its key), and the new one is handed over in the commit after its `onReady`: the runtime starts in its
+   * provider's passive effect, after this component's commit, and an unstarted host would only queue the hand-over. */
+  const [ready, setReady] = useState<Readonly<{ api: DockviewApi; host: typeof dockHost }>>();
+  const api = ready?.host === dockHost ? ready.api : undefined;
+  const dockKey = dockHostKey(dockHost);
+  const dockId = useId();
 
   useEffect(() => {
     onApiChange?.(api);
@@ -1923,259 +1950,50 @@ export const WorkbenchDockview = memo(function ({
       onApiChange?.(undefined);
     };
   }, [api, onApiChange]);
-  const adoptedProjectionRef = useRef<string | undefined>(undefined);
-  const pendingUserFilePathRef = useRef<string | undefined>(undefined);
-  const pendingFilePlacementRef = useRef(new Map<string, PendingFilePlacement>());
-  const pendingRecordNodeRef = useRef<WorkbenchLaneNode | undefined>(undefined);
 
-  // Reconciler inputs: the open-tab set and active tab from the machine.
-  // The editor machine is the single source of truth — Dockview is a
-  // pure reconciler that diffs its current panels against this state.
-  const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
-  const activePaneId = useSelector(editorRef, (state) => state.context.activePaneId);
   const workbenchOpen = useSelector(editorRef, (state) => state.context.panelState.desktopLayout.workbenchOpen);
 
-  // Only a person-edited semantic projection writes layout.json.
-  useEffect(() => {
-    if (!api || profile === 'shared') {
-      return;
-    }
-
-    const disposable = api.onDidLayoutChange(() => {
-      if (isRestoringLayout.current) {
-        return;
-      }
-      try {
-        const node = fromDockview('workbench', api.toJSON());
-        if (JSON.stringify(node) === adoptedProjectionRef.current) {
-          return;
-        }
-        adoptedProjectionRef.current = undefined;
-        layoutController.personWorkbenchChanged(node);
-      } catch {
-        // Dockview can emit while a drag has a temporary unsupported intermediate group.
-      }
-    });
-
-    return () => {
-      disposable.dispose();
-    };
-  }, [api, layoutController, profile]);
-
-  const pendingRecordAppliedRef = useRef<((shown?: WorkbenchLaneNode) => void) | undefined>(undefined);
-  /* The node the layout handed the held apply: one that lands without a tab reports what it shows instead. */
-  const pendingRecordRequestedRef = useRef<WorkbenchLaneNode | undefined>(undefined);
-  const applyRecordNode = useCallback(
-    (node: WorkbenchLaneNode, applied?: (shown?: WorkbenchLaneNode) => void) => {
-      if (!api || profile === 'shared') {
-        return;
-      }
-      pendingRecordNodeRef.current = node;
-      if (applied !== undefined) {
-        pendingRecordAppliedRef.current = applied;
-        pendingRecordRequestedRef.current = node;
-      }
-      const device = editorRef.getSnapshot().context;
-      const files = Object.fromEntries(
-        device.openFiles.map((file) => [
-          file.path,
-          {
-            paneId: file.paneId,
-            filesWidth: device.fileSidebars[file.path],
-          },
-        ]),
-      );
-      const tabs = (current: WorkbenchLaneNode): string[] =>
-        current.kind === 'group'
-          ? current.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
-          : current.children.flatMap(tabs);
-      const missing = tabs(node).filter((path) => files[path] === undefined);
-      if (missing.length > 0) {
-        for (const path of missing) {
-          editorRef.send({ type: 'openFile', path, source: 'record' });
-        }
-        return;
-      }
-      const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-      // Launchers are window-local, so a record carries none; keep the open one beside the record's tabs.
-      const launcherId = api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id;
-      const landed = pendingRecordAppliedRef.current;
-      const requested = pendingRecordRequestedRef.current;
-      let shown: WorkbenchLaneNode | undefined;
-      isRestoringLayout.current = true;
-      try {
-        // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
-        // Browser tab. That is intended, since Browser tabs are window-local.
-        api.fromJSON(
-          toDockview('workbench', withoutUnshippedPanes(node), {
-            dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
-            files,
-            ...(launcherId === undefined ? {} : { launcherId }),
-          }),
-          { reuseExistingPanels: true },
-        );
-        shown = fromDockview('workbench', api.toJSON());
-        adoptedProjectionRef.current = JSON.stringify(shown);
-        pendingRecordNodeRef.current = undefined;
-        pendingRecordAppliedRef.current = undefined;
-        pendingRecordRequestedRef.current = undefined;
-      } finally {
-        isRestoringLayout.current = false;
-        active?.focus({ preventScroll: true });
-      }
-      // Answered once the restore is over: what the answer opens (a held pane or file intent) is not taken for it. An
-      // apply that lost a tab reports what the Dockview shows, so the arrangement the layout records is the one on screen.
-      landed?.(requested === undefined || requested === node ? undefined : shown);
-    },
-    [api, editorRef, profile],
+  const ports = useMemo<WorkbenchAdapterPorts>(
+    () => ({
+      editor: editorRef,
+      projectId,
+      profile,
+      isMobile,
+      controller: layoutController,
+      connectWorkbench,
+      setWorkbenchOpen,
+      navigate: requestEditorNavigation,
+      dock: workbenchDockOperations[profile],
+      connectBrowser: profile === 'shared' ? undefined : connectWorkbenchBrowser,
+    }),
+    [connectWorkbench, editorRef, isMobile, layoutController, profile, projectId, setWorkbenchOpen],
   );
 
-  // Registered before the opener connects below (effects run in order): an intent delivered at attach waits until the
-  // opener connects, and then opens on what the attach showed.
-  useEffect(() => {
-    if (!api || profile === 'shared') {
-      return;
-    }
-    return layoutController.registerWorkbench(applyRecordNode);
-  }, [api, applyRecordNode, layoutController, profile]);
-
-  /* The files open at the last render: a held apply's file that was open and is not now was closed by the person. */
-  const previousOpenPathsRef = useRef<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    const open = new Set(openFiles.map((file) => file.path));
-    const before = previousOpenPathsRef.current;
-    previousOpenPathsRef.current = open;
-    let pending = pendingRecordNodeRef.current;
-    if (!pending) {
-      return;
-    }
-    // A tab the person closed before the rest of the held apply's files opened is no longer wanted: the apply lands
-    // without it, as without a file that failed to open, rather than waiting for it forever.
-    for (const path of workbenchFilePaths(pending)) {
-      if (before.has(path) && !open.has(path)) {
-        pending = withoutFileTab(pending, path);
+  /* The Dockview reaches its adapter through this ref callback (I1, react-policy 5.5): once Dockview is ready the
+   * adapter holds its `DockviewApi` until the ref's cleanup, and owns every listener on it and on the editor. */
+  const handOver = useCallback(
+    // oxlint-disable-next-line no-restricted-types -- React passes null to a ref callback on detach.
+    (element: HTMLDivElement | null) => {
+      if (element === null || api === undefined) {
+        return undefined;
       }
-    }
-    pendingRecordNodeRef.current = pending;
-    if (workbenchFilePaths(pending).every((path) => open.has(path))) {
-      applyRecordNode(pending);
-    }
-  }, [applyRecordNode, openFiles]);
+      dockHost.send({ type: 'dockReady', adapter: 'workbench', dockId, api, ports });
+      // The host has spawned the adapter and finished its step: the adapter attaches now, with the layout idle, so
+      // the record applies before the reconciler adds the open files (see the adapter's `attach`).
+      selectDockAdapter(dockHost, dockId)?.send({ type: 'attach' });
+      return () => {
+        dockHost.send({ type: 'dockReleased', adapter: 'workbench', dockId });
+      };
+    },
+    [api, dockHost, dockId, ports],
+  );
 
-  // ─────────────────────────────────────────────────────────────────
-  // Reconciler: editor machine state → Dockview panels
-  //
-  // The reconciler is idempotent: each pass diffs `openFiles` against
-  // `api.panels` and issues add/remove/updateParameters/setTitle/
-  // setActive calls only where they differ. Because it converges on
-  // each render of the source state, no re-entry guard is needed
-  // (replacing the old `isSyncingFromMachine` ref pattern).
-  // ─────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!api || isRestoringLayout.current) {
-      return;
-    }
-
-    pendingUserFilePathRef.current = reconcileWorkbenchFiles({
-      api,
-      openFiles,
-      activePaneId,
-      isMobile,
-      pendingUserFilePath: pendingUserFilePathRef.current,
-      pendingFilePlacements: pendingFilePlacementRef.current,
-    });
-  }, [api, openFiles, activePaneId, isMobile]);
-
-  // Line navigation stays bound to fileOpened; activation is handed off by the persistent workspace.
-  // These were tangled into the old sync effect; they stay event-driven
-  // because they encode user intent ("the user just opened a file"),
-  // not state convergence.
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-    const openFileSub = editorRef.on('fileOpened', (event) => {
-      if (event.source !== 'record' && event.lineNumber) {
-        requestEditorNavigation({
-          projectId,
-          path: event.path,
-          paneId: editorRef.getSnapshot().context.activePaneId,
-          line: event.lineNumber,
-          column: event.column ?? 1,
-        });
-      }
-    });
-    return () => {
-      openFileSub.unsubscribe();
-    };
-  }, [api, editorRef, projectId]);
-
-  useEffect(() => {
-    const failureSubscription = editorRef.on('fileOpenFailed', (event) => {
-      const pendingPlacement = pendingFilePlacementRef.current.get(event.path);
-      if (pendingPlacement?.placeholderId) {
-        pendingFilePlacementRef.current.delete(event.path);
-      }
-      // A record apply held for this file would wait for it forever, and the layout holds every pane intent until the
-      // apply lands: it lands now without the file's tab.
-      const pending = pendingRecordNodeRef.current;
-      if (pending !== undefined && workbenchFilePaths(pending).includes(event.path)) {
-        applyRecordNode(withoutFileTab(pending, event.path));
-      }
-    });
-    return () => {
-      failureSubscription.unsubscribe();
-    };
-  }, [applyRecordNode, editorRef]);
-
-  // ─────────────────────────────────────────────────────────────────
-  // Reverse channel: user-initiated Dockview events → machine intents
-  //
-  // Because the reconciler is idempotent, no guard ref is needed: when
-  // the machine receives `closeFile` it removes the entry, the
-  // reconciler re-runs, sees the panel is already gone in
-  // `api.panels`, and skips the redundant remove. Same applies to
-  // `setActiveFile`.
-  // ─────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-
-    const activeDisposable = api.onDidActivePanelChange((event) => {
-      if (!event.panel) {
-        return;
-      }
-      const parameters = getFileParameters(event.panel);
-      if (parameters) {
-        editorRef.send({ type: 'setActiveFile', path: parameters.filePath });
-      }
-    });
-
-    const removeDisposable = api.onDidRemovePanel((event) => {
-      for (const [path, placement] of pendingFilePlacementRef.current) {
-        if (placement.placeholderId === event.id) {
-          pendingFilePlacementRef.current.delete(path);
-        }
-      }
-      handleWorkbenchPanelRemoved({
-        panel: event,
-        remainingPanelCount: api.panels.length,
-        isRestoringLayout: isRestoringLayout.current,
-        closeFile: (path) => {
-          editorRef.send({ type: 'closeFile', path });
-        },
-        closeWorkbench: () => {
-          setWorkbenchOpen(false);
-        },
-      });
-    });
-
-    return () => {
-      activeDisposable.dispose();
-      removeDisposable.dispose();
-    };
-  }, [api, editorRef, setWorkbenchOpen]);
+  const seedWorkbenchFromState = useCallback(
+    (dockApi: DockviewApi) => {
+      seedFreshWorkbench({ api: dockApi, profile });
+    },
+    [profile],
+  );
 
   // Tag outgoing tab drags with the editor MIME so the viewer can identify them
   useEffect(() => {
@@ -2221,33 +2039,20 @@ export const WorkbenchDockview = memo(function ({
     };
   }, [api]);
 
-  const seedWorkbenchFromState = useCallback(
-    (dockApi: DockviewApi) => {
-      seedFreshWorkbench({ api: dockApi, profile });
-    },
-    [profile],
-  );
-
   // Handle ready event: restore layout, validate concrete utilities, and seed
   // one guided launcher when no usable layout remains.
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const dockApi = event.api;
-      setApi(dockApi);
-
-      isRestoringLayout.current = true;
-      try {
-        restoreWorkbenchLayout({
-          api: dockApi,
-          layout: undefined,
-          isTauDebugEnabled,
-        });
-      } finally {
-        isRestoringLayout.current = false;
-      }
+      setReady({ api: dockApi, host: dockHost });
+      restoreWorkbenchLayout({
+        api: dockApi,
+        layout: undefined,
+        isTauDebugEnabled,
+      });
       seedWorkbenchFromState(dockApi);
     },
-    [isTauDebugEnabled, seedWorkbenchFromState],
+    [dockHost, isTauDebugEnabled, seedWorkbenchFromState],
   );
 
   useEffect(() => {
@@ -2297,69 +2102,23 @@ export const WorkbenchDockview = memo(function ({
     };
   }, [api]);
 
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-    /* What the Dockview shows now, read as its layout report reads it: its model changes synchronously, and only the
-     * report is deferred, so an intent's answer carries the pane it opened. */
-    const shownNode = (): WorkbenchLaneNode | undefined => {
-      try {
-        return fromDockview('workbench', api.toJSON());
-      } catch {
-        // Dockview can hold a temporary unsupported group mid-drag: the layout falls back to its arrangement.
-        return undefined;
-      }
-    };
-    return connectWorkbench(
-      (panelId) => {
-        // A pane this view does not offer is refused: its intent is unavailable, not applied.
-        if (!isWorkbenchSurfaceAllowed(panelId, profile)) {
-          return false;
-        }
-        if ((panelId === 'kernel' || panelId === 'console') && !isTauDebugEnabled) {
-          return false;
-        }
-        pendingUserFilePathRef.current = undefined;
-        if (panelId === 'files') {
-          openWorkbenchFiles({ api });
-        } else {
-          openWorkbenchUtility(api, panelId);
-        }
-        return shownNode();
-      },
-      (path) => {
-        pendingUserFilePathRef.current = path;
-        if (isRestoringLayout.current) {
-          return undefined;
-        }
-        // Connection can follow the first reconcile: consume the retained user intent against the current state.
-        const snapshot = editorRef.getSnapshot().context;
-        pendingUserFilePathRef.current = reconcileWorkbenchFiles({
-          api,
-          openFiles: snapshot.openFiles,
-          activePaneId: snapshot.activePaneId,
-          isMobile,
-          pendingUserFilePath: path,
-          pendingFilePlacements: pendingFilePlacementRef.current,
-        });
-        return shownNode();
-      },
-    );
-  }, [api, connectWorkbench, editorRef, isMobile, isTauDebugEnabled, profile]);
-
-  // Handle external file drops and cross-dockview viewer panel drops
+  // External file drops and cross-dockview viewer panel drops are placed by the adapter, which keeps the placements.
   const onDidDrop = useCallback(
     (event: DockviewDidDropEvent) => {
-      handleWorkbenchDrop({
-        event,
-        pendingFilePlacements: pendingFilePlacementRef.current,
-        openFile: (path) => {
-          editorRef.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || undefined });
-        },
-      });
+      const adapter = selectDockAdapter(dockHost, dockId);
+      if (adapter === undefined) {
+        handleWorkbenchDrop({
+          event,
+          pendingFilePlacements: new Map(),
+          openFile: (path) => {
+            editorRef.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || undefined });
+          },
+        });
+        return;
+      }
+      adapter.send({ type: 'dropped', event });
     },
-    [editorRef, profile],
+    [dockHost, dockId, editorRef, profile],
   );
 
   // Open-file action: delegate to editor machine which syncs with Dockview
@@ -2374,33 +2133,40 @@ export const WorkbenchDockview = memo(function ({
     (path, readOnly, placeholder) => {
       const { group } = placeholder.api;
       const parameters = getPlaceholderParameters(placeholder);
-      pendingFilePlacementRef.current.set(path, {
+      const placement: PendingFilePlacement = {
         group,
         index: group.panels.findIndex((panel) => panel.id === placeholder.id),
         placeholderId: placeholder.id,
         paneState: { filesOpen: parameters?.filesOpen, filesWidth: parameters?.filesWidth },
-      });
-      editorRef.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || readOnly });
+      };
+      const adapter = selectDockAdapter(dockHost, dockId);
+      if (adapter === undefined) {
+        editorRef.send({ type: 'openFile', path, source: 'user', readOnly: profile === 'shared' || readOnly });
+        return;
+      }
+      adapter.send({ type: 'openFile', path, readOnly, placement });
     },
-    [editorRef, profile],
+    [dockHost, dockId, editorRef, profile],
   );
 
   return (
     <WorkbenchProfileContext.Provider value={profile}>
       <WorkbenchOpenPlaceholderFileContext.Provider value={handlePlaceholderOpenFile}>
         <DockviewFileActionProvider value={handleOpenFile}>
-          <Dockview
-            components={components}
-            tabComponents={tabComponents}
-            watermarkComponent={WorkbenchEmptyGroupWatermark}
-            noPanelsOverlay='emptyGroup'
-            defaultTabComponent={WorkbenchDockviewTab}
-            getTabIcon={getWorkbenchTabIcon}
-            leftHeaderActionsComponent={WorkbenchLeftActions}
-            rightHeaderActionsComponent={WorkbenchRightHeaderActions}
-            onReady={onReady}
-            onDidDrop={onDidDrop}
-          />
+          <div key={dockKey} ref={handOver} className='contents'>
+            <Dockview
+              components={components}
+              tabComponents={tabComponents}
+              watermarkComponent={WorkbenchEmptyGroupWatermark}
+              noPanelsOverlay='emptyGroup'
+              defaultTabComponent={WorkbenchDockviewTab}
+              getTabIcon={getWorkbenchTabIcon}
+              leftHeaderActionsComponent={WorkbenchLeftActions}
+              rightHeaderActionsComponent={WorkbenchRightHeaderActions}
+              onReady={onReady}
+              onDidDrop={onDidDrop}
+            />
+          </div>
         </DockviewFileActionProvider>
       </WorkbenchOpenPlaceholderFileContext.Provider>
     </WorkbenchProfileContext.Provider>

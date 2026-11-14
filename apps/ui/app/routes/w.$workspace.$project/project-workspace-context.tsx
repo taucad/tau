@@ -51,6 +51,8 @@ type ProjectWorkspaceContextValue = {
     activateFile?: WorkbenchIntentTarget['activateFile'],
   ) => () => void;
   layoutController: WorkbenchLayoutController;
+  /** The live project's layout, which runs the workbench's adapter (A8c); absent on a page without one. */
+  layout: WorkbenchLayoutRef | undefined;
 };
 
 const ProjectWorkspaceContext = createContext<ProjectWorkspaceContextValue | undefined>(undefined);
@@ -251,11 +253,11 @@ export function ProjectWorkspaceProvider({
   const committedRouteKeyRef = useRef(routeKey);
   useLayoutEffect(() => {
     if (committedRouteKeyRef.current !== routeKey || committedEditorRef.current !== editorRef) {
+      // What was asked under the old route is dropped. The opener and file activation stay: they are the mounted
+      // workbench's, which connects and disconnects them itself (its adapter, A8c).
       pendingPreviewPanel.current = undefined;
-      openerRef.current = undefined;
       committedRouteKeyRef.current = routeKey;
       committedEditorRef.current = editorRef;
-      fileActivationRef.current = undefined;
       pendingUserFileRef.current = undefined;
       pendingRecordRecoveryFocus.current = false;
       recordRecoveryHadFocus.current = false;
@@ -373,11 +375,7 @@ export function ProjectWorkspaceProvider({
 
   const connectWorkbench = useCallback(
     (opener: WorkbenchIntentTarget['openPanel'], activateFile?: WorkbenchIntentTarget['activateFile']) => {
-      if (
-        !providerActiveRef.current ||
-        committedRouteKeyRef.current !== routeKey ||
-        committedEditorRef.current !== editorRef
-      ) {
+      if (!providerActiveRef.current) {
         return () => undefined;
       }
       openerRef.current = opener;
@@ -389,11 +387,11 @@ export function ProjectWorkspaceProvider({
       });
       const pendingPreview = pendingPreviewPanel.current;
       pendingPreviewPanel.current = undefined;
-      if (pendingPreview?.route === routeKey) {
+      if (pendingPreview?.route === committedRouteKeyRef.current) {
         opener(pendingPreview.panel);
       }
       const pendingFile = pendingUserFileRef.current;
-      if (activation && pendingFile?.route === routeKey) {
+      if (activation && pendingFile?.route === committedRouteKeyRef.current) {
         // Claim before delivery: reconnects and reentrant opens cannot replay this intent.
         pendingUserFileRef.current = undefined;
         if (selectOpenFilePaths(editorRef).includes(pendingFile.path)) {
@@ -410,7 +408,7 @@ export function ProjectWorkspaceProvider({
         }
       };
     },
-    [editorRef, layoutShim, routeKey],
+    [editorRef, layoutShim],
   );
 
   useKeybinding(
@@ -545,12 +543,14 @@ export function ProjectWorkspaceProvider({
       setChatOpen,
       connectWorkbench,
       layoutController,
+      layout: layoutRef,
       registerRecordRecoveryFocus,
       restoreRecordRecoveryFocus,
     }),
     [
       connectWorkbench,
       layoutController,
+      layoutRef,
       openPanel,
       setChatOpen,
       setWorkbenchOpen,

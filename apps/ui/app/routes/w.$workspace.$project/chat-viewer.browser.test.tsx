@@ -60,7 +60,8 @@ vi.mock('#hooks/use-project.js', () => ({
     return { geometryUnits: new Map([['main.tsx', actor]]), viewRecords: state.records };
   },
 }));
-vi.mock('#workbench-records/view-actions.js', () => ({
+vi.mock('#workbench-records/view-actions.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   useWorkbenchViewCommands: () => ({ edit: state.edits }),
 }));
 vi.mock('#routes/w.$workspace.$project/project-workspace-actions.js', () => ({

@@ -25,6 +25,11 @@
       "expect": "pass",
       "ref": "Two person opens and two closes interleaved with 3 requests over 3 projects, no Home, no library change; OpenCarriesRequest and every other safety property hold."
     },
+    "ProjectFocus.target-person-epoch.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Budget 1 over 2 projects, 3 requests, 1 library change, 2 person opens and 1 person close, no Home or failed flush or close: a library change drops every kept request, so focus withdraws a person's waiting open whose kept request was dropped; every target safety property holds. Keeps this interaction at pr since target-retained-session's pr form has no library change."
+    },
     "ProjectFocus.target-same-project.cfg": {
       "tier": "pr",
       "expect": "pass",

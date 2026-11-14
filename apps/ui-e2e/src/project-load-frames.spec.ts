@@ -1241,7 +1241,7 @@ const sourcePaneRegions = {
 const entryRead: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^alpha\.ts$`, milliseconds: 500 };
 
 /** How long F9's record runs on after the editor shows: past the late move its follow-up row catches. */
-const editorLayoutWindow = 6000;
+const editorLayoutWindow = 12_000;
 
 /** F9's forced load, measured once per run by whichever of its two rows runs first. */
 type SourcePaneLoad = {
@@ -1264,8 +1264,8 @@ const measureSourcePaneLoad = async (): Promise<SourcePaneLoad> => {
     await target.reload();
     await settleProject();
     await target.expectVisible(selectors.getByCss('.cm-content'), 60_000);
-    /* The follow-up row's late move comes 1 to 2.6 s after the mount, and the editor can show 2.4 s before this
-       line runs: a 2 s window missed it in 2 of 14 runs on the merged head, so the record runs on for 6 s. */
+    /* The follow-up row's late move came 1 to 6.5 s after the mount in 19 measured runs on the merged head, and the
+       editor can show 2.4 s before this line runs: a 2 s window missed it in 2 of 14 runs, so the record runs 12 s. */
     await target.delay(editorLayoutWindow);
     const record = await keepRecord('f9-wide');
     const held = await readDelayedRequests();

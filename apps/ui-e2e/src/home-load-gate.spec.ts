@@ -424,10 +424,10 @@ cloudDefectRow(
 
 /*
  * A15a frame rows for Home (loading states UX blueprint, § Red-first tests, Home), on A0.10's recorder: added after
- * A0.10 so later lanes only flip. H-a is S-flags' (#2180). The guards that hold on `main` assert as plain passing
- * rows: H-g, and H-b and H-c since A13 (#2164) and A15g (#2214) landed. Every other row stands as an expected failure,
- * and its title names the lane that flips it. H-f's cancel
- * case is red until A15d: on `main` an Enter typed before hydration becomes a line break, so there is no send to cancel.
+ * A0.10 so later lanes only flip. H-a is S-flags' (#2180). The guards that hold on `main` assert as plain passing rows:
+ * H-g, and H-b, H-c and H-d since A13 (#2164) and A15g (#2214) landed. Every other row stands as an expected failure,
+ * and its title names the lane that flips it. H-f's cancel case is red until A15d: on `main` an Enter typed before
+ * hydration becomes a line break, so there is no send to cancel.
  */
 
 /** A row's defect assertion, with what was measured in its message, so a failure names every frame it counted. */
@@ -505,7 +505,7 @@ knownDefect(
     expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
-      const { record } = await measureReturningReload({
+      const { record, since } = await measureReturningReload({
         viewport: 'wide',
         delays: [projectListingRead],
         label: 'h-c-wide',
@@ -517,6 +517,11 @@ knownDefect(
           });
         },
       });
+      const answeredAt = since + projectListingRead.milliseconds;
+      precondition(
+        record.projectRows.every((entry) => entry.t >= answeredAt),
+        `H-c: a project row drew before the listing was answered at ${answeredAt} ms, so something was remembered`,
+      );
       return record;
     },
     assert: (record) => {
@@ -550,7 +555,7 @@ knownDefect(
   'H-d (A15g): with the thumbnail read 2 s late, no card draws the no-preview icon before the read settles, and the media box keeps its box',
   {
     artifact: 'h-d-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () =>
       measureReturningReload({
@@ -563,7 +568,8 @@ knownDefect(
       const settledAt = since + thumbnailRead.milliseconds;
       const early = regionsOf(record, 'boxIcon').filter((entry) => entry.present && entry.t < settledAt);
       /* From the first frame with a card: the media box as it stood then, and every change after. */
-      const firstCard = regionsOf(record, 'card').find((entry) => entry.present);
+      /* A visible card: A15g's invisible stand-in card (`ProjectCardRoom`) holds the grid's place but is not drawn. */
+      const firstCard = regionsOf(record, 'card').find((entry) => entry.present && entry.visible);
       const allMedia = regionsOf(record, 'media');
       const atCard = firstCard === undefined ? undefined : allMedia.findLast((entry) => entry.t <= firstCard.t);
       const media =

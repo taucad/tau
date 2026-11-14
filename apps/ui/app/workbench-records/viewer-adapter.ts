@@ -517,12 +517,12 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
         if (activeViewerId === panel.id) {
           activeViewerId = undefined;
         }
-        if (api.panels.length === 0) {
-          // Dockview is still removing the panel: the group is given back once it has finished.
-          queueMicrotask(() => {
-            ensureViewerGroup(api);
-          });
-        }
+      }),
+    );
+    // Dockview removes the last panel's group once the panel has gone: the dock gets a group back to drop into then.
+    listen(
+      api.onDidRemoveGroup(() => {
+        ensureViewerGroup(api);
       }),
     );
 

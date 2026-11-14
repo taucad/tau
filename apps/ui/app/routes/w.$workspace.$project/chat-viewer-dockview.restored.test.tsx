@@ -212,6 +212,7 @@ vi.mock('#components/panes/dockview.js', () => ({
           return { dispose: () => addListeners.delete(listener) };
         },
         onDidRemovePanel: subscribe,
+        onDidRemoveGroup: subscribe,
         onWillDragPanel: subscribe,
         onUnhandledDragOver: subscribe,
       } as unknown as DockviewApi;

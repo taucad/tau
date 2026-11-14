@@ -1134,19 +1134,19 @@ describe('pre-receive version-number check (B6)', () => {
     /**
      * One annotated tag on the base commit named `name`: a version with `id`,
      * by a tagger at `seconds`. `record` replaces the whole `Tau-Tag` record,
-     * and `null` leaves the trailer out.
+     * and `null` leaves the trailer out. `object` names another entry.
      */
     const tag = async (
       ref: string,
       name: string,
-      options: Readonly<{ id?: string; seconds?: number; record?: unknown }> = {},
+      options: Readonly<{ id?: string; seconds?: number; record?: unknown; object?: string }> = {},
     ): Promise<string> => {
       const file = path.join(fixture, '.git', `tag-${String(Math.random()).slice(2)}`);
       const record = 'record' in options ? options.record : { version: 2, id: options.id ?? versionId(), name };
       await writeFile(
         file,
         [
-          `object ${base}`,
+          `object ${options.object ?? base}`,
           'type commit',
           `tag ${ref}`,
           `tagger Someone <${pusher}@users.noreply.tau.new> ${String(options.seconds ?? 1_790_000_000)} +0000`,
@@ -1239,6 +1239,23 @@ describe('pre-receive version-number check (B6)', () => {
     ]);
     expect(replaced.code).toBe(1);
     expect(replaced.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+  });
+
+  it('refuses a rename that moves a backed-up version to another entry (N1)', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    const id = versionId();
+    const held = await repository.tag('v4', 'Hinge', { id });
+    repository.git('update-ref', 'refs/tags/v4', held);
+    repository.git('commit', '--quiet', '--allow-empty', '-m', 'later');
+    const later = repository.git('rev-parse', 'HEAD');
+    /* The same id and a later tagger time, but on a later entry: git's fast-forward rule alone lets it through. */
+    const moved = await repository.push([
+      `${held} ${await repository.tag('v4', 'Hinge', { id, seconds: 1_790_000_200, object: later })} refs/tags/v4`,
+    ]);
+    expect(moved.code).toBe(1);
+    expect(moved.stderr).toContain(`Tau: refused refs/tags/v4 — ${versionNumberRefusals.GIT_PUSH_VERSION_MOVED}`);
+    expect(moved.stderr).toContain('Tau: nothing was written.');
   });
 
   it('tells two versions apart by id, even on the same entry by the same tagger in the same second', async () => {

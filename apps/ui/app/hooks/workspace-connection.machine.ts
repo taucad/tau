@@ -3,6 +3,7 @@ import type { DirectoryPick } from '#constants/browser.constants.js';
 import { hostPathName } from '#filesystem/desktop-bridge.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 export type PreparedWorkspaceCatalog = {
   readonly projectCount: number;
@@ -35,6 +36,10 @@ type WorkspaceConnectionContext = {
   catalog: PreparedWorkspaceCatalog | undefined;
   error: unknown;
   failedPhase: WorkspaceConnectionFailedPhase | undefined;
+  /** The first defect the root `onError` caught (MC-R12, D23); later ones are its consequences and are not kept. */
+  fault: string | undefined;
+  /** How many defects the root `onError` caught, so a caller waiting on an operation hears of each one. */
+  faults: number;
 };
 
 export type WorkspaceConnectionFailedPhase = 'registering' | 'mounting' | 'discovering' | 'publishing';
@@ -229,6 +234,18 @@ export const workspaceConnectionMachine = setup({
   },
 }).createMachine({
   id: 'workspace-connection',
+  /* A defect no transition modelled is recorded and reported once, and the machine stays where it was and keeps
+   * answering (MC-R12, D23, B2). Its host objects in context are accepted debt (D4): the machine is not rewritten. */
+  onError: ({ context, event }, enq) => {
+    const faults = context.faults + 1;
+    if (context.fault !== undefined) {
+      return { context: { faults } };
+    }
+    enq(() => {
+      reportAppRuntimeFault(event.error);
+    });
+    return { context: { fault: faultMessage(event.error, 'workspace connection fault'), faults } };
+  },
   context: ({ input }) => ({
     services: input,
     operationId: undefined,
@@ -238,6 +255,8 @@ export const workspaceConnectionMachine = setup({
     catalog: undefined,
     error: undefined,
     failedPhase: undefined,
+    fault: undefined,
+    faults: 0,
   }),
   initial: 'idle',
   on: {

@@ -99,6 +99,10 @@ const build = async (version: string, full = false) => {
     { mode: 0o755 },
   );
   await writeFile(join(app, 'lazy-resource'), version);
+  // The Terminal's store guard, as a linux-x64 release archive carries it (LP8).
+  await mkdir(join(app, 'resources/store-guard/linux-x64'), { recursive: true });
+  await writeFile(join(app, 'resources/store-guard/linux-x64/tau-store-guard'), '#!/bin/sh\n', { mode: 0o755 });
+  await writeFile(join(app, 'resources/store-guard/linux-x64/NOTICE'), 'notice\n');
   if (full) {
     await writeFile(join(app, 'too-large'), Buffer.alloc(2 * 1024 * 1024, 1));
   }
@@ -111,6 +115,10 @@ const build = async (version: string, full = false) => {
   });
 };
 const first = await build('1.0.1');
+// The runtime package ships the store guard executable beside the app, with its NOTICE (LP8).
+const runtimeListing = command('dpkg-deb', ['-c', first[0]!]);
+assert.match(runtimeListing, /^-rwxr-xr-x .*\/resources\/store-guard\/linux-x64\/tau-store-guard$/mu);
+assert.match(runtimeListing, /\/resources\/store-guard\/linux-x64\/NOTICE$/mu);
 const runtimeDependencies = command('dpkg-deb', ['-f', first[0]!, 'Depends']);
 assert.match(runtimeDependencies, /(?:^|, )ripgrep(?:,|$)/u);
 assert.match(runtimeDependencies, /(?:^|, )socat(?:,|$)/u);

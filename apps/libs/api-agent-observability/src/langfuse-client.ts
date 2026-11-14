@@ -41,7 +41,8 @@ export type ScoreOutcome = SendOutcome;
 export const scoreAttempts = 3;
 
 /** What one reconciliation read established; `unavailable` is never absence. */
-export type FindOutcome = 'present' | 'absent' | 'unavailable';
+/** `present-root` is a found observation with no parent: a run's root or a helper or direct call, which is a trace too. */
+export type FindOutcome = 'present' | 'present-root' | 'absent' | 'unavailable';
 
 /**
  * What one bulk trace deletion request established. Langfuse queues the
@@ -303,8 +304,9 @@ export class LangfuseClient {
         if (!Array.isArray(data)) {
           return 'unavailable';
         }
-        if (data.some((row: unknown) => field(row, 'id') === identity.spanId)) {
-          return 'present';
+        const found: unknown = data.find((row: unknown) => field(row, 'id') === identity.spanId);
+        if (found !== undefined) {
+          return field(found, 'parentObservationId') === null ? 'present-root' : 'present';
         }
         const cursor = field(field(body, 'meta'), 'cursor');
         if (typeof cursor !== 'string' || cursor.length === 0) {

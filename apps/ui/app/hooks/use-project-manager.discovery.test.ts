@@ -2,10 +2,9 @@
 /**
  * Discovery rows of the library (charter I7, I9; app-state orchestration A0.4).
  *
- * Characterisation of `ProjectManagerProvider` as it is today, except where a
- * row is written `it.fails`: there today's code breaks the invariant its title
- * names, and the failure is that invariant's own assertion. The fixing lane
- * flips the row and never deletes it.
+ * Characterisation of `ProjectManagerProvider`. A0.4 wrote the rows where the
+ * pre-A3b code broke the invariant its title names as `it.fails`; A3b, which
+ * wired the library machines, flipped them to `it`.
  *
  * Ordering is held by deferred promises. `settle` drains every pending
  * continuation through the fake clock, which fires nothing: none of these
@@ -13,8 +12,9 @@
  */
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { renderHook, act } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
 import type {
@@ -29,7 +29,7 @@ import type { Project } from '@taucad/types';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
-import type { ProjectListing } from '#hooks/use-project-manager.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -118,7 +118,8 @@ const mockFileManager = {
   workspace: { syncProjectRoots: mockSyncProjectRoots },
   scopedStorage: { readShallowDirectory: vi.fn(async () => []) },
 };
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
+/* A4b: the library reads the root file facade the runtime builds; here, one over the double. */
+const rootFiles = testRootFiles(mockFileManager);
 
 // ── Durable route configuration double ──────────────────────────────────────
 
@@ -245,7 +246,7 @@ const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>(
 const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
   let library = libraries.get(queryClient);
   if (library === undefined) {
-    library = new ProjectLibrary({ queryClient });
+    library = new ProjectLibrary({ queryClient, rootFiles: () => rootFiles });
     library.start();
     libraries.set(queryClient, library);
     startedLibraries.push(library);
@@ -276,7 +277,7 @@ const createHarness = () => {
       createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
-  return { ...renderHook(() => useProjectManager(), { wrapper }), publishedListings };
+  return { ...renderHook(() => useProjectManager(), { wrapper }), publishedListings, queryClient };
 };
 
 /** Drain every pending continuation; the fake clock yields once and fires nothing. */
@@ -378,7 +379,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
       expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
     });
 
-    it.fails.each(['scans', 'makes its last read before writing'] as const)(
+    it.each(['scans', 'makes its last read before writing'] as const)(
       'I7: should not write route configs from a pass superseded by a newer epoch while it %s',
       async (moment) => {
         // The stale pass finds the project with no route config, so applying it upserts one.
@@ -411,7 +412,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
       },
     );
 
-    it.fails('I7: should not prune orphans from a pass whose epoch moved while it readied the worker', async () => {
+    it('I7: should not prune orphans from a pass whose epoch moved while it readied the worker', async () => {
       // The first pass holds an orphan; once the epoch moves, the current pass holds none.
       mockGetAllProjectFileSystemConfigs
         .mockResolvedValueOnce([projectConfig, orphanConfig])
@@ -436,7 +437,7 @@ describe('useProjectManager discovery (I7, I9)', () => {
       expect(mockDeleteProjectResources).not.toHaveBeenCalled();
     });
 
-    it.fails.each(['scans', 'enriches its listing'] as const)(
+    it.each(['scans', 'enriches its listing'] as const)(
       'I7: should not publish a workspace catalog from a pass superseded by a newer epoch while it %s',
       async (moment) => {
         const stale = moment === 'scans' ? heldScan(validProjectDiscovery) : undefined;
@@ -470,6 +471,20 @@ describe('useProjectManager discovery (I7, I9)', () => {
     );
   });
 
+  // ── A failed pass ─────────────────────────────────────────────────────────
+
+  describe('a pass that fails', () => {
+    it("should reject the listing with the scan's own error, as the direct pass did", async () => {
+      const broken = new TypeError('manifest unreadable');
+      mockListProjectManifests.mockRejectedValueOnce(broken);
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectListing()).rejects.toBe(broken);
+      });
+    });
+  });
+
   // ── Write stop ────────────────────────────────────────────────────────────
 
   describe('a pass skipped during a write stop', () => {
@@ -499,6 +514,30 @@ describe('useProjectManager discovery (I7, I9)', () => {
 
       expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
       expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledOnce();
+    });
+
+    it('I9: should refetch the projects listing as the skipped pass is redone, so the stop-time listing is replaced', async () => {
+      mockBuildSuperseded = true;
+      const { result, publishedListings, queryClient } = createHarness();
+      // The listing a person sees: one observed `['projects']` query, as the sidebar's.
+      const observer = new QueryObserver(queryClient, {
+        queryKey: ['projects'],
+        queryFn: async () => result.current.getProjectListing(),
+      });
+      const unsubscribe = observer.subscribe(() => undefined);
+      await settle();
+      expect(publishedListings).toHaveLength(1);
+      expect(mockListProjectManifests).toHaveBeenCalledOnce();
+
+      mockBuildSuperseded = false;
+      act(() => {
+        announceBuildSkew();
+      });
+      await settle();
+
+      expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+      expect(publishedListings).toHaveLength(2);
+      unsubscribe();
     });
 
     it('I9: should let a pass still in flight end before redoing the writes it skipped', async () => {

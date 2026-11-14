@@ -26,9 +26,21 @@ const heapThresholdBytes = 1024 * 1024 * 1024 * 0.8;
  */
 const sharedDependencyIndicators: ReadonlySet<string> = new Set(['redis', 'database', 's3']);
 
+/**
+ * Probes in a row a shared dependency must be down on this Machine before it is reported to Sentry. One slow answer
+ * is the dependency's tail latency (TAU-API-6: R2 occasionally misses the 1.5 s deadline once and answers the next
+ * probe); two in a row is a degradation worth an event. The streak counts probes from any caller of this
+ * Machine's `/health/ready`; with Fly's 10 s check as the only caller that is about 10 s of failure. Every down probe is still logged and
+ * counted, so the metric keeps the full rate.
+ */
+const sharedDependencyReportStreak = 2;
+
 @Controller('health')
 export class HealthController {
   private readonly logger = new Logger(HealthController.name);
+
+  /** Down probes in a row per indicator on this Machine; an indicator leaves the map when it answers up. */
+  private readonly consecutiveFailures = new Map<string, number>();
 
   public constructor(
     private readonly health: HealthCheckService,
@@ -58,20 +70,23 @@ export class HealthController {
    * but a down shared dependency leaves the probe at 200 with the indicator under `error`,
    * because every Machine would refuse together.
    *
-   * Every down indicator, refusing or not, is logged as a warning, counted per indicator, and
-   * reported to Sentry grouped by indicator rather than as one anonymous `ServiceUnavailableException`.
+   * Every down indicator, refusing or not, is logged as a warning and counted per indicator. It is
+   * reported to Sentry grouped by indicator rather than as one anonymous `ServiceUnavailableException`:
+   * a Machine check at once, a shared dependency once it is down on two probes in a row (TAU-API-6).
    */
   @Get('ready')
   @HealthCheck()
   public async checkReady(): Promise<HealthCheckResult> {
     try {
-      return await this.health.check([
+      const ready = await this.health.check([
         async () => this.redisHealth.isHealthy(),
         async () => this.databaseHealth.isHealthy(),
         async () => this.s3Health.isHealthy(),
         async () => this.gitToolchainHealth.isHealthy(),
         async () => this.memory.checkHeap('memory_heap', heapThresholdBytes),
       ]);
+      this.consecutiveFailures.clear();
+      return ready;
     } catch (error) {
       if (!(error instanceof ServiceUnavailableException)) {
         throw error;
@@ -87,9 +102,20 @@ export class HealthController {
         { failures },
         refuses ? 'Readiness refused: Machine check down' : 'Readiness degraded: shared dependency check down',
       );
+      const streaks = new Map(
+        failures.map((failure) => [failure.indicator, (this.consecutiveFailures.get(failure.indicator) ?? 0) + 1]),
+      );
+      this.consecutiveFailures.clear();
+      for (const [indicator, streak] of streaks) {
+        this.consecutiveFailures.set(indicator, streak);
+      }
       for (const failure of failures) {
         this.metrics.healthReadinessFailures.add(1, { [AttributeKey.HEALTH_INDICATOR]: failure.indicator });
-        reportReadinessFailure(failure);
+        const consecutiveFailures = streaks.get(failure.indicator) ?? 1;
+        const shared = sharedDependencyIndicators.has(failure.indicator);
+        if (!shared || consecutiveFailures >= sharedDependencyReportStreak) {
+          reportReadinessFailure({ ...failure, consecutiveFailures });
+        }
       }
       if (!refuses) {
         return { ...result, status: 'ok' };

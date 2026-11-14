@@ -26,6 +26,10 @@ export type WorkbenchLayoutSnapshot = Readonly<{
   restoreTarget?: string;
   restoreUnavailable?: string;
   restoring?: boolean;
+  /** The layout revision this page acknowledged on screen (rule 4); absent while unknown, as while no adapter is attached. */
+  appliedDigest?: `sha256:${string}` | 'missing';
+  /** The latest restore notice for the page's live region. */
+  notice?: Readonly<{ text: string; version: number }>;
 }>;
 
 /** Project-scoped page commands. Restore writes the saved projection as an authoritative record edit. */
@@ -36,21 +40,26 @@ export type WorkbenchLayoutController = Readonly<{
     expected: Readonly<{ layoutDigest: string; target: string; eligible: () => boolean }>,
   ) => Promise<boolean>;
   registerViewer: (apply: (node: ViewerNode, applied: () => void) => void) => () => void;
-  registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
-  personViewerChanged: (node: ViewerNode) => void;
   /**
-   * The person changed the workbench arrangement. A change given as a function is applied to the record's arrangement;
-   * `unapplied` runs instead when the record cannot take it (its first read failed, or it holds a refused record), so
-   * the caller can show the pane another way.
+   * Register the workbench's apply. It calls `applied` once the node is on screen, with the node it shows instead when
+   * that differs (a held apply that landed without a tab whose file did not open).
    */
-  personWorkbenchChanged: (
-    node: WorkbenchLaneNode | ((current: WorkbenchLaneNode) => WorkbenchLaneNode),
-    unapplied?: () => void,
-  ) => void;
+  registerWorkbench: (
+    apply: (node: WorkbenchLaneNode, applied: (shown?: WorkbenchLaneNode) => void) => void,
+  ) => () => void;
+  personViewerChanged: (node: ViewerNode) => void;
+  /** The person changed the workbench arrangement. */
+  personWorkbenchChanged: (node: WorkbenchLaneNode) => void;
   /**
-   * Whether the record's first read has finished. Until then the record's arrangement replaces whatever the workbench
-   * shows when it arrives, so a pane opened earlier must be asked for as a change ({@link personWorkbenchChanged} with a
-   * function), which is applied on top of the record once it is read.
+   * Connect the viewer adapter's opener for delivered viewer intents (A8d). Absent where no layout actor runs: the
+   * viewer then opens a requested file at once.
+   */
+  connectViewerIntents?: (open: (entryPath: string) => ViewerNode | undefined) => () => void;
+  /** Ask the layout to show an entry in the viewer, as a pane intent (A8d). Present with `connectViewerIntents`. */
+  requestViewerFile?: (entryPath: string) => void;
+  /**
+   * Whether the record's first read has settled: it was read, or it stopped retrying. Until then a pane intent waits in
+   * the layout (A8b), and the viewer shows no empty state, since the record has not yet arranged it (A8d, M2).
    */
   ready: () => boolean;
 }>;

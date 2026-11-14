@@ -160,15 +160,12 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
         return;
       }
       actorSentFor = { user, anonymous, salt };
+      /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
+      const commitAuthor = githubProjectBinding.get(projectId)?.author;
       client.send({
         command: 'setActor',
-        actor: revisionUserActor({
-          workspace,
-          user,
-          anonymous,
-          salt,
-          commitIdentity: githubProjectBinding.get(projectId)?.author,
-        }),
+        actor: revisionUserActor({ workspace, user, anonymous, salt }),
+        ...(commitAuthor === undefined ? {} : { commitAuthor }),
       });
     };
 

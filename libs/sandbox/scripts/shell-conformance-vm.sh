@@ -16,7 +16,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 tier="${TAU_SHELL_TIER:-full}"
 [[ "$tier" == full || "$tier" == semantics ]] || { printf 'Unknown shell tier: %s\n' "$tier" >&2; exit 1; }
 # The guest takes the projects as a comma list of shape-checked names.
-all_projects='["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"]'
+all_projects='["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop-services-host","desktop-e2e"]'
 projects="$(jq -r 'if type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z0-9-]+$")) then join(",") else error("projects must be a non-empty JSON array of project names") end' <<< "${TAU_SHELL_PROJECTS:-$all_projects}")"
 # The same dated, checksum-pinned images as apps/desktop/scripts/hosted-linux-vm.sh.
 case "$TAU_VM_DISTRO" in
@@ -140,7 +140,11 @@ const files = await buildLinuxAptPackages({
 console.log(files.join('\\n'));
 PRODUCER
 (umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register "$work/bwrap-app/build.mts" "$work/bwrap-app/app" "$work/bwrap-fixture-production")
-ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/bwrap-fixture-production ~/node ~/tau'
+# The Linux Terminal's git store guard, built here from its pinned toolchain and locked crates as a release builds it
+# (sandbox:build:store-guard, blueprint LP2); the guest runs it under the selector's bwrap and never compiles it.
+(umask 022 && cd "$REPO_ROOT" && CI=true node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts)
+ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/bwrap-fixture-production ~/node ~/tau ~/store-guard'
+tar -C "$REPO_ROOT/out/store-guard/linux-x64" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/store-guard'
 for fixture in bwrap-fixture bwrap-fixture-production; do
   for deb in "$work/$fixture"/*.deb; do
     # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.

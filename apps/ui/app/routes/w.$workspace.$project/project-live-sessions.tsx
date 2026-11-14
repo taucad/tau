@@ -19,8 +19,7 @@ import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-rec
 import { ProjectPrintRouteIntent } from '#routes/w.$workspace.$project/project-print-route-intent.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
-import { EntriesSyncHost } from '#routes/w.$workspace.$project/entries-sync-host.js';
-import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
+import { SessionFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { useModels } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -69,11 +68,12 @@ import {
   registerProjectSessionServices,
   reportRegionFailed,
   reportRegionReady,
+  selectProjectSessionFileManager,
 } from '#services/sessions-store.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import { useTauCloudIntent, useTauCloudIntentConnection } from '#hooks/use-cloud-projects.js';
-import type { TauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import {
   useRevisionClientLifecycle,
   useRevisionClientStatus,
@@ -419,12 +419,6 @@ function ProjectSessionBinding({
     useCallback(() => isRecordingEditorConflict(projectId), [projectId]),
   );
 
-  useEffect(() => {
-    if (viewsReady) {
-      reportRegionReady(projectId, 'views');
-    }
-  }, [projectId, viewsReady]);
-
   /* One report for one region (R4): a runtime whose kernel was refused is not
    * ready, however loaded the project itself is, and the sidebar row says which
    * refusal until the kernel is back. */
@@ -637,9 +631,18 @@ function ProjectSession({
     projectId,
     nativeKernelId,
   });
+  /* A6c: the session's `fileManager` child built this project's file manager through the host; the provider is a view
+   * of it and creates nothing. */
+  const fileManagerRef = useSelector(useProjectSession(projectId), (snapshot) =>
+    snapshot === undefined ? undefined : selectProjectSessionFileManager(snapshot),
+  );
   const focused = isFocused === true;
   return (
-    <HomeFileManagerProvider projectId={projectId} rootDirectory={`/projects/${projectId}`}>
+    <SessionFileManagerProvider
+      fileManagerRef={fileManagerRef}
+      projectId={projectId}
+      rootDirectory={`/projects/${projectId}`}
+    >
       <WebglContextTrackerProvider>
         <ProjectProvider
           key={kernelSelection.key}
@@ -651,7 +654,6 @@ function ProjectSession({
         >
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
           <ViewSettingsSyncHost />
-          <EntriesSyncHost />
           <ProjectSessionBinding projectId={projectId} isFocused={focused} />
           {focused ? (
             <>
@@ -678,7 +680,7 @@ function ProjectSession({
           ) : null}
         </ProjectProvider>
       </WebglContextTrackerProvider>
-    </HomeFileManagerProvider>
+    </SessionFileManagerProvider>
   );
 }
 

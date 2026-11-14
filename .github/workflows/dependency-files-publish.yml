@@ -1,7 +1,7 @@
 # The producer of third-party dependency files: it serves, from both locked dependency hosts, the files a
 # `tau-plugin.json` pins only by a third-party URL, so a locked `tau prepare` (`TAU_ACQUISITION=locked`) can
-# fetch them from `TAU_DEPENDENCY_MIRROR`. Today that is the PicoGK `dotnet` runtime archives, pinned from
-# `builds.dotnet.microsoft.com` by the sha512 Microsoft publishes.
+# fetch them from `TAU_DEPENDENCY_MIRROR`. Today that is the PicoGK `dotnet` runtime archives from
+# `builds.dotnet.microsoft.com`, pinned by the sha256 of the bytes whose sha512 Microsoft publishes.
 #
 # Dispatched on `main`, the `tag` job downloads every `dotnet` file `packages/plugins/picogk/tau-plugin.json`
 # pins, refuses unless each matches its pinned integrity and byte length, and names the bytes with a key: the

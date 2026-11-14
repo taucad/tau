@@ -1,0 +1,3 @@
+# The Linux Terminal's store guard is built by libs/sandbox/scripts/build-store-guard.mts, never committed.
+*
+!.gitignore

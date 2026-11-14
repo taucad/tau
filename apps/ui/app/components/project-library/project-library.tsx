@@ -66,7 +66,7 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { Skeleton } from '@taucad/ui/components/skeleton';
-import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
+import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
 import {
   ProjectCard,
   ProjectCardCadPreview,
@@ -262,6 +262,7 @@ export function ProjectLibrary({
     isSettled: isCloudSettled,
     isFetching: isCloudFetching,
     isFailed: isCloudFailed,
+    cloud,
     retry: retryCloud,
   } = useCloudProjects();
   const auth = useResolvedAuth();
@@ -702,7 +703,7 @@ export function ProjectLibrary({
         </div>
       ) : null}
 
-      {!showDeleted && isCloudFailed && auth === 'authed' ? (
+      {!showDeleted && cloud === 'failed' && auth === 'authed' ? (
         <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-md border p-4'>
           <span className='text-sm'>
             Tau Cloud projects could not be loaded. Projects on this device are still available.
@@ -717,7 +718,7 @@ export function ProjectLibrary({
             Retry Tau Cloud
           </Button>
         </div>
-      ) : !showDeleted && auth === 'authed' && isCloudFetching ? (
+      ) : !showDeleted && auth === 'authed' && cloud === 'fetching' ? (
         <div role='status' aria-busy='true' className='flex items-center gap-2 text-sm text-muted-foreground'>
           <Loader className='size-4' />
           Loading Tau Cloud projects…

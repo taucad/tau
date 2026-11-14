@@ -116,7 +116,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: 'N2: requests get-session, /v1/projects, /v1/agents and the file-manager worker once per load of Home',
     },
     async (defect) => {

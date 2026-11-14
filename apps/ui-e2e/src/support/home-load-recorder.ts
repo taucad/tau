@@ -783,6 +783,19 @@ export const recordProjectLoad = (input: {
       }
     }
   };
+  const trackComposer = (frame: ProjectLoadFrame): void => {
+    const composer = document.querySelector(probe.composer);
+    if (!composer) {
+      return;
+    }
+    const rect = composer.getBoundingClientRect();
+    const face = { y: Math.round(rect.y), height: Math.round(rect.height) };
+    const key = JSON.stringify(face);
+    if (key !== lastComposer) {
+      lastComposer = key;
+      keep(record.composer, { ...frame, ...face });
+    }
+  };
   const sample = (stamp: number): void => {
     record.frames += 1;
     const frame: ProjectLoadFrame = { frame: record.frames, t: now() };
@@ -802,16 +815,7 @@ export const recordProjectLoad = (input: {
         keep(record.placeholderWorkbenchLane, { ...frame, width: Math.round(width) });
       }
     }
-    const composer = document.querySelector(probe.composer);
-    if (composer) {
-      const rect = composer.getBoundingClientRect();
-      const face = { y: Math.round(rect.y), height: Math.round(rect.height) };
-      const key = JSON.stringify(face);
-      if (key !== lastComposer) {
-        lastComposer = key;
-        keep(record.composer, { ...frame, ...face });
-      }
-    }
+    trackComposer(frame);
     scanProjectRows(frame);
     if (input.laneBorders) {
       scanLaneBorders(frame);
@@ -1331,7 +1335,8 @@ export const firstDelayedRead = (deliveries: WorkerReadDeliveries, rule: WorkerR
  * `external-target.ts`. */
 declare module 'vitest/browser' {
   interface BrowserCommands {
-    uiDelayTargetRequests: (pattern: string, milliseconds: number) => Promise<void>;
+    uiDelayTargetRequests: (pattern: string, milliseconds: number | 'until-released') => Promise<void>;
+    uiReleaseTargetRequests: () => Promise<void>;
     uiReadDelayedTargetRequests: () => Promise<readonly string[]>;
     uiOpenBeforeHydration: (request: EarlyInputRequest) => Promise<EarlyInput>;
   }
@@ -1385,6 +1390,18 @@ export const openBeforeHydration = async (request: EarlyInputRequest): Promise<E
  */
 export const delayRequests = async (pattern: string, milliseconds: number): Promise<void> =>
   commands.uiDelayTargetRequests(pattern, milliseconds);
+
+/**
+ * Hold every request whose URL matches `pattern` until {@link releaseHeldRequests} (at most 30 s), so the acts a row
+ * makes before what the request starts (typing before hydration) come first however slow the runner is.
+ *
+ * @param pattern - A regular expression source matched against the request URL.
+ */
+export const holdRequestsUntilReleased = async (pattern: string): Promise<void> =>
+  commands.uiDelayTargetRequests(pattern, 'until-released');
+
+/** Let the requests {@link holdRequestsUntilReleased} holds go on. */
+export const releaseHeldRequests = async (): Promise<void> => commands.uiReleaseTargetRequests();
 
 /** The URLs {@link delayRequests} held in this target context so far. */
 export const readDelayedRequests = async (): Promise<readonly string[]> => commands.uiReadDelayedTargetRequests();

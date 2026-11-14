@@ -24,6 +24,8 @@ import {
   projectRowMoves,
   projectLoadProbe,
   readDelayedRequests,
+  holdRequestsUntilReleased,
+  releaseHeldRequests,
   readProjectLoad,
   firstDelayedRead,
   readLaneBordersNow,
@@ -1127,7 +1129,7 @@ knownDefect(
 );
 
 knownDefect(
-  'F7 (A15d): text typed at first paint on a project URL, with the entry chunk 2 s late, is in the composer after hydration with its caret and focus, and the composer never moved',
+  'F7 (A15d): text typed at first paint on a project URL, with the entry chunk held until the typing is done, is in the composer after hydration with its caret and focus, and the composer never moved',
   {
     artifact: 'f7-wide',
     expectedFailure: true,
@@ -1136,7 +1138,8 @@ knownDefect(
       const { path } = await seedProjects('wide');
       await target.navigate('/');
       await target.expectVisible(composer, 60_000);
-      await delayRequests(entryChunk, 2000);
+      /* Hydration waits for the typing, not for a fixed time a loaded runner can outlast. */
+      await holdRequestsUntilReleased(entryChunk);
       const early = await openBeforeHydration({
         path,
         input: anyComposerInput,
@@ -1145,6 +1148,7 @@ knownDefect(
         wait: 1500,
         settle: 0,
       });
+      await releaseHeldRequests();
       await settleProject();
       const held = await readDelayedRequests();
       precondition(
@@ -1582,6 +1586,10 @@ knownDefect(
       );
       const [first] = shown;
       const text = regionsOf(record, 'text').find((entry) => entry.present && entry.text !== '' && entry.t >= click.t);
+      const afterAnswer = record.frameTimes.filter((t) => t > answeredAt && (text === undefined || t < text.t));
+      const framesWithoutText = afterAnswer.length;
+      const stamps = [answeredAt, ...afterAnswer, ...(text === undefined ? [] : [text.t])];
+      const longestFrame = Math.round(Math.max(0, ...stamps.slice(1).map((t, index) => t - stamps[index]!)));
       expectMeasured(
         {
           spans: shown.length,
@@ -1589,9 +1597,12 @@ knownDefect(
           revealBeforeAnswer: first === undefined ? undefined : first.from <= answeredAt + 20,
           /* The blueprint's row: visible from 1,000 ms to 1,500 ms after the wait starts. `to` is the first frame without it. */
           heldTo1500: first === undefined ? undefined : first.to - click.t >= 1500,
-          textAtAnswer: text === undefined ? undefined : text.t - answeredAt < 200,
+          /* Counted in frames, not milliseconds: a frame a loaded runner paints late is not a late render, but a frame
+             painted after the answer without the text is. The reply reaches React in the next task and paints in the
+             frame after, so at most two frames go by without it. */
+          textAtAnswer: text === undefined ? undefined : framesWithoutText <= 2,
         },
-        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms`,
+        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms, ${framesWithoutText} frames after the answer without it (the longest ${longestFrame} ms)`,
         { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
       );
     },

@@ -6097,15 +6097,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               taken = error;
               return undefined;
             });
-            /* A rename the remote refused because another device renamed the
-             * same version first: the remote's name wins (Revisions Policy
-             * rule 19), and it is never offered again under a refreshed lease. */
+            /* A version tag refused with a lost lease, with the lease this push
+             * held for it. Both ports say `leaseLost` for every command of an
+             * atomic push when any one ref moved, so the refusal alone never
+             * decides: only a tag the remote itself moved off that lease is a
+             * rename another device made first, and the remote's name wins
+             * (Revisions Policy rule 19, N3). */
             const lostRenames = (pushed?.refs ?? []).flatMap((entry) => {
               const number =
                 entry.status === 'rejected' && entry.reason === 'leaseLost'
                   ? versionNumberOfTag(entry.name)
                   : undefined;
-              return number === undefined ? [] : [number];
+              return number === undefined ? [] : [{ number, lease: leasedTags[entry.name] }];
             });
             let adopted: readonly SyncRefOutcome[] = [];
             if (
@@ -6125,7 +6128,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               const local = new Map(localTags.map((tag) => [tag.name, String(tag.head)] as const));
               /* A lost rename that now holds the remote's own tag has nothing left to offer. */
               adopted = lostRenames
-                .map((number) => versionTagRef(number))
+                .map(({ number }) => versionTagRef(number))
                 .filter((name) => local.has(name) && local.get(name) === leasedTags[name])
                 .map((name): SyncRefOutcome => Object.freeze({ name, status: 'upToDate', head: leasedTags[name] }));
               const settled = new Set([

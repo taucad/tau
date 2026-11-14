@@ -15,6 +15,11 @@
       "expect": "pass",
       "ref": "Budget 1 at the target bounds with 1 failed session start and 1 retry: the registry closes the session being left through its close flush, a failed start gives held, focus never closes, and every safety property holds. Nightly: the family target was over the per-target budget; target-one-project is its narrowed pr form."
     },
+    "ProjectFocus.target-start-retry.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "Budget 1 over 2 projects, 2 requests, 1 failed session start, 1 retry and 1 library change, no Home, no failed flush or person command: a retry after a failed start asks access again and the next open carries the current answer; every target safety property holds. Keeps this interaction at pr since target-one-project's pr form has no retry."
+    },
     "ProjectFocus.target-idle-expiry.cfg": {
       "tier": "pr",
       "expect": "pass",

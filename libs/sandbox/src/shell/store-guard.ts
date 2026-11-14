@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -117,6 +117,11 @@ const ownCheckRoot = async (): Promise<string> => {
   const status = await lstat(root);
   if (!status.isDirectory() || (process.getuid !== undefined && status.uid !== process.getuid())) {
     throw new Error(`${root} is not this user's own folder`);
+  }
+  /* `mkdir` leaves an existing folder's mode alone: one another user could write into is made private again. */
+  // oxlint-disable-next-line no-bitwise -- permission bits are a bit mask.
+  if ((status.mode & 0o777) !== 0o700) {
+    await chmod(root, 0o700);
   }
   for (const name of await readdir(root)) {
     const pid = Number(name.split('-')[0]);

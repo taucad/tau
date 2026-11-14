@@ -4,7 +4,7 @@
  * `store-guard/tests/acceptance.sh` and the Linux shell-conformance rows.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -101,11 +101,15 @@ describe('probeStoreGuard', () => {
       mkdirSync(join(stale, 'project', '.git'), { recursive: true });
       mkdirSync(live, { recursive: true });
       roots.push(live);
+      /* A root another user could write into is made private again before it is read. */
+      chmodSync(root, 0o777);
 
       await probeStoreGuard({ guardPath: join(root, 'absent'), bwrapPath: '/usr/bin/bwrap' });
 
       expect(existsSync(stale)).toBe(false);
       expect(existsSync(live)).toBe(true);
+      // oxlint-disable-next-line no-bitwise -- permission bits are a bit mask.
+      expect(statSync(root).mode & 0o777).toBe(0o700);
     },
   );
 });

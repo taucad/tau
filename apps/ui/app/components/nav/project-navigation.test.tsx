@@ -830,6 +830,40 @@ describe('ProjectNavigation', () => {
     });
 
     /*
+     * R1/P46 on a later mount over remembered rows: the phone sidebar mounts
+     * again each time its sheet opens, and a failed listing keeps the
+     * remembered rows. An open project whose session closed is not drawn as
+     * live there either.
+     */
+    it.fails('R1: over remembered rows after a failed listing, a closed open project is not drawn as live', () => {
+      pathname = '/w/home/one';
+      liveProjectIds = ['proj_two'];
+      closedReasons = { [firstProject.id]: 'Closed to save memory' };
+      rememberedShape = { count: 2, projects: [secondProject, { ...firstProject, lastActivityAt: 30 }] };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], error: new Error('offline') });
+      render(<ProjectNavigation />);
+
+      expect(drawnRows().slice(0, 3)).toEqual(['Two', 'Earlier', 'One']);
+    });
+
+    /* Leaving the project the page was loaded on ends its wait: coming back, only the registry says what is live. */
+    it("U6: leaving the reload's open project ends its wait", () => {
+      pathname = '/w/home/one';
+      rememberedShape = { count: 2, projects: [secondProject, firstProject] };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      const view = render(<ProjectNavigation />);
+      expect(drawnRows()).toEqual(['One', 'Earlier', 'Two']);
+
+      pathname = '/';
+      view.rerender(<ProjectNavigation />);
+      pathname = '/w/home/one';
+      mockUseProjects.mockReturnValue(projectsResult);
+      view.rerender(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'One']);
+    });
+
+    /*
      * R1/P46: an open project whose session a policy or the person closed is
      * not live, on its own page too. It sorts with the rest, below the live
      * ones and the "Earlier" divider.
@@ -848,10 +882,9 @@ describe('ProjectNavigation', () => {
     });
 
     /*
-     * The open project counts as live only while the remembered rows stand in
-     * for the listing. Once the listing answers, a session that never opened
-     * (an open the live budget refused, a route that cannot open it) is not
-     * drawn as live.
+     * Outside a reload's wait for its open project's session, an open project
+     * whose session never opened (an open the live budget refused, then "Not
+     * now") is not drawn as live.
      */
     it('R1: once the listing answers, an open project whose session never opened sorts with the rest', () => {
       pathname = '/w/home/one';

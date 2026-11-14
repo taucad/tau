@@ -336,10 +336,12 @@ type WaitSlotRecord = {
   sidebarBusyAt?: number;
   gridStates: Array<{ t: number; busy: boolean }>;
   noPreviewIconAt?: number;
+  /** How many "No saved preview" icons were on screen, each time the count changed. */
+  noPreviewIcons: Array<{ t: number; count: number }>;
   mediaRects: Array<{ t: number; rect: string }>;
 };
 const recordWaitSlots = (): void => {
-  const record: WaitSlotRecord = { gridStates: [], mediaRects: [] };
+  const record: WaitSlotRecord = { gridStates: [], noPreviewIcons: [], mediaRects: [] };
   Object.defineProperty(globalThis, '__TAU_WAIT_SLOTS__', { value: record });
   const now = (): number => Math.round(performance.now());
   const sample = (): void => {
@@ -362,8 +364,12 @@ const recordWaitSlots = (): void => {
     if (grid && record.gridStates.at(-1)?.busy !== busy) {
       record.gridStates.push({ t: now(), busy });
     }
-    if (record.noPreviewIconAt === undefined && document.querySelector('main [aria-label="No saved preview"]')) {
+    const icons = document.querySelectorAll('main [aria-label="No saved preview"]').length;
+    if (record.noPreviewIconAt === undefined && icons > 0) {
       record.noPreviewIconAt = now();
+    }
+    if ((record.noPreviewIcons.at(-1)?.count ?? 0) !== icons) {
+      record.noPreviewIcons.push({ t: now(), count: icons });
     }
     const media = grid?.querySelector('li [class*="aspect-4/3"]');
     if (media) {
@@ -424,20 +430,25 @@ knownDefect(
       );
       const listedAt = firstDelayedRead(deliveries, projectListingRead);
       precondition(listedAt !== undefined, 'H-c: the project listing was not answered late');
+      /* When that late listing reached the page: the lists wait until then. */
+      const deliveredAt = deliveries.find(
+        (entry) => entry.method === projectListingRead.method && entry.sentAt === listedAt,
+      )?.t;
+      precondition(deliveredAt !== undefined, 'H-c: the late project listing has no delivery time');
       precondition(
         record.dropped['skeletonFrames'] === undefined,
         'H-c: the record dropped skeleton frames past its frame limit',
       );
-      return { record, slots };
+      return { record, slots, deliveredAt };
     },
-    assert: ({ record, slots }) => {
+    assert: ({ record, slots, deliveredAt }) => {
       expect(
         {
           skeletonFrames: record.skeletonFrames.length,
           recentsShownFromDelay: slots.recentsShownAt !== undefined && slots.recentsShownAt >= indicatorDelay,
           sidebarBusy: slots.sidebarBusyAt !== undefined,
           gridIdleWhileWaiting: slots.gridStates.some(
-            (state) => !state.busy && slots.recentsShownAt !== undefined && state.t < slots.recentsShownAt,
+            (state) => !state.busy && slots.recentsShownAt !== undefined && state.t < deliveredAt,
           ),
         },
         `H-c: skeleton frames ${JSON.stringify(record.skeletonFrames.slice(0, 3))}, slots ${JSON.stringify(slots)}`,
@@ -462,23 +473,29 @@ knownDefect(
       });
       const slots = await readWaitSlots();
       const deliveries = await readWorkerDeliveries();
-      const settledAt = Math.min(
-        ...deliveries
-          .filter(
-            (entry) =>
-              entry.method === thumbnailRead.method && new RegExp(thumbnailRead.path, 'u').test(entry.path ?? ''),
-          )
-          .map((entry) => entry.t),
-      );
+      /* The worker's path names no project, so each card is matched by count: no more icons than settled reads. */
+      const settledTimes = deliveries
+        .filter(
+          (entry) =>
+            entry.method === thumbnailRead.method && new RegExp(thumbnailRead.path, 'u').test(entry.path ?? ''),
+        )
+        .map((entry) => entry.t)
+        .toSorted((a, b) => a - b);
+      const settledAt = settledTimes.at(0) ?? Number.NaN;
       precondition(Number.isFinite(settledAt), 'H-d: no thumbnail read was answered late');
       precondition(slots.mediaRects.length > 0, 'H-d: no card media box was on screen');
-      await target.writeArtifact('home-load-gate/h-d-slots.json', `${JSON.stringify({ slots, settledAt }, null, 2)}\n`);
-      return { record, slots, settledAt };
+      await target.writeArtifact(
+        'home-load-gate/h-d-slots.json',
+        `${JSON.stringify({ slots, settledTimes }, null, 2)}\n`,
+      );
+      return { record, slots, settledAt, settledTimes };
     },
-    assert: ({ slots, settledAt }) => {
+    assert: ({ slots, settledAt, settledTimes }) => {
       expect(
         {
-          iconBeforeRead: slots.noPreviewIconAt !== undefined && slots.noPreviewIconAt < settledAt,
+          iconBeforeRead: slots.noPreviewIcons.some(
+            (sample) => sample.count > settledTimes.filter((settled) => settled <= sample.t).length,
+          ),
           mediaResized: slots.mediaRects.length > 1,
         },
         `H-d: the thumbnail read answered at ${settledAt} ms; slots ${JSON.stringify(slots)}`,

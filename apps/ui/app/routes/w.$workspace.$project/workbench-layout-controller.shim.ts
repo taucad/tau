@@ -49,7 +49,7 @@ export type WorkbenchIntentTarget = Readonly<{
 
 /** The controller, with the workbench's intent target the workspace connects and the viewer adapter's port (A8d). */
 export type WorkbenchLayoutControllerShim = WorkbenchLayoutController &
-  Required<Pick<WorkbenchLayoutController, 'connectViewerIntents' | 'requestViewerFile'>> &
+  Required<Pick<WorkbenchLayoutController, 'connectViewerIntents' | 'requestViewerFile' | 'dockHost'>> &
   Readonly<{
     /** Connect the workbench's opener and file activation: delivered intents are applied through them. */
     connectIntents: (target: WorkbenchIntentTarget) => () => void;
@@ -432,6 +432,7 @@ export function createWorkbenchLayoutControllerShim(
       layout.send({ type: 'personEdited', adapter: 'workbench', node });
     },
     ready: () => selectLayoutReadSettled(layout.getSnapshot()),
+    dockHost: layout,
     connectViewerIntents: (open) => {
       viewerOpener = open;
       return () => {

@@ -104,6 +104,8 @@ import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbe
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import { layoutPolicy } from '#workbench-records/layout-policy.js';
+import { createViewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerAdapterInput } from '#workbench-records/viewer-adapter.js';
 import {
   intentAdapter,
   intentOf,
@@ -207,6 +209,18 @@ export type WorkbenchLayoutEvent =
   | Readonly<{ type: 'lanesSeeded'; lanes: WorkbenchLayout['lanes'] }>
   /** The shell the layout is shown on changed (the phone breakpoint): intents follow it from the next one (rule 7). */
   | Readonly<{ type: 'deviceChanged'; device: WorkbenchLayoutDevice }>
+  /**
+   * A Dockview is ready (its `onReady`): its adapter is spawned as this actor's child, holding the api in its closure
+   * (D4, D11). A second one for the same adapter replaces the first.
+   */
+  | Readonly<{
+      type: 'dockReady';
+      adapter: 'viewer';
+      api: ViewerAdapterInput['api'];
+      ports: Omit<ViewerAdapterInput, 'api'>;
+    }>
+  /** The Dockview's ref cleanup: its adapter is stopped, which detaches it (rule 4). */
+  | Readonly<{ type: 'dockReleased'; adapter: LayoutAdapterId }>
   /** The route key changed. */
   | Readonly<{ type: 'routeChanged'; routeKey: string }>
   /** A pane intent. */
@@ -815,6 +829,15 @@ const adapterRegion = (adapter: LayoutAdapterId) => {
   } as const;
 };
 
+/** The viewer Dockview's adapter (A8d). */
+const viewerAdapter = createViewerAdapterLogic();
+
+/** Each adapter's child id. */
+const adapterChildIds = { viewer: 'viewerAdapter', workbench: 'workbenchAdapter' } as const satisfies Record<
+  LayoutAdapterId,
+  string
+>;
+
 const workbenchLayoutDefinition = setup({
   schemas: {
     context: types<LayoutContext>(),
@@ -823,10 +846,10 @@ const workbenchLayoutDefinition = setup({
     input: types<WorkbenchLayoutInput>(),
     transitionMeta: types<{ tla: WorkbenchLayoutAction }>(),
   },
-  actors: { layoutRecord },
+  actors: { layoutRecord, viewerAdapter },
 }).createMachine({
   id: 'workbenchLayout',
-  version: '3',
+  version: '4',
   // A defect is recorded and the layout keeps answering; the first is kept, since later ones are usually its
   // consequences (MC-R12, D23).
   onError: refines('Unmodelled', ({ context, event }) => ({
@@ -984,6 +1007,22 @@ const workbenchLayoutDefinition = setup({
     deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
       event.device === context.device ? {} : { context: { device: event.device } },
     ),
+    dockReady: refines('Unmodelled', ({ children, event }: Step<'dockReady'>, enq: LayoutEnqueue) => {
+      const id = adapterChildIds[event.adapter];
+      const prior = children[id];
+      if (prior !== undefined) {
+        enq.stop(prior);
+      }
+      enq.spawn(viewerAdapter, { id, input: { ...event.ports, api: event.api } });
+      return {};
+    }),
+    dockReleased: refines('Unmodelled', ({ children, event }: Step<'dockReleased'>, enq: LayoutEnqueue) => {
+      const child = children[adapterChildIds[event.adapter]];
+      if (child !== undefined) {
+        enq.stop(child);
+      }
+      return {};
+    }),
     recordHealthChanged: refines(
       'Unmodelled',
       ({ context, event, value }: Step<'recordHealthChanged'>, enq: LayoutEnqueue) => {
@@ -1326,6 +1365,8 @@ export const workbenchLayoutEventTypes = [
   'lanesApplied',
   'lanesSeeded',
   'deviceChanged',
+  'dockReady',
+  'dockReleased',
   'routeChanged',
   'intent',
   'intentApplied',

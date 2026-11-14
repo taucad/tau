@@ -31,6 +31,9 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 import type * as ViewerDockviewModule from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import type * as UnavailableOverlayModule from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
+import { createActor } from 'xstate';
+import type { Actor } from 'xstate';
+import { createViewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
 
 /** The registry these rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor().start();
@@ -178,7 +181,8 @@ const layoutRecord: {
   viewer: ViewerNode | undefined;
   applyViewer: ((node: ViewerNode, applied: () => void) => void) | undefined;
   listeners: Set<() => void>;
-} = { viewer: undefined, applyViewer: undefined, listeners: new Set() };
+  viewerAdapter: Actor<ReturnType<typeof createViewerAdapterLogic>> | undefined;
+} = { viewer: undefined, applyViewer: undefined, listeners: new Set(), viewerAdapter: undefined };
 /** The record's first read lands: the registered viewer applies it, and the page's readers hear it. */
 const readLayoutRecord = (viewer: ViewerNode): void => {
   layoutRecord.viewer = viewer;
@@ -211,6 +215,21 @@ const layoutController: WorkbenchLayoutController = {
   personViewerChanged: () => undefined,
   personWorkbenchChanged: () => undefined,
   ready: () => layoutRecord.viewer !== undefined,
+  connectViewerIntents: () => () => undefined,
+  requestViewerFile: () => undefined,
+  // The layout spawns the viewer's adapter on `dockReady` and stops it on `dockReleased` (A8d).
+  dockHost: {
+    send(event) {
+      layoutRecord.viewerAdapter?.stop();
+      layoutRecord.viewerAdapter = undefined;
+      if (event.type === 'dockReady' && event.adapter === 'viewer') {
+        layoutRecord.viewerAdapter = createActor(createViewerAdapterLogic(), {
+          input: { ...event.ports, api: event.api },
+        });
+        layoutRecord.viewerAdapter.start();
+      }
+    },
+  },
 };
 
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
@@ -589,6 +608,8 @@ beforeEach(() => {
   layoutRecord.viewer = undefined;
   layoutRecord.applyViewer = undefined;
   layoutRecord.listeners.clear();
+  layoutRecord.viewerAdapter?.stop();
+  layoutRecord.viewerAdapter = undefined;
   facts.viewer.mounts = 0;
   facts.viewer.removals = 0;
   revisionStatus.set(undefined);

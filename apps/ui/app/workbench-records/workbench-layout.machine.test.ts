@@ -1299,6 +1299,9 @@ describe('totality', () => {
     lanesApplied: { type: 'lanesApplied', lanes: { chat: true, workbench: true } },
     lanesSeeded: { type: 'lanesSeeded', lanes: { chat: true, workbench: false } },
     deviceChanged: { type: 'deviceChanged', device: 'phone' },
+    // The api and ports are the adapter's own: traversal never starts the child it spawns.
+    dockReady: { type: 'dockReady', adapter: 'viewer', api: {}, ports: {} } as unknown as WorkbenchLayoutEvent,
+    dockReleased: { type: 'dockReleased', adapter: 'viewer' },
     routeChanged: { type: 'routeChanged', routeKey: 'route-2' },
     intent: { type: 'intent', intentId: 'i1', source: 'person', target: modelPane },
     intentApplied: { type: 'intentApplied', intentId: 'i1', deliveryId: 1, node: panes('model') },

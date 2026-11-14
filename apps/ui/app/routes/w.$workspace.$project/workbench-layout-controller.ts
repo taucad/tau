@@ -16,6 +16,7 @@ import { layoutPolicy } from '#workbench-records/layout-policy.js';
 import type { WorkbenchLayoutPatch as PolicyPatch } from '#workbench-records/layout-policy.js';
 import { createRecordSync } from '#workbench-records/record-sync.js';
 import { createRecordSyncMachine } from '#workbench-records/record-sync.machine.js';
+import type { WorkbenchLayoutRef } from '#runtime/project-runtime.layout.js';
 
 /** The focused page's applied portable arrangement and any tabs it cannot display. */
 export type WorkbenchLayoutSnapshot = Readonly<{
@@ -57,6 +58,11 @@ export type WorkbenchLayoutController = Readonly<{
   connectViewerIntents?: (open: (entryPath: string) => ViewerNode | undefined) => () => void;
   /** Ask the layout to show an entry in the viewer, as a pane intent (A8d). Present with `connectViewerIntents`. */
   requestViewerFile?: (entryPath: string) => void;
+  /**
+   * The project's layout actor, which a Dockview hands itself to (`dockReady` from `onReady`, `dockReleased` from its
+   * ref cleanup) so it spawns that Dockview's adapter (D11, A8c, A8d). Present with `connectViewerIntents`.
+   */
+  dockHost?: Pick<WorkbenchLayoutRef, 'send'>;
   /**
    * Whether the record's first read has settled: it was read, or it stopped retrying. Until then a pane intent waits in
    * the layout (A8b), and the viewer shows no empty state, since the record has not yet arranged it (A8d, M2).

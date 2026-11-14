@@ -1,10 +1,10 @@
 {
   "alphabet": [],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "ab3c6f2cd5043b5c2fa2b0f596a7811a7b51895d2bc73386bec89bb830ae8813"
+    "apps/ui/app/hooks/use-project-manager.tsx": "8407788fd0580bb08558f683776660ed62ff02710a5b3e1141a05a05dc9636b1"
   },
   "specs": {
-    "LibraryCatalog.tla": "dbd16dac00d8ec420d1b0b2ab47a02dec6483f77c069cfe29159f4d7bb5fa386"
+    "LibraryCatalog.tla": "172aa88b4b02e2af5025a9e639885dbdd045aa35def5abb9aeb36524e320c2cb"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",
@@ -22,6 +22,6 @@
     "LibraryCatalog.today-ref-epoch-safe.cfg": "6820ab1b6b89c0a0d47de908ceae256d01e4111049d8004d2daebb0e6c24f67b",
     "LibraryCatalog.today-ref-epoch.cfg": "bbd222e64dd0e6b9cbf59057f4346110ab64658a0c6f3f251023330665c0a87c",
     "LibraryCatalog.wide.cfg": "13bb12904b6222c282f37460eb225ff6f402cc2fa5d96f34bb54836ad214822c",
-    "expected.json": "667056ac3f7f92d1442a2e593344b49802182538c13f474da0299e57ff84d1ad"
+    "expected.json": "ab5df4c34ff06385edb879591d9b8417f5b96d758d405948a9be1ab365652a4c"
   }
 }

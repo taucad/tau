@@ -20,7 +20,7 @@ The registry answers an open in the step that sends it, as the actor does, so `O
 
 ### Tiers
 
-Under programme control's interim budget ruling, every config is in tier `nightly`. They run in the scheduled `ui:formal:wide` tier (added by A0.6), not in `ui:formal:tla`, until the budget is ruled. The PR tier (`ui:formal:tla`) still parses `ProjectFocus.tla` with SANY and still checks that `ProjectFocus/graph.json` and `suite.json` are fresh. That check is one small TLC export run of `ProjectFocus.export.cfg`, which the runner does for every `graphs` entry in the PR tier. The drift test, `project-focus.drift.test.ts`, runs with `ui`'s Node tests. `wide` keeps the largest bounds. The other configs keep the bounds their `ref` states, which were sized for the PR tier.
+Every config except `wide` is in tier `pr` and runs in this family's own target, `ui:formal:tla:project-focus` (about 165 s on 4 cores), in parallel with the other `ui` families under the per-target budget of the formal verification policy § 6. `wide` is in tier `nightly` and runs in the scheduled `ui:formal:wide`. The PR tier also parses `ProjectFocus.tla` with SANY and checks that `ProjectFocus/graph.json` and `suite.json` are fresh. That check is one small TLC export run of `ProjectFocus.export.cfg`, which the runner does for every `graphs` entry in the PR tier. The drift test, `project-focus.drift.test.ts`, runs with `ui`'s Node tests.
 
 ### Configs
 
@@ -59,7 +59,7 @@ A passing target config checks every safety property. A passing today config che
 | `match-by-request-id`               | `SameProjectKeepsEditor`          | limit                             | Matched by request id, a chat switch tears the editor down                                                                                                                                |
 | `wide`                              | pass                              |                                   | 4 projects and Home, 4 requests, 1 library change (the plan's 6 requests and 2 changes exceed the watchdog)                                                                               |
 
-`expected.json` records each config's bounds in its `ref`. Under the interim ruling the configs run in `ui:formal:wide`, not `ui:formal:tla`; run them through the runner (`node tools/formal/src/cli.ts check --tier nightly apps/ui`), never TLC directly.
+`expected.json` records each config's bounds in its `ref`. Run them through the runner, never TLC directly: `pnpm nx run ui:formal:tla:project-focus` for the PR tier, or `node tools/formal/src/cli.ts check --tier nightly --family project-focus apps/ui` for `wide`.
 
 ## Rules the focus machine keeps (A5a)
 

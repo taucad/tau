@@ -795,7 +795,8 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
       if (disposed) {
         return;
       }
-      const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model]');
+      /* The pending name's placeholder is cut like the name, so it too makes the labels leave first. */
+      const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model], [data-slot=trigger-model-placeholder]');
       for (let hidden = 0; hidden <= collapseSteps.length; hidden += 1) {
         for (const [index, flag] of collapseSteps.entries()) {
           bar.toggleAttribute(flag, index < hidden);

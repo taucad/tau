@@ -634,6 +634,21 @@ describe('useProjectManager recovery (I8)', () => {
       expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(commits);
       expect(reloaded.result.current.recoveries).toEqual([]);
     });
+
+    it("I8: should reject a discard that fails with the journal's own error, and keep the row", async () => {
+      mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
+      mockListProjectManifests.mockResolvedValue(emptyDiscovery);
+      const { result } = await bootstrap();
+      const quota = Object.assign(new Error('The quota has been exceeded.'), { name: 'QuotaExceededError' });
+      mockCompletePending.mockRejectedValueOnce(quota);
+
+      await act(async () => {
+        await expect(result.current.discardRecovery(operationId)).rejects.toBe(quota);
+      });
+
+      expect(journal).toEqual([pendingCreate]);
+      expect(result.current.recoveries).toEqual([expect.objectContaining(failedRecovery('filesystem-error'))]);
+    });
   });
 
   // ── RecoveryGatesMutation ─────────────────────────────────────────────────

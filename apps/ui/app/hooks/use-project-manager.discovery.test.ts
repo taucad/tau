@@ -469,6 +469,20 @@ describe('useProjectManager discovery (I7, I9)', () => {
     );
   });
 
+  // ── A failed pass ─────────────────────────────────────────────────────────
+
+  describe('a pass that fails', () => {
+    it("should reject the listing with the scan's own error, as the direct pass did", async () => {
+      const broken = new TypeError('manifest unreadable');
+      mockListProjectManifests.mockRejectedValueOnce(broken);
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectListing()).rejects.toBe(broken);
+      });
+    });
+  });
+
   // ── Write stop ────────────────────────────────────────────────────────────
 
   describe('a pass skipped during a write stop', () => {

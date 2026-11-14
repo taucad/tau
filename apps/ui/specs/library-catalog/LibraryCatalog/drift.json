@@ -121,10 +121,10 @@
     "apps/ui/app/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
     "apps/ui/app/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
     "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/ui/app/runtime/project-library.ts": "a2d64d9dc87b679ccba4a9cf07caaba1e1a5e4a5ad149e4dfde690a7aa7afb31"
+    "apps/ui/app/runtime/project-library.ts": "e8e13254bad379f8f6425b3bf23631b109bc0dd83f628ad63e7022b33c372ae0"
   },
   "specs": {
-    "LibraryCatalog.tla": "fe2a70d26adfbb727ae4d08ff07f18cadb03f66d8b93248666e974b82259ce05"
+    "LibraryCatalog.tla": "d03e8f452b9fa6d1273e167b55e0b47727edc3ca289e851a96d86216d1eb66ed"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

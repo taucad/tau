@@ -235,6 +235,10 @@ const until = async <Ref extends AnyActorRef>(
   });
 };
 
+/** A rejection as an `Error`: a thrown non-error travels as its cause. */
+const asError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error), { cause: error });
+
 /**
  * The project library.
  *
@@ -277,6 +281,12 @@ export class ProjectLibrary {
   #requests = 0;
   /** What each scan read, by its pass's epoch, until that pass plans its writes. */
   readonly #scans = new Map<number, DiscoveryScan>();
+  /*
+   * The errors the machines carry only as messages (MC-R5 keeps them out of context): the last discovery port failure
+   * with its pass's epoch, and each discard's, so a caller rejects with the error itself, as today's direct calls did.
+   */
+  #passError: Readonly<{ epoch: number; error: Error }> | undefined;
+  readonly #discardErrors = new Map<string, Error>();
   /**
    * The operations behind the journal rows, by id: host data the replay port reads, never machine context (MC-R5).
    * `fresh` while no attempt has consumed its bytes; a later attempt reads the journal again, as a retry does today.
@@ -328,42 +338,45 @@ export class ProjectLibrary {
     this.discovery = createLibraryDiscovery({
       ...options,
       ports: {
-        scan: async ({ epoch }) => {
-          const fileManager = await this.#facade();
-          const scan = await scanDiscovery(fileManager, () => this.#recoveries());
-          for (const earlier of this.#scans.keys()) {
-            if (earlier < epoch) {
-              this.#scans.delete(earlier);
+        scan: async ({ epoch }) =>
+          this.#keepPassError(epoch, async () => {
+            const fileManager = await this.#facade();
+            const scan = await scanDiscovery(fileManager, () => this.#recoveries());
+            for (const earlier of this.#scans.keys()) {
+              if (earlier < epoch) {
+                this.#scans.delete(earlier);
+              }
             }
-          }
-          this.#scans.set(epoch, scan);
-          this.#syncWriteStop();
-          return scan.result;
-        },
-        plan: async ({ epoch, result }) => {
-          const scan = this.#scans.get(epoch);
-          this.#scans.delete(epoch);
-          const planned = await planDiscovery(
-            {
-              result,
-              configs: scan?.configs ?? new Map(),
-              quarantinedLocators: scan?.quarantinedLocators ?? new Map(),
-            },
-            async () => this.getReadiedWorker(),
-          );
-          this.#syncWriteStop();
-          return planned;
-        },
-        apply: async ({ writes }) => {
-          const fileManager = await this.#facade();
-          return applyDiscovery(fileManager, async () => this.getReadiedWorker(), {
-            writes,
-            stopped: () => {
-              this.#syncWriteStop();
-              return isBuildSuperseded();
-            },
-          });
-        },
+            this.#scans.set(epoch, scan);
+            this.#syncWriteStop();
+            return scan.result;
+          }),
+        plan: async ({ epoch, result }) =>
+          this.#keepPassError(epoch, async () => {
+            const scan = this.#scans.get(epoch);
+            this.#scans.delete(epoch);
+            const planned = await planDiscovery(
+              {
+                result,
+                configs: scan?.configs ?? new Map(),
+                quarantinedLocators: scan?.quarantinedLocators ?? new Map(),
+              },
+              async () => this.getReadiedWorker(),
+            );
+            this.#syncWriteStop();
+            return planned;
+          }),
+        apply: async ({ epoch, writes }) =>
+          this.#keepPassError(epoch, async () => {
+            const fileManager = await this.#facade();
+            return applyDiscovery(fileManager, async () => this.getReadiedWorker(), {
+              writes,
+              stopped: () => {
+                this.#syncWriteStop();
+                return isBuildSuperseded();
+              },
+            });
+          }),
         discoveryObservation: createDiscoveryObservation(host),
         metadataObservation: createMetadataObservation(host),
       },
@@ -386,7 +399,12 @@ export class ProjectLibrary {
         discard: async ({ operationId }) => {
           const worker = await this.getReadiedWorker();
           // `completePendingProjectOperation` is a plain journal-row delete, which is exactly what discarding needs.
-          await worker.completePendingProjectOperation(operationId);
+          try {
+            await worker.completePendingProjectOperation(operationId);
+          } catch (error) {
+            this.#discardErrors.set(operationId, asError(error));
+            throw error;
+          }
           this.#operations.delete(operationId);
         },
       },
@@ -955,8 +973,10 @@ export class ProjectLibrary {
       });
       this.recovery.send({ type: 'discardAsked', requestId, operationId });
     });
+    const error = this.#discardErrors.get(operationId);
+    this.#discardErrors.delete(operationId);
     if (!ok) {
-      throw new Error(`The unfinished project operation could not be discarded: ${operationId}`);
+      throw error ?? new Error(`The unfinished project operation could not be discarded: ${operationId}`);
     }
   };
 
@@ -1132,7 +1152,8 @@ export class ProjectLibrary {
         this.discovery.on('passFailed', (event) => {
           if (event.requestId === requestId) {
             done();
-            reject(new Error(event.message));
+            const failure = this.#passError;
+            reject(failure?.epoch === event.epoch ? failure.error : new Error(event.message));
           }
         }),
       ];
@@ -1151,6 +1172,16 @@ export class ProjectLibrary {
       this.discovery.send({ type: 'passRequested', requestId, reuse });
       sending = false;
     });
+  }
+
+  /** Run a discovery port, keeping its failure for the pass's requesters. */
+  async #keepPassError<Value>(epoch: number, run: () => Promise<Value>): Promise<Value> {
+    try {
+      return await run();
+    } catch (error) {
+      this.#passError = { epoch, error: asError(error) };
+      throw error;
+    }
   }
 
   /** Settles once no discovery pass is in flight. */

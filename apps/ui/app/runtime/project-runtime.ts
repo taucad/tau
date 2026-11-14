@@ -72,6 +72,7 @@ import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import { startViewRecordSession } from '#workbench-records/view-record-session.js';
+import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 
 /** The editor writes the project's records; `shared` shows a project without saving editor state or chats. */
@@ -121,13 +122,28 @@ export type ProjectRuntimeProvide = Readonly<{
 
 /**
  * The profile and how the project loads. The editor profile loading from disk always runs each view's record session
- * over the ports every view shares (charter G6b), so it must be given them; a project with its own loader, and a
- * shared workbench, keep no view records.
+ * over the ports every view shares (charter G6b) and the project's entries record session (A9), so it must be given
+ * them; a project with its own loader, and a shared workbench, keep neither.
  */
 export type ProjectRuntimeProfileOptions =
-  | Readonly<{ profile: 'editor'; provide?: undefined; viewRecordPorts: ViewRecordPortsHandle }>
-  | Readonly<{ profile: 'editor'; provide: ProjectRuntimeProvide; viewRecordPorts?: undefined }>
-  | Readonly<{ profile: 'shared'; provide?: ProjectRuntimeProvide; viewRecordPorts?: undefined }>;
+  | Readonly<{
+      profile: 'editor';
+      provide?: undefined;
+      viewRecordPorts: ViewRecordPortsHandle;
+      entriesRecord: EntriesRecordSession;
+    }>
+  | Readonly<{
+      profile: 'editor';
+      provide: ProjectRuntimeProvide;
+      viewRecordPorts?: undefined;
+      entriesRecord?: undefined;
+    }>
+  | Readonly<{
+      profile: 'shared';
+      provide?: ProjectRuntimeProvide;
+      viewRecordPorts?: undefined;
+      entriesRecord?: undefined;
+    }>;
 
 export type ProjectRuntimeOptions = Readonly<{
   projectId: string;
@@ -207,6 +223,7 @@ const resources: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, Proj
 const parameterServiceOwner: CallbackActorLogic<{ type: 'never' }> = createCallbackLogic<{ type: 'never' }>(
   () => undefined,
 );
+const entriesRecord: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => undefined);
 
 export const projectRuntimeActors = {
   project: projectMachine,
@@ -216,6 +233,7 @@ export const projectRuntimeActors = {
   libraryEvents,
   resources,
   parameterServiceOwner,
+  entriesRecord,
 };
 
 const describeFault = (error: unknown): string =>
@@ -315,6 +333,12 @@ export const projectRuntimeMachine = setup({
         {
           id: 'resources',
           src: 'resources',
+          input: ({ context }) => ({ project: context.projectRef }),
+          onError: recordFault,
+        },
+        {
+          id: 'entriesRecord',
+          src: 'entriesRecord',
           input: ({ context }) => ({ project: context.projectRef }),
           onError: recordFault,
         },
@@ -702,6 +726,23 @@ export const createLibraryEventsLogic = (
 };
 
 /**
+ * The entries record session as a runtime child (plan § 4 A9, rows S24 and S25): it starts with the runtime, follows
+ * the project's geometry units, and registers its flush in the runtime's producer set at its start (D12), so the leave,
+ * close and unload flushes reach it with nothing mounted.
+ *
+ * @param options - The session and the runtime's producer set.
+ * @returns The child's callback logic.
+ */
+export const createEntriesRecordLogic = (
+  options: Readonly<{ session: EntriesRecordSession; producers: ProjectRuntimeProducers }>,
+): ProjectChildLogic => {
+  const { session, producers } = options;
+  return createCallbackLogic<{ type: 'never' }, ProjectChildInput>(({ input: { project } }) =>
+    session.start({ project, producers }),
+  );
+};
+
+/**
  * What the runtime releases when it stops: each geometry unit's kernel runtime (a root stop runs no machine exit), and
  * on the shared profile without a preview service, the parameter service it built.
  *
@@ -825,6 +866,7 @@ export const createParameterServiceOwnerLogic = (
  */
 export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRuntime {
   const { projectId, fileManager, library, profile, provide, previewParameterService, viewRecordPorts } = options;
+  const producers = createProjectRuntimeProducers();
   const { fileManagerRef } = fileManager;
   const fileSystemRoot = fileManagerRef.getSnapshot().context.rootDirectory;
   const kernelOptionsFactory =
@@ -937,6 +979,10 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
         previewParameterService === undefined
           ? createParameterServiceOwnerLogic({ fileManager, holder: parameterService, source: parameterSource })
           : parameterServiceOwner,
+      entriesRecord:
+        options.entriesRecord === undefined
+          ? entriesRecord
+          : createEntriesRecordLogic({ session: options.entriesRecord, producers }),
     },
   });
 
@@ -966,7 +1012,7 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
   return {
     actor,
     parameterService: { get: parameterService.get, subscribe: parameterService.subscribe },
-    producers: createProjectRuntimeProducers(),
+    producers,
     replacePreviewParameterService: (service) => {
       if (previewParameterService !== undefined && service !== parameterService.get()) {
         parameterService.replace(service);

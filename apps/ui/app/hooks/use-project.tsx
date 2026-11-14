@@ -8,7 +8,6 @@ import {
   useEffect,
   useLayoutEffect,
   useReducer,
-  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -52,6 +51,8 @@ import type {
   ProjectRuntimeProfileOptions,
 } from '#runtime/project-runtime.js';
 import { createProjectViewRecords } from '#runtime/project-runtime.view-records.js';
+import { createEntriesRecordSession } from '#workbench-records/entries-record-session.js';
+import type { EntriesRecordSession, EntriesRecordSnapshot } from '#workbench-records/entries-record-session.js';
 import type { ProjectViewRecords } from '#runtime/project-runtime.view-records.js';
 
 type ProjectContextType = {
@@ -67,13 +68,10 @@ type ProjectContextType = {
   appliedWorkbenchRevisions: ReadonlyMap<string, `sha256:${string}`>;
   setAppliedWorkbenchRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
   appliedEntryRevisions: ReadonlyMap<string, `sha256:${string}`>;
-  setAppliedEntryRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
   setViewRecord: (viewId: string, record: WorkbenchView | undefined) => void;
   viewEntryPaths: ReadonlyMap<string, string | null>;
   setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
   entriesRecord: WorkbenchEntries | undefined;
-  setEntriesRecord: (record: WorkbenchEntries | undefined) => void;
-  registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => () => void;
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
   /** Add a producer to the runtime's producer set (`projectRuntime.producers`), which every flush walks (S40). */
   registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
@@ -171,7 +169,9 @@ type ProjectProviderFiles = Readonly<{
 type LeasedProjectRuntime = Readonly<{
   runtime: ProjectRuntime;
   viewRecords: ProjectViewRecords;
-  /** Hand the runtime the file manager's current parts: the parameter port and the view records' host follow it. */
+  /** The entries record session (A9): only the editor loading from disk keeps one. */
+  entriesRecord: EntriesRecordSession | undefined;
+  /** Hand the runtime the file manager's current parts: the parameter port and the record sessions' host follow it. */
   replaceFiles: (files: ProjectProviderFiles) => void;
 }>;
 
@@ -261,6 +261,11 @@ function useLeasedProjectRuntime(
   return lease;
 }
 
+/* A runtime without an entries record session reads no record and changes no paths, as no host was mounted. */
+const noEntriesRecord: EntriesRecordSnapshot = { entriesRecord: undefined, appliedEntryRevisions: new Map() };
+const subscribeNoEntriesRecord = (): (() => void) => () => undefined;
+const readNoEntriesRecord = (): EntriesRecordSnapshot => noEntriesRecord;
+
 const leasedRuntimeOf = (actor: ProjectRuntimeActor): LeasedProjectRuntime => {
   const leased = leasedRuntimes.get(actor);
   if (leased === undefined) {
@@ -309,12 +314,16 @@ export function ProjectProvider({
       watch: current.watchRecordFile,
     });
     const viewRecords = createProjectViewRecords({ projectId, host: viewRecordHost(files) });
-    /* Only the editor loading from disk writes view records (G6b); the options' type says so. */
+    /* Only the editor loading from disk writes view and entries records (G6b, A9); the options' type says so. */
+    const entriesRecord =
+      provide === undefined && profile === 'editor'
+        ? createEntriesRecordSession({ projectId, host: viewRecordHost(files), clock: appRuntime.clock })
+        : undefined;
     const profileOptions: ProjectRuntimeProfileOptions =
       provide === undefined
-        ? profile === 'editor'
-          ? { profile, viewRecordPorts: viewRecords.ports }
-          : { profile }
+        ? entriesRecord === undefined
+          ? { profile: 'shared' }
+          : { profile: 'editor', viewRecordPorts: viewRecords.ports, entriesRecord }
         : profile === 'editor'
           ? { profile, provide }
           : { profile, provide };
@@ -333,14 +342,16 @@ export function ProjectProvider({
     return {
       runtime,
       viewRecords,
+      entriesRecord,
       replaceFiles: (next) => {
         parameterFiles.set(next.parameterFiles);
         /* The filesystem's connections can be replaced (a new worker): each session reopens its store on the new ones. */
         viewRecords.ports.replaceHost(viewRecordHost(next));
+        entriesRecord?.replaceHost(viewRecordHost(next));
       },
     };
   });
-  const { runtime, viewRecords, replaceFiles } = leasedRuntimeOf(lease.actor);
+  const { runtime, viewRecords, entriesRecord: entriesRecordSession, replaceFiles } = leasedRuntimeOf(lease.actor);
   const { actor } = runtime;
   /* The root spawned both with itself and never replaces them, so one read is enough. */
   const actorRef = selectProjectRef(actor.getSnapshot());
@@ -384,36 +395,15 @@ export function ProjectProvider({
   }, [createdChatId, editorRef, projectId, queryClient, requestedChatId]);
 
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
-  const [appliedEntryRevisions, setAppliedEntryRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
-    () => new Map(),
+  /* The entries record session's record and acknowledgements (A9); it runs as a child of the runtime. */
+  const { entriesRecord, appliedEntryRevisions } = useSyncExternalStore(
+    entriesRecordSession?.subscribe ?? subscribeNoEntriesRecord,
+    entriesRecordSession?.getSnapshot ?? readNoEntriesRecord,
+    entriesRecordSession?.getSnapshot ?? readNoEntriesRecord,
   );
-  const setAppliedEntryRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
-    setAppliedEntryRevisions((current) => {
-      if (current.get(path) === digest) {
-        return current;
-      }
-      const next = new Map(current);
-      if (digest === undefined) {
-        next.delete(path);
-      } else {
-        next.set(path, digest);
-      }
-      return next;
-    });
-  }, []);
-  const [entriesRecord, setEntriesRecord] = useState<WorkbenchEntries>();
-  const entryPathChangeRef = useRef<((operation: EntryPathChange) => Promise<boolean>) | undefined>(undefined);
-  const registerEntryPathChange = useCallback((change: (operation: EntryPathChange) => Promise<boolean>) => {
-    entryPathChangeRef.current = change;
-    return () => {
-      if (entryPathChangeRef.current === change) {
-        entryPathChangeRef.current = undefined;
-      }
-    };
-  }, []);
   const changeEntryPaths = useCallback(
-    async (operation: EntryPathChange) => (entryPathChangeRef.current ? entryPathChangeRef.current(operation) : false),
-    [],
+    async (operation: EntryPathChange) => (entriesRecordSession ? entriesRecordSession.changePaths(operation) : false),
+    [entriesRecordSession],
   );
   const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
@@ -583,13 +573,10 @@ export function ProjectProvider({
       appliedWorkbenchRevisions,
       setAppliedWorkbenchRevision: viewRecords.setAppliedWorkbenchRevision,
       appliedEntryRevisions,
-      setAppliedEntryRevision,
       setViewRecord: viewRecords.setViewRecord,
       viewEntryPaths,
       setViewEntryPath: viewRecords.setViewEntryPath,
       entriesRecord,
-      setEntriesRecord,
-      registerEntryPathChange,
       changeEntryPaths,
       registerWorkbenchRecordProducer: runtime.producers.register,
       flushWorkbenchRecordProducers: runtime.producers.flushAll,
@@ -625,11 +612,8 @@ export function ProjectProvider({
     viewRecordMap,
     appliedWorkbenchRevisions,
     appliedEntryRevisions,
-    setAppliedEntryRevision,
     viewEntryPaths,
     entriesRecord,
-    setEntriesRecord,
-    registerEntryPathChange,
     changeEntryPaths,
     runtime,
     modelInteractionRef,

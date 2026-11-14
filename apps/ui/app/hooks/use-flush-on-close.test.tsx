@@ -220,12 +220,12 @@ describe('UnloadProvider', () => {
 });
 
 /*
- * A0.2 (row S26, D26): the eight `useFlushOnClose` registrations the app mounts today, with the stage each
- * declares. Seven are producers; the revision lifecycle's is the session stage — the close cut.
+ * A0.2 (row S26, D26): the `useFlushOnClose` registrations the app mounts today, with the stage each declares. Six
+ * are producers; the revision lifecycle's is the session stage — the close cut. A9 removed the entries host's: the
+ * entries record session is a runtime child in the producer set, which the persistence guard's registration walks.
  */
 const unloadRegistrations = [
   { site: 'routes/w.$workspace.$project/project-live-sessions.tsx', stage: 'producer' },
-  { site: 'routes/w.$workspace.$project/entries-sync-host.tsx', stage: 'producer' },
   { site: 'routes/w.$workspace.$project/workbench-record-host.tsx', stage: 'producer' },
   { site: 'routes/w.$workspace.$project/view-settings-sync-host.tsx', stage: 'producer' },
   { site: 'hooks/use-revision-status.ts', stage: 'session' },
@@ -261,7 +261,7 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     });
   });
 
-  it('should name the eight registration sites with the stage each declares', async () => {
+  it('should name the seven registration sites with the stage each declares', async () => {
     const declared = await Promise.all(
       unloadRegistrations.map(async ({ site }) => {
         const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
@@ -306,7 +306,7 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     });
     const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
     const producerDone = sequence.filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done'));
-    expect(producerDone).toHaveLength(7);
+    expect(producerDone).toHaveLength(6);
     expect(sequence.slice(0, firstSession).filter((entry) => entry.endsWith(':done'))).toEqual(producerDone);
 
     sequence.length = 0;
@@ -390,7 +390,7 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     expect(cut).toBeGreaterThan(-1);
     expect(
       sequence.slice(0, cut).filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done')),
-    ).toHaveLength(7);
+    ).toHaveLength(6);
     /* Quit runs the producer stage itself; the session stage is the registry's close, not `hidden`'s. */
     expect(sequence.filter((entry) => entry.startsWith('session:'))).toEqual([]);
     expect(started.getSnapshot().matches('quiesced')).toBe(true);

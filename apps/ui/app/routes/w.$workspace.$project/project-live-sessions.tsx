@@ -19,7 +19,6 @@ import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-rec
 import { ProjectPrintRouteIntent } from '#routes/w.$workspace.$project/project-print-route-intent.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
-import { EntriesSyncHost } from '#routes/w.$workspace.$project/entries-sync-host.js';
 import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { useModels } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
@@ -651,7 +650,6 @@ function ProjectSession({
         >
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
           <ViewSettingsSyncHost />
-          <EntriesSyncHost />
           <ProjectSessionBinding projectId={projectId} isFocused={focused} />
           {focused ? (
             <>

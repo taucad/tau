@@ -245,11 +245,11 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
       return;
     }
     deferred.current = undefined;
-    if (held.command.type === 'chatShown' && !ownCommit && chatOf(latest.current.currentUrl) !== held.chatId) {
+    if (held.command.type === 'chatShown' && chatOf(latest.current.currentUrl) !== held.chatId) {
       /* The move asked for another chat (I18): focus answers that commit, not this one. */
       return;
     }
     sink(held.command);
-  }, [currentUrl, location.key, navigationState, projectId, sink]);
+  }, [location.key, navigationState, sink]);
   return sink;
 }

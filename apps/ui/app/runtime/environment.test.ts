@@ -20,13 +20,9 @@ const createFakeFocus = (initial: FocusRequest) => {
   const ref = mock<AnyActorRef>();
   ref.getSnapshot.mockImplementation(() => ({ context: { request } }));
   ref.subscribe.mockImplementation((listener) => {
-    /* `environment` subscribes with a plain listener; it reads the request from the snapshot itself. */
-    const notify =
-      typeof listener === 'function'
-        ? listener
-        : (): void => {
-            listener.next?.(undefined);
-          };
+    /* `environment` subscribes with a plain listener and reads the request from the snapshot itself; an observer
+     * object is not a shape it uses, so it is never notified here. */
+    const notify = typeof listener === 'function' ? listener : (): void => undefined;
     listeners.add(notify);
     return {
       unsubscribe: () => {
@@ -130,6 +126,24 @@ describe('environment: the memory release (B-08)', () => {
 
     expect(later).toHaveBeenCalledWith('pagehide');
     expect(send).toHaveBeenCalledWith({ type: 'releaseMemory', keepProjectId: 'projA' });
+    errors.mockRestore();
+  });
+
+  it('should log a session whose pagehide flush rejects, as every registrant through useFlushOnClose is async', async () => {
+    const sequencer = createUnloadSequencer();
+    const later = vi.fn();
+    sequencer.register('session', async () => {
+      throw new Error('port closed');
+    });
+    sequencer.register('session', later);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    sequencer.pagehide();
+    await vi.waitFor(() => {
+      expect(errors).toHaveBeenCalledWith('A session could not flush on pagehide.', expect.any(Error));
+    });
+
+    expect(later).toHaveBeenCalledWith('pagehide');
     errors.mockRestore();
   });
 });

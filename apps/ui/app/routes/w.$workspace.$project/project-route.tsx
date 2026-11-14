@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, use, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
-import { useSelector } from '@xstate/react';
+import { shallowEqual, useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '@taucad/ui/components/loader';
@@ -63,17 +63,6 @@ const selectSessionNativeKernels = (context: SessionsMachineContext): Readonly<R
     ]),
   );
 
-const sameRecord = (
-  left: Readonly<Record<string, string | undefined>>,
-  right: Readonly<Record<string, string | undefined>>,
-): boolean => {
-  const keys = Object.keys(left);
-  return (
-    keys.length === Object.keys(right).length &&
-    keys.every((key) => Object.hasOwn(right, key) && left[key] === right[key])
-  );
-};
-
 /**
  * The project whose session holds focus's props, whether it is kept behind the route's state, and whether the route is
  * on its way somewhere else.
@@ -119,7 +108,7 @@ export function ProjectRouteGate({
   const sessions = useSessions();
   const focusSnapshot = useSelector(focus, (snapshot) => snapshot);
   const registry = useSelector(sessions, (snapshot) => selectFocusRegistryView(snapshot.context), sameRegistryView);
-  const nativeKernels = useSelector(sessions, (snapshot) => selectSessionNativeKernels(snapshot.context), sameRecord);
+  const nativeKernels = useSelector(sessions, (snapshot) => selectSessionNativeKernels(snapshot.context), shallowEqual);
   const liveProjectIds = useLiveProjectIds();
 
   /*

@@ -93,6 +93,18 @@ const refusalMessages = (reason: unknown, fallback: string): string[] =>
     : [reason instanceof Error ? reason.message : fallback];
 
 /**
+ * Run one session's pagehide flush. The callback starts synchronously; one registrant's throw or rejection is logged
+ * and never skips the rest, nor the memory release after them.
+ */
+const pageHideSafely = async (callback: FlushCallback): Promise<void> => {
+  try {
+    await callback('pagehide');
+  } catch (error) {
+    console.error('A session could not flush on pagehide.', error);
+  }
+};
+
+/**
  * Build the unload sequencer. A plain registry, not an actor: `environment` drives it.
  *
  * @returns The sequencer.
@@ -137,14 +149,8 @@ export const createUnloadSequencer = (): UnloadSequencer => {
         if (registration.stage === 'session') {
           /* Synchronous by contract: pagehide can only emit data prepared by hidden and cannot wait for a fresh
            * producer flush. */
-          try {
-            void Promise.resolve(registration.callback('pagehide')).catch((error: unknown) => {
-              console.error('A session could not flush on pagehide.', error);
-            });
-          } catch (error) {
-            /* One registrant's throw must not skip the rest, nor the memory release after them. */
-            console.error('A session could not flush on pagehide.', error);
-          }
+          // async-iife: bootstrap -- the document is going; each registrant settles, or logs, on its own.
+          void pageHideSafely(registration.callback);
         }
       }
     },

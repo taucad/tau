@@ -102,7 +102,7 @@
 \* the model's route steps are atomic, and the sink's deferral is what keeps the app's ones so.
 \* A held `chatShown` is dropped when the person's move changed the route's chat: focus answers that commit
 \* (I18). The sink's own replace, judged where it lands and used once, is not such a move, so the last chat
-\* shown still wins. Where that replace lands while another move loads, a held command is judged against it.
+\* shown still wins. Where that replace lands, even while another move loads, a held command is judged against it.
 \* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 

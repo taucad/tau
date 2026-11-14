@@ -2,8 +2,27 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
-import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
+import type {
+  HomeInspection,
+  HomeLoadRecord,
+  ProjectLoadRecord,
+  WorkerReadDelay,
+} from '#support/home-load-recorder.js';
+import {
+  armWorkerReadDelay,
+  inspectServerHtml,
+  installHomeLoadRecorder,
+  installProjectLoadRecorder,
+  installWorkerReadDelay,
+  knownDefectRows,
+  precondition,
+  projectRowMoves,
+  readHomeLoad,
+  readProjectLoad,
+  firstDelayedRead,
+  readWorkerDeliveries,
+  readWorkerReads,
+} from '#support/home-load-recorder.js';
 import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
 import { useFlagState } from '#support/flag-state-test.js';
 import {
@@ -167,11 +186,150 @@ test.each(
 );
 
 /*
+ * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
+ * row forces its defect by delivering a file-manager worker reply late, so its defect shows on every run. The title
+ * names the defect; the defect assertion names the frame and the node. Each is a plain test that stands as an
+ * expected failure until the fixing lane sets `expectedFailure: false`. A row measures first and asserts after: an
+ * error while measuring, in setup or teardown, or the defect assertion passing fails the row (`knownDefectRows`).
+ */
+
+/** How late a delayed worker read answers. Milliseconds. */
+const readDelay = 3000;
+/** The project listing Home's library and sidebar wait for. */
+const projectListingRead: WorkerReadDelay = { method: 'listProjectManifests', path: '', milliseconds: readDelay };
+/** Every project's chat listing. */
+const chatListingRead: WorkerReadDelay = {
+  method: 'readdir',
+  path: String.raw`^\.tau/chats$`,
+  milliseconds: readDelay,
+};
+
+const knownDefect = knownDefectRows('home-load-gate');
+/** The measure budget of a row: seven projects created through the UI, then two loads of Home. Milliseconds. */
+const homeBudget = 600_000;
+
+/** The returning visitor, then one reload of Home with `delays` armed, watched until the late reads answered. */
+const measureReturningReload = async ({
+  viewport,
+  delays,
+  label,
+  prepare,
+}: {
+  readonly viewport: ViewportName;
+  readonly delays: readonly WorkerReadDelay[];
+  readonly label: string;
+  /** What the visitor did on Home before the measured reload. */
+  readonly prepare?: () => Promise<void>;
+}): Promise<{ readonly record: ProjectLoadRecord; readonly since: number }> => {
+  await target.setViewport(viewports.wide);
+  await target.installModelCatalogFixture(catalogLatency);
+  await target.startModelCatalogApi();
+  await installHomeLoadRecorder();
+  await installProjectLoadRecorder();
+  await installWorkerReadDelay();
+  await seedReturningVisitor();
+  await target.setViewport(viewports[viewport]);
+  await target.navigate('/');
+  await waitForSettledHome(seededProjects, 1);
+  await prepare?.();
+  await armWorkerReadDelay(delays);
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(readDelay + settleWindow);
+  await waitForSettledHome(seededProjects, 1);
+  const record = await readProjectLoad();
+  const reads = await readWorkerReads();
+  const deliveries = await readWorkerDeliveries();
+  await target.writeArtifact(
+    `home-load-gate/${label}.json`,
+    `${JSON.stringify({ record, workerReads: reads, workerDeliveries: deliveries }, null, 2)}\n`,
+  );
+  const held = delays.map((rule) => firstDelayedRead(deliveries, rule));
+  for (const [index, rule] of delays.entries()) {
+    precondition(
+      held[index] !== undefined,
+      `${label}: no ${rule.method} reply matching /${rule.path}/ was delivered late`,
+    );
+  }
+  return { record, since: Math.min(...held.map((t) => t!)) };
+};
+
+for (const viewport of ['wide', 'phone'] as const) {
+  knownDefect(
+    `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
+    {
+      artifact: `h1-${viewport}`,
+      expectedFailure: true,
+      budget: homeBudget,
+      measure: async () => {
+        const { record } = await measureReturningReload({
+          viewport,
+          delays: [projectListingRead],
+          label: `h1-${viewport}`,
+        });
+        precondition(record.hydratedFirstFrame !== undefined, 'H1: the rich composer never mounted');
+        precondition(
+          record.dropped['skeletonFrames'] === undefined,
+          'H1: the record dropped skeleton frames past its frame limit',
+        );
+        return record;
+      },
+      assert: (record) => {
+        const hydrated = record.hydratedFirstFrame!;
+        const after = record.skeletonFrames.filter((frame) => frame.frame >= hydrated.frame);
+        expect(
+          after.map((frame) => `frame ${frame.frame} (${frame.t} ms): ${frame.count}`).slice(0, 5),
+          `H1: hydrated by frame ${hydrated.frame} (${hydrated.t} ms), then [data-slot=skeleton] blocks in ${after.length} frames`,
+        ).toEqual([]);
+      },
+    },
+  );
+}
+
+knownDefect(
+  'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
+  {
+    artifact: 'h5-wide',
+    expectedFailure: true,
+    budget: homeBudget,
+    measure: async () => {
+      /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's did. */
+      const expanded = seededProjects.at(-1)!;
+      const measured = await measureReturningReload({
+        viewport: 'wide',
+        delays: [chatListingRead],
+        label: 'h5-wide',
+        prepare: async () => {
+          const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
+          await target.click(disclosure);
+          await target.expectAttribute(
+            selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
+            'aria-expanded',
+            'true',
+          );
+          /* The disclosure is persisted before the measured load. */
+          await target.delay(settleWindow);
+        },
+      });
+      precondition(measured.record.projectRows.length > 0, 'H5: no sidebar project row was on screen');
+      return measured;
+    },
+    assert: ({ record, since }) => {
+      /* Only what the late listing can move: a move before it was requested is not this defect's. */
+      const moved = projectRowMoves(record, since);
+      expect(
+        moved,
+        `H5: after the chat listing was requested at ${since} ms, a sidebar project row moved between frames: ${moved.join(' | ')}`,
+      ).toEqual([]);
+    },
+  },
+);
+
+/*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
- * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
- * `cloudDefectRow` `expectedFailure` to `false`. Each is a plain test: only its defect assertion's failure is
- * recorded as the standing defect, and any other fault, or that assertion passing, fails the row.
+ * (`#support/cloud-stand-ins.js`). Side lane N1 fixed both defects and set each `cloudDefectRow`'s
+ * `expectedFailure` to `false`, so each now passes as a guard and any fault, its defect assertion among them, fails it.
  */
 const cloud = cloudStandInCommands(target.commands);
 const cloudLoadTier = await cloud.uiIsCloudLoadTier();

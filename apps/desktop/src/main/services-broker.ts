@@ -1,5 +1,5 @@
-import { isStreamingMachines } from '#shared/machine-shutdown.js';
-import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
+import { isStreamingMachines } from '@taucad/types/desktop';
+import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /**
  * The singleton services-utility broker (work item E2, second half).
  *

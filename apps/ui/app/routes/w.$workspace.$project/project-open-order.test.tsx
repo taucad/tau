@@ -19,7 +19,7 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';

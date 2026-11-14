@@ -34,6 +34,16 @@
         "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
       }
     },
+    "test:e2e:webgpu": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The WebGPU hardware qualification tier for the viewer: e2e-nightly.yml's webgpu-hardware job runs it with TAU_E2E_WEBGPU_PROFILE=hardware on a runner with a GPU. It runs the node frame reference and post-processing suites whose 5K coverage oracles, node-pipeline AO/FXAA/camera-preparation rows and 2560/5K frame-count rows hold only on a hardware rasterizer (the viewer composes beauty-only on a software rasterizer, #1081 and #1083); under the software profile those rows are not registered (it.runIf on the injected webGpuProfile)."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts src/graphics/three/node-frame-reference.browser.test.ts src/graphics/three/post-processing-antialias.browser.test.tsx"
+      }
+    },
     "test": {
       "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
     },

@@ -6,8 +6,8 @@
  * refetches the listing, and the chat-metadata watch, which refetches the chat queries a project's `.tau/chats` rows
  * feed. Each is now a callback actor `libraryDiscovery` invokes. It holds its watches, leases and subscriptions in its
  * closure (D4), reports to the machine with `invalidated` and `observationChanged`, and takes `refreshObservations`.
- * The watches run over the root file manager's facade, which still comes from React through the library's binding
- * (D15 ruling, A2), so each child rebuilds them when the facade it reads changes, as the effect re-ran.
+ * The watches run over the root file facade the app runtime builds and the library follows (A4b; the D15 binding is
+ * gone), so each child rebuilds them when the facade it reads changes, as the effect re-ran.
  *
  * `createMetadataReadOwner` moved here unchanged: the chat-record reads wait on the metadata observation's
  * registration, so the two are built together.
@@ -187,11 +187,11 @@ export type LibraryRecords = Readonly<{ chatStore: ChatStorage; readOwner: Metad
 /** What the observations read from the library that runs them; host objects, held in their closures only (D4). */
 export type LibraryObservationHost = Readonly<{
   queryClient: QueryClient;
-  /** The facade of the current binding, if any. */
+  /** The root file facade's current value, once the library follows it. */
   fileManager: () => ProjectLibraryFileManager | undefined;
-  /** The records over the current binding's record client, if any. */
+  /** The records over the facade's record client, if any. */
   records: () => LibraryRecords | undefined;
-  /** Called after the binding's facade or records changed. */
+  /** Called after the facade or its records changed. */
   subscribeBinding: (listener: () => void) => () => void;
   /** Called when the library asks the manifest watch to invalidate (a root moved under the listing). */
   subscribeInvalidate: (listener: () => void) => () => void;
@@ -203,7 +203,7 @@ export type LibraryObservationHost = Readonly<{
   clearMetadataHealth: () => void;
 }>;
 
-/** Rebuild a watch whenever the binding parts it reads change; dispose it when the actor stops. */
+/** Rebuild a watch whenever the facade parts it reads change; dispose it when the actor stops. */
 const rebuilding = <Key extends readonly unknown[]>(
   host: LibraryObservationHost,
   keyOf: () => Key | undefined,

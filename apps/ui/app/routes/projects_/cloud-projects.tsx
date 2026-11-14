@@ -25,15 +25,13 @@ import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { CardFooter, CardHeader } from '@taucad/ui/components/card';
 import {
-  isCloudProjectPending,
   assertCloudProjectActive,
   CloudProjectUnavailableError,
-  getCloudDeletionState,
   materializedCloudProjects,
-  tauCloudIntent,
   useMaterializeOnSignInLocation,
-  withNamedLock,
 } from '#hooks/use-cloud-projects.js';
+import { isCloudProjectPending, getCloudDeletionState, tauCloudIntent } from '#lib/tau-cloud-intent.js';
+import { withNamedLock } from '#lib/named-lock.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';

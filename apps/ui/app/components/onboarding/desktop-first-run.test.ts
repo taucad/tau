@@ -11,10 +11,13 @@ const { listing } = vi.hoisted(() => ({
 vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => ({ firstRun: true }) }));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
-    getProjectListing: async () =>
-      new Promise((resolve) => {
-        listing.pending.push(resolve);
-      }),
+    projectListingQuery: {
+      queryKey: ['projects'],
+      queryFn: async () =>
+        new Promise((resolve) => {
+          listing.pending.push(resolve);
+        }),
+    },
     isLoading: false,
   }),
 }));

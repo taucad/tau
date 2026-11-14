@@ -71,7 +71,8 @@ vi.stubGlobal(
 );
 
 const { toLibraryRows, useMaterializeCloudProjects } = await import('#routes/projects_/cloud-projects.js');
-const { materializeOnSignIn, materializedCloudProjects, tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
+const { materializeOnSignIn, materializedCloudProjects } = await import('#hooks/use-cloud-projects.js');
+const { tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 
 /* Every queued microtask and the lock's chain drain before a macrotask runs. */
 const settle = async (): Promise<void> =>

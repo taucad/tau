@@ -25,7 +25,11 @@ vi.hoisted(() => {
   vi.stubEnv('TAU_WEBSOCKET_URL', 'ws://localhost:4001');
   vi.stubEnv('TAU_FRONTEND_URL', 'http://localhost:3000');
 });
-const seen = vi.hoisted(() => ({ states: [] as ProjectRouteState[], projectHook: 0, workspaceImport: 0 }));
+const seen = vi.hoisted(() => ({
+  states: [] as Array<ProjectRouteState | undefined>,
+  projectHook: 0,
+  workspaceImport: 0,
+}));
 vi.mock('#machines/focus.route-state.js', async (importOriginal) => {
   const actual = await importOriginal<typeof FocusRouteStateModule>();
   return {
@@ -81,7 +85,7 @@ it('should derive resolving for a project URL on the server and call no project 
     </QueryClientProvider>,
   );
   expect(seen.states.length).toBeGreaterThan(0);
-  expect(seen.states.map((state) => state.kind)).toEqual(seen.states.map(() => 'resolving'));
+  expect(seen.states.map((state) => state?.kind)).toEqual(seen.states.map(() => 'resolving'));
   expect({ projectHook: seen.projectHook, workspaceImport: seen.workspaceImport }).toEqual({
     projectHook: 0,
     workspaceImport: 0,

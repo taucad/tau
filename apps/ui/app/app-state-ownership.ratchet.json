@@ -29,6 +29,7 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/flags/layout-flags.ts",
       "apps/ui/app/machines/focus.machine.ts",
       "apps/ui/app/machines/focus.route-state.ts",
       "apps/ui/app/machines/library-access.machine.ts",

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.5.0 (2026-11-14)
+
+### Features
+
+- feat(sandbox): Write the Linux Terminal's git store through a FUSE store guard (LP2, LP3, LP5, LP8) (#2187) (277277b3a)
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+- feat(shell-service): one Terminal git store policy with remotes, branches and folded spellings (LP1, LP6) (#2124) (80c065da7)
+- feat(shell-service): let the macOS Terminal commit, branch, stash and merge (TG5) (#2061) (255e24e5a)
+- feat(revisions): keep the person's staging and wait out their Git operations (TG4, TG7b) (#2058) (fe7b4dfa8)
+- feat(api-git-core): back up commits you make with git (TG3) (#2053) (9b2f1aa2a)
+- feat(desktop): Report Git LFS and revision-engine failures, and guard the Linux payload (TG7c) (#2047) (8a1f7dcb3)
+
+### Fixes
+
+- fix(sandbox): Close the store guard's follow-up review nits (#2216) (ed5fc1389)
+- fix(shell-service): never admit a shell call whose signal aborted before the gate (E09) (#2215) (8352062ed)
+- fix(picogk): Pin the .NET runtime archives by sha256 for locked prepare (#2208) (47c0292ce)
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(agent-observability): Price Vertex thinking and label each run with its kernel (LA3, LU6) (#2152) (c4e265109)
+- fix(revisions): pin the engine's common dir, refuse planted commondir, warn on rebase exec (LP4, LP7) (#2148) (1abaf069d)
+- fix(revisions): Refuse a merge built on history an undo took back (#2111) (82fc8f4b5)
+- fix(revisions): Back up past a v<n> tag that is not a version (#2107) (2c5a458e0)
+- fix(agent-observability): Let a host claim the protection the API reads for the account (#2052) (475b2f403)
+
+### Other changes
+
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+- ci(formal): Run each TLA+ family in a parallel target of its own (#2092) (2cdaf1520)
+- test(host): probe the Linux store guard's launch shape on the shell rows (LP0) (#2108) (50a5e6308)
+
 ## 0.4.0 (2026-11-13)
 
 ### Features

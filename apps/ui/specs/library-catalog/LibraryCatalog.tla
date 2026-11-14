@@ -65,7 +65,8 @@
 \* above them; the code they name is unchanged, so no action or correspondence changes.
 \* A12 (app state orchestration, I21): `createProject` tells the chat store when the first chat it writes
 \* holds no message, so that chat shows empty at once. It is a call to the chat store after the operation
-\* commits; no root, row or read changes, so every action is unchanged.
+\* commits, and the creating callback lists the store among its inputs; no root, row or read changes,
+\* so every action is unchanged.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

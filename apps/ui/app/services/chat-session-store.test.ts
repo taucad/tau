@@ -6161,6 +6161,67 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    it('remembers trays only from a transcript that holds the local log (U10)', async () => {
+      const projectId = 'project_foreign_only';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      const scans = new Map<string, PromiseWithResolvers<string[]>>();
+      const foreignChats = ['chat_foreign_refused', 'chat_foreign_unanswered'];
+      await Promise.all(
+        foreignChats.map(async (chatId) =>
+          client.writeFile(`${eventsOf(chatId)}/other-device.jsonl`, new TextEncoder().encode(rows)),
+        ),
+      );
+      for (const chatId of foreignChats) {
+        scans.set(eventsOf(chatId), Promise.withResolvers<string[]>());
+      }
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => scans.get(path)?.promise ?? readDirectory(path));
+      const memory = new Map<string, string>([
+        ['tau:chat-composer-trays:chat_foreign_refused', 'todo'],
+        ['tau:chat-composer-trays:chat_foreign_unanswered', 'todo'],
+      ]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const refused = store.acquire('chat_foreign_refused', projectId);
+      const unanswered = store.acquire('chat_foreign_unanswered', projectId);
+      try {
+        await settle();
+        // This device's log is refused for good: the other device's turns show, but they are not the whole chat.
+        store.receiveHostReadAnswer('chat_foreign_refused', { status: 'refused', reason: 'unreadable' });
+        scans.get(eventsOf('chat_foreign_refused'))?.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(refused.transcript).toBe('loaded');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_foreign_refused')).toBe('todo');
+
+        // This device's log has not answered yet.
+        scans.get(eventsOf('chat_foreign_unanswered'))?.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(unanswered.transcript).toBe('loaded');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_foreign_unanswered')).toBe('todo');
+      } finally {
+        store.release('chat_foreign_refused');
+        store.release('chat_foreign_unanswered');
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('keeps the remembered tray when the foreign scan failed, even once local turns show (U10)', async () => {
       const projectId = 'project_failed_scan_turns';
       const client = createMemoryClient();

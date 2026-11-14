@@ -4013,11 +4013,12 @@ export class ChatSessionStore {
    * applied turns, so a change that leaves the turns as they were still notifies.
    */
   #settleTranscript(session: InternalSession, messages: readonly MyUIMessage[]): void {
-    if (this.#foreignScanState(session.chatId) !== 'read') {
+    // Trays are remembered only from the whole chat: other devices' history read, and this device's log answered.
+    if (this.#foreignScanState(session.chatId) !== 'read' || !this.#answeredLogReads.has(session.chatId)) {
       if (messages.length === 0) {
         this.#latchUnreadTranscript(session);
       } else {
-        // Turns show, yet other devices' history is unread: the trays it may hold are not forgotten (U10).
+        // Turns show, yet part of the chat is unread: the trays it may hold are not forgotten (U10).
         session.transcriptAwaitsForeignScan = false;
         this.#latchTranscriptSettled(session);
       }

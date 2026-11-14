@@ -1841,6 +1841,7 @@ export function ProjectManagerProvider({
       };
     },
     [
+      chatSessions,
       fileManager.client,
       getReadiedWorker,
       namingImageUrls,
@@ -2049,7 +2050,7 @@ export function ProjectManagerProvider({
       }
       return recordSnapshot();
     },
-    [chatSessions, fileManager, getReadiedWorker],
+    [fileManager, getReadiedWorker],
   );
 
   // Single-flight: the 5 s poll, route access, project reads and the broadcast

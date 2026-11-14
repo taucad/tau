@@ -226,7 +226,12 @@ describe('workspaceConnectionMachine', () => {
       const second = new Error('second fault');
       const actor = createActor(workspaceConnectionMachine, {
         input: {
-          registerWorkspace: vi.fn(async () => new Promise<never>(() => undefined)),
+          registerWorkspace: vi.fn(
+            async () =>
+              new Promise<never>(() => {
+                /* Registration never settles: the fault happens first. */
+              }),
+          ),
           mountWorkspace: vi.fn(),
           prepareWorkspaceCatalog: vi.fn(),
         },

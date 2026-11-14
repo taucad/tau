@@ -539,7 +539,10 @@ export const useCloudProjects = (
   } = useQuery({
     queryKey: cloudProjectsQueryKeyFor(account),
     queryFn: async ({ signal }) => fetchCloudProjects(signal),
+    /* A pending deletion is watched every 3 s. A listing that failed with nothing listed is not: polling would turn its
+       failure back into a wait every 3 s, so its notice and Retry stay until the person retries or the window refocuses. */
     refetchInterval: (query) =>
+      !(query.state.status === 'error' && query.state.data === undefined) &&
       overlayDeletionReceipts(query.state.data ?? [], account).some((entry) => entry.cloudState === 'deleting')
         ? 3000
         : false,

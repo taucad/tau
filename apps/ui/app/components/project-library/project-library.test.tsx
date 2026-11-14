@@ -1554,7 +1554,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 3: the slow wait's Retry is the failure's Retry, so a Retry that fails keeps its focus. */
-    it.fails("C14: keeps focus on the slow wait's Retry when the request it starts fails", async () => {
+    it("C14: keeps focus on the slow wait's Retry when the request it starts fails", async () => {
       cloudListing.retry.mockImplementationOnce(
         async () =>
           new Promise<void>(() => {
@@ -1576,7 +1576,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 3: a Retry pressed beside the first wait's slow words starts a wait of its own, which is announced. */
-    it.fails("C14: announces the wait the slow wait's Retry starts, timed from the press", async () => {
+    it("C14: announces the wait the slow wait's Retry starts, timed from the press", async () => {
       cloudListing.retry.mockImplementationOnce(
         async () =>
           new Promise<void>(() => {
@@ -1648,17 +1648,17 @@ describe('ProjectLibrary', () => {
       cloudListing.isFailed = true;
       const slot = renderSlot({ isPhoneBar: true });
       const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
-      expect(row).not.toHaveClass('max-md:hidden');
+      expect(row).not.toHaveClass('max-md:sr-only');
       await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
       slot.rerender();
-      expect(row).not.toHaveClass('max-md:hidden');
+      expect(row).not.toHaveClass('max-md:sr-only');
     });
 
     /* D21 round 3: on a phone the slot's status region is in the accessibility tree before its first words, so they
        are announced when they arrive. */
-    it.fails("C14: keeps the phone header row's status region readable before a notice shows", () => {
+    it("C14: keeps the phone header row's status region readable before a notice shows", () => {
       const slot = renderSlot({ isPhoneBar: true });
       const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
       expect(row).not.toHaveClass('max-md:hidden');
@@ -1666,7 +1666,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 3: the phone row shows for a notice the slot shows, not one the local listing's wait still holds back. */
-    it.fails("C14: keeps the phone header row hidden while the local listing's wait holds a notice back", () => {
+    it("C14: keeps the phone header row hidden while the local listing's wait holds a notice back", () => {
       mockRememberedShape = { count: 2, projects: [] };
       mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
       cloudListing.isFailed = true;

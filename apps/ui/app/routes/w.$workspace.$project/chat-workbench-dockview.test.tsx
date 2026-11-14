@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
+import { isValidElement, useEffect, useRef, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
@@ -119,8 +119,11 @@ let readyDockviewApi: DockviewApi | undefined;
 const workspaceLayout: { value: { send: (event: { type: string }) => void } | undefined } = { value: undefined };
 vi.mock('#components/panes/dockview.js', () => ({
   Dockview: ({ onReady }: { onReady: (event: DockviewReadyEvent) => void }) => {
+    // As Dockview (`useKeptInstance`): `onReady` once per mounted instance, whatever the later renders pass.
+    const announced = useRef(false);
     useEffect(() => {
-      if (readyDockviewApi) {
+      if (readyDockviewApi && !announced.current) {
+        announced.current = true;
         onReady({ api: readyDockviewApi });
       }
     }, [onReady]);

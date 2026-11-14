@@ -1515,6 +1515,13 @@ describe('ProjectLibrary', () => {
 
     /* D21 round 1: the first listing belongs to the page's open, which the sidebar announces; a Retry is announced. */
     it('C14: does not announce the first Tau Cloud wait, and announces the wait a Retry starts', async () => {
+      /* The Retry's request is still in flight. */
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
       cloudListing.isFetching = true;
       const slot = renderSlot();
       const cloudStatuses = (): HTMLElement[] =>
@@ -1547,7 +1554,14 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
-    it.fails("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
+    it("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
+      /* The Retry's request is still in flight. */
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
       cloudListing.isFailed = true;
       const slot = renderSlot();
       const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
@@ -1560,9 +1574,9 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 2: a Retry that ends without a wait (a failed refresh over listed projects) leaves nothing behind. */
-    it.fails('C14: does not announce a later first wait after a Retry that started none', async () => {
+    it('C14: does not announce a later first wait after a Retry that started none', async () => {
       cloudListing.isFailed = true;
-      cloudListing.retry.mockImplementation(async () => undefined);
+      cloudListing.retry.mockImplementationOnce(async () => undefined);
       const slot = renderSlot();
       await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
       cloudListing.isFailed = false;

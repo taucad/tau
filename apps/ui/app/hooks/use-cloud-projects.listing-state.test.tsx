@@ -74,7 +74,7 @@ describe('H6: the cloud listing state', () => {
     const retried = Promise.withResolvers<Response>();
     fetchMock.mockImplementation(async () => retried.promise);
     act(() => {
-      result.current.retry();
+      void result.current.retry();
     });
     await waitFor(() => {
       expect(cloudOf(result)).toBe('fetching');
@@ -122,7 +122,7 @@ describe('H6: the cloud listing state', () => {
     fetchMock.mockClear();
     fetchMock.mockResolvedValue(new Response(undefined, { status: 503 }));
     act(() => {
-      result.current.retry();
+      void result.current.retry();
     });
     await waitFor(() => {
       expect(cloudOf(result)).toBe('failed');
@@ -163,7 +163,7 @@ describe('H6: the cloud listing state', () => {
   });
 
   /* D21 round 2: Retry beside the slow words asks again even while the first request hangs. */
-  it.fails('H6: asks again for a Retry while the first listing request hangs', async () => {
+  it('H6: asks again for a Retry while the first listing request hangs', async () => {
     fetchMock.mockImplementation(
       async () =>
         new Promise<Response>(() => {

@@ -307,10 +307,19 @@ export function ProjectLibrary({
   if (cloudNotice !== undefined && !hasShownCloudNotice) {
     setHasShownCloudNotice(true);
   }
-  const retryCloudListing = useCallback(() => {
+  /* The flag lasts as long as the Retry's own request, so a Retry that starts no wait (a failed refresh over listed
+     projects) leaves nothing behind for a later one. */
+  const retryCloudListing = useCallback(async () => {
     setIsCloudRetried(true);
-    retryCloud();
+    try {
+      await retryCloud();
+    } finally {
+      setIsCloudRetried(false);
+    }
   }, [retryCloud]);
+  const handleRetryCloud = useCallback(() => {
+    void retryCloudListing();
+  }, [retryCloudListing]);
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
     cloud: cloudProjects,
@@ -596,7 +605,12 @@ export function ProjectLibrary({
   const statusSlot = (
     /* The listing's own wait keeps the slot while it runs: until it answers, there are no projects on this device to
        speak of, and its slow words and Retry stay reachable. */
-    <LibraryStatusSlot notice={isAwaitingListing ? undefined : cloudNotice} onRetryCloud={retryCloudListing}>
+    <LibraryStatusSlot
+      notice={isAwaitingListing ? undefined : cloudNotice}
+      /* A failure's Retry stays through the wait it starts, so its focus does not move. */
+      isRetryShown={!isAwaitingListing && (cloudNotice === 'failed' || cloudWait?.isAnnounced === true)}
+      onRetryCloud={handleRetryCloud}
+    >
       <WaitIndicator
         className='min-w-0 justify-end overflow-hidden'
         /* The listing's wait is seen, not announced: the sidebar's Recents label announces it (one announcement per
@@ -611,7 +625,9 @@ export function ProjectLibrary({
             ? () => {
                 void retry();
               }
-            : retryCloudListing
+            : cloudWait?.isAnnounced === true
+              ? undefined
+              : handleRetryCloud
         }
       />
     </LibraryStatusSlot>
@@ -1045,10 +1061,13 @@ function cloudNoticeOf({
  */
 function LibraryStatusSlot({
   notice,
+  isRetryShown,
   onRetryCloud,
   children,
 }: {
   readonly notice: CloudNotice | undefined;
+  /** Whether Tau Cloud's Retry is offered: beside a failure, and through the wait it starts. */
+  readonly isRetryShown: boolean;
   readonly onRetryCloud: () => void;
   readonly children: ReactNode;
 }): React.JSX.Element {
@@ -1062,25 +1081,26 @@ function LibraryStatusSlot({
         {notice === 'offline' ? 'Offline. Showing projects on this device.' : null}
       </span>
       {notice === 'offline' ? null : notice === 'failed' ? (
-        <>
-          <span role='alert' className='flex min-w-0 items-center gap-1.5'>
-            <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
-            <span className='truncate'>Tau Cloud projects not loaded</span>
-          </span>
-          <Button
-            type='button'
-            variant='ghost'
-            size='xs'
-            className='min-w-6 shrink-0'
-            aria-label='Retry Tau Cloud'
-            onClick={onRetryCloud}
-          >
-            Retry
-          </Button>
-        </>
+        <span role='alert' className='flex min-w-0 items-center gap-1.5'>
+          <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
+          <span className='truncate'>Tau Cloud projects not loaded</span>
+        </span>
       ) : (
         children
       )}
+      {/* Last in the slot, so the same element stays while the words before it change. */}
+      {isRetryShown ? (
+        <Button
+          type='button'
+          variant='ghost'
+          size='xs'
+          className='min-w-6 shrink-0'
+          aria-label='Retry Tau Cloud'
+          onClick={onRetryCloud}
+        >
+          Retry
+        </Button>
+      ) : null}
     </div>
   );
 }

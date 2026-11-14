@@ -204,6 +204,8 @@ export type CloudLoadProbe = {
   readonly cloudListingText: string;
   /** Words every Tau Cloud listing state Home shows carries: its wait, its slow words and its failure. */
   readonly cloudStateText: string;
+  /** The Projects header's status slot, which shows a wait it does not announce. */
+  readonly statusSlot: string;
   /** The session request's path, so its answer's arrival is timed on the page's own clock. */
   readonly sessionPath: string;
 };
@@ -215,6 +217,7 @@ export const cloudLoadProbe: CloudLoadProbe = {
   projectGrid: 'ul[aria-label="Projects"]',
   cloudListingText: 'Loading Tau Cloud projects',
   cloudStateText: 'Tau Cloud projects',
+  statusSlot: '[data-slot="project-library-status"]',
   sessionPath: '/v1/auth/get-session',
 };
 
@@ -233,8 +236,8 @@ export type CloudLoadRecord = {
   /** The project grid's top offset, in CSS pixels, each time it or the cloud listing line changed. */
   readonly gridTops: ReadonlyArray<{ readonly t: number; readonly top: number; readonly cloudListing: boolean }>;
   /**
-   * Each change of what the Tau Cloud listing's state shows on screen (P-k): a live region or alert carrying
-   * `cloudStateText`, its visible words (`innerText`, so words a wait indicator still hides are left out), its role,
+   * Each change of what the Tau Cloud listing's state shows on screen (P-k): a live region, alert or the library's
+   * header slot carrying `cloudStateText`, its visible words (`innerText`, so words a wait indicator still hides are left out), its role,
    * and whether it sits in the row of the Projects heading.
    */
   readonly cloudStates: ReadonlyArray<{
@@ -335,7 +338,8 @@ export const recordCloudLoad = (probe: CloudLoadProbe): void => {
   let lastCloudState = '';
   const sampleCloudState = (): void => {
     const row = headerRow();
-    const shown = [...document.querySelectorAll('[role="status"], [role="alert"]')]
+    /* The library's header slot too: a wait that belongs to the page's open is seen there, not announced. */
+    const shown = [...document.querySelectorAll(`[role="status"], [role="alert"], ${probe.statusSlot}`)]
       .filter((region) => region.textContent.includes(probe.cloudStateText))
       .map((region) => ({
         role: region.getAttribute('role') ?? '',

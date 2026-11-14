@@ -9,7 +9,7 @@
  * three times under three different cache keys.
  */
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { QueryClient, QueryState, UseMutationResult } from '@tanstack/react-query';
 import { notifyManager, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
@@ -465,26 +465,6 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
 };
 
 /**
- * Ask Tau Cloud for the listing once, with no retries of its own, into the shared query. A failure is the query's
- * state, which the library shows; nothing else is done with it here.
- *
- * @param queryClient - The client holding the listing.
- * @param account - The signed-in account the listing belongs to.
- */
-const askOnce = async (queryClient: QueryClient, account: string | undefined): Promise<void> => {
-  try {
-    await queryClient.query({
-      queryKey: cloudProjectsQueryKeyFor(account),
-      queryFn: async ({ signal }) => fetchCloudProjects(signal),
-      retry: false,
-      staleTime: 0,
-    });
-  } catch {
-    /* Reported through the query's error state. */
-  }
-};
-
-/**
  * The Tau Cloud listing as one state (A13, H6's state part): `failed` while react-query reports the listing errored,
  * `fetching` while a request is otherwise in flight, and `ready` otherwise, including a listing not asked yet. This is
  * the order Home's cloud line has always drawn: a retry of a listing that never answered reads `fetching`, because
@@ -525,7 +505,8 @@ export const useCloudProjects = (
   isFetching: boolean;
   /** The listing's state, which Home's cloud line reads. */
   cloud: CloudListingState;
-  retry: () => void;
+  /** Ask Tau Cloud once more, as a person's Retry: one request, settled when its answer is in. */
+  retry: () => Promise<void>;
 }> => {
   const account = useRevisionSessionUser()?.id;
   const queryClient = useQueryClient();
@@ -547,11 +528,14 @@ export const useCloudProjects = (
       globalThis.removeEventListener('storage', onStorage);
     };
   }, [account, queryClient]);
+  /* While a person's Retry is in flight, its request is not retried on its own: its answer is said at once (K-c). */
+  const isPersonRetry = useRef(false);
   const {
     data = [],
     isSuccess,
     isError,
     isFetching,
+    refetch,
   } = useQuery({
     queryKey: cloudProjectsQueryKeyFor(account),
     queryFn: async ({ signal }) => fetchCloudProjects(signal),
@@ -560,7 +544,7 @@ export const useCloudProjects = (
         ? 3000
         : false,
     enabled: (options?.enabled ?? true) && !awaitsSession,
-    retry: retryCloudListing,
+    retry: (failureCount, error) => !isPersonRetry.current && retryCloudListing(failureCount, error),
     /* The set only changes when another device backs something up or an owner
        shares one, and a window focus is when this device is most likely to have
        missed either — which is react-query's `refetchOnWindowFocus` default
@@ -574,9 +558,19 @@ export const useCloudProjects = (
     isFailed: isError,
     isFetching,
     cloud: selectCloudListingState({ isError, isFetching }),
-    /* A person's Retry (K-c) is one request: its answer is said at once, and they can ask again. */
-    retry: () => {
-      void askOnce(queryClient, account);
+    /* A person's Retry (K-c) is one new request, even while an earlier one hangs: that one is dropped silently, so
+       the listing reads as fetching throughout, and the new one asks with no retries of its own. */
+    retry: async () => {
+      void queryClient
+        .getQueryCache()
+        .find({ queryKey: cloudProjectsQueryKeyFor(account), exact: true })
+        ?.cancel({ silent: true });
+      isPersonRetry.current = true;
+      try {
+        await refetch();
+      } finally {
+        isPersonRetry.current = false;
+      }
     },
   };
 };

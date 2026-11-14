@@ -78,7 +78,6 @@
   "apps/ui/app/routes/w.$workspace.$project/chat-print-program.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/chat-viewer-dockview.tsx": 5,
   "apps/ui/app/routes/w.$workspace.$project/chat-viewer.tsx": 6,
-  "apps/ui/app/routes/w.$workspace.$project/chat-workbench-dockview.tsx": 9,
   "apps/ui/app/routes/w.$workspace.$project/entries-sync-host.tsx": 3,
   "apps/ui/app/routes/w.$workspace.$project/project-command-items.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": 8,

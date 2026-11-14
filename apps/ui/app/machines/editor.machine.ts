@@ -18,6 +18,8 @@ import type {
 import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
+import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
 
 const maxOpenFiles = 200;
 
@@ -192,7 +194,11 @@ export type EditorStateEvent =
   | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
   // User-initiated retry from `<FocusedChatErrorPanel>` after
   // `ensureFocusedChatActor` rejected.
-  | { type: 'retryEnsureFocusedChat' };
+  | { type: 'retryEnsureFocusedChat' }
+  /* A layout-less page's workbench Dockview hands over its adapter (A8c): share and preview have no workbench layout
+   * to run it, so the editor, whose open files it places, runs it as a child until the same Dockview releases it. */
+  | WorkbenchDockReady
+  | WorkbenchDockReleased;
 
 /**
  * The editor machine's public alphabet: every {@link EditorStateEvent} type, in the union's order. The totality test
@@ -223,6 +229,8 @@ export const editorEventTypes = [
   'focusedChatEnsured',
   'focusedChatDeferred',
   'retryEnsureFocusedChat',
+  'dockReady',
+  'dockReleased',
 ] as const satisfies ReadonlyArray<EditorStateEvent['type']>;
 
 /** The events only `ready` answers: tab, chat, panel and flush verbs, and the focused-chat retry. */
@@ -348,6 +356,7 @@ const editorActors = {
   saveEditorStateActor,
   materialiseOpenFileActor,
   ensureFocusedChatActor,
+  workbenchAdapter: workbenchAdapterLogic,
 };
 
 type EditorEnqueue = EnqueueObject<EditorStateEvent, EditorStateEmitted, SystemRegistry, typeof editorActors>;
@@ -509,6 +518,28 @@ export const editorMachine = setup({
   }),
   initial: 'idle',
   on: {
+    // A layout-less page's workbench adapter (A8c, I1, D4): the `DockviewApi` reaches only the adapter's closure. A new
+    // mount replaces the adapter it had; a release names its mount, so a late one stops nothing newer.
+    dockReady: ({ children, event, actors }, enq) => {
+      for (const id of dockAdapterIdsOf(children, event.adapter)) {
+        const previous = children[id];
+        if (previous !== undefined) {
+          enq.stop(previous);
+        }
+      }
+      enq.spawn(actors.workbenchAdapter, {
+        id: dockAdapterId(event.adapter, event.dockId),
+        input: { api: event.api, ports: event.ports },
+      });
+      return {};
+    },
+    dockReleased: ({ children, event }, enq) => {
+      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
+      if (adapter !== undefined) {
+        enq.stop(adapter);
+      }
+      return {};
+    },
     setRequestedChatId: { context: ({ event }) => ({ requestedChatId: event.chatId }) },
     /* Fallback for the pre-`ready` window: record the request so the cold-start
      * ensure resolves to it. The `ready.operation` handler overrides this one

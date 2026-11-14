@@ -4,7 +4,8 @@
  * (I11), acknowledges a revision only once it is on screen (I12), holds one record session for the file (I13) and
  * settles restore commands against the arrangement they expected (I14). App state orchestration charter D2, D4, D11,
  * D13, D23; package A8a. It conforms to `specs/layout-apply/LayoutApply.tla`, whose README states the rules it keeps.
- * A8b makes it a child of the project runtime; A8c and A8d write the real adapters. Until then it is unwired.
+ * A8b makes it a child of the project runtime; A8c and A8d write the real adapters, which a Dockview hands to it with
+ * `dockReady` and takes back with `dockReleased`: each runs as its child, so no component starts an actor (I1).
  *
  * ```text
  * workbenchLayout (parallel)
@@ -102,6 +103,8 @@ import { publishRecordIssue, recordIssueState } from '#workbench-records/record-
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
+import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
 import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import { layoutPolicy } from '#workbench-records/layout-policy.js';
 import {
@@ -220,7 +223,14 @@ export type WorkbenchLayoutEvent =
    */
   | Readonly<{ type: 'intentUnavailable'; intentId: string; deliveryId?: number }>
   /** A restore command: write `layout` over the record bytes `expected` names. */
-  | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>;
+  | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>
+  /**
+   * A Dockview is ready and hands over its adapter (A8c): the adapter runs as this actor's child, holding the
+   * `DockviewApi` in its closure (D4), until the same Dockview's `dockReleased`. Host plumbing outside the spec.
+   */
+  | WorkbenchDockReady
+  /** The Dockview that sent `dockReady` with `dockId` is gone: its adapter stops. */
+  | WorkbenchDockReleased;
 
 /** Events the machine emits: to the adapters, to the phone's tab port, and to its owner. */
 export type WorkbenchLayoutEmitted =
@@ -660,6 +670,7 @@ type Step<Event extends WorkbenchLayoutEvent['type']> = Readonly<{
   event: Extract<WorkbenchLayoutEvent, { type: Event }>;
   value: StateValue;
   children: Children;
+  actors: Readonly<{ workbenchAdapter: typeof workbenchAdapterLogic }>;
 }>;
 
 /** A publication (`Published`), with rules 2, 3 and 8. The first one becomes the arrangement and seeds the adapters. */
@@ -823,10 +834,10 @@ const workbenchLayoutDefinition = setup({
     input: types<WorkbenchLayoutInput>(),
     transitionMeta: types<{ tla: WorkbenchLayoutAction }>(),
   },
-  actors: { layoutRecord },
+  actors: { layoutRecord, workbenchAdapter: workbenchAdapterLogic },
 }).createMachine({
   id: 'workbenchLayout',
-  version: '3',
+  version: '4',
   // A defect is recorded and the layout keeps answering; the first is kept, since later ones are usually its
   // consequences (MC-R12, D23).
   onError: refines('Unmodelled', ({ context, event }) => ({
@@ -980,6 +991,29 @@ const workbenchLayoutDefinition = setup({
         appliedLanes: { chat: event.lanes.chat, workbench: event.lanes.workbench },
       };
       return { context: finished(context, settle(next, viewOf(value), enq), enq) };
+    }),
+    // A Dockview's adapter (A8c, I1): the Dockview hands it over and takes it back; its attach to this actor is the
+    // adapter's own `adapterAttaching` and `adapterAttached`, so the spec sees nothing here.
+    dockReady: refines('Unmodelled', ({ actors, children, event }: Step<'dockReady'>, enq: LayoutEnqueue) => {
+      for (const id of dockAdapterIdsOf(children, event.adapter)) {
+        // A new mount of the same Dockview replaces its adapter.
+        const previous = children[id];
+        if (previous !== undefined) {
+          enq.stop(previous);
+        }
+      }
+      enq.spawn(actors.workbenchAdapter, {
+        id: dockAdapterId(event.adapter, event.dockId),
+        input: { api: event.api, ports: event.ports },
+      });
+      return {};
+    }),
+    dockReleased: refines('Unmodelled', ({ children, event }: Step<'dockReleased'>, enq: LayoutEnqueue) => {
+      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
+      if (adapter !== undefined) {
+        enq.stop(adapter);
+      }
+      return {};
     }),
     deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
       event.device === context.device ? {} : { context: { device: event.device } },
@@ -1331,6 +1365,8 @@ export const workbenchLayoutEventTypes = [
   'intentApplied',
   'intentUnavailable',
   'restore',
+  'dockReady',
+  'dockReleased',
 ] as const satisfies ReadonlyArray<WorkbenchLayoutEvent['type']>;
 
 type WorkbenchLayoutMachineDefinition = typeof workbenchLayoutDefinition;

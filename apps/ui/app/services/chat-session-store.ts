@@ -1767,7 +1767,6 @@ export class ChatSessionStore {
       answer.endCursor >= answer.nextCursor
     ) {
       this.#answeredLogReads.add(chatId);
-      this.#latchIfForeignScanLost(chatId);
       const observed = this.#observed.get(chatId);
       if (observed !== undefined) {
         observed.status = 'attached';
@@ -1793,6 +1792,7 @@ export class ChatSessionStore {
       }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
+    this.#latchIfForeignScanLost(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
       this.#syncProjection(chatId, 'none');
@@ -2709,8 +2709,14 @@ export class ChatSessionStore {
     }
     const projection = this.#projectionContext(chatId);
     if (scan === 'read') {
-      // A log that has not caught up is not settled yet: its catch-up materializes and settles it.
+      // A log that has not caught up is not settled yet: its catch-up materializes and settles it, unless the host
+      // refused the read, and nothing will catch it up.
       if (projection === undefined || !selectCaughtUp(projection)) {
+        if (this.#observed.get(chatId)?.status !== 'refused') {
+          return;
+        }
+        session.transcriptAwaitsForeignScan = false;
+        this.#latchTranscriptSettled(session);
         return;
       }
       // Present what the scan brought: a new materialization settles the transcript, with or without turns.
@@ -2743,8 +2749,9 @@ export class ChatSessionStore {
       return;
     }
     // A local log the lane can still present settles through its own materialization.
+    // A page that is not the log's end is not settled yet; nor is a log the lane can still present.
     const projection = this.#projectionContext(chatId);
-    if (projection === undefined || this.#foreignDisplayReady(chatId, projection)) {
+    if (projection === undefined || !selectCaughtUp(projection) || this.#foreignDisplayReady(chatId, projection)) {
       return;
     }
     session.transcriptAwaitsForeignScan = false;
@@ -4006,8 +4013,14 @@ export class ChatSessionStore {
    * applied turns, so a change that leaves the turns as they were still notifies.
    */
   #settleTranscript(session: InternalSession, messages: readonly MyUIMessage[]): void {
-    if (messages.length === 0 && this.#foreignScanState(session.chatId) !== 'read') {
-      this.#latchUnreadTranscript(session);
+    if (this.#foreignScanState(session.chatId) !== 'read') {
+      if (messages.length === 0) {
+        this.#latchUnreadTranscript(session);
+      } else {
+        // Turns show, yet other devices' history is unread: the trays it may hold are not forgotten (U10).
+        session.transcriptAwaitsForeignScan = false;
+        this.#latchTranscriptSettled(session);
+      }
       return;
     }
     session.transcriptAwaitsForeignScan = false;

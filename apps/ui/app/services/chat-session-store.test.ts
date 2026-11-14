@@ -6070,6 +6070,141 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    it('settles a refused read after a partial page once the foreign scan reads, since nothing will catch it up (I21)', async () => {
+      const projectId = 'project_refused_partial';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_refused_partial/events`;
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === events ? scan.promise : readDirectory(path),
+      );
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_refused_partial', projectId);
+      try {
+        await settle();
+        publishLogPage(store, 'chat_refused_partial', [...runningRows('run_refused_partial')], {
+          cursor: 0,
+          endCursor: 50,
+        });
+        await settle();
+        store.receiveHostReadAnswer('chat_refused_partial', { status: 'refused', reason: 'unreadable' });
+        await settle();
+        expect(session.transcript).toBe('loading');
+        scan.resolve([]);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('empty');
+        });
+      } finally {
+        store.release('chat_refused_partial');
+      }
+    });
+
+    it('does not settle a partial page while a watched rescan has failed and may retry (I21)', async () => {
+      const projectId = 'project_rescan_failed';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_rescan_failed/events`;
+      let scans = 0;
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === events) {
+          scans += 1;
+          if (scans === 2) {
+            throw Object.assign(new Error('EIO'), { code: 'EIO' });
+          }
+        }
+        return readDirectory(path);
+      });
+      let notify: ((event: WatchEvent) => void) | undefined;
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path, listener) => {
+        if (path === events) {
+          notify = listener;
+        }
+        return {
+          ready: Promise.resolve(),
+          closed: new Promise<void>(() => {
+            /* Owner-controlled watch. */
+          }),
+          dispose: vi.fn(),
+        };
+      };
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const session = store.acquire('chat_rescan_failed', projectId);
+      try {
+        await settle();
+        notify?.({ type: 'change', path: `${events}/other-device.jsonl` });
+        await settle();
+        expect(scans).toBe(2);
+        publishLogPage(
+          store,
+          'chat_rescan_failed',
+          [
+            ...runningRows('run_rescan_failed'),
+            logRow(2, {
+              runId: 'run_rescan_failed',
+              type: 'message.appended',
+              message: { id: 'rescan-reply', role: 'assistant', content: 'Part.' },
+            }),
+          ],
+          { cursor: 0, endCursor: 50 },
+        );
+        await settle();
+        expect(session.transcript).toBe('loading');
+      } finally {
+        store.release('chat_rescan_failed');
+      }
+    });
+
+    it('keeps the remembered tray when the foreign scan failed, even once local turns show (U10)', async () => {
+      const projectId = 'project_failed_scan_turns';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_failed_scan_turns/events`;
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === events) {
+          throw Object.assign(new Error('EIO'), { code: 'EIO' });
+        }
+        return readDirectory(path);
+      });
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_failed_scan_turns', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_failed_scan_turns', projectId);
+      try {
+        await settle();
+        publishLogRows(store, 'chat_failed_scan_turns', [
+          ...runningRows('run_failed_scan'),
+          logRow(2, {
+            runId: 'run_failed_scan',
+            type: 'message.appended',
+            message: { id: 'failed-scan-reply', role: 'assistant', content: 'Local.' },
+          }),
+          lifecycleRow(3, 'completed', 'run_failed_scan'),
+        ]);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('loaded');
+        });
+        // The task list may live in the history the scan could not read.
+        expect(memory.get('tau:chat-composer-trays:chat_failed_scan_turns')).toBe('todo');
+      } finally {
+        store.release('chat_failed_scan_turns');
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();

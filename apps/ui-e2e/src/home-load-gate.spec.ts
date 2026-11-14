@@ -388,7 +388,9 @@ const storeGoals = (goals: readonly string[]): void => {
 
 /** The sidebar is open on a wide layout: the remembered state, and the shell's default. */
 const isSidebarOpen = async (): Promise<boolean> =>
-  target.evaluate(() => document.querySelector('[data-slot="sidebar"][data-state="expanded"]') !== null);
+  target.evaluate(
+    () => document.querySelector<HTMLElement>('[data-slot="application-shell"]')?.dataset['sidebarOpen'] === 'true',
+  );
 
 for (const row of suggestionsRowCases) {
   cloudDefectRow(

@@ -1101,10 +1101,12 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     const root = identity.real;
     /*
      * The person reaches the project's real git store: writable except the names that run a program where the sandbox
-     * can protect them ({@link terminalGitAccess}), read-only elsewhere.
+     * can protect them ({@link terminalGitAccess}): Seatbelt on macOS, the provider's store guard on Linux where it can
+     * start. Read-only elsewhere (blueprint OD2).
      */
-    const terminalGit = terminalGitAccess(platform);
-    const checkoutProtected = await projectProtected(root, { terminalGit });
+    const storeGuard = platform === 'linux' && (await provider.storeGuard?.()) === true;
+    const terminalGit = terminalGitAccess(platform, storeGuard);
+    const checkoutProtected = await projectProtected(root, { terminalGit, guardStores: storeGuard });
     const requested = request.access;
     const access =
       requested === undefined

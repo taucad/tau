@@ -296,3 +296,26 @@ export const bundledGitEnvironment = (
   // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
   return existsSync(executable) ? { TAU_GIT_EXECUTABLE: executable } : {};
 };
+
+/**
+ * Point the services utility at the store guard this build ships (Linux Terminal git parity blueprint, LP5 and LP8):
+ * `resources/store-guard/linux-x64/tau-store-guard`, through which the Linux Terminal writes the project's git store.
+ * Absent (another platform, or a development tree where `prepare-store-guard-linux` has not run), the Terminal keeps
+ * the store read-only.
+ *
+ * @param resourceRoot - `process.resourcesPath` in a packaged app; `apps/desktop/resources` in a development tree.
+ * @param target - Operating system and CPU architecture the guard was built for.
+ * @returns `TAU_DESKTOP_SHELL_STORE_GUARD` naming the guard, or nothing when there is none.
+ */
+export const bundledStoreGuardEnvironment = (
+  resourceRoot: string,
+  target?: Readonly<{ architecture: string; platform: NodeJS.Platform }>,
+): Readonly<Record<string, string>> => {
+  const { architecture, platform } = target ?? { architecture: process.arch, platform: process.platform };
+  if (platform !== 'linux') {
+    return {};
+  }
+  const executable = join(resourceRoot, 'store-guard', `${platform}-${architecture}`, 'tau-store-guard');
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+  return existsSync(executable) ? { TAU_DESKTOP_SHELL_STORE_GUARD: executable } : {};
+};

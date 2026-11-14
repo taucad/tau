@@ -160,6 +160,9 @@ const shell = createDesktopShell({
     (root): root is string => root !== undefined && root !== '',
   ),
   bwrapPath: process.env['TAU_DESKTOP_SHELL_BWRAP'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_BWRAP'],
+  /* The store guard this build ships, through which the Linux Terminal writes the project's git store (LP5). */
+  storeGuardPath:
+    process.env['TAU_DESKTOP_SHELL_STORE_GUARD'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_STORE_GUARD'],
   /* Host-owned, denied to every shell: the stand-ins a crashed services host left behind are swept from here. */
   standInJournal: join(authorityDirectory, 'shell-stand-ins.json'),
   /* One git for the engine and both shells: the bundled git and its git-lfs first on the shell's PATH. */

@@ -175,6 +175,14 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target linux-x64"
       }
     },
+    "prepare-store-guard-linux": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/store-guard/linux-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --resources apps/desktop/resources/store-guard/linux-x64"
+      }
+    },
     "test-git-payload": {
       "executor": "nx:run-commands",
       "options": {
@@ -273,7 +281,8 @@
           "target": "check-desktop-payload"
         },
         "prepare-build123d-python-linux",
-        "prepare-git-linux"
+        "prepare-git-linux",
+        "prepare-store-guard-linux"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {

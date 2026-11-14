@@ -15,6 +15,7 @@ import {
   protectedPaths,
   resolveShellAccess,
   terminalGitAccess,
+  terminalGitStorePolicy,
   within,
 } from '#shell/shell-grant.js';
 import type { ShellGrantHost, TerminalGitAccess } from '#shell/shell-grant.js';
@@ -187,6 +188,43 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
     expect(terminalGitAccess('darwin')).toBe('write');
     expect(terminalGitAccess('linux')).toBe('read');
     expect(terminalGitAccess('win32')).toBe('read');
+  });
+
+  it('should open a Linux store for writing only when the store guard can start', () => {
+    expect(terminalGitAccess('linux', true)).toBe('write');
+    expect(terminalGitAccess('linux', false)).toBe('read');
+    expect(terminalGitAccess('win32', true)).toBe('read');
+  });
+
+  it('should hand each writable store to the provider guard whole, with the policy names, instead of listing them', async () => {
+    const checkoutProtected = await projectProtected(checkout, { terminalGit: 'write', guardStores: true });
+    const store = join(checkout, '.git');
+    const nested = join(checkout, 'vendor', 'lib', '.git');
+
+    expect(checkoutProtected.guarded).toStrictEqual(expect.arrayContaining([store, nested]));
+    expect(checkoutProtected.readOnly.filter((path) => within(host.platform, path, store))).toStrictEqual([]);
+    expect(checkoutProtected.denied).not.toContain(store);
+    expect(protectedPaths(checkoutProtected)).toStrictEqual(expect.arrayContaining([store, nested]));
+
+    const filesystem = await compileShellFilesystem({
+      checkout,
+      checkoutProtected,
+      session: [join(session, 'home'), join(session, 'tmp')],
+      toolchain: [],
+      access: { read: [], write: [], domains: [] },
+      host,
+    });
+    expect(filesystem.guardedStores?.stores).toStrictEqual(expect.arrayContaining([store, nested]));
+    expect(filesystem.guardedStores?.protect).toStrictEqual(terminalGitStorePolicy.map(({ name }) => name));
+    expect(filesystem.readOnly).not.toContain(store);
+    expect(filesystem.denied).not.toContain(store);
+  });
+
+  it('should keep a store read-only and unguarded when the Terminal only reads it', async () => {
+    const checkoutProtected = await projectProtected(checkout, { terminalGit: 'read', guardStores: true });
+
+    expect(checkoutProtected.guarded).toBeUndefined();
+    expect(checkoutProtected.readOnly).toContain(join(checkout, '.git'));
   });
 
   it('should leave a writable store open except every spelling of the names through which git runs a program or follows another address', async () => {

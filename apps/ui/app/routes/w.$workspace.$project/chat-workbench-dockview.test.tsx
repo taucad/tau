@@ -1029,6 +1029,29 @@ describe('FileEditor routing', () => {
     expect(screen.getByRole('region', { name: 'Files for main.ts' })).toBe(region);
   });
 
+  it.each([
+    ['re-reads its file', { kind: 'loading' }],
+    ['loses its file', { kind: 'orphaned' }],
+  ] as const)('should keep the same open Files region while the pane %s', (_label, interim) => {
+    let content: FileContentResult = { kind: 'text', content: new TextEncoder().encode('hello') };
+    mockUseFileContent.mockImplementation(() => content);
+    const parameters = { filePath: 'main.ts', filesOpen: true, filesWidth: 240 };
+    const { rerender } = render(
+      <FileEditor paneId='test-pane' filePath='main.ts' parameters={parameters} panelApi={mockPanelApi} />,
+    );
+    const region = screen.getByRole('region', { name: 'Files for main.ts' });
+    const tree = screen.getByTestId('file-tree');
+
+    /* A move, rename or delete of the open file re-reads it: the tree beside it, and the folders open in it, stay. */
+    content = interim;
+    rerender(
+      <FileEditor paneId='test-pane' filePath='main.ts' parameters={{ ...parameters }} panelApi={mockPanelApi} />,
+    );
+
+    expect(screen.getByRole('region', { name: 'Files for main.ts' })).toBe(region);
+    expect(screen.getByTestId('file-tree')).toBe(tree);
+  });
+
   it('should keep drag widths local and discard cancelled gestures before the next resize', () => {
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
     render(

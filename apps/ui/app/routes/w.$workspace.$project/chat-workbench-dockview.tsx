@@ -1942,14 +1942,19 @@ export const WorkbenchDockview = memo(function ({
     };
   }, [api, layoutController, profile]);
 
-  const pendingRecordAppliedRef = useRef<(() => void) | undefined>(undefined);
+  const pendingRecordAppliedRef = useRef<((shown?: WorkbenchLaneNode) => void) | undefined>(undefined);
+  /* The node the layout handed the held apply: one that lands without a tab reports what it shows instead. */
+  const pendingRecordRequestedRef = useRef<WorkbenchLaneNode | undefined>(undefined);
   const applyRecordNode = useCallback(
-    (node: WorkbenchLaneNode, applied?: () => void) => {
+    (node: WorkbenchLaneNode, applied?: (shown?: WorkbenchLaneNode) => void) => {
       if (!api || profile === 'shared') {
         return;
       }
       pendingRecordNodeRef.current = node;
-      pendingRecordAppliedRef.current = applied ?? pendingRecordAppliedRef.current;
+      if (applied !== undefined) {
+        pendingRecordAppliedRef.current = applied;
+        pendingRecordRequestedRef.current = node;
+      }
       const device = editorRef.getSnapshot().context;
       const files = Object.fromEntries(
         device.openFiles.map((file) => [
@@ -1974,6 +1979,8 @@ export const WorkbenchDockview = memo(function ({
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       // Launchers are window-local, so a record carries none; keep the open one beside the record's tabs.
       const launcherId = api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id;
+      const landed = pendingRecordAppliedRef.current;
+      const requested = pendingRecordRequestedRef.current;
       isRestoringLayout.current = true;
       try {
         // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
@@ -1988,12 +1995,14 @@ export const WorkbenchDockview = memo(function ({
         );
         adoptedProjectionRef.current = JSON.stringify(fromDockview('workbench', api.toJSON()));
         pendingRecordNodeRef.current = undefined;
-        pendingRecordAppliedRef.current?.();
         pendingRecordAppliedRef.current = undefined;
+        pendingRecordRequestedRef.current = undefined;
       } finally {
         isRestoringLayout.current = false;
         active?.focus({ preventScroll: true });
       }
+      // Answered once the restore is over: what the answer opens (a held pane or file intent) is not taken for it.
+      landed?.(requested === undefined || requested === node ? undefined : node);
     },
     [api, editorRef, profile],
   );
@@ -2007,16 +2016,25 @@ export const WorkbenchDockview = memo(function ({
     return layoutController.registerWorkbench(applyRecordNode);
   }, [api, applyRecordNode, layoutController, profile]);
 
+  /* The files open at the last render: a held apply's file that was open and is not now was closed by the person. */
+  const previousOpenPathsRef = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    const pending = pendingRecordNodeRef.current;
+    const open = new Set(openFiles.map((file) => file.path));
+    const before = previousOpenPathsRef.current;
+    previousOpenPathsRef.current = open;
+    let pending = pendingRecordNodeRef.current;
     if (!pending) {
       return;
     }
-    const filePaths = (node: WorkbenchLaneNode): string[] =>
-      node.kind === 'group'
-        ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
-        : node.children.flatMap(filePaths);
-    if (filePaths(pending).every((path) => openFiles.some((file) => file.path === path))) {
+    // A tab the person closed before the rest of the held apply's files opened is no longer wanted: the apply lands
+    // without it, as without a file that failed to open, rather than waiting for it forever.
+    for (const path of workbenchFilePaths(pending)) {
+      if (before.has(path) && !open.has(path)) {
+        pending = withoutFileTab(pending, path);
+      }
+    }
+    pendingRecordNodeRef.current = pending;
+    if (workbenchFilePaths(pending).every((path) => open.has(path))) {
       applyRecordNode(pending);
     }
   }, [applyRecordNode, openFiles]);

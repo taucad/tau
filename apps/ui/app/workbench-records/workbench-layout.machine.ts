@@ -45,7 +45,8 @@
  * 4. A revision is acknowledged only after every adapter of the device is attached and has reported its latest `show`,
  *    with no apply in flight and the arrangement holding the revision's bytes. Any detach makes the applied revision
  *    unknown; when the last adapter detaches an apply in flight is dropped and computed again on the next attach. As
- *    built (D14), a desktop with the workbench lane closed acknowledges nothing, since its workbench is not attached.
+ *    built (D14), the workbench Dockview stays mounted, and so attached, while its lane is hidden; on a device with
+ *    lane flags the lanes on screen must also be the revision's (`lanesApplied`), the hidden lane included.
  * 5. A restore `{restoreId, expected}` may be sent any number of times. It is asked only while the arrangement holds
  *    the record bytes `expected` names and no edit is owed, and settles `applied` only if the record took it and the
  *    arrangement has not moved when the record answers; otherwise it is refused and the arrangement is not changed by
@@ -213,7 +214,11 @@ export type WorkbenchLayoutEvent =
   /** The adapter applied delivery `deliveryId` of an intent and shows `node`. */
   | Readonly<{ type: 'intentApplied'; intentId: string; deliveryId: number; node: ViewerNode | WorkbenchLaneNode }>
   /** The intent's target cannot open. */
-  | Readonly<{ type: 'intentUnavailable'; intentId: string }>
+  /**
+   * The intent's target cannot open. With the `deliveryId` it answers, an adapter that opened nothing for a delivery
+   * dropped meanwhile gives its one late answer (rules 6 and 7).
+   */
+  | Readonly<{ type: 'intentUnavailable'; intentId: string; deliveryId?: number }>
   /** A restore command: write `layout` over the record bytes `expected` names. */
   | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>;
 
@@ -1087,8 +1092,17 @@ const workbenchLayoutDefinition = setup({
           'IntentDropped',
           ({ context, event, value }: Step<'intentUnavailable'>, enq: LayoutEnqueue) => {
             const entry = intentOf(context.intents, event.intentId);
-            if (entry === undefined || !isOpen(entry)) {
-              // Settled already, or never sent: nothing to drop.
+            if (entry?.state === 'dropped' && entry.late !== undefined && entry.late === event.deliveryId) {
+              // The late answer of a delivery dropped meanwhile: the adapter opened nothing, so nothing is counted, and
+              // no later answer to it is taken (I11).
+              return { context: withIntents(context, lateAnswered(context.intents, entry.intentId)) };
+            }
+            if (
+              entry === undefined ||
+              !isOpen(entry) ||
+              (event.deliveryId !== undefined && (entry.state !== 'delivered' || entry.deliveryId !== event.deliveryId))
+            ) {
+              // Settled already, never sent, or an answer to another delivery: nothing to drop.
               return {};
             }
             const settled = settleWhere(context.intents, (open) => open.intentId === entry.intentId, {
@@ -1420,15 +1434,18 @@ export const createLayoutRecordLogic = (
     /* The last arrangement read: a reviewed reset writes it. */
     let lastRead: WorkbenchLayout | undefined;
     let observation: ObservationService<boolean> | undefined;
+    /* The record's health with the watch's error folded in, as the record host combined them: a watch that fails reads
+     * nothing, so the record is unavailable until it recovers. */
+    const sourceHealthOf = (): RecordHealth | undefined =>
+      observedError === undefined
+        ? health
+        : { ...(health ?? store.health()), read: 'unavailable', error: observedError };
     const publishIssue = (): void => {
       const { session } = options;
       if (session === undefined || stopped) {
         return;
       }
-      const sourceHealth: RecordHealth | undefined =
-        observedError === undefined
-          ? health
-          : { ...(health ?? store.health()), read: 'unavailable', error: observedError };
+      const sourceHealth = sourceHealthOf();
       const state = recordIssueState(refusal, sourceHealth);
       const current = observation;
       publishRecordIssue(
@@ -1485,7 +1502,7 @@ export const createLayoutRecordLogic = (
       onHealth: (next) => {
         health = next;
         publishIssue();
-        answer({ type: 'recordHealthChanged', health: next });
+        answer({ type: 'recordHealthChanged', health: sourceHealthOf() ?? next });
       },
     });
     /* Each command's answer is sent back unless the child stopped; a command that rejects answers `ok: false`. */
@@ -1570,6 +1587,8 @@ export const createLayoutRecordLogic = (
         if (error !== observedError) {
           observedError = error;
           publishIssue();
+          // The layout hears it too: a first read the watch never makes releases the intents that wait for it.
+          answer({ type: 'recordHealthChanged', health: sourceHealthOf() ?? store.health() });
         }
       });
       return () => {

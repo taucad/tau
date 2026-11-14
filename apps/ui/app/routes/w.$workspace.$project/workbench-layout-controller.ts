@@ -40,7 +40,13 @@ export type WorkbenchLayoutController = Readonly<{
     expected: Readonly<{ layoutDigest: string; target: string; eligible: () => boolean }>,
   ) => Promise<boolean>;
   registerViewer: (apply: (node: ViewerNode, applied: () => void) => void) => () => void;
-  registerWorkbench: (apply: (node: WorkbenchLaneNode, applied: () => void) => void) => () => void;
+  /**
+   * Register the workbench's apply. It calls `applied` once the node is on screen, with the node it shows instead when
+   * that differs (a held apply that landed without a tab whose file did not open).
+   */
+  registerWorkbench: (
+    apply: (node: WorkbenchLaneNode, applied: (shown?: WorkbenchLaneNode) => void) => void,
+  ) => () => void;
   personViewerChanged: (node: ViewerNode) => void;
   /** The person changed the workbench arrangement. */
   personWorkbenchChanged: (node: WorkbenchLaneNode) => void;

@@ -301,7 +301,10 @@ export type LayoutBridgeInput = Readonly<{ editor: EditorRef; layout: WorkbenchL
  * @returns The bridge's callback logic.
  */
 export const createLayoutBridgeLogic = (
-  options: Readonly<{ shell: ProjectShellPort; host: Pick<ProjectLayoutHost, 'rememberedViews'> | undefined }>,
+  options: Readonly<{
+    shell: ProjectShellPort;
+    host: Pick<ProjectLayoutHost, 'rememberedViews' | 'facts'> | undefined;
+  }>,
 ): CallbackActorLogic<{ type: 'never' }, LayoutBridgeInput> =>
   createCallbackLogic<{ type: 'never' }, LayoutBridgeInput>(({ input: { editor, layout } }) => {
     const { shell } = options;
@@ -387,6 +390,9 @@ export const createLayoutBridgeLogic = (
       const shown = layout.getSnapshot().context.arrangement?.lanes ?? selectEditorLanes(snapshot);
       lanes = shown;
       showLanes(shown);
+      // The intents that waited are routed by the seed: the layout first hears the shell's route and device now, so one
+      // queued under a route the shell has left is dropped (rule 6), not shown on the phone's tab or opened.
+      syncLayoutFacts(layout, host.facts());
       layout.send({ type: 'lanesSeeded', lanes: shown });
     };
     /* After the seed, the editor's lanes: what is on screen (rule 4), a closed lane (rule 7) and a person's lane edit

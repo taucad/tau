@@ -23,6 +23,7 @@ import {
 } from '#runtime/project-runtime.layout.js';
 import type { ProjectLayoutHost, WorkbenchLayoutRef } from '#runtime/project-runtime.layout.js';
 import { selectAppliedLayoutDigest, selectLayoutReady } from '#workbench-records/workbench-layout.machine.js';
+import { intentOf } from '#workbench-records/pane-intents.js';
 import type { LayoutAdapterId } from '#workbench-records/pane-intents.js';
 import type {
   WorkbenchLayoutController,
@@ -155,17 +156,16 @@ export function createWorkbenchLayoutControllerShim(
     }>,
     target: WorkbenchIntentTarget,
   ): void {
-    // Rule 6: an intent delivered under a route the shell has left opens nothing; telling the layout the route drops
-    // it, and its late answer never comes.
-    const facts = host.facts();
-    if (layout.getSnapshot().context.routeKey !== facts.routeKey) {
-      syncLayoutFacts(layout, facts);
-      return;
-    }
-    const { latest, arrangement } = layout.getSnapshot().context;
-    if (latest?.refused === true) {
-      // A refused record: the workbench shows only what is on disk, as the record host did, so nothing opens.
-      layout.send({ type: 'intentUnavailable', intentId: delivery.intentId });
+    const { intentId, deliveryId } = delivery;
+    // Rule 6: the layout hears the route the shell is on now, which drops what was queued under another.
+    syncLayoutFacts(layout, host.facts());
+    const { latest, arrangement, intents } = layout.getSnapshot().context;
+    const entry = intentOf(intents, intentId);
+    if (entry?.state !== 'delivered' || entry.deliveryId !== deliveryId || latest?.refused === true) {
+      // A delivery dropped while it was held (the route moved, rule 6, or the lane closed, rule 7) opens nothing; nor
+      // does one on a refused record, whose workbench shows only what is on disk, as the record host did. The answer
+      // names the delivery, so a dropped one's late answer is taken and nothing is counted.
+      layout.send({ type: 'intentUnavailable', intentId, deliveryId });
       return;
     }
     let answer: WorkbenchLaneNode | false | undefined = false;
@@ -185,10 +185,10 @@ export function createWorkbenchLayoutControllerShim(
       // The opener refused the pane, the file closed before its intent arrived, or the record could not be read at all
       // (the pane opens, but there is no record to hold it): nothing becomes an edit. A record that is missing is
       // not refused: the intent's node starts its arrangement.
-      layout.send({ type: 'intentUnavailable', intentId: delivery.intentId });
+      layout.send({ type: 'intentUnavailable', intentId, deliveryId });
       return;
     }
-    layout.send({ type: 'intentApplied', intentId: delivery.intentId, deliveryId: delivery.deliveryId, node });
+    layout.send({ type: 'intentApplied', intentId, deliveryId, node });
   }
 
   /** Deliver the held intents the workbench can take now, in the order they were held. */
@@ -208,7 +208,7 @@ export function createWorkbenchLayoutControllerShim(
 
   const register = <Node extends ViewerNode | WorkbenchLaneNode>(
     adapter: LayoutAdapterId,
-    apply: (node: Node, applied: () => void) => void,
+    apply: (node: Node, applied: (shown?: Node) => void) => void,
   ): (() => void) => {
     let registered = true;
     onScreen.delete(adapter);
@@ -235,9 +235,19 @@ export function createWorkbenchLayoutControllerShim(
         if (adapter === 'workbench') {
           workbenchApplying = event.showId;
         }
-        apply(node, () => {
+        apply(node, (landed?: Node) => {
           if (registered) {
-            onScreen.set(adapter, shown);
+            const actual = landed === undefined ? shown : JSON.stringify(landed);
+            onScreen.set(adapter, actual);
+            if (landed !== undefined && actual !== shown) {
+              // It shows less than it was handed (a tab whose file did not open): that is the arrangement now, an edit
+              // reported before the show, so the revision it was handed is not acknowledged (I12).
+              layout.send(
+                adapter === 'viewer'
+                  ? { type: 'personEdited', adapter, node: landed as ViewerNode }
+                  : { type: 'personEdited', adapter, node: landed as WorkbenchLaneNode },
+              );
+            }
             layout.send({ type: 'adapterShown', adapter, showId: event.showId });
           }
           // A newer apply replaces this one, and only the newest lands.
@@ -258,7 +268,7 @@ export function createWorkbenchLayoutControllerShim(
         }
         if (adapter === 'viewer') {
           // No viewer intent has a sender until A8d writes the viewer adapter.
-          layout.send({ type: 'intentUnavailable', intentId: event.intentId });
+          layout.send({ type: 'intentUnavailable', intentId: event.intentId, deliveryId: event.deliveryId });
           return;
         }
         const target = intentTarget;

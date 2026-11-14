@@ -55,6 +55,7 @@ import {
 import { confirmFlush } from '#workbench-records/record-health.js';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
 import { createViewRecordPorts } from '#workbench-records/view-record-session.js';
+import { intentOf } from '#workbench-records/pane-intents.js';
 import {
   flushWorkbenchLayout,
   selectAppliedLayoutDigest,
@@ -71,7 +72,9 @@ vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: () => false }));
 vi.mock('#flags/use-feature.js', () => ({ subscribeFeatureFlags: () => () => undefined }));
 
 type EditorRef = ActorRefFrom<typeof editorMachine>;
-type Apply = (node: WorkbenchLaneNode, applied: () => void) => void;
+/* An apply lands with what the workbench shows once its files open: what it was handed, or less (a tab whose file did
+ * not open). */
+type Apply = (node: WorkbenchLaneNode, applied: (shown?: WorkbenchLaneNode) => void) => void;
 
 const encoder = new TextEncoder();
 const first = (): WorkbenchLayout => ({
@@ -124,6 +127,8 @@ function mount(
     missing?: boolean;
     /** Every read of the layout record fails, so its first read stops retrying. */
     failAllReads?: boolean;
+    /** The layout record's watch cannot be opened. */
+    failLayoutWatch?: boolean;
   } = {},
 ) {
   let bytes: Uint8Array<ArrayBuffer> | undefined = options.missing
@@ -213,7 +218,10 @@ function mount(
     const notify = () => listener({ type: 'change', path });
     liveWatches.add(notify);
     return {
-      ready: Promise.resolve(),
+      ready:
+        options.failLayoutWatch && path.endsWith(workbenchPaths.layout)
+          ? Promise.reject(new Error('watch denied'))
+          : Promise.resolve(),
       closed: new Promise<void>(() => {
         /* This watch stays open until it is disposed. */
       }),
@@ -338,9 +346,9 @@ function mount(
     attach: (apply?: Apply) => {
       const detach = shim.registerWorkbench((node, applied) => {
         // Dockview shows what it is handed once the apply lands, in place of whatever it showed before.
-        (apply ?? ((_node, landed) => landed()))(node, () => {
-          workbenchShows = node;
-          applied();
+        (apply ?? ((_node, landed) => landed()))(node, (shown) => {
+          workbenchShows = shown ?? node;
+          applied(shown);
         });
       });
       const disconnect = shim.connectIntents({
@@ -389,6 +397,11 @@ function mount(
         source: 'person',
         target: { kind: 'pane', adapter: 'workbench', pane },
       }),
+    /** The shell moves to another route, as the provider reports it: a plain value the layout hears with the next
+     * intent or delivery. */
+    setRoute: (routeKey: string) => {
+      layoutHost.setFacts({ ...layoutHost.facts(), routeKey });
+    },
     set: async (next: Uint8Array<ArrayBuffer>) => {
       bytes = next;
       await notifyWatches();
@@ -872,6 +885,67 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
+  /* A8b review: a delivery held behind an apply can be dropped before the apply lands, here by a route the shell left
+   * (rule 6). It opens nothing when the apply lands, and its late answer retires it. */
+  it('opens nothing for a held delivery that a route change dropped before the apply landed', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    let land: (() => void) | undefined;
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((_node, applied) => {
+        land = applied;
+      });
+    });
+    let left = '';
+    await act(async () => {
+      left = host.intent('details');
+    });
+    // The shell moves to another route, and an intent sent there tells the layout so, which drops the held one.
+    host.setRoute('r2');
+    await act(async () => {
+      host.intent('kernel');
+    });
+    expect(selectIntentOutcome(host.layout.getSnapshot(), left)).toEqual({
+      outcome: 'dropped',
+      reason: 'routeChanged',
+    });
+    await act(async () => {
+      land?.();
+    });
+    expect(host.dockview.shows).toEqual(withPane(first().workbench, 'kernel'));
+    expect(intentOf(host.layout.getSnapshot().context.intents, left)).toBeUndefined();
+    expect(host.layout.getSnapshot().context.arrangement?.workbench).toEqual(withPane(first().workbench, 'kernel'));
+    host.unmount();
+  });
+
+  /* A8b review: an apply can land with less than it was handed (a tab whose file did not open). What it shows is the
+   * arrangement now, an edit, and the revision it was handed is not acknowledged until the edit is written back. */
+  it('reports an apply that lands with less than it was handed as an edit, and does not acknowledge the revision', async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((_node, applied) => applied(emptyGroup()));
+    });
+    await waitFor(() => {
+      expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([
+        { type: 'personEdited', adapter: 'workbench', node: emptyGroup() },
+      ]);
+    });
+    expect(host.dockview.shows).toEqual(emptyGroup());
+    expect(host.appliedDigest).not.toBe(host.controller.snapshot()?.layoutDigest);
+    await act(async () => {
+      await host.producer();
+    });
+    expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ record: { workbench: emptyGroup() } });
+    host.unmount();
+  });
+
   /* A8b review: while the record is refused the workbench shows only what is on disk, as the record host did. A pane
    * intent opens nothing, is unavailable and owes no edit, so a flush settles; and when the record comes back with the
    * same bytes, the revision acknowledged is the one on screen (I12). */
@@ -985,6 +1059,35 @@ describe('live workbench record host', () => {
     });
     expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([]);
     expect(host.appliedDigest).toBeUndefined();
+    host.unmount();
+  });
+
+  /* A8b review: a watch that fails before the first read means that read never comes. The record is unavailable, as the
+   * record host combined the watch's error into its health, so a pane intent opens instead of waiting for it. */
+  it('opens a pane intent when the watch fails before the first read, without an edit', async () => {
+    const host = mount({
+      failLayoutWatch: true,
+      initialRead: new Promise<void>(() => {
+        /* The first read never finishes. */
+      }),
+    });
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach(landAtOnce());
+    });
+    await waitFor(() => {
+      expect(host.layout.getSnapshot().context.health?.read).toBe('unavailable');
+    });
+    let intentId = '';
+    await act(async () => {
+      intentId = host.intent('details');
+    });
+    expect(host.dockview.shows).toEqual(withPane(emptyGroup(), 'details'));
+    expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({
+      outcome: 'dropped',
+      reason: 'unavailable',
+    });
+    expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([]);
     host.unmount();
   });
 

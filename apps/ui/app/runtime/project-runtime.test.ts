@@ -424,6 +424,25 @@ describe('createProjectRuntime', () => {
       runtime.actor.stop();
     });
 
+    it('should drop a phone tab asked for while the editor loads when the shell leaves its route first', async () => {
+      const { runtime, editor, layout } = start(storedWith({ chat: true, workbench: true }), {});
+      runtime.layout!.setFacts({ routeKey: 'r1', device: 'phone' });
+      const intentId = sendPaneIntent(layout, runtime.layout!.facts(), {
+        source: 'route',
+        target: { kind: 'pane', adapter: 'workbench', pane: 'parameters' },
+      });
+      // A push navigation before the editor is ready: the shell's facts move, and nothing is sent yet (rule 6).
+      runtime.layout!.setFacts({ routeKey: 'r2', device: 'phone' });
+      await settle();
+      expect(editor.getSnapshot().matches('ready')).toBe(true);
+      expect(editor.getSnapshot().context.panelState.mobileActiveTab).toBe('viewer');
+      expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toEqual({
+        outcome: 'dropped',
+        reason: 'routeChanged',
+      });
+      runtime.actor.stop();
+    });
+
     it("should show the record's lanes once the editor is ready, without counting its loaded lanes as an edit", async () => {
       const stored = storedWith({ chat: true, workbench: true });
       const loaded = Promise.withResolvers<void>();
@@ -444,11 +463,12 @@ describe('createProjectRuntime', () => {
 
     it('should show a phone tab asked for while the editor loads once it is ready, and settle the intent then', async () => {
       const { runtime, editor, layout } = start(storedWith({ chat: true, workbench: true }), {});
-      const intentId = sendPaneIntent(
-        layout,
-        { ...runtime.layout!.facts(), device: 'phone' },
-        { source: 'route', target: { kind: 'pane', adapter: 'workbench', pane: 'parameters' } },
-      );
+      // The phone shell feeds its facts, as the workspace provider does.
+      runtime.layout!.setFacts({ ...runtime.layout!.facts(), device: 'phone' });
+      const intentId = sendPaneIntent(layout, runtime.layout!.facts(), {
+        source: 'route',
+        target: { kind: 'pane', adapter: 'workbench', pane: 'parameters' },
+      });
       // The editor would ignore the tab now: the intent is not applied before it can be shown.
       expect(selectIntentOutcome(layout.getSnapshot(), intentId)).toBeUndefined();
       await settle();

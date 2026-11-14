@@ -1407,8 +1407,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@2.2.4
-        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@2.3.0
+        version: '@taulabs/three-viewport-gizmo@2.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -7450,8 +7450,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@2.2.4
-        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@2.3.0
+        version: '@taulabs/three-viewport-gizmo@2.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
     devDependencies:
       '@react-three/fiber':
         specifier: 9.8.2
@@ -15379,8 +15379,8 @@ packages:
   '@taulabs/replicad@1.1.0-taulabs.1':
     resolution: {integrity: sha512-lyCe6PKiZ1BIVQ0NZShUsJQxmfQc1jZyx15WXcGMivzCBWuZQwFqFw38DqaKBz8xRC2Ir8tECGjpeiTVLiSMCA==}
 
-  '@taulabs/three-viewport-gizmo@2.2.4':
-    resolution: {integrity: sha512-vqvgsi4oTyaKf19useCAZBSV929cZWum/pVny5xHTUDOV8GwrP89OpKeF18Ui4rJ7/b5cLMKmoAZRBvAMDKf9w==}
+  '@taulabs/three-viewport-gizmo@2.3.0':
+    resolution: {integrity: sha512-cmnXtxaB+LPnYwo/YUyeyQX+bLF7ZmT/DVKUbvr19j/39uRdJt4KBWHLAHrZRahUZQDycMtL5jaGU1mGMgHTBA==}
     peerDependencies:
       three: '>=0.162.0 <1.0.0'
 
@@ -36185,7 +36185,7 @@ snapshots:
       flatbush: 4.6.2
       opentype.js: 1.3.4
 
-  '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
+  '@taulabs/three-viewport-gizmo@2.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
     dependencies:
       three: 0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)
 

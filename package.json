@@ -188,7 +188,7 @@
     "stripe": "catalog:",
     "three": "^0.184.0",
     "three-mesh-bvh": "^0.9.10",
-    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@2.2.4",
+    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@2.3.0",
     "tslib": "catalog:",
     "typescript-eslint": "catalog:",
     "uint8array-extras": "catalog:",

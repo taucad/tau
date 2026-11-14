@@ -549,8 +549,9 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       }
     };
     let unsubscribeFacts: (() => void) | undefined;
-    receive((event) => {
-      if (event.type !== 'attach' || unsubscribeFacts !== undefined) {
+    // `attach` is the adapter's one event: a second one finds it attached.
+    receive(() => {
+      if (unsubscribeFacts !== undefined) {
         return;
       }
       previous = facts.get();

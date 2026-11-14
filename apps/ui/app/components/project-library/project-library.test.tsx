@@ -1513,8 +1513,8 @@ describe('ProjectLibrary', () => {
       expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
     });
 
-    /* D21 round 1: the first listing belongs to the page's open, which the sidebar announces; a Retry is announced. */
-    it('C14: does not announce the first Tau Cloud wait, and announces the wait a Retry starts', async () => {
+    /* D21 rounds 1 and 6: each Tau Cloud wait is one announcement group; the sidebar only announces the local listing. */
+    it("C14: announces each Tau Cloud wait in one status region: the first by its indicator, a Retry's by the slot", async () => {
       /* The Retry's request is still in flight. */
       cloudListing.retry.mockImplementationOnce(
         async () =>
@@ -1528,7 +1528,7 @@ describe('ProjectLibrary', () => {
         within(slot.header())
           .queryAllByRole('status')
           .filter((status) => status.textContent.includes('Tau Cloud'));
-      expect(cloudStatuses()).toEqual([]);
+      expect(cloudStatuses()).toHaveLength(1);
       cloudListing.isFetching = false;
       cloudListing.isFailed = true;
       slot.rerender();
@@ -1681,7 +1681,7 @@ describe('ProjectLibrary', () => {
       cloudListing.isFetching = true;
       const clock = { at: 0 };
       const slot = renderSlot({ clock });
-      const region = within(slot.header()).getByRole('status');
+      const region = slot.header().querySelector('[data-slot="project-library-status"] > [role="status"]');
       clock.at = 11_000;
       await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud', hidden: true }));
       expect(region).toBeInTheDocument();
@@ -1694,7 +1694,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 6: the sidebar announces the local listing's wait, not Tau Cloud's, so the slot announces its own. */
-    it.fails("C14: announces the page's first Tau Cloud wait in the slot once the local listing has answered", () => {
+    it("C14: announces the page's first Tau Cloud wait in the slot once the local listing has answered", () => {
       cloudListing.isFetching = true;
       const slot = renderSlot();
       expect(
@@ -1705,7 +1705,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 6: a wait that fails right after it shows keeps its indicator for its 500 ms minimum, then the failure. */
-    it.fails('C14: holds a shown Tau Cloud wait for its minimum before saying it failed, keeping its Retry', async () => {
+    it('C14: holds a shown Tau Cloud wait for its minimum before saying it failed, keeping its Retry', async () => {
       cloudListing.retry.mockImplementationOnce(
         async () =>
           new Promise<void>(() => {
@@ -1755,7 +1755,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 2: a Retry that ends without a wait (a failed refresh over listed projects) leaves nothing behind. */
-    it('C14: does not announce a later first wait after a Retry that started none', async () => {
+    it("C14: does not announce a later first wait as a Retry's after a Retry that started none", async () => {
       cloudListing.isFailed = true;
       cloudListing.retry.mockImplementationOnce(async () => undefined);
       const slot = renderSlot();
@@ -1764,11 +1764,10 @@ describe('ProjectLibrary', () => {
       slot.rerender();
       cloudListing.isFetching = true;
       slot.rerender();
+      /* The later wait is the indicator's to announce, not the slot's as a Retry's. */
       expect(
-        within(slot.header())
-          .queryAllByRole('status')
-          .filter((status) => status.textContent.includes('Tau Cloud')),
-      ).toEqual([]);
+        slot.header().querySelector('[data-slot="project-library-status"] > [role="status"]'),
+      ).toBeEmptyDOMElement();
     });
 
     /* D21 round 1: the local listing's own wait keeps the slot while it runs; Tau Cloud's notice waits its turn. */

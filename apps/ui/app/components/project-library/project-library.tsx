@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -303,8 +303,8 @@ export function ProjectLibrary({
     setHasCloudFailed(false);
   }
   /* A wait is timed from when this library saw it begin, so one that begins well into the page (a client navigation
-     to Home, a Retry, another account) starts its own 1,000 ms. Only a wait a Retry started is announced: the first
-     belongs to the page's open, which the sidebar announces. */
+     to Home, a Retry, another account) starts its own 1,000 ms. A wait a Retry started is announced by the
+     slot's status region; any other by its indicator, once revealed. */
   const [cloudWait, setCloudWait] = useState<CloudWait>();
   if (isAwaitingCloud && cloudWait === undefined) {
     setCloudWait({
@@ -321,7 +321,25 @@ export function ProjectLibrary({
     setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt, followsFailure: true });
   }
   /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
-  const { timing: cloudWaitTiming } = useWaitClock({ active: isAwaitingCloud, startedAt: cloudWait?.startedAt ?? 0 });
+  /* Active once the wait's start is recorded, so this render, which may still be recording it, times nothing from 0. */
+  const { timing: cloudWaitTiming } = useWaitClock({
+    active: isAwaitingCloud && cloudWait !== undefined,
+    startedAt: cloudWait?.startedAt ?? 0,
+  });
+  /* A shown wait that ends keeps its indicator for its 500 ms minimum, so a failure is said once that hold is over. */
+  const [releasedCloudHold, setReleasedCloudHold] = useState<WaitIndicatorTiming>();
+  const isCloudWaitHolding = cloudWaitTiming.state === 'holding' && releasedCloudHold !== cloudWaitTiming;
+  useEffect(() => {
+    if (cloudWaitTiming.state !== 'holding') {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setReleasedCloudHold(cloudWaitTiming);
+    }, Number.parseFloat(cloudWaitTiming.hideDelay));
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [cloudWaitTiming]);
   /* On a phone whose top bar carries the /projects header, the header row is visually hidden until a notice is shown;
      once shown, it stays for this page view, so a Retry or a recovery does not move the grid again. */
   const [hasShownCloudNotice, setHasShownCloudNotice] = useState(false);
@@ -626,8 +644,8 @@ export function ProjectLibrary({
   const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
   /* The latch reads the notice the slot shows, not one the listing's own wait still holds back. */
   /* A Retry's wait over a failure says the wait, not the failure, until its own request answers. */
-  const shownCloudNotice =
-    isAwaitingListing || (cloudWait?.isAnnounced === true && cloudNotice === 'failed') ? undefined : cloudNotice;
+  const isFailureHeld = cloudNotice === 'failed' && (cloudWait?.isAnnounced === true || isCloudWaitHolding);
+  const shownCloudNotice = isAwaitingListing || isFailureHeld ? undefined : cloudNotice;
   if (shownCloudNotice !== undefined && !hasShownCloudNotice) {
     setHasShownCloudNotice(true);
   }
@@ -644,15 +662,20 @@ export function ProjectLibrary({
       retry={
         isAwaitingListing
           ? undefined
-          : cloudRetryOf({ notice: shownCloudNotice, wait: cloudWait, timing: cloudWaitTiming })
+          : cloudRetryOf({
+              /* A failure held behind its wait's minimum already offers its Retry, so the control does not leave. */
+              notice: isFailureHeld ? 'failed' : shownCloudNotice,
+              wait: cloudWait,
+              timing: cloudWaitTiming,
+            })
       }
       onRetryCloud={handleRetryCloud}
     >
       <WaitIndicator
         className='min-w-0 justify-end overflow-hidden'
-        /* Seen, not announced here: the sidebar's Recents label announces the listing's wait and the page's first Tau
-           Cloud wait (one announcement per group), and the slot's status region a Retry's. */
-        live={false}
+        /* The sidebar's Recents label announces the local listing's wait, and the slot's status region a Retry's (one
+           announcement per group); the indicator announces any other Tau Cloud wait, once its words are revealed. */
+        live={!isAwaitingListing && cloudWait?.isAnnounced !== true}
         active={isAwaitingListing || isAwaitingCloud}
         startedAt={isAwaitingListing ? 0 : (cloudWait?.startedAt ?? 0)}
         label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}

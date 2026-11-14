@@ -1565,7 +1565,9 @@ export const FileEditor = memo(function ({
     }
   }
 
-  const requestsFiles = resolvedViewer?.requestsFiles ?? false;
+  /* While no viewer answers (the file is re-read after a move, rename or delete, or is gone), the pane keeps the Files
+   * request its last viewer made: the effect below writes `filesOpen` only for a viewer that requests Files. */
+  const requestsFiles = resolvedViewer?.requestsFiles ?? paneParameters.filesOpen !== undefined;
   const presentation = resolvedViewer?.presentation;
   const normalizedState = normalizeFilePaneState({ parameters: paneParameters, requestsFiles, presentation });
   useEffect(() => {
@@ -1629,18 +1631,26 @@ export const FileEditor = memo(function ({
   }
 
   if (isAwaitingLargeObject) {
-    return renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> });
-  }
-
-  if (result.kind === 'binary' || result.kind === 'text') {
-    return isPanelShown ? (
-      <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
-    ) : (
-      renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })
+    return (
+      <FilePaneRoute render={(): ReactNode => renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> })} />
     );
   }
 
-  return renderPane({ body });
+  if (result.kind === 'binary' || result.kind === 'text') {
+    const viewer = resolvedViewer!;
+    const request = viewerRequest!;
+    return (
+      <FilePaneRoute
+        render={
+          isPanelShown
+            ? (): ReactNode => viewer.render({ ...request, renderPane })
+            : (): ReactNode => renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })
+        }
+      />
+    );
+  }
+
+  return <FilePaneRoute render={(): ReactNode => renderPane({ body })} />;
 });
 
 /** One file still downloading: the pane waits for its bytes, which replace the placeholder as they land. */
@@ -1659,16 +1669,12 @@ function LargeObjectPendingPlaceholder({ name }: { readonly name: string }): Rea
   );
 }
 
-function RoutedFileViewer({
-  viewer,
-  request,
-  renderPane,
-}: {
-  readonly viewer: ResolvedFileViewer;
-  readonly request: Omit<FileViewerRenderRequest, 'renderPane'>;
-  readonly renderPane: FileViewerRenderRequest['renderPane'];
-}): ReactNode {
-  return viewer.render({ ...request, renderPane });
+/**
+ * One component in every state of a file pane, so a viewer, a re-read and a missing file reconcile the same pane: its
+ * Files tree, and the folders open in it, stay mounted rather than starting again from the root.
+ */
+function FilePaneRoute({ render }: { readonly render: () => ReactNode }): ReactNode {
+  return render();
 }
 
 const clampFilesWidth = (width: number): number => Math.min(maximumFilesWidth, Math.max(minimumFilesWidth, width));

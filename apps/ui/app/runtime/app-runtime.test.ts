@@ -55,7 +55,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
 
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach the eight A1a, A1b, A2 and A6b compose', () => {
+  it('should list the nine static children once, and attach all nine (A5b attached focus)', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -76,6 +76,7 @@ describe('app runtime root', () => {
       'projectLibrary',
       'chatSessions',
       'sessions',
+      'focus',
     ]);
   });
 
@@ -101,6 +102,7 @@ describe('app runtime root', () => {
       'document:visibilitychange',
       'window:blur',
       'window:focus',
+      'window:pagehide',
     ]);
     expect(selectSessionsRegistry(runtime.getSnapshot())).toBe(registry);
     registry.send({ type: 'open', projectId: 'p1' });
@@ -113,12 +115,15 @@ describe('app runtime root', () => {
     expect(registry.getSnapshot().status).toBe('stopped');
   });
 
-  it('should never listen for an unload phase (D26: UnloadProvider stays the one sequencer)', () => {
+  it('should be the one listener of both unload phases, and of no other unload event (D26)', () => {
     const host = createFakeEnvironmentHost();
     const runtime = createAppRuntime({ environment: () => host }).start();
 
     const types = host.everAdded().map((listener) => listener.split(':')[1]);
-    expect(types).not.toContain('pagehide');
+    expect(types.filter((type) => type === 'visibilitychange' || type === 'pagehide').toSorted()).toEqual([
+      'pagehide',
+      'visibilitychange',
+    ]);
     expect(types).not.toContain('beforeunload');
     expect(types).not.toContain('unload');
     expect(types).not.toContain('freeze');
@@ -351,6 +356,12 @@ describe('app runtime root totality', () => {
       { type: 'memoryClassChanged', constrained: true },
       { type: 'memoryClassChanged', constrained: false },
     ],
+    quitHoldChanged: [
+      { type: 'quitHoldChanged', held: true },
+      { type: 'quitHoldChanged', held: true, error: 'Pane layout is not confirmed saved.' },
+      { type: 'quitHoldChanged', held: false },
+    ],
+    quitRetried: [{ type: 'quitRetried' }],
     choicesChanged: [
       {
         type: 'choicesChanged',

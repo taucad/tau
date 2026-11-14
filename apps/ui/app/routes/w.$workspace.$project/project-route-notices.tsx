@@ -34,11 +34,12 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useSessions } from '#hooks/use-sessions.js';
+import { useFocus, useSessions } from '#hooks/use-sessions.js';
+import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
-import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
 
@@ -258,6 +259,10 @@ const restoreFromTrash = async (
   }
 };
 
+/** Whether the project's session failed to close and holds its slot (read when the person asks to reopen it). */
+const selectSessionFailed = (sessions: SessionsActorRef, projectId: string): boolean =>
+  sessions.getSnapshot().context.status[projectId]?.state === 'failed';
+
 /**
  * Bind the table's verbs to their effects.
  *
@@ -268,6 +273,7 @@ const restoreFromTrash = async (
 export const useProjectRouteNoticeActions = (projectId: string | undefined): ((run: NoticeActionRun) => void) => {
   const navigate = useNavigate();
   const sessions = useSessions();
+  const { focus } = useFocus();
   const projectManager = useProjectManager();
   const retry = useContext(ProjectRouteRetryContext);
 
@@ -276,8 +282,13 @@ export const useProjectRouteNoticeActions = (projectId: string | undefined): ((r
       switch (run) {
         case 'reopen': {
           if (projectId !== undefined) {
-            sessions.send({ type: 'open', projectId });
-            sessions.send({ type: 'touch', projectId });
+            /* A session whose close failed holds its slot, and an open of it is only a touch: the reopen closes it
+             * and opens it again as one action (programme control's ruling on a failed child, a named change). */
+            if (selectSessionFailed(sessions, projectId)) {
+              sessions.send({ type: 'close', projectId, reason: 'user' });
+            }
+            /* A person's open goes through focus, which re-sends the request it kept for the project (D7, S39). */
+            focus.send({ type: 'openRequested', projectId });
           }
           return;
         }
@@ -308,7 +319,7 @@ export const useProjectRouteNoticeActions = (projectId: string | undefined): ((r
         }
       }
     },
-    [navigate, projectId, projectManager, retry, sessions],
+    [focus, navigate, projectId, projectManager, retry, sessions],
   );
 };
 

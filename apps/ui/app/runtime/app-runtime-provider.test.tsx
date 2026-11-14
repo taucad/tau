@@ -5,7 +5,7 @@
  * runtime starts once, after hydration, in `AppRuntimeProvider`'s one effect. Under StrictMode nothing is created
  * and nothing is started twice: `SessionsProvider` reads the registry the runtime made instead of creating one.
  */
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { render } from '@testing-library/react';
 import { hydrateRoot } from 'react-dom/client';
@@ -20,7 +20,6 @@ import type { FakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type * as SessionsStore from '#services/sessions-store.js';
 import { SessionsProvider, useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
-import { useMemoryRelease } from '#hooks/use-memory-release.js';
 import type { SessionsMachineEvent } from '#machines/sessions.machine.js';
 
 const sessionsStore = vi.hoisted(() => ({ created: 0 }));
@@ -140,12 +139,13 @@ describe('AppRuntimeProvider start boundary', () => {
       'document:visibilitychange',
       'window:blur',
       'window:focus',
+      'window:pagehide',
     ]);
     expect(runtime.getSnapshot().status).toBe('active');
 
     /* Unmounting stops nothing: the runtime outlives the tree that read it. */
     view.unmount();
-    expect(host.listeners().length).toBe(4);
+    expect(host.listeners().length).toBe(5);
     runtime.stop();
   });
 
@@ -169,16 +169,11 @@ describe('AppRuntimeProvider start boundary', () => {
     const atSend: string[][] = [];
     function DirectOpen(): undefined {
       const sessions = useSessions();
-      useMemoryRelease({
-        sessions: {
-          send: (event: SessionsMachineEvent) => {
-            sessions.send(event);
-            atSend.push([...processed]);
-          },
-        },
-        focusedProjectId: 'p1',
-        constrained: true,
-      });
+      useEffect(() => {
+        const event: SessionsMachineEvent = { type: 'releaseMemory', keepProjectId: 'p1' };
+        sessions.send(event);
+        atSend.push([...processed]);
+      }, [sessions]);
       return undefined;
     }
 
@@ -192,8 +187,9 @@ describe('AppRuntimeProvider start boundary', () => {
       </AppRuntimeProvider>,
     );
 
-    /* Delivered synchronously, so the registry was running: not queued on an actor not yet started. */
-    expect(atSend).toEqual([['releaseMemory']]);
+    /* Delivered synchronously, so the registry was running: not queued on an actor not yet started. The library port
+     * told it the epoch when it started, before anything could open (A5b). */
+    expect(atSend).toEqual([['libraryEpochChanged', 'releaseMemory']]);
     runtime.stop();
   });
 });

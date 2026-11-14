@@ -363,6 +363,9 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({
   desktopBridge: () => undefined,
   hostPathName: (path: string) => /[^/\\]+(?=[/\\]*$)/.exec(path)?.[0] ?? path,
   nodeHomeRoot: () => '/Users/tester/Library/Application Support/Tau/home',
+  /* The runtime's `environment` is composed with the desktop quit seam; the web build's never asks. */
+  onDesktopQuitRequested: () => () => undefined,
+  reportDesktopQuiesced: () => undefined,
 }));
 
 let mockIsFileSystemAccessSupported = false;

@@ -2,6 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { StrictMode, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
@@ -321,7 +323,7 @@ function createHomeWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <StrictMode>
-        <UnloadProvider>
+        <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
           <HomeNewProjectComposerProvider>{children}</HomeNewProjectComposerProvider>
         </UnloadProvider>
       </StrictMode>
@@ -366,6 +368,17 @@ afterEach(() => {
 // ===========================================================================
 // ChatComposerProvider — composer-only contract
 // ===========================================================================
+
+/* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
+let unloadEnvironment: EnvironmentHostFixture | undefined;
+beforeEach(() => {
+  unloadEnvironment = startEnvironmentHost();
+});
+afterEach(() => {
+  unloadEnvironment?.stop();
+  unloadEnvironment = undefined;
+});
+
 describe('ChatComposerProvider', () => {
   it('should expose a draftActorRef via useChatComposer', () => {
     const { result } = renderHook(() => useChatComposer(), {
@@ -654,7 +667,7 @@ describe('HomeNewProjectComposerProvider', () => {
     const texts: string[] = [];
     const view = render(
       <StrictMode>
-        <UnloadProvider>
+        <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
           <HomeNewProjectComposerProvider>
             <HomeProbe onRender={(text) => texts.push(text)} />
           </HomeNewProjectComposerProvider>

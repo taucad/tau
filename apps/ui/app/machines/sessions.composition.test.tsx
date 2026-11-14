@@ -38,6 +38,8 @@ import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 import { SessionsProvider } from '#hooks/use-sessions.js';
+import { startFocusHost, startRuntimeSlice } from '#runtime/app-runtime-focus.fixture.js';
+import type { FocusHostFixture, RuntimeSliceFixture } from '#runtime/app-runtime-focus.fixture.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
@@ -502,6 +504,30 @@ const openChatRoot = (projectId: string, chatId: string) => {
 /** The registry the rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
+/* Focus and its ports over a registry, as the runtime root composes them (A5b); a fresh one per row, as each row
+ * mounted a fresh gate before. */
+const focusHosts: FocusHostFixture[] = [];
+const focusOver = (registry: ActorRefFrom<typeof sessionsMachine>): FocusHostFixture => {
+  const host = startFocusHost({
+    sessions: registry,
+    library: {
+      routeAccess: async (projectId) => getProjectRouteAccess(projectId) as Promise<ProjectRouteAccess>,
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  focusHosts.push(host);
+  return host;
+};
+let focusHost = focusOver(sessionsActor);
+beforeEach(() => {
+  for (const host of focusHosts.splice(0)) {
+    host.stop();
+  }
+  focusHost = focusOver(sessionsActor);
+});
+
 const emitted: SessionsMachineEmitted[] = [];
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -548,7 +574,7 @@ const renderRoute = async (
    * composition needs one too. */
   const at = (id: string): React.JSX.Element => (
     <QueryClientProvider client={queryClient}>
-      <SessionsProvider actor={sessionsActor}>
+      <SessionsProvider actor={sessionsActor} focus={focusHost}>
         <routeModule.ProjectRouteProviders projectId={id} />
       </SessionsProvider>
     </QueryClientProvider>
@@ -601,7 +627,7 @@ const renderRouteFamily = async (
     <MemoryRouter initialEntries={[initialEntry]}>
       <NavigationProbe />
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={sessionsActor}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <routeModule.ProjectSessionsHost>
             <Routes>
               <Route path='/' element={<div>Home</div>} />
@@ -878,7 +904,7 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
 
     const sidebar = render(
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={sessionsActor}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <ul>
             {projectIds.map((projectId) => (
               <li key={projectId}>
@@ -922,7 +948,7 @@ describe('sessions composition — a finished run reads Done at its terminal row
 
     const row = render(
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={sessionsActor}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <ChatRow />
         </SessionsProvider>
       </QueryClientProvider>,
@@ -1580,7 +1606,9 @@ describe('sessions composition — the workbench follows the selection (S48(14))
  */
 describe('sessions composition — a one-project device (A0.2 item 6, B-08)', () => {
   type OneProjectRegistry = Readonly<{
-    actor: ReturnType<typeof createSessionsActor>;
+    actor: ActorRefFrom<typeof sessionsMachine>;
+    /** Focus and `environment` beside it, in its system: the memory release is `environment`'s (A5b). */
+    slice: RuntimeSliceFixture;
     /** Every event the registry root processed, by type. */
     received: string[];
     /** Every live set the registry announced. */
@@ -1592,10 +1620,16 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     const received: string[] = [];
     const liveSets: Array<readonly string[]> = [];
     const budgetRefusals: string[] = [];
-    const root: { current: ReturnType<typeof createSessionsActor> | undefined } = { current: undefined };
+    const root: { current: unknown } = { current: undefined };
     /* A child never sends `close` to the registry, so a `close` the root processes came from the app. */
-    const actor = createSessionsActor({
+    const slice = startRuntimeSlice({
       sharedWorker: () => workerRef.current,
+      library: {
+        routeAccess: async (projectId) => getProjectRouteAccess(projectId) as Promise<ProjectRouteAccess>,
+        epoch: () => 0,
+        onEpochChanged: () => () => undefined,
+      },
+      loadModule: async () => undefined,
       inspect: (inspection) => {
         if (
           inspection.type === '@xstate.transition' &&
@@ -1606,12 +1640,12 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
         }
       },
     });
+    const actor = slice.sessions;
     root.current = actor;
     actor.on('liveSetChanged', (event) => liveSets.push(event.projectIds));
     actor.on('budgetRefused', (event) => budgetRefusals.push(event.projectId));
-    actor.start();
-    started.push(actor);
-    return { actor, received, liveSets, budgetRefusals };
+    started.push(slice);
+    return { actor, slice, received, liveSets, budgetRefusals };
   };
 
   const renderOn = async (
@@ -1627,7 +1661,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
       <MemoryRouter initialEntries={[initialEntry]}>
         <NavigationProbe />
         <QueryClientProvider client={queryClient}>
-          <SessionsProvider actor={registry.actor}>
+          <SessionsProvider actor={registry.actor} focus={registry.slice}>
             <routeModule.ProjectSessionsHost>
               <Routes>
                 <Route path='/w/:workspace/:project' element={<RouteStateProbe />} />
@@ -1655,7 +1689,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     Object.keys(registry.actor.getSnapshot().context.refs);
 
   /* Torn down whether or not a row's assertions pass. */
-  const started: Array<ReturnType<typeof createSessionsActor>> = [];
+  const started: RuntimeSliceFixture[] = [];
   const unmounts: Array<() => void> = [];
   let restoreSpies: (() => void) | undefined;
 
@@ -1669,8 +1703,8 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     for (const unmount of unmounts.splice(0)) {
       unmount();
     }
-    for (const actor of started.splice(0)) {
-      actor.stop();
+    for (const slice of started.splice(0)) {
+      slice.stop();
     }
     deviceMemory.constrained = false;
   });
@@ -1774,7 +1808,42 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.unstubAllEnvs();
     delete (globalThis as { tau?: unknown }).tau;
     flushProducers.mockReset();
+    for (const stop of stops.splice(0)) {
+      stop();
+    }
   });
+
+  const stops: Array<() => void> = [];
+
+  /**
+   * The app runtime over fresh modules (the desktop bridge reads `TAU_TARGET` when it loads), with no page: the quit
+   * hold is `environment`'s (D31, A5b), and the producers it awaits are the runtime sequencer's, where this row's
+   * `flushProducers` registers as one producer.
+   */
+  const renderQuitRuntime = async () => {
+    vi.resetModules();
+    const freshSessions = await import('#hooks/use-sessions.js');
+    const freshStore = await import('#services/sessions-store.js');
+    const freshRuntime = await import('#runtime/app-runtime.js');
+    const freshRuntimeProvider = await import('#runtime/app-runtime-provider.js');
+    const runtime = freshRuntime.createAppRuntime({ environment: () => undefined });
+    const unregister = freshRuntime.selectRuntimeUnload(runtime).register('producer', async () => flushProducers());
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <freshRuntimeProvider.AppRuntimeProvider runtime={runtime}>
+          <freshSessions.SessionsProvider>
+            <span>app</span>
+          </freshSessions.SessionsProvider>
+        </freshRuntimeProvider.AppRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    stops.push(() => {
+      unregister();
+      runtime.stop();
+    });
+    await settle();
+    return { view, freshStore, freshActor: freshRuntime.selectSessionsRegistry(runtime.getSnapshot()) };
+  };
 
   it('should refuse quit for blocked workbench intent and wait for its repaired checked write', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
@@ -1826,18 +1895,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
           throw new Error('Workbench records could not be saved.');
         }
       });
-      vi.resetModules();
-      const freshSessions = await import('#hooks/use-sessions.js');
-      const freshStore = await import('#services/sessions-store.js');
-      const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-      const view = render(
-        <QueryClientProvider client={queryClient}>
-          <freshSessions.SessionsProvider actor={freshActor}>
-            <span>app</span>
-          </freshSessions.SessionsProvider>
-        </QueryClientProvider>,
-      );
-      await settle();
+      const { view, freshActor } = await renderQuitRuntime();
       await act(async () => {
         asks[0]?.();
         await Promise.resolve();
@@ -1899,19 +1957,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
       await producers.promise;
     });
 
-    vi.resetModules();
-    const freshSessions = await import('#hooks/use-sessions.js');
-    const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider actor={freshActor}>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
-      </QueryClientProvider>,
-    );
-    await settle();
+    const { view, freshActor } = await renderQuitRuntime();
 
     await act(async () => {
       asks[0]?.();
@@ -1974,9 +2020,11 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     expect(ready).toBe(true);
     expect(answers).toEqual(['quiesced']);
+    /* The runtime's `environment` holds the quit seam, not the tree: unmounting leaves it in, stopping removes it. */
     view.unmount();
-    expect(ready).toBe(false);
+    expect(ready).toBe(true);
     runtime.stop();
+    expect(ready).toBe(false);
   });
 
   it('paints what is being waited for, and Quit anyway answers main', async () => {
@@ -1997,19 +2045,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     /* A registry of this row's own: the module singleton the rows above share
      * is quiesced by pin e, and a quiesced registry never opens again. */
-    vi.resetModules();
-    const freshSessions = await import('#hooks/use-sessions.js');
-    const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider actor={freshActor}>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
-      </QueryClientProvider>,
-    );
-    await settle();
+    const { view, freshStore, freshActor } = await renderQuitRuntime();
     expect(asks).toHaveLength(1);
 
     /* One session whose flush never answers — the only reason a quit is ever
@@ -2078,18 +2114,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     flushProducers
       .mockRejectedValueOnce(new Error('checked workbench write unavailable'))
       .mockResolvedValueOnce(undefined);
-    vi.resetModules();
-    const freshSessions = await import('#hooks/use-sessions.js');
-    const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider actor={freshActor}>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
-      </QueryClientProvider>,
-    );
-    await settle();
+    const { view, freshActor } = await renderQuitRuntime();
     await act(async () => {
       asks[0]?.();
       await Promise.resolve();

@@ -732,18 +732,15 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revisi
 });
 
 /*
- * Report-only (I2, `ProjectFocus` `FocusFollowsLatestRequest`; owner A5c). Going back to A as soon as B's
- * path commits sometimes settles on B: B's `?chat=` correction (`project-route.tsx`
- * `handleFocusedChatResolved`, a `navigate(replace)`) fires once B's editor reaches
- * `ready.operation.idle` (`use-project.tsx`), and can land after the person's click to A. Each trip is
- * read only once it has settled (`readSettledProject`), so a navigation still in the route gate's pending
- * state is not counted as B. Forcing was tried: holding every `Worker` and `MessagePort` message from the click on B
- * until A's path committed did not delay the correction past the click (5 of 5 trips settled on A), and no
- * network request gates it. So the row records k of n and never fails on it; every attempt counts.
+ * I2 (`ProjectFocus` `FocusFollowsLatestRequest`; fixed by A5b). Going back to A as soon as B's path commits used to
+ * settle on B sometimes (6 of 10 trips in A5c's run): B's `?chat=` correction was the route's own
+ * `navigate(replace)`, fired once B's editor reached `ready.operation.idle` (`use-project.tsx`), and could land after
+ * the person's click to A. Focus now owns the correction: the editor reports `focusedChatResolved`, focus answers it
+ * with `chatShown` only for the project it is on, and the route sink drops a command about a project the route has
+ * left (MC-R18). Each trip is read only once it has settled (`readSettledProject`), so a navigation still in the route
+ * gate's pending state is not counted as B. The race cannot be forced, so every attempt counts and none may end on B.
  */
-test('A0.1 I2 report-only (A5c): a fast round trip through B and the late B correction that overrides it', async ({
-  annotate,
-}) => {
+test('A0.1 I2 (A5b): a fast round trip through B ends on A, never on a late B correction', async ({ annotate }) => {
   await openSeed();
   const routes = { a: await routeOf(projectNames.a), b: await routeOf(projectNames.b) };
   const attempts = 10;
@@ -777,4 +774,5 @@ test('A0.1 I2 report-only (A5c): a fast round trip through B and the late B corr
     JSON.stringify({ overridden, unsettled, attempts, outcomes }),
   );
   expect(outcomes).toHaveLength(attempts);
+  expect(overridden, 'I2: a late B correction took the route back to B').toBe(0);
 });

@@ -50,7 +50,7 @@ import { createActor, matchesState, setup, types } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, StateValue } from 'xstate';
 import type { Project } from '@taucad/types';
 import type { EventSchemaMap } from '@taucad/ui-core/lib/xstate.lib';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { AccessAnswer } from '#machines/library-access.machine.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 /**
@@ -65,20 +65,15 @@ export const openPatienceMilliseconds = 1000;
 export type FocusSlugs = Readonly<{ workspaceSlug: string; projectSlug: string }>;
 
 /**
- * The library's access answer for a project URL: today's `ProjectRouteAccess`, restated here because infrastructure
- * does not import hooks (A3a's access machine will own the one type).
+ * The library's access answer for a project URL. It is `ProjectRouteAccess`, the access machine's answer without its
+ * port failure (`#runtime/project-library.js`); focus names it from the machine that owns the one type.
  *
  * @public
  */
-export type FocusRouteAccess =
-  | Readonly<{ status: 'ready'; project: Project }>
-  | Readonly<{ status: 'trashed'; project: Project }>
-  | Readonly<{ status: 'recovering'; recovery: Extract<PendingProjectRecovery, { status: 'recovering' }> }>
-  | Readonly<{ status: 'recovery-failed'; recovery: Extract<PendingProjectRecovery, { status: 'failed' }> }>
-  | Readonly<{ status: 'conflict' | 'unavailable' | 'missing' }>;
+export type FocusRouteAccess = Exclude<AccessAnswer, Readonly<{ status: 'error' }>>;
 
-/** The library's access answer, or the port's failure to give one. @public */
-export type FocusAccessAnswer = FocusRouteAccess | Readonly<{ status: 'error'; message: string }>;
+/** The library's access answer, or the port's failure to give one (the access machine's `AccessAnswer`). @public */
+export type FocusAccessAnswer = AccessAnswer;
 
 /**
  * What focus holds as its answer: the library's answer, a project URL whose slugs name no project (`missing` with no

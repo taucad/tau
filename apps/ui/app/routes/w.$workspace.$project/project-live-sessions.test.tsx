@@ -14,6 +14,8 @@ import { StrictMode, createContext, useContext, useEffect, useSyncExternalStore 
 import { act, render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFakeEnvironmentHost, startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { mock } from 'vitest-mock-extended';
 import type { Actor } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
@@ -23,7 +25,6 @@ import type * as ProjectRuntimeModule from '#runtime/project-runtime.js';
 import type { ProjectRuntimeOptions } from '#runtime/project-runtime.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
-import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type * as CloudProjectsModule from '#hooks/use-cloud-projects.js';
 import type * as SessionsStoreModule from '#services/sessions-store.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
@@ -642,7 +643,7 @@ function SessionStageProbe(): undefined {
 const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => (
   <StrictMode>
     <AppRuntimeProvider runtime={appRuntime}>
-      <UnloadProvider>
+      <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
         {sessionProbe ? <SessionStageProbe /> : null}
         <QueryClientProvider client={queryClient}>
           <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
@@ -736,6 +737,16 @@ afterEach(() => {
 // ===========================================================================
 // ProjectSessionBinding: one row per relay (S1 to S7, S27), under StrictMode
 // ===========================================================================
+
+/* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
+let unloadEnvironment: EnvironmentHostFixture | undefined;
+beforeEach(() => {
+  unloadEnvironment = startEnvironmentHost();
+});
+afterEach(() => {
+  unloadEnvironment?.stop();
+  unloadEnvironment = undefined;
+});
 
 describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
   it('should bring the session live once the views and runtime regions report ready (S7)', async () => {

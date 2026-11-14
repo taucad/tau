@@ -95,6 +95,9 @@
 \* The app runtime builds the session store with its dependencies at construction (app state
 \* orchestration A2): the library's chat-record ports, and its record client and watch, taken again
 \* when the root worker is replaced. The closures it calls are the same; queue paths unchanged.
+\* The session store reports its transcript's load state and the composer trays a chat remembers
+\* (app state orchestration A12, I21): read-only derivations of the applied transcript and a
+\* per-device memory. Admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

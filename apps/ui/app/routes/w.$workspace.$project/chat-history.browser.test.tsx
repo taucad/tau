@@ -21,7 +21,7 @@ type MockChatSession = {
   readonly todoList: FileContentResult;
   /**
    * The composer trays this chat showed when it was last open, known before its transcript loads. Lane A12 reads it
-   * to reserve the trays' height while the transcript loads (U10); nothing reads it yet.
+   * to reserve the trays' height while the transcript loads (U10).
    */
   readonly rememberedComposerTrays: readonly RememberedComposerTray[];
 };
@@ -281,7 +281,7 @@ const laneLayoutAcrossLoad = async ({
 };
 
 describe('chat composer across the transcript load', () => {
-  it.fails('keeps the composer region height when the transcript resolves, for a chat with a tray (U10)', async () => {
+  it('keeps the composer region height when the transcript resolves, for a chat with a tray (U10)', async () => {
     const { before, after } = await laneLayoutAcrossLoad({ rememberedComposerTrays: taskListTray, todoList });
 
     expect(screen.getByRole('button', { name: /Tasks:/u })).toBeVisible();

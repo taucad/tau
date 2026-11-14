@@ -124,6 +124,12 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import {
+  composerTraysOf,
+  readRememberedComposerTrays,
+  writeRememberedComposerTrays,
+} from '#services/chat-composer-trays.js';
+import type { ComposerTray } from '#services/chat-composer-trays.js';
 import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type {
   ChatMessageQueueIntent,
@@ -279,6 +285,16 @@ export type ChatSession = {
   /** Coherent visible transcript; the SDK array may be reconstructing a cumulative stream. */
   readonly messages: readonly MyUIMessage[];
   /**
+   * The transcript's load state (I21): `loaded` with the turns it shows, `empty` only once its load has settled with
+   * none, and `loading` until then. Read it with {@link selectChatTranscript}.
+   */
+  readonly transcript: ChatTranscriptState;
+  /**
+   * The composer trays this chat showed when it was last open on this device, known before its transcript loads,
+   * and the trays its transcript has once it has settled (U10). The lane reserves their height from it.
+   */
+  readonly rememberedComposerTrays: readonly ComposerTray[];
+  /**
    * This chat's state in the agent-state vocabulary (D32, S45).
    *
    * The store keeps the AI SDK `Chat`, its transport and its persistence; the
@@ -290,6 +306,18 @@ export type ChatSession = {
    * subscribed once stays subscribed to the chat's machine. */
   readonly stateActorRef: ChatSessionActorRef;
 };
+
+/** A transcript's load state (I21): empty is not loading. */
+export type ChatTranscriptState = 'loading' | 'loaded' | 'empty';
+
+/**
+ * The transcript state a view reads for a chat: a chat with no session is still loading.
+ *
+ * @param session - The chat's session, if it is acquired.
+ * @returns Its transcript's load state.
+ */
+export const selectChatTranscript = (session: ChatSession | undefined): ChatTranscriptState =>
+  session?.transcript ?? 'loading';
 
 type MessagePresentation = {
   readonly messagesById: ReadonlyMap<string, MyUIMessage>;
@@ -520,6 +548,21 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
 // ChatSessionStore
 // ---------------------------------------------------------------------------
 
+/**
+ * The transcript's load state (I21). Turns shown are `loaded`, so the first turns and `loaded` arrive in one snapshot
+ * (U19). With none, it is `empty` only once a materialization of the log has settled, or once the host refused or lost
+ * the read, which nothing then answers; until then it is `loading` (U7).
+ */
+const transcriptOf = (
+  session: Pick<InternalSession, 'messages' | 'transcriptSettled'>,
+  attachment: ObservedChat['status'] | undefined,
+): ChatTranscriptState => {
+  if (session.messages.length > 0) {
+    return 'loaded';
+  }
+  return session.transcriptSettled || attachment === 'refused' || attachment === 'lost' ? 'empty' : 'loading';
+};
+
 type InternalSession = ChatSession & {
   readonly messageQueueStore: ChatMessageQueueStore;
   readonly messageQueueObservation: ObservationService<void>;
@@ -566,6 +609,10 @@ type InternalSession = ChatSession & {
     | undefined;
   materializeVersion: number;
   transcriptMaterialization: Promise<void> | undefined;
+  /** A materialization of the log applied (or failed) for this session: an empty transcript is now settled (I21). */
+  transcriptSettled: boolean;
+  /** {@link ChatSession.rememberedComposerTrays}: this device's memory until the transcript settles. */
+  composerTrays: readonly ComposerTray[];
   recoveredRunId: string | undefined;
   blockedPresentationRunId: string | undefined;
   recoveringPresentation: boolean;
@@ -3804,12 +3851,15 @@ export class ChatSessionStore {
           session.chat.messages = retained;
         }
         session.failedTranscriptProjection = undefined;
+        this.#settleTranscript(session, retained);
       }
     } catch (error) {
       if (this.#sessions.get(session.chatId) !== session || session.materializeVersion !== version) {
         return;
       }
       session.failedTranscriptProjection = projection;
+      // A failed read has settled too: the lane is not held in `loading` by a transcript that cannot arrive.
+      this.#settleTranscript(session, session.messages);
       console.warn('[ChatSessionStore] projected transcript could not be materialized', {
         chatId: session.chatId,
         runId: selectCurrentRun(projection)?.runId,
@@ -3818,6 +3868,25 @@ export class ChatSessionStore {
         ...presentationErrorFacts(error),
       });
     }
+  }
+
+  /**
+   * Mark the transcript settled and remember its trays (I21, U10). Views read both in the snapshot that carries the
+   * applied turns, so a change that leaves the turns as they were still notifies.
+   */
+  #settleTranscript(session: InternalSession, messages: readonly MyUIMessage[]): void {
+    const trays = composerTraysOf(messages);
+    const changed =
+      !session.transcriptSettled ||
+      trays.length !== session.composerTrays.length ||
+      trays.some((tray, index) => tray !== session.composerTrays[index]);
+    if (!changed) {
+      return;
+    }
+    session.transcriptSettled = true;
+    session.composerTrays = trays;
+    writeRememberedComposerTrays(session.chatId, trays);
+    this.#chatTopics.get(session.chatId)?.emit();
   }
 
   async #clearAcceptedSeed(chatId: string, requestId: string): Promise<void> {
@@ -4516,11 +4585,18 @@ export class ChatSessionStore {
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
     let loading: 'before' | 'loading' | 'loaded' = 'before';
     const chatRoot = createActor(this.#chatSessionLogic, { ...this.#rootOptions, input: { chatId, projectId } });
+    const observedChats = this.#observed;
     session = {
       chatId,
       chat,
       get messages() {
         return session.presentationHold?.messages ?? chat.messages;
+      },
+      get transcript() {
+        return transcriptOf(session, observedChats.get(chatId)?.status);
+      },
+      get rememberedComposerTrays() {
+        return session.composerTrays;
       },
       transport,
       projectId,
@@ -4553,6 +4629,8 @@ export class ChatSessionStore {
       presentationHold: undefined,
       materializeVersion: 0,
       transcriptMaterialization: undefined,
+      transcriptSettled: false,
+      composerTrays: readRememberedComposerTrays(chatId),
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,
       recoveringPresentation: false,

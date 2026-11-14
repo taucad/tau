@@ -5534,7 +5534,7 @@ describe('ChatSessionStore', () => {
       store.release('chat_verified_empty');
     });
 
-    it.fails('reports a loading transcript, never an empty one, before the load settles for a chat with history (U7)', async () => {
+    it('reports a loading transcript, never an empty one, before the load settles for a chat with history (U7)', async () => {
       const chatId = 'chat_deferred_transcript';
       const projectId = 'project_deferred_transcript';
       const runId = 'run_deferred_transcript';
@@ -5610,6 +5610,39 @@ describe('ChatSessionStore', () => {
         unsubscribeProjection();
         persistence.unsubscribe();
         store.release(chatId);
+      }
+    });
+
+    it('serves the remembered composer trays before the transcript loads, and the settled ones after (U10)', async () => {
+      const memory = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const chatId = 'chat_remembered_tray';
+      memory.set(`tau:chat-composer-trays:${chatId}`, 'todo');
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, 'project_tray'));
+      store.setDependencies(deps);
+      try {
+        const session = store.acquire(chatId, 'project_tray');
+        await settle();
+        // Known before the log answers, so the lane can hold the tray's height from its first commit.
+        expect(session.transcript).toBe('loading');
+        expect(session.rememberedComposerTrays).toEqual(['todo']);
+
+        // The log settles with no task list: the tray is released, and the device forgets it.
+        publishLogPage(store, chatId, [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('empty');
+        });
+        expect(session.rememberedComposerTrays).toEqual([]);
+        expect(memory.has(`tau:chat-composer-trays:${chatId}`)).toBe(false);
+      } finally {
+        store.release(chatId);
+        vi.unstubAllGlobals();
       }
     });
 

@@ -50,7 +50,10 @@ import type { ActorRefFrom } from 'xstate';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
-import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
+import { selectChatTranscript } from '#services/chat-session-store.js';
+import type { ChatSession, ChatTranscriptState, StopOrigin } from '#services/chat-session-store.js';
+import { noComposerTrays } from '#services/chat-composer-trays.js';
+import type { ComposerTray } from '#services/chat-composer-trays.js';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
@@ -154,6 +157,10 @@ export type CombinedChatState = {
   messageOrder: readonly string[];
   turnGroups: readonly TurnGroup[];
   agentInvocations: string;
+  /** The transcript's load state (I21): the lane draws no empty-chat state while it is `loading`. */
+  transcript: ChatTranscriptState;
+  /** The composer trays whose height the lane reserves while their reads are pending (U10). */
+  rememberedComposerTrays: readonly ComposerTray[];
   status: ChatInstance['status'];
   error: Error | undefined;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
@@ -237,8 +244,9 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
     [activeChatId, draftActorRef, persistenceActorRef, store],
   );
   const getSnapshot = useCallback((): T => {
-    const chat = store.get(activeChatId)?.chat;
-    const messages = store.get(activeChatId)?.messages ?? emptyMessages;
+    const session = store.get(activeChatId);
+    const chat = session?.chat;
+    const messages = session?.messages ?? emptyMessages;
     const projection = store.getProjection(activeChatId);
     const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
     const draftContext = draftActorRef.getSnapshot().context;
@@ -257,6 +265,8 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       get agentInvocations() {
         return store.getMessagePresentation(activeChatId).agentInvocations;
       },
+      transcript: selectChatTranscript(session),
+      rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
       status,
       error: chat?.error,
       persistedError: persistenceContext?.persistedError,

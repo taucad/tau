@@ -383,6 +383,12 @@ export type ProjectLoadRecord = {
   >;
   /** Every sampled frame's time, by frame index from 1 (`frameTimes[0]` is frame 1), when asked for (`frameTimes`). */
   readonly frameTimes: readonly number[];
+  /**
+   * Every sampled frame's own time, the timestamp `requestAnimationFrame` passes, by frame index from 1, when asked for
+   * (`frameTimes`). `frameTimes` is when the sample ran, which other frame callbacks can push later; this is the time
+   * the frame's animations were evaluated at (A15f2).
+   */
+  readonly frameStamps: readonly number[];
 };
 
 /** A node's rounded box. */
@@ -490,6 +496,7 @@ export const recordProjectLoad = (input: {
     regionRemovals: Object.create(null) as Record<string, ProjectLoadFrame[]>,
     boxSets: Object.create(null) as Record<string, Array<ProjectLoadFrame & { boxes: ProjectLoadBox[] }>>,
     frameTimes: [] as number[],
+    frameStamps: [] as number[],
     mark: (name: string): void => {
       record.marks.push({ frame: record.frames + 1, t: now(), name });
     },
@@ -776,7 +783,7 @@ export const recordProjectLoad = (input: {
       }
     }
   };
-  const sample = (): void => {
+  const sample = (stamp: number): void => {
     record.frames += 1;
     const frame: ProjectLoadFrame = { frame: record.frames, t: now() };
     track();
@@ -831,6 +838,7 @@ export const recordProjectLoad = (input: {
     }
     if (input.frameTimes === true) {
       keep(record.frameTimes, frame.t);
+      keep(record.frameStamps, stamp);
     }
     requestAnimationFrame(sample);
   };
@@ -907,6 +915,84 @@ export const markProjectLoad = async (name: string): Promise<void> =>
     (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__.mark(label);
   }, name);
 
+/**
+ * Mark the record when the page itself dispatches the next click, so a row times from the click the app handled, not
+ * from before the driver sent it (A15f2, F12).
+ *
+ * @param name - The mark's name.
+ */
+export const markProjectLoadOnClick = async (name: string): Promise<void> =>
+  target.evaluate((label) => {
+    document.addEventListener(
+      'click',
+      () => {
+        (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__.mark(label);
+      },
+      { capture: true, once: true },
+    );
+  }, name);
+
+/** A span a region was on screen, in frame-stamp time (`shownOnFrames`). Milliseconds. */
+export type ShownSpan = { readonly from: number; readonly to: number };
+
+/**
+ * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or still on
+ * screen 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it served.
+ *
+ * @param shown - The indicator's spans (`shownOnFrames`).
+ * @param answeredAt - When the wait's answer reached the page. Milliseconds.
+ * @returns Each breaking span as `from-to`, by kind.
+ */
+export const minimumBreaches = (
+  shown: readonly ShownSpan[],
+  answeredAt: number,
+): { readonly short: string[]; readonly lingering: string[] } => {
+  const describe = (span: ShownSpan): string => `${Math.round(span.from)}-${Math.round(span.to)}`;
+  return {
+    short: shown.filter((span) => span.to - span.from < 500).map((span) => describe(span)),
+    lingering: shown
+      .filter((span) => span.to - Math.max(span.from + 500, answeredAt) > 1000)
+      .map((span) => describe(span)),
+  };
+};
+
+/**
+ * A15f2: each span a region was shown in, on the frames' own times (`frameStamps`): from the first frame that drew it
+ * to the first that did not, or to the region's node leaving the document if that came first. A node removed in a
+ * task is gone from the next frame however late a busy page paints it, so a removal ends the span when it happens.
+ *
+ * @param entries - The region's entries.
+ * @param frameStamps - The record's frame stamps.
+ * @param removals - The region's node removals (`regionRemovals`), each timed when it happened.
+ * @returns The spans, in frame-stamp time.
+ */
+export const shownOnFrames = (
+  entries: readonly ProjectLoadRegionEntry[],
+  frameStamps: readonly number[],
+  removals: readonly ProjectLoadFrame[] = [],
+): ShownSpan[] => {
+  const stampOf = (frame: number): number => frameStamps[frame - 1] ?? Number.NaN;
+  const removedAfter = (time: number): number =>
+    Math.min(...removals.filter((removal) => removal.t > time).map((removal) => removal.t));
+  const spans: Array<{ from: number; to: number }> = [];
+  let open: ProjectLoadRegionEntry | undefined;
+  for (const entry of entries) {
+    const shown = entry.present && entry.visible && entry.text !== '';
+    if (shown && open === undefined) {
+      open = entry;
+    } else if (!shown && open !== undefined) {
+      const from = stampOf(open.frame);
+      spans.push({ from, to: Math.min(stampOf(entry.frame), removedAfter(from)) });
+      open = undefined;
+    }
+  }
+  if (open !== undefined) {
+    const from = stampOf(open.frame);
+    spans.push({ from, to: removedAfter(from) });
+  }
+  return spans;
+};
+
 /** What the server's HTML for a document holds, before any script runs. */
 export type ServerShellInspection = {
   readonly wrapper: boolean;
@@ -948,8 +1034,9 @@ export type WorkerReadDelay = {
   readonly path: string;
   readonly milliseconds: number;
   /**
-   * A15f2: count `milliseconds` from the first frame this selector's node is visible, not from the send, so the reply
-   * lands a set time into a wait indicator's minimum.
+   * A15f2: hand the reply over in the frame after the first one this selector's node is visible in (in that frame's
+   * callbacks, before it paints), not `milliseconds` after the send, so it lands at the start of a wait indicator's
+   * minimum whatever the load did to the reveal.
    */
   readonly afterShown?: string;
   /**
@@ -959,10 +1046,10 @@ export type WorkerReadDelay = {
    */
   readonly busyMilliseconds?: number;
   /**
-   * A15f2: also hold the main thread `milliseconds` once `after` ms have passed since the first frame this selector
-   * matched a node, whatever the reply does: a long task across a wait indicator's reveal, so the reveal paints late.
+   * A15f2: also hold the main thread `milliseconds` from the first frame this selector matches a node in, whatever the
+   * reply does: a long task across a wait indicator's reveal, so the reveal paints late.
    */
-  readonly longTask?: { readonly selector: string; readonly after: number; readonly milliseconds: number };
+  readonly longTask?: { readonly selector: string; readonly milliseconds: number };
 };
 
 /** The `sessionStorage` key the rules are read from when each document starts. */
@@ -1000,7 +1087,7 @@ export const delayWorkerReads = (key: string): void => {
     milliseconds: number;
     afterShown?: string;
     busyMilliseconds?: number;
-    longTask?: { selector: string; after: number; milliseconds: number };
+    longTask?: { selector: string; milliseconds: number };
   }> = [];
   try {
     const raw = sessionStorage.getItem(key);
@@ -1026,9 +1113,7 @@ export const delayWorkerReads = (key: string): void => {
         requestAnimationFrame(untilPresent);
         return;
       }
-      setTimeout(() => {
-        holdMainThread(longTask.milliseconds);
-      }, longTask.after);
+      holdMainThread(longTask.milliseconds);
     };
     requestAnimationFrame(untilPresent);
   }
@@ -1166,11 +1251,10 @@ export const delayWorkerReads = (key: string): void => {
       }
       const untilShown = (): void => {
         const node = document.querySelector(afterShown);
-        if (node?.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
-          setTimeout(release, reply.milliseconds);
-        } else {
-          requestAnimationFrame(untilShown);
-        }
+        /* Visible here means painted in this frame: the reply goes in the next one, after one frame on screen. */
+        requestAnimationFrame(
+          node?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) ? release : untilShown,
+        );
       };
       requestAnimationFrame(untilShown);
     };

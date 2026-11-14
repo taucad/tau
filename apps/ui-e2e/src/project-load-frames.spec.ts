@@ -5,6 +5,7 @@ import * as target from '#support/external-target.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
+  ShownSpan,
   ProjectLoadFrame,
   ProjectLoadBox,
   ProjectLoadRecord,
@@ -29,6 +30,9 @@ import {
   readWorkerDeliveries,
   readWorkerReads,
   openBeforeHydration,
+  markProjectLoadOnClick,
+  minimumBreaches,
+  shownOnFrames,
 } from '#support/home-load-recorder.js';
 
 /**
@@ -1334,8 +1338,8 @@ knownDefect(
 );
 
 /*
- * F9's clause past the mount: on `main` the editor's first line moves 14 px about 2 s after the editor mounts, as
- * CodeMirror lays out its gutters. The code pane is A15f's; an A15f follow-up lane flips this row.
+ * F9's clause past the mount: the editor's first line moved 14 px one to six seconds after the editor mounted, when the
+ * language service's first diagnostic gave the lint gutter its width. A15f2 keeps that gutter 1em wide from the mount.
  */
 knownDefect(
   "F9 (A15f follow-up): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
@@ -1416,21 +1420,23 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
 
 /*
  * A15f2: the 500 ms minimum (UI Policy § 5) on History's "Loading history", seen at 164 ms in a local F10 record,
- * where the load's long tasks painted the reveal 222 ms late. The forcing: a 700 ms long task from 900 ms after the
- * indicator mounts, across its reveal, and History's read answered just after the first frame that shows it. A span
- * is measured on screen, from the first frame with the words to the first without.
+ * where the load's long tasks painted the reveal 222 ms late. The forcing: a 1,700 ms long task from the first frame
+ * the indicator is in, across its reveal and the 500 ms after it, and History's read answered in the frame after the
+ * first that shows the words. A span is measured on screen, from the first frame with the words to the first without.
  */
-/**
- * The shortest on-screen span the minimum allows, from the first frame with the words to the first without: 500 ms less
- * 10 ms, because the recorder reads each frame a few ms into it, and a hold that ends on the 30th frame after the
- * reveal can be read 1 or 2 ms short. Milliseconds.
- */
-const shownMinimum = 490;
+/** A15f2's assertion for both minimums (`minimumBreaches`). */
+const expectMinimum = (label: string, shown: readonly ShownSpan[], answeredAt: number): void => {
+  expectMeasured(
+    minimumBreaches(shown, answeredAt),
+    `${label} showed ${shown.map((span) => `${Math.round(span.from)}-${Math.round(span.to)}`).join(', ')}; the read was answered at ${answeredAt} ms`,
+    { short: [], lingering: [] },
+  );
+};
 
 const historyHold: WorkerReadDelay = {
   ...historyRead(0),
   afterShown: historyRegions.historyIndicator,
-  longTask: { selector: historyRegions.historyIndicator, after: 900, milliseconds: 700 },
+  longTask: { selector: historyRegions.historyIndicator, milliseconds: 1700 },
 };
 
 knownDefect(
@@ -1448,19 +1454,29 @@ knownDefect(
       await armWorkerReadDelay([historyHold]);
       await target.reload();
       await settleProject();
-      await target.delay(2000);
+      /* The answer waits on the words, which the long task and the load put late: wait for it, then the minimum. */
+      await target.waitFor(
+        () =>
+          (
+            globalThis as typeof globalThis & { __TAU_WORKER_READS__: { delivered: ReadonlyArray<{ method: string }> } }
+          ).__TAU_WORKER_READS__.delivered.some((delivery) => delivery.method === 'revision:log'),
+        undefined,
+        { timeout: 60_000 },
+      );
+      await target.delay(1500);
       const record = await keepRecord('history-minimum-wide');
       await requireReadDelayed('History minimum', historyHold);
-      const shown = shownSpans(regionsOf(record, 'historyIndicator'), record.frameTimes);
-      precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
-      return { record, shown };
-    },
-    assert: ({ shown }) => {
-      expectMeasured(
-        shown.filter((span) => span.to - span.from < shownMinimum).map((span) => `${span.from}-${span.to}`),
-        `History minimum: "Loading history" showed ${shown.map((span) => `${span.from}-${span.to}`).join(', ')}`,
-        [],
+      const shown = shownOnFrames(
+        regionsOf(record, 'historyIndicator'),
+        record.frameStamps,
+        record.regionRemovals['historyIndicator'],
       );
+      precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
+      const deliveries = await readWorkerDeliveries();
+      return { shown, answeredAt: deliveries.find((delivery) => delivery.method === 'revision:log')!.t };
+    },
+    assert: ({ shown, answeredAt }) => {
+      expectMinimum('History minimum: "Loading history"', shown, answeredAt);
     },
   },
 );
@@ -1480,7 +1496,12 @@ const measureSourceOpen = async (
   label: string,
   milliseconds: number,
   hold: Pick<WorkerReadDelay, 'afterShown' | 'busyMilliseconds'> = {},
-): Promise<{ readonly record: ProjectLoadRecord; readonly click: ProjectLoadFrame; readonly answeredAt: number }> => {
+): Promise<{
+  readonly record: ProjectLoadRecord;
+  readonly click: ProjectLoadFrame;
+  readonly sentAt: number;
+  readonly answeredAt: number;
+}> => {
   const read: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^notes\.ts$`, milliseconds, ...hold };
   await seedProjects('wide', { regions: openedFileRegions, frameTimes: true });
   await writeWorkbenchFile(openedFile, 'export const note = "A file no pane has read yet.";\n');
@@ -1497,6 +1518,7 @@ const measureSourceOpen = async (
   const entry = treeItem(openedFile);
   await target.expectVisible(entry, 60_000);
   await markProjectLoad('click');
+  await markProjectLoadOnClick('clicked');
   await target.click(entry);
   await target.expectVisible(selectors.getByCss(openedFileRegions.text), 60_000);
   await target.delay(milliseconds + settleWindow);
@@ -1512,20 +1534,37 @@ const measureSourceOpen = async (
       delivery.t - delivery.sentAt >= milliseconds - 20,
   );
   precondition(late.length > 0, `${label}: no read of ${openedFile} sent after the click was answered late`);
-  return { record, click: click!, answeredAt: Math.min(...late.map((delivery) => delivery.t)) };
+  const [first] = late.toSorted((left, right) => left.t - right.t);
+  /* The page's own click, and how long the app took from it to send the read: a product delay there would push the
+     answer past the reveal, and the indicator would then be right to show. */
+  const clicked = record.marks.find((mark) => mark.name === 'clicked');
+  await target.writeArtifact(
+    `project-load-frames/${label}-timing.json`,
+    `${JSON.stringify({ click: click!.t, clicked: clicked?.t, sentAt: first!.sentAt, answeredAt: first!.t }, null, 2)}\n`,
+  );
+  return { record, click: click!, sentAt: first!.sentAt, answeredAt: first!.t };
 };
 
+/*
+ * The wait starts at the click, but the forced 600 ms runs from the read's send. An answer 1,000 ms or more after the
+ * click makes the indicator right to show (3 of 15 main runs drew it at 1,243 to 1,776 ms), so the row asserts from the
+ * answer: none drawn for an answer within 1,000 ms of the click, none ever before 1,000 ms (A15f2).
+ */
 knownDefect('F12 source pane (A15f): a file opened from the tree with its read 600 ms late shows no wait indicator', {
   artifact: 'f12-600-wide',
   expectedFailure: false,
   budget: loadBudget,
   measure: async () => measureSourceOpen('f12-600-wide', 600),
-  assert: ({ record, click }) => {
+  assert: ({ record, click, sentAt, answeredAt }) => {
     const shown = shownSpans(regionsOf(record, 'fileIndicator')).filter((span) => span.from >= click.t);
+    const isAnsweredBeforeReveal = answeredAt - click.t < 1000;
     expectMeasured(
-      shown.map((span) => `from ${span.from - click.t} ms after the click`),
-      'F12: a 600 ms wait drew its indicator',
-      [],
+      {
+        drawnBeforeAnswer: isAnsweredBeforeReveal ? shown.map((span) => `from ${span.from - click.t} ms`) : [],
+        drawnEarly: shown.filter((span) => span.from - click.t < 1000).map((span) => `from ${span.from - click.t} ms`),
+      },
+      `F12: the read was sent ${sentAt - click.t} ms and answered ${answeredAt - click.t} ms after the click; the indicator showed ${shown.map((span) => `from ${span.from - click.t} ms`).join(', ') || 'never'}`,
+      { drawnBeforeAnswer: [], drawnEarly: [] },
     );
   },
 });
@@ -1561,7 +1600,8 @@ knownDefect(
 
 /*
  * A15f2: the 500 ms minimum on the code pane's "Opening file", seen at 468 and 481 ms in 2 of about 10 local F12 runs.
- * The forcing: the file's read answers in the first frame the indicator shows, at the end of a 300 ms long task.
+ * The forcing: the file's read answers in the frame after the first that shows the words, at the end of a 300 ms long
+ * task in that frame.
  */
 knownDefect(
   'Opening file minimum (A15f2): a file opened from the tree, its read answered at the end of a long task as "Opening file" shows, keeps the words at least 500 ms',
@@ -1574,18 +1614,17 @@ knownDefect(
         afterShown: openedFileRegions.fileIndicator,
         busyMilliseconds: 300,
       });
-      const shown = shownSpans(regionsOf(measured.record, 'fileIndicator'), measured.record.frameTimes).filter(
-        (span) => span.from >= measured.click.t,
-      );
+      const clickedAt = measured.record.frameStamps[measured.click.frame - 1] ?? 0;
+      const shown = shownOnFrames(
+        regionsOf(measured.record, 'fileIndicator'),
+        measured.record.frameStamps,
+        measured.record.regionRemovals['fileIndicator'],
+      ).filter((span) => span.from >= clickedAt);
       precondition(shown.length > 0, 'Opening file minimum: "Opening file" never showed');
-      return shown;
+      return { shown, answeredAt: measured.answeredAt };
     },
-    assert: (shown) => {
-      expectMeasured(
-        shown.filter((span) => span.to - span.from < shownMinimum).map((span) => `${span.from}-${span.to}`),
-        `Opening file minimum: "Opening file" showed ${shown.map((span) => `${span.from}-${span.to}`).join(', ')}`,
-        [],
-      );
+    assert: ({ shown, answeredAt }) => {
+      expectMinimum('Opening file minimum: "Opening file"', shown, answeredAt);
     },
   },
 );

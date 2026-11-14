@@ -115,7 +115,7 @@ export type GatewayHostLabels = Readonly<{
   kind: GatewayHostKind;
   /** The host build's release label, such as its short commit. Absent when the composition cannot read it. */
   build?: string | undefined;
-  /** The kernel id of the project the host serves. Absent when the composition has none. */
+  /** A kernel id for every call; a run's own kernel, from its turn's snapshot, replaces it. Absent when the composition has none. */
   kernel?: string | undefined;
 }>;
 

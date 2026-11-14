@@ -8,6 +8,7 @@ import type {
   RunFailureDetail,
 } from '#log/event-types.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
+import { snapshotKernel } from '#log/snapshot-kernel.js';
 
 /*
  * Tau's own turn facts for agent observability (T05), read from committed rows.
@@ -145,6 +146,8 @@ export type TurnObservation = Readonly<{
     | undefined;
   /** The revision the run's turn wrote, when it wrote one. */
   finalRevision?: string | undefined;
+  /** The kernel the run targets, from the snapshot its turn committed (LW17); absent when it names none. */
+  kernel?: string | undefined;
   /** How many files that revision changed. */
   filesChanged?: number;
   /** How many Tau runs of the chat came before this one in its rows. */
@@ -283,6 +286,7 @@ type RunDraft = {
   lastFactAt: number;
   sources: ObservedSource[];
   finalRevision: string | undefined;
+  kernel: string | undefined;
   changedPaths: readonly string[];
   prompt: JsonValue | undefined;
   reply: JsonValue | undefined;
@@ -311,6 +315,7 @@ const draftFor = (runs: Map<string, RunDraft>, chatId: string, runId: string): R
       lastFactAt: 0,
       sources: [],
       finalRevision: undefined,
+      kernel: undefined,
       changedPaths: [],
       prompt: undefined,
       reply: undefined,
@@ -407,6 +412,7 @@ const fold = (
     case 'turn.history-projection-committed': {
       draft.turnId ??= event.message.id;
       draft.external ||= isExternalAgentTurn(event.message);
+      draft.kernel ??= snapshotKernel(event.context.snapshot);
       if (content && isPersonsMessage(event.message)) {
         draft.prompt ??= event.message.content;
       }
@@ -568,6 +574,7 @@ const settle = (draft: RunDraft, priorTurns: number, content: boolean): TurnObse
             ...(ending.failure === undefined ? {} : { failure: ending.failure }),
           },
     ...(draft.finalRevision === undefined ? {} : { finalRevision: draft.finalRevision }),
+    ...(draft.kernel === undefined ? {} : { kernel: draft.kernel }),
     filesChanged: draft.changedPaths.length,
     priorTurns,
     ...(content ? { content: { prompt: draft.prompt, reply: draft.reply, changedPaths: draft.changedPaths } } : {}),

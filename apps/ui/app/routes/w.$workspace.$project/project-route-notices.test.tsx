@@ -353,6 +353,8 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
   let stop: (() => void) | undefined;
   /** Whether the session's runtime closes; a refusal leaves the session `failed`, holding its slot. */
   let runtimeCloses = true;
+  /** Whether the session's runs cancel; a refusal leaves the session `failed` with its runs still listed. */
+  let runsCancel = true;
 
   /**
    * A real registry and focus, and the route's visit that opened the project: focus knows its slugs only from a route
@@ -375,7 +377,11 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     composed.focus = host;
     /* The services a mounted session subtree registers; the close reads them. */
     const releaseServices = registerProjectSessionServices(projectId, {
-      cancelRuns: async () => undefined,
+      cancelRuns: async () => {
+        if (!runsCancel) {
+          throw new Error('runs would not cancel');
+        }
+      },
       flushProducers: async () => undefined,
       flushSync: async () => undefined,
       closeRuntime: async () => {
@@ -418,6 +424,7 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     stop?.();
     stop = undefined;
     runtimeCloses = true;
+    runsCancel = true;
     composed.sessions = undefined;
     composed.focus = undefined;
   });
@@ -444,6 +451,26 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     const failed = registry.getSnapshot().context.refs[projectId];
     await closeTo(registry, 'failed');
     runtimeCloses = true;
+
+    render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
+
+    await vi.waitFor(() => {
+      const reopened = registry.getSnapshot().context.refs[projectId];
+      expect(reopened).toBeDefined();
+      expect(reopened).not.toBe(failed);
+    });
+    expect(registry.getSnapshot().context.status[projectId]?.state).not.toBe('failed');
+  });
+
+  it('should reopen a failed session whose refused close left its runs listed, without a confirm dialog', async () => {
+    const { registry } = await compose();
+    const failed = registry.getSnapshot().context.refs[projectId];
+    failed?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
+    runsCancel = false;
+    await closeTo(registry, 'failed');
+    expect(failed?.getSnapshot().context.runs).toEqual(['run']);
+    runsCancel = true;
 
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
     await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));

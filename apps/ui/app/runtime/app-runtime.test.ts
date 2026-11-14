@@ -162,6 +162,29 @@ describe('app runtime root', () => {
     runtime.stop();
   });
 
+  it('should tell focus the window came back, only on a return from blur (R16)', () => {
+    const host = createFakeEnvironmentHost({ focused: true });
+    const focusEvents: string[] = [];
+    /* Focus is the only actor that takes `windowFocused`; the root's own transition sends it on. */
+    const runtime = createAppRuntime({
+      environment: () => host,
+      inspect: (inspection) => {
+        if (inspection.type === '@xstate.transition' && inspection.event.type === 'windowFocused') {
+          focusEvents.push(inspection.actorRef.sessionId === runtime.sessionId ? 'root' : 'focus');
+        }
+      },
+    }).start();
+
+    /* The first reading is focused: nothing came back. */
+    host.focus();
+    expect(focusEvents).toEqual([]);
+
+    host.blur();
+    host.focus();
+    expect(focusEvents).toEqual(['focus']);
+    runtime.stop();
+  });
+
   it('should forward the clock, inspect and onRejectedEvent to the whole tree (MC-R4)', () => {
     const clock = new StepClock();
     const inspected: InspectionEvent[] = [];

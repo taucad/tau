@@ -1625,7 +1625,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 5: a refetch of a failed listing that no Retry started (a window focus) keeps the failure's Retry. */
-    it.fails("C14: keeps the failure's Retry seen and focused through a refetch the person did not start", async () => {
+    it("C14: keeps the failure's Retry seen and focused through a refetch the person did not start", async () => {
       cloudListing.isFailed = true;
       const slot = renderSlot();
       const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
@@ -1639,7 +1639,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 5: a Retry over a failed refresh of listed projects is a wait the person sees and hears. */
-    it.fails('C14: says a Retry over a failed refresh of listed projects is loading, and its answer again', async () => {
+    it('C14: says a Retry over a failed refresh of listed projects is loading, and its answer again', async () => {
       cloudListing.current = [
         { id: 'cloud-1', name: 'Listed cube', role: 'owner', canDeleteCloud: true, cloudState: 'active' },
       ];
@@ -1671,7 +1671,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 5: a Retry's wait is announced by the slot's status region, present before the press. */
-    it.fails("C14: announces a Retry's wait in the status region that was already there", async () => {
+    it("C14: announces a Retry's wait in the status region that was already there", async () => {
       cloudListing.retry.mockImplementationOnce(
         async () =>
           new Promise<void>(() => {

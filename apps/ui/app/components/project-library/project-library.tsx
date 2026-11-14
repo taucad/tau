@@ -290,29 +290,35 @@ export function ProjectLibrary({
   const cloudNotice: CloudNotice | undefined = isCloudShown
     ? cloudNoticeOf({ isOnline, isCloudSettled, cloud })
     : undefined;
-  const isAwaitingCloud = isCloudShown && cloudPending && cloud === 'fetching';
+  /* The time of the latest Retry press while its request runs: each press is a new request, so a new wait. */
+  const [cloudRetriedAt, setCloudRetriedAt] = useState<number>();
+  /* A Retry's own request is a wait even over listed projects, whose failed refresh stays `failed` while it asks. */
+  const isAwaitingCloud =
+    isCloudShown && ((cloudPending && cloud === 'fetching') || (cloudRetriedAt !== undefined && isCloudFetching));
+  /* Whether the listing's last answer was a failure, so a wait that follows it keeps the failure's Retry. */
+  const [hasCloudFailed, setHasCloudFailed] = useState(false);
+  if (cloud === 'failed' && !hasCloudFailed) {
+    setHasCloudFailed(true);
+  } else if (cloud === 'ready' && hasCloudFailed) {
+    setHasCloudFailed(false);
+  }
   /* A wait is timed from when this library saw it begin, so one that begins well into the page (a client navigation
      to Home, a Retry, another account) starts its own 1,000 ms. Only a wait a Retry started is announced: the first
      belongs to the page's open, which the sidebar announces. */
-  /* The time of the latest Retry press while its request runs: each press is a new request, so a new wait. */
-  const [cloudRetriedAt, setCloudRetriedAt] = useState<number>();
-  const [cloudWait, setCloudWait] = useState<{
-    readonly startedAt: number;
-    readonly isAnnounced: boolean;
-    readonly retriedAt?: number;
-  }>();
+  const [cloudWait, setCloudWait] = useState<CloudWait>();
   if (isAwaitingCloud && cloudWait === undefined) {
     setCloudWait({
       startedAt: cloudRetriedAt ?? waitClock.now(),
       isAnnounced: cloudRetriedAt !== undefined,
       retriedAt: cloudRetriedAt,
+      followsFailure: hasCloudFailed,
     });
   } else if (!isAwaitingCloud && cloudWait !== undefined) {
     setCloudWait(undefined);
     setCloudRetriedAt(undefined);
   } else if (cloudWait !== undefined && cloudRetriedAt !== undefined && cloudWait.retriedAt !== cloudRetriedAt) {
     /* A Retry pressed during a wait, slow or not, starts a wait of its own, timed and announced from the press. */
-    setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt });
+    setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt, followsFailure: true });
   }
   /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
   const { timing: cloudWaitTiming } = useWaitClock({ active: isAwaitingCloud, startedAt: cloudWait?.startedAt ?? 0 });
@@ -619,7 +625,9 @@ export function ProjectLibrary({
      empty frames alike; the grid itself is busy for as long. */
   const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
   /* The latch reads the notice the slot shows, not one the listing's own wait still holds back. */
-  const shownCloudNotice = isAwaitingListing ? undefined : cloudNotice;
+  /* A Retry's wait over a failure says the wait, not the failure, until its own request answers. */
+  const shownCloudNotice =
+    isAwaitingListing || (cloudWait?.isAnnounced === true && cloudNotice === 'failed') ? undefined : cloudNotice;
   if (shownCloudNotice !== undefined && !hasShownCloudNotice) {
     setHasShownCloudNotice(true);
   }
@@ -629,18 +637,22 @@ export function ProjectLibrary({
        speak of, and its slow words and Retry stay reachable. */
     <LibraryStatusSlot
       notice={shownCloudNotice}
+      /* A Retry's wait is announced by the slot's status region, there before the press, so the words are heard. */
+      announcement={!isAwaitingListing && cloudWait?.isAnnounced === true ? 'Loading Tau Cloud projects' : undefined}
       /* One Retry for Tau Cloud: beside a failure, through the wait it starts, and from the first wait's slow mark, so a
          Retry whose request fails or waits keeps its focus. */
       retry={
-        isAwaitingListing ? undefined : cloudRetryOf({ notice: cloudNotice, wait: cloudWait, timing: cloudWaitTiming })
+        isAwaitingListing
+          ? undefined
+          : cloudRetryOf({ notice: shownCloudNotice, wait: cloudWait, timing: cloudWaitTiming })
       }
       onRetryCloud={handleRetryCloud}
     >
       <WaitIndicator
         className='min-w-0 justify-end overflow-hidden'
-        /* The listing's wait is seen, not announced: the sidebar's Recents label announces it (one announcement per
-           group), as it does the page's first Tau Cloud wait. */
-        live={!isAwaitingListing && cloudWait?.isAnnounced === true}
+        /* Seen, not announced here: the sidebar's Recents label announces the listing's wait and the page's first Tau
+           Cloud wait (one announcement per group), and the slot's status region a Retry's. */
+        live={false}
         active={isAwaitingListing || isAwaitingCloud}
         startedAt={isAwaitingListing ? 0 : (cloudWait?.startedAt ?? 0)}
         label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}
@@ -1079,12 +1091,22 @@ function cloudNoticeOf({
   return cloud === 'failed' ? 'failed' : undefined;
 }
 
+/** One Tau Cloud wait as the slot times it: from its start, announced when a Retry press began it. */
+type CloudWait = Readonly<{
+  startedAt: number;
+  isAnnounced: boolean;
+  /** The press that began it, if any. A later press restarts the wait. */
+  retriedAt?: number;
+  /** Whether it followed a failure, whose Retry it keeps in view. */
+  followsFailure: boolean;
+}>;
+
 /** Tau Cloud's Retry in the slot: shown, or, for the first wait, revealed at its slow mark (`slowDelay`). */
 type CloudRetry = Readonly<{ slowDelay?: string }>;
 
 /**
- * Tau Cloud's one Retry: beside a failure and through the wait a Retry starts, and from the slow mark of a wait the
- * person did not start. None beside the offline words, which a Retry cannot help.
+ * Tau Cloud's one Retry: beside a failure, through the wait a Retry starts or that follows a failure, and from the
+ * slow mark of a first wait the person did not start. None beside the offline words, which a Retry cannot help.
  *
  * @param state - The slot's notice, the Tau Cloud wait and its timing.
  * @returns How Retry is offered, or `undefined` for none.
@@ -1095,10 +1117,10 @@ function cloudRetryOf({
   timing,
 }: {
   readonly notice: CloudNotice | undefined;
-  readonly wait: { readonly isAnnounced: boolean } | undefined;
+  readonly wait: CloudWait | undefined;
   readonly timing: WaitIndicatorTiming;
 }): CloudRetry | undefined {
-  if (notice === 'failed' || wait?.isAnnounced === true) {
+  if (notice === 'failed' || wait?.isAnnounced === true || wait?.followsFailure === true) {
     return {};
   }
   if (notice === undefined && wait !== undefined && timing.state === 'waiting') {
@@ -1124,11 +1146,14 @@ function retryRevealStyle(slowDelay: string): React.CSSProperties & Record<'--wa
  */
 function LibraryStatusSlot({
   notice,
+  announcement,
   retry,
   onRetryCloud,
   children,
 }: {
   readonly notice: CloudNotice | undefined;
+  /** Words the status region announces without showing, for a wait a Retry started. */
+  readonly announcement: string | undefined;
   /** How Tau Cloud's Retry is offered, if at all. */
   readonly retry: CloudRetry | undefined;
   readonly onRetryCloud: () => void;
@@ -1139,9 +1164,9 @@ function LibraryStatusSlot({
       data-slot='project-library-status'
       className='flex min-h-6 min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 overflow-hidden text-xs text-muted-foreground'
     >
-      {/* One status region, always present, so the offline words are announced when they arrive. */}
-      <span role='status' className='min-w-0 truncate empty:hidden'>
-        {notice === 'offline' ? 'Offline. Showing projects on this device.' : null}
+      {/* One status region, always present, so the offline words and a Retry's wait are announced when they arrive. */}
+      <span role='status' className={cn('min-w-0 truncate empty:hidden', notice !== 'offline' && 'sr-only')}>
+        {notice === 'offline' ? 'Offline. Showing projects on this device.' : announcement}
       </span>
       {notice === 'offline' ? null : notice === 'failed' ? (
         <span role='alert' className='flex min-w-0 items-center gap-1.5'>

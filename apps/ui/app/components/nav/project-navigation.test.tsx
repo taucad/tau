@@ -731,14 +731,14 @@ describe('ProjectNavigation', () => {
 
     /*
      * U6/H5 for project rows while nothing is live: the rows are reserved from
-     * the remembered count (R5), so this is a guard, not an expected failure.
+     * the remembered listing (R5), so this is a guard, not an expected failure.
      * It covers Home reloads, where no session is live; the sidebar is the root
      * layout's, so the same row covers Home (H5).
      */
     it.each([2, 5, 7])(
       'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and nothing live',
       (count) => {
-        rememberedShape = { count };
+        rememberedShape = { count, projects: listing(count) };
         mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
         const view = render(<ProjectNavigation />);
         const loadingRows = projectRowCount();
@@ -763,7 +763,7 @@ describe('ProjectNavigation', () => {
       'U6/H5: project row count is equal before and after the project listing resolves with %i remembered and a live project',
       (count) => {
         liveProjectIds = ['proj_1'];
-        rememberedShape = { count };
+        rememberedShape = { count, projects: listing(count) };
         mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
         const view = render(<ProjectNavigation />);
         const loadingRows = projectRowCount();
@@ -775,6 +775,20 @@ describe('ProjectNavigation', () => {
         expect(loadingRows).toBe(projectRowCount());
       },
     );
+
+    /*
+     * H1 with nothing remembered (blueprint P-d): no row stands in for a project
+     * the device has never listed. The list is empty and busy, and the wait is
+     * the label's trailing slot, so the arriving rows displace nothing.
+     */
+    it.fails('H1: with nothing remembered the first list is empty and busy, with the wait in the label slot', () => {
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      render(<ProjectNavigation />);
+
+      expect(projectRowCount()).toBe(0);
+      expect(document.querySelector('section > ul')).toHaveAttribute('aria-busy', 'true');
+      expect(document.querySelector('section > div [data-slot=wait-indicator]')).not.toBeNull();
+    });
 
     /*
      * H1 states the defect only: with a persisted listing, the first client

@@ -632,18 +632,42 @@ describe('ProjectChatList', () => {
 
   describe('remembered chat count', () => {
     /*
-     * The remembered input is the library's listing shape with each project's
-     * chat count (charter P5, fixed by A13). Today the shape persists only the
-     * project count, under this key, so the per-project chat count is seeded
-     * beside it; A13 owns the final shape and adjusts this seed when it flips
-     * the row.
+     * The remembered input is the listing snapshot (loading-states blueprint,
+     * A13): each project's id, name, activity and its newest chat rows, kept on
+     * this device under the shape's key.
      */
-    const rememberChatCount = (projectId: string, count: number): void => {
+    const rememberChats = (projectId: string, chats: readonly ChatRecord[]): void => {
       globalThis.localStorage.setItem(
         projectListShapeStorageKey,
-        JSON.stringify({ count: 1, chatCounts: { [projectId]: count } }),
+        JSON.stringify({
+          v: 1,
+          savedAt: 1,
+          count: 1,
+          projects: [
+            {
+              id: projectId,
+              name: project.name,
+              lastActivityAt: 1,
+              slugs: project.slugs,
+              chatCount: chats.length,
+              chats: chats.map(({ id, name, createdAt, updatedAt, recencyAt }) => ({
+                id,
+                name,
+                createdAt,
+                updatedAt,
+                ...(recencyAt === undefined ? {} : { recencyAt }),
+              })),
+            },
+          ],
+        }),
       );
       projectListShapeStore.reset();
+    };
+    const rememberChatCount = (projectId: string, count: number): void => {
+      rememberChats(
+        projectId,
+        Array.from({ length: count }, (_, index) => chat(index + 1)),
+      );
     };
 
     /** The sidebar rows the project's chat list draws: placeholders, chats and labels alike. */
@@ -652,6 +676,29 @@ describe('ProjectChatList', () => {
     beforeEach(() => {
       globalThis.localStorage.clear();
       projectListShapeStore.reset();
+    });
+
+    /* C8: remembered chats are real links under the labels their own times give, with no stand-in row. */
+    it.fails('C8: with a remembered listing the loading list has real chat links under their day labels', () => {
+      rememberChats(project.id, [
+        { ...chat(1), name: 'Earlier chat', recencyAt: 1 },
+        { ...chat(2), name: 'Today chat', recencyAt: Date.now() },
+      ]);
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+      render(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Today chat', 'Earlier chat']);
+      expect(screen.getByText('Today')).toBeInTheDocument();
+      expect(screen.getByText('Earlier')).toBeInTheDocument();
+      expect(screen.queryAllByTestId('skeleton')).toHaveLength(0);
+    });
+
+    it.fails('C8: with nothing remembered the loading list has no row and is busy', () => {
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+      render(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(chatListRowCount()).toBe(0);
+      expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
     });
 
     it.fails.each([5, 1])(

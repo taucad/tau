@@ -410,12 +410,14 @@ describe('ProjectLibrary', () => {
             name: 'Name newer',
             lastActivityAt: 9,
             slugs: { workspaceSlug: 'home', projectSlug: 'newer' },
+            place: { kind: 'home' },
           },
           {
             id: 'older',
             name: 'Name older',
             lastActivityAt: 1,
             slugs: { workspaceSlug: 'home', projectSlug: 'older' },
+            place: { kind: 'home' },
           },
         ],
       });

@@ -1433,7 +1433,7 @@ const expectMinimum = (label: string, shown: readonly ShownSpan[], answeredAt: n
   expectMeasured(
     minimumBreaches(shown, answeredAt),
     `${label} showed ${shown.map((span) => `${Math.round(span.from)}-${Math.round(span.to)}`).join(', ')}; the read was answered at ${answeredAt} ms`,
-    { short: [], lingering: [] },
+    { short: [], lingering: [], unstamped: [] },
   );
 };
 
@@ -1499,10 +1499,11 @@ const openedFileRegions = {
 const measureSourceOpen = async (
   label: string,
   milliseconds: number,
-  hold: Pick<WorkerReadDelay, 'afterShown' | 'busyMilliseconds'> = {},
+  hold: Pick<WorkerReadDelay, 'afterShown' | 'busyMilliseconds' | 'fromClick'> = {},
 ): Promise<{
   readonly record: ProjectLoadRecord;
-  readonly click: ProjectLoadFrame;
+  /** The page's own click, when the wait starts: not the driver's, which comes before its actionability checks. */
+  readonly clicked: ProjectLoadFrame;
   readonly sentAt: number;
   readonly answeredAt: number;
 }> => {
@@ -1521,54 +1522,49 @@ const measureSourceOpen = async (
   }
   const entry = treeItem(openedFile);
   await target.expectVisible(entry, 60_000);
-  await markProjectLoad('click');
   await markProjectLoadOnClick('clicked');
   await target.click(entry);
   await target.expectVisible(selectors.getByCss(openedFileRegions.text), 60_000);
   await target.delay(milliseconds + settleWindow);
   const record = await keepRecord(label);
-  const click = record.marks.find((mark) => mark.name === 'click');
-  precondition(click !== undefined, `${label}: the click was not marked`);
+  /* The page's own click, and how long the app took from it to send the read: a product delay there would push the
+     answer past the reveal, and the indicator would then be right to show. */
+  const clicked = record.marks.find((mark) => mark.name === 'clicked');
+  precondition(clicked !== undefined, `${label}: the page saw no click`);
   const deliveries = await readWorkerDeliveries();
   const late = deliveries.filter(
     (delivery) =>
       delivery.method === read.method &&
       delivery.path === openedFile &&
-      delivery.sentAt >= click!.t &&
-      delivery.t - delivery.sentAt >= milliseconds - 20,
+      delivery.sentAt >= clicked!.t &&
+      delivery.t - (hold.fromClick === true ? clicked!.t : delivery.sentAt) >= milliseconds - 20,
   );
   precondition(late.length > 0, `${label}: no read of ${openedFile} sent after the click was answered late`);
   const [first] = late.toSorted((left, right) => left.t - right.t);
-  /* The page's own click, and how long the app took from it to send the read: a product delay there would push the
-     answer past the reveal, and the indicator would then be right to show. */
-  const clicked = record.marks.find((mark) => mark.name === 'clicked');
   await target.writeArtifact(
     `project-load-frames/${label}-timing.json`,
-    `${JSON.stringify({ click: click!.t, clicked: clicked?.t, sentAt: first!.sentAt, answeredAt: first!.t }, null, 2)}\n`,
+    `${JSON.stringify({ clicked: clicked!.t, sentAt: first!.sentAt, answeredAt: first!.t }, null, 2)}\n`,
   );
-  return { record, click: click!, sentAt: first!.sentAt, answeredAt: first!.t };
+  return { record, clicked: clicked!, sentAt: first!.sentAt, answeredAt: first!.t };
 };
 
-/*
- * The wait starts at the click, but the forced 600 ms runs from the read's send. An answer 1,000 ms or more after the
- * click makes the indicator right to show (3 of 15 main runs drew it at 1,243 to 1,776 ms), so the row asserts from the
- * answer: none drawn for an answer within 1,000 ms of the click, none ever before 1,000 ms (A15f2).
- */
+/* The read is answered 600 ms after the page's click (`fromClick`), so every sample answers inside the reveal; a send
+   300 ms or more after the click is a product delay before the read, and fails the row (A15f2). */
 knownDefect('F12 source pane (A15f): a file opened from the tree with its read 600 ms late shows no wait indicator', {
   artifact: 'f12-600-wide',
   expectedFailure: false,
   budget: loadBudget,
-  measure: async () => measureSourceOpen('f12-600-wide', 600),
-  assert: ({ record, click, sentAt, answeredAt }) => {
-    const shown = shownSpans(regionsOf(record, 'fileIndicator')).filter((span) => span.from >= click.t);
-    const isAnsweredBeforeReveal = answeredAt - click.t < 1000;
+  measure: async () => measureSourceOpen('f12-600-wide', 600, { fromClick: true }),
+  assert: ({ record, clicked, sentAt, answeredAt }) => {
+    const shown = shownSpans(regionsOf(record, 'fileIndicator')).filter((span) => span.from >= clicked.t);
     expectMeasured(
       {
-        drawnBeforeAnswer: isAnsweredBeforeReveal ? shown.map((span) => `from ${span.from - click.t} ms`) : [],
-        drawnEarly: shown.filter((span) => span.from - click.t < 1000).map((span) => `from ${span.from - click.t} ms`),
+        sentPromptly: sentAt - clicked.t < 300,
+        answeredBeforeReveal: answeredAt - clicked.t < 1000,
+        drawn: shown.map((span) => `from ${span.from - clicked.t} ms`),
       },
-      `F12: the read was sent ${sentAt - click.t} ms and answered ${answeredAt - click.t} ms after the click; the indicator showed ${shown.map((span) => `from ${span.from - click.t} ms`).join(', ') || 'never'}`,
-      { drawnBeforeAnswer: [], drawnEarly: [] },
+      `F12: the read was sent ${sentAt - clicked.t} ms and answered ${answeredAt - clicked.t} ms after the page's click; the indicator showed ${shown.map((span) => `from ${span.from - clicked.t} ms`).join(', ') || 'never'}`,
+      { sentPromptly: true, answeredBeforeReveal: true, drawn: [] },
     );
   },
 });
@@ -1580,14 +1576,13 @@ knownDefect(
     expectedFailure: false,
     budget: loadBudget,
     measure: async () => measureSourceOpen('f12-1100-wide', 1100),
-    assert: ({ record, click, answeredAt }) => {
+    assert: ({ record, clicked: click, answeredAt }) => {
       const shown = shownSpans(regionsOf(record, 'fileIndicator'), record.frameTimes).filter(
         (span) => span.from >= click.t,
       );
       const [first] = shown;
       const text = regionsOf(record, 'text').find((entry) => entry.present && entry.text !== '' && entry.t >= click.t);
       const afterAnswer = record.frameTimes.filter((t) => t > answeredAt && (text === undefined || t < text.t));
-      const framesWithoutText = afterAnswer.length;
       const stamps = [answeredAt, ...afterAnswer, ...(text === undefined ? [] : [text.t])];
       const longestFrame = Math.round(Math.max(0, ...stamps.slice(1).map((t, index) => t - stamps[index]!)));
       expectMeasured(
@@ -1600,9 +1595,9 @@ knownDefect(
           /* Counted in frames, not milliseconds: a frame a loaded runner paints late is not a late render, but a frame
              painted after the answer without the text is. The reply reaches React in the next task and paints in the
              frame after, so at most two frames go by without it. */
-          textAtAnswer: text === undefined ? undefined : framesWithoutText <= 2,
+          textAtAnswer: text === undefined ? undefined : afterAnswer.length <= 2,
         },
-        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms, ${framesWithoutText} frames after the answer without it (the longest ${longestFrame} ms)`,
+        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms, ${afterAnswer.length} frames after the answer without it (the longest ${longestFrame} ms)`,
         { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
       );
     },
@@ -1625,7 +1620,7 @@ knownDefect(
         afterShown: openedFileRegions.fileIndicator,
         busyMilliseconds: 300,
       });
-      const clickedAt = measured.record.frameStamps[measured.click.frame - 1] ?? 0;
+      const clickedAt = measured.record.frameStamps[measured.clicked.frame - 1] ?? 0;
       const shown = shownOnFrames(
         regionsOf(measured.record, 'fileIndicator'),
         measured.record.frameStamps,

@@ -941,7 +941,8 @@ export type ShownSpan = { readonly from: number; readonly to: number };
 
 /**
  * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or still on
- * screen 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it served.
+ * screen 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it served; and
+ * any span with no frame stamp, which no check could read.
  *
  * @param shown - The indicator's spans (`shownOnFrames`).
  * @param answeredAt - When the wait's answer reached the page. Milliseconds.
@@ -950,9 +951,11 @@ export type ShownSpan = { readonly from: number; readonly to: number };
 export const minimumBreaches = (
   shown: readonly ShownSpan[],
   answeredAt: number,
-): { readonly short: string[]; readonly lingering: string[] } => {
+): { readonly short: string[]; readonly lingering: string[]; readonly unstamped: string[] } => {
   const describe = (span: ShownSpan): string => `${Math.round(span.from)}-${Math.round(span.to)}`;
   return {
+    /* A span on a frame with no stamp (frame times off, or past the record's frame limit) reads NaN and would pass. */
+    unstamped: shown.filter((span) => Number.isNaN(span.from) || Number.isNaN(span.to)).map((span) => describe(span)),
     short: shown.filter((span) => span.to - span.from < 500).map((span) => describe(span)),
     lingering: shown
       .filter((span) => span.to - Math.max(span.from + 500, answeredAt) > 1000)
@@ -1054,6 +1057,11 @@ export type WorkerReadDelay = {
    * reply does: a long task across a wait indicator's reveal, so the reveal paints late.
    */
   readonly longTask?: { readonly selector: string; readonly milliseconds: number };
+  /**
+   * A15f2: count `milliseconds` from the page's last click, not from the send, so a wait a click starts is answered at
+   * a set time into it whatever the app took to send the read. A reply already past it goes on at once.
+   */
+  readonly fromClick?: boolean;
 };
 
 /** The `sessionStorage` key the rules are read from when each document starts. */
@@ -1092,6 +1100,7 @@ export const delayWorkerReads = (key: string): void => {
     afterShown?: string;
     busyMilliseconds?: number;
     longTask?: { selector: string; milliseconds: number };
+    fromClick?: boolean;
   }> = [];
   try {
     const raw = sessionStorage.getItem(key);
@@ -1121,6 +1130,15 @@ export const delayWorkerReads = (key: string): void => {
     };
     requestAnimationFrame(untilPresent);
   }
+  /* The page's last click, for replies timed from it (`fromClick`). */
+  let clickedAt: number | undefined;
+  document.addEventListener(
+    'click',
+    () => {
+      clickedAt = performance.now();
+    },
+    { capture: true },
+  );
   const log: Array<{ t: number; method: string; path: string | undefined; delayed: boolean }> = [];
   /* Each held reply as it reached the page's listener: proof the late answer was late, not only that it was held. */
   const delivered: Array<{ t: number; sentAt: number; method: string; path: string | undefined }> = [];
@@ -1132,6 +1150,7 @@ export const delayWorkerReads = (key: string): void => {
     path: string | undefined;
     afterShown?: string;
     busyMilliseconds?: number;
+    fromClick?: boolean;
   };
   const held = new Map<string, Held>();
 
@@ -1161,6 +1180,7 @@ export const delayWorkerReads = (key: string): void => {
           path,
           afterShown: rule.afterShown,
           busyMilliseconds: rule.busyMilliseconds,
+          fromClick: rule.fromClick,
         });
       }
       if (log.length < 2000) {
@@ -1180,6 +1200,7 @@ export const delayWorkerReads = (key: string): void => {
           path: undefined,
           afterShown: rule.afterShown,
           busyMilliseconds: rule.busyMilliseconds,
+          fromClick: rule.fromClick,
         });
       }
       if (log.length < 2000) {
@@ -1250,7 +1271,8 @@ export const delayWorkerReads = (key: string): void => {
       };
       const { afterShown } = reply;
       if (afterShown === undefined) {
-        setTimeout(release, reply.milliseconds);
+        const from = reply.fromClick === true && clickedAt !== undefined ? clickedAt : performance.now();
+        setTimeout(release, Math.max(0, from + reply.milliseconds - performance.now()));
         return;
       }
       const untilShown = (): void => {

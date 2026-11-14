@@ -199,11 +199,44 @@ afterEach(() => {
   expect(referenceMode.validationErrors.splice(0)).toEqual([]);
 });
 
-it.each(
+/**
+ * The WebGPU hardware qualification tier: `viewer:test:e2e:webgpu`, which e2e-nightly's webgpu-hardware job runs with
+ * `TAU_E2E_WEBGPU_PROFILE=hardware` on a GPU runner. Two kinds of row run only there.
+ *
+ * - Rows that assert the hardware composition of the node pipeline (WebGPU and node WebGL 2): GTAO, FXAA and
+ *   speculative camera preparation. On a software rasterizer the viewer composes beauty-only by design: #1081 dropped
+ *   AO and camera preparation on a software WebGPU adapter, and #1083 extended that to the node WebGL 2 backend on a
+ *   software rasterizer and dropped FXAA (`PostProcessing`, `rendererUsesSoftwareRasterizer`). Under the software
+ *   profile these rows read a flat AO-free frame, no FXAA smoothing and no preparation. The classic WebGL rows, which
+ *   keep AO and FXAA on every rasterizer, run in every tier.
+ * - Rows at 2560 and 5K device pixels that count GPU frames or readbacks within their budget. SwiftShader rasterizes each
+ *   such frame on the CPU and reaches too few of them (2 or 3 of 4, 9 to 11 of 12) or none before the timeout.
+ *
+ * Evidence: e2e-nightly runs 43283954277, 43472189308 and 43502431643 (viewer test:e2e, software profile). No
+ * assertion or budget changes; the same rows still run, on hardware.
+ */
+const hardwareTier = inject('webGpuProfile') === 'hardware';
+const nodeExecution = (execution: string): boolean => execution !== 'webgl';
+
+/**
+ * `it.each` that registers the rows `needsHardware` selects only in the hardware tier, and the others in every tier.
+ * @param table - The rows, each one test.
+ * @param needsHardware - Whether a row holds only on a hardware GPU (see {@link hardwareTier}).
+ * @returns The `it.each` registration for both sets of rows.
+ */
+const eachByTier =
+  <Row extends Readonly<Record<string, unknown>>>(table: readonly Row[], needsHardware: (row: Row) => boolean) =>
+  (name: string, body: (row: Row) => Promise<void>): void => {
+    it.each(table.filter((row) => !needsHardware(row)))(name, body);
+    it.runIf(hardwareTier).each(table.filter((row) => needsHardware(row)))(name, body);
+  };
+
+eachByTier(
   ['webgl', 'webgpu', 'node-webgl2'].flatMap((execution) => [
     { execution, width: 256, height: 256, dpr: 1 },
     { execution, width: 2560, height: 1440, dpr: 2 },
   ]),
+  ({ execution, width }) => nodeExecution(execution) || width === 2560,
 )(
   'should smooth shader edges in the final $execution image at width $width',
   async ({ execution, width, height, dpr }) => {
@@ -367,10 +400,11 @@ it.each(
 
 // A straight wall meets a flat floor. Away from its ends, occlusion must be
 // constant along each horizontal row; noise cannot masquerade as surface detail.
-it.each(
+eachByTier(
   (['webgl', 'webgpu', 'node-webgl2'] as const).flatMap((execution) =>
     [1, 2].flatMap((dpr) => [0, 45].map((fov) => ({ execution, dpr, fov }))),
   ),
+  ({ execution }) => nodeExecution(execution),
 )('should keep contact AO smooth without erasing it: $execution DPR $dpr FOV $fov', async ({ execution, dpr, fov }) => {
   referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
   const backend = execution === 'webgl' ? 'webgl' : 'webgpu';
@@ -738,7 +772,7 @@ const linearChannel = Array.from({ length: 256 }, (_, value) => {
 
 // Diagnostic qualification: accepted WebGL is the reference. Integrate contrast
 // around isolated strokes so subpixel placement cannot hide width differences.
-it.each(
+eachByTier(
   [
     { dpr: 1, width: 256, height: 256 },
     { dpr: 1.5, width: 256, height: 256 },
@@ -753,6 +787,7 @@ it.each(
       })),
     ),
   ),
+  ({ width }) => width === 2560,
 )(
   'should preserve nominal unlit stroke coverage across phases at DPR $dpr color $color width $width line $lineWidth',
   async ({ dpr, color, width, height, lineWidth }) => {
@@ -1068,7 +1103,7 @@ it.each(
   },
 );
 
-it.each(
+eachByTier(
   ['webgl', 'webgpu', 'node-webgl2'].flatMap((execution) =>
     [1, -1].flatMap((side) =>
       (['none', 'neutral'] as const).flatMap((toneMapping) =>
@@ -1081,6 +1116,7 @@ it.each(
       ),
     ),
   ),
+  ({ execution, width }) => execution === 'webgpu' && width === 5120,
 )(
   'should occlude grid and hidden outlines through actual stencil caps: $execution side $side tone $toneMapping width $width',
   async ({ execution, side, toneMapping, width }) => {
@@ -1421,7 +1457,10 @@ it.each(
 
 // Use the live post owner (PBR, AO, retained frame depth, overlays and final encoding),
 // not a standalone mask render. The prior native fusion passed isolated mask pixels.
-it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({ forceNodeWebGl2, width }))))(
+eachByTier(
+  [false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({ forceNodeWebGl2, width }))),
+  ({ width }) => width === 2560,
+)(
   'should clear persistent emphasis through the production node frame: WebGL2=$forceNodeWebGl2 width=$width',
   async ({ forceNodeWebGl2, width }) => {
     referenceMode.forceNodeWebGl2 = forceNodeWebGl2;
@@ -1675,11 +1714,13 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
   },
 );
 
-it.each(
-  (['webgpu', 'node-webgl2'] as const).flatMap((execution) =>
-    [384, 5120].flatMap((width) => [0, 1].map((transmission) => ({ execution, width, transmission }))),
-  ),
-)(
+it
+  .runIf(hardwareTier)
+  .each(
+    (['webgpu', 'node-webgl2'] as const).flatMap((execution) =>
+      [384, 5120].flatMap((width) => [0, 1].map((transmission) => ({ execution, width, transmission }))),
+    ),
+  )(
   'should retain transmissive composition and bounded resources across camera switches: $execution width $width transmission $transmission',
   async ({ execution, width, transmission }) => {
     referenceMode.manualPreparation = true;
@@ -1936,10 +1977,11 @@ it.each(
   },
 );
 
-it.each(
+eachByTier(
   (['webgpu', 'node-webgl2'] as const).flatMap((execution) =>
     [false, true].map((aoEnabled) => ({ execution, aoEnabled })),
   ),
+  ({ execution }) => execution === 'webgpu',
 )(
   'should retain the continuous unlit planetary rim through production composition at 5K on $execution AO $aoEnabled',
   async ({ execution, aoEnabled }) => {
@@ -2079,7 +2121,7 @@ it.each(
   },
 );
 
-it.each(['webgpu', 'node-webgl2'] as const)(
+it.runIf(hardwareTier).each(['webgpu', 'node-webgl2'] as const)(
   'should isolate two 5K node views through sibling resize and remount on %s',
   async (execution) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
@@ -2199,7 +2241,9 @@ it.each(['webgpu', 'node-webgl2'] as const)(
   },
 );
 
-it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map((fov) => ({ execution, fov }))))(
+it
+  .runIf(hardwareTier)
+  .each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map((fov) => ({ execution, fov }))))(
   'should preserve opaque planetary pixels beneath workspace axes at 5K on $execution FOV $fov',
   async ({ execution, fov }) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
@@ -2334,7 +2378,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
   },
 );
 
-it.each(['webgpu', 'node-webgl2'] as const)(
+it.runIf(hardwareTier).each(['webgpu', 'node-webgl2'] as const)(
   'should retain planetary surface boundaries and motion with six-step filtering at 5K on %s',
   async (execution) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
@@ -2551,7 +2595,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
   120_000,
 );
 
-it.each([
+it.runIf(hardwareTier).each([
   ['webgpu', true],
   ['node-webgl2', true],
   ['webgpu', false],

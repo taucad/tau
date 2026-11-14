@@ -2,7 +2,7 @@ import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Line2 } from 'three/addons/lines/webgpu/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
-import { expect, it, vi } from 'vitest';
+import { expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import {
   RenderTarget,
@@ -31,6 +31,15 @@ import { WebGLBackend, WebGPUBackend, WebGPURenderer, RenderPipeline, NodeMateri
 import type { Node } from 'three/webgpu';
 import { pass, screenUV, vec4 } from 'three/tsl';
 import { createRenderer } from '#graphics/three/renderer.js';
+
+/**
+ * The WebGPU hardware qualification tier: `viewer:test:e2e:webgpu`, which e2e-nightly's webgpu-hardware job runs with
+ * `TAU_E2E_WEBGPU_PROFILE=hardware` on a GPU runner. The 5K coverage oracles below hold a real GPU's rasterization to
+ * four UNORM8 levels; SwiftShader (both the WebGPU adapter and ANGLE's WebGL 2) draws the same deterministic pixels
+ * outside that bound on every nightly (e2e-nightly runs 43283954277, 43472189308, 43502431643), so they run where a
+ * hardware rasterizer draws them. Every other row here runs in every tier.
+ */
+const hardwareTier = inject('webGpuProfile') === 'hardware';
 
 // This minimal reference intentionally isolates output ownership from AO, edge
 // coverage, clipping and stencil. Those remain separate production gates.
@@ -302,11 +311,13 @@ it.each(['webgpu', 'webgl'] as const)(
   },
 );
 
-it.each(
-  (['webgpu', 'webgl'] as const).flatMap((backend) =>
-    [false, true].flatMap((prepared) => [false, true].map((perspective) => ({ backend, prepared, perspective }))),
-  ),
-)(
+it
+  .runIf(hardwareTier)
+  .each(
+    (['webgpu', 'webgl'] as const).flatMap((backend) =>
+      [false, true].flatMap((prepared) => [false, true].map((perspective) => ({ backend, prepared, perspective }))),
+    ),
+  )(
   'should preserve long-axis coverage across cached materials and frame formats at 5K on $backend preparation=$prepared perspective=$perspective',
   async ({ backend, prepared, perspective }) => {
     const { texture, renderOutput } = await import('three/tsl');
@@ -482,7 +493,7 @@ const stripPixelArea = (normal: readonly [number, number], distance: number, wid
   return Math.abs(twiceArea) / 2;
 };
 
-it.each(['webgpu', 'webgl'] as const)(
+it.runIf(hardwareTier).each(['webgpu', 'webgl'] as const)(
   'should give section outlines the BREP square-pixel coverage at 5K on %s',
   async (backend) => {
     const { createSectionCapOutlineNodeMaterial } =

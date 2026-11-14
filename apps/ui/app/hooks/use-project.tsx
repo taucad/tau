@@ -1,5 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { selectRuntimeChatSessions } from '#runtime/app-runtime.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
@@ -175,7 +177,8 @@ export async function ensureFocusedChatForProject({
   readonly requestedChatId: string | undefined;
   readonly persistedChatId: string | undefined;
   readonly worker: FocusedChatWorker;
-  readonly onCreatedChat?: () => void;
+  /** Called with the chat it created empty. */
+  readonly onCreatedChat?: (chatId: string) => void;
   readonly canCreateChat?: () => boolean;
 }): Promise<
   { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
@@ -204,7 +207,7 @@ export async function ensureFocusedChatForProject({
     return { type: 'focusedChatDeferred' };
   }
   const created = await worker.createNavigationRepairChat(projectId);
-  onCreatedChat?.();
+  onCreatedChat?.(created.id);
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
 }
 
@@ -397,6 +400,8 @@ export function ProjectProvider({
   const computeMode = useComputeReuseMode();
   const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId, undefined, computeMode);
   const queryClient = useQueryClient();
+  const runtime = useOptionalAppRuntime();
+  const chatSessions = runtime === undefined ? undefined : selectRuntimeChatSessions(runtime);
   // Create the project machine actor - it will auto-load based on projectId
   const fileManager = useFileManager();
   const projectManager = useProjectManager();
@@ -602,7 +607,9 @@ export function ProjectProvider({
               }
               return status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
             },
-            onCreatedChat: () => {
+            onCreatedChat: (chatId) => {
+              // Created empty here: its lane shows the empty state at once, not after its log answers (A12, I21).
+              chatSessions?.noteCreatedEmpty(chatId);
               // Surface the new chat through TanStack Query so `useChats`
               // refetches and the history selector picks it up immediately.
               void queryClient.invalidateQueries({

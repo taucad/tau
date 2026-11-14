@@ -54,6 +54,21 @@ describe('ensureFocusedChatForProject', () => {
     expect(onCreatedChat).toHaveBeenCalledOnce();
   });
 
+  it('hands the chat it created empty to its caller, which tells the chat store (A12, I21)', async () => {
+    const onCreatedChat = vi.fn<(chatId: string) => void>();
+    await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: undefined,
+      persistedChatId: undefined,
+      worker: {
+        getChatRecordsForResource: async () => [],
+        createNavigationRepairChat: async () => makeChat({ id: 'chat_repaired' }),
+      },
+      onCreatedChat,
+    });
+    expect(onCreatedChat).toHaveBeenCalledWith('chat_repaired');
+  });
+
   it('prefers a valid requested chat over the persisted selection', async () => {
     const requested = makeChat({ id: 'chat_requested' });
     const persisted = makeChat({ id: 'chat_persisted' });

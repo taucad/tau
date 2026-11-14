@@ -253,6 +253,23 @@ const mockFileManager = {
   scopedStorage: { readShallowDirectory: mockReadScopedShallowDirectory },
 };
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
+/* A12: the app runtime's chat store hears of a first chat created empty. Rows run with no runtime unless one sets it. */
+const appRuntime = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | undefined,
+  notedEmpty: [] as string[],
+}));
+vi.mock('#runtime/app-runtime-provider.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useOptionalAppRuntime: () => appRuntime.current,
+}));
+vi.mock('#runtime/app-runtime.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  selectRuntimeChatSessions: () => ({
+    noteCreatedEmpty: (chatId: string) => {
+      appRuntime.notedEmpty.push(chatId);
+    },
+  }),
+}));
 
 const recordConfigWrite = async (_config: ProjectFileSystemConfig): Promise<void> => {
   phaseOrder.push('locator');
@@ -3532,6 +3549,35 @@ describe('useProjectManager.createProject', () => {
     const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
     expect(prepared?.manifest.name).toBe('Tall Birdhouse');
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
+  });
+
+  it('tells the chat store of a first chat created with no prompt, so it shows empty at once (A12, I21)', async () => {
+    appRuntime.current = {};
+    appRuntime.notedEmpty = [];
+    try {
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await act(async () =>
+        result.current.createProject({
+          project: fakeProject,
+          files: pendingCreate.files,
+          location: { kind: 'home' },
+        }),
+      );
+      expect(appRuntime.notedEmpty).toEqual([pendingCreate.chat!.id]);
+
+      // A first chat that carries the person's prompt is not empty.
+      appRuntime.notedEmpty = [];
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'auto',
+          initialMessage: { content: 'a bracket', attachments: [] },
+          location: { kind: 'home' },
+        }),
+      );
+      expect(appRuntime.notedEmpty).toEqual([]);
+    } finally {
+      appRuntime.current = undefined;
+    }
   });
 
   it('creates an entry-less project under Auto: no main, no model file, and a first chat on Auto (D3)', async () => {

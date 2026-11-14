@@ -78,7 +78,7 @@ function SetPassword({ className }: { className?: string }) {
         title={localization.settings.setPassword}
         description={localization.settings.setPasswordDescription}
         control={
-          <Button size='control' variant='outline' disabled={isPending || !session} onClick={handleSetPassword}>
+          <Button variant='outline' disabled={isPending || !session} onClick={handleSetPassword}>
             {isPending && <Spinner />}
             {localization.auth.sendResetLink}
           </Button>
@@ -306,7 +306,7 @@ function ChangePasswordForm({
           </Field>
         )}
         <div className='flex justify-end'>
-          <Button size='control' type='submit' disabled={isPending || !session}>
+          <Button type='submit' disabled={isPending || !session}>
             {isPending && <Spinner />}
 
             {localization.settings.updatePassword}

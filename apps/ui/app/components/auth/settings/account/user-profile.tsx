@@ -78,7 +78,7 @@ export function UserProfile({ className }: UserProfileProps): React.JSX.Element 
                   <Input className='invisible w-40 sm:w-56' />
                 </Skeleton>
               )}
-              <Button size='control' type='submit' variant='outline' disabled={isPending || !session}>
+              <Button type='submit' variant='outline' disabled={isPending || !session}>
                 {isPending && <Spinner />}
                 Save
               </Button>

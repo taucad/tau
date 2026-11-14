@@ -326,7 +326,6 @@ export function WorkspaceConnections({
         title='Workspaces'
         action={
           <Button
-            size='control'
             variant='outline'
             disabled={isAddingWorkspace || busyWorkspaceId !== undefined}
             onClick={handleAddWorkspace}
@@ -345,7 +344,6 @@ export function WorkspaceConnections({
             </div>
             {workspaceConnection.phase === 'failed' ? (
               <Button
-                size='control'
                 className='ml-auto'
                 variant='outline'
                 onClick={() => {

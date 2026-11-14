@@ -54,7 +54,6 @@ export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.El
 
   const retry = (
     <Button
-      size='control'
       variant='outline'
       disabled={isFetching}
       onClick={async () => {
@@ -86,7 +85,7 @@ export function ActiveSessions({ className }: ActiveSessionsProps): React.JSX.El
             }
             control={
               sessionIsNotFresh ? (
-                <Button size='control' asChild>
+                <Button asChild>
                   <Link href={signIn}>
                     <LogIn aria-hidden='true' />
                     Sign in again

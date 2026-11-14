@@ -266,18 +266,18 @@ Hover never reveals the only route to an action (DESIGN Composition and visible 
 
 ### 9. Choose button variants by role and sizes by variant
 
-| Role                                                             | Variant                          | Size                                                                      |
-| ---------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------- |
-| The one primary action of a view (page action, dialog commit)    | `default` (`primary-action`)     | `default`                                                                 |
-| Secondary action (Open, Retry, Remix) and toolbar triggers       | `outline`                        | `default` in toolbars, `sm` in cards and rows, `control` in settings rows |
-| Tertiary, inline, `Clear`, overflow trigger                      | `ghost`                          | `sm`, `icon`, `icon-sm`                                                   |
-| Control over media or a canvas                                   | `overlay`                        | `icon`, `icon-sm`                                                         |
-| Action nested in a hovered or selected row                       | `ghost` + `nestedActionVariants` | `icon-xs`, `icon-sm`                                                      |
-| Commit of a data-losing action (`AlertDialogAction`)             | `destructive`                    | `default`                                                                 |
-| Textual navigation ("View all")                                  | `link`                           | `default`                                                                 |
-| Two to five mutually exclusive views, or a kernel shelf (Rule 3) | `ToggleGroup`                    | —                                                                         |
+| Role                                                             | Variant                          | Size                                          |
+| ---------------------------------------------------------------- | -------------------------------- | --------------------------------------------- |
+| The one primary action of a view (page action, dialog commit)    | `default` (`primary-action`)     | `default`                                     |
+| Secondary action (Open, Retry, Remix) and toolbar triggers       | `outline`                        | `default` in toolbars, `sm` in cards and rows |
+| Tertiary, inline, `Clear`, overflow trigger                      | `ghost`                          | `sm`, `icon`, `icon-sm`                       |
+| Control over media or a canvas                                   | `overlay`                        | `icon`, `icon-sm`                             |
+| Action nested in a hovered or selected row                       | `ghost` + `nestedActionVariants` | `icon-xs`, `icon-sm`                          |
+| Commit of a data-losing action (`AlertDialogAction`)             | `destructive`                    | `default`                                     |
+| Textual navigation ("View all")                                  | `link`                           | `default`                                     |
+| Two to five mutually exclusive views, or a kernel shelf (Rule 3) | `ToggleGroup`                    | —                                             |
 
-`sm` shares `default`'s 32 px height and only tightens padding and type; `control` (28 px, 14 px text) matches `Select size='sm'` for settings rows; `xs` and `icon-xs` (24 px) are the smallest targets that ship. Never change a Button's height, padding, size or text colour through `className`; choose a size, or add a variant in `packages/ui`. The base already sizes icons to 16 px and spaces them with `gap-2`, so do not add `mr-2` or restate `size-4`. A trailing arrow means navigation or a flow that continues; a leading glyph names the object or state. Icon-only buttons carry `aria-label` and a tooltip with the same words.
+`sm` shares `default`'s 32 px height and only tightens padding and type; `xs` and `icon-xs` (24 px) are the smallest targets that ship. Never change a Button's height, padding, size or text colour through `className`; choose a size, or add a variant in `packages/ui`. The base already sizes icons to 16 px and spaces them with `gap-2`, so do not add `mr-2` or restate `size-4`. A trailing arrow means navigation or a flow that continues; a leading glyph names the object or state. Icon-only buttons carry `aria-label` and a tooltip with the same words.
 
 **Why**: 52 Buttons overrode their size through `className` (six in `/plugins`), the community Remix action rendered enabled text in `text-muted-foreground` and turned accent on hover, which DESIGN's "quiet buttons are still visible buttons" forbids, and 15 icon-only Buttons had no name.
 

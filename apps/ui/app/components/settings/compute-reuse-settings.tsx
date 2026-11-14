@@ -120,7 +120,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
         }
         control={
           <Select
-            size='sm'
+            size='md'
             value={selected}
             onValueChange={(value) => {
               setComputeReuseMode(value as ComputeReuseMode);
@@ -151,20 +151,14 @@ export function ComputeReuseSettings(): React.JSX.Element {
         }
       >
         <div className='flex flex-wrap items-center gap-2'>
-          <Button size='control' variant='outline' disabled={!available} onClick={async () => control('inspect')}>
+          <Button variant='outline' disabled={!available} onClick={async () => control('inspect')}>
             Check size
           </Button>
-          <Button
-            size='control'
-            variant='outline'
-            disabled={!available}
-            onClick={async () => control('collect', collectCursor)}
-          >
+          <Button variant='outline' disabled={!available} onClick={async () => control('collect', collectCursor)}>
             {collectCursor ? 'Free more' : 'Free space'}
           </Button>
           {confirmClear ? (
             <Button
-              size='control'
               variant='destructive'
               onClick={async () => {
                 setConfirmClearProjectId(undefined);
@@ -175,7 +169,6 @@ export function ComputeReuseSettings(): React.JSX.Element {
             </Button>
           ) : (
             <Button
-              size='control'
               variant='outline'
               disabled={!available}
               onClick={() => {

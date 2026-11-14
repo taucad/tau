@@ -68,10 +68,10 @@ export function SetupAnswersRow(): React.JSX.Element | undefined {
       }
       control={
         <>
-          <Button size='control' asChild variant='outline'>
+          <Button asChild variant='outline'>
             <Link to={setupAddress}>{setupAnswersCopy.edit}</Link>
           </Button>
-          <Button size='control' variant='outline' disabled={!hasAnswers(profile)} onClick={handleClear}>
+          <Button variant='outline' disabled={!hasAnswers(profile)} onClick={handleClear}>
             {setupAnswersCopy.clear}
           </Button>
         </>

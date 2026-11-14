@@ -104,7 +104,7 @@ function GridUnitControl({
 }): React.JSX.Element {
   return (
     <Select
-      size='sm'
+      size='md'
       value={value}
       onValueChange={(next) => {
         const unit = lengthUnits.find((each) => each === next);

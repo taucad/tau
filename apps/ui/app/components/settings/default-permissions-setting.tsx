@@ -135,7 +135,6 @@ export function DefaultPermissionsSetting(): React.JSX.Element | undefined {
           </span>
           <div className='flex justify-end gap-2'>
             <Button
-              size='control'
               ref={cancelRef}
               type='button'
               variant='outline'
@@ -145,7 +144,6 @@ export function DefaultPermissionsSetting(): React.JSX.Element | undefined {
               {bypassConfirmation.cancel}
             </Button>
             <Button
-              size='control'
               type='button'
               title={bypassConfirmation.confirmDefault}
               onClick={() => {

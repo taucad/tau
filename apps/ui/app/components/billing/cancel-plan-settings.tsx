@@ -78,7 +78,6 @@ export function CancelPlanSettings({
         }
         control={
           <Button
-            size='control'
             variant='destructive'
             disabled={binding === undefined || isRedirecting}
             onClick={async () => {

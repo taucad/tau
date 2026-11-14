@@ -62,7 +62,6 @@ export function GithubPermissions(): React.JSX.Element {
           <>
             {capability.error ? (
               <Button
-                size='control'
                 variant='outline'
                 onClick={() => {
                   void capability.refetch();
@@ -72,7 +71,7 @@ export function GithubPermissions(): React.JSX.Element {
               </Button>
             ) : null}
             {account && capability.data ? (
-              <Button size='control' asChild variant='outline'>
+              <Button asChild variant='outline'>
                 <a href={capability.data.authorizationUrl} target='_blank' rel='noopener noreferrer'>
                   Review on GitHub
                   <ExternalLink aria-hidden />

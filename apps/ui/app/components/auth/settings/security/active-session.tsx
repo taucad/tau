@@ -80,7 +80,6 @@ export function ActiveSession({ activeSession }: ActiveSessionProps): React.JSX.
       }
       control={
         <Button
-          size='control'
           variant='outline'
           onClick={() => {
             if (isCurrentSession) {

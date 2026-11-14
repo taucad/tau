@@ -99,7 +99,7 @@ export function ChangeEmail({ className }: ChangeEmailProps): React.JSX.Element 
           </CardContent>
 
           <CardFooter>
-            <Button size='control' type='submit' disabled={isPending || !session}>
+            <Button type='submit' disabled={isPending || !session}>
               {isPending && <Spinner />}
 
               {localization.settings.updateEmail}

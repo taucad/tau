@@ -170,7 +170,7 @@ function ModelsEmptyState({
         description='Try another model or provider name'
         className={className}
       >
-        <Button size='control' variant='outline' onClick={onClearSearch}>
+        <Button variant='outline' onClick={onClearSearch}>
           Clear search
         </Button>
       </PanelEmptyState>
@@ -185,7 +185,7 @@ function ModelsEmptyState({
         description='Browse the full catalog to choose the models you want available'
         className={className}
       >
-        <Button size='control' variant='outline' onClick={onShowAll}>
+        <Button variant='outline' onClick={onShowAll}>
           View all models
         </Button>
       </PanelEmptyState>

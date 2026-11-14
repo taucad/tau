@@ -134,7 +134,6 @@ export function BillingSettings(): React.JSX.Element {
   };
   const portalButton = (label: string): React.JSX.Element => (
     <Button
-      size='control'
       variant='outline'
       disabled={isPortalBusy}
       onClick={async () => {
@@ -167,7 +166,7 @@ export function BillingSettings(): React.JSX.Element {
           tone='warning'
           role='alert'
           action={
-            <Button size='control' disabled={binding === undefined} onClick={openTopup}>
+            <Button disabled={binding === undefined} onClick={openTopup}>
               Add credits
             </Button>
           }
@@ -313,7 +312,6 @@ export function BillingSettings(): React.JSX.Element {
               <div className='flex flex-wrap items-center gap-2'>
                 {availableBalance !== undefined || isBalanceLoading ? undefined : (
                   <Button
-                    size='control'
                     variant='outline'
                     onClick={() => {
                       void queryClient.invalidateQueries({ queryKey: ['billing', 'credits'] });
@@ -323,7 +321,7 @@ export function BillingSettings(): React.JSX.Element {
                   </Button>
                 )}
                 {/* Buying stays available when the balance cannot be shown: the purchase does not depend on this read. */}
-                <Button size='control' variant='outline' disabled={binding === undefined} onClick={openTopup}>
+                <Button variant='outline' disabled={binding === undefined} onClick={openTopup}>
                   <Plus className='size-4' />
                   Add credits
                 </Button>

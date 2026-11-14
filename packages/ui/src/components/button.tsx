@@ -39,8 +39,6 @@ const buttonVariants = cva(
         default: 'h-8 px-4 py-2 has-[>svg]:px-3',
         xs: 'h-6 rounded-md gap-1.5 px-2 has-[>svg]:px-2 text-xs',
         sm: 'h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5 text-xs',
-        // `Select size='sm'`'s geometry: 28 px tall, 14 px text, 16 px icons, for a button beside a select in a settings row.
-        control: 'h-7 rounded-md gap-1.5 px-2.5 has-[>svg]:px-2 text-sm',
         lg: 'h-10 rounded-md px-8 has-[>svg]:px-4',
         icon: 'size-8',
         'icon-xs': "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",

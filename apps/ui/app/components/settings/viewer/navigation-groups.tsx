@@ -106,7 +106,7 @@ export function NavigationGroup({ profile, viewer, writeViewer, onWrite }: Viewe
               />
             )}
             <Select
-              size='sm'
+              size='md'
               value={preset}
               onValueChange={(next) => {
                 const id = mousePresetIds.find((each) => each === next);
@@ -212,7 +212,7 @@ export function GizmoGroup({ profile, viewer, writeViewer, onWrite }: ViewerWrit
               />
             )}
             <Select
-              size='sm'
+              size='md'
               value={style}
               onValueChange={(next) => {
                 const id = gizmoStyleIds.find((each) => each === next);

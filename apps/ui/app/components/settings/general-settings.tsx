@@ -77,7 +77,7 @@ export function GeneralSettings(): React.JSX.Element {
               )}
               onSelect={handleThemeChange}
             >
-              <Button size='control' variant='outline' className='w-36 justify-between font-normal'>
+              <Button variant='outline' className='w-36 justify-between font-normal'>
                 <span className='flex items-center gap-2'>
                   {getThemeIcon(themeWithSystem)}
                   <span className='truncate'>{currentOption.name}</span>
@@ -100,7 +100,7 @@ export function GeneralSettings(): React.JSX.Element {
                 setHue(value.h);
               }}
             >
-              <Button size='control' variant='outline' className='w-36 justify-between font-normal'>
+              <Button variant='outline' className='w-36 justify-between font-normal'>
                 <span className='flex items-center gap-2'>
                   <span className='size-4 shrink-0 rounded-full bg-primary' />
                   <span className='truncate'>Hue {hue}°</span>

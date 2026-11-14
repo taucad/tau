@@ -221,7 +221,6 @@ export function AccountClosureSettings({
   const control = closure ? (
     closure.state === 'ready_for_auth_deletion' ? (
       <Button
-        size='control'
         variant='destructive'
         disabled={busy}
         onClick={() =>
@@ -241,7 +240,6 @@ export function AccountClosureSettings({
       </Button>
     ) : ['closing', 'cancellation_pending', 'attention'].includes(closure.state) ? (
       <Button
-        size='control'
         variant='outline'
         disabled={busy}
         onClick={() =>
@@ -266,7 +264,6 @@ export function AccountClosureSettings({
     ) : undefined
   ) : (
     <Button
-      size='control'
       variant='destructive'
       disabled={!binding}
       onClick={() => {
@@ -360,7 +357,7 @@ function ClosureNotice({
       </p>
       {notice.next === 'support' ? <SupportLink /> : undefined}
       {notice.next === 'review' ? (
-        <Button size='control' variant='outline' onClick={onReview}>
+        <Button variant='outline' onClick={onReview}>
           Go to purchase
         </Button>
       ) : undefined}

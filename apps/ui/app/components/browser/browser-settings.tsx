@@ -27,7 +27,7 @@ export function BrowserSettingsSurface({
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <Label htmlFor='browser-search-engine'>Search engine</Label>
             <Select
-              size='sm'
+              size='md'
               value={settings.searchEngine}
               onValueChange={(value) => {
                 if (value === 'duckduckgo' || value === 'google' || value === 'bing') {
@@ -48,7 +48,7 @@ export function BrowserSettingsSurface({
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <Label htmlFor='browser-default-zoom'>Default page zoom</Label>
             <Select
-              size='sm'
+              size='md'
               value={String(settings.defaultZoom)}
               onValueChange={(value) => {
                 void command({ kind: 'settings', settings: { ...settings, defaultZoom: Number(value) } });
@@ -98,7 +98,6 @@ export function BrowserSettingsSurface({
           <div className='flex flex-wrap items-center justify-between gap-4 p-4'>
             <span>Browsing history</span>
             <Button
-              size='control'
               variant='outline'
               onClick={() => {
                 setClearScope('history');
@@ -112,7 +111,6 @@ export function BrowserSettingsSurface({
               Cookies and site data<p className='mt-1 text-xs text-muted-foreground'>Separate from your Tau account.</p>
             </div>
             <Button
-              size='control'
               variant='outline'
               onClick={() => {
                 setClearScope('all');
@@ -132,7 +130,6 @@ export function BrowserSettingsSurface({
           </p>
           <div className='flex flex-wrap gap-2'>
             <Button
-              size='control'
               variant='destructive'
               disabled={isClearing}
               onClick={async () => {
@@ -148,7 +145,6 @@ export function BrowserSettingsSurface({
               {isClearing ? 'Clearing…' : 'Clear data'}
             </Button>
             <Button
-              size='control'
               variant='outline'
               disabled={isClearing}
               onClick={() => {

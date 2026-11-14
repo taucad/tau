@@ -224,12 +224,12 @@ export function AutoReloadSettings({
   };
   const reviewDisabled = busy || !binding || !isResolved || !paymentCollectionAvailable;
   const reviewButton = (label: string, variant: 'default' | 'outline' = 'outline'): React.JSX.Element => (
-    <Button size='control' variant={variant} disabled={reviewDisabled} onClick={review}>
+    <Button variant={variant} disabled={reviewDisabled} onClick={review}>
       {label}
     </Button>
   );
   const turnOffButton = (label: string): React.JSX.Element => (
-    <Button size='control' variant='outline' disabled={busy} onClick={turnOff}>
+    <Button variant='outline' disabled={busy} onClick={turnOff}>
       {label}
     </Button>
   );
@@ -251,7 +251,7 @@ export function AutoReloadSettings({
             title='Couldn’t load auto-reload'
             description='Your setting hasn’t changed.'
             control={
-              <Button size='control' variant='outline' onClick={() => void reload.refetch()}>
+              <Button variant='outline' onClick={() => void reload.refetch()}>
                 Try again
               </Button>
             }
@@ -287,7 +287,6 @@ export function AutoReloadSettings({
           <div className='flex flex-wrap justify-end gap-2'>
             {consent.state === 'revoked' ? undefined : turnOffButton('Cancel')}
             <Button
-              size='control'
               disabled={busy}
               onClick={() =>
                 void run(async () => {
@@ -332,7 +331,6 @@ export function AutoReloadSettings({
             {turnOffButton('Cancel setup')}
             {canContinueSetup ? (
               <Button
-                size='control'
                 disabled={busy}
                 onClick={() => {
                   if (action.state === 'redirect_required') {

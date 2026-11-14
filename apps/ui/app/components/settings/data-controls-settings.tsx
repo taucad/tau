@@ -195,7 +195,6 @@ export function DataControlsSettings(): React.JSX.Element {
           description='Choose whether Tau uses optional analytics'
           control={
             <Button
-              size='control'
               variant='outline'
               onClick={() => {
                 setIsCookiePreferencesOpen(true);

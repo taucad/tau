@@ -438,12 +438,21 @@ vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
   },
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatStore }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({
-  useFlushOnClose: (callback: (phase: 'hidden' | 'pagehide') => Promise<void>) => {
-    closeFlushes.add(callback);
-  },
-  useFlushProducers: () => flushProducers,
-}));
+vi.mock('#hooks/use-flush-on-close.js', async () => {
+  const { useEffect } = await import('react');
+  return {
+    // A guard's flush is registered while it is mounted and removed when it unmounts, as the real hook does.
+    useFlushOnClose: (callback: (phase: 'hidden' | 'pagehide') => Promise<void>) => {
+      useEffect(() => {
+        closeFlushes.add(callback);
+        return () => {
+          closeFlushes.delete(callback);
+        };
+      }, [callback]);
+    },
+    useFlushProducers: () => flushProducers,
+  };
+});
 vi.mock('#hooks/use-editor-document-session.js', () => ({
   EditorDocumentSessionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -650,6 +659,7 @@ const renderRouteFamily = async (
 };
 
 beforeEach(() => {
+  closeFlushes.clear();
   runtimeShutdown.mockReset();
   runtimeShutdown.mockResolvedValue(undefined);
   workerFrames.length = 0;

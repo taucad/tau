@@ -1110,7 +1110,10 @@ const workbenchLayoutDefinition = setup({
               reason: 'unavailable',
             });
             reportIntents(settled.settled, enq);
-            const done = settle(withIntents(context, settled.intents), viewOf(value), enq);
+            // This answer is the delivery's own, so no late answer to it is still owed and the entry retires.
+            const intents =
+              entry.state === 'delivered' ? lateAnswered(settled.intents, entry.intentId) : settled.intents;
+            const done = settle(withIntents(context, intents), viewOf(value), enq);
             return { target: intentsTarget(done), context: finished(context, done, enq) };
           },
         ),

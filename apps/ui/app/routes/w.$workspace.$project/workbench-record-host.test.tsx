@@ -100,8 +100,9 @@ const viewSeed = (): WorkbenchView =>
 const emptyGroup = (): WorkbenchLaneNode => ({ kind: 'group', tabs: [] });
 
 /** The group a Dockview shows after opening `pane` (the workbench's opener, as Dockview answers it). */
-const withPane = (node: WorkbenchLaneNode, pane: string): WorkbenchLaneNode =>
-  node.kind === 'group' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane }] } : node;
+const withPane = (node: WorkbenchLaneNode, pane: WorkbenchPanelId): WorkbenchLaneNode =>
+  // The Files pane is no record tab (the record's pane ids exclude it): Dockview's report leaves the node as it was.
+  node.kind === 'group' && pane !== 'files' ? { ...node, tabs: [...node.tabs, { kind: 'pane', pane }] } : node;
 
 const mounted = new Set<() => void>();
 afterEach(() => {

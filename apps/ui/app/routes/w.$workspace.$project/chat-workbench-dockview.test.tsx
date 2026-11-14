@@ -2132,6 +2132,7 @@ describe('Workbench file reconciliation', () => {
             if (id === 'files') {
               openWorkbenchFiles({ api: dockview.api });
             }
+            return undefined;
           });
         }, [mounted, workspace]);
         return (

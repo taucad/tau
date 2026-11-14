@@ -171,7 +171,7 @@ type ProjectRuntimeInput = Readonly<{
    * A project that writes view records has a workbench layout (A8b). It starts before the editor has loaded its lanes,
    * so it awaits them: the bridge seeds them once the editor is ready.
    */
-  layout: Omit<WorkbenchLayoutInput, 'workbenchOpen' | 'lanes' | 'awaitsLanes'> | undefined;
+  layout?: Omit<WorkbenchLayoutInput, 'workbenchOpen' | 'lanes' | 'awaitsLanes'> | undefined;
 }>;
 
 export type ProjectRuntimeContext = {

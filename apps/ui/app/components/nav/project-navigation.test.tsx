@@ -803,7 +803,7 @@ describe('ProjectNavigation', () => {
      * The open project stays first through it, and once its session has gone
      * live the registry alone says what is live.
      */
-    it.fails('U6: no row moves when the listing answers before the open project goes live', () => {
+    it('U6: no row moves when the listing answers before the open project goes live', () => {
       pathname = '/w/home/one';
       rememberedShape = { count: 2, projects: [secondProject, firstProject] };
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });

@@ -71,23 +71,39 @@ export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 
 ): Row[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
+/** The project a reload opened, while its session has not yet gone live; `ended` once it has, or the page moved on. */
+type ReloadOpen = { readonly id: string; readonly pathname: string } | 'ended' | undefined;
+
 /**
- * The projects the list draws as live: the live sessions, and, while the remembered rows stand in for the listing,
- * the open project. A reload draws the remembered rows before the open project's session goes live, and that project
- * would otherwise move above them then (U6). Once the listing answers, only the registry says what is live (R1/P46):
- * a session that closed, or never opened, is not drawn as live.
+ * The projects the list draws as live: the live sessions, and the project the page was loaded on until its session
+ * first goes live. A reload draws the remembered rows, then the listing answers, and only then does the open
+ * project's session go live; it would otherwise move above the rest at that point (U6). After that, or once the page
+ * leaves that project, only the registry says what is live (R1/P46), so a session that closes is not drawn as live.
  */
 const useShownLiveIds = (
   liveProjectIds: readonly string[],
   rememberedProjects: readonly SidebarProject[] | undefined,
   pathname: string,
 ): ReadonlySet<string> => {
-  const openRememberedId = rememberedProjects?.find(
+  const [reloadOpen, setReloadOpen] = useState<ReloadOpen>();
+  const rememberedOpenId = rememberedProjects?.find(
     (project) => project.slugs !== undefined && pathname === projectUrlOr(project.slugs),
   )?.id;
+  /* Render-time state adjustments, not effects: latched once, from the remembered rows, and ended once. */
+  if (reloadOpen === undefined && rememberedOpenId !== undefined) {
+    setReloadOpen({ id: rememberedOpenId, pathname });
+  }
+  const pendingId =
+    typeof reloadOpen === 'object' && reloadOpen.pathname === pathname && !liveProjectIds.includes(reloadOpen.id)
+      ? reloadOpen.id
+      : undefined;
+  if (typeof reloadOpen === 'object' && pendingId === undefined) {
+    setReloadOpen('ended');
+  }
+  const shownOpenId = pendingId ?? (reloadOpen === undefined ? rememberedOpenId : undefined);
   return useMemo(
-    () => new Set(openRememberedId === undefined ? liveProjectIds : [...liveProjectIds, openRememberedId]),
-    [liveProjectIds, openRememberedId],
+    () => new Set(shownOpenId === undefined ? liveProjectIds : [...liveProjectIds, shownOpenId]),
+    [liveProjectIds, shownOpenId],
   );
 };
 
@@ -115,8 +131,8 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const rows: readonly SidebarProject[] = rememberedProjects ?? projects;
   const isWaiting = isAwaitingListing && rememberedShape?.count !== 0;
   /* A29's temporal hiding: what is live now sits above what is not, and the
-   * rest keeps its recency order. Over remembered rows the open project
-   * counts as live from the first frame (U6). */
+   * rest keeps its recency order. The project a reload opened counts as
+   * live from the first frame until its session goes live (U6). */
   const shownLiveIds = useShownLiveIds(liveProjectIds, rememberedProjects, location.pathname);
   const sortedProjects = useMemo(
     () =>

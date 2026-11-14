@@ -21,6 +21,7 @@ import {
   desktopArchiveCommand,
   desktopGitPayloadRefusal,
   desktopPackageOmissions,
+  desktopStoreGuardRefusal,
   desktopPackagePlans,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
@@ -185,7 +186,45 @@ assert.ok(
 );
 assert.equal(linux.gitPayloadSupported, true);
 assert.equal(windows.gitPayloadSupported, false);
+assert.ok(
+  desktopPackageOmissions(linux, {
+    git: true,
+    gitResourceRoot: '/r/git/linux-x64',
+    storeGuard: false,
+    storeGuardRoot: '/r/store-guard/linux-x64',
+  }).includes("store guard: none at /r/store-guard/linux-x64; the Terminal opens each project's .git read-only."),
+);
+assert.ok(
+  !desktopPackageOmissions(linux, {
+    git: true,
+    gitResourceRoot: '/r/git/linux-x64',
+    storeGuard: true,
+    storeGuardRoot: '/r/store-guard/linux-x64',
+  }).some((line) => line.startsWith('store guard')),
+);
+assert.ok(
+  !desktopPackageOmissions(windows, { git: false, gitResourceRoot: 'C:\\r', storeGuard: false }).some((line) =>
+    line.startsWith('store guard'),
+  ),
+);
+assert.equal(linux.storeGuard, true);
+assert.equal(windows.storeGuard, false);
 console.log('✓ every payload a target leaves out is named');
+
+/* The Linux store guard (blueprint LP8): APT and AppImage are built from the archive, so the archive refuses without it. */
+{
+  const storeGuardRoot = '/r/store-guard/linux-x64';
+  const complete = { executable: true, notice: true, storeGuardRoot };
+  assert.equal(desktopStoreGuardRefusal(linux, true, complete), undefined);
+  assert.equal(desktopStoreGuardRefusal(linux, false, { ...complete, executable: false, notice: false }), undefined);
+  assert.equal(desktopStoreGuardRefusal(windows, true, { ...complete, executable: false, notice: false }), undefined);
+  assert.equal(
+    desktopStoreGuardRefusal(linux, true, { ...complete, executable: false, notice: false }),
+    "A linux-x64 release package must ship the Terminal's store guard; tau-store-guard and NOTICE missing at /r/store-guard/linux-x64. Run sandbox:build:store-guard with --resources first.",
+  );
+  assert.match(desktopStoreGuardRefusal(linux, true, { ...complete, notice: false }) ?? '', /; NOTICE missing at /u);
+}
+console.log('✓ a Linux release refuses to assemble without the store guard');
 
 /* The Linux release guard: a distribution archive ships an executable git and git-lfs, as a macOS release does. */
 {

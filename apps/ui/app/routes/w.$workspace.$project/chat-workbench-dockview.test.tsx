@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
+import { isValidElement, useEffect, useRef, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
@@ -22,13 +22,20 @@ import type {
 } from 'dockview-react';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
-import type { PendingFilePlacement } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { createActor } from 'xstate';
+import type { Actor } from 'xstate';
+import { dockAdapterId, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type {
+  PendingFilePlacement,
+  WorkbenchDockReady,
+  WorkbenchDockReleased,
+} from '#workbench-records/workbench-adapter.js';
 
 const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastError, mockPrintBody, mockExportBody } =
   vi.hoisted(() => ({
@@ -108,10 +115,15 @@ const mockConnectWorkbench = vi.fn<
 const mockLayoutController = { registerWorkbench: vi.fn(() => () => undefined), personWorkbenchChanged: vi.fn() };
 const mockSetWorkbenchOpen = vi.fn();
 let readyDockviewApi: DockviewApi | undefined;
+/* The live project's layout a row gives the workspace: absent, as on a share or preview page. */
+const workspaceLayout: { value: { send: (event: { type: string }) => void } | undefined } = { value: undefined };
 vi.mock('#components/panes/dockview.js', () => ({
   Dockview: ({ onReady }: { onReady: (event: DockviewReadyEvent) => void }) => {
+    // As Dockview (`useKeptInstance`): `onReady` once per mounted instance, whatever the later renders pass.
+    const announced = useRef(false);
     useEffect(() => {
-      if (readyDockviewApi) {
+      if (readyDockviewApi && !announced.current) {
+        announced.current = true;
         onReady({ api: readyDockviewApi });
       }
     }, [onReady]);
@@ -126,6 +138,7 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
     connectWorkbench: mockConnectWorkbench,
     layoutController: mockLayoutController,
     setWorkbenchOpen: mockSetWorkbenchOpen,
+    layout: workspaceLayout.value,
   }),
 }));
 
@@ -217,8 +230,9 @@ const editorMachineSnapshot = {
     openFiles: [] as Array<{ paneId: string; path: string; readOnly?: boolean }>,
     fileSidebars: {} as Record<string, number>,
     panelState: { desktopLayout: { workbenchOpen: true } },
+    pendingOpenFile: undefined as { path: string } | undefined,
   },
-  matches: () => true,
+  matches: (_value: unknown) => true,
   status: 'active',
   output: undefined,
   error: undefined,
@@ -248,6 +262,25 @@ const emitEditor = (event: { type: string; path?: string; error?: Error }): void
   }
 };
 
+/* A shared page's editor runs the workbench's adapter (A8c): the mock hosts it the way the editor does. */
+const dockAdapters = new Map<string, Actor<typeof workbenchAdapterLogic>>();
+const hostDock = (event: { type: string }): void => {
+  if (event.type === 'dockReady') {
+    const ready = event as WorkbenchDockReady;
+    for (const [id, adapter] of dockAdapters) {
+      adapter.stop();
+      dockAdapters.delete(id);
+    }
+    const adapter = createActor(workbenchAdapterLogic, { input: { api: ready.api, ports: ready.ports } });
+    dockAdapters.set(dockAdapterId('workbench', ready.dockId), adapter);
+    adapter.start();
+  } else if (event.type === 'dockReleased') {
+    const id = dockAdapterId('workbench', (event as WorkbenchDockReleased).dockId);
+    dockAdapters.get(id)?.stop();
+    dockAdapters.delete(id);
+  }
+};
+
 const mockEditorRef = {
   on: (type: string, listener: (event: { type: string }) => void) => {
     const listeners = editorEventListeners.get(type) ?? new Set();
@@ -255,8 +288,8 @@ const mockEditorRef = {
     editorEventListeners.set(type, listeners);
     return { unsubscribe: () => listeners.delete(listener) };
   },
-  send: vi.fn(),
-  getSnapshot: () => currentEditorSnapshot,
+  send: vi.fn(hostDock),
+  getSnapshot: () => ({ ...currentEditorSnapshot, children: Object.fromEntries(dockAdapters) }),
   subscribe: (listener: EditorListener) => {
     editorListeners.add(listener);
     return { unsubscribe: () => editorListeners.delete(listener) };
@@ -1587,6 +1620,132 @@ describe('workbench adapter record apply (A0.3)', () => {
     expect(detach).toHaveBeenCalledOnce();
   });
 
+  // A8c, I1: the Dockview hands its adapter to the project's layout, or on a page without one (share and preview) to
+  // the editor, and takes it back when it unmounts.
+  it.each([
+    ['the layout', true],
+    ['the editor, on a page without a layout', false],
+  ])('should hand the workbench adapter to %s and release it on unmount', (_host, withLayout) => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    // The layout spawns the adapter on `dockReady`; the Dockview then attaches it, once the layout's step is over.
+    const spawned = { send: vi.fn() };
+    let spawnedId: string | undefined;
+    const layout = {
+      send: vi.fn((event: { type: string; dockId?: string }) => {
+        if (event.type === 'dockReady') {
+          spawnedId = dockAdapterId('workbench', event.dockId!);
+        }
+      }),
+      getSnapshot: () => ({ children: spawnedId === undefined ? {} : { [spawnedId]: spawned } }),
+    };
+    workspaceLayout.value = withLayout ? layout : undefined;
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      workspaceLayout.value = undefined;
+    });
+    mockEditorRef.send.mockClear();
+    const dockEvents = () =>
+      (withLayout ? layout.send : mockEditorRef.send).mock.calls
+        .map(([event]) => event as { type: string; api?: unknown })
+        .filter((event) => event.type === 'dockReady' || event.type === 'dockReleased');
+
+    const view = render(<WorkbenchDockview />);
+    expect(dockEvents()).toEqual([
+      expect.objectContaining({ type: 'dockReady', adapter: 'workbench', api: dockview.api }),
+    ]);
+    if (withLayout) {
+      expect(spawned.send.mock.calls).toEqual([[{ type: 'attach' }]]);
+    }
+    view.unmount();
+    expect(dockEvents().map((event) => event.type)).toEqual(['dockReady', 'dockReleased']);
+    if (withLayout) {
+      expect(mockEditorRef.send.mock.calls.some(([event]) => event.type === 'dockReady')).toBe(false);
+    }
+  });
+
+  // D21 round 3: a runtime replaced under a mounted Dockview (a lease renewed after its grace) is started by its
+  // provider's passive effect, after the Dockview's commit. Handed over in that commit, the adapter was spawned only
+  // when its host started, and nothing attached it: the Dockview hands over to a host only once that host has started.
+  it('should attach the workbench adapter to a runtime that starts after the commit that replaced it', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      workspaceLayout.value = undefined;
+    });
+    /* A layout that queues what it is sent until it starts, as an unstarted actor does, and spawns an adapter on
+     * `dockReady`. */
+    const runtimeLayout = () => {
+      let started = false;
+      const queued: Array<{ type: string; dockId?: string }> = [];
+      const children = new Map<string, { send: (event: { type: string }) => void }>();
+      const attached = vi.fn();
+      const handle = (event: { type: string; dockId?: string }): void => {
+        const id = dockAdapterId('workbench', event.dockId ?? '');
+        if (event.type === 'dockReady') {
+          children.set(id, { send: attached });
+        } else if (event.type === 'dockReleased') {
+          children.delete(id);
+        }
+      };
+      return {
+        send: (event: { type: string; dockId?: string }) => {
+          if (started) {
+            handle(event);
+          } else {
+            queued.push(event);
+          }
+        },
+        getSnapshot: () => ({ children: Object.fromEntries(children) }),
+        start: () => {
+          started = true;
+          for (const event of queued.splice(0)) {
+            handle(event);
+          }
+        },
+        attached,
+      };
+    };
+    /* The project provider: its runtime starts in its passive effect, after its children's. */
+    function Runtime({ layout }: { readonly layout: ReturnType<typeof runtimeLayout> }) {
+      useEffect(() => {
+        layout.start();
+      }, [layout]);
+      // The workspace context re-renders the Dockview with the new runtime; the mocked hook needs a new prop for it.
+      return <WorkbenchDockview onApiChange={() => layout} />;
+    }
+    const first = runtimeLayout();
+    workspaceLayout.value = first;
+    const view = render(<Runtime layout={first} />);
+    expect(first.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+
+    const second = runtimeLayout();
+    workspaceLayout.value = second;
+    view.rerender(<Runtime layout={second} />);
+
+    expect(second.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+    view.unmount();
+  });
+
   // A8b review: a record apply waits for its files to open, and the layout holds every pane intent until the apply
   // lands. A file that fails to open (deleted since) would hold them forever: the apply lands without its tab.
   it('should land a held record apply without the tab of a file that failed to open', () => {
@@ -1698,6 +1857,65 @@ describe('workbench adapter record apply (A0.3)', () => {
       },
     };
   };
+
+  // A8b's carried risk (A8c): a chat switch (`setRequestedChatId`, `focusKnownChat`, `retryEnsureFocusedChat`) leaves
+  // the editor's materialisation of a held apply's file with neither `fileOpened` nor `fileOpenFailed`, and the layout
+  // holds every pane intent until the apply lands. The apply asks for the file again, so it lands with the file's tab.
+  it('should ask again for a held record apply file whose materialisation the editor dropped, and land the apply', () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    const recorded: WorkbenchLaneNode = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'file', path: 'part.ts' },
+      ],
+    };
+    const publish = (phase: 'materialising' | 'dropped' | 'opened'): void => {
+      const isMaterialising = phase === 'materialising';
+      currentEditorSnapshot = {
+        ...editorMachineSnapshot,
+        context: {
+          ...editorMachineSnapshot.context,
+          openFiles: phase === 'opened' ? [{ paneId: 'pane-part', path: 'part.ts' }] : [],
+          // A cancelled materialisation leaves the request behind, as the editor does today.
+          pendingOpenFile: phase === 'opened' ? undefined : { path: 'part.ts' },
+        },
+        matches: (value: unknown) =>
+          JSON.stringify(value) === JSON.stringify({ ready: { operation: 'materializingOpenFile' } })
+            ? isMaterialising
+            : true,
+      };
+      for (const listener of editorListeners) {
+        if (typeof listener === 'function') {
+          listener(currentEditorSnapshot);
+        } else {
+          listener.next(currentEditorSnapshot);
+        }
+      }
+    };
+    const opens = (): number =>
+      mockEditorRef.send.mock.calls.filter(
+        ([event]) => event.type === 'openFile' && (event as { path?: string }).path === 'part.ts',
+      ).length;
+    const before = opens();
+    act(() => {
+      host.apply(recorded, applied);
+    });
+    expect(opens() - before).toBe(1);
+    act(() => {
+      publish('materialising');
+    });
+    act(() => {
+      publish('dropped');
+    });
+    expect(opens() - before, 'the file whose materialisation was dropped is asked for again').toBe(2);
+    act(() => {
+      publish('opened');
+    });
+    expect(applied).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(host.shown).toEqual(recorded);
+  });
 
   // A8b review: a landed apply releases the pane and file intents held behind it. They open once the restore is over,
   // so a file activation answers with what the Dockview shows, not as a step of the restore.

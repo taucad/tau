@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import {
   bundledGitEnvironment,
+  bundledStoreGuardEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -297,5 +298,37 @@ describe('loginShellEnvironment', () => {
     await loginShellEnvironment({ target, shell: '/usr/bin/false', fallbackEntries: [] });
     await loginShellEnvironment({ target, shell: join(tmpdir(), 'no-such-shell'), fallbackEntries: [] });
     expect(target).toEqual({ PATH: '/usr/bin:/bin' });
+  });
+});
+
+describe('bundledStoreGuardEnvironment', () => {
+  const roots: string[] = [];
+  afterAll(async () => {
+    await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
+  });
+
+  const resourcesWithGuard = async (): Promise<string> => {
+    const resources = await mkdtemp(join(tmpdir(), 'tau-resources-'));
+    roots.push(resources);
+    await mkdir(join(resources, 'store-guard', 'linux-x64'), { recursive: true });
+    await writeFile(join(resources, 'store-guard', 'linux-x64', 'tau-store-guard'), '#!/bin/sh\n');
+    return resources;
+  };
+
+  it('should point the services utility at the store guard a Linux build carries under its resources', async () => {
+    const resources = await resourcesWithGuard();
+    expect(bundledStoreGuardEnvironment(resources, { architecture: 'x64', platform: 'linux' })).toEqual({
+      TAU_DESKTOP_SHELL_STORE_GUARD: join(resources, 'store-guard/linux-x64/tau-store-guard'),
+    });
+  });
+
+  it('should name no guard on macOS, whose Seatbelt profile protects the store by name itself', async () => {
+    const resources = await resourcesWithGuard();
+    expect(bundledStoreGuardEnvironment(resources, { architecture: 'arm64', platform: 'darwin' })).toEqual({});
+  });
+
+  it('should keep the store read-only when the build carries no guard for this target', async () => {
+    const resources = await resourcesWithGuard();
+    expect(bundledStoreGuardEnvironment(resources, { architecture: 'arm64', platform: 'linux' })).toEqual({});
   });
 });

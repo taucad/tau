@@ -70,7 +70,7 @@
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
 (*                  of ProjectPersistenceGuard after the commit that       *)
 (*                  mounts the session it names (project-live-sessions.tsx *)
-(*                  656, 799 to 814), so the person may edit before it     *)
+(*                  655, 797 to 812), so the person may edit before it     *)
 (*                  lands; React runs it before the next render, so it has *)
 (*                  landed before the next commit or effect run            *)
 (*                  (RegFlushed). FALSE: it is current at every step.      *)
@@ -93,6 +93,9 @@
 (***************************************************************************)
 \* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
 \* route gate imports the type from there. No action or correspondence changes.
+\* A4b: `tauCloudIntent` and its type moved from `hooks/use-cloud-projects.ts` to
+\* `lib/tau-cloud-intent.ts`; the route gate and the live sessions import them from there. No action or
+\* correspondence changes.
 \* A5b: the route gate's effects are gone. The route reports to focus (`project-route-intent.tsx`) and
 \* the runtime composes focus with the registry, the library epoch and the module import over ordered ports
 \* (`runtime/app-runtime-focus.ts`): registry facts reach focus after the open's answer they follow, every
@@ -691,8 +694,9 @@ DRetry ==
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
 
-\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 799 to 814, 723): the
+\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 797 to 812, 721): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
+\* ProjectFocus.today-late-effect.cfg cites 655 and 797 to 812 too.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration
   /\ reg # RegTarget

@@ -485,34 +485,39 @@ describe('ProjectWorkspaceProvider', () => {
     expect(opener).toHaveBeenCalledExactlyOnceWith('parameters');
   });
 
-  it('refuses a retired route connector without consuming the replacement Files intent', () => {
+  // A8c: the workbench's adapter connects once per Dockview mount, not once per route, so a route change keeps its
+  // opener and drops only what was asked under the old route. (Replaces the row that refused a retired route's
+  // connector: a connector now lives as long as its Dockview.)
+  it('keeps the connected opener across a route change and drops only the Files intent pending under the old route', () => {
     const view = render(
       <ProjectWorkspaceProvider>
         <Probe />
       </ProjectWorkspaceProvider>,
     );
-    const retiredConnect = workspace.connectWorkbench;
+    act(() => {
+      workspace.openPanel('files');
+    });
     route.key = 'replacement-route';
     view.rerender(
       <ProjectWorkspaceProvider>
         <Probe />
       </ProjectWorkspaceProvider>,
     );
-    const retired = vi.fn();
-    const replacement = vi.fn();
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+    });
+    expect(opener, 'the Files intent asked under the old route is dropped').not.toHaveBeenCalled();
+    route.key = 'third-route';
+    view.rerender(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
     act(() => {
       workspace.openPanel('files');
-      retiredConnect(retired);
-      workspace.connectWorkbench(replacement);
     });
-    expect(retired).not.toHaveBeenCalled();
-    expect(replacement).toHaveBeenCalledExactlyOnceWith('files');
-    act(() => {
-      retiredConnect(retired);
-      workspace.openPanel('files');
-    });
-    expect(retired).not.toHaveBeenCalled();
-    expect(replacement).toHaveBeenCalledTimes(2);
+    expect(opener).toHaveBeenCalledExactlyOnceWith('files');
   });
 
   it('preserves a Files intent issued by a child effect in the navigation commit', () => {

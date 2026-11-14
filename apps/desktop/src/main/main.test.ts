@@ -444,6 +444,7 @@ vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => state.shellApplied),
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
+  bundledStoreGuardEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),

@@ -34,6 +34,7 @@ describe('LibraryCatalog.tla implementation correspondence', () => {
           'apps/ui/app/machines/library-access.machine.ts',
           'apps/ui/app/runtime/project-library.ts',
           'apps/ui/app/runtime/project-library-commands.ts',
+          'apps/ui/app/runtime/project-library-workspace.ts',
         ]),
         specs: hashFiles(specs, ['LibraryCatalog.tla']),
       }),

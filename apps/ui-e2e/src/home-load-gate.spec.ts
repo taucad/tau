@@ -259,7 +259,7 @@ for (const viewport of ['wide', 'phone'] as const) {
     `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
     {
       artifact: `h1-${viewport}`,
-      expectedFailure: true,
+      expectedFailure: false,
       budget: homeBudget,
       measure: async () => {
         const { record } = await measureReturningReload({
@@ -290,7 +290,7 @@ knownDefect(
   'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
   {
     artifact: 'h5-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
       /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's did. */

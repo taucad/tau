@@ -27,7 +27,7 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { EditorDocument } from '#lib/editor-document.js';
 import type * as UseFeatureModule from '#flags/use-feature.js';
 

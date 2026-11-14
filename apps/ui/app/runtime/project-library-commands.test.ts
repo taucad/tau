@@ -13,12 +13,13 @@ import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import type { Chat } from '@taucad/chat';
 import { ProjectLibrary } from '#runtime/project-library.js';
-import type { ProjectLibraryBinding } from '#runtime/project-library.js';
+import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
-/** The chat store each record client stands for. */
-const stores = vi.hoisted(() => new WeakMap<WeakKey, unknown>());
+/** The chats each record client's store holds; a client with none holds no chats. */
+const stores = vi.hoisted(() => new WeakMap<WeakKey, readonly unknown[]>());
 
 vi.mock('#hooks/object-store.worker.js?worker', () => ({
   default: class MockWorker {
@@ -29,7 +30,9 @@ vi.mock('#hooks/object-store.worker.js?worker', () => ({
 vi.mock('comlink', () => ({ wrap: vi.fn(() => ({})) }));
 
 vi.mock('#db/chat-file-storage.js', () => ({
-  createChatFileStore: ({ client }: { client: WeakKey }) => stores.get(client),
+  createChatFileStore: ({ client }: { client: WeakKey }) => ({
+    getChatsForResource: async () => [...(stores.get(client) ?? [])],
+  }),
 }));
 
 /* A read owner that admits every read at once: no observation runs in these rows. */
@@ -47,11 +50,11 @@ vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
 
 const chatOf = (id: string): Chat => ({ id, resourceId: 'p1', name: id, messages: [], createdAt: 0, updatedAt: 0 });
 
-/** A binding whose chat store holds `chats` for every project. */
-const bindingWith = (chats: readonly Chat[]): ProjectLibraryBinding => {
-  const fileManager = mock<ProjectLibraryBinding['fileManager']>();
-  stores.set(fileManager.recordFiles, mock<ChatStorage>({ getChatsForResource: async () => [...chats] }));
-  return { fileManager };
+/** A root file facade whose chat store holds `chats` for every project. */
+const facadeWith = (chats: readonly Chat[]): ProjectLibraryFileManager => {
+  const fileManager = mock<ProjectLibraryFileManager>();
+  stores.set(fileManager.recordFiles, chats);
+  return fileManager;
 };
 
 type LiveSessions = Readonly<Record<string, unknown>>;
@@ -104,12 +107,13 @@ const createLibrary = (
   chatSessions: ProjectLibraryChatSessions,
   chats: readonly Chat[],
 ): ProjectLibrary => {
+  const root = testRootFiles(facadeWith(chats));
   const library = new ProjectLibrary({
     queryClient: new QueryClient(),
     sessions: () => sessions,
     chatSessions: () => chatSessions,
+    rootFiles: () => root,
   });
-  library.bind(bindingWith(chats));
   libraries.push(library);
   return library;
 };
@@ -171,14 +175,13 @@ describe('ProjectLibrary project commands (A4a, row L7)', () => {
     const { createAppRuntime, selectRuntimeProjectLibrary } = await import('#runtime/app-runtime.js');
     const runtime = createAppRuntime({ idleFileManagers: true });
     const library = selectRuntimeProjectLibrary(runtime);
-    library.bind(bindingWith([]));
     /* Neither refuses for want of the registry or the chat store, which a library built without them would. */
     await expect(library.commands.closeProjectSession('p1')).resolves.toBeUndefined();
     await expect(library.commands.verifyProjectQuiescent('p1')).resolves.toBeUndefined();
     const bare = createLibrary(registryOf([]), chatSessionsOf({}), []);
-    const unwired = new ProjectLibrary({ queryClient: new QueryClient() });
+    const root = testRootFiles(facadeWith([]));
+    const unwired = new ProjectLibrary({ queryClient: new QueryClient(), rootFiles: () => root });
     libraries.push(unwired);
-    unwired.bind(bindingWith([]));
     await expect(unwired.commands.closeProjectSession('p1')).rejects.toThrow('built without the sessions registry');
     await expect(bare.commands.closeProjectSession('p1')).resolves.toBeUndefined();
   });

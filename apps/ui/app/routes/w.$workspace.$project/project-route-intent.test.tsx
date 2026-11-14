@@ -8,7 +8,7 @@ import { act, render } from '@testing-library/react';
 import { useState } from 'react';
 import { RouterProvider, createMemoryRouter, useLocation, useNavigation, useParams } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import { useRouterRouteSink } from '#routes/w.$workspace.$project/project-route-intent.js';
 

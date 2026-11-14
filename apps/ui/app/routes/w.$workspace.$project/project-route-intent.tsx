@@ -16,7 +16,7 @@ import {
   useMatch,
   useNavigate,
 } from 'react-router';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { useFocus } from '#hooks/use-sessions.js';

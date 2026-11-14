@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Inside a stock guest: install the real APT selector's profiled bwrap, then run the shell conformance targets as an
 # unprivileged user against it. Called over SSH by shell-conformance-vm.sh with the distro as its argument.
-# Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/tau (tracked sources plus,
-# in the full tier only, verified host-built Electron/UI artifacts).
+# Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/store-guard (the
+# host-built tau-store-guard with its NOTICE and manifest), ~/tau (tracked sources plus, in the full tier only,
+# verified host-built Electron/UI artifacts).
 # Required env: GITHUB_SHA/GITHUB_RUN_ID/GITHUB_REPOSITORY, TAU_SHELL_CONFORMANCE_ROW (forwarded identities),
 # TAU_SHELL_TIER (full: every target and the application tier; semantics: the listed projects' targets only, no
 # Electron, xvfb, Vulkan or application tier) and TAU_SHELL_PROJECTS (comma list of the projects whose targets run).
@@ -46,19 +47,17 @@ trap 'exit 1' INT TERM
 { cat /etc/os-release; uname -a; printf 'source=%s\nrun=%s\nrepository=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_REPOSITORY"; } > "$evidence/identity.txt"
 
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-# Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with. The host rows
-# also need the distribution's Go: E14-guard-host builds the store guard prototype in the guest (Linux Terminal git
-# parity blueprint, LP0), against its checked-in go.sum, with no toolchain download.
+# Runtime prerequisites (bubblewrap, socat, ripgrep) and the toolchain node-pty builds from source with.
 if [[ "$tier" == full ]]; then
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux golang-go \
+    apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
     xvfb xauth dbus-x11 dbus-user-session xdg-utils libsecret-1-0 libgtk-3-0t64 libnss3 libasound2t64 libatk-bridge2.0-0t64 libcups2t64 \
     libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libx11-xcb1 libxss1 \
     libvulkan1 mesa-vulkan-drivers vulkan-tools docker.io
 else
   # No Electron, xvfb or Vulkan prerequisites; Docker and the user session bus only for the host rows below.
   host_packages=()
-  if listed host; then host_packages=(dbus-user-session docker.io golang-go); fi
+  if listed host; then host_packages=(dbus-user-session docker.io); fi
   sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     apparmor bubblewrap socat ripgrep curl git git-lfs ca-certificates build-essential python3 util-linux \
     "${host_packages[@]}"
@@ -101,12 +100,12 @@ if [[ "$tier" == full ]]; then
   node node_modules/electron/install.js
   cp application-build.sha256 "$evidence/application-build.sha256"
   sha256sum --check application-build.sha256 > "$evidence/application-build-verification.txt"
-  dependencies=(bash rg socat bwrap git node pnpm xvfb-run docker go)
+  dependencies=(bash rg socat bwrap git node pnpm xvfb-run docker)
 else
   # The semantics tier expects no host-built artefact: the runner built none and transferred none.
   [[ ! -e application-build.sha256 && ! -e apps/desktop/dist && ! -e apps/ui/desktop/build ]]
   dependencies=(bash rg socat bwrap git node pnpm)
-  if listed host; then dependencies+=(docker go); fi
+  if listed host; then dependencies+=(docker); fi
 fi
 # Use the actual selector directory, not a path through its executable.
 export PATH="$(dirname "$bwrap"):$HOME/node/bin:/usr/local/bin:/usr/bin:/bin"
@@ -122,7 +121,25 @@ node --input-type=module -e '
   console.log(JSON.stringify({electron:desktop("electron/package.json").version,nodePty:native("node-pty/package.json").version,openScad:desktop("@taulabs/openrscad-engine/package.json").version}));
 ' > "$evidence/native-package-versions.json"
 
+# The Linux Terminal's git store guard as the package ships it: a static executable the shell rows start under the
+# selector's bwrap (TAU_SHELL_CONFORMANCE_STORE_GUARD), and, in the full tier, the unpackaged app's own resources copy.
+store_guard="$HOME/store-guard/tau-store-guard"
+[[ -x "$store_guard" && -s "$HOME/store-guard/NOTICE" ]]
+"$store_guard" --version > "$evidence/store-guard-version.txt"
+cp "$HOME/store-guard/manifest.json" "$evidence/store-guard-manifest.json"
+{ stat -c '%a %U:%G' /dev/fuse 2>&1 || printf 'absent\n'; } > "$evidence/dev-fuse.txt"
+export TAU_SHELL_CONFORMANCE_STORE_GUARD="$store_guard"
+if [[ "$tier" == full ]]; then
+  mkdir -p apps/desktop/resources/store-guard/linux-x64
+  cp "$HOME"/store-guard/{tau-store-guard,NOTICE,manifest.json} apps/desktop/resources/store-guard/linux-x64/
+fi
+
 status=0
+# The guard's own acceptance (blueprint LP2): workflow, protected writes, git outside mid-session, the bypass shape,
+# the server's death and the cost bound, as this unprivileged user under the selector's bwrap.
+if listed sandbox; then
+  bash libs/sandbox/store-guard/tests/acceptance.sh "$store_guard" "$bwrap" "$evidence/store-guard-acceptance.txt" || status=$?
+fi
 if listed sandbox; then
   NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
     TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-conformance-receipt.json" \
@@ -153,6 +170,7 @@ if listed host; then
   sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SERVER_URL="$GITHUB_SERVER_URL" \
     TAU_SHELL_CONFORMANCE_ROW="$TAU_SHELL_CONFORMANCE_ROW" NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+    TAU_SHELL_CONFORMANCE_STORE_GUARD="$TAU_SHELL_CONFORMANCE_STORE_GUARD" \
     TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-qualification-receipt.json" \
     pnpm nx run host:test:shell-qualification --skip-nx-cache || status=$?
 fi

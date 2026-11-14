@@ -45,6 +45,13 @@ vi.mock('#hooks/use-sessions.js', () => ({
   useSessions: vi.fn(),
   useFocus: () => ({ focus: { send: focusSend }, bindings: {} }),
   useLiveProjectIds: () => Object.keys(fakeRegistry.refs),
+  useProjectLiveness: (projectId: string) => ({
+    projectId,
+    live: fakeRegistry.refs[projectId] !== undefined,
+    status: undefined,
+    closedReason: fakeRegistry.closed[projectId]?.reason,
+    policyRefusal: undefined,
+  }),
 }));
 vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));

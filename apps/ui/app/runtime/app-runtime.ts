@@ -43,6 +43,9 @@ import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.js';
+import { createRootFileFacade } from '#runtime/file-manager-facade.js';
+import type { RootFileFacade } from '#runtime/file-manager-facade.js';
+import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 import {
   createSessionsRegistryLogic,
@@ -139,6 +142,7 @@ type AppRuntimeServices = Readonly<{
   unload: UnloadSequencer;
   /** Focus and the bindings its ports read (A5b). */
   focus: FocusHandle;
+  rootFileFacade: RootFileFacade;
 }>;
 
 /** The desktop bridge's quit seam: a no-op outside the desktop build. Read when `environment` starts, not on import. */
@@ -269,9 +273,13 @@ export const createAppRuntime = ({
   const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
   const table = createLeaseTable();
   /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
-  const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore } = {};
+  const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore; rootFiles?: RootFileFacade } = {};
+  const workspaceTelemetry = buildWorkspaceTelemetry(analytics);
   const projectLibrary = new ProjectLibrary({
     queryClient,
+    /* A4b: the root file facade over `rootFiles`, which exists once the root is created below. */
+    rootFiles: () => composed.rootFiles,
+    workspaceTelemetry,
     sessions: () => (composed.runtime === undefined ? undefined : selectRuntimeSessions(composed.runtime)),
     chatSessions: () => composed.chatSessions,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
@@ -312,11 +320,15 @@ export const createAppRuntime = ({
          * which mounts no `ProjectManagerProvider`) starts no worker. */
         projectLibrary: createCallbackLogic<EventObject>(() => {
           if (idleFileManagers) {
-            return undefined;
+            /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
+            return () => {
+              composed.rootFiles?.close();
+            };
           }
           projectLibrary.start();
           return () => {
             projectLibrary.stop();
+            composed.rootFiles?.close();
           };
         }),
 
@@ -367,11 +379,19 @@ export const createAppRuntime = ({
     sharedWorker: host.sharedWorker,
     idleFileManagers,
   });
+  const rootFileFacade = createRootFileFacade({
+    fileManagerRef: selectRootFiles(runtime.getSnapshot()),
+    files: runtimeFiles.get(runtime)!,
+    telemetry: workspaceTelemetry,
+  });
+  composed.rootFiles = rootFileFacade;
+  projectLibrary.followRootFiles();
   runtimeServices.set(runtime, {
     queryClient,
     projectLibrary,
     chatSessions,
     unload,
+    rootFileFacade,
     focus: { focus: runtime.getSnapshot().context.focus, bindings: focusComposition.bindings },
   });
   composed.runtime = runtime;
@@ -404,6 +424,16 @@ export const selectRuntimeQueryClient = (runtime: AppRuntime): QueryClient => se
  * @public
  */
 export const selectRuntimeProjectLibrary = (runtime: AppRuntime): ProjectLibrary => servicesOf(runtime).projectLibrary;
+
+/**
+ * The runtime's root file facade over `rootFiles` (A4b): the one the project library reads and the root layout's scope
+ * views.
+ *
+ * @param runtime - The app runtime.
+ * @returns The facade.
+ * @public
+ */
+export const selectRuntimeRootFileFacade = (runtime: AppRuntime): RootFileFacade => servicesOf(runtime).rootFileFacade;
 
 /**
  * The runtime's chat store, built with its dependencies (A2), which `ChatSessionStoreProvider` hands down.

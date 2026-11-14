@@ -5,13 +5,14 @@
  * with nothing for its provider to render. These rows compose the real runtime and read the session's file manager,
  * so dropping the opener or the shared-worker port from the runtime's registry fails them.
  */
-import { flush } from '@taucad/xstate-testing/clock';
+import { flush, StepClock } from '@taucad/xstate-testing/clock';
 import { Topic } from '@taucad/events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAppRuntime, selectRuntimeSessions } from '#runtime/app-runtime.js';
+import { createAppRuntime, selectRuntimeFileManagerHost, selectRuntimeSessions } from '#runtime/app-runtime.js';
 import type * as FileManagerHostModule from '#runtime/file-manager-host.js';
-import { sessionFileManagerOf } from '#runtime/session-file-manager.js';
+import { sessionFileManagerOf, sessionFileManagerSpec } from '#runtime/session-file-manager.js';
 import type * as SessionFileManagerModule from '#runtime/session-file-manager.js';
+import type { SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { reportRegionReady } from '#services/sessions-store.js';
 
@@ -20,6 +21,10 @@ const world = vi.hoisted(() => ({
   /** Set once the mocked host is built: tells the host's listeners that the worker changed. */
   setWorker: (_worker: Worker | undefined): void => undefined,
   opened: [] as SessionFileManagerStandIn[],
+  /** The ports the runtime handed each opening. */
+  ports: [] as SessionFileManagerPorts[],
+  /** Each call of the host's builder. */
+  builds: [] as unknown[][],
 }));
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
@@ -36,8 +41,13 @@ vi.mock('#runtime/file-manager-host.js', async (importOriginal) => {
         world.worker = worker;
         changes.emit(worker);
       };
+      const host = actual.createFileManagerHost(...args);
       return {
-        ...actual.createFileManagerHost(...args),
+        ...host,
+        build: (...buildArgs: Parameters<typeof host.build>) => {
+          world.builds.push(buildArgs);
+          return host.build(...buildArgs);
+        },
         sharedWorker: () => world.worker,
         onSharedWorker: (listener: (worker: Worker | undefined) => void) => changes.subscribe(listener),
       };
@@ -49,7 +59,8 @@ vi.mock('#runtime/session-file-manager.js', async (importOriginal) => {
   const { openSessionFileManagerStandIn } = await import('#runtime/session-file-manager.fixture.js');
   return {
     ...(await importOriginal<typeof SessionFileManagerModule>()),
-    openSessionFileManager: (projectId: string) => {
+    openSessionFileManager: (projectId: string, ports: SessionFileManagerPorts) => {
+      world.ports.push(ports);
       const standIn = openSessionFileManagerStandIn(projectId);
       world.opened.push(standIn);
       return standIn;
@@ -63,6 +74,8 @@ const inertWorker = (name: string) => ({ name, postMessage: () => undefined }) a
 afterEach(() => {
   world.worker = undefined;
   world.opened.length = 0;
+  world.ports.length = 0;
+  world.builds.length = 0;
 });
 
 describe("the app runtime's sessions build their file managers through its host (A6c)", () => {
@@ -90,6 +103,30 @@ describe("the app runtime's sessions build their file managers through its host 
     registry.send({ type: 'close', projectId, reason: 'user' });
     await flush();
     expect(world.opened[1]?.isClosed()).toBe(true);
+    runtime.stop();
+  });
+
+  it("should build through the runtime's own host with the project's spec, and wait on the runtime's clock", async () => {
+    const clock = new StepClock();
+    const runtime = createAppRuntime({ clock, idleFileManagers: true }).start();
+    world.setWorker(inertWorker('a'));
+    const registry = selectRuntimeSessions(runtime);
+    registry.send({ type: 'open', projectId });
+    const ports = world.ports[0]!;
+
+    const built = ports.build(sessionFileManagerSpec(projectId));
+
+    expect(world.builds).toEqual([
+      [selectRuntimeFileManagerHost(runtime), sessionFileManagerSpec(projectId), expect.objectContaining({ clock })],
+    ]);
+    /* Unstarted, the built file manager never reaches its services: only the runtime's clock ends the wait. */
+    const waited = ports.awaitServices(built.actor, new AbortController().signal);
+    const outcome = expect(waited).rejects.toMatchObject({ code: 'services-timeout' });
+    clock.advance(10 * 60 * 1000);
+    await flush();
+    await outcome;
+
+    built.dispose();
     runtime.stop();
   });
 });

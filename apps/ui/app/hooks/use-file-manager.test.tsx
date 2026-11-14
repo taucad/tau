@@ -1991,6 +1991,27 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
         }),
     });
 
+  it("refuses a record read with machine-error once the session's file manager is in error, as the scope did", async () => {
+    mockWaitForWorkerReady.mockReturnValue(
+      new Promise<void>(() => {
+        /* Never resolves: the worker's error event ends the connect. */
+      }),
+    );
+    const opened = openForSession();
+    await vi.waitFor(() => {
+      expect(workerTestState.instances).toHaveLength(1);
+    });
+    workerTestState.instances[0]!.dispatchEvent(new Event('error'));
+    await vi.waitFor(() => {
+      expect(opened.fileManagerRef.getSnapshot().value).toBe('error');
+    });
+
+    await expect(
+      opened.owner.workingCopyFiles.get().exists('/projects/p/.tau/workbench/layout.json'),
+    ).rejects.toMatchObject({ name: 'FileManagerNotReadyError', code: 'machine-error' });
+    opened.close();
+  });
+
   it('renders nothing before the session reports its file manager', () => {
     const view = render(
       <SessionFileManagerProvider fileManagerRef={undefined} projectId='p' rootDirectory='/projects/p'>

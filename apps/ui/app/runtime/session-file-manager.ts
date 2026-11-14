@@ -24,6 +24,8 @@ import type { FileManagerActor, FileManagerSpec } from '#runtime/file-manager-ho
 import { recordConnectionsOf } from '#runtime/file-manager-record-connections.js';
 import type { RecordBridgeOpener } from '#runtime/file-manager-record-connections.js';
 
+type FileManagerSnapshot = ReturnType<FileManagerRef['getSnapshot']>;
+
 /** A value that can change: the current value, and a listener called after each change. @public */
 export type SessionFilesPort<T> = Readonly<{
   get: () => T;
@@ -63,7 +65,7 @@ export type SessionFileManagerPorts = Readonly<{
   /** Build the unstarted file manager for `spec` through the file-manager host. */
   build: (spec: FileManagerSpec) => Readonly<{ actor: FileManagerActor; dispose: () => void }>;
   /** Wait for the file manager's content and tree services, up to the ready bound; ends when `gone` aborts. */
-  awaitServices: (fileManagerRef: FileManagerRef, gone: AbortSignal) => Promise<unknown>;
+  awaitServices: (fileManagerRef: FileManagerRef, gone: AbortSignal) => Promise<FileManagerSnapshot>;
 }>;
 
 /* Each session file manager a session's child holds, by its ref: the provider over the child reads its owner here. */
@@ -119,9 +121,17 @@ export function openSessionFileManager(projectId: string, ports: SessionFileMana
     }
     return opener(root, consumer);
   };
-  const connections = recordConnectionsOf(fileManagerRef, fallback, async () =>
-    ports.awaitServices(fileManagerRef, drop.signal),
-  );
+  /* As the scope's `whenServicesReady`: a wait that settles on a file manager in `error`, or without its services,
+   * refuses, so a record read fails fast rather than opening a bridge the file manager has given up on. */
+  const connections = recordConnectionsOf(fileManagerRef, fallback, async () => {
+    const settled = await ports.awaitServices(fileManagerRef, drop.signal);
+    if (settled.matches('error')) {
+      throw new FileManagerNotReadyError('machine-error', { cause: settled.context.error });
+    }
+    if (!settled.context.contentService || !settled.context.treeService) {
+      throw new FileManagerNotReadyError('services-timeout');
+    }
+  });
 
   let current = connections.ownerFor(fileManagerRef.getSnapshot().context.openFileSystemBridge);
   connections.install(current);

@@ -28,6 +28,9 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/machines/library-access.machine.ts",
+      "apps/ui/app/machines/library-discovery.machine.ts",
+      "apps/ui/app/machines/library-recovery.machine.ts",
       "apps/ui/app/runtime/app-runtime-faults.ts",
       "apps/ui/app/runtime/app-runtime-holder.ts",
       "apps/ui/app/runtime/app-runtime.machine.ts",

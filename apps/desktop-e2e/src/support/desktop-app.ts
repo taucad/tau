@@ -20,10 +20,15 @@ import {
 } from '#support/config.js';
 import { restorePreparedKernels, savePreparedKernels } from '#support/prepared-kernels.js';
 /* eslint-disable @nx/enforce-module-boundaries -- Both e2e harnesses share one definition of the FL4 flag states; no production dependency is introduced. */
-// oxlint-disable-next-line no-restricted-imports -- The flag states are harness-only data both hosts must agree on.
-import { flagStateInitScript, flagStateVariable, resolveFlagState } from '../../../ui-e2e/src/support/flag-state.ts';
-// oxlint-disable-next-line no-restricted-imports -- The flag-state name type is shared by the two harnesses only.
+/* oxlint-disable no-restricted-imports -- The flag states and their name type are harness-only data both hosts must agree on. */
+import {
+  flagStateFlags,
+  flagStateInitScript,
+  flagStateVariable,
+  resolveFlagState,
+} from '../../../ui-e2e/src/support/flag-state.ts';
 import type { FlagStateName } from '../../../ui-e2e/src/support/flag-state.ts';
+/* oxlint-enable no-restricted-imports -- Restore the import rule after the harness-only imports. */
 /* eslint-enable @nx/enforce-module-boundaries -- Restore normal boundaries after the harness-only imports. */
 
 /**
@@ -274,11 +279,17 @@ const completedArtifactForbiddenEnvironment = ['NODE_OPTIONS', 'NODE_PATH', 'TAU
  * headless runners without one set `TAU_E2E_WEBGPU_PROFILE=software`. Copied
  * from `apps/ui-e2e/src/support/webgpu-profile.ts` rather than imported —
  * cross-e2e-project source imports are not a dependency this suite should own.
+ *
+ * The software profile also lets WebGL fall back to SwiftShader. Chromium no
+ * longer does that by itself, so on a runner with no GPU every WebGL context
+ * fails. Playwright's own Chromium always passes `--enable-unsafe-swiftshader`,
+ * which is why the browser suites have WebGL on the same runners. Electron
+ * launched through Playwright gets no such default.
  */
 const webGpuArguments = (): readonly string[] => {
   const profile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
   if (profile === 'software') {
-    return ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'];
+    return ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--enable-unsafe-swiftshader'];
   }
   if (profile === 'hardware') {
     return ['--enable-unsafe-webgpu'];
@@ -404,7 +415,9 @@ export const launchDesktopApp = async (options: {
   readonly preparedKernels?: boolean | undefined;
   /**
    * FL4: open the renderer in this flag state (`apps/ui-e2e/src/support/flag-state.ts`). Defaults to the run's
-   * `TAU_E2E_FLAG_STATE`; with neither, the renderer is left exactly as it launched.
+   * `TAU_E2E_FLAG_STATE`; with neither, the renderer is left exactly as it launched. A launch that takes a state
+   * which opens setup by itself from the run, into a profile of its own, opens as an install that has been used
+   * before, so only a spec that names the state meets the first run.
    */
   readonly flagState?: FlagStateName | undefined;
 }): Promise<DesktopSession> => {
@@ -429,6 +442,19 @@ export const launchDesktopApp = async (options: {
     );
   const snapshots = manual || configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
+  const runFlagState = process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined;
+  const flagState = options.flagState ?? runFlagState;
+  if (
+    options.flagState === undefined &&
+    options.profileRoot === undefined &&
+    flagState !== undefined &&
+    flagStateFlags[flagState].onboardingAutoOpen
+  ) {
+    /* Main counts a launch as the first run only while no window-state file exists, whatever the file holds
+     * (`apps/desktop/src/main/first-run.ts`); an empty object restores no frame, so the window opens at its default
+     * size as before. */
+    await writeFile(join(userData, 'window-state.json'), '{}\n');
+  }
   const configRoot = options.env?.['TAU_CONFIG_DIR'] ?? join(userData, 'config');
   const dependencyStore = join(configRoot, 'dependencies');
   const preparedKernels = options.preparedKernels !== false;
@@ -626,9 +652,6 @@ export const launchDesktopApp = async (options: {
       { waitUntil: 'load' },
     );
     recordStartupPhase('initial-app-load.after', page.url());
-    const flagState =
-      options.flagState ??
-      (process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined);
     if (flagState !== undefined) {
       /* The renderer reads its flag state once, when it loads, and the first window starts loading before Playwright
        * can add an init script; so seed it and reload, as the specs that stub navigator APIs do. The build honours

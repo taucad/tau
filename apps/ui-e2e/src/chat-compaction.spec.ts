@@ -104,10 +104,10 @@ const gatewayRequests = async (): Promise<{ readonly agent: number; readonly sum
 const openSeededChat = async (summary: string): Promise<void> => {
   await target.installAgentHostGatewayFixture(compactionScript, { contextWindow, summary });
   await target.setViewport({ width: 1440, height: 900 });
-  await target.navigate(seedRoute);
+  // A new project's layout record opens the chat lane, so a toggle after its first read would close it.
+  // `chat=1` seeds the editor state with the same open lane, so the composer shows without a toggle.
+  await target.navigate(`${seedRoute}?chat=1`);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
-  await target.expectVisible(selectors.getByCss('[aria-label="Toggle Chat lane"]'), 60_000);
-  await target.click(selectors.getByCss('[aria-label="Toggle Chat lane"]'));
   await target.expectVisible(selectors.getByCss(composer), 60_000);
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };

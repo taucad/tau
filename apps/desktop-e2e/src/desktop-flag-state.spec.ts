@@ -6,7 +6,7 @@ import { expectVisible } from '#support/scenario.js';
 // oxlint-disable-next-line no-restricted-imports -- The flag states are harness-only data both hosts must agree on.
 import { flagProbeGlobal, flagStateFlags, flagStateNames } from '../../ui-e2e/src/support/flag-state.ts';
 // oxlint-disable-next-line no-restricted-imports -- The resolved-flags type is shared by the two harnesses only.
-import type { OnboardingFlags } from '../../ui-e2e/src/support/flag-state.ts';
+import type { FlagStateName, OnboardingFlags } from '../../ui-e2e/src/support/flag-state.ts';
 /* eslint-enable @nx/enforce-module-boundaries -- Restore normal boundaries after the harness-only imports. */
 
 /*
@@ -38,10 +38,22 @@ const readAppFlags = async (current: DesktopSession): Promise<OnboardingFlags> =
     return flags;
   }, flagProbeGlobal);
 
+/**
+ * The screen a fresh launch opens on. `onboardingAutoOpen` sends a first run to setup at `/welcome` (#1925), which
+ * has no composer; every other state opens Home. A reload stays on whichever it is.
+ */
+const firstScreen = (
+  page: DesktopSession['page'],
+  state: FlagStateName,
+): ReturnType<DesktopSession['page']['locator']> =>
+  flagStateFlags[state].onboardingAutoOpen
+    ? page.getByRole('heading', { level: 1, name: 'What do you want to make?' })
+    : page.locator('[aria-label="Ask Tau to build anything..."]');
+
 test.for(flagStateNames)('opens the renderer in the %s flag state', async (state) => {
   session = await launchDesktopApp({ token: 'unused', flagState: state });
   const { page } = session;
-  await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+  await expectVisible(firstScreen(page, state), 120_000);
   expect(await readAppFlags(session)).toStrictEqual(flagStateFlags[state]);
 
   await page.evaluate(() => {
@@ -51,6 +63,6 @@ test.for(flagStateNames)('opens the renderer in the %s flag state', async (state
     );
   });
   await page.reload({ waitUntil: 'load' });
-  await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+  await expectVisible(firstScreen(page, state), 120_000);
   expect(await readAppFlags(session)).toStrictEqual(flagStateFlags[state]);
 });

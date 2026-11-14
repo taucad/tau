@@ -77,7 +77,8 @@ const openActivityChat = async (name: string): Promise<void> => {
 type CameraInput = Readonly<{
   position: readonly [number, number, number];
   target: readonly [number, number, number];
-  fov: number;
+  /** Sent to the live camera only; omitted, the camera keeps the field of view it presents. */
+  fov?: number;
   zoom: number;
   rollRadians: number;
 }>;
@@ -140,6 +141,32 @@ const readCamera = async (): Promise<CameraEvidence> =>
     }
     return bridge.getCamera();
   });
+
+/*
+ * The field of view is a view command's leaf since #1911: the view's controls write the record, which seeds the camera,
+ * and a change sent straight to the camera (the bridge's `fov`) is never written. A durable field of view is set here
+ * through the person's control.
+ */
+const setFieldOfView = async (degrees: number): Promise<void> => {
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }));
+  const row = selectors.getByRole('menuitem', { name: /^Field of view, 0° is orthographic, / });
+  await target.expectVisible(row);
+  await target.focus(row);
+  await target.keyboardPress('Enter');
+  for (const digit of String(degrees)) {
+    // oxlint-disable-next-line no-await-in-loop -- The digits are keystrokes, typed in order.
+    await target.keyboardPress(digit);
+  }
+  await target.keyboardPress('Enter');
+  await target.expectAttribute(row, 'aria-label', `Field of view, 0° is orthographic, ${degrees}°`);
+  await target.keyboardPress('Escape');
+  await expect
+    .poll(async () => {
+      const camera = await readCamera();
+      return camera.requestedFov;
+    })
+    .toBe(degrees);
+};
 
 const startCameraRestoreObservation = async (entryPath: string): Promise<void> => {
   await target.evaluate((observedEntryPath) => {
@@ -360,6 +387,8 @@ test('client navigation keeps every project-scoped resource on one logical proje
   );
   await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
   await waitForCameraBridge();
+  /* The entry's first frame replaces any pose set before it (the framing machine), so the camera is set after it. */
+  await target.expectGeometryFramed();
   const legacyDefaultCamera = await readCamera();
   expect(legacyDefaultCamera.projection).toBe('perspective');
   expect(legacyDefaultCamera.requestedFov).toBe(60);
@@ -379,6 +408,7 @@ test('client navigation keeps every project-scoped resource on one logical proje
      * active tab, and waiting for B's own camera first hid alpha's first frames behind a race. */
     await startCameraRestoreObservation('alpha.ts');
     await waitForCameraBridge();
+    await target.expectGeometryFramed();
     await waitForTwoFrames();
     const projectBetaCamera = await readCamera();
     expect(projectBetaCamera.projection).toBe('perspective');
@@ -551,13 +581,14 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     );
     const project = document.querySelector<HTMLElement>('[data-slot="project-trigger"]');
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')];
-    /* Two `navMain` rows (`route.constants.ts`), which is where the sidebar's
-     * standing destinations live: `navSecondary` — and with it the `Files` row
-     * this used to read — moved into the user dropdown in `be3d0eb6e`, and
-     * `Project Library` has never been a committed label. */
+    /* The sidebar's standing destinations: `Projects`, the one `navMain` row
+     * (`route.constants.ts`), and the `More` row whose menu lists Community and
+     * the other secondary destinations (#817, 8f929d9c8d). `navSecondary` — and
+     * with it the `Files` row this used to read — moved into the user dropdown
+     * in `be3d0eb6e`, and `Project Library` has never been a committed label. */
     const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
-    const community = navButtons.find((button) => button.textContent.trim() === 'Community');
-    if (!search || !newProject || !projects || !project || !projectsNav || !community) {
+    const more = navButtons.find((button) => button.textContent.trim() === 'More');
+    if (!search || !newProject || !projects || !project || !projectsNav || !more) {
       throw new Error('Sidebar controls were not ready.');
     }
     const searchBounds = search.getBoundingClientRect();
@@ -572,7 +603,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     return {
       fontSizes: [getComputedStyle(search).fontSize, getComputedStyle(newProject).fontSize],
       heightDelta: Math.abs(searchBounds.height - newProjectBounds.height),
-      horizontalEdges: [search, newProject, project, projectsNav, community].map((element) => {
+      horizontalEdges: [search, newProject, project, projectsNav, more].map((element) => {
         const bounds = element.getBoundingClientRect();
         return [bounds.left, bounds.right];
       }),
@@ -642,7 +673,8 @@ test('project and chat rows reveal their actions over a dissolving name', async 
    * The row could not read this until `2cfd558fd` repaired the lookups above. */
   expect(closeMetrics.background).toBe(closeMetrics.tabBackground);
   expect(closeMetrics.background).not.toBe('rgba(0, 0, 0, 0)');
-  expect(closeMetrics.flex).toEqual(['1', '1', '112px', '160px']);
+  /* The 112 px floor is capped at the strip's width, so a lone tab at large text sizes still fits (#1144). */
+  expect(closeMetrics.flex).toEqual(['1', '1', 'min(112px, 100%)', '160px']);
   expect(Math.max(...closeMetrics.inset) - Math.min(...closeMetrics.inset)).toBeLessThanOrEqual(1);
   await target.hover(closeButton);
   expect(await target.evaluateLocator(closeButton, (element) => getComputedStyle(element).backgroundColor)).not.toBe(
@@ -749,14 +781,16 @@ test('revisit and reload restore the same durable view settings', async () => {
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
   await waitForCameraBridge();
+  await target.expectGeometryFramed();
 
+  await setFieldOfView(42);
   const camera = await setCamera({
     position: [43, -31, 27],
     target: [3, -4, 5],
-    fov: 42,
     zoom: 1,
     rollRadians: 0.37,
   });
+  expect(camera.requestedFov).toBe(42);
   await setSectionCuts([
     { kind: 'plane', plane: 'xz', offset: 0.022, isFlipped: true },
     { kind: 'revolution', axis: 'z', start: 23, sweep: 120 },

@@ -87,6 +87,8 @@ import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js'
 import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import { Loader } from '@taucad/ui/components/loader';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitStart } from '#hooks/use-wait-start.js';
 import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
@@ -1179,6 +1181,7 @@ function FileWorkbenchPane({
   presentation,
   shouldHandleReveal,
   onOpenFile,
+  waitSlot,
   children,
 }: {
   readonly paneId: string;
@@ -1191,6 +1194,11 @@ function FileWorkbenchPane({
   readonly presentation?: FileViewerPresentation;
   readonly shouldHandleReveal: () => boolean;
   readonly onOpenFile: (path: string, readOnly?: boolean) => void;
+  /**
+   * The pane's wait indicator, in the header's actions group as its first child (loading states UX blueprint P-i): the
+   * group is right-aligned, so the slot grows to its left and never moves the actions beside it.
+   */
+  readonly waitSlot?: ReactNode;
   readonly children: ReactNode;
 }): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
@@ -1209,6 +1217,7 @@ function FileWorkbenchPane({
 
   const actions = (
     <div className='ml-2 flex shrink-0 items-center gap-1' role='group' aria-label={`File actions for ${title}`}>
+      {waitSlot}
       {viewerActions}
       {alternateView ? (
         <PaneButton
@@ -1257,7 +1266,7 @@ function FileWorkbenchPane({
         </div>
       )}
       <div className='flex min-h-0 flex-1'>
-        <div className='min-h-0 min-w-0 flex-1'>
+        <div className='relative min-h-0 min-w-0 flex-1'>
           <EditorSymbolPathProvider onSymbolPath={setSymbolPath}>{children}</EditorSymbolPathProvider>
         </div>
         {paneState.filesOpen ? (
@@ -1475,9 +1484,15 @@ export const FileEditor = memo(function ({
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
   const availability = useProjectAvailability();
+  /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
+     the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
+     own notice instead. */
+  const isWaitingForText = availability === 'ready' && !isAwaitingLargeObject && result.kind === 'loading';
+  const textWait = useWaitStart(isWaitingForText);
+  const waitSlotRef = useRef<HTMLDivElement>(null);
   switch (result.kind) {
     case 'loading': {
-      const placeholder = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
+      const loadingLabel = `Loading ${filePath.split('/').pop() ?? filePath}`;
       const language = getEditorLanguage(filePath);
       const isSourcePane =
         language !== undefined &&
@@ -1486,9 +1501,9 @@ export const FileEditor = memo(function ({
         (!filePath.toLowerCase().endsWith('.md') || paneParameters.viewId === 'source');
       body =
         isPanelShown && isSourcePane ? (
-          <CodeEditor viewId={paneId} languageId={language} loading={placeholder} />
+          <CodeEditor viewId={paneId} languageId={language} loadingLabel={loadingLabel} />
         ) : (
-          placeholder
+          <EditorPanePlaceholder label={loadingLabel} />
         );
       break;
     }
@@ -1609,6 +1624,25 @@ export const FileEditor = memo(function ({
       onOpenFile={(path, fileReadOnly) => {
         editorRef.send({ type: 'openFile', path, source: 'user', readOnly: fileReadOnly });
       }}
+      waitSlot={
+        /* Focus lands here after Retry, which replaces the indicator's words and its button (focus never falls to the
+           page). Live only for a pane a person opened: one restored with the route open is part of its announcement. */
+        <div ref={waitSlotRef} tabIndex={-1} className='flex rounded-md outline-none focus-visible:focus-outline'>
+          <WaitIndicator
+            active={isWaitingForText}
+            label='Opening file'
+            slowLabel='Still opening file'
+            startedAt={textWait.startedAt}
+            live={textWait.isGesture}
+            variant='inline'
+            onRetry={() => {
+              textWait.restart();
+              result.retry();
+              waitSlotRef.current?.focus();
+            }}
+          />
+        </div>
+      }
     >
       <div className='flex h-full min-h-0 flex-1 flex-col' onBlur={flushPaneSave}>
         {result.observation.status === 'closed' || result.observation.status === 'error' ? (
@@ -1628,19 +1662,25 @@ export const FileEditor = memo(function ({
     return <ProjectSyncPlaceholder state={availability} />;
   }
 
+  /* Every branch renders through one component type, so the pane (its header and its wait slot) stays the same node
+     when the content arrives and the body moves from the loading branch to its viewer. */
   if (isAwaitingLargeObject) {
-    return renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> });
+    return (
+      <FilePaneContent render={(): ReactNode => renderPane({ body: <LargeObjectPendingPlaceholder name={name} /> })} />
+    );
   }
 
   if (result.kind === 'binary' || result.kind === 'text') {
     return isPanelShown ? (
-      <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />
+      <FilePaneContent render={(): ReactNode => resolvedViewer!.render({ ...viewerRequest!, renderPane })} />
     ) : (
-      renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })
+      <FilePaneContent
+        render={(): ReactNode => renderPane({ body: <EditorPanePlaceholder label={`Loading ${name}`} /> })}
+      />
     );
   }
 
-  return renderPane({ body });
+  return <FilePaneContent render={(): ReactNode => renderPane({ body })} />;
 });
 
 /** One file still downloading: the pane waits for its bytes, which replace the placeholder as they land. */
@@ -1659,16 +1699,15 @@ function LargeObjectPendingPlaceholder({ name }: { readonly name: string }): Rea
   );
 }
 
-function RoutedFileViewer({
-  viewer,
-  request,
-  renderPane,
-}: {
-  readonly viewer: ResolvedFileViewer;
-  readonly request: Omit<FileViewerRenderRequest, 'renderPane'>;
-  readonly renderPane: FileViewerRenderRequest['renderPane'];
-}): ReactNode {
-  return viewer.render({ ...request, renderPane });
+/**
+ * A file pane's content. A component boundary, as the routed viewer had, and one type for every branch of
+ * {@link FileEditor}, so React keeps the pane a viewer returns from `renderPane` when the branch changes.
+ *
+ * @param props - Renders the pane.
+ * @returns The pane.
+ */
+function FilePaneContent({ render }: { readonly render: () => ReactNode }): ReactNode {
+  return render();
 }
 
 const clampFilesWidth = (width: number): number => Math.min(maximumFilesWidth, Math.max(minimumFilesWidth, width));

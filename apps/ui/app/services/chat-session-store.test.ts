@@ -4079,6 +4079,30 @@ describe('ChatSessionStore', () => {
       expect(store.isUnread('chat_listed')).toBe(true);
     });
 
+    /* D-UI-06: a sidebar row observes its chat's log and never acquires it, so a chat the person is not in is answered
+     * from its observation: its project's record, its log's newest attention row and its receipt. */
+    it('answers unread for a chat the sidebar only observes', async () => {
+      const { store, deps } = storeInProject();
+      await deps.client.writeFile(
+        unreadPath,
+        new TextEncoder().encode(JSON.stringify({ version: 1, unread: { chat_marked: true } })),
+      );
+      // The focused chat's hook opens the project's record (`useFocusedChatReadState`).
+      store.unreadRecordRef(projectId);
+      const unobserveListed = store.observe('chat_listed', projectId);
+      const unobserveMarked = store.observe('chat_marked', projectId);
+      await vi.waitFor(() => {
+        expect(store.hasUnreadMark('chat_marked')).toBe(true);
+      });
+      expect(store.isUnread('chat_marked')).toBe(true);
+
+      ended(store, 'chat_listed', 'completed');
+
+      expect(store.isUnread('chat_listed')).toBe(true);
+      unobserveListed();
+      unobserveMarked();
+    });
+
     it('marks a run that ends while its focused view is hidden, and clears it when the person looks', async () => {
       vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
       const { store, deps } = storeInProject();
@@ -5780,6 +5804,32 @@ describe('ChatSessionStore — composer records (W7)', () => {
     });
     expect(second.store.isUnread(chatId)).toBe(false);
     second.store.release(chatId);
+  });
+
+  /* D9, PV-S8: a legacy mark on a log with no attention row is not unread once the log is read, yet the record keeps
+   * it and a fresh page answers from it until that page reads the log; viewing the chat removes it. */
+  it('keeps a legacy mark a caught-up log no longer reads as unread until the chat is viewed', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    await client.writeFile(
+      unreadPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, unread: { [chatId]: true } })),
+    );
+    const { store } = openStore(client);
+    store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(store.hasUnreadMark(chatId)).toBe(true);
+    });
+    publishLogRows(store, chatId, []);
+    expect(store.isUnread(chatId)).toBe(false);
+    expect(store.hasUnreadMark(chatId)).toBe(true);
+
+    store.markViewed(chatId);
+    expect(store.hasUnreadMark(chatId)).toBe(false);
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({ version: 1 });
+    });
+    store.release(chatId);
   });
 
   it('should keep multiple queued messages and their promoted attachments across reopen', async () => {

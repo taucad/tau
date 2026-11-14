@@ -15,7 +15,7 @@ import {
   recordPaths,
   seededChatIds,
   selectModel,
-  selectReasoningLevel,
+  selectEffort,
   sendDraft,
 } from '#support/chat-attachments.js';
 
@@ -65,15 +65,15 @@ const openChat = async (name: string): Promise<void> => {
     .toBe(true);
 };
 
-test('restores draft text and the reasoning level after a reload, and keeps the draft per chat', async () => {
+test('restores draft text and the effort after a reload, and keeps the draft per chat', async () => {
   const { projectId, chatIds } = await openSeededChats();
   const recordPath = recordPaths.chat(projectId, chatIds[0]!);
 
-  // A model that offers levels, so the sheet shows its reasoning control.
+  // A model that offers levels, so the sheet shows its Effort row (ce8c822c5e, #747: the trigger names it `effort`).
   await selectModel(imageOnlyModelName);
-  await selectReasoningLevel('Low');
+  await selectEffort('Low');
   await target.expectVisible(
-    selectors.getByRole('button', { name: `Agent and model: ${imageOnlyModelName}, reasoning Low` }),
+    selectors.getByRole('button', { name: `Agent and model: ${imageOnlyModelName}, effort Low` }),
   );
 
   const draftText = 'Draft that must survive a reload.';
@@ -87,7 +87,7 @@ test('restores draft text and the reasoning level after a reload, and keeps the 
   await target.expectContainingText(selectors.getByCss(composerSelector).first(), draftText, 30_000);
   await expect
     .poll(async () => target.getAttribute(agentTrigger(), 'aria-label'), { timeout: 30_000 })
-    .toBe(`Agent and model: ${imageOnlyModelName}, reasoning Low`);
+    .toBe(`Agent and model: ${imageOnlyModelName}, effort Low`);
 
   // The other chat has its own record: no draft.
   await openChat('Second chat');
@@ -133,31 +133,40 @@ test('restores an open message edit after a reload', async () => {
   await target.expectContainingText(editComposer, revision.trim(), 30_000);
 });
 
+/* PV-S8 (555e045667): unread is derived from the chat's log and its read receipt. A chat is unread while its newest
+ * attention row (a run that completed or failed) is not the row its receipt names, and nothing is written to say so;
+ * seeing the chat writes the receipt. A legacy mark on a chat with no attention row is no longer unread once the page
+ * has read its log, so the row makes a real finished turn in a chat the person is not looking at. */
 test('keeps unread across a reload and clears it when the chat is focused', async () => {
-  const { projectId, chatIds } = await openSeededChats();
+  const { projectId, chatIds } = await openSeededChats([
+    { text: replyText, gated: true, usage: { inputTokens: 20, outputTokens: 3 } },
+  ]);
   const secondChatId = chatIds[1]!;
+  await openChat('Second chat');
+  await sendDraft('Finish while I read the other chat.');
+  await target.expectVisible(selectors.getByText(replyText, { exact: true }).last(), 60_000);
+  await openChat('Attachments chat');
+  await target.releaseAgentHostGatewayFixture();
 
-  await expect.poll(async () => chatMark('Second chat'), { timeout: 30_000 }).toBe('unread');
+  await expect.poll(async () => chatMark('Second chat'), { timeout: 60_000 }).toBe('unread');
   await target.reload();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await expect.poll(async () => chatMark('Second chat'), { timeout: 30_000 }).toBe('unread');
-  const unreadRecord = await readHomeJson<RecordFile>(recordPaths.unread(projectId));
-  expect(unreadRecord?.unread?.[secondChatId]).toBe(true);
+  const unseenRecord = await readHomeJson<RecordFile>(recordPaths.unread(projectId));
+  expect(unseenRecord?.readThrough?.[secondChatId]).toBeUndefined();
 
   await openChat('Second chat');
   await expect.poll(async () => chatMark('Second chat'), { timeout: 30_000 }).not.toBe('unread');
-  // D8: an entry exists only while true.
+  // Seeing the chat writes its receipt, and clears the seed's legacy mark (D8: an entry exists only while true).
   await expect
     .poll(
       async () => {
         const record = await readHomeJson<RecordFile>(recordPaths.unread(projectId));
-        return record?.unread?.[secondChatId];
+        return { receipt: record?.readThrough?.[secondChatId] !== undefined, mark: record?.unread?.[secondChatId] };
       },
-      {
-        timeout: 30_000,
-      },
+      { timeout: 30_000 },
     )
-    .toBeUndefined();
+    .toEqual({ receipt: true, mark: undefined });
 
   await target.reload();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
@@ -179,15 +188,9 @@ test('marks a turn that finishes in another chat unread with the window focused,
   await target.releaseAgentHostGatewayFixture();
 
   await expect.poll(async () => chatMark('Attachments chat'), { timeout: 60_000 }).toBe('unread');
-  await expect
-    .poll(
-      async () => {
-        const record = await readHomeJson<RecordFile>(recordPaths.unread(projectId));
-        return record?.unread?.[firstChatId];
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(true);
+  // PV-S8: nothing is written to say a chat is unread; it has no receipt for the row that finished.
+  const record = await readHomeJson<RecordFile>(recordPaths.unread(projectId));
+  expect(record?.readThrough?.[firstChatId]).toBeUndefined();
 
   await target.reload();
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);

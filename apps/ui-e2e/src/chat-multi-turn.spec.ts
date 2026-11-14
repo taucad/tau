@@ -17,6 +17,15 @@
  * continued under its own run id (`chat-turn-host.tsx:313-334`), so a refused
  * turn retried is one run with two attempts, not two runs.
  *
+ * Every attempt that was placed settles `turn.finalized`, whatever its run's
+ * lifecycle says: a refused call, an abandoned run and a stop all complete with
+ * `cut: true` (`chat-run.machine.ts` `unsettled`, 1d488bdf66; RM-R13 *every
+ * completion cuts*, a3775bd976), and a held lease a new page adopts is cut too
+ * (TS-Q5). A refused attempt's settlement names no revision because it changed
+ * nothing. Only an attempt released before it was placed records `turn.failed`,
+ * and no row here reaches one — so which attempts ended badly is the run
+ * lifecycle's to say, and the attempt counts below say it.
+ *
  * Every read and gesture comes from `#support/chat-admission.js`. The sweep that
  * used to live in `zz-gesture-sweep.spec.ts` kept its own diverging copy of them
  * and stayed green through a refusal the copy had never heard of (blueprint
@@ -212,7 +221,8 @@ test('edits a turn after resuming a refused one', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await expectFinalizedTurns(chatId!, 1);
+  /* The refused attempt and its continuation each settle. */
+  await expectFinalizedTurns(chatId!, 2);
 
   await editFirstMessage(' Edited.');
 
@@ -224,7 +234,7 @@ test('edits a turn after resuming a refused one', async () => {
   await expectLogInvariant(chatId!, {
     runs: 2,
     attempts: [2, 1],
-    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized', 'turn.finalized'],
   });
 });
 
@@ -269,7 +279,7 @@ test('resumes a refused turn that follows a completed one', async () => {
   await expectLogInvariant(chatId!, {
     runs: 2,
     attempts: [1, 2],
-    settlements: ['turn.finalized', 'turn.failed', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized', 'turn.finalized'],
   });
   await expectAsksByTurn([
     ['First plain message.', 1],
@@ -285,22 +295,27 @@ test('resumes a refused turn twice', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(continueAction, 120_000);
+  /* The card can be on screen before the second attempt has settled — the
+   * first refusal's card, or the second's while its run is still finishing —
+   * and a press then reaches a run that is not yet resumable. Its settlement
+   * is what says the second refusal is over. */
+  await expectFinalizedTurns(chatId!, 2);
   await target.setAgentHostGatewayFailure();
 
   await tryAgain();
 
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  /* The third attempt is the one that settles, and the log invariant is only
+  /* The third attempt is the last to settle, and the log invariant is only
    * meaningful once it has. */
-  await expectFinalizedTurns(chatId!, 1);
+  await expectFinalizedTurns(chatId!, 3);
   await expectNoAdmissionRefusal();
   /* One run, three attempts, three settlements. The retry verb used to rewind
    * and mint a fresh run id, which paid for the refused prefix again (W7). */
   await expectLogInvariant(chatId!, {
     runs: 1,
     attempts: [3],
-    settlements: ['turn.failed', 'turn.failed', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized', 'turn.finalized'],
   });
 });
 
@@ -327,7 +342,8 @@ test('resumes, edits, then sends a new message', async () => {
   await tryAgain();
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
-  await expectFinalizedTurns(chatId!, 1);
+  /* The refused attempt and its continuation each settle. */
+  await expectFinalizedTurns(chatId!, 2);
 
   await editFirstMessage(' Edited.');
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
@@ -341,7 +357,7 @@ test('resumes, edits, then sends a new message', async () => {
   await expectLogInvariant(chatId!, {
     runs: 3,
     attempts: [2, 1, 1],
-    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized', 'turn.finalized', 'turn.finalized'],
   });
 });
 
@@ -377,9 +393,9 @@ test('queues a gesture made while a turn is dispatched', async () => {
   const [chatId] = await openChat(twoTurnScript);
   /* The turn is parked at the request's *entry* — dispatched, not one byte
    * answered — which is the only way to press a gesture while the chat sits in
-   * `run.queued.dispatched`. That child handler records the gesture and
-   * interrupts the live turn (`chat-session.machine.ts:518-520`); nothing there
-   * takes a second lease, and no row anywhere held that state before (V1(b)). */
+   * `run.queued.dispatched`. A follow-up made then waits for the live turn to
+   * finish instead of interrupting it (19d8ea9e51, #588: only Steer
+   * interrupts), so both turns complete and nothing takes a second lease. */
   await target.holdNextAgentHostGatewayRequest();
   await sendDraft('First plain message.');
   await target.waitForAgentHostGatewayGate({ kind: 'request', turn: 'First plain message.' });
@@ -398,7 +414,7 @@ test('queues a gesture made while a turn is dispatched', async () => {
     ['Second plain message.', 1],
   ]);
   await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
 });
 
 /*
@@ -406,12 +422,9 @@ test('queues a gesture made while a turn is dispatched', async () => {
  * cannot produce it, and the row that claimed to was asserting a state the
  * product never reaches.
  *
- * - Over a **dispatched** turn, a second gesture interrupts it
- *   (`chat-session.machine.ts` `queued.dispatched` → `recordGesture` +
- *   `interruptTurn`) and the chat adopts that gesture as its own turn within a
- *   moment — observed here: by the time the composer had cleared, the second
- *   message was already in the transcript under its own run, so the third
- *   gesture displaced nothing and the composer was correctly empty.
+ * - Over a **dispatched** turn, a second gesture joins the chat's saved
+ *   follow-up queue and waits for the live turn to finish (19d8ea9e51, #588),
+ *   so a third gesture queues behind it rather than displacing it.
  * - Over an **admitting** turn nothing can be typed at all: the composer's
  *   busy-lock renders it `contenteditable="false"` for the whole admission
  *   window (S01), which is what `reaches no provider while a turn is admitting`
@@ -453,9 +466,9 @@ test('edits a turn queued behind a live one', async () => {
   await target.waitForAgentHostGatewayGate({ kind: 'request', turn: 'First plain message.' });
 
   /* An edit derives its rewind point when it is *admitted*, from the transcript
-   * as it is then — and the live turn's interruption truncates that transcript
-   * in between. Clamping a missing target to index 0 leased a checkout for a
-   * rewind point that does not exist (T3-D5); refusing it is the contract. */
+   * as it is then, not when it is pressed. It waits for the live turn to finish
+   * (19d8ea9e51, #588), and clamping a missing target to index 0 leased a
+   * checkout for a rewind point that does not exist (T3-D5). */
   await editFirstMessage(' Edited.');
   await target.releaseAgentHostGatewayRequest('First plain message.');
 
@@ -465,7 +478,7 @@ test('edits a turn queued behind a live one', async () => {
     ['First plain message. Edited.', 1],
   ]);
   await expectNoAdmissionRefusal();
-  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
 });
 
 test('resumes a refused turn under its own run, rewinding nothing', async () => {
@@ -481,7 +494,7 @@ test('resumes a refused turn under its own run, rewinding nothing', async () => 
   await expectLogInvariant(chatId!, {
     runs: 1,
     attempts: [2],
-    settlements: ['turn.failed', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized'],
   });
   /* The one `history.rewound` a continuation records is the *failure marker*
    * retraction, not a turn rewind: the host drops the assistant message that
@@ -513,9 +526,10 @@ test('sends again after reloading while a turn is queued', async () => {
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   await target.releaseAgentHostGatewayRequest('First plain message.');
 
-  /* Reload killed the browser Worker. Discovery records the orphan, but the
-   * page neither re-asks the provider nor finishes the run on its own. */
-  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
+  /* Reload killed the browser Worker. Discovery records the orphan
+   * (`RUN_ABANDONED`) and the reloaded page cuts its held lease, but it neither
+   * re-asks the provider nor resumes the run on its own. */
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
   await selectModel(pdfModelName);
@@ -526,7 +540,7 @@ test('sends again after reloading while a turn is queued', async () => {
     ['First plain message.', 1],
     ['Second plain message.', 1],
   ]);
-  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.failed', 'turn.finalized'] });
+  await expectLogInvariant(chatId!, { runs: 2, settlements: ['turn.finalized', 'turn.finalized'] });
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });
 
@@ -540,7 +554,7 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await target.expectUrl(/\/$|\/\?/u, 60_000);
   await target.navigate(`${projectUrl.pathname}${projectUrl.search}`);
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
-  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.failed'], timeoutMilliseconds: 120_000 });
+  await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'], timeoutMilliseconds: 120_000 });
   await expectAsksByTurn([['First plain message.', 1]]);
 
   await target.expectVisible(continueAction, 60_000);
@@ -552,7 +566,7 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await expectLogInvariant(chatId!, {
     runs: 1,
     attempts: [2],
-    settlements: ['turn.failed', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized'],
     timeoutMilliseconds: 120_000,
   });
 
@@ -567,7 +581,7 @@ test('resumes the turn a navigation abandoned, then sends another', async () => 
   await expectLogInvariant(chatId!, {
     runs: 2,
     attempts: [2, 1],
-    settlements: ['turn.failed', 'turn.finalized', 'turn.finalized'],
+    settlements: ['turn.finalized', 'turn.finalized', 'turn.finalized'],
   });
   await expectNoAdmissionRefusal(['RUN_ABANDONED']);
 });
@@ -609,6 +623,9 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   const [chatId] = await openChat(writingTurn(reply('Reply one.', { gated: true })));
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Writing the proof.', { exact: true }).last(), 120_000);
+  /* The first call's text shows before its `create_file` runs, so a Stop there changed nothing and settles as plain
+   * Saved. The second call parks at its stream gate only after the tool has written the file. */
+  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' }, 120_000);
 
   await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
   await target.releaseAgentHostGatewayFixture();

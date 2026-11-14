@@ -2,13 +2,27 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { WatchRequest, WatchEvent, ProjectRootConfiguration } from '@taucad/filesystem';
 import { RootedFileSystemError } from '@taucad/filesystem';
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import type * as HandleStore from '#filesystem/handle-store.js';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { StrictMode, useEffect } from 'react';
-import { renderHook, render, screen, act, fireEvent, waitFor, configure, getConfig } from '@testing-library/react';
+import { StrictMode, Suspense, use, useEffect, useState } from 'react';
+import {
+  renderHook as renderHookBare,
+  render as renderBare,
+  screen,
+  act,
+  fireEvent,
+  waitFor,
+  configure,
+  getConfig,
+  cleanup,
+  within,
+} from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import type { RenderHookOptions, RenderOptions } from '@testing-library/react';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -16,6 +30,7 @@ import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
 
 const workerTestState = vi.hoisted(() => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- recursive type cannot be expressed inline
@@ -282,10 +297,66 @@ const {
   FileManagerProvider,
   HomeFileManagerProvider,
   HomeFileManagerNotice,
+  RootFileManagerProvider,
   useFileManager,
   useHomeStorageBackend,
   SharedWorkerGate,
 } = await import('#hooks/use-file-manager.js');
+const { createAppRuntime, selectRuntimeFileManagerHost, selectRuntimeFiles, selectRuntimeRootFiles } =
+  await import('#runtime/app-runtime.js');
+const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
+const { leaseGraceMilliseconds } = await import('#runtime/leases.machine.js');
+
+/*
+ * A1b: every file manager is the app runtime's, so each case renders under one. The runtime's `rootFiles` reads
+ * Home's engine only in the cases that ask for it (`readsHome`); elsewhere the read never settles, so `rootFiles`
+ * never connects a worker of its own and a case's leased provider is the only file manager running. Time is the
+ * runtime's `StepClock`: a lease's grace passes only when a case advances it.
+ */
+let testClock = new StepClock();
+/* The host's own read of Home's engine; `rootFiles`'s worker connection reads it again through the handle store. */
+const hostHomeRead = vi.fn(async () => mockGetHomeStorageBackend());
+let readsHome = false;
+let testRuntime = createAppRuntime({ clock: testClock });
+const newTestRuntime = (): ReturnType<typeof createAppRuntime> =>
+  createAppRuntime({
+    clock: testClock,
+    loadHomeBackend: async () => (readsHome ? hostHomeRead() : Promise.withResolvers<never>().promise),
+  });
+
+const newTestRuntimeWith = (options: Parameters<typeof createAppRuntime>[0]): ReturnType<typeof createAppRuntime> =>
+  createAppRuntime({
+    clock: testClock,
+    loadHomeBackend: async () => (readsHome ? hostHomeRead() : Promise.withResolvers<never>().promise),
+    ...options,
+  });
+
+beforeEach(() => {
+  testClock = new StepClock();
+  readsHome = false;
+  testRuntime = newTestRuntime();
+});
+
+afterEach(() => {
+  cleanup();
+  testRuntime.stop();
+});
+
+function TestRuntime({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <AppRuntimeProvider runtime={testRuntime}>{children}</AppRuntimeProvider>;
+}
+
+const withRuntime =
+  (Inner?: React.JSXElementConstructor<{ children: React.ReactNode }>) =>
+  ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+    <TestRuntime>{Inner === undefined ? children : <Inner>{children}</Inner>}</TestRuntime>
+  );
+
+const render = (ui: React.ReactNode, options: RenderOptions = {}) =>
+  renderBare(ui, { ...options, wrapper: withRuntime(options.wrapper) });
+
+const renderHook = <Result, Props>(callback: (props: Props) => Result, options: RenderHookOptions<Props> = {}) =>
+  renderHookBare(callback, { ...options, wrapper: withRuntime(options.wrapper) });
 
 describe('waitForFileManagerServices', () => {
   beforeEach(() => {
@@ -397,16 +468,170 @@ describe('HomeFileManagerProvider', () => {
     vi.clearAllMocks();
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    readsHome = true;
   });
 
-  it('renders useful HTML without selecting storage or starting a worker', () => {
-    const html = renderToString(
-      <HomeFileManagerProvider rootDirectory='/'>
-        <input aria-label='Project name' />
-      </HomeFileManagerProvider>,
+  const probed: Array<ReturnType<typeof useFileManager>['fileManagerRef']> = [];
+  function LeaseProbe(): React.JSX.Element {
+    probed.push(useFileManager().fileManagerRef);
+    return <span hidden />;
+  }
+
+  /* A revealed Suspense boundary that re-suspends hides the subtree but keeps it mounted: its file manager lives on
+   * however long the boundary stays hidden, as `useActorRef`'s did. */
+  it('keeps a lease while a re-suspended boundary hides it for longer than the grace', async () => {
+    const never = Promise.withResolvers<undefined>().promise;
+    const control = { suspend: (_value: boolean): void => undefined };
+    function MaySuspend(): React.JSX.Element {
+      const [suspended, setSuspended] = useState(false);
+      control.suspend = setSuspended;
+      if (suspended) {
+        use(never);
+      }
+      return <LeaseProbe />;
+    }
+    const view = render(
+      <Suspense fallback={<i>Loading</i>}>
+        <HomeFileManagerProvider rootDirectory='/projects/hidden'>
+          <MaySuspend />
+        </HomeFileManagerProvider>
+      </Suspense>,
     );
+    const shown = probed.at(-1)!;
+    expect(shown.getSnapshot().status).toBe('active');
+    await act(async () => {
+      control.suspend(true);
+    });
+    expect(screen.getByText('Loading')).toBeInTheDocument();
+    act(() => {
+      testClock.advance(leaseGraceMilliseconds * 2);
+    });
+    expect(shown.getSnapshot().status).toBe('active');
+    await act(async () => {
+      control.suspend(false);
+    });
+    expect(probed.at(-1)).toBe(shown);
+    view.unmount();
+  });
+
+  /* A render that commits after its unretained lease's grace (a transition held by a slow lazy chunk) finds the entry
+   * dropped: the mount renders again and leases a fresh file manager instead of keeping the stopped one (MC-R24). The
+   * late commit is staged by ending the grace inside the lease's render, which no real scheduler can be made to do. */
+  it('leases a fresh file manager when its render commits after the grace', async () => {
+    const view = render(<span>before</span>);
+    const files = selectRuntimeFiles(testRuntime) as { leaseFileManager: AppRuntimeFiles['leaseFileManager'] };
+    const lease = files.leaseFileManager;
+    const leased: Array<ReturnType<AppRuntimeFiles['leaseFileManager']>> = [];
+    files.leaseFileManager = (key, spec) => {
+      const entry = lease(key, spec);
+      if (leased.length === 0) {
+        testClock.advance(leaseGraceMilliseconds);
+      }
+      leased.push(entry);
+      return entry;
+    };
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      view.rerender(
+        <HomeFileManagerProvider rootDirectory='/projects/late'>
+          <LeaseProbe />
+        </HomeFileManagerProvider>,
+      );
+    } finally {
+      files.leaseFileManager = lease;
+    }
+    const late = leased[0]!;
+    expect(late.isDropped()).toBe(true);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('was retained after it was dropped'));
+    error.mockRestore();
+
+    const committed = probed.at(-1)!;
+    expect(committed).not.toBe(late.actor);
+    await waitFor(() => {
+      expect(committed.getSnapshot().value).toBe('ready');
+    });
+    view.unmount();
+  });
+
+  /* A server render and the first client render agree: the runtime is created and not started, `rootFiles` and a
+   * leased file manager both exist with their initial snapshots, and nothing reads storage or starts a worker. */
+  it('renders useful HTML without selecting storage or starting a worker', () => {
+    const before = workerTestState.instances.length;
+    const serverRuntime = newTestRuntime();
+    const page = (
+      <RootFileManagerProvider>
+        <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+          <input aria-label='Project name' />
+        </HomeFileManagerProvider>
+      </RootFileManagerProvider>
+    );
+    const html = renderToString(<AppRuntimeProvider runtime={serverRuntime}>{page}</AppRuntimeProvider>);
     expect(html).toContain('aria-label="Project name"');
     expect(mockGetHomeStorageBackend).not.toHaveBeenCalled();
+    expect(serverRuntime.getSnapshot().status).toBe('active');
+    expect(selectRuntimeRootFiles(serverRuntime).getSnapshot().value).toBe('initializing');
+    expect(workerTestState.instances).toHaveLength(before);
+
+    serverRuntime.stop();
+  });
+
+  /* The client hydrates that HTML in StrictMode: its first render reads the same unstarted snapshots, then the commit
+   * retains the lease and the runtime starts, with no mismatch and nothing created or started twice. */
+  it('hydrates the server HTML with no mismatch, and starts each file manager once', async () => {
+    const page = (
+      <StrictMode>
+        <AppRuntimeProvider runtime={testRuntime}>
+          <RootFileManagerProvider>
+            <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+              <LeaseProbe />
+              <input aria-label='Project name' />
+            </HomeFileManagerProvider>
+          </RootFileManagerProvider>
+        </AppRuntimeProvider>
+      </StrictMode>
+    );
+    const serverRuntime = newTestRuntime();
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <AppRuntimeProvider runtime={serverRuntime}>
+        <RootFileManagerProvider>
+          <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+            <LeaseProbe />
+            <input aria-label='Project name' />
+          </HomeFileManagerProvider>
+        </RootFileManagerProvider>
+      </AppRuntimeProvider>,
+    );
+    serverRuntime.stop();
+    document.body.append(container);
+    const served = within(container).getByRole('textbox', { name: 'Project name' });
+    probed.length = 0;
+    const workersBefore = workerTestState.instances.length;
+    const onRecoverableError = vi.fn();
+    const consoleError = vi.spyOn(console, 'error');
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      await act(async () => {
+        root = hydrateRoot(container, page, { onRecoverableError });
+      });
+      expect(onRecoverableError).not.toHaveBeenCalled();
+      expect(consoleError.mock.calls.flat().join(' ')).not.toMatch(/hydrat/i);
+      expect(within(container).getByRole('textbox', { name: 'Project name' })).toBe(served);
+      /* One leased actor across StrictMode's double render and remount, started once by the commit. */
+      expect(new Set(probed).size).toBe(1);
+      expect(testRuntime.getSnapshot().status).toBe('active');
+      await waitFor(() => {
+        expect(probed[0]!.getSnapshot().value).toBe('ready');
+      });
+      /* No gate here, so the lease was built before `rootFiles` had a worker: each started one, and none twice. */
+      expect(workerTestState.instances.length - workersBefore).toBe(2);
+    } finally {
+      act(() => {
+        root?.unmount();
+      });
+      container.remove();
+      consoleError.mockRestore();
+    }
   });
 
   it('preserves the page and actor identity when the pending backend resolves', async () => {
@@ -419,9 +644,9 @@ describe('HomeFileManagerProvider', () => {
       return <input aria-label='Draft' defaultValue='Keep this draft' />;
     }
     render(
-      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+      <RootFileManagerProvider>
         <Page />
-      </HomeFileManagerProvider>,
+      </RootFileManagerProvider>,
     );
     const original = screen.getByRole('textbox', { name: 'Draft' });
     await act(async () => {
@@ -431,11 +656,54 @@ describe('HomeFileManagerProvider', () => {
     expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(original);
     expect(original).toHaveValue('Keep this draft');
     expect(new Set(seen).size).toBe(1);
+    expect(seen[0]).toBe(selectRuntimeRootFiles(testRuntime));
   });
 
-  it('starts only the latest root when scope and backend resolve in the same render', async () => {
+  /* Row S17: an actor built while the backend was pending is sent `resolveInitialBackend` once, by the host. */
+  it('sends a file manager built while Home resolves its backend once, when the host resolves it', async () => {
     const selection = Promise.withResolvers<'opfs'>();
     mockGetHomeStorageBackend.mockReturnValueOnce(selection.promise);
+    const resolutions: unknown[] = [];
+    const leased: Array<ReturnType<typeof useFileManager>['fileManagerRef']> = [];
+    function Probe(): React.JSX.Element {
+      const { fileManagerRef } = useFileManager();
+      leased.push(fileManagerRef);
+      return <input aria-label='Draft' />;
+    }
+    const inspected = newTestRuntimeWith({
+      inspect: (inspection) => {
+        if (inspection.type === '@xstate.transition' && inspection.event.type === 'resolveInitialBackend') {
+          resolutions.push(inspection.event);
+        }
+      },
+    });
+    testRuntime.stop();
+    testRuntime = inspected;
+    render(
+      <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+        <Probe />
+      </HomeFileManagerProvider>,
+    );
+    const actor = leased.at(-1)!;
+    expect(actor.getSnapshot().context.backendType).toBeUndefined();
+    await act(async () => {
+      selection.resolve('opfs');
+      await selection.promise;
+    });
+    await waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+    /* One for `rootFiles`, one for the leased actor, and none later. */
+    expect(resolutions).toEqual([
+      { type: 'resolveInitialBackend', backend: 'opfs' },
+      { type: 'resolveInitialBackend', backend: 'opfs' },
+    ]);
+    expect(new Set(leased).size).toBe(1);
+  });
+
+  /* A mount that changes its root leases a fresh file manager built for that root, where it used to send `setRoot`;
+   * the old lease is released after the grace (B3). */
+  it('leases a file manager built for the latest root and releases the old one after the grace', async () => {
     const actors: Array<ReturnType<typeof useFileManager>['fileManagerRef']> = [];
     function Probe(): React.JSX.Element {
       const { fileManagerRef } = useFileManager();
@@ -448,42 +716,52 @@ describe('HomeFileManagerProvider', () => {
       </HomeFileManagerProvider>
     );
     const view = render(tree('/old'));
-    const before = workerTestState.instances.length;
-    await act(async () => {
-      selection.resolve('opfs');
-      view.rerender(tree('/latest'));
-      await selection.promise;
-    });
+    const old = actors.at(-1)!;
+    view.rerender(tree('/latest'));
+    const latest = actors.at(-1)!;
+    expect(latest).not.toBe(old);
+    expect(latest.getSnapshot().context.rootDirectory).toBe('/latest');
     await waitFor(() => {
-      expect(actors.at(-1)?.getSnapshot().value).toBe('ready');
+      expect(latest.getSnapshot().value).toBe('ready');
     });
-    expect(actors.at(-1)?.getSnapshot().context.rootDirectory).toBe('/latest');
-    expect(new Set(actors).size).toBe(1);
-    expect(workerTestState.instances).toHaveLength(before + 1);
+    expect(old.getSnapshot().status).toBe('active');
+    act(() => {
+      testClock.advance(leaseGraceMilliseconds);
+    });
+    expect(old.getSnapshot().status).toBe('stopped');
+    expect(latest.getSnapshot().status).toBe('active');
     view.unmount();
   });
 
-  it('does not start a worker after a pending Home provider unmounts', async () => {
+  it('does not start a worker after a pending Home provider unmounts and its grace passes', async () => {
     const selection = Promise.withResolvers<'opfs'>();
     mockGetHomeStorageBackend.mockReturnValueOnce(selection.promise);
     const before = workerTestState.instances.length;
     const view = render(
-      <HomeFileManagerProvider rootDirectory='/'>
+      <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
         <input aria-label='Draft' />
       </HomeFileManagerProvider>,
     );
     view.unmount();
+    act(() => {
+      testClock.advance(leaseGraceMilliseconds);
+    });
+    /* Only `rootFiles` connects once Home resolves: the released lease was stopped before it had an engine. */
     await act(async () => {
       selection.resolve('opfs');
       await selection.promise;
     });
-    expect(workerTestState.instances).toHaveLength(before);
+    await waitFor(() => {
+      expect(selectRuntimeRootFiles(testRuntime).getSnapshot().value).toBe('ready');
+    });
+    expect(workerTestState.instances).toHaveLength(before + 1);
   });
 
+  /* Row S37: the backend failing, the notice offering a retry, and resolving after `retry`. */
   it('keeps a draft available and retries a failed Home selection without choosing another engine', async () => {
     mockGetHomeStorageBackend.mockRejectedValueOnce(new Error('Pin could not be read')).mockResolvedValue('opfs');
     render(
-      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+      <RootFileManagerProvider>
         <main>
           <HomeFileManagerNotice />
           <input aria-label='Draft' defaultValue='Keep this draft' />
@@ -491,34 +769,78 @@ describe('HomeFileManagerProvider', () => {
         <SharedWorkerGate shouldReportFailure={false}>
           <span>files ready</span>
         </SharedWorkerGate>
-      </HomeFileManagerProvider>,
+      </RootFileManagerProvider>,
     );
     const original = screen.getByRole('textbox', { name: 'Draft' });
     expect(await screen.findByRole('alert', { name: "Couldn't open Home" })).toBeInTheDocument();
     expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(selectRuntimeFileManagerHost(testRuntime).getSnapshot().value).toBe('failed');
+    expect(selectRuntimeRootFiles(testRuntime).getSnapshot().context.backendType).toBeUndefined();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
+    expect(await screen.findByText('files ready')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(original);
     expect(original).toHaveValue('Keep this draft');
-    expect(mockGetHomeStorageBackend).toHaveBeenCalledTimes(2);
+    expect(hostHomeRead).toHaveBeenCalledTimes(2);
+    expect(selectRuntimeRootFiles(testRuntime).getSnapshot().context.backendType).toBe('opfs');
   });
 
   it('resolves Home once and shares the selected engine with nested mounts', async () => {
     const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
-      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+      <RootFileManagerProvider>
         <HomeFileManagerProvider rootDirectory='/nested' shouldInitializeOnStart={false}>
           {children}
         </HomeFileManagerProvider>
-      </HomeFileManagerProvider>
+      </RootFileManagerProvider>
     );
-    const { result } = renderHook(() => useHomeStorageBackend(), { wrapper });
+    const { result } = renderHook(() => ({ backend: useHomeStorageBackend(), manager: useFileManager() }), {
+      wrapper,
+    });
 
     await vi.waitFor(() => {
-      expect(result.current).toBe('opfs');
+      expect(result.current.backend).toBe('opfs');
     });
-    expect(mockGetHomeStorageBackend).toHaveBeenCalledOnce();
+    expect(hostHomeRead).toHaveBeenCalledOnce();
+    expect(result.current.manager.fileManagerRef.getSnapshot().context.backendType).toBe('opfs');
+  });
+
+  /* A StrictMode render creates and starts nothing twice: one lease, one actor, started once, kept across the
+   * simulated remount, and released only after the grace once the mount is gone. */
+  it('keeps one lease across a StrictMode remount and releases it after the grace', async () => {
+    const actors = new Set<unknown>();
+    function Probe(): React.JSX.Element {
+      actors.add(useFileManager().fileManagerRef);
+      return <span>leased</span>;
+    }
+    const before = workerTestState.instances.length;
+    const view = render(
+      <StrictMode>
+        <RootFileManagerProvider>
+          <HomeFileManagerProvider rootDirectory='/projects/p1' projectId='p1'>
+            <Probe />
+          </HomeFileManagerProvider>
+        </RootFileManagerProvider>
+      </StrictMode>,
+    );
+    expect(actors.size).toBe(1);
+    const [actor] = [...actors] as Array<ReturnType<typeof useFileManager>['fileManagerRef']>;
+    await waitFor(() => {
+      expect(actor!.getSnapshot().value).toBe('ready');
+    });
+    /* `rootFiles` and the leased file manager: one worker each, since the lease was built before the root's. */
+    expect(workerTestState.instances).toHaveLength(before + 2);
+    act(() => {
+      testClock.advance(leaseGraceMilliseconds);
+    });
+    expect(actor!.getSnapshot().status).toBe('active');
+    view.unmount();
+    expect(actor!.getSnapshot().status).toBe('active');
+    act(() => {
+      testClock.advance(leaseGraceMilliseconds);
+    });
+    expect(actor!.getSnapshot().status).toBe('stopped');
   });
 });
 
@@ -530,6 +852,7 @@ describe('SharedWorkerGate', () => {
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockGetHomeStorageBackend.mockResolvedValue('opfs');
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    readsHome = true;
   });
 
   /* R7: a machine that gave up used to leave the gate's whole subtree blank. */
@@ -537,11 +860,11 @@ describe('SharedWorkerGate', () => {
     mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
 
     render(
-      <HomeFileManagerProvider rootDirectory='/'>
+      <RootFileManagerProvider>
         <SharedWorkerGate>
           <div>subtree</div>
         </SharedWorkerGate>
-      </HomeFileManagerProvider>,
+      </RootFileManagerProvider>,
     );
 
     await vi.waitFor(() => {
@@ -557,11 +880,11 @@ describe('SharedWorkerGate', () => {
     mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
 
     render(
-      <HomeFileManagerProvider rootDirectory='/'>
+      <RootFileManagerProvider>
         <SharedWorkerGate withShellFrame>
           <div>subtree</div>
         </SharedWorkerGate>
-      </HomeFileManagerProvider>,
+      </RootFileManagerProvider>,
     );
 
     const notice = await screen.findByRole('alert');
@@ -574,11 +897,11 @@ describe('SharedWorkerGate', () => {
     mockWaitForWorkerReady.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
 
     render(
-      <HomeFileManagerProvider rootDirectory='/'>
+      <RootFileManagerProvider>
         <SharedWorkerGate placeholder={<div>opening</div>}>
           <div>subtree</div>
         </SharedWorkerGate>
-      </HomeFileManagerProvider>,
+      </RootFileManagerProvider>,
     );
 
     expect(await screen.findByText('opening')).toBeInTheDocument();
@@ -590,9 +913,9 @@ describe('SharedWorkerGate', () => {
     mockGetHomeStorageBackend.mockReturnValueOnce(Promise.withResolvers<'indexeddb' | 'opfs'>().promise);
 
     render(
-      <HomeFileManagerProvider rootDirectory='/'>
+      <RootFileManagerProvider>
         <div>subtree</div>
-      </HomeFileManagerProvider>,
+      </RootFileManagerProvider>,
     );
 
     expect(screen.getByText('subtree')).toBeInTheDocument();
@@ -662,7 +985,10 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
   /* RV1-F1 (W6.r1 round 3): a restart replaces the root mount's worker, so each open agent project host is re-brokered
    * onto the new one, once. */
   it('should re-broker agent project hosts when the file manager restarts its worker', async () => {
-    const { result } = renderProvider('proj-restart');
+    /* The root mount is the runtime's `rootFiles` (A1b), on Home's engine. */
+    readsHome = true;
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    const { result } = renderHook(() => useFileManager(), { wrapper: RootFileManagerProvider });
     await vi.waitFor(() => {
       expect(result.current.contentService).toBeDefined();
     });

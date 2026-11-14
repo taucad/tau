@@ -29,8 +29,8 @@ type Layout = Readonly<{
  * height in one step, but the sheet (and its grabber) slides there over a transition, so a box read mid-slide is not
  * the detent's.
  */
-const sheetSettled = async (grabber: Locator): Promise<void> =>
-  target.evaluateLocator(grabber, async (handle) => {
+const sheetSettled = async (inside: Locator): Promise<void> =>
+  target.evaluateLocator(inside, async (handle) => {
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -40,7 +40,7 @@ const sheetSettled = async (grabber: Locator): Promise<void> =>
     });
     const sheet = handle.closest('[data-slot=drawer-content]');
     if (!sheet) {
-      throw new Error('The grabber is not inside the sheet.');
+      throw new Error('The element is not inside a sheet.');
     }
     // A cancelled transition has settled too: a newer one replaced it or the sheet stopped moving.
     await Promise.all(sheet.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
@@ -132,6 +132,43 @@ test.each([
   expect(layout.group.left).toBeGreaterThanOrEqual(layout.frame.left);
   expect(layout.group.right).toBeLessThanOrEqual(layout.frame.right);
   expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+});
+
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])('opens Viewer settings as a whole bottom drawer with its sub-views at $width×$height', async (viewport) => {
+  await openStage(viewport);
+  await target.click(controls().getByRole('button', { name: 'Viewer settings' }), { touch: true });
+  // On a phone the settings are the responsive menu's drawer, never a menu clipped behind the bar.
+  const drawer = selectors.getByRole('dialog', { name: 'Viewer settings' });
+  await target.expectVisible(drawer);
+  await target.expectCount(selectors.getByRole('menu'), 0);
+  // The drawer slides up from below the screen, so its box is the detent's only once the slide ends.
+  await sheetSettled(drawer);
+  const box = await target.boundingBox(drawer);
+  if (!box) {
+    throw new Error('The settings drawer has no layout box.');
+  }
+  expect(box.x).toBeGreaterThanOrEqual(-0.5);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 0.5);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
+
+  // Grid & units opens in the same drawer under a Back row, and Back returns to the settings.
+  await target.click(drawer.getByRole('button', { name: /^Grid & units, /u }), { touch: true });
+  await target.expectVisible(drawer.getByRole('group', { name: 'Grid & units' }));
+  await target.click(drawer.getByRole('button', { name: 'Back to Viewer settings' }), { touch: true });
+  await target.expectVisible(drawer.getByRole('switch', { name: 'Grid', exact: true }));
+  // The modal drawer hides the stage from the accessibility tree, so the page's overflow is read through the drawer.
+  const pageOverflow = await target.evaluateLocator(
+    drawer,
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(pageOverflow).toBeLessThanOrEqual(0);
+
+  await target.click(drawer.getByRole('button', { name: 'Close' }), { touch: true });
+  await target.expectCount(drawer, 0);
 });
 
 test.each([

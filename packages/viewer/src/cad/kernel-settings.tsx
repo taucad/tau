@@ -339,11 +339,11 @@ export function KernelSettings({
   const valueAt = (path: readonly string[]): unknown => readPath(values, path) ?? readPath(defaults, path);
   const renderNumber = (
     field: NumberField,
-    row: Readonly<{ value: unknown; onValue: (next: number) => void; className?: string }>,
+    row: Readonly<{ value: unknown; onValue: (next: number) => void; isInset?: boolean }>,
   ): React.JSX.Element => (
     <DropdownMenuSliderItem
       key={field.path.join('.')}
-      className={row.className}
+      isInset={row.isInset}
       value={Number(row.value ?? field.shown)}
       min={field.min}
       max={field.max}
@@ -439,7 +439,7 @@ export function KernelSettings({
                   replace({ ...explicit, [leaf]: next });
                 },
                 // The explicit values belong to Custom: their labels start where the radio labels do.
-                className: 'pl-8',
+                isInset: true,
               });
             })
           : undefined}

@@ -189,26 +189,48 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
     expect(terminalGitAccess('win32')).toBe('read');
   });
 
-  it('should leave a writable store open except every spelling of the names through which git runs a program', async () => {
+  it('should leave a writable store open except every spelling of the names through which git runs a program or follows another address', async () => {
     await mkdir(join(checkout, '.git', 'hooks'), { recursive: true });
     await mkdir(join(checkout, 'vendor', 'lib', '.git', 'Hooks'), { recursive: true });
     const terminal = await terminalPlan('write');
     const store = join(checkout, '.git');
     const nested = join(checkout, 'vendor', 'lib', '.git');
-    const executable = (directory: string): string[] => [
-      join(directory, 'config'),
-      join(directory, '[cC][oO][nN][fF][iI][gG]'),
-      join(directory, 'hooks'),
-      join(directory, '[hH][oO][oO][kK][sS]'),
-      join(directory, 'commondir'),
-      join(directory, '[cC][oO][mM][mM][oO][nN][dD][iI][rR]'),
-      join(directory, 'config.worktree'),
-      join(directory, '[cC][oO][nN][fF][iI][gG].[wW][oO][rR][kK][tT][rR][eE][eE]'),
-      join(directory, 'worktrees'),
-      join(directory, '[wW][oO][rR][kK][tT][rR][eE][eE][sS]'),
-      join(directory, 'modules'),
-      join(directory, '[mM][oO][dD][uU][lL][eE][sS]'),
-    ];
+    /*
+     * Each policy name, its ASCII caseless glob, and a glob for every way of writing its `s`, `k` and `fi` with the
+     * character a case-folding volume reads as them: U+017F, U+212A and U+FB01, each outside any bracket.
+     */
+    const executable = (directory: string): string[] =>
+      [
+        'config',
+        '[cC][oO][nN][fF][iI][gG]',
+        '[cC][oO][nN]\uFB01[gG]',
+        'hooks',
+        '[hH][oO][oO][kK][sS]',
+        '[hH][oO][oO][kK]\u017F',
+        '[hH][oO][oO]\u212A[sS]',
+        '[hH][oO][oO]\u212A\u017F',
+        'commondir',
+        '[cC][oO][mM][mM][oO][nN][dD][iI][rR]',
+        'config.worktree',
+        '[cC][oO][nN][fF][iI][gG].[wW][oO][rR][kK][tT][rR][eE][eE]',
+        '[cC][oO][nN][fF][iI][gG].[wW][oO][rR]\u212A[tT][rR][eE][eE]',
+        '[cC][oO][nN]\uFB01[gG].[wW][oO][rR][kK][tT][rR][eE][eE]',
+        '[cC][oO][nN]\uFB01[gG].[wW][oO][rR]\u212A[tT][rR][eE][eE]',
+        'worktrees',
+        '[wW][oO][rR][kK][tT][rR][eE][eE][sS]',
+        '[wW][oO][rR][kK][tT][rR][eE][eE]\u017F',
+        '[wW][oO][rR]\u212A[tT][rR][eE][eE][sS]',
+        '[wW][oO][rR]\u212A[tT][rR][eE][eE]\u017F',
+        'modules',
+        '[mM][oO][dD][uU][lL][eE][sS]',
+        '[mM][oO][dD][uU][lL][eE]\u017F',
+        'remotes',
+        '[rR][eE][mM][oO][tT][eE][sS]',
+        '[rR][eE][mM][oO][tT][eE]\u017F',
+        'branches',
+        '[bB][rR][aA][nN][cC][hH][eE][sS]',
+        '[bB][rR][aA][nN][cC][hH][eE]\u017F',
+      ].map((name) => join(directory, name));
 
     expect(terminal.denied.filter((path) => within(host.platform, path, store))).toStrictEqual([]);
     expect(terminal.denied.filter((path) => within(host.platform, path, nested))).toStrictEqual([]);
@@ -227,10 +249,26 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
         join(store, 'hooks'),
         join(store, 'worktrees'),
         join(store, 'modules'),
+        join(store, 'remotes'),
+        join(store, 'branches'),
+        join(store, '[rR][eE][mM][oO][tT][eE]\u017F'),
         join(nested, 'Hooks'),
       ]),
     );
-    for (const path of ['objects', 'refs', 'index', 'HEAD', 'logs', 'lfs', 'MERGE_HEAD', 'config.lock', 'info']) {
+    expect(terminal.directories).not.toContain(join(store, 'config'));
+    for (const path of [
+      'objects',
+      'refs',
+      'index',
+      'HEAD',
+      'logs',
+      'lfs',
+      'MERGE_HEAD',
+      'config.lock',
+      'info',
+      'rebase-merge',
+      'sequencer',
+    ]) {
       expect(terminal.readOnly, path).not.toContain(join(store, path));
     }
     /* Every other control path stays denied, as for a read-only store. */
@@ -244,6 +282,30 @@ describe('projectProtected for the Terminal, which reads the real git store', ()
 
     const agent = await plan();
     expect(agent.denied).toStrictEqual(expect.arrayContaining([store, nested]));
+  });
+
+  it('should keep an existing entry that a case-folding volume reads as a policy name read-only under its own spelling', async () => {
+    const store = join(checkout, '.git');
+    /* `remote` + U+017F and `ho` + `o` + U+212A + `s`: each folds onto a policy name, so git outside finds it. */
+    for (const name of ['remote\u017F', 'hoo\u212As']) {
+      // oxlint-disable-next-line no-await-in-loop -- fixture setup.
+      await mkdir(join(store, name));
+    }
+    await writeFile(join(store, 'con\uFB01g.worktree'), '');
+    /* Names that fold onto nothing in the policy stay writable. */
+    await mkdir(join(store, 'remote'));
+    await writeFile(join(store, 'configs'), '');
+    const terminal = await terminalPlan('write');
+
+    for (const name of ['remote\u017F', 'hoo\u212As', 'con\uFB01g.worktree']) {
+      expect(terminal.readOnly, name).toContain(join(store, name));
+    }
+    expect(terminal.directories).toStrictEqual(
+      expect.arrayContaining([join(store, 'remote\u017F'), join(store, 'hoo\u212As')]),
+    );
+    for (const name of ['remote', 'configs']) {
+      expect(terminal.readOnly, name).not.toContain(join(store, name));
+    }
   });
 
   it('should keep a .git pointer file, an absent .git and a store whose path reads as a glob read-only whole', async () => {

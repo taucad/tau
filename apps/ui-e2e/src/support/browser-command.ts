@@ -1362,8 +1362,23 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
     const body = request.postDataBuffer();
     if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
       const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
-      const payload: unknown = JSON.parse(decoded);
-      const events: unknown[] = Array.isArray(payload) ? (payload as unknown[]) : [payload];
+      /* The PostHog client also posts form bodies (`data=<base64 JSON>`, `compression=base64`), notably from `sendBeacon` on unload. */
+      const formData = decoded.startsWith('data=') ? new URLSearchParams(decoded).get('data') : null;
+      const json = formData === null ? decoded : Buffer.from(formData, 'base64').toString('utf8');
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(json);
+      } catch {
+        // A body this fixture cannot read records no event; throwing here would reject the route handler and fail the suite.
+      }
+      /* PostHog posts one event, an array of them, or a batch envelope (`{ api_key, batch: [...] }`). */
+      const events: unknown[] = Array.isArray(payload)
+        ? (payload as unknown[])
+        : payload !== null && typeof payload === 'object' && 'batch' in payload && Array.isArray(payload.batch)
+          ? (payload.batch as unknown[])
+          : payload === null
+            ? []
+            : [payload];
       for (const event of events) {
         if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
           const compressed: string[] = [];
@@ -2186,11 +2201,97 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
   });
 };
 
+/** Each target context's requests that `uiDelayTargetRequests` held, by URL, in the order they were held. */
+const delayedTargetRequests = new WeakMap<object, string[]>();
+
+/**
+ * Holds every request of the target context whose URL matches `pattern` for `milliseconds` before it goes on
+ * (A0.10: a slow chunk). Routing turns the context's HTTP cache off, so a reload fetches the chunk again and is held.
+ * The delay stays for the rest of the session.
+ */
+export const uiDelayTargetRequests: BrowserCommand<[pattern: string, milliseconds: number]> = async (
+  commandContext,
+  pattern,
+  milliseconds,
+) => {
+  const session = sessionFor(commandContext);
+  const held = delayedTargetRequests.get(session.context) ?? [];
+  delayedTargetRequests.set(session.context, held);
+  await session.context.route(new RegExp(pattern, 'u'), async (route) => {
+    held.push(route.request().url());
+    await new Promise((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
+    await route.fallback();
+  });
+};
+
+/** The URLs `uiDelayTargetRequests` held in the target context so far. */
+export const uiReadDelayedTargetRequests: BrowserCommand = async (commandContext) =>
+  delayedTargetRequests.get(sessionFor(commandContext).context) ?? [];
+
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
 export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
   const session = sessionFor(commandContext);
   session.offline = offline;
   await session.context.setOffline(offline);
+};
+
+/** What a load whose document was held on the network saw (U24, cloud-load row K-f); times from the navigation's origin. */
+export type TargetStalledDocumentLoad = {
+  /** Requests for the document the route held, the service worker's own fetch included. */
+  readonly stalledRequests: number;
+  readonly firstContentfulPaint: number;
+  readonly responseStart: number;
+};
+
+/**
+ * Open `path` on the primary page while every request for that document is held `stall` ms before it goes on to
+ * the server (U24, K-f). Chromium routes a service worker's own fetches through the context, so an installed
+ * offline shell's network-first fetch is held too. Waits for the first contentful paint, however late, so a stall
+ * the page cannot beat is read as a paint time, never as a navigation timeout.
+ */
+export const uiOpenWithStalledDocument: BrowserCommand<
+  [path: string, stall: number],
+  TargetStalledDocumentLoad
+> = async (commandContext, path, stall) => {
+  const session = sessionFor(commandContext);
+  const url = new URL(path, testBaseURL);
+  let stalledRequests = 0;
+  const matches = (candidate: URL): boolean =>
+    candidate.origin === url.origin &&
+    (candidate.pathname === url.pathname || candidate.pathname === `${url.pathname}/`);
+  const hold = async (route: Parameters<Parameters<ProviderContext['route']>[1]>[0]): Promise<void> => {
+    stalledRequests += 1;
+    await new Promise((resolve) => {
+      setTimeout(resolve, stall);
+    });
+    /* The page may be gone by now: a late answer nobody waits for is dropped. */
+    await route.fallback().catch(() => undefined);
+  };
+  await session.context.route(matches, hold);
+  try {
+    const timeout = stall + 30_000;
+    await session.primary.goto(url.href, { waitUntil: 'commit', timeout });
+    const timing = await session.primary.waitForFunction(
+      () => {
+        const [paint] = performance.getEntriesByName('first-contentful-paint');
+        const [navigation] = performance.getEntriesByType('navigation') as PerformanceNavigationTiming[];
+        return paint !== undefined && navigation !== undefined
+          ? { firstContentfulPaint: paint.startTime, responseStart: navigation.responseStart }
+          : false;
+      },
+      undefined,
+      { timeout },
+    );
+    const { firstContentfulPaint, responseStart } = (await timing.jsonValue()) as Omit<
+      TargetStalledDocumentLoad,
+      'stalledRequests'
+    >;
+    return { stalledRequests, firstContentfulPaint, responseStart };
+  } finally {
+    await session.context.unroute(matches, hold);
+  }
 };
 
 /**
@@ -3718,6 +3819,8 @@ export const uiBrowserCommands = {
   uiReadTarget,
   uiReadAgentHostGatewayRequests,
   uiReadTauVertexOperations,
+  uiDelayTargetRequests,
+  uiReadDelayedTargetRequests,
   uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,
@@ -3725,6 +3828,7 @@ export const uiBrowserCommands = {
   uiSampleCameraDuringClick,
   uiScrollTarget,
   uiSetTargetOffline,
+  uiOpenWithStalledDocument,
   uiSetViewport,
   uiStartHostFixture,
   uiStartLinkedGithubFixture,

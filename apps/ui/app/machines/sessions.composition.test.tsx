@@ -218,13 +218,11 @@ workerRef.current = mock<Worker>({
   },
 });
 
-/* The provider mirrors the app's shared worker into the store; in jsdom there
- * is no `SharedWorkerContext`, so the one hook it reads is the seam to stand
- * in for. Compute admission is then the real path, on a recording worker. */
+/* The registry reads the shared worker through its composition, as the runtime gives it the file-manager host's; the
+ * rows hand it this recording worker, so compute admission is the real path. */
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useSharedFileManagerWorker: () => workerRef.current,
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   /* This subtree *is* the project's resources: mounted means they exist. */
   HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
@@ -502,7 +500,7 @@ const openChatRoot = (projectId: string, chatId: string) => {
 };
 
 /** The registry the rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor().start();
+const sessionsActor = createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
 const emitted: SessionsMachineEmitted[] = [];
 
@@ -1597,6 +1595,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     const root: { current: ReturnType<typeof createSessionsActor> | undefined } = { current: undefined };
     /* A child never sends `close` to the registry, so a `close` the root processes came from the app. */
     const actor = createSessionsActor({
+      sharedWorker: () => workerRef.current,
       inspect: (inspection) => {
         if (
           inspection.type === '@xstate.transition' &&
@@ -1750,7 +1749,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
 
     expect(liveOn(registry)).toEqual(['one-running-a']);
     expect(registry.budgetRefusals).toEqual(['one-running-b']);
-    expect(registry.actor.getSnapshot().context.pendingOpen).toBe('one-running-b');
+    expect(registry.actor.getSnapshot().context.pendingOpen?.projectId).toBe('one-running-b');
     expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
     expect(registry.received).not.toContain('close');
   });
@@ -1830,7 +1829,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
       vi.resetModules();
       const freshSessions = await import('#hooks/use-sessions.js');
       const freshStore = await import('#services/sessions-store.js');
-      const freshActor = freshStore.createSessionsActor().start();
+      const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
       const view = render(
         <QueryClientProvider client={queryClient}>
           <freshSessions.SessionsProvider actor={freshActor}>
@@ -1903,7 +1902,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor().start();
+    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
     const view = render(
       <QueryClientProvider client={queryClient}>
@@ -2001,7 +2000,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor().start();
+    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
 
     const view = render(
       <QueryClientProvider client={queryClient}>
@@ -2082,7 +2081,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.resetModules();
     const freshSessions = await import('#hooks/use-sessions.js');
     const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor().start();
+    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
     const view = render(
       <QueryClientProvider client={queryClient}>
         <freshSessions.SessionsProvider actor={freshActor}>

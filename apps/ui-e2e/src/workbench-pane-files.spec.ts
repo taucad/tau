@@ -33,6 +33,8 @@ const readCommandInputVisualState = async (input: Locator) =>
 
 /** A drawer is a touch surface: its filter field takes the 40px touch row height (`--spacing-touch-row`). */
 const touchRowHeight = 40;
+/** A popover's filter field sits 4px in; a drawer moves it to the drawer's 16px edge (`drawer-command-rows`, #1223). */
+const fieldInset = { menu: 4, drawer: 16 } as const;
 
 const expectModernCommandInput = async (input: Locator, surface: 'menu' | 'drawer' = 'menu'): Promise<void> => {
   await target.expectVisible(input);
@@ -45,7 +47,7 @@ const expectModernCommandInput = async (input: Locator, surface: 'menu' | 'drawe
   }
   expect(state.borderRadius).toBeGreaterThan(0);
   expect(state.borderLeftWidth).toBe(1);
-  expect(state.leftInset).toBe(4);
+  expect(state.leftInset).toBe(fieldInset[surface]);
   expect(state.leftInset).toBeCloseTo(state.rightInset, 1);
   expect(state.wrapperBottomBorderWidth).toBe(0);
 };
@@ -185,7 +187,15 @@ test('should own Files and Markdown views independently in each Workbench pane',
   await target.reload();
   await target.expectVisible(packageRegion, 60_000);
   // The layout record keeps file tabs with their Files state; a placeholder pane returns as its launcher (B3).
-  const restoredLauncher = selectors.getByCss('.dv-groupview:has(.dv-tab[aria-label="New tab"])');
+  // Launchers are window-local, so the window's own launcher stays as a trailing tab in the first group (#1386).
+  await target.expectCount(
+    selectors.getByCss('.dv-groupview:has(.dv-tab[aria-label="package.json"]) .dv-tab[aria-label="New tab"]'),
+    1,
+    60_000,
+  );
+  const restoredLauncher = selectors.getByCss(
+    '.dv-groupview:has(.dv-tab[aria-label="New tab"]):not(:has(.dv-tab[aria-label="package.json"]))',
+  );
   await target.expectCount(restoredLauncher, 1, 60_000);
   await target.expectCount(openFileRegion, 0);
   await target.click(restoredLauncher.getByRole('button', { name: /^Files/u }));

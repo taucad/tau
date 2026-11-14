@@ -88,12 +88,23 @@ export class ProviderStreamFacts {
   private firstText: number | undefined;
   private oversized = false;
   private sink: FrameSink | undefined;
+  private provider: string | undefined;
 
   public constructor(
     private readonly wire: ModelProviderWire,
     private readonly startedAt: number,
     private readonly clock: () => number = performance.now.bind(performance),
   ) {}
+
+  /**
+   * Name the supplier the gateway routed to, which decides how thinking is counted on the completions wire: Vertex
+   * bills it on top of `completion_tokens`, every other supplier inside it.
+   *
+   * @param provider - The routed supplier's id, such as `vertexai`.
+   */
+  public routedTo(provider: string): void {
+    this.provider = provider;
+  }
 
   /**
    * Hand every parsed data frame from here on to a content capture as well. Without one, only the frames that can
@@ -269,9 +280,12 @@ export class ProviderStreamFacts {
     if (usage !== undefined && usage !== null) {
       const cached = count(field(usage, 'prompt_tokens_details', 'cached_tokens'));
       this.usage.input = uncached(count(field(usage, 'prompt_tokens')), cached);
-      this.usage.output = count(field(usage, 'completion_tokens'));
+      const output = count(field(usage, 'completion_tokens'));
+      const reasoning = count(field(usage, 'completion_tokens_details', 'reasoning_tokens'));
+      /* Vertex bills thinking on top of `completion_tokens`; the ledger adds it the same way (`billable-model-evidence.ts`). */
+      this.usage.output = this.provider === 'vertexai' && output !== null ? output + (reasoning ?? 0) : output;
       this.usage.cacheRead = cached;
-      this.usage.reasoning = count(field(usage, 'completion_tokens_details', 'reasoning_tokens'));
+      this.usage.reasoning = reasoning;
     }
   }
 }

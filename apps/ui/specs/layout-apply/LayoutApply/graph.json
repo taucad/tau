@@ -54,11 +54,11 @@
       { "applications": [1], "applyUnt": true, "recUnt": true }
     ],
     [
-      [{ "state": "applied", "target": "viewer" }],
-      [{ "state": "queued", "target": "viewer" }],
-      [{ "state": "routeChanged", "target": "viewer" }],
-      [{ "state": "unavailable", "target": "viewer" }],
-      [{ "state": "unsent", "target": "viewer" }]
+      [{ "kind": "file", "state": "applied", "target": "viewer" }],
+      [{ "kind": "file", "state": "queued", "target": "viewer" }],
+      [{ "kind": "file", "state": "routeChanged", "target": "viewer" }],
+      [{ "kind": "file", "state": "unavailable", "target": "viewer" }],
+      [{ "kind": "file", "state": "unsent", "target": "viewer" }]
     ],
     [
       {

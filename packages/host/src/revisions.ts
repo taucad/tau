@@ -65,6 +65,7 @@ import {
   publishOverHttp,
   readRemoteStorageOverHttp,
   registerProjectOverHttp,
+  registrationOrigin,
   RevisionPortError,
   tauRemoteUrl,
   watchRevisionStream,
@@ -723,12 +724,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
             if (credential === undefined) {
               throw new Error('This host is not signed in to Tau Cloud.');
             }
+            /* B4c: a GitHub-linked project says so, as the browser's registration does (K4). */
             await registerProjectOverHttp(
               apiBaseUrl,
               { kind: 'bearer', authorization: credential.authorization },
               {
                 id,
                 name: readManifestField(options.workspaceRoot, 'name'),
+                ...registrationOrigin(await port.listRemotes()),
               },
             );
           },
@@ -1583,6 +1586,15 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'undoOperation':
         actor.getSnapshot().children.restore?.send({ type: request.command });
         break;
+      /* The *Merged* toast's *Undo*, as the browser worker routes it: a new entry with `before`'s files, while the
+       * merge is still the head (I11). */
+      case 'undoMerge':
+        actor.getSnapshot().children.restore?.send({
+          type: 'undoMerge',
+          revisionId: text('revisionId'),
+          before: text('before'),
+        });
+        break;
       case 'switch':
         actor.send({ type: 'switch', requestId: requestIdOf(request), branch: text('branch') });
         break;
@@ -1982,22 +1994,30 @@ export type RevisionPublishOutcome =
 
 /** What a `save` did, or why it did not (C16, W15). @public */
 export type RevisionSaveOutcome =
-  | Readonly<{
+  | (Readonly<{
       status: 'saved';
       revisionId: string;
       /** Where the files are now, in the pane's words: `main`. */
       line: string;
-      /**
-       * How the push that followed ended; `noRemote` when this project backs up
-       * nowhere. A hung push ends at the scheduler's own deadline (A12).
-       */
-      backup: SyncPushOutcome | 'noRemote';
-      /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
-      reason?: string;
-    }>
+    }> &
+      RevisionBackupOutcome)
   /** The files already are the head's revision, or a turn is recording them. */
   | Readonly<{ status: 'unchanged'; line: string }>
   | Readonly<{ status: 'refused'; reason: string }>;
+
+/** How the push after a recorded write ended, as `save` and `tag` answer it. @public */
+export type RevisionBackupOutcome = Readonly<{
+  /**
+   * How the push that followed ended; `noRemote` when this project backs up
+   * nowhere. A hung push ends at the scheduler's own deadline (A12).
+   */
+  backup: SyncPushOutcome | 'noRemote';
+  /** The scheduler's own sentence, when `backup` is neither `backedUp` nor `noRemote`. */
+  reason?: string;
+}>;
+
+/** What a `tag` made, and how its push ended (B6, K1). @public */
+export type RevisionTagOutcome = Readonly<{ tag: RevisionTag }> & RevisionBackupOutcome;
 
 /** What an `openFromRemote` did, or why it did not (W18 DEF-2). @public */
 export type RevisionOpenOutcome =
@@ -2022,8 +2042,15 @@ export type ProjectRevisionVerbs = {
   switchTo(branch: string): Promise<RevisionSwitchOutcome>;
   /** Remove one branch's linked checkout, refusing while it holds unsaved work. */
   discard(branch: string): Promise<RevisionDiscardOutcome>;
-  /** Make a version of one revision, or rename the version `number` names (B6). */
-  tag(input: Omit<CreateRevisionTagInput, 'revisionId'> & { readonly revisionId: string }): Promise<RevisionTag>;
+  /**
+   * Make a version of one revision, or rename the version `number` names (B6), and back it up.
+   *
+   * The tag names who made it as a save does, and is pushed at once, like `save`'s
+   * entry, because a terminal verb does not outlive the window (K1).
+   */
+  tag(
+    input: Omit<CreateRevisionTagInput, 'revisionId' | 'actor'> & { readonly revisionId: string },
+  ): Promise<RevisionTagOutcome>;
   /**
    * Record the live files as a revision and back it up: the pane's *Save* (C16).
    *
@@ -2129,12 +2156,14 @@ export const openProjectRevisions = async (
     apiBaseUrl === undefined || apiToken === undefined
       ? undefined
       : async (id: string) => {
+          /* B4c: a GitHub-linked project says so, as the browser's registration does (K4). */
           await registerProjectOverHttp(
             apiBaseUrl,
             { kind: 'bearer', authorization: `Bearer ${apiToken}` },
             {
               id,
               name: readManifestField(options.workspaceRoot, 'name'),
+              ...registrationOrigin(await port.listRemotes()),
             },
           );
         };
@@ -2174,6 +2203,12 @@ export const openProjectRevisions = async (
     },
   };
   let tree: ReturnType<typeof createProjectRevisionsActor> | undefined;
+  /* Who this terminal's writes are by, resolved on the first write: a read names nobody (A1). */
+  let person: HostRevisionActorResolver | undefined;
+  const resolvePerson: HostRevisionActorResolver = (input) => {
+    person ??= hostRevisionActor(options.actor);
+    return person(input);
+  };
 
   /* Started on the first write verb only: `log`, `diff` and `describe` ask the
    * store directly, and a read must never create a repository, retire a lease or
@@ -2190,7 +2225,7 @@ export const openProjectRevisions = async (
         ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
         parameters: parameterCodec,
         /* The account the terminal's token belongs to, else this device's pseudonym (A1, AC15), through the CLI (B1). */
-        identity: { via: 'cli', resolve: hostRevisionActor(options.actor) },
+        identity: { via: 'cli', resolve: resolvePerson },
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),
@@ -2218,6 +2253,48 @@ export const openProjectRevisions = async (
     } finally {
       stop();
     }
+  };
+
+  type RevisionsActor = NonNullable<typeof tree>['actor'];
+
+  /**
+   * Push what was just recorded, through the scheduler's correlated `syncNow`, the request the Publish dialog makes,
+   * so D28's queue still records what cannot be pushed.
+   *
+   * @param actor - The project's revisions actor.
+   * @param scheduler - Its sync child, whose `pushSettled` answers.
+   * @param pending - The sentence for a push that did not finish, when the scheduler has none.
+   * @returns How the push ended.
+   */
+  const backUp = async (
+    actor: RevisionsActor,
+    scheduler: NonNullable<ReturnType<RevisionsActor['getSnapshot']>['children']['sync']>,
+    pending: string,
+  ): Promise<RevisionBackupOutcome> => {
+    /* A push already running when this asks was built before the write, so the
+     * scheduler answers with the next one (sync.machine row 65). */
+    const pushId = randomUUID();
+    const pushed = await answered<SyncPushOutcome>(
+      (resolve) => {
+        const settled = scheduler.on('pushSettled', (event) => {
+          if (event.pushId === pushId) {
+            resolve(event.outcome);
+          }
+        });
+        actor.send({ type: 'syncNow', pushId });
+        return () => {
+          settled.unsubscribe();
+        };
+      },
+      /* Every correlated push is answered, a hung one at the scheduler's own deadline (A12, RM-R11). */
+    );
+    const { sync } = selectRevisionStatus(actor.getSnapshot());
+    /* `noRemote` answers a correlated push with `failed`; nothing failed. */
+    const backup = sync.state === 'noRemote' ? 'noRemote' : pushed;
+    return Object.freeze({
+      backup,
+      ...(backup === 'backedUp' || backup === 'noRemote' ? {} : { reason: sync.error ?? pending }),
+    });
   };
 
   const switchTo = async (branch: string): Promise<RevisionSwitchOutcome> => {
@@ -2394,36 +2471,33 @@ export const openProjectRevisions = async (
       const { line } = await readRevisionPlace(port);
       return Object.freeze({ status: 'unchanged', line });
     }
-    /* A push already running when this asks was built before the mint, so the
-     * scheduler answers with the next one (sync.machine row 65). */
-    const pushId = randomUUID();
-    const pushed = await answered<SyncPushOutcome>(
-      (resolve) => {
-        const settled = scheduler.on('pushSettled', (event) => {
-          if (event.pushId === pushId) {
-            resolve(event.outcome);
-          }
-        });
-        actor.send({ type: 'syncNow', pushId });
-        return () => {
-          settled.unsubscribe();
-        };
-      },
-      /* Every correlated push is answered, a hung one at the scheduler's own deadline (A12, RM-R11). */
-    );
-    const { sync } = selectRevisionStatus(actor.getSnapshot());
-    /* `noRemote` answers a correlated push with `failed`; nothing failed. */
-    const backup = sync.state === 'noRemote' ? 'noRemote' : pushed;
+    const backedUp = await backUp(actor, scheduler, 'This revision is saved here and was not backed up yet.');
     const { line } = await readRevisionPlace(port);
-    return Object.freeze({
-      status: 'saved',
-      revisionId: cut.revisionId,
-      line,
-      backup,
-      ...(backup === 'backedUp' || backup === 'noRemote'
-        ? {}
-        : { reason: sync.error ?? 'This revision is saved here and was not backed up yet.' }),
+    return Object.freeze({ status: 'saved', revisionId: cut.revisionId, line, ...backedUp });
+  };
+
+  /*
+   * `tau version create` and `rename` are the pane's version verbs (B6), reached from a terminal (K1).
+   *
+   * The tag names this terminal's account, else this device's pseudonym, as a
+   * save's entry does (A1); and a version or a rename writes only its tag ref,
+   * which no branch head shows, so sync is told (R9) and the push is asked for
+   * now, as `save` asks for it: the scheduler is gone once the verb exits.
+   */
+  const tag: ProjectRevisionVerbs['tag'] = async (input) => {
+    const { actor } = await started();
+    const made = await port.tag({
+      ...input,
+      revisionId: revisionId(input.revisionId),
+      actor: resolvePerson({ runId: undefined, trigger: 'tag' }),
     });
+    actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
+    const scheduler = actor.getSnapshot().children.sync;
+    const backedUp: RevisionBackupOutcome =
+      scheduler === undefined
+        ? { backup: 'failed', reason: 'This project has no sync running.' }
+        : await backUp(actor, scheduler, 'This version is saved here and was not backed up yet.');
+    return Object.freeze({ tag: made, ...backedUp });
   };
 
   /*
@@ -2559,7 +2633,7 @@ export const openProjectRevisions = async (
     describe: async () => readRevisionPlace(port),
     switchTo,
     discard,
-    tag: async (input) => port.tag({ ...input, revisionId: revisionId(input.revisionId) }),
+    tag,
     save,
     publish,
     openFromRemote,

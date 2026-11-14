@@ -1,105 +1,123 @@
 ---------------------------- MODULE LayoutApply ----------------------------
 (***************************************************************************)
-(* How the workbench arrangement record is applied to Dockview (app state *)
-(* orchestration charter D13, D18, invariants I10 to I14). It is the spec *)
-(* for `workbench-layout.machine` (A8a) and lands before that machine,    *)
-(* under formal verification policy rule 1.                               *)
+(* How the workbench arrangement record is applied to Dockview (app state  *)
+(* orchestration charter D13, D18, invariants I10 to I14). It is the spec  *)
+(* for `workbench-layout.machine` (A8a), which its conformance test        *)
+(* replays the export graph through, under formal verification policy      *)
+(* rule 1.                                                                 *)
 (*                                                                         *)
 (* Parties:                                                                *)
-(*   record    the publications `recordSync` emits for the layout file:   *)
-(*             bytes and an attributed origin, own or foreign. Any bytes  *)
-(*             with any origin, so a misattributed echo of the store's    *)
-(*             own write is one of them                                   *)
-(*   person    rearranges panes while an adapter is attached              *)
-(*   adapters  the workbench and the viewer Dockview, each detached,      *)
-(*             attaching or attached. A phone has both: its workbench     *)
-(*             attaches only while the editor tab shows (`Phone`)         *)
-(*   intents   pane requests (open a file, reveal a model) for one        *)
-(*             adapter, queued until applied or dropped with a reason     *)
-(*   restore   commands from the arrange-workbench card, each with the    *)
-(*             arrangement it expects and the one it restores; the card   *)
-(*             may send any number of them, a stale one included          *)
-(*   route     the route key; a change drops what was queued before it    *)
-(*   host      Today only: the React host remounts and replaces its store *)
+(*   record    the publications `recordSync` emits for the layout file:    *)
+(*             bytes and an attributed origin, own or foreign. Any bytes   *)
+(*             with any origin, so a misattributed echo of the store's     *)
+(*             own write is one of them                                    *)
+(*   person    rearranges panes while an adapter is attached               *)
+(*   adapters  the workbench and the viewer Dockview, each detached,       *)
+(*             attaching or attached. A phone has both: its workbench      *)
+(*             attaches only while the editor tab shows (`Phone`)          *)
+(*   intents   pane requests (open a file, reveal a model) for one         *)
+(*             adapter, queued until applied or dropped with a reason;     *)
+(*             a workbench intent is, by source, a `file` intent (a held   *)
+(*             Files open or a person's file open), which a lane close     *)
+(*             drops, or a `pane` intent (the handed-back slot,            *)
+(*             `pendingPreviewPanel`), which a lane close keeps and a      *)
+(*             route change drops. A pane change held before the first     *)
+(*             read or written to the record is a pending record edit of   *)
+(*             the record session, not an intent, and is not modelled; it  *)
+(*             survives a route change only while the first read           *)
+(*             succeeds (a failed read hands it back, and a route change   *)
+(*             then drops it: A0.3 row 1b 'before')                        *)
+(*   restore   commands from the arrange-workbench card, each with the     *)
+(*             arrangement it expects and the one it restores; the card    *)
+(*             may send any number of them, a stale one included           *)
+(*   route     the route key; a change drops what was queued before it     *)
+(*   host      Today only: the React host remounts and replaces its store  *)
 (*                                                                         *)
 (* The model is untimed. `recordSync` itself is not modelled               *)
-(* (`RecordSync.tla` is reused unchanged): the layout starts where its    *)
-(* publications come out. An arrangement is an opaque value with no       *)
-(* geometry, and what the attached adapters show is that one value. A     *)
-(* file pane's dependency on its file opening is one "target available"   *)
-(* flag, which the environment lowers at any step (`DropUnavailable`).    *)
+(* (`RecordSync.tla` is reused unchanged): the layout starts where its     *)
+(* publications come out. An arrangement is an opaque value with no        *)
+(* geometry, and what the attached adapters show is that one value. A      *)
+(* file pane's dependency on its file opening is one "target available"    *)
+(* flag, which the environment lowers at any step (`DropUnavailable`).     *)
 (*                                                                         *)
-(* Edit count. Only comparisons of the count are observable, so the model *)
-(* keeps, for the latest publication and for the apply in flight, whether *)
-(* the count has moved since (`fresh`), and `edited`, whether this step   *)
-(* counted an edit. "An apply computed at an edit count lower than the    *)
-(* current one" is an apply that is not `fresh`. The properties read      *)
-(* ghosts that no guard reads: `gh.recUnt` and `gh.applyUnt` follow the   *)
-(* count as `fresh` does, but each local change clears them itself;       *)
-(* `gh.applications` counts each intent's applies; `over` is rule 8's     *)
+(* Edit count. Only comparisons of the count are observable, so the model  *)
+(* keeps, for the latest publication and for the apply in flight, whether  *)
+(* the count has moved since (`fresh`), and `edited`, whether this step    *)
+(* counted an edit. "An apply computed at an edit count lower than the     *)
+(* current one" is an apply that is not `fresh`. The properties read       *)
+(* ghosts that no guard reads: `gh.recUnt` and `gh.applyUnt` follow the    *)
+(* count as `fresh` does, but each local change clears them itself;        *)
+(* `gh.applications` counts each intent's applies; `over` is rule 8's      *)
 (* fact at arrival.                                                        *)
 (*                                                                         *)
-(* Revisions. Only "the latest publication" and "an older one" are        *)
-(* observable, so `applied` is Unknown, "latest" or "older", and an apply *)
-(* knows whether its publication is still the latest.                     *)
+(* Revisions. Only "the latest publication" and "an older one" are         *)
+(* observable, so `applied` is Unknown, "latest" or "older", and an apply  *)
+(* knows whether its publication is still the latest.                      *)
 (*                                                                         *)
-(* Design rules the target holds (README.md, Rules for A8a):              *)
-(*   1. Every local change of the arrangement (a person's edit, an        *)
-(*      applied intent, an applied restore) counts one edit.              *)
-(*   2. An apply carries the edit count at the step its publication       *)
-(*      arrived, and lands only while that publication is the latest and  *)
-(*      the count is unchanged; otherwise it is discarded.                *)
-(*   3. An own publication whose bytes the arrangement already holds is   *)
-(*      not re-applied; any other publication, own or foreign, is applied *)
-(*      under rules 2 and 8. It may be acknowledged either way.           *)
-(*   4. A revision is acknowledged only while every adapter of the       *)
-(*      device is attached, no apply is in flight and the arrangement     *)
-(*      holds its bytes; any detach makes the applied revision unknown.   *)
-(*   5. A restore is settled against the arrangement at that step, and is *)
-(*      refused while a local edit is unwritten.                          *)
-(*   6. A route key change drops every queued intent in the same step.    *)
-(*   7. A workbench intent opens its lane, or on a phone switches to the *)
-(*      editor tab, and is applied once the workbench attaches. Closing   *)
-(*      the lane drops the queued workbench intents (`workbenchClosed`);  *)
-(*      a phone has no lane to close.                                     *)
-(*   8. A publication that arrives while a local edit is unwritten does   *)
-(*      not hold the edit, whatever edit count it arrived at: it is       *)
-(*      fenced at arrival (`held`) and its apply never lands. The         *)
-(*      record's rebase of the edit (`recordSync`, not modelled) comes    *)
-(*      back as a later publication, which rule 3 applies.                *)
+(* Design rules the target holds (README.md, Rules for A8a):               *)
+(*   1. Every local change of the arrangement (a person's edit, an         *)
+(*      applied intent, an applied restore) counts one edit.               *)
+(*   2. An apply carries the edit count at the step its publication        *)
+(*      arrived, and lands only while that publication is the latest and   *)
+(*      the count is unchanged; otherwise it is discarded.                 *)
+(*   3. An own publication whose bytes the arrangement already holds is    *)
+(*      not re-applied; any other publication, own or foreign, is applied  *)
+(*      under rules 2 and 8. It may be acknowledged either way.            *)
+(*   4. A revision is acknowledged only while every adapter of the         *)
+(*      device is attached, no apply is in flight and the arrangement      *)
+(*      holds its bytes; any detach makes the applied revision unknown.    *)
+(*   5. A restore is settled against the arrangement at that step, and is  *)
+(*      refused while a local edit is unwritten.                           *)
+(*   6. A route key change drops every queued intent in the same step.     *)
+(*      Pending record edits are not intents and survive it while the      *)
+(*      first read succeeds; one handed back by a failed read is dropped,  *)
+(*      and A8a records that drop as `routeChanged` (I11).                 *)
+(*   7. A workbench intent opens its lane, or on a phone switches to the   *)
+(*      editor tab, and is applied once the workbench attaches. Closing    *)
+(*      the lane drops the queued workbench `file` intents                 *)
+(*      (`workbenchClosed`); a queued `pane` intent survives and is        *)
+(*      applied once on the next workbench attach (A0.3 row 1c). A phone   *)
+(*      has no lane to close. A pending record edit is not an intent.      *)
+(*   8. A publication that arrives while a local edit is unwritten does    *)
+(*      not hold the edit, whatever edit count it arrived at: it is        *)
+(*      fenced at arrival (`held`) and its apply never lands. The          *)
+(*      record's rebase of the edit (`recordSync`, not modelled) comes     *)
+(*      back as a later publication, which rule 3 applies.                 *)
 (*                                                                         *)
-(* Environment assumptions (Dockview and the adapters, not the machine):  *)
-(*   A. An apply, and any adapter change event it causes, never counts as *)
-(*      an edit.                                                          *)
-(*   B. A detached adapter whose lane is open attaches again; on a       *)
-(*      phone, the workbench attaches while a workbench intent is queued  *)
-(*      (the intent switched to the editor tab). Liveness only:           *)
-(*      `Reattach`, with `DetachGuard`.                                   *)
+(* Environment assumptions (Dockview and the adapters, not the machine):   *)
+(*   A. An apply, and any adapter change event it causes, never counts as  *)
+(*      an edit.                                                           *)
+(*   B. A detached adapter whose lane is open attaches again; on a         *)
+(*      phone, the workbench attaches while a workbench intent is queued   *)
+(*      (the intent switched to the editor tab). Liveness only:            *)
+(*      `Reattach`, with `DetachGuard`.                                    *)
+(*   C. A closed lane holding a queued pane intent is reopened eventually  *)
+(*      (liveness only: `Reopen`).                                         *)
 (*                                                                         *)
-(* Switches. The first value of each is the target.                       *)
-(*   EditCount  TRUE: rule 2's count. FALSE: an apply lands whatever was  *)
-(*              edited since its publication (no-edit-count, a limit).    *)
-(*   Expected   TRUE: rule 5. FALSE: a restore is applied without         *)
-(*              comparing (no-expected, a limit).                         *)
-(*   Unwritten  TRUE: rule 8. FALSE: the apply of a publication that      *)
-(*              arrived over an unwritten edit, at the current edit       *)
-(*              count, lands (no-unwritten, a limit; A0.3 host I10 row).  *)
-(*   Today      FALSE: the record session is a runtime child of the       *)
-(*              project actor and outlives any mount (I13). TRUE: the     *)
-(*              store as built in `workbench-record-host.tsx` (inventory  *)
-(*              Y3): `useMemo` creates and starts a new store in the      *)
-(*              render of a remounted host (`HostRemounted`); the old     *)
-(*              store is disposed in a microtask after the effect cleanup *)
-(*              (`OldStoreDisposed`), and a write it had in flight still  *)
-(*              lands (`OrphanWriteLanded`).                              *)
-(*   Phone      FALSE: a desktop. TRUE: a phone, which has both adapters  *)
-(*              (chat-interface-mobile.tsx renders the editor tab's       *)
-(*              workbench Dockview); its workbench detaches and attaches  *)
-(*              again on a tab switch, and it has no lane close.          *)
-(*   DetachGuard  TRUE only in the liveness configuration: a detach or a *)
-(*              lane close leaves an attach cycle for assumption B.       *)
-(*   Labelled   TRUE: `act` names each step, for the graph export and the *)
-(*              covering suite. FALSE: `act` is constant.                 *)
+(* Switches. The first value of each is the target.                        *)
+(*   EditCount  TRUE: rule 2's count. FALSE: an apply lands whatever was   *)
+(*              edited since its publication (no-edit-count, a limit).     *)
+(*   Expected   TRUE: rule 5. FALSE: a restore is applied without          *)
+(*              comparing (no-expected, a limit).                          *)
+(*   Unwritten  TRUE: rule 8. FALSE: the apply of a publication that       *)
+(*              arrived over an unwritten edit, at the current edit        *)
+(*              count, lands (no-unwritten, a limit; A0.3 host I10 row).   *)
+(*   Today      FALSE: the record session is a runtime child of the        *)
+(*              project actor and outlives any mount (I13). TRUE: the      *)
+(*              store as built in `workbench-record-host.tsx` (inventory   *)
+(*              Y3): `useMemo` creates and starts a new store in the       *)
+(*              render of a remounted host (`HostRemounted`); the old      *)
+(*              store is disposed in a microtask after the effect cleanup  *)
+(*              (`OldStoreDisposed`), and a write it had in flight still   *)
+(*              lands (`OrphanWriteLanded`).                               *)
+(*   Phone      FALSE: a desktop. TRUE: a phone, which has both adapters   *)
+(*              (chat-interface-mobile.tsx renders the editor tab's        *)
+(*              workbench Dockview); its workbench detaches and attaches   *)
+(*              again on a tab switch, and it has no lane close.           *)
+(*   DetachGuard  TRUE only in the liveness configuration: a detach or a   *)
+(*              lane close leaves an attach cycle for assumption B.        *)
+(*   Labelled   TRUE: `act` names each step, for the graph export and the  *)
+(*              covering suite. FALSE: `act` is constant.                  *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, TLC
 
@@ -158,7 +176,7 @@ IntentIds == 1..MaxIntents
 RestoreIds == 1..MaxRestores
 NoApply == [state |-> "none", bytes |-> InitialBytes, fresh |-> TRUE, held |-> FALSE, latest |-> FALSE, same |-> FALSE,
               over |-> FALSE]
-NoIntent == [state |-> "unsent", target |-> "viewer"]
+NoIntent == [state |-> "unsent", target |-> "viewer", kind |-> "file"]
 NoRestore == [state |-> "unsent", expected |-> InitialBytes, to |-> InitialBytes]
 
 Attached == {a \in Adapters : adapter[a] = "attached"}
@@ -177,7 +195,7 @@ TypeOK ==
   /\ applied \in {Unknown, "latest", "older"}
   /\ adapter \in [Adapters -> {"detached", "attaching", "attached"}]
   /\ wbOpen \in BOOLEAN
-  /\ intent \in [IntentIds -> [state : {"unsent", "queued"} \cup Settled, target : Targets]]
+  /\ intent \in [IntentIds -> [state : {"unsent", "queued"} \cup Settled, target : Targets, kind : {"file", "pane"}]]
   /\ restore \in [RestoreIds -> [state : {"unsent", "asked", "applied", "refused"}, expected : Bytes, to : Bytes]]
   /\ route \in Nat
   /\ sessions \in [live : Nat, oldWriting : BOOLEAN, lingering : Nat, writing : BOOLEAN]
@@ -333,11 +351,14 @@ Settle(x, s) == [NoIntent EXCEPT !.state = s]
 \* Rule 7: a workbench intent opens the workbench lane, as `openPanel` and the `fileOpened` listener call
 \* `setWorkbenchOpen(true)` today; on a phone it switches to the editor tab (project-workspace-context.tsx,
 \* `mobileActiveTab: 'editor'`), where the lane is always open. An intent targets an adapter the device has.
+\* A workbench intent's kind matters only at a lane close, so it is a `pane` intent only on a desktop.
+Kinds(t) == IF t = "workbench" /\ ~Phone THEN {"file", "pane"} ELSE {"file"}
+
 IntentSent(i) ==
   /\ intent[i].state = "unsent"
   /\ \A j \in IntentIds : j < i => intent[j].state # "unsent"
-  /\ \E t \in Adapters :
-       /\ intent' = [intent EXCEPT ![i] = [state |-> "queued", target |-> t]]
+  /\ \E t \in Adapters : \E k \in Kinds(t) :
+       /\ intent' = [intent EXCEPT ![i] = [state |-> "queued", target |-> t, kind |-> k]]
        /\ wbOpen' = (wbOpen \/ t = "workbench")
   /\ edited' = FALSE
   /\ act' = Label("IntentSent")
@@ -376,7 +397,10 @@ RouteKeyChanged ==
   /\ UNCHANGED <<rec, shown, pending, applied, adapter, wbOpen, restore, sessions, bound, gh>>
 
 \* Rule 7 for the intents queued when the person closes the lane, whether its adapter is attached or
-\* detached. Under `DetachGuard`, as for `AdapterDetached`, only while the workbench has an attach cycle left.
+\* detached: the queued `file` intents are dropped, as today's close clears the held Files and user-file
+\* intents (project-workspace-context.tsx lines 338 to 341); a queued `pane` intent stays queued (A0.3
+\* row 1c, project-workspace-context.test.tsx lines 1111 to 1139). Under `DetachGuard`, as for
+\* `AdapterDetached`, only while the workbench has an attach cycle left.
 \* A phone has no lane close: leaving the editor tab is an `AdapterDetached` of the workbench.
 WorkbenchClosed ==
   /\ ~Phone
@@ -386,7 +410,7 @@ WorkbenchClosed ==
   /\ wbOpen' = FALSE
   /\ Leave({"workbench"})
   /\ intent' = [i \in IntentIds |->
-                  IF intent[i].state = "queued" /\ intent[i].target = "workbench"
+                  IF intent[i].state = "queued" /\ intent[i].target = "workbench" /\ intent[i].kind = "file"
                   THEN Settle(intent[i], "workbenchClosed") ELSE intent[i]]
   /\ edited' = FALSE
   /\ act' = Label("WorkbenchClosed")
@@ -486,10 +510,16 @@ Reattach(a) ==
   /\ a = "viewer" \/ (~Phone /\ wbOpen) \/ (Phone /\ WorkbenchQueued)
   /\ AdapterAttaching(a)
 
-\* Weak fairness of the adapters (an adapter with an open lane attaches) and of the intent queue (an
-\* intent its adapter can take is taken).
+\* Environment assumption C: a closed lane holding a queued pane intent is reopened eventually. Today
+\* nothing reopens it; the person does, by opening the workbench (a risk).
+PaneQueued == \E i \in IntentIds : intent[i].state = "queued" /\ intent[i].kind = "pane"
+Reopen == "workbench" \in Adapters /\ ~wbOpen /\ PaneQueued /\ AdapterAttaching("workbench")
+
+\* Weak fairness of the adapters (an adapter with an open lane attaches, and a closed lane holding a
+\* pane intent is reopened) and of the intent queue (an intent its adapter can take is taken).
 Fairness ==
   /\ \A a \in Adapters : WF_vars(Reattach(a)) /\ WF_vars(AdapterAttached(a))
+  /\ WF_vars(Reopen)
   /\ \A i \in IntentIds : WF_vars(IntentApplied(i))
 
 LiveSpec == Spec /\ Fairness
@@ -540,6 +570,11 @@ IntentAccounted ==
        /\ gh'.applications[i] <= 1
        /\ (intent[i].state = "queued" /\ intent'[i].state # "queued") => intent'[i].state \in Settled
        /\ intent[i].state \in Settled => intent'[i].state = intent[i].state]_vars
+
+\* I11, A0.3 row 1c: a lane close never drops a queued pane intent.
+PaneIntentKept ==
+  [][(wbOpen /\ ~wbOpen') =>
+       \A i \in IntentIds : (intent[i].state = "queued" /\ intent[i].kind = "pane") => intent'[i].state = "queued"]_vars
 
 \* I11: after `RouteKeyChanged`, every intent queued before it is `dropped{routeChanged}`.
 RouteChangeDrops ==

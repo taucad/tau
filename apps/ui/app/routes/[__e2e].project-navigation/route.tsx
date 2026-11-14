@@ -1,6 +1,9 @@
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import type { ProjectManifest } from '@taucad/types';
+import { idPrefix } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
+import type { OpenFile } from '@taucad/ui-core/types/editor.types';
 import { Loader } from '@taucad/ui/components/loader';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -41,6 +44,16 @@ const createManifest = (name: string, entryPath: string): Omit<ProjectManifest, 
   assets: { main: { entryPath } },
 });
 
+/**
+ * The entry file open in the Editor, for `?openEntry=1`: a new project opens no file (#1386), so a spec that reads a
+ * project's source in its Editor tab seeds the project as one reopened with that file open.
+ */
+const openEntryFiles = (entryPath: string): { openFiles: OpenFile[] } => ({
+  openFiles: [
+    { paneId: generatePrefixedId(idPrefix.pane), path: entryPath, name: entryPath, lastAccessedAt: Date.now() },
+  ],
+});
+
 export const loader = async (): Promise<Response> => {
   const environment = await getEnvironment();
   if (!environment.TAU_DEBUG) {
@@ -65,6 +78,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
   const [searchParams] = useSearchParams();
   const seedActivityChats = searchParams.get('activity') === '1';
   const seedProjectOpen = searchParams.get('projectOpen') === '1';
+  const seedOpenEntry = searchParams.get('openEntry') === '1';
   const [error, setError] = React.useState<string>();
   const seedStarted = React.useRef(false);
 
@@ -137,6 +151,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
             panelState: {
               desktopLayout: { chatOpen: true, workbenchOpen: true },
             },
+            ...(seedOpenEntry ? openEntryFiles(alphaEntryPath) : {}),
           },
           project: createManifest('Project Navigation A', alphaEntryPath),
           files: { [alphaEntryPath]: { content: encode(model(18)) } },
@@ -186,6 +201,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
             panelState: {
               desktopLayout: { chatOpen: true, workbenchOpen: true },
             },
+            ...(seedOpenEntry ? openEntryFiles(betaEntryPath) : {}),
           },
           project: createManifest('Project Navigation B', betaEntryPath),
           files: { [betaEntryPath]: { content: encode(model(28)) } },
@@ -207,6 +223,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
     navigate,
     patchChat,
     seedActivityChats,
+    seedOpenEntry,
     seedProjectOpen,
     searchParams,
   ]);

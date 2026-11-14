@@ -1,130 +1,88 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { cn } from '@taucad/ui/utils/cn';
+import { useMemo } from 'react';
+import type { Ref, UIEventHandler } from 'react';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
-import type { EditorDocument } from '#lib/editor-document.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
- * What an editor pane shows while it has no document yet: the editor's own background and a
- * screen-reader status. It draws nothing shaped like code, holds no timer and has no entrance
- * animation, so a pane never cycles through bars, text and a blank on its way in.
+ * What an editor pane shows until its editor can mount, in the editor's own place: the editor's background, and as
+ * soon as the file is read, the file's own text, read-only, in the editor's font, size, line height and content padding,
+ * beside gutters of the editor's widths. The editor then mounts over the same box with its first line where this one
+ * was (loading states UX blueprint, P-i). It draws nothing that stands for text it does not have.
  *
- * @param props - The screen-reader label, and optional classes for the frame.
+ * The metrics follow `code-editor-view.client.tsx`: 14 px (16 px on a phone) at line height 1.5, a line-number gutter
+ * at least 4ch wide with `var(--spacing)` either side, the fold gutter as wide as its closed marker plus 2 px, a
+ * lint gutter of zero width, and CodeMirror's own 6 px and 2 px line padding.
+ *
+ * The busy state is on the pane for the whole wait. The wait's words ("Opening file") belong to the pane that hosts
+ * this placeholder, which outlives it (the workbench's `FileEditor`): this node is replaced when the editor mounts, so
+ * an indicator here would lose its minimum and restart its clock.
+ *
+ * @param props - The pane's accessible name, the file's text once read, whether the editor shows line numbers, a
+ *   scroll handler that hands the position to the editor, and the frame's classes and ref.
  * @returns The placeholder.
  */
 export function EditorPanePlaceholder({
   label,
-  className,
-}: {
-  readonly label: string;
-  readonly className?: string;
-}): React.JSX.Element {
-  return (
-    <div
-      role='status'
-      aria-busy='true'
-      data-slot='editor-pane-placeholder'
-      className={cn('size-full overflow-hidden bg-background', className)}
-    >
-      <span className='sr-only'>{label}</span>
-    </div>
-  );
-}
-
-/**
- * Lines drawn before the editor mounts. A pane shows far fewer; CodeMirror draws its own viewport
- * once it mounts, so a long file costs no more than a screenful here.
- */
-const textLineLimit = 200;
-const lineBreak = /\r\n?|\n/u;
-
-/* The metrics below mirror `code-editor-view.client.tsx`'s themes and CodeMirror's base theme, so
- * each line keeps its box when the editor replaces this text: the font, size and 1.5 line height of
- * `.cm-content`, the `.cm-line` padding, the line-number gutter (at least 4ch, `--spacing` either
- * side, sized by the largest line number) and the fold gutter (one `›` marker, 1px either side). */
-const gutterCell: React.CSSProperties = {
-  boxSizing: 'border-box',
-  minWidth: '4ch',
-  height: '1.5em',
-  padding: '0 var(--spacing)',
-  lineHeight: 1.4,
-  textAlign: 'right',
-  whiteSpace: 'nowrap',
-};
-const linePadding: React.CSSProperties = { padding: '0 2px 0 6px' };
-
-/**
- * The file's own text in the box and metrics of the editor that will replace it, read-only, while
- * the editor runtime loads. It follows the document until then and never writes to it, so the
- * editor mounts on exactly the document's text with its undo history untouched.
- *
- * @param props - The document to show, the screen-reader label, whether the editor shows line
- *   numbers, and the classes the editor's own frame takes.
- * @returns The read-only text.
- */
-export function EditorPaneText({
-  document,
-  label,
+  text,
   hasLineNumbers = true,
   className,
+  onScroll,
+  ref,
 }: {
-  readonly document: EditorDocument;
   readonly label: string;
+  /** The file's text, once read. */
+  readonly text?: string;
   readonly hasLineNumbers?: boolean;
   readonly className?: string;
+  readonly onScroll?: UIEventHandler<HTMLDivElement>;
+  readonly ref?: Ref<HTMLDivElement>;
 }): React.JSX.Element {
-  const subscribe = useCallback((onChange: () => void) => document.subscribe(onChange), [document]);
-  const text = useSyncExternalStore(
-    subscribe,
-    () => document.text,
-    () => document.text,
-  );
   const isMobile = useIsMobile();
-  const { lines, lineCount } = useMemo(() => {
-    const all = text.split(lineBreak);
-    return { lines: all.slice(0, textLineLimit), lineCount: all.length };
+  /* One pass over the text per text, not per render: the pane re-renders while it waits. */
+  const lineNumbers = useMemo(() => {
+    if (text === undefined) {
+      return '';
+    }
+    const lineCount = text.split(/\r\n?|\n/u).length;
+    return Array.from({ length: lineCount }, (_, index) => index + 1).join('\n');
   }, [text]);
   return (
     <div
-      data-slot='editor-pane-text'
-      className={cn('size-full overflow-hidden bg-background text-foreground', className)}
-      style={{ fontFamily: 'var(--font-mono)', fontSize: isMobile ? '16px' : '14px' }}
+      ref={ref}
+      role='group'
+      aria-label={label}
+      aria-busy='true'
+      data-slot='editor-pane-placeholder'
+      className={cn('relative size-full overflow-hidden bg-background', className)}
     >
-      <span role='status' aria-busy='true' className='sr-only'>
-        {`${label}. The text is read-only until the editor opens.`}
-      </span>
-      <div className='flex h-full cursor-default items-start overflow-hidden'>
-        <div aria-hidden='true' className='flex shrink-0 text-muted-foreground'>
-          {hasLineNumbers ? (
-            <div className='flex flex-col'>
-              {lines.map((_, index) => (
-                // oxlint-disable-next-line react/no-array-index-key -- a line number is its own key
-                <div key={index} style={gutterCell}>
-                  {index + 1}
-                </div>
-              ))}
-              {/* CodeMirror sizes the gutter by the largest line number, shown or not. */}
-              <div className='invisible' style={{ ...gutterCell, height: 0 }}>
-                {lineCount}
-              </div>
-            </div>
-          ) : undefined}
-          <div className='invisible' style={{ lineHeight: 1.4 }}>
-            <span style={{ padding: '0 1px' }}>›</span>
+      {text === undefined ? null : (
+        <div
+          data-slot='editor-pane-scroller'
+          className={cn(
+            'flex size-full items-start overflow-auto font-mono leading-[1.4] text-foreground [overflow-anchor:none]',
+            isMobile ? 'text-[16px]' : 'text-[14px]',
+          )}
+          onScroll={onScroll}
+        >
+          <div
+            aria-hidden='true'
+            className='sticky left-0 z-10 flex min-h-full shrink-0 bg-background leading-[1.5] text-muted-foreground select-none'
+          >
+            {hasLineNumbers ? (
+              /* CodeMirror sizes this gutter to the widest line number, as here: digits are one width in a mono font. */
+              <div className='box-border min-w-[4ch] px-(--spacing) text-right whitespace-pre'>{lineNumbers}</div>
+            ) : null}
+            {/* The fold gutter is as wide as its closed marker, which CodeMirror pads by 1 px each side. */}
+            <span className='invisible px-px'>›</span>
+          </div>
+          <div
+            data-slot='editor-pane-text'
+            className='box-border min-h-full shrink-0 grow-[2] pr-[2px] pl-[6px] leading-[1.5] whitespace-pre [tab-size:2]'
+          >
+            {text}
           </div>
         </div>
-        <div
-          data-slot='editor-pane-text-content'
-          className='min-w-0 grow'
-          style={{ lineHeight: 1.5, whiteSpace: 'pre', tabSize: 2 }}
-        >
-          {lines.map((line, index) => (
-            // oxlint-disable-next-line react/no-array-index-key -- lines are positional and never reorder
-            <div key={index} style={linePadding}>
-              {line === '' ? <br /> : line}
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

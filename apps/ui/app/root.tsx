@@ -6,6 +6,7 @@ import { readThemeCookie } from '#theme-cookie.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
+import { remoteHostHarnessPath } from '#utils/remote-host-harness.js';
 import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
@@ -79,9 +80,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /**
- * The root loader reads request headers, cookies and the pathname only, so a navigation
- * that changes nothing but the query string (a gallery search, a filter) cannot change its
- * result. Explicit revalidation and submissions keep the default.
+ * The root loader reads request headers, cookies and the server environment, none of which a
+ * client navigation changes, so a GET navigation that changes the pathname or the query string
+ * does not re-run it, and a click never waits for the server before the URL changes (U23). The
+ * `pathname` it returns is then the path the root data was last loaded for, not the current one.
+ *
+ * What that gives up: the `HydrationBoundary` over `queries` used to rehydrate the model
+ * catalog from the server on every navigation. The client's own catalog query now refreshes it,
+ * through its `staleTime` and `refetchInterval`. The cookie-backed values (consent, theme,
+ * sidebar, preferences, project count) are read from loader data only as the server snapshot.
+ *
+ * The default is kept for submissions, an explicit revalidation of the same URL, leaving the
+ * offline shell path (its neutral prerendered document has no real root data), and a navigation
+ * into or out of the remote-host harness: the root layout's harness check reads `pathname` from
+ * this loader's data, so revalidating there keeps that value correct whenever the check depends
+ * on it. The offline shell path itself never revalidates the root.
  */
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   currentUrl,
@@ -92,9 +105,13 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   if (isOfflineShellPath(nextUrl.pathname)) {
     return false;
   }
-  const isQueryOnlyNavigation =
-    formMethod === undefined && currentUrl.pathname === nextUrl.pathname && currentUrl.search !== nextUrl.search;
-  return isQueryOnlyNavigation ? false : defaultShouldRevalidate;
+  const touchesHarness = currentUrl.pathname === remoteHostHarnessPath || nextUrl.pathname === remoteHostHarnessPath;
+  const isClientNavigation =
+    formMethod === undefined &&
+    !touchesHarness &&
+    !isOfflineShellPath(currentUrl.pathname) &&
+    (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
+  return isClientNavigation ? false : defaultShouldRevalidate;
 };
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {

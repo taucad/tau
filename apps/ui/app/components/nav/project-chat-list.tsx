@@ -210,7 +210,7 @@ export function ProjectChatList({
      * project row never share a column. */
     <SidebarMenuSub
       id={listId}
-      aria-busy={isAwaitingChats && !isRemembered ? true : undefined}
+      aria-busy={isAwaitingChats ? true : undefined}
       className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0.5 border-l border-sidebar-border py-0 pr-0 pl-1.5'
     >
       {error ? (

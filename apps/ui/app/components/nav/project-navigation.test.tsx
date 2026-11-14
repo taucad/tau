@@ -515,7 +515,7 @@ describe('ProjectNavigation', () => {
     );
     expect(screen.getByRole('button', { name: 'Show more projects' })).toBeEnabled();
     expect(document.querySelector('[data-slot=skeleton]')).toBeNull();
-    expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
+    expect(document.querySelector('section > ul')).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
   });
 
@@ -816,7 +816,7 @@ describe('ProjectNavigation', () => {
      * ruling, 2026-11-14T01:20Z): the list is busy while its listing is pending,
      * and the label's wait says it is slow at 10 s, with Retry.
      */
-    it.fails('P-d: with remembered rows the list is busy and the label carries the slow wait with Retry', () => {
+    it('P-d: with remembered rows the list is busy and the label carries the slow wait with Retry', () => {
       const retry = vi.fn(async () => undefined);
       rememberedShape = { count: 2, projects: [firstProject, secondProject] };
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true, retry });
@@ -832,17 +832,13 @@ describe('ProjectNavigation', () => {
     });
 
     /* P-d's Failed line: a failed listing keeps the remembered rows, with the failure row below them. */
-    it.fails('P-d: a failed listing keeps the remembered rows above the failure row', () => {
+    it('P-d: a failed listing keeps the remembered rows above the failure row', () => {
       rememberedShape = { count: 2, projects: [firstProject, secondProject] };
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], error: new Error('offline') });
       render(<ProjectNavigation />);
 
       const items = [...document.querySelectorAll('section > ul > li')];
-      expect(items.map((item) => item.querySelector('a')?.textContent ?? item.getAttribute('data-slot'))).toEqual([
-        'Two',
-        'One',
-        null,
-      ]);
+      expect(items.map((item) => item.querySelector('a')?.textContent)).toEqual(['Two', 'One', undefined]);
       expect(items.at(-1)?.querySelector('[data-slot=failure-row]')).not.toBeNull();
       expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
     });

@@ -676,7 +676,7 @@ describe('ProjectChatList', () => {
     });
 
     /* The accessibility line (programme-control ruling, 2026-11-14T01:20Z): busy while the listing is pending, rows or not. */
-    it.fails('C8: with remembered chats the loading list is busy until the chat listing answers', () => {
+    it('C8: with remembered chats the loading list is busy until the chat listing answers', () => {
       rememberChats(project.id, [chat(1), chat(2)]);
       mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
       const view = render(<ProjectChatList project={project} isProjectActive={false} />);

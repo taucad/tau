@@ -82,16 +82,18 @@ export function ProjectNavigation({ className }: { readonly className?: string }
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const liveProjectIds = useLiveProjectIds();
-  /* R5, A13: until the worker lists, the rows are the ones the last listing had
-   * (the listing snapshot), as real rows; the listing reconciles them by id in
-   * place. A device that remembers none shows an empty, busy list, and says
-   * "No projects yet" up front when the last listing had none. */
+  /* R5, A13: until the worker lists, and when its first listing failed, the
+   * rows are the ones the last listing had (the listing snapshot), as real
+   * rows; the listing reconciles them by id in place. While the listing is
+   * pending the list is busy and the label carries its wait (P-d), rows or
+   * not. A last listing that had none says "No projects yet" up front
+   * instead, so that list is not also shown as waiting. */
   const rememberedShape = useProjectListShape();
   const isAwaitingListing = isLoading && projects.length === 0;
-  const rememberedProjects = isAwaitingListing ? rememberedShape?.projects : undefined;
+  const isShowingRemembered = projects.length === 0 && (isAwaitingListing || error !== undefined);
+  const rememberedProjects = isShowingRemembered ? rememberedShape?.projects : undefined;
   const rows: readonly SidebarProject[] = rememberedProjects ?? projects;
-  /* A last listing that had none says "No projects yet" up front, so its list is not also shown as waiting. */
-  const isAwaitingRows = isAwaitingListing && rows.length === 0 && rememberedShape?.count !== 0;
+  const isWaiting = isAwaitingListing && rememberedShape?.count !== 0;
   /* A29's temporal hiding: what is live now sits above what is not, and the
    * rest keeps its recency order. */
   const sortedProjects = useMemo(() => {
@@ -147,7 +149,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
     <TooltipProvider delayDuration={500} skipDelayDuration={300}>
       <SidebarGroup className={cn('px-2 group-data-[collapsible=icon]:hidden', className)}>
         <ProjectsLabel
-          isAwaitingRows={isAwaitingRows}
+          isWaiting={isWaiting}
           onRetry={() => {
             void retry();
           }}
@@ -155,14 +157,7 @@ export function ProjectNavigation({ className }: { readonly className?: string }
         {/* One row pitch throughout: projects, a project and its first chat, and
           chats between themselves all sit `gap-0.5` apart, so expanding or
           collapsing a project shifts nothing. */}
-        <SidebarMenu className='gap-0.5' aria-busy={isAwaitingRows ? true : undefined}>
-          {/* D18: a failed refresh over a list already on screen shows nothing;
-            the last good list stays. */}
-          {error && projects.length === 0 ? (
-            <SidebarMenuItem>
-              <SidebarFailureRow what='projects' />
-            </SidebarMenuItem>
-          ) : null}
+        <SidebarMenu className='gap-0.5' aria-busy={isWaiting ? true : undefined}>
           {isKnownEmpty && liveProjectIds.length === 0 ? (
             <SidebarMenuItem>
               <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
@@ -229,6 +224,14 @@ export function ProjectNavigation({ className }: { readonly className?: string }
               </Fragment>
             );
           })}
+          {/* D18: a failed refresh over a list already on screen shows nothing;
+            the last good list stays. A first listing that failed keeps the
+            remembered rows above its failure row (P-d). */}
+          {error && projects.length === 0 ? (
+            <SidebarMenuItem>
+              <SidebarFailureRow what='projects' />
+            </SidebarMenuItem>
+          ) : null}
           {visibleCount < sortedProjects.length ? (
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -545,18 +548,19 @@ function ProjectNavigationItem({
  *
  * The budget stays stated (I28) in two words, and its way out — closing exactly
  * the projects the registry says a policy may close — is the label's overflow
- * menu, reachable on hover, focus and coarse pointers. While a device that
- * remembers no rows waits for its first listing, the wait is the label's
- * trailing slot (blueprint P-d), so nothing below the label moves.
+ * menu, reachable on hover, focus and coarse pointers. While the first listing
+ * is pending, with remembered rows or none, the wait is the label's trailing
+ * slot (blueprint P-d): words from 1 s, the slow words and Retry from 10 s,
+ * and nothing below the label moves.
  *
- * @param props - Whether the list waits with no row to show, and its Retry.
+ * @param props - Whether the list waits for its listing, and its Retry.
  * @returns The label.
  */
 function ProjectsLabel({
-  isAwaitingRows,
+  isWaiting,
   onRetry,
 }: {
-  readonly isAwaitingRows: boolean;
+  readonly isWaiting: boolean;
   readonly onRetry: () => void;
 }): React.JSX.Element {
   const { projects, idleProjectIds } = useLiveNow();
@@ -568,12 +572,7 @@ function ProjectsLabel({
         Recents
         {projects > 0 ? <span className='ml-1.5 tabular-nums'>{`${String(projects)} live`}</span> : null}
       </SidebarGroupLabel>
-      <WaitIndicator
-        active={isAwaitingRows}
-        label='Loading projects'
-        slowLabel='Still loading projects'
-        onRetry={onRetry}
-      />
+      <WaitIndicator active={isWaiting} label='Loading projects' slowLabel='Still loading projects' onRetry={onRetry} />
       {idleProjectIds.length > 0 ? (
         <span className='hidden group-focus-within/label:flex group-hover/label:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'>
           <DropdownMenu isResponsive>

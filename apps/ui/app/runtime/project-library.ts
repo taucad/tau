@@ -59,7 +59,11 @@ import type { LibraryRecoveryActor, ReplayOutcome } from '#machines/library-reco
 import { createLibraryAccess } from '#machines/library-access.machine.js';
 import type { AccessAnswer, LibraryAccessActor } from '#machines/library-access.machine.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
+import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import type { ListedChat } from '#lib/project-list-shape.lib.js';
+import { isUnownedChatObservation } from '@taucad/ui-core/lib/chat-observation-guard';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { PendingProjectOperation, PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import {
@@ -82,12 +86,21 @@ import {
   createMetadataReadOwner,
 } from '#runtime/project-library-observations.js';
 import type { LibraryRecords } from '#runtime/project-library-observations.js';
+import { ProjectCommands } from '#runtime/project-library-commands.js';
+import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 
 /** What the library takes from the runtime's composition. @public */
 export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &
   Readonly<{
     /** The browser `QueryClient`, the same instance `QueryClientProvider` hands down. */
     queryClient: QueryClient;
+    /**
+     * The runtime's sessions registry, read when a command needs it (row L7). The runtime builds the library before
+     * the registry, so it is a getter; a library built without it refuses the commands that ask the registry.
+     */
+    sessions?: () => ProjectLibrarySessions | undefined;
+    /** The runtime's chat store, read when a command needs it; built after the library, so a getter too. */
+    chatSessions?: () => ProjectLibraryChatSessions | undefined;
   }>;
 
 /** The root file manager's record client and watch, which the chat store reads its records through. @public */
@@ -157,6 +170,10 @@ export type ProjectManagerRef = Actor<typeof projectManagerMachine>;
 
 /** The workspace-connection actor's ref. @public */
 export type WorkspaceConnectionRef = Actor<typeof workspaceConnectionMachine>;
+
+/** A project listing as the `['projects']` query holds it: its entries, among other fields. */
+const isProjectListing = (data: unknown): data is { readonly projects: readonly ProjectLibraryEntry[] } =>
+  typeof data === 'object' && data !== null && Array.isArray((data as { projects?: unknown }).projects);
 
 /** The telemetry of one workspace connection, filled in as its services run. @public */
 export type WorkspaceConnectionTrace = {
@@ -259,6 +276,14 @@ export class ProjectLibrary {
   public readonly access: LibraryAccessActor;
   /** The root file facade's record client and watch, from the binding; `undefined` until the first one. */
   public readonly files: ProjectLibraryObservable<ProjectLibraryFiles | undefined>;
+  /**
+   * The listing snapshot (A13): the remembered shape of the last project listing and its chat listings, which the
+   * sidebar draws before they answer. The library writes it whenever a listing lands in its `QueryClient`, fetched or
+   * set (a workspace connect or disconnect publishes the listing with `setQueryData`).
+   */
+  public readonly listingSnapshot = projectListShapeStore;
+  /** The project commands (A4a): create, duplicate, delete, restore, adopt, repair and rename. */
+  public readonly commands: ProjectCommands;
 
   #binding: ProjectLibraryBinding | undefined;
   #bound = Promise.withResolvers<void>();
@@ -301,7 +326,7 @@ export class ProjectLibrary {
   #connection: Promise<unknown> | undefined;
   #connectionTrace: WorkspaceConnectionTrace | undefined;
 
-  public constructor({ queryClient, ...options }: ProjectLibraryOptions) {
+  public constructor({ queryClient, sessions, chatSessions, ...options }: ProjectLibraryOptions) {
     this.queryClient = queryClient;
     this.projectManager = createActor(projectManagerMachine, options);
     const connection: WorkspaceConnectionServices = {
@@ -486,6 +511,29 @@ export class ProjectLibrary {
       },
       subscribe: (listener) => this.#filesChanged.subscribe(listener),
     };
+    this.commands = new ProjectCommands({
+      facade: async () => this.#facade(),
+      chatStore: () => this.chatStore,
+      readChats: async (operation, projectId, readOptions) => this.readChats(operation, projectId, readOptions),
+      readiedWorker: async () => this.getReadiedWorker(),
+      whenDiscoveryReady: async () => this.whenDiscoveryReady(),
+      whenReplaysDrained: async () => this.whenReplaysDrained(),
+      discover: async () => {
+        const { result } = await this.discover();
+        return result;
+      },
+      beginMutation: async (projectId, mutationOptions) => this.beginMutation(projectId, mutationOptions),
+      replayForPerson: async (operation) => this.replayForPerson(operation),
+      invalidateProjectListing: async () => this.invalidateProjectListing(),
+      invalidateListing: () => {
+        this.invalidateListing();
+      },
+      noteLibraryChanged: () => {
+        this.noteLibraryChanged();
+      },
+      sessions: () => sessions?.(),
+      chatSessions: () => chatSessions?.(),
+    });
   }
 
   /**
@@ -497,6 +545,7 @@ export class ProjectLibrary {
       return;
     }
     this.#started = true;
+    this.#subscriptions.push(this.#watchListings());
     this.projectManager.start();
     this.workspaceConnection.start();
     this.access.start();
@@ -1018,6 +1067,30 @@ export class ProjectLibrary {
   }
 
   /* ---------------------------------------------------------------------------------------------------------------- */
+
+  /**
+   * Remember each project and chat listing that lands in the cache, fetched or set, in the listing snapshot (A13).
+   *
+   * @returns The unsubscribe.
+   */
+  #watchListings(): () => void {
+    return this.queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success') {
+        return;
+      }
+      const [scope, resourceId, kind] = event.query.queryKey as readonly unknown[];
+      const data: unknown = event.query.state.data;
+      if (scope === 'projects' && resourceId === undefined && isProjectListing(data)) {
+        this.listingSnapshot.remember(projectListShapeOf(data.projects.map(projectLibraryEntryToListItem)));
+      } else if (scope === 'chats' && typeof resourceId === 'string' && kind === 'records' && Array.isArray(data)) {
+        this.listingSnapshot.rememberChats(
+          resourceId,
+          data as readonly ListedChat[],
+          (chatId) => !isUnownedChatObservation(chatId),
+        );
+      }
+    });
+  }
 
   #publish(snapshot: ProjectLibrarySnapshot): void {
     this.#snapshot = snapshot;

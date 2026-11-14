@@ -21,7 +21,7 @@ import {
 } from '#hooks/use-cloud-projects.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
-import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 
 /**
  * What this device creates for a Tau Cloud project before its first pull: the

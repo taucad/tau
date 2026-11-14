@@ -162,8 +162,17 @@ const mockLiveNow = vi.fn();
 const mockCloseProject = vi.fn();
 const mockGetProjectClosePlan = vi.fn();
 let liveProjectIds: readonly string[] = [];
+/** Why a project's session closed, by project: the registry's `closed` entries. */
+let closedReasons: Readonly<Record<string, string>> = {};
 vi.mock('#hooks/use-sessions.js', () => ({
   useLiveProjectIds: () => liveProjectIds,
+  useProjectLiveness: (projectId: string) => ({
+    projectId,
+    live: liveProjectIds.includes(projectId),
+    status: undefined,
+    closedReason: closedReasons[projectId],
+    policyRefusal: undefined,
+  }),
   useSessions: () => ({ on: () => ({ unsubscribe: () => undefined }) }),
 }));
 vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
@@ -242,6 +251,7 @@ describe('ProjectNavigation', () => {
     mockSetProjectDisclosure.mockResolvedValue(undefined);
     mockNavigate.mockResolvedValue(undefined);
     liveProjectIds = [];
+    closedReasons = {};
     mockRow.mockImplementation((projectId: string) => closedRow(projectId));
     mockLiveNow.mockReturnValue({ projects: 0, idleProjectIds: [] });
     mockGetProjectClosePlan.mockResolvedValue({
@@ -786,6 +796,24 @@ describe('ProjectNavigation', () => {
 
       expect(before).toEqual(['One', 'Earlier', 'Two']);
       expect(drawnRows()).toEqual(before);
+    });
+
+    /*
+     * R1/P46: an open project whose session a policy or the person closed is
+     * not live, on its own page too. It sorts with the rest, below the live
+     * ones and the "Earlier" divider.
+     */
+    it.fails('R1: the open project whose session closed sits below the live ones and the divider', () => {
+      pathname = '/w/home/one';
+      liveProjectIds = ['proj_two'];
+      closedReasons = { proj_one: 'Closed to save memory' };
+      mockUseProjects.mockReturnValue({
+        ...projectsResult,
+        projects: [{ ...firstProject, lastActivityAt: 30 }, secondProject],
+      });
+      render(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'Earlier', 'One']);
     });
 
     /*

@@ -159,7 +159,18 @@ const setFieldOfView = async (degrees: number): Promise<void> => {
   }
   await target.keyboardPress('Enter');
   await target.expectAttribute(row, 'aria-label', `Field of view, 0° is orthographic, ${degrees}°`);
-  await target.keyboardPress('Escape');
+  /* The focused row shows its tooltip, and Escape dismisses that tooltip before it closes the menu (the topmost
+   * dismissable layer takes it). A menu left open hides the rest of the page from the accessibility tree, so the
+   * next role query (a sidebar link) never finds it: press Escape until the menu is gone. */
+  const menu = selectors.getByRole('menu');
+  await expect
+    .poll(async () => {
+      if (await target.isVisible(menu)) {
+        await target.keyboardPress('Escape');
+      }
+      return target.isVisible(menu);
+    })
+    .toBe(false);
   await expect
     .poll(async () => {
       const camera = await readCamera();

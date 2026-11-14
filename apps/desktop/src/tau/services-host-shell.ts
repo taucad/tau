@@ -44,6 +44,12 @@ export type DesktopShellOptions = Readonly<{
   /** On Linux, the host-owned file journalling protected-path stand-ins, swept at the next start after a crash. */
   standInJournal?: string | undefined;
   /**
+   * On Linux, the `tau-store-guard` this build ships (`resources/store-guard/linux-x64`): the Terminal then writes the
+   * project's git store through it where it can start, and keeps the store read-only where it cannot (Linux Terminal
+   * git parity blueprint, R3 and OD2). Absent, the store stays read-only.
+   */
+  storeGuardPath?: string | undefined;
+  /**
    * The bundled git's toolchain ({@link bundledGitToolchain}): readable, and first on both shells' `PATH`, so the agent
    * and the Terminal run the git the revision engine records with.
    */
@@ -135,7 +141,7 @@ export const bundledShellSupervisor = (): SandboxShellProviderOptions['superviso
  * @returns The provider, or `undefined` when this platform has none.
  */
 export const desktopShellProvider = (
-  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal'> &
+  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal' | 'storeGuardPath'> &
     Partial<Pick<DesktopShellOptions, 'appDataRoots'>> &
     Readonly<{ platform: NodeJS.Platform }>,
 ): ShellProvider | undefined => {
@@ -152,6 +158,7 @@ export const desktopShellProvider = (
         ...shared,
         ...(options.bwrapPath === undefined ? {} : { bwrapPath: options.bwrapPath }),
         ...(options.standInJournal === undefined ? {} : { standInJournal: options.standInJournal }),
+        ...(options.storeGuardPath === undefined ? {} : { storeGuardPath: options.storeGuardPath }),
       });
     }
     case 'darwin': {
@@ -283,6 +290,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
           home: options.home,
           appDataRoots: options.appDataRoots,
           standInJournal: options.standInJournal,
+          storeGuardPath: options.storeGuardPath,
         });
       const outcome =
         provider === undefined

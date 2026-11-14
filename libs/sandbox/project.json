@@ -5,6 +5,37 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:lib", "shell:sandbox", "ci:shell"],
   "targets": {
+    "build:store-guard": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/store-guard/src/**/*",
+        "{projectRoot}/store-guard/Cargo.toml",
+        "{projectRoot}/store-guard/Cargo.lock",
+        "{projectRoot}/store-guard/rust-toolchain.toml",
+        "{projectRoot}/scripts/build-store-guard.mts"
+      ],
+      "outputs": ["{workspaceRoot}/out/store-guard/linux-x64"],
+      "metadata": {
+        "description": "Build the Linux Terminal's git store guard (store-guard/, Rust, static musl) and stage it with its NOTICE and manifest under out/store-guard/linux-x64 (Linux git parity blueprint, LP2 and LP8). Linux x64 only; rustup installs the pinned toolchain on first run."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts"
+      }
+    },
+    "test:store-guard": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/store-guard/**/*", "{projectRoot}/scripts/build-store-guard.mts"],
+      "metadata": {
+        "description": "The store guard's Rust unit tests, clippy (warnings denied) and rustfmt. The mounted acceptance cases (store-guard/tests/acceptance.sh) need FUSE and bubblewrap and run in the Linux shell-conformance guest."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --test"
+      }
+    },
     "test:shell-conformance": {
       "executor": "nx:run-commands",
       "cache": true,

@@ -51,6 +51,7 @@ import {
   stagedTerminalStartArguments,
 } from '#shell/shell-start-barrier.js';
 import type { LaunchAnnouncement } from '#shell/shell-start-barrier.js';
+import { probeStoreGuard, storeGuardCommand } from '#shell/store-guard.js';
 import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
@@ -140,6 +141,12 @@ export type SandboxShellProviderOptions = Readonly<{
    * the next start sweeps the ones a crash left behind.
    */
   standInJournal?: string;
+  /**
+   * On Linux, the `tau-store-guard` executable that writes a Terminal's git stores through a name guard
+   * ({@link ShellFilesystem.guardedStores}). Without it, or where its start check fails, {@link ShellProvider.storeGuard}
+   * answers `false` and the host keeps the stores read-only (blueprint OD2).
+   */
+  storeGuardPath?: string;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
@@ -607,6 +614,8 @@ type ByteQueue = Readonly<{
 
 // Private diagnostics: numeric queue occupancy only, never command text or output bytes.
 const queueDiagnostics = channel('taucad.native-process.shell.byte-queue');
+/** Why the store guard's start check failed, once per process; the host keeps read-only stores (blueprint OD2). */
+const storeGuardDiagnostics = channel('taucad.native-process.shell.store-guard');
 type QueueIdentity = Readonly<{ commandId: string; stream: 'stdout' | 'stderr' | 'pty' }>;
 
 const byteQueue = (pause: () => void, resume: () => void, identity: QueueIdentity): ByteQueue => {
@@ -861,6 +870,39 @@ const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[
     : argv;
 
 /**
+ * The vector for a launch with guarded stores (blueprint R2): the outer bubblewrap and the guard launcher, which exec
+ * the runtime's own command text once the guard is mounted and every capability is dropped. Any other launch keeps
+ * its vector.
+ *
+ * @param argv - The host-bound `[shell, '-c', 'exec <bwrap> …']` vector.
+ * @param launch - The launch, whose `guardedStores` decide.
+ * @param options - The provider's bubblewrap and guard paths.
+ * @returns The vector to spawn, or `undefined` when a guarded launch's vector is not the shape Tau recognises.
+ */
+const guardedVector = (
+  argv: readonly string[],
+  launch: ShellLaunch,
+  options: SandboxShellProviderOptions,
+): readonly string[] | undefined => {
+  const guarded = launch.filesystem.guardedStores;
+  if (guarded === undefined) {
+    return argv;
+  }
+  const bwrapPath = options.bwrapPath ?? '/usr/bin/bwrap';
+  const [shell, flag, command] = argv;
+  if (
+    options.storeGuardPath === undefined ||
+    shell === undefined ||
+    flag !== '-c' ||
+    command === undefined ||
+    !command.startsWith(`exec ${bwrapPath} `)
+  ) {
+    return undefined;
+  }
+  return [shell, '-c', storeGuardCommand({ guardPath: options.storeGuardPath, bwrapPath, guarded, command })];
+};
+
+/**
  * A launch spawned behind its start barrier (I7): the staged root runs nothing until `open`, and `abandon` makes it
  * exit without executing the workload.
  */
@@ -1079,6 +1121,33 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
   if (launch.toolchainBins !== undefined && launch.startupFiles === undefined) {
     return unsupported('environment', 'only the Terminal Zsh with its startup files takes toolchain folders.');
   }
+  const { guardedStores } = launch.filesystem;
+  if (guardedStores !== undefined) {
+    if (process.platform !== 'linux' || launch.stdio.kind !== 'terminal' || options.storeGuardPath === undefined) {
+      return unsupported(
+        'filesystem-mask',
+        'only a Linux Terminal launch with the store guard may write guarded stores.',
+      );
+    }
+    const plain = /^[^/\0]+$/u;
+    if (
+      guardedStores.stores.length === 0 ||
+      guardedStores.protect.length === 0 ||
+      guardedStores.protect.some((name) => !plain.test(name) || name === '.' || name === '..') ||
+      guardedStores.stores.some(
+        (store) =>
+          !isAbsolute(store) ||
+          store.includes('\0') ||
+          !writable.some((root) => store !== root && inside(store, root)) ||
+          [...readOnly, ...denied].some((path) => inside(store, path) || inside(path, store)),
+      )
+    ) {
+      return unsupported(
+        'filesystem-mask',
+        'each guarded store must lie inside a writable root, outside every read-only and denied path, with a plain policy.',
+      );
+    }
+  }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
       return unsupported('terminal', 'the macOS Terminal waits for the own-pty validation run.');
@@ -1187,6 +1256,27 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     useStandInJournal(options.standInJournal);
   }
   const custody = createShellCustody(options.custody ?? defaultCustody());
+  /* One start check per process (blueprint R3): a host without the guard keeps read-only stores. */
+  let storeGuard: Promise<boolean> | undefined;
+  const storeGuardAvailable = async (): Promise<boolean> => {
+    storeGuard ??= (async () => {
+      if (process.platform !== 'linux' || options.storeGuardPath === undefined) {
+        return false;
+      }
+      const probe = await probeStoreGuard({
+        guardPath: options.storeGuardPath,
+        bwrapPath: options.bwrapPath ?? '/usr/bin/bwrap',
+      }).catch((error: unknown) => ({
+        available: false as const,
+        reason: error instanceof Error ? error.message : String(error),
+      }));
+      if (!probe.available) {
+        storeGuardDiagnostics.publish({ available: false, reason: probe.reason });
+      }
+      return probe.available;
+    })();
+    return storeGuard;
+  };
   const stage = async (launch: ShellLaunch, binding: PtyBinding | undefined): Promise<ShellLaunchOutcome> => {
     let lock: number;
     try {
@@ -1266,7 +1356,15 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
+    const argv = guardedVector(
+      hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap'),
+      launch,
+      options,
+    );
+    if (argv === undefined) {
+      await supervisor.close();
+      return { status: 'sandbox-unavailable', message: 'the sandbox command could not be wrapped by the store guard.' };
+    }
     const owner: LaunchOwner = { supervisor, table: options.processTable };
     let staged: Staged;
     if (launch.stdio.kind === 'pipes') {
@@ -1310,6 +1408,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
   };
   return {
     name: 'srt-0.0.75',
+    storeGuard: storeGuardAvailable,
     prepare: async (input) => custody.prepare(input),
     inventory: async () => custody.inventory(),
     recover: async (input) => custody.recover(input),
@@ -1319,6 +1418,9 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       const refusal = admit(launch, options);
       if (refusal !== undefined) {
         return refusal;
+      }
+      if (launch.filesystem.guardedStores !== undefined && !(await storeGuardAvailable())) {
+        return { status: 'sandbox-unavailable', message: 'the store guard cannot start on this device.' };
       }
       let binding: PtyBinding | undefined;
       if (launch.stdio.kind === 'terminal') {

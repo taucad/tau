@@ -1123,17 +1123,30 @@ function UnifiedProjectList({
         /* P-g: the remembered cards are the same list and cards the listing then fills, reconciled by id in place;
            with only a count, the grid holds the room for that many cards and draws none. */
         <ul aria-label='Projects' aria-busy='true' className={projectGridClassName}>
-          {rememberedCards === undefined
-            ? Array.from({ length: placeholderCount }, (_, index) => (
+          {/* One flat list, as the listed grid's, so its items are the ones the listing keeps. The snapshot keeps at
+              most 100 projects; an unfiltered page longer than that keeps the count's height with room. */}
+          {[
+            ...(rememberedCards ?? []).map((project) => (
+              <li key={project.id}>
+                <ProjectLibraryCard project={project} actions={actions} />
+              </li>
+            )),
+            ...Array.from(
+              {
+                length:
+                  rememberedCards === undefined
+                    ? placeholderCount
+                    : globalFilter
+                      ? 0
+                      : Math.max(placeholderCount - rememberedCards.length, 0),
+              },
+              (_, index) => (
                 <li key={`room-${String(index)}`} aria-hidden>
                   <ProjectCardRoom />
                 </li>
-              ))
-            : rememberedCards.map((project) => (
-                <li key={project.id}>
-                  <ProjectLibraryCard project={project} actions={actions} />
-                </li>
-              ))}
+              ),
+            ),
+          ]}
         </ul>
       ) : (
         // Grid View

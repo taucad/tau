@@ -1108,6 +1108,32 @@ describe('ProjectLibrary', () => {
     expect(container.querySelectorAll('[data-slot=skeleton]')).toHaveLength(0);
   });
 
+  /* P-g: past the snapshot's 100 projects, a longer page keeps the count's height with room, so nothing moves. */
+  it('holds room after the remembered cards for a page longer than the snapshot keeps', () => {
+    mockCookieValues = { [cookieName.projectPageSize]: 150 };
+    mockRememberedShape = {
+      count: 120,
+      projects: Array.from({ length: 100 }, (_, index) => ({
+        id: `proj_many_${String(index)}`,
+        name: `Many ${String(index)}`,
+        lastActivityAt: 1000 - index,
+      })),
+    };
+    mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+
+    render(
+      <TestRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </TestRouter>,
+    );
+
+    const grid = screen.getByRole('list', { name: 'Projects' });
+    expect(grid.children).toHaveLength(120);
+    expect(within(grid).getAllByRole('link')).toHaveLength(100);
+  });
+
   /* R14: the paging row is reserved with the grid when the remembered list spans pages. */
   it('reserves a page of cards and the paging row when the remembered list spans pages', () => {
     mockRememberedShape = { count: 45 };

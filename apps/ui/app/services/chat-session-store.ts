@@ -1518,6 +1518,10 @@ export class ChatSessionStore {
     this.#sessions.set(chatId, session);
     session.messageQueueRef.start();
     session.observationRelease = this.observe(chatId, projectId);
+    // A read the host refused before this session existed answers nothing more: the load has settled (I21).
+    if (this.#observed.get(chatId)?.status === 'refused') {
+      this.#latchUnreadTranscript(session);
+    }
     // A retained sidebar observation may already be caught up and emit no new answer.
     this.#syncProjection(chatId, 'open');
     // The root bound before the session was registered; its first read of the chat's waits is now.
@@ -1763,6 +1767,7 @@ export class ChatSessionStore {
       answer.endCursor >= answer.nextCursor
     ) {
       this.#answeredLogReads.add(chatId);
+      this.#latchIfForeignScanLost(chatId);
       const observed = this.#observed.get(chatId);
       if (observed !== undefined) {
         observed.status = 'attached';
@@ -2650,6 +2655,7 @@ export class ChatSessionStore {
       // A disposed observation was replaced or released; its successor's scan is the one an empty transcript waits for.
       if (!observation.isDisposed) {
         this.#resumeTranscriptAfterForeignScan(chatId);
+        this.#latchIfForeignScanLost(chatId);
       }
     });
     observation.acquire();
@@ -2702,7 +2708,11 @@ export class ChatSessionStore {
       return;
     }
     const projection = this.#projectionContext(chatId);
-    if (scan === 'read' && projection !== undefined) {
+    if (scan === 'read') {
+      // A log that has not caught up is not settled yet: its catch-up materializes and settles it.
+      if (projection === undefined || !selectCaughtUp(projection)) {
+        return;
+      }
       // Present what the scan brought: a new materialization settles the transcript, with or without turns.
       const started = session.materializeVersion;
       session.transcriptSource = undefined;
@@ -2711,6 +2721,31 @@ export class ChatSessionStore {
       if (session.materializeVersion !== started) {
         return;
       }
+    }
+    session.transcriptAwaitsForeignScan = false;
+    this.#latchTranscriptSettled(session);
+  }
+
+  /**
+   * Settle a chat whose local log has answered while the watch of other devices' history has ended without a read
+   * that counts, so the lane cannot present the log. Nothing will until the client is replaced, so the load has settled
+   * (I21); nothing was read to forget the trays by (U10).
+   */
+  #latchIfForeignScanLost(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (
+      session === undefined ||
+      session.transcriptSettled ||
+      session.messages.length > 0 ||
+      !this.#answeredLogReads.has(chatId) ||
+      this.#foreignScanState(chatId) !== 'failed'
+    ) {
+      return;
+    }
+    // A local log the lane can still present settles through its own materialization.
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || this.#foreignDisplayReady(chatId, projection)) {
+      return;
     }
     session.transcriptAwaitsForeignScan = false;
     this.#latchTranscriptSettled(session);

@@ -5929,6 +5929,123 @@ describe('ChatSessionStore', () => {
       }
     });
 
+    it('settles a chat whose read was refused before it was opened, or before it was opened again (I21)', async () => {
+      const projectId = 'project_refused_earlier';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const stopListed = store.observe('chat_refused_listed', projectId);
+      const stopReopened = store.observe('chat_refused_reopened', projectId);
+      try {
+        await settle();
+        // Refused while only listed in the sidebar, then opened.
+        store.receiveHostReadAnswer('chat_refused_listed', { status: 'refused', reason: 'unreadable' });
+        const listed = store.acquire('chat_refused_listed', projectId);
+        await settle();
+        expect(listed.transcript).toBe('empty');
+
+        // Refused while open, then left and opened again while the sidebar still lists it.
+        const first = store.acquire('chat_refused_reopened', projectId);
+        await settle();
+        store.receiveHostReadAnswer('chat_refused_reopened', { status: 'refused', reason: 'unreadable' });
+        expect(first.transcript).toBe('empty');
+        store.release('chat_refused_reopened');
+        const reopened = store.acquire('chat_refused_reopened', projectId);
+        await settle();
+        expect(reopened.transcript).toBe('empty');
+      } finally {
+        store.release('chat_refused_listed');
+        store.release('chat_refused_reopened');
+        stopListed();
+        stopReopened();
+      }
+    });
+
+    it('settles a chat whose foreign watch closed after it read, without forgetting the tray (I21, U10)', async () => {
+      const projectId = 'project_watch_closed_after_read';
+      const closed = Promise.withResolvers<void>();
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = () => ({
+        ready: Promise.resolve(),
+        closed: closed.promise,
+        dispose: vi.fn(),
+      });
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_closed_after_read', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const session = store.acquire('chat_closed_after_read', projectId);
+      try {
+        await settle();
+        // The watch read once, then the connection dropped before the local log answered.
+        closed.resolve();
+        await settle();
+        publishLogPage(store, 'chat_closed_after_read', [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('empty');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_closed_after_read')).toBe('todo');
+      } finally {
+        store.release('chat_closed_after_read');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('does not settle from a log page that has not caught up when the foreign scan ends (I21, U10)', async () => {
+      const projectId = 'project_partial_page';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_partial_page/events`;
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === events ? scan.promise : readDirectory(path),
+      );
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_partial_page', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_partial_page', projectId);
+      try {
+        await settle();
+        publishLogPage(store, 'chat_partial_page', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        // The log grew: its first page is not its end.
+        publishLogPage(
+          store,
+          'chat_partial_page',
+          [
+            ...runningRows('run_partial'),
+            logRow(2, {
+              runId: 'run_partial',
+              type: 'message.appended',
+              message: { id: 'partial-reply', role: 'assistant', content: 'Part.' },
+            }),
+          ],
+          { cursor: 0, endCursor: 50 },
+        );
+        await settle();
+        scan.resolve([]);
+        await settle();
+        expect(session.transcript).toBe('loading');
+        expect(memory.get('tau:chat-composer-trays:chat_partial_page')).toBe('todo');
+      } finally {
+        store.release('chat_partial_page');
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
       const store = new ChatSessionStore({ chatSession });
       const deps = createStubDeps();

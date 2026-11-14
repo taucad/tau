@@ -81,6 +81,13 @@
 \* `MutationApplied` and rule 4's gate keep their correspondence. The delete's quiescence check and session
 \* close ask the registry and the chat store, outside the model; the check's chat read is not asked again
 \* after a release, as the hook's was not. No action changes.
+\* A4b: connecting a workspace, retrying it, choosing a project's directory and repairing workspace
+\* bindings are `ProjectLibrary` workspace commands (`runtime/project-library-workspace.ts`), moved from
+\* the hook in the same order; choosing a directory now also refetches the listing. The library follows the
+\* root file facade the app runtime builds, so no provider binds, releases or resumes it, and a provider
+\* unmount no longer releases a held read. The library is the listing's only writer: the hook's
+\* refetches after a mutation are the commands' own, a query refetch that moves no epoch, as before. No
+\* action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

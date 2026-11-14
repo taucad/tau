@@ -2,7 +2,7 @@
   "name": "@taucad/desktop",
   "productName": "Tau",
   "desktopName": "com.taucad.tau.desktop",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",

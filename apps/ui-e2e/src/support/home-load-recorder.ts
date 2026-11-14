@@ -1024,7 +1024,8 @@ export const shownOnFrames = (
  */
 export const regionShownOnFrames = (record: ProjectLoadRecord, region: string, since = -Infinity): ShownSpan[] =>
   shownOnFrames(record.regions[region] ?? [], record.frameStamps, record.regionRemovals[region]).filter(
-    (span) => span.from >= since,
+    /* An unstamped span is kept, so `minimumBreaches` reports it rather than the filter dropping it. */
+    (span) => Number.isNaN(span.from) || span.from >= since,
   );
 
 /** What the server's HTML for a document holds, before any script runs. */
@@ -1378,15 +1379,15 @@ export const armWorkerReadDelay = async (rules: readonly WorkerReadDelay[]): Pro
 export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
 
+/** When each `longTask` started on the page (`WorkerReadDelay.longTask`), in milliseconds from navigation start. */
+export const readLongTasks = async (): Promise<readonly number[]> =>
+  target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.longTasks);
+
 /**
  * The held replies the page has received so far.
  *
  * @returns Each delivery, with its request's send time.
  */
-/** When each `longTask` started on the page (`WorkerReadDelay.longTask`), in milliseconds from navigation start. */
-export const readLongTasks = async (): Promise<readonly number[]> =>
-  target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.longTasks);
-
 export const readWorkerDeliveries = async (): Promise<WorkerReadDeliveries> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.delivered);
 

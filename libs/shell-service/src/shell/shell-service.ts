@@ -901,6 +901,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           'The project folder or a granted folder was replaced before the command started, so it did not run.',
         );
       }
+      /* A call withdrawn while its launch was staged is never prepared (E09); `didNotStart` answers `cancelled`. */
+      if (request.signal.aborted) {
+        return didNotStart('launch-failed', 'The command was cancelled before it started.');
+      }
       let executionId: string;
       try {
         ({ executionId } = await provider.prepare({
@@ -931,6 +935,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           return didNotStart('checkout-unavailable', `${answer.message} The command did not run.`);
         }
         custody = { executionId, holds };
+      }
+      /* Nor launched, when it was withdrawn while custody was recorded; the receipt is released as for any refusal. */
+      if (request.signal.aborted) {
+        return didNotStart('launch-failed', 'The command was cancelled before it started.');
       }
       const controller = new AbortController();
       /* Set by the timer; an object so the check after the awaits reads it live. */

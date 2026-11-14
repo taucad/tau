@@ -486,11 +486,56 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
       toolCallId: 'call-late',
     });
     /* It settles while the holder still has the slot: it never waits for a slot it would refuse to use. */
-    await expect(queued).resolves.toMatchObject({ status: 'cancelled' });
+    const settled = await Promise.race([
+      queued,
+      new Promise<'still waiting'>((resolve) => {
+        setTimeout(() => {
+          resolve('still waiting');
+        }, 1000);
+      }),
+    ]);
+    expect(settled).toMatchObject({ status: 'cancelled' });
     holding.abort();
     await expect(holder).resolves.toMatchObject({ status: 'cancelled' });
     expect(prepared).toBe(1);
     expect(provider.launches).toHaveLength(1);
+  });
+  it('a call already withdrawn when a slot is free is never staged (E09)', async () => {
+    const { service, provider } = harness(() => ({ status: 'started' }), { maxExecutions: 1 });
+    const prepare = vi.spyOn(provider, 'prepare');
+    const withdrawn = new AbortController();
+    withdrawn.abort();
+    await expect(service.run(call({ command: 'echo late' }, { signal: withdrawn.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(provider.launches).toHaveLength(0);
+  });
+
+  it('a call withdrawn while its custody is recorded is never launched, and its hold is released (E09)', async () => {
+    const { service, provider, checkouts } = harness(() => ({ status: 'started' }));
+    const controller = new AbortController();
+    const log: string[] = [];
+    checkouts.set('run-1', {
+      cwd: project,
+      admission: 'admission-1',
+      executions: {
+        hold: async (executionId) => {
+          log.push(`hold:${executionId}`);
+          controller.abort();
+          return { status: 'applied' };
+        },
+        release: async (executionId) => {
+          log.push(`release:${executionId}`);
+          return { status: 'applied' };
+        },
+      },
+    });
+    await expect(service.run(call({ command: 'echo late' }, { signal: controller.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(provider.launches).toHaveLength(0);
+    expect(log.map((entry) => entry.split(':')[0])).toEqual(['hold', 'release']);
   });
 });
 

@@ -21,7 +21,12 @@ const standInMachine = setup({
   initial: 'starting',
   context: { openFileSystemBridge: undefined, error: undefined },
   states: {
-    starting: { on: { ready: { target: 'ready' } } },
+    starting: {
+      on: {
+        ready: { target: 'ready' },
+        fail: ({ event }) => ({ target: 'error', context: { error: event.error } }),
+      },
+    },
     ready: {
       on: {
         lost: { target: 'starting' },
@@ -37,7 +42,7 @@ export type SessionFileManagerStandIn = SessionFileManager &
   Readonly<{
     /** Move the file manager into `ready`, or back out of it. */
     setReady: (ready: boolean) => void;
-    /** Move the file manager into `error`, as a lost worker does a nested one. */
+    /** Move the file manager into `error`, as a dead shared worker does a nested one. */
     fail: (error: Error) => void;
     /** Whether `close` ran. */
     isClosed: () => boolean;

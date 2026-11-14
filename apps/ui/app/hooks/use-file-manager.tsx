@@ -717,8 +717,9 @@ export function HomeFileManagerProvider({
 /**
  * A project session's file manager: a provider over the actor the session's `fileManager` child built through the
  * host for `/projects/<id>` (A6c). It creates, starts and stops nothing: the child owns the actor, its connections and
- * its working-copy client, and the session stops the child when it closes (I1, I23). Until the child reports the
- * actor (it does as the session starts) the provider renders nothing.
+ * its working-copy client, and the session stops the child when it closes (I1, I23). Until the child reports an
+ * actor (once `rootFiles` holds the shared worker), and while it rebuilds one on a new worker, the provider renders
+ * nothing.
  *
  * @param props - The session's file manager, its root and project, and the subtree.
  * @returns The provider element, or nothing before the session has a file manager.

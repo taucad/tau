@@ -535,8 +535,9 @@ export const projectSessionMachine = setup({
       reportFacts({ ...context, ...patch }, enq);
       return { context: patch };
     },
-    /* The child reports its file manager once, as it starts (A6c). A child that stopped tells nothing more, so a
-     * report reaches only a session whose child runs; a report from a stopped child's predecessor cannot arrive. */
+    /* The child reports each file manager it builds, and `undefined` when it closes one because the shared worker was
+     * lost or replaced or the child is stopping (A6c). A stopped child tells nothing more, and `stopChildren` clears
+     * the ref itself, so a report reaches only a session whose child runs. */
     fileManagerChanged: ({ event }) => ({ context: { fileManagerRef: event.fileManagerRef } }),
     /* Answered in every state: the request is a fact the session keeps, whatever it is doing (MC-R16). */
     chatRequested: ({ context, event }) =>

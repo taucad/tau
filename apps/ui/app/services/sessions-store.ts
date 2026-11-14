@@ -30,7 +30,6 @@ import type {
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import { faultMessage } from '#runtime/app-runtime-faults.js';
 import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
@@ -177,8 +176,7 @@ export type SessionFileManagerWorker = Readonly<{
  * The `fileManager` child: it builds the project's file manager through the host for `/projects/<id>`, owns it for
  * the session's life and closes it when the session stops the child (I23). It tells the session the file manager's
  * ref, then reports the views region each time the file manager comes up, from its snapshot rather than from a mount
- * (I5), and fails the region when the file manager goes to `error`. A build that throws fails the region with its
- * reason.
+ * (I5). A build that throws fails the region with its reason.
  *
  * With the host's shared worker it follows `rootFiles`, as the shared-worker gate made the mounted subtree follow it
  * before A6c: it builds only once `rootFiles` holds a worker, so a session opened while the root connects or restarts
@@ -215,21 +213,17 @@ const fileManagerRegionOn = (open: SessionFileManagerOpener, worker: SessionFile
       const fileManager: FileManagerRef = opened.fileManagerRef;
       const untrack = trackSessionFileManager(opened);
       sendBack({ type: 'fileManagerChanged', fileManagerRef: fileManager });
-      /* Edge-triggered, as the binding's effect was: one report each time the file manager enters `ready` or `error`. */
-      let last: 'ready' | 'error' | undefined;
+      /* Edge-triggered, as the binding's effect was: one report each time the file manager enters `ready`. An `error`
+       * reports nothing, as the binding reported nothing: a nested file manager errs when the shared worker dies, often
+       * before `rootFiles` sees it, and the rebuild on the root's new worker is what recovers it. The start bound
+       * decides an opening session that never comes up. */
+      let ready = false;
       const observe = (snapshot: ReturnType<FileManagerRef['getSnapshot']>): void => {
-        const now = snapshot.matches('ready') ? 'ready' : snapshot.matches('error') ? 'error' : undefined;
-        if (now === 'ready' && last !== 'ready') {
+        const now = snapshot.matches('ready');
+        if (now && !ready) {
           sendBack({ type: 'childReady', region: 'views' });
         }
-        if (now === 'error' && last !== 'error') {
-          sendBack({
-            type: 'childFailed',
-            region: 'views',
-            reason: faultMessage(snapshot.context.error, 'file manager error'),
-          });
-        }
-        last = now;
+        ready = now;
       };
       const subscription = fileManager.subscribe(observe);
       current = {

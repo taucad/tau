@@ -200,20 +200,26 @@ describe("the session's file manager follows the host's shared worker (A6c)", ()
   });
 });
 
-describe("the session's file manager reports its failure (A6c)", () => {
-  it('should fail the views region when the file manager goes to error, and clear it when it is ready again', async () => {
-    const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id));
+describe('a nested file manager that errs on a dead worker (A6c)', () => {
+  it('should not fail an opening session when its file manager errs first, and go live on the rebuild', async () => {
+    const worker = sharedWorkerOf(workerA);
+    const { registry, opened } = harness((id) => openSessionFileManagerStandIn(id, { ready: false }), worker.port);
     registry.send({ type: 'open', projectId });
     reportRegionReady(projectId, 'runtime');
     await flush();
 
-    opened[0]?.fail(new Error('worker lost'));
+    /* The nested file manager sees the worker die before `rootFiles` does, then the root restarts its worker. */
+    opened[0]?.fail(new Error('The file service for this project stopped.'));
     await flush();
-    expect(sessionOf(registry)?.getSnapshot().context.failures).toMatchObject({ views: 'worker lost' });
-
-    opened[0]?.setReady(true);
-    await flush();
+    expect(sessionOf(registry)?.getSnapshot().matches('opening')).toBe(true);
     expect(sessionOf(registry)?.getSnapshot().context.failures).toEqual({});
+
+    worker.set(undefined);
+    worker.set(workerB);
+    opened[1]?.setReady(true);
+    await flush();
+
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
   });
 });
 

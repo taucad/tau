@@ -183,7 +183,8 @@ const layoutRecord: {
   applyViewer: ((node: ViewerNode, applied: () => void) => void) | undefined;
   listeners: Set<() => void>;
   viewerAdapter: Actor<typeof viewerAdapterLogic> | undefined;
-} = { viewer: undefined, applyViewer: undefined, listeners: new Set(), viewerAdapter: undefined };
+  viewerDockId: string;
+} = { viewer: undefined, applyViewer: undefined, listeners: new Set(), viewerAdapter: undefined, viewerDockId: '' };
 /** The record's first read lands: the registered viewer applies it, and the page's readers hear it. */
 const readLayoutRecord = (viewer: ViewerNode): void => {
   layoutRecord.viewer = viewer;
@@ -227,9 +228,16 @@ const layoutDockHost = {
     layoutRecord.viewerAdapter = undefined;
     if ('api' in event) {
       layoutRecord.viewerAdapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+      layoutRecord.viewerDockId = event.dockId;
       layoutRecord.viewerAdapter.start();
     }
   },
+  getSnapshot: () => ({
+    children:
+      layoutRecord.viewerAdapter === undefined
+        ? {}
+        : { [`viewerAdapter:${layoutRecord.viewerDockId}`]: layoutRecord.viewerAdapter },
+  }),
 };
 
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();

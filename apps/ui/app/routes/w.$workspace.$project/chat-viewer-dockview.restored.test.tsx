@@ -50,7 +50,7 @@ vi.mock('#hooks/use-project-availability.js', () => {
 });
 
 /** The viewer adapter the editor double spawned, as the editor does on a page without a layout. */
-const dock: { adapter: Actor<typeof viewerAdapterLogic> | undefined } = { adapter: undefined };
+const dock: { adapter: Actor<typeof viewerAdapterLogic> | undefined; id: string } = { adapter: undefined, id: '' };
 
 vi.mock('#hooks/use-project.js', () => {
   const projectSnapshot = { matches: (state: string) => state === 'ready' };
@@ -69,6 +69,7 @@ vi.mock('#hooks/use-project.js', () => {
         if ('api' in event) {
           dock.adapter?.stop();
           dock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+          dock.id = event.dockId;
           dock.adapter.start();
           return;
         }
@@ -79,7 +80,10 @@ vi.mock('#hooks/use-project.js', () => {
         }
         fixture.editorSend(event);
       },
-      getSnapshot: () => fixture.editorSnapshot,
+      getSnapshot: () => ({
+        ...fixture.editorSnapshot,
+        children: dock.adapter === undefined ? {} : { [`viewerAdapter:${dock.id}`]: dock.adapter },
+      }),
       subscribe: () => ({ unsubscribe: () => undefined }),
     },
     get mainEntryPath() {
@@ -254,8 +258,9 @@ describe('restored viewer layout admission', () => {
   it('should detach the viewer adapter on unmount and attach again on remount', () => {
     const detach = vi.fn();
     const registerViewer = vi.fn(() => detach);
-    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined } = {
+    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined; id: string } = {
       adapter: undefined,
+      id: '',
     };
     fixture.workspace = {
       layoutController: {
@@ -265,11 +270,15 @@ describe('restored viewer layout admission', () => {
         requestViewerFile: vi.fn(),
       },
       layout: {
+        getSnapshot: () => ({
+          children: layoutDock.adapter === undefined ? {} : { [`viewerAdapter:${layoutDock.id}`]: layoutDock.adapter },
+        }),
         send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
           layoutDock.adapter?.stop();
           layoutDock.adapter = undefined;
           if ('api' in event) {
             layoutDock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+            layoutDock.id = event.dockId;
             layoutDock.adapter.start();
           }
         },
@@ -288,7 +297,10 @@ describe('restored viewer layout admission', () => {
   // A8d review round 1: a project switch hands the dock over again, and the new adapter starts on that render's facts,
   // so it registers with the new project's layout only, never again with the old one's.
   it('should register the re-handed viewer with the new project layout only', () => {
-    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined } = { adapter: undefined };
+    const layoutDock: { adapter: Actor<typeof viewerAdapterLogic> | undefined; id: string } = {
+      adapter: undefined,
+      id: '',
+    };
     const workspaceWith = (registerViewer: () => () => void): NonNullable<typeof fixture.workspace> =>
       ({
         layoutController: {
@@ -298,11 +310,16 @@ describe('restored viewer layout admission', () => {
           requestViewerFile: vi.fn(),
         },
         layout: {
+          getSnapshot: () => ({
+            children:
+              layoutDock.adapter === undefined ? {} : { [`viewerAdapter:${layoutDock.id}`]: layoutDock.adapter },
+          }),
           send: (event: Readonly<{ type: string }> | ViewerDockReady) => {
             layoutDock.adapter?.stop();
             layoutDock.adapter = undefined;
             if ('api' in event) {
               layoutDock.adapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+              layoutDock.id = event.dockId;
               layoutDock.adapter.start();
             }
           },

@@ -2,7 +2,7 @@
  * The viewer Dockview's adapter to a live project's layout (app state orchestration charter D4, D11, I1, I10 to I14;
  * plan § 4 A8d; inventory rows Y8 and Y9).
  *
- * A callback actor holds the viewer's `DockviewApi` in its closure from Dockview's `onReady` to the dock's ref cleanup,
+ * A callback actor holds the viewer's `DockviewApi` in its closure from the dock's ref handover to its ref cleanup,
  * on desktop and on the phone shell. It:
  *
  * - applies what the layout shows on the viewer and reports the person's rearrangement (through the layout port the
@@ -28,6 +28,7 @@ import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
+import { dockAdapterId } from '#workbench-records/workbench-adapter.js';
 import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { readViewLevels } from '#workbench-records/view-levels.js';
 import { resolvedViewFields } from '#workbench-records/view-record-binding-changes.js';
@@ -184,8 +185,6 @@ export type ViewerAdapterFacts = Readonly<{
   setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
   /** Write a new view's record, made from `source` (V8). */
   createViewRecord: (viewId: string, entryPath: string, source: ViewSource | undefined) => void;
-  /** The project's layout, on a page that has one (the editor profile of a live project). */
-  layout: ViewerAdapterLayoutPort | undefined;
 }>;
 
 /** The facts port the page feeds: a value it replaces, which the adapter follows. */
@@ -219,6 +218,11 @@ export type ViewerAdapterPorts = Readonly<{
   profile: 'editor' | 'shared';
   projectId: string;
   project: Pick<ProjectRef, 'send' | 'on'>;
+  /**
+   * The project's layout, on a page that has one (the editor profile of a live project). A port, not a fact: a dock
+   * handed to another layout is handed over again, so a new adapter registers with the layout it was handed with.
+   */
+  layout: ViewerAdapterLayoutPort | undefined;
   facts: ObservablePort<ViewerAdapterFacts>;
 }>;
 
@@ -238,8 +242,27 @@ export type ViewerDockReady = Readonly<{
 /** The viewer Dockview that made `dockId` is gone (its ref cleanup): its adapter stops. */
 export type ViewerDockReleased = Readonly<{ type: 'dockReleased'; adapter: 'viewer'; dockId: string }>;
 
-/** The adapter takes no events: everything reaches it through Dockview, the project, the layout port and the facts. */
-export type ViewerAdapterEvent = Readonly<{ type: 'never' }>;
+/**
+ * The adapter's one event: `attach`, which the dock sends once its host's `dockReady` step has returned (A8c's
+ * handover). It registers with the layout then, when the layout is idle, so the arrangement shown at attach lands before
+ * the adapter follows the records. Everything else reaches it through Dockview, the project and its ports.
+ */
+export type ViewerAdapterEvent = Readonly<{ type: 'attach' }>;
+
+/**
+ * The viewer adapter a host runs for the dock `dockId`, if it runs one.
+ *
+ * @param host - The project's layout, or the editor on a page without one.
+ * @param dockId - The dock's mount.
+ * @returns The adapter, to send `attach` to.
+ */
+export const selectViewerDockAdapter = (
+  host: Readonly<{ getSnapshot: () => { children: Readonly<Record<string, unknown>> } }>,
+  dockId: string,
+): Readonly<{ send: (event: ViewerAdapterEvent) => void }> | undefined =>
+  host.getSnapshot().children[dockAdapterId('viewer', dockId)] as
+    | Readonly<{ send: (event: ViewerAdapterEvent) => void }>
+    | undefined;
 
 type Disposable = Readonly<{ dispose: () => void }>;
 type Panel = DockviewApi['panels'][number];
@@ -250,10 +273,10 @@ type Panel = DockviewApi['panels'][number];
  * @returns Callback logic over {@link ViewerAdapterInput}.
  */
 export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEvent, ViewerAdapterInput> =>
-  createCallbackLogic<ViewerAdapterEvent, ViewerAdapterInput>(({ input }) => {
+  createCallbackLogic<ViewerAdapterEvent, ViewerAdapterInput>(({ input, receive }) => {
     const {
       api,
-      ports: { profile, projectId, project, facts },
+      ports: { profile, projectId, project, layout: layoutPort, facts },
     } = input;
     const isEditor = profile === 'editor';
     const disposables: Disposable[] = [];
@@ -506,9 +529,8 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
     // Requests to show a file in the viewer (file tree, editor tab menus) become viewer intents on a page with a
     // layout; a page without one opens the panel at once.
     const requests = project.on('viewerFileRequested', ({ entryPath }) => {
-      const current = facts.get().layout;
-      if (current !== undefined && isEditor) {
-        current.requestViewerFile(entryPath);
+      if (layoutPort !== undefined && isEditor) {
+        layoutPort.requestViewerFile(entryPath);
         return;
       }
       openEntry(entryPath);
@@ -517,7 +539,6 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
     let previous = facts.get();
     const onFacts = (): void => {
       const current = facts.get();
-      connectLayout(current.layout);
       if (current.viewRecords !== previous.viewRecords || current.geometryUnits !== previous.geometryUnits) {
         followRecords();
       }
@@ -527,15 +548,23 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
         admit(panel);
       }
     };
-    const unsubscribeFacts = facts.subscribe(onFacts);
-    connectLayout(previous.layout);
-    followRecords();
-    for (const panel of api.panels) {
-      watch(panel);
-    }
+    let unsubscribeFacts: (() => void) | undefined;
+    receive((event) => {
+      if (event.type !== 'attach' || unsubscribeFacts !== undefined) {
+        return;
+      }
+      previous = facts.get();
+      unsubscribeFacts = facts.subscribe(onFacts);
+      // The layout shows its arrangement now, so the records are followed on what it shows.
+      connectLayout(layoutPort);
+      followRecords();
+      for (const panel of api.panels) {
+        watch(panel);
+      }
+    });
 
     return () => {
-      unsubscribeFacts();
+      unsubscribeFacts?.();
       requests.unsubscribe();
       detachLayout?.();
       for (const disposable of [...disposables, ...visibilitySubscriptions.values()]) {

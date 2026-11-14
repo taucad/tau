@@ -32,6 +32,7 @@ import {
   createViewerAdapterFactsPort,
   createViewerAdapterLogic,
   isViewerPanelParameters,
+  selectViewerDockAdapter,
 } from '#workbench-records/viewer-adapter.js';
 import type { ViewerAdapterFacts, ViewerAdapterInput } from '#workbench-records/viewer-adapter.js';
 
@@ -171,7 +172,6 @@ function baseFacts(overrides: Partial<ViewerAdapterFacts> = {}): ViewerAdapterFa
     viewCommands: { edit: vi.fn(async () => true), remove: vi.fn(async () => true) },
     setViewEntryPath: vi.fn(),
     createViewRecord: vi.fn(),
-    layout: undefined,
     ...overrides,
   };
 }
@@ -179,6 +179,8 @@ function baseFacts(overrides: Partial<ViewerAdapterFacts> = {}): ViewerAdapterFa
 function startAdapter(input: ViewerAdapterInput) {
   const adapter = createActor(createViewerAdapterLogic(), { input });
   adapter.start();
+  // The dock attaches its adapter once the host's step that spawned it has returned (A8c's handover).
+  adapter.send({ type: 'attach' });
   stops.unshift(() => {
     adapter.stop();
   });
@@ -192,9 +194,12 @@ describe('viewer adapter (A8d)', () => {
     const harness = mountLayout('phone');
     const api = mountDock();
     const project = mountProject();
-    const facts = createViewerAdapterFactsPort(baseFacts({ layout: harness.controller }));
+    const facts = createViewerAdapterFactsPort(baseFacts());
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
     });
     expect(harness.layout.getSnapshot().value).toMatchObject({ viewer: 'attached', workbench: 'detached' });
     // The record has not been read: the phone's viewer dock is empty, so Dockview shows its watermark (M2).
@@ -215,9 +220,12 @@ describe('viewer adapter (A8d)', () => {
     const api = mountDock();
     const project = mountProject();
     const personViewerChanged = vi.spyOn(harness.controller, 'personViewerChanged');
-    const facts = createViewerAdapterFactsPort(baseFacts({ layout: harness.controller }));
+    const facts = createViewerAdapterFactsPort(baseFacts());
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
       harness.publish(group('front'));
     });
     await act(async () => {
@@ -242,9 +250,12 @@ describe('viewer adapter (A8d)', () => {
     const project = mountProject();
     const personViewerChanged = vi.spyOn(harness.controller, 'personViewerChanged');
     const createViewRecord = vi.fn();
-    const facts = createViewerAdapterFactsPort(baseFacts({ layout: harness.controller, createViewRecord }));
+    const facts = createViewerAdapterFactsPort(baseFacts({ createViewRecord }));
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
       harness.publish(group('front'));
     });
     const intentsBefore = Object.keys(harness.layout.getSnapshot().context.intents).length;
@@ -282,9 +293,12 @@ describe('viewer adapter (A8d)', () => {
     const api = mountDock();
     const project = mountProject();
     const personViewerChanged = vi.spyOn(harness.controller, 'personViewerChanged');
-    const facts = createViewerAdapterFactsPort(baseFacts({ layout: harness.controller }));
+    const facts = createViewerAdapterFactsPort(baseFacts());
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
       harness.publish(group('front'), { code: 'NEWER_RECORD', message: 'newer' });
     });
     await act(async () => {
@@ -310,7 +324,10 @@ describe('viewer adapter (A8d)', () => {
       baseFacts({ viewRecords: new Map([['front', front]]), createViewRecord }),
     );
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'shared', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'shared', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
       api.addPanel({
         id: 'front',
         component: 'viewer',
@@ -330,12 +347,61 @@ describe('viewer adapter (A8d)', () => {
     expect(createViewRecord).toHaveBeenCalledWith(opened!.id, 'b.ts', undefined);
   });
 
+  // A8d review round 2: a dock that mounts after the record was read is handed over through the layout's `dockReady`
+  // and attached once that step returns, so the record's arrangement lands first and its hidden tabs are bound too.
+  it('should bind hidden tabs a record shows at attach, and activate one when its file is requested', async () => {
+    const harness = mountLayout('desktop');
+    await act(async () => {
+      harness.publish(group('view-a', 'view-b'));
+    });
+    const api = mountDock();
+    const project = mountProject();
+    const createViewRecord = vi.fn();
+    const facts = createViewerAdapterFactsPort(
+      baseFacts({
+        admitsDemand: true,
+        viewRecords: new Map([
+          ['view-a', newViewRecord('a.ts')],
+          ['view-b', newViewRecord('b.ts')],
+        ]),
+        createViewRecord,
+      }),
+    );
+    const dockId = 'dock-1';
+    await act(async () => {
+      harness.layout.send({
+        type: 'dockReady',
+        adapter: 'viewer',
+        dockId,
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
+      selectViewerDockAdapter(harness.layout, dockId)?.send({ type: 'attach' });
+    });
+    const viewA = api.panels.find((panel) => panel.id === 'view-a');
+    expect(viewA?.params).toMatchObject({ viewId: 'view-a', entryPath: 'a.ts' });
+    expect(viewA?.title).toBe('a.ts');
+
+    await act(async () => {
+      project.request('a.ts');
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    });
+    expect(viewIds(api)).toEqual(['view-a', 'view-b']);
+    expect(api.activePanel?.id).toBe('view-a');
+    expect(createViewRecord).not.toHaveBeenCalled();
+  });
+
   it('should open a requested file at once on a page without a layout', async () => {
     const api = mountDock();
     const project = mountProject();
     const facts = createViewerAdapterFactsPort(baseFacts());
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'shared', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'shared', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
     });
     await act(async () => {
       project.request('main.ts');
@@ -355,7 +421,10 @@ describe('viewer adapter (A8d)', () => {
         title: 'front',
         params: { viewId: 'front', entryPath: undefined },
       });
-      return startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      return startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
     });
     expect(project.sent).toEqual([]);
 
@@ -397,9 +466,12 @@ describe('viewer adapter (A8d)', () => {
     const harness = mountLayout('desktop');
     const api = mountDock();
     const project = mountProject();
-    const facts = createViewerAdapterFactsPort(baseFacts({ layout: harness.controller }));
+    const facts = createViewerAdapterFactsPort(baseFacts());
     await act(async () => {
-      startAdapter({ api, ports: { profile: 'editor', projectId: 'p', project: project.project, facts } });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
       harness.publish(group('front', 'iso'));
     });
     await act(async () => {

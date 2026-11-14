@@ -60,6 +60,7 @@
       "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
+      "apps/ui/app/runtime/session-file-manager.fixture.ts",
       "apps/ui/app/runtime/session-revisions.ts",
       "apps/ui/app/runtime/ui-runtime.config.ts",
       "apps/ui/app/runtime/ui-runtime.definition.ts",

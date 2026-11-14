@@ -4,7 +4,8 @@
  * (I11), acknowledges a revision only once it is on screen (I12), holds one record session for the file (I13) and
  * settles restore commands against the arrangement they expected (I14). App state orchestration charter D2, D4, D11,
  * D13, D23; package A8a. It conforms to `specs/layout-apply/LayoutApply.tla`, whose README states the rules it keeps.
- * A8b makes it a child of the project runtime; A8c and A8d write the real adapters. Until then it is unwired.
+ * A8b makes it a child of the project runtime; A8c and A8d write the real adapters, which a Dockview hands to it with
+ * `dockReady` and takes back with `dockReleased`: each runs as its child, so no component starts an actor (I1).
  *
  * ```text
  * workbenchLayout (parallel)
@@ -45,7 +46,8 @@
  * 4. A revision is acknowledged only after every adapter of the device is attached and has reported its latest `show`,
  *    with no apply in flight and the arrangement holding the revision's bytes. Any detach makes the applied revision
  *    unknown; when the last adapter detaches an apply in flight is dropped and computed again on the next attach. As
- *    built (D14), a desktop with the workbench lane closed acknowledges nothing, since its workbench is not attached.
+ *    built (D14), the workbench Dockview stays mounted, and so attached, while its lane is hidden; on a device with
+ *    lane flags the lanes on screen must also be the revision's (`lanesApplied`), the hidden lane included.
  * 5. A restore `{restoreId, expected}` may be sent any number of times. It is asked only while the arrangement holds
  *    the record bytes `expected` names and no edit is owed, and settles `applied` only if the record took it and the
  *    arrangement has not moved when the record answers; otherwise it is refused and the arrangement is not changed by
@@ -69,6 +71,10 @@
  * Before the record's first read nothing is shown: the first publication becomes the arrangement and seeds every
  * attached adapter, person edits are ignored (as the host ignores them today) and intents wait.
  *
+ * A project runtime's layout starts before its editor has loaded its lanes (`awaitsLanes`, A8b): until the editor
+ * reports them with `lanesSeeded`, intents wait unrouted and undelivered, and nothing is acknowledged, since the editor
+ * takes no panel change before it is ready and its lanes so far are defaults.
+ *
  * Context holds no durable fact of its own: the arrangement, the publications and the acknowledgement are rebuilt from
  * the record's next read by a new actor (MC-R5).
  *
@@ -80,6 +86,7 @@ import { createActor, createCallbackLogic, setup, types } from 'xstate';
 import type {
   Actor,
   ActorOptions,
+  ActorRefFrom,
   AnyActorLogic,
   AnyActorRef,
   CallbackActorLogic,
@@ -88,9 +95,16 @@ import type {
   StateValue,
 } from 'xstate';
 import type { ViewerNode, WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
+import { workbenchPaths } from '@taucad/workbench';
+import type { WatchEvent } from '@taucad/filesystem';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { ObservationWatch } from '@taucad/fs-client/observation-service';
+import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createWorkbenchLayoutStore } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
+import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
 import type { RecordRefusal } from '#workbench-records/record-sync-policy.js';
 import { layoutPolicy } from '#workbench-records/layout-policy.js';
 import {
@@ -102,6 +116,7 @@ import {
   openIntents,
   outcomeOf,
   queued,
+  retired,
   settleWhere,
   withState,
 } from '#workbench-records/pane-intents.js';
@@ -110,6 +125,7 @@ import type {
   PaneIntent,
   PaneIntentEntry,
   PaneIntentOutcome,
+  PaneIntentOutcomes,
   PaneIntents,
   PaneIntentTarget,
 } from '#workbench-records/pane-intents.js';
@@ -129,6 +145,18 @@ export type WorkbenchLayoutInput = Readonly<{
   routeKey: string;
   /** Whether the workbench lane is open when the actor starts. */
   workbenchOpen: boolean;
+  /**
+   * The editor's chat and workbench lane flags when the actor starts. Given, rule 4 also waits for the lanes on screen
+   * to match the revision's (`lanesApplied`), as the record host's acknowledgement did (A8b, D14). Omitted, the device
+   * has no lane flags to check.
+   */
+  lanes?: WorkbenchLayout['lanes'];
+  /**
+   * The editor is still loading its lanes, so `workbenchOpen` and `lanes` are its defaults, not what will show. Until
+   * `lanesSeeded` reports them, intents wait without opening the lane, showing a phone tab or reaching an adapter, and
+   * nothing is acknowledged (A8b): the editor takes no panel change before it is ready.
+   */
+  awaitsLanes?: boolean;
 }>;
 
 /** The public event alphabet of {@link workbenchLayoutMachine}. */
@@ -173,6 +201,15 @@ export type WorkbenchLayoutEvent =
   | Readonly<{ type: 'lanesEdited'; lanes: WorkbenchLayout['lanes'] }>
   /** The workbench lane opened or closed (the editor's panel state). */
   | Readonly<{ type: 'workbenchLaneChanged'; open: boolean }>
+  /** The chat and workbench lane flags now on screen (the editor's panel state): rule 4 waits for them (A8b, D14). */
+  | Readonly<{ type: 'lanesApplied'; lanes: WorkbenchLayout['lanes'] }>
+  /**
+   * The lanes the editor loaded, once it is ready (`awaitsLanes`): what is on screen and whether the workbench lane is
+   * open. A baseline, not a lane change: it drops no intent (rule 7) and is not an edit (rule 1).
+   */
+  | Readonly<{ type: 'lanesSeeded'; lanes: WorkbenchLayout['lanes'] }>
+  /** The shell the layout is shown on changed (the phone breakpoint): intents follow it from the next one (rule 7). */
+  | Readonly<{ type: 'deviceChanged'; device: WorkbenchLayoutDevice }>
   /** The route key changed. */
   | Readonly<{ type: 'routeChanged'; routeKey: string }>
   /** A pane intent. */
@@ -180,9 +217,20 @@ export type WorkbenchLayoutEvent =
   /** The adapter applied delivery `deliveryId` of an intent and shows `node`. */
   | Readonly<{ type: 'intentApplied'; intentId: string; deliveryId: number; node: ViewerNode | WorkbenchLaneNode }>
   /** The intent's target cannot open. */
-  | Readonly<{ type: 'intentUnavailable'; intentId: string }>
+  /**
+   * The intent's target cannot open. With the `deliveryId` it answers, an adapter that opened nothing for a delivery
+   * dropped meanwhile gives its one late answer (rules 6 and 7).
+   */
+  | Readonly<{ type: 'intentUnavailable'; intentId: string; deliveryId?: number }>
   /** A restore command: write `layout` over the record bytes `expected` names. */
-  | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>;
+  | Readonly<{ type: 'restore'; restoreId: string; expected: LayoutDigest; layout: WorkbenchLayout }>
+  /**
+   * A Dockview is ready and hands over its adapter (A8c): the adapter runs as this actor's child, holding the
+   * `DockviewApi` in its closure (D4), until the same Dockview's `dockReleased`. Host plumbing outside the spec.
+   */
+  | WorkbenchDockReady
+  /** The Dockview that sent `dockReady` with `dockId` is gone: its adapter stops. */
+  | WorkbenchDockReleased;
 
 /** Events the machine emits: to the adapters, to the phone's tab port, and to its owner. */
 export type WorkbenchLayoutEmitted =
@@ -202,8 +250,11 @@ export type WorkbenchLayoutEmitted =
   | Readonly<{ type: 'mobileTabRequested'; intentId: string; target: PaneIntentTarget }>
   /** Open the workbench lane for a workbench intent (desktop). */
   | Readonly<{ type: 'workbenchOpenRequested'; intentId: string }>
-  /** The arrangement changed by an apply or a restore, not by a person: lanes follow `layout.lanes`. */
-  | Readonly<{ type: 'arranged'; layout: WorkbenchLayout }>
+  /**
+   * The arrangement changed by an apply or a restore, not by a person: lanes follow `layout.lanes`. `baseline` marks the
+   * record's first arrangement, whose lanes are the device's baseline rather than a change of them.
+   */
+  | Readonly<{ type: 'arranged'; layout: WorkbenchLayout; baseline: boolean }>
   /** The applied revision changed: the acknowledged digest, or `undefined` while unknown. */
   | Readonly<{ type: 'appliedRevisionChanged'; digest: LayoutDigest | undefined }>
   /** An intent settled. */
@@ -245,6 +296,8 @@ type Publication = Readonly<{
   layout: WorkbenchLayout | undefined;
   digest: LayoutDigest;
   refused: boolean;
+  /** Whether the record published its own write or a change it read (the previous layout follows a foreign one). */
+  origin: 'own' | 'foreign';
   /** The edit count when it arrived (rule 2). */
   editCount: number;
   /** It arrived while a local edit was owed (rule 8): it is never applied. */
@@ -291,7 +344,10 @@ type LayoutContext = Readonly<{
   /** Per adapter, the `show` it has not yet reported. */
   awaiting: Readonly<Partial<Record<LayoutAdapterId, number | undefined>>>;
   shows: number;
+  /** The open intents, and the dropped ones a late answer may still reach. */
   intents: PaneIntents;
+  /** The outcomes of the intents retired from `intents` (I11: a re-sent id is answered from them). */
+  outcomes: PaneIntentOutcomes;
   deliveries: number;
   restores: Readonly<Record<string, 'applied' | 'refused'>>;
   restoring: Restoring | undefined;
@@ -300,6 +356,14 @@ type LayoutContext = Readonly<{
   recordError: string | undefined;
   /** The first defect the root `onError` caught; later ones are usually its consequences (MC-R12, D23). */
   fault: string | undefined;
+  /** Whether rule 4 waits for the lanes on screen (the input gave them). */
+  checksLanes: boolean;
+  /** The lane flags on screen, as last reported. */
+  appliedLanes: WorkbenchLayout['lanes'] | undefined;
+  /** Whether the editor's lanes are known (`lanesSeeded`, when the input awaits them): until then intents wait. */
+  lanesKnown: boolean;
+  /** The intents whose rule 7 step waits for the lanes it depends on ({@link routable}), in the order they were sent. */
+  unrouted: readonly string[];
 }>;
 
 type LayoutEnqueue = EnqueueObject<WorkbenchLayoutEvent, WorkbenchLayoutEmitted>;
@@ -354,6 +418,18 @@ const appliedDigestOf = (context: LayoutContext): LayoutDigest | undefined =>
     ? context.latest.digest
     : undefined;
 
+/**
+ * The record's first read failed for good (its retries stopped): there is no record to wait for, so intents are routed
+ * and delivered as after a read, and the adapters answer them without an arrangement to join (nothing is acknowledged
+ * without a publication, rule 4).
+ */
+const unreadable = (context: LayoutContext): boolean =>
+  context.latest === undefined && context.health?.read === 'unavailable';
+
+/** Whether intents may reach their adapters: after the first read (or once it stopped retrying) and the seeded lanes. */
+const deliverable = (context: LayoutContext, view: View): boolean =>
+  (view.ready || unreadable(context)) && context.lanesKnown;
+
 /** Rule 2: the apply in flight may still land. */
 const isCurrent = (context: LayoutContext, pending: PendingApply): boolean =>
   pending.revision === context.latest?.revision && pending.editCount === context.editCount;
@@ -375,6 +451,13 @@ const show = (
   return { ...context, shows, awaiting };
 };
 
+/** Rule 4 on a device with lane flags: the lanes on screen are the revision's (the record host's check, D14). */
+const lanesShown = (context: LayoutContext, layout: WorkbenchLayout): boolean =>
+  !context.checksLanes ||
+  (context.lanesKnown &&
+    context.appliedLanes?.chat === layout.lanes.chat &&
+    context.appliedLanes.workbench === layout.lanes.workbench);
+
 /** Rule 4's conditions on the arrangement, with every adapter's report still to check. */
 const acknowledgeable = (context: LayoutContext, view: View): boolean =>
   context.adapters.every((adapter) => view.adapters[adapter] === 'attached') &&
@@ -385,7 +468,8 @@ const acknowledgeable = (context: LayoutContext, view: View): boolean =>
   context.latest.digest !== 'missing' &&
   context.recordError === undefined &&
   context.acknowledged !== context.latest.revision &&
-  sameLayout(context.arrangement, context.latest.layout);
+  sameLayout(context.arrangement, context.latest.layout) &&
+  lanesShown(context, context.latest.layout);
 
 const reported = (context: LayoutContext): boolean =>
   context.adapters.every((adapter) => context.awaiting[adapter] === undefined);
@@ -424,7 +508,8 @@ const settle = (context: LayoutContext, view: View, enq: LayoutEnqueue): LayoutC
       enq.emit({ type: 'applyOffered', applyId });
     }
   }
-  if (view.ready) {
+  next = routeWaiting(next, view, enq);
+  if (deliverable(next, view)) {
     next = deliver(next, attached, enq);
   }
   if (acknowledgeable(next, view) && reported(next)) {
@@ -462,6 +547,70 @@ const reportIntents = (settled: readonly PaneIntentEntry[], enq: LayoutEnqueue):
       enq.emit({ type: 'intentSettled', intentId: entry.intentId, ...outcome });
     }
   }
+};
+
+/** Hold `intents`, retiring each settled entry no late answer can reach to its outcome. */
+const withIntents = (context: LayoutContext, intents: PaneIntents): LayoutContext => {
+  const next = retired(intents, context.outcomes);
+  return { ...context, intents: next.intents, outcomes: next.outcomes };
+};
+
+/**
+ * Rule 7 for one queued intent on the device now: a phone shows its tab (a pane intent settles there, a file intent
+ * waits for the workbench), an intent for an adapter the device lacks is dropped, and on a desktop a workbench intent
+ * opens the lane.
+ */
+const routed = (context: LayoutContext, intent: PaneIntent, enq: LayoutEnqueue): LayoutContext => {
+  const adapter = intentAdapter(intent.target);
+  const workbenchPane = intent.target.kind === 'pane' && intent.target.adapter === 'workbench';
+  const workbenchFile = intent.target.kind === 'file' && context.adapters.includes(adapter);
+  if (context.device === 'phone' && (workbenchPane || workbenchFile)) {
+    // Rule 7 on a phone: the tab port shows the pane, or the editor tab for a file, which then waits for the workbench.
+    enq.emit({ type: 'mobileTabRequested', intentId: intent.intentId, target: intent.target });
+    if (!workbenchPane) {
+      return context;
+    }
+    const settled = settleWhere(context.intents, (entry) => entry.intentId === intent.intentId, { state: 'applied' });
+    reportIntents(settled.settled, enq);
+    return withIntents(context, settled.intents);
+  }
+  if (!context.adapters.includes(adapter)) {
+    const settled = settleWhere(context.intents, (entry) => entry.intentId === intent.intentId, {
+      state: 'dropped',
+      reason: 'unavailable',
+    });
+    reportIntents(settled.settled, enq);
+    return withIntents(context, settled.intents);
+  }
+  if (adapter === 'workbench' && !context.workbenchOpen) {
+    // Rule 7 on a desktop: a workbench intent opens the lane.
+    enq.emit({ type: 'workbenchOpenRequested', intentId: intent.intentId });
+    return { ...context, workbenchOpen: true };
+  }
+  return context;
+};
+
+/**
+ * Whether rule 7 can route an intent now. A phone's tab waits for an editor that takes it; on a desktop whose lanes the
+ * record holds, the lane also waits for the record's first read, whose lanes are shown first, so the lane an intent
+ * opens is not closed again by them.
+ */
+const routable = (context: LayoutContext, view: View): boolean =>
+  context.lanesKnown && (context.device === 'phone' || view.ready || unreadable(context) || !context.checksLanes);
+
+/** Route the intents that waited, once they can be: in the order they were sent, each once. */
+const routeWaiting = (context: LayoutContext, view: View, enq: LayoutEnqueue): LayoutContext => {
+  if (context.unrouted.length === 0 || !routable(context, view)) {
+    return context;
+  }
+  let next: LayoutContext = { ...context, unrouted: [] };
+  for (const intentId of context.unrouted) {
+    const entry = intentOf(next.intents, intentId);
+    if (entry !== undefined && isOpen(entry)) {
+      next = routed(next, entry, enq);
+    }
+  }
+  return next;
 };
 
 /** Rule 1: a local change of the arrangement counts one edit and is written to the record. */
@@ -521,6 +670,7 @@ type Step<Event extends WorkbenchLayoutEvent['type']> = Readonly<{
   event: Extract<WorkbenchLayoutEvent, { type: Event }>;
   value: StateValue;
   children: Children;
+  actors: Readonly<{ workbenchAdapter: typeof workbenchAdapterLogic }>;
 }>;
 
 /** A publication (`Published`), with rules 2, 3 and 8. The first one becomes the arrangement and seeds the adapters. */
@@ -538,6 +688,7 @@ const published = ({ context, event, value }: Step<'recordPublished'>, enq: Layo
       layout: refused ? undefined : event.layout,
       digest: event.digest,
       refused,
+      origin: event.origin,
       editCount: context.editCount,
       held,
       done: false,
@@ -548,16 +699,18 @@ const published = ({ context, event, value }: Step<'recordPublished'>, enq: Layo
   };
   const view = viewOf(value, {}, true);
   if (context.arrangement === undefined && !refused && event.layout !== undefined) {
-    // The first read is the arrangement; every attached adapter is seeded with it.
+    // The first read is the arrangement; every attached adapter is seeded with it. On a device with lane flags its
+    // lanes are shown with it (`arranged`), so its workbench lane is the baseline: not a close (rule 7).
     next = {
       ...next,
       arrangement: event.layout,
       arrangementDigest: event.digest,
       moves: next.moves + 1,
       latest: { ...next.latest!, done: true },
+      workbenchOpen: next.checksLanes ? event.layout.lanes.workbench : next.workbenchOpen,
     };
     next = show(next, attachedIn(next, view), event.layout, enq);
-    enq.emit({ type: 'arranged', layout: event.layout });
+    enq.emit({ type: 'arranged', layout: event.layout, baseline: true });
   } else if (
     context.restoring !== undefined &&
     event.origin === 'own' &&
@@ -584,7 +737,7 @@ const left = (context: LayoutContext, adapter: LayoutAdapterId, view: View, enq:
     }
   }
   const awaiting = { ...context.awaiting, [adapter]: undefined };
-  return settle({ ...context, intents, awaiting, acknowledged: undefined }, view, enq);
+  return settle({ ...withIntents(context, intents), awaiting, acknowledged: undefined }, view, enq);
 };
 
 /** Rule 5: a restore settles against the arrangement it was asked over. */
@@ -681,10 +834,10 @@ const workbenchLayoutDefinition = setup({
     input: types<WorkbenchLayoutInput>(),
     transitionMeta: types<{ tla: WorkbenchLayoutAction }>(),
   },
-  actors: { layoutRecord },
+  actors: { layoutRecord, workbenchAdapter: workbenchAdapterLogic },
 }).createMachine({
   id: 'workbenchLayout',
-  version: '1',
+  version: '4',
   // A defect is recorded and the layout keeps answering; the first is kept, since later ones are usually its
   // consequences (MC-R12, D23).
   onError: refines('Unmodelled', ({ context, event }) => ({
@@ -708,6 +861,7 @@ const workbenchLayoutDefinition = setup({
     awaiting: {},
     shows: 0,
     intents: {},
+    outcomes: {},
     deliveries: 0,
     restores: {},
     restoring: undefined,
@@ -715,6 +869,10 @@ const workbenchLayoutDefinition = setup({
     health: undefined,
     recordError: undefined,
     fault: undefined,
+    checksLanes: input.lanes !== undefined,
+    appliedLanes: input.lanes,
+    lanesKnown: input.awaitsLanes !== true,
+    unrouted: [],
   }),
   type: 'parallel',
   // Rule 9: one record session for the file, for the actor's whole life.
@@ -775,7 +933,7 @@ const workbenchLayoutDefinition = setup({
         arrangementDigest: context.latest?.digest,
         moves: context.moves + 1,
       };
-      enq.emit({ type: 'arranged', layout: pending.layout });
+      enq.emit({ type: 'arranged', layout: pending.layout, baseline: false });
       return {
         context: finished(context, settle(show(landed, attachedIn(landed, view), pending.layout, enq), view, enq), enq),
       };
@@ -822,9 +980,52 @@ const workbenchLayoutDefinition = setup({
       }
       return {};
     }),
-    recordHealthChanged: refines('Unmodelled', ({ event }: Step<'recordHealthChanged'>) => ({
-      context: { health: event.health },
-    })),
+    lanesApplied: refines('Unmodelled', ({ context, event, value }: Step<'lanesApplied'>, enq: LayoutEnqueue) => {
+      if (context.appliedLanes?.chat === event.lanes.chat && context.appliedLanes.workbench === event.lanes.workbench) {
+        // The lanes already reported.
+        return {};
+      }
+      // Rule 4 may now hold: the adapters are asked to confirm what they show.
+      const next: LayoutContext = {
+        ...context,
+        appliedLanes: { chat: event.lanes.chat, workbench: event.lanes.workbench },
+      };
+      return { context: finished(context, settle(next, viewOf(value), enq), enq) };
+    }),
+    // A Dockview's adapter (A8c, I1): the Dockview hands it over and takes it back; its attach to this actor is the
+    // adapter's own `adapterAttaching` and `adapterAttached`, so the spec sees nothing here.
+    dockReady: refines('Unmodelled', ({ actors, children, event }: Step<'dockReady'>, enq: LayoutEnqueue) => {
+      for (const id of dockAdapterIdsOf(children, event.adapter)) {
+        // A new mount of the same Dockview replaces its adapter.
+        const previous = children[id];
+        if (previous !== undefined) {
+          enq.stop(previous);
+        }
+      }
+      enq.spawn(actors.workbenchAdapter, {
+        id: dockAdapterId(event.adapter, event.dockId),
+        input: { api: event.api, ports: event.ports },
+      });
+      return {};
+    }),
+    dockReleased: refines('Unmodelled', ({ children, event }: Step<'dockReleased'>, enq: LayoutEnqueue) => {
+      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
+      if (adapter !== undefined) {
+        enq.stop(adapter);
+      }
+      return {};
+    }),
+    deviceChanged: refines('Unmodelled', ({ context, event }: Step<'deviceChanged'>) =>
+      event.device === context.device ? {} : { context: { device: event.device } },
+    ),
+    recordHealthChanged: refines(
+      'Unmodelled',
+      ({ context, event, value }: Step<'recordHealthChanged'>, enq: LayoutEnqueue) => {
+        const next: LayoutContext = { ...context, health: event.health };
+        // A first read that stopped retrying releases the intents that waited for it.
+        return { context: unreadable(next) ? finished(context, settle(next, viewOf(value), enq), enq) : next };
+      },
+    ),
     recordFailed: refines('Unmodelled', ({ context, event }: Step<'recordFailed'>, enq: LayoutEnqueue) => ({
       // The record's health carries the failure; nothing on screen is known to match the record.
       context: finished(context, { ...context, recordError: event.message, acknowledged: undefined }, enq),
@@ -857,44 +1058,29 @@ const workbenchLayoutDefinition = setup({
       initial: 'idle',
       on: {
         intent: refines('IntentSent', ({ context, event, value }: Step<'intent'>, enq: LayoutEnqueue) => {
+          const outcome = ownValue(context.outcomes, event.intentId);
+          if (outcome !== undefined) {
+            // A re-sent id: answered again by its first outcome, never applied twice (I11).
+            enq.emit({ type: 'intentSettled', intentId: event.intentId, ...outcome });
+            return {};
+          }
           const sent = intentOf(context.intents, event.intentId);
           if (sent !== undefined) {
-            // A re-sent id: answered again by its first outcome once settled, never applied twice (I11).
+            // A re-sent id still open, or dropped with a late answer owed: answered by its outcome once it has one.
             reportIntents([sent], enq);
             return {};
           }
           const intent: PaneIntent = { intentId: event.intentId, source: event.source, target: event.target };
-          const adapter = intentAdapter(intent.target);
-          let next: LayoutContext = {
-            ...context,
-            intents: queued(context.intents, intent),
-          };
-          const workbenchPane = intent.target.kind === 'pane' && intent.target.adapter === 'workbench';
-          const workbenchFile = intent.target.kind === 'file' && context.adapters.includes(adapter);
-          if (context.device === 'phone' && (workbenchPane || workbenchFile)) {
-            // Rule 7 on a phone: the tab port shows the pane, or the editor tab for a file, which then waits for the
-            // workbench.
-            enq.emit({ type: 'mobileTabRequested', intentId: intent.intentId, target: intent.target });
-            if (workbenchPane) {
-              const settled = settleWhere(next.intents, (entry) => entry.intentId === intent.intentId, {
-                state: 'applied',
-              });
-              reportIntents(settled.settled, enq);
-              next = { ...next, intents: settled.intents };
-            }
-          } else if (!context.adapters.includes(adapter)) {
-            const settled = settleWhere(next.intents, (entry) => entry.intentId === intent.intentId, {
-              state: 'dropped',
-              reason: 'unavailable',
-            });
-            reportIntents(settled.settled, enq);
-            next = { ...next, intents: settled.intents };
-          } else if (adapter === 'workbench' && !context.workbenchOpen) {
-            // Rule 7 on a desktop: a workbench intent opens the lane.
-            enq.emit({ type: 'workbenchOpenRequested', intentId: intent.intentId });
-            next = { ...next, workbenchOpen: true };
-          }
-          const settled = settle(next, viewOf(value), enq);
+          const view = viewOf(value);
+          const next: LayoutContext = { ...context, intents: queued(context.intents, intent) };
+          // Until the lanes it depends on are known, the intent waits: the step that makes it routable routes it (A8b).
+          const settled = settle(
+            routable(next, view)
+              ? routed(next, intent, enq)
+              : { ...next, unrouted: [...next.unrouted, intent.intentId] },
+            view,
+            enq,
+          );
           return { target: intentsTarget(settled), context: finished(context, settled, enq) };
         }),
         intentApplied: refines(
@@ -909,7 +1095,7 @@ const workbenchLayoutDefinition = setup({
             ) {
               // The one late answer for an intent dropped while it was delivered (rules 6 and 7): the adapter shows the
               // pane, so its node is the arrangement, counted as a person's edit is. The intent stays dropped (I11).
-              const answered: LayoutContext = { ...context, intents: lateAnswered(context.intents, entry.intentId) };
+              const answered = withIntents(context, lateAnswered(context.intents, entry.intentId));
               const arrangement = withPart(answered.arrangement, intentAdapter(entry.target), event.node);
               return sameLayout(arrangement, answered.arrangement)
                 ? { context: answered }
@@ -927,7 +1113,7 @@ const workbenchLayoutDefinition = setup({
               state: 'applied',
             });
             reportIntents(settled.settled, enq);
-            const applied: LayoutContext = { ...context, intents: settled.intents };
+            const applied = withIntents(context, settled.intents);
             const arrangement = withPart(applied.arrangement, intentAdapter(entry.target), event.node);
             const next = sameLayout(arrangement, applied.arrangement)
               ? applied
@@ -940,8 +1126,17 @@ const workbenchLayoutDefinition = setup({
           'IntentDropped',
           ({ context, event, value }: Step<'intentUnavailable'>, enq: LayoutEnqueue) => {
             const entry = intentOf(context.intents, event.intentId);
-            if (entry === undefined || !isOpen(entry)) {
-              // Settled already, or never sent: nothing to drop.
+            if (entry?.state === 'dropped' && entry.late !== undefined && entry.late === event.deliveryId) {
+              // The late answer of a delivery dropped meanwhile: the adapter opened nothing, so nothing is counted, and
+              // no later answer to it is taken (I11).
+              return { context: withIntents(context, lateAnswered(context.intents, entry.intentId)) };
+            }
+            if (
+              entry === undefined ||
+              !isOpen(entry) ||
+              (event.deliveryId !== undefined && (entry.state !== 'delivered' || entry.deliveryId !== event.deliveryId))
+            ) {
+              // Settled already, never sent, or an answer to another delivery: nothing to drop.
               return {};
             }
             const settled = settleWhere(context.intents, (open) => open.intentId === entry.intentId, {
@@ -949,7 +1144,13 @@ const workbenchLayoutDefinition = setup({
               reason: 'unavailable',
             });
             reportIntents(settled.settled, enq);
-            const done = settle({ ...context, intents: settled.intents }, viewOf(value), enq);
+            // An answer that names the delivery is that delivery's own: no late answer to it is still owed, so the
+            // entry retires. A drop that names none keeps the delivery's late answer open.
+            const intents =
+              entry.state === 'delivered' && event.deliveryId !== undefined
+                ? lateAnswered(settled.intents, entry.intentId)
+                : settled.intents;
+            const done = settle(withIntents(context, intents), viewOf(value), enq);
             return { target: intentsTarget(done), context: finished(context, done, enq) };
           },
         ),
@@ -961,7 +1162,10 @@ const workbenchLayoutDefinition = setup({
           // Rule 6: every open intent is dropped in this step.
           const settled = settleWhere(context.intents, () => true, { state: 'dropped', reason: 'routeChanged' });
           reportIntents(settled.settled, enq);
-          return { target: '.idle', context: { intents: settled.intents, routeKey: event.routeKey } };
+          return {
+            target: '.idle',
+            context: { ...withIntents(context, settled.intents), unrouted: [], routeKey: event.routeKey },
+          };
         }),
         workbenchLaneChanged: refines(
           'WorkbenchClosed',
@@ -980,10 +1184,27 @@ const workbenchLayoutDefinition = setup({
               reason: 'workbenchClosed',
             });
             reportIntents(settled.settled, enq);
-            const next: LayoutContext = { ...context, intents: settled.intents, workbenchOpen: false };
+            const next: LayoutContext = { ...withIntents(context, settled.intents), workbenchOpen: false };
             return { target: intentsTarget(next), context: next };
           },
         ),
+        lanesSeeded: refines('Unmodelled', ({ context, event, value }: Step<'lanesSeeded'>, enq: LayoutEnqueue) => {
+          if (context.lanesKnown) {
+            // Seeded already, or never awaited: later lane changes arrive as lane reports.
+            return {};
+          }
+          // The lanes the editor loaded are on screen, and the workbench lane is as they say. The intents that waited
+          // for them are routed once they can be (rule 7), in the order they were sent, and may then reach their
+          // adapters.
+          const next: LayoutContext = {
+            ...context,
+            lanesKnown: true,
+            workbenchOpen: event.lanes.workbench,
+            appliedLanes: { chat: event.lanes.chat, workbench: event.lanes.workbench },
+          };
+          const done = settle(next, viewOf(value), enq);
+          return { target: intentsTarget(done), context: finished(context, done, enq) };
+        }),
       },
       states: { idle: {}, waiting: {} },
     },
@@ -1095,7 +1316,7 @@ const workbenchLayoutDefinition = setup({
                 // Written already: counted (rule 1) without a second write. The record's echo names the bytes.
                 const restored = counted(settled, restoring.layout, children, enq, true);
                 const echo = sameLayout(context.latest?.layout, restoring.layout) ? context.latest?.digest : undefined;
-                enq.emit({ type: 'arranged', layout: restoring.layout });
+                enq.emit({ type: 'arranged', layout: restoring.layout, baseline: false });
                 const shown = show(
                   { ...restored, arrangementDigest: echo },
                   attachedIn(restored, view),
@@ -1136,11 +1357,16 @@ export const workbenchLayoutEventTypes = [
   'personEdited',
   'lanesEdited',
   'workbenchLaneChanged',
+  'lanesApplied',
+  'lanesSeeded',
+  'deviceChanged',
   'routeChanged',
   'intent',
   'intentApplied',
   'intentUnavailable',
   'restore',
+  'dockReady',
+  'dockReleased',
 ] as const satisfies ReadonlyArray<WorkbenchLayoutEvent['type']>;
 
 type WorkbenchLayoutMachineDefinition = typeof workbenchLayoutDefinition;
@@ -1155,52 +1381,70 @@ export const workbenchLayoutMachine: WorkbenchLayoutMachine = workbenchLayoutDef
 /** A layout actor's snapshot. */
 export type WorkbenchLayoutSnapshot = SnapshotFrom<WorkbenchLayoutMachine>;
 
+/** What the selectors read: an actor's and a spawned ref's snapshots both carry it. */
+export type WorkbenchLayoutView = Pick<WorkbenchLayoutSnapshot, 'context' | 'value'>;
+
 /** A layout actor. */
 export type WorkbenchLayoutActor = Actor<WorkbenchLayoutMachine>;
 
 /** The acknowledged layout digest, or `undefined` while the applied revision is unknown (I12). */
-export const selectAppliedLayoutDigest = (snapshot: WorkbenchLayoutSnapshot): LayoutDigest | undefined =>
+export const selectAppliedLayoutDigest = (snapshot: WorkbenchLayoutView): LayoutDigest | undefined =>
   appliedDigestOf(snapshot.context);
 
 /** The arrangement the adapters show, or `undefined` before the record's first read. */
-export const selectArrangement = (snapshot: WorkbenchLayoutSnapshot): WorkbenchLayout | undefined =>
+export const selectArrangement = (snapshot: WorkbenchLayoutView): WorkbenchLayout | undefined =>
   snapshot.context.arrangement;
 
 /** The digest of the record bytes the arrangement holds: what a restore command names as `expected`. */
-export const selectArrangementDigest = (snapshot: WorkbenchLayoutSnapshot): LayoutDigest | undefined =>
+export const selectArrangementDigest = (snapshot: WorkbenchLayoutView): LayoutDigest | undefined =>
   snapshot.context.arrangementDigest;
 
 /** Whether the record's first read has published. */
-export const selectLayoutReady = (snapshot: WorkbenchLayoutSnapshot): boolean => snapshot.matches({ record: 'ready' });
+export const selectLayoutReady = (snapshot: WorkbenchLayoutView): boolean => snapshot.value.record === 'ready';
 
 /** An intent's outcome, once it settled. */
-export const selectIntentOutcome = (
-  snapshot: WorkbenchLayoutSnapshot,
-  intentId: string,
-): PaneIntentOutcome | undefined => {
+export const selectIntentOutcome = (snapshot: WorkbenchLayoutView, intentId: string): PaneIntentOutcome | undefined => {
   const entry = intentOf(snapshot.context.intents, intentId);
-  return entry === undefined ? undefined : outcomeOf(entry);
+  return ownValue(snapshot.context.outcomes, intentId) ?? (entry === undefined ? undefined : outcomeOf(entry));
 };
 
 /** A restore's outcome, once it settled. */
 export const selectRestoreOutcome = (
-  snapshot: WorkbenchLayoutSnapshot,
+  snapshot: WorkbenchLayoutView,
   restoreId: string,
 ): 'applied' | 'refused' | undefined => ownValue(snapshot.context.restores, restoreId);
 
 /** The refusal the record holds, if any. */
-export const selectLayoutRefusal = (snapshot: WorkbenchLayoutSnapshot): RecordRefusal | undefined =>
+export const selectLayoutRefusal = (snapshot: WorkbenchLayoutView): RecordRefusal | undefined =>
   snapshot.context.refusal;
 
 /** The record's health, once the record child reported it. */
-export const selectLayoutHealth = (snapshot: WorkbenchLayoutSnapshot): RecordHealth | undefined =>
-  snapshot.context.health;
+export const selectLayoutHealth = (snapshot: WorkbenchLayoutView): RecordHealth | undefined => snapshot.context.health;
 
 /** The first defect the root `onError` caught (D23). */
-export const selectLayoutFault = (snapshot: WorkbenchLayoutSnapshot): string | undefined => snapshot.context.fault;
+export const selectLayoutFault = (snapshot: WorkbenchLayoutView): string | undefined => snapshot.context.fault;
 
 /** The record's file ports, as the layout store takes them. */
 export type WorkbenchLayoutFiles = Parameters<typeof createWorkbenchLayoutStore>[0]['files'];
+
+/** A watch on one record file, as the project's file manager opens it. */
+export type LayoutRecordWatch = (absolutePath: string, listener: (event: WatchEvent) => void) => ObservationWatch;
+
+/**
+ * The record session of a live project (A8b): the file's watch, which the filesystem replaces with its connections, and
+ * the project the record's issue is published for. Given, the record child follows the file on disk and publishes the
+ * record's issue (refused, newer, unconfirmed or unreadable) with its recoveries, as `WorkbenchRecordHost` did.
+ */
+export type LayoutRecordSession = Readonly<{
+  projectId: string;
+  /** The watch port now. */
+  watch: () => LayoutRecordWatch;
+  /** Hear of a replaced watch port: the session reopens its watch on it. */
+  onWatchReplaced: (listener: () => void) => () => void;
+}>;
+
+/* What a reviewed reset writes when no arrangement was ever read (the record host's fallback). */
+const resetFallbackLayout = (): WorkbenchLayout => emptyLayout();
 
 /**
  * The store-backed record child: the layout store over the project's file ports, in this callback's closure (D4).
@@ -1209,7 +1453,13 @@ export type WorkbenchLayoutFiles = Parameters<typeof createWorkbenchLayoutStore>
  * @returns The `layoutRecord` logic.
  */
 export const createLayoutRecordLogic = (
-  options: Readonly<{ root: string; files: WorkbenchLayoutFiles; editDebounce?: number }> &
+  options: Readonly<{
+    root: string;
+    files: WorkbenchLayoutFiles;
+    editDebounce?: number;
+    /** A live project's record session: the watch and the record's issue (A8b). */
+    session?: LayoutRecordSession;
+  }> &
     Pick<ActorOptions<AnyActorLogic>, 'clock'>,
 ): CallbackActorLogic<LayoutRecordCommand> =>
   createCallbackLogic<LayoutRecordCommand>(({ sendBack, receive }) => {
@@ -1219,6 +1469,51 @@ export const createLayoutRecordLogic = (
         sendBack(event);
       }
     };
+    /* The record's issue: the codec's refusal, the store's health and the watch's error (the record host's). */
+    let refusal: (RecordRefusal & Readonly<{ bytes: Uint8Array<ArrayBuffer> | null }>) | undefined;
+    let health: RecordHealth | undefined;
+    let observedError: string | undefined;
+    /* The last arrangement read: a reviewed reset writes it. */
+    let lastRead: WorkbenchLayout | undefined;
+    let observation: ObservationService<boolean> | undefined;
+    /* The record's health with the watch's error folded in, as the record host combined them: a watch that fails reads
+     * nothing, so the record is unavailable until it recovers. */
+    const sourceHealthOf = (): RecordHealth | undefined =>
+      observedError === undefined
+        ? health
+        : { ...(health ?? store.health()), read: 'unavailable', error: observedError };
+    const publishIssue = (): void => {
+      const { session } = options;
+      if (session === undefined || stopped) {
+        return;
+      }
+      const sourceHealth = sourceHealthOf();
+      const state = recordIssueState(refusal, sourceHealth);
+      const current = observation;
+      publishRecordIssue(
+        session.projectId,
+        workbenchPaths.layout,
+        state === undefined
+          ? undefined
+          : {
+              kind: 'layout',
+              path: workbenchPaths.layout,
+              state,
+              message: refusal?.message ?? sourceHealth?.error,
+              bytes: refusal?.bytes ?? null,
+              writing: health?.writing ?? false,
+              retryRead: async () => {
+                if (observedError !== undefined && current !== undefined) {
+                  current.refresh();
+                  return false;
+                }
+                return store.retryRead();
+              },
+              retrySave: async () => store.flush(),
+              reset: async (reviewed) => store.reset(lastRead ?? resetFallbackLayout(), reviewed),
+            },
+      );
+    };
     /* Edits since a restore was asked make it ineligible (rule 5): the arrangement moved under it. */
     let edits = 0;
     const store = createWorkbenchLayoutStore({
@@ -1227,6 +1522,11 @@ export const createLayoutRecordLogic = (
       ...(options.editDebounce === undefined ? {} : { editDebounce: options.editDebounce }),
       ...(options.clock === undefined ? {} : { clock: options.clock }),
       onChange: (state, source) => {
+        refusal = state.refusal === undefined ? undefined : { ...state.refusal, bytes: state.bytes };
+        if (state.refusal === undefined && state.layout !== undefined) {
+          lastRead = state.layout;
+        }
+        publishIssue();
         // Rule 8: owed when the store's intended arrangement is not what it published.
         const owed = !sameLayout(store.intendedLayout(), state.layout);
         answer({
@@ -1241,8 +1541,10 @@ export const createLayoutRecordLogic = (
       onError: (error) => {
         answer({ type: 'recordFailed', message: messageOf(error) });
       },
-      onHealth: (health) => {
-        answer({ type: 'recordHealthChanged', health });
+      onHealth: (next) => {
+        health = next;
+        publishIssue();
+        answer({ type: 'recordHealthChanged', health: sourceHealthOf() ?? next });
       },
     });
     /* Each command's answer is sent back unless the child stopped; a command that rejects answers `ok: false`. */
@@ -1294,10 +1596,67 @@ export const createLayoutRecordLogic = (
         }
       }
     });
-    void store.read(true);
+    const { session } = options;
+    if (session === undefined) {
+      void store.read(true);
+      return () => {
+        stopped = true;
+        store.dispose();
+      };
+    }
+    /* A live project's record follows the file on disk (rule 9: one store, whichever watch reports it). The watch's
+     * first answer reads it, and each change or reset reads it again, as the record host's observation did. */
+    const path = `${options.root}/${workbenchPaths.layout}`;
+    const openWatch = (): (() => void) => {
+      const watch = session.watch();
+      const opened = new ObservationService<boolean>({
+        resource: path,
+        watch: (invalidate, reset) =>
+          watch(path, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => store.read(!store.ready()),
+      });
+      observation = opened;
+      const lease = opened.acquire();
+      const unsubscribe = lease.subscribe(() => {
+        const { error } = lease.getSnapshot();
+        if (error !== observedError) {
+          observedError = error;
+          publishIssue();
+          // The layout hears it too: a first read the watch never makes releases the intents that wait for it.
+          answer({ type: 'recordHealthChanged', health: sourceHealthOf() ?? store.health() });
+        }
+      });
+      return () => {
+        unsubscribe();
+        lease.release();
+      };
+    };
+    let closeWatch = openWatch();
+    const stopFollowing = session.onWatchReplaced(() => {
+      closeWatch();
+      closeWatch = openWatch();
+    });
     return () => {
+      stopFollowing();
+      closeWatch();
       stopped = true;
-      store.dispose();
+      publishRecordIssue(session.projectId, workbenchPaths.layout, undefined);
+      // A debounced edit is written before the store closes (the record host's dispose dropped one, A0.3).
+      const flushThenClose = async (): Promise<void> => {
+        try {
+          await store.flush();
+        } finally {
+          store.dispose();
+        }
+      };
+      void flushThenClose();
     };
   });
 
@@ -1313,12 +1672,21 @@ export function createWorkbenchLayoutActor(
     root: string;
     files: WorkbenchLayoutFiles;
     editDebounce?: number;
+    session?: LayoutRecordSession;
   }> &
     Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
 ): WorkbenchLayoutActor {
-  const { input, root, files, editDebounce, clock, inspect, onRejectedEvent } = options;
+  const { input, root, files, editDebounce, session, clock, inspect, onRejectedEvent } = options;
   const machine = workbenchLayoutMachine.provide({
-    actors: { layoutRecord: createLayoutRecordLogic({ root, files, editDebounce, clock }) },
+    actors: {
+      layoutRecord: createLayoutRecordLogic({
+        root,
+        files,
+        editDebounce,
+        clock,
+        ...(session === undefined ? {} : { session }),
+      }),
+    },
   });
   // An explicit `undefined` would replace xstate's own default, so only what was given is passed on.
   return createActor(machine, {
@@ -1338,7 +1706,7 @@ let flushRequests = 0;
  * @param actor - A started layout actor.
  * @returns Whether the record holds every local change.
  */
-export async function flushWorkbenchLayout(actor: WorkbenchLayoutActor): Promise<boolean> {
+export async function flushWorkbenchLayout(actor: ActorRefFrom<WorkbenchLayoutMachine>): Promise<boolean> {
   if (actor.getSnapshot().status !== 'active') {
     return false;
   }

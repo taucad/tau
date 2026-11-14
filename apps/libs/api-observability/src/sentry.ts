@@ -171,6 +171,10 @@ export type ReadinessFailure = {
   message?: string;
   /** How long the indicator's probe took, when it measured one. */
   responseTimeMs?: number;
+  /** The requests still unanswered when the probe's deadline fired, when the indicator tracks them. */
+  waitingOn?: string[];
+  /** How many probes in a row on this Machine have found the indicator down, this one included. */
+  consecutiveFailures?: number;
 };
 
 /**

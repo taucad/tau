@@ -19,7 +19,7 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
@@ -239,7 +239,7 @@ vi.mock('#cloud/commercial-features.js', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => projectManager }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
+  SessionFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
     <div data-testid='project-session' data-project-id={projectId}>
       {children}
     </div>
@@ -260,7 +260,6 @@ vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
 }));
 vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };

@@ -22,7 +22,15 @@ import { parseProjectCreationLocation } from '#utils/project-creation-location.u
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';
-import { KeyedMutex } from '@taucad/utils/keyed-mutex';
+import { withNamedLock } from '#lib/named-lock.js';
+import {
+  canOpenCloudProject,
+  deletionStoragePrefix,
+  getCloudDeletionState,
+  readDeletionReceipts,
+  tauCloudIntent,
+} from '#lib/tau-cloud-intent.js';
+import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
@@ -78,34 +86,16 @@ export type CloudProject = Readonly<{
   isCheckingDeletion?: boolean;
 }>;
 
-const deletionReceiptSchema = z.discriminatedUnion('state', [
-  z.object({ id: z.string(), name: z.string(), state: z.enum(['checking', 'deleting']) }),
-  z.object({ id: z.string(), state: z.literal('deleted') }),
-]);
-type DeletionReceipt = z.infer<typeof deletionReceiptSchema>;
 const deletionStatusSchema = z.object({
   projectId: z.string(),
   state: z.enum(['active', 'deleting', 'deleted']),
   deletedAt: z.string().optional(),
 });
-const deletionStoragePrefix = 'tau:cloud-project-deletions:';
 const deletionTopic = new Topic<void>({ name: 'cloud-project-deletions' });
 let deletionRevision = 0;
 const notifyDeletion = (): void => {
   deletionRevision += 1;
   deletionTopic.emit();
-};
-const readDeletionReceipts = (account: string | undefined): DeletionReceipt[] => {
-  if (account === undefined) {
-    return [];
-  }
-  try {
-    return deletionReceiptSchema
-      .array()
-      .parse(JSON.parse(localStorage.getItem(`${deletionStoragePrefix}${account}`) ?? '[]'));
-  } catch {
-    return [];
-  }
 };
 const saveDeletionReceipt = async (account: string, receipt: DeletionReceipt, shouldRemove = false): Promise<void> => {
   await withNamedLock(`${deletionStoragePrefix}${account}`, async () => {
@@ -128,10 +118,6 @@ const saveDeletionReceipt = async (account: string, receipt: DeletionReceipt, sh
   });
   notifyDeletion();
 };
-
-/** Known intent fences stale cards and default/open connection gestures. */
-export const getCloudDeletionState = (projectId: string): DeletionReceipt['state'] | undefined =>
-  readDeletionReceipts(getRevisionSessionUser()?.id).find((entry) => entry.id === projectId)?.state;
 
 const overlayDeletionReceipts = (projects: readonly CloudProject[], account: string | undefined): CloudProject[] => {
   const rows = new Map(projects.map((entry) => [entry.id, entry]));
@@ -456,6 +442,27 @@ const useListingAwaitsSession = (queryClient: QueryClient, account: string | und
 };
 
 /**
+ * The Tau Cloud listing as one state (A13, H6's state part): `failed` while react-query reports the listing errored,
+ * `fetching` while a request is otherwise in flight, and `ready` otherwise, including a listing not asked yet. This is
+ * the order Home's cloud line has always drawn: a retry of a listing that never answered reads `fetching`, because
+ * react-query clears its error when that retry starts; a refetch over earlier data that failed keeps `failed`.
+ *
+ * @public
+ */
+export type CloudListingState = 'fetching' | 'ready' | 'failed';
+
+/**
+ * The listing's state from its query.
+ *
+ * @param query - The listing query's error and fetch flags.
+ * @returns The state.
+ * @public
+ */
+export const selectCloudListingState = (
+  query: Readonly<{ isError: boolean; isFetching: boolean }>,
+): CloudListingState => (query.isError ? 'failed' : query.isFetching ? 'fetching' : 'ready');
+
+/**
  * The shared listing query.
  *
  * @param options - `enabled` gates the request; a project with no Tau remote has
@@ -473,6 +480,8 @@ export const useCloudProjects = (
   isSettled: boolean;
   isFailed: boolean;
   isFetching: boolean;
+  /** The listing's state, which Home's cloud line reads. */
+  cloud: CloudListingState;
   retry: () => void;
 }> => {
   const account = useRevisionSessionUser()?.id;
@@ -521,6 +530,7 @@ export const useCloudProjects = (
     isSettled: isSuccess,
     isFailed: isError,
     isFetching,
+    cloud: selectCloudListingState({ isError, isFetching }),
     retry: () => {
       void refetch();
     },
@@ -559,95 +569,6 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
      Unsettled and absent is a listing nobody has read yet — or one being re-read right
      now — which says nothing. */
   return isSettled && !isFetching ? 'revoked' : undefined;
-};
-
-/**
- * What this device still owes one project's Tau Cloud backup (D19, D20).
- *
- * - `default`: a project born with no remote, whose person has not yet been told
- *   it backs up (D19).
- * - `noticed`: told, with the opt-out beside it (DESIGN: opt-out before
- *   commitment); the only state a default connection is made from.
- * - `connected`: backed up by default; *Where you are* keeps its line and opt-out.
- * - `open`: brought to this device on sign-in (D20); its first open connects Tau
- *   Cloud and pulls, exactly what *Open* does for a cloud-only row. Kept until
- *   the authored checkout and project manifest are ready.
- *
- * Per device and per project, like `githubProjectBinding`: whether a project is
- * backed up is recorded in its own git config once it is, and this is only what
- * happens before then.
- *
- * @public
- */
-export type TauCloudIntent = 'default' | 'noticed' | 'connected' | 'open';
-
-const intentKeyPrefix = 'tau:tau-cloud-intent:';
-const intentKey = (projectId: string): string => `${intentKeyPrefix}${projectId}`;
-const transientIntents = new Map<string, { intent: TauCloudIntent | undefined; account: string | undefined }>();
-const intentOwnerKey = (projectId: string): string => `${intentKey(projectId)}:account`;
-const intentTopic = new Topic<void>({ name: 'tau-cloud-intent' });
-const isIntent = (value: unknown): value is TauCloudIntent =>
-  value === 'default' || value === 'noticed' || value === 'connected' || value === 'open';
-
-/** The per-project intent store, with document-local fallback when storage writes fail. @public */
-export const tauCloudIntent = Object.freeze({
-  get(projectId: string): TauCloudIntent | undefined {
-    const pending = transientIntents.get(projectId);
-    if (pending !== undefined) {
-      return pending.intent;
-    }
-    try {
-      const value = globalThis.localStorage.getItem(intentKey(projectId));
-      return isIntent(value) ? value : undefined;
-    } catch {
-      return transientIntents.get(projectId)?.intent;
-    }
-  },
-  set(projectId: string, intent: TauCloudIntent | undefined): void {
-    if (intent !== undefined && getCloudDeletionState(projectId) !== undefined) {
-      return;
-    }
-    try {
-      if (intent === undefined) {
-        globalThis.localStorage.removeItem(intentOwnerKey(projectId));
-        globalThis.localStorage.removeItem(intentKey(projectId));
-      } else {
-        globalThis.localStorage.setItem(intentKey(projectId), intent);
-        const account = getRevisionSessionUser()?.id;
-        if (intent === 'open' && account !== undefined) {
-          globalThis.localStorage.setItem(intentOwnerKey(projectId), account);
-        }
-      }
-      transientIntents.delete(projectId);
-    } catch {
-      transientIntents.set(projectId, { intent, account: getRevisionSessionUser()?.id });
-      // Keep an undefined tombstone too: a failed remove must not revive a stale open.
-      // Preserve the gesture for this document when persistent storage is unavailable.
-    }
-    intentTopic.emit();
-  },
-  subscribe: (listener: () => void): (() => void) => intentTopic.subscribe(listener),
-});
-
-/** Whether a cloud project still awaits its first authored download. */
-export const isCloudProjectPending = (projectId: string): boolean => tauCloudIntent.get(projectId) === 'open';
-
-/** Prevent a pending gesture from connecting under a different signed-in account. */
-export const canOpenCloudProject = (projectId: string): boolean => {
-  if (getCloudDeletionState(projectId) !== undefined) {
-    return false;
-  }
-  const pending = transientIntents.get(projectId);
-  if (pending !== undefined) {
-    return pending.account === getRevisionSessionUser()?.id;
-  }
-  try {
-    const owner = globalThis.localStorage.getItem(intentOwnerKey(projectId));
-    return owner === null || owner === getRevisionSessionUser()?.id;
-  } catch {
-    const pending = transientIntents.get(projectId);
-    return pending === undefined || pending.account === getRevisionSessionUser()?.id;
-  }
 };
 
 /**
@@ -941,12 +862,9 @@ export const materializedCloudProjects = Object.freeze({
   },
 });
 
-/* Another tab's writes (RV-W11 7): its intent or setting change reaches this one. */
+/* Another tab's writes (RV-W11 7): its setting change reaches this one. */
 if (typeof globalThis.addEventListener === 'function') {
   globalThis.addEventListener('storage', (event: StorageEvent) => {
-    if (event.key === null || event.key.startsWith(intentKeyPrefix)) {
-      intentTopic.emit();
-    }
     if (event.key === null || event.key === materializeKey) {
       materializeLocation = readMaterializeLocation();
       materializeTopic.emit();
@@ -962,23 +880,3 @@ if (typeof globalThis.addEventListener === 'function') {
  */
 export const useMaterializeOnSignInLocation = (): ProjectCreationLocation | undefined =>
   useSyncExternalStore(materializeOnSignIn.subscribe, materializeOnSignIn.get, () => undefined);
-
-const documentLocks = new KeyedMutex<string>();
-
-/**
- * Run `task` holding a named Web Lock, so two tabs of this origin never run it
- * at once (RV-W11 3). Without the Locks API (a test document, an old engine)
- * it runs under an in-document queue of the same name.
- *
- * @param name - The lock's name.
- * @param task - The work.
- * @returns What the task answered.
- * @public
- */
-export const withNamedLock = async <T>(name: string, task: () => Promise<T>): Promise<T> => {
-  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
-  if (locks !== undefined) {
-    return locks.request(name, task);
-  }
-  return documentLocks.run(name, task);
-};

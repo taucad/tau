@@ -6,8 +6,8 @@ import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
 import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
@@ -256,7 +256,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     }
     return sharedWorkerState === 'ready' ? <div>{children}</div> : placeholder;
   },
-  HomeFileManagerProvider: ({
+  SessionFileManagerProvider: ({
     children,
     projectId,
     rootDirectory,
@@ -313,7 +313,6 @@ vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
 }));
 vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };

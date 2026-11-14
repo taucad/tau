@@ -12,7 +12,7 @@
   },
   "components": [
     {
-      "bom-ref": "64c77a5f98d6dfc63393ed5d2fed47c2855c7cdd4322008b3b13e1d0b710aefc1fba7e56612f25f7e8a2b1b6cef5cf77cb3a834ff3685e723ad286703c3396d8",
+      "bom-ref": "7d847ecaa123efae40b114c5d45641e456b4cd65e5114b4612095d45d7c71a63",
       "type": "platform",
       "supplier": {
         "name": "Microsoft"
@@ -27,8 +27,8 @@
       ],
       "hashes": [
         {
-          "alg": "SHA-512",
-          "content": "64c77a5f98d6dfc63393ed5d2fed47c2855c7cdd4322008b3b13e1d0b710aefc1fba7e56612f25f7e8a2b1b6cef5cf77cb3a834ff3685e723ad286703c3396d8"
+          "alg": "SHA-256",
+          "content": "7d847ecaa123efae40b114c5d45641e456b4cd65e5114b4612095d45d7c71a63"
         }
       ],
       "externalReferences": [
@@ -41,6 +41,39 @@
         {
           "name": "taucad:target",
           "value": "linux-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "8847a4f3321a5c42a682cdf8551489dbed6ebe52c04f1be58494ec0d56872403",
+      "type": "platform",
+      "supplier": {
+        "name": "Microsoft"
+      },
+      "name": "dotnet-runtime",
+      "version": "10.0.11",
+      "purl": "pkg:generic/microsoft/dotnet-runtime@10.0.11?download_url=https%3A%2F%2Fbuilds.dotnet.microsoft.com%2Fdotnet%2FRuntime%2F10.0.11%2Fdotnet-runtime-10.0.11-osx-arm64.tar.gz",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8847a4f3321a5c42a682cdf8551489dbed6ebe52c04f1be58494ec0d56872403"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-osx-arm64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
         }
       ]
     },
@@ -77,39 +110,6 @@
         {
           "name": "taucad:sbom",
           "value": "tau-worker/tau-picogk-sbom.cdx.json"
-        }
-      ]
-    },
-    {
-      "bom-ref": "e96a8a8108d5a3b70e827567b2493ede540f3705c1209e7f34736ba6aa398dd4d0d15f31eb667c9cca3dbcd30ad83b315a86d5e9a13fd2c370e2fc0cece72436",
-      "type": "platform",
-      "supplier": {
-        "name": "Microsoft"
-      },
-      "name": "dotnet-runtime",
-      "version": "10.0.11",
-      "purl": "pkg:generic/microsoft/dotnet-runtime@10.0.11?download_url=https%3A%2F%2Fbuilds.dotnet.microsoft.com%2Fdotnet%2FRuntime%2F10.0.11%2Fdotnet-runtime-10.0.11-osx-arm64.tar.gz",
-      "licenses": [
-        {
-          "expression": "MIT"
-        }
-      ],
-      "hashes": [
-        {
-          "alg": "SHA-512",
-          "content": "e96a8a8108d5a3b70e827567b2493ede540f3705c1209e7f34736ba6aa398dd4d0d15f31eb667c9cca3dbcd30ad83b315a86d5e9a13fd2c370e2fc0cece72436"
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "distribution",
-          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-osx-arm64.tar.gz"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
         }
       ]
     },

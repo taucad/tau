@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
+import { isValidElement, useEffect, useRef, useState, StrictMode, Fragment } from 'react';
 import { MemoryRouter } from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
@@ -22,13 +22,20 @@ import type {
 } from 'dockview-react';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
-import type { PendingFilePlacement } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { EditorDocument } from '#lib/editor-document.js';
 import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { createActor } from 'xstate';
+import type { Actor } from 'xstate';
+import { dockAdapterId, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type {
+  PendingFilePlacement,
+  WorkbenchDockReady,
+  WorkbenchDockReleased,
+} from '#workbench-records/workbench-adapter.js';
 
 const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastError, mockPrintBody, mockExportBody } =
   vi.hoisted(() => ({
@@ -103,15 +110,20 @@ vi.mock('#components/panes/dockview-split-action.js', () => ({
   ),
 }));
 const mockConnectWorkbench = vi.fn<
-  (openPanel: (id: string) => void, activateFile?: (path: string) => void) => () => void
+  (openPanel: (id: string) => unknown, activateFile?: (path: string) => unknown) => () => void
 >(() => () => undefined);
 const mockLayoutController = { registerWorkbench: vi.fn(() => () => undefined), personWorkbenchChanged: vi.fn() };
 const mockSetWorkbenchOpen = vi.fn();
 let readyDockviewApi: DockviewApi | undefined;
+/* The live project's layout a row gives the workspace: absent, as on a share or preview page. */
+const workspaceLayout: { value: { send: (event: { type: string }) => void } | undefined } = { value: undefined };
 vi.mock('#components/panes/dockview.js', () => ({
   Dockview: ({ onReady }: { onReady: (event: DockviewReadyEvent) => void }) => {
+    // As Dockview (`useKeptInstance`): `onReady` once per mounted instance, whatever the later renders pass.
+    const announced = useRef(false);
     useEffect(() => {
-      if (readyDockviewApi) {
+      if (readyDockviewApi && !announced.current) {
+        announced.current = true;
         onReady({ api: readyDockviewApi });
       }
     }, [onReady]);
@@ -126,6 +138,7 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
     connectWorkbench: mockConnectWorkbench,
     layoutController: mockLayoutController,
     setWorkbenchOpen: mockSetWorkbenchOpen,
+    layout: workspaceLayout.value,
   }),
 }));
 
@@ -217,8 +230,9 @@ const editorMachineSnapshot = {
     openFiles: [] as Array<{ paneId: string; path: string; readOnly?: boolean }>,
     fileSidebars: {} as Record<string, number>,
     panelState: { desktopLayout: { workbenchOpen: true } },
+    pendingOpenFile: undefined as { path: string } | undefined,
   },
-  matches: () => true,
+  matches: (_value: unknown) => true,
   status: 'active',
   output: undefined,
   error: undefined,
@@ -240,10 +254,42 @@ const publishOpenFiles = (openFiles: typeof editorMachineSnapshot.context.openFi
   }
 };
 
+/* The editor's emitted events, by type: a row emits one with `emitEditor`. */
+const editorEventListeners = new Map<string, Set<(event: { type: string }) => void>>();
+const emitEditor = (event: { type: string; path?: string; error?: Error }): void => {
+  for (const listener of editorEventListeners.get(event.type) ?? []) {
+    listener(event);
+  }
+};
+
+/* A shared page's editor runs the workbench's adapter (A8c): the mock hosts it the way the editor does. */
+const dockAdapters = new Map<string, Actor<typeof workbenchAdapterLogic>>();
+const hostDock = (event: { type: string }): void => {
+  if (event.type === 'dockReady') {
+    const ready = event as WorkbenchDockReady;
+    for (const [id, adapter] of dockAdapters) {
+      adapter.stop();
+      dockAdapters.delete(id);
+    }
+    const adapter = createActor(workbenchAdapterLogic, { input: { api: ready.api, ports: ready.ports } });
+    dockAdapters.set(dockAdapterId('workbench', ready.dockId), adapter);
+    adapter.start();
+  } else if (event.type === 'dockReleased') {
+    const id = dockAdapterId('workbench', (event as WorkbenchDockReleased).dockId);
+    dockAdapters.get(id)?.stop();
+    dockAdapters.delete(id);
+  }
+};
+
 const mockEditorRef = {
-  on: () => ({ unsubscribe: () => undefined }),
-  send: vi.fn(),
-  getSnapshot: () => currentEditorSnapshot,
+  on: (type: string, listener: (event: { type: string }) => void) => {
+    const listeners = editorEventListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    editorEventListeners.set(type, listeners);
+    return { unsubscribe: () => listeners.delete(listener) };
+  },
+  send: vi.fn(hostDock),
+  getSnapshot: () => ({ ...currentEditorSnapshot, children: Object.fromEntries(dockAdapters) }),
   subscribe: (listener: EditorListener) => {
     editorListeners.add(listener);
     return { unsubscribe: () => editorListeners.delete(listener) };
@@ -255,6 +301,8 @@ vi.mock('#hooks/use-project.js', () => ({
     editorRef: mockEditorRef,
     geometryUnits: new Map(),
     mainEntryPath: 'main.ts',
+    /* A shared project's runtime has no layout; the shell port is all the workspace asks of it here. */
+    projectRuntime: { layout: undefined, shell: { set: () => undefined, release: () => undefined } },
     projectRef: {
       send: mockProjectSend,
       getSnapshot: () => ({ context: { project: undefined } }),
@@ -568,9 +616,9 @@ describe('FileEditor routing', () => {
 
     render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
-    const placeholder = screen.getByRole('status');
+    const placeholder = screen.getByRole('group', { name: 'Loading mystery.dat' });
     expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
-    expect(placeholder).toHaveTextContent('Loading mystery.dat');
+    expect(placeholder).toHaveAttribute('aria-busy', 'true');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
   });
 
@@ -580,7 +628,7 @@ describe('FileEditor routing', () => {
     render(<FileEditor paneId='hidden-pane' filePath='main.ts' panelApi={api} />);
 
     await act(async () => undefined);
-    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).toHaveAttribute('aria-busy', 'true');
     expect(mockEditorRuntimeImported).not.toHaveBeenCalled();
     expect(mockLoadEditorSyntax).not.toHaveBeenCalled();
     expect(mockEditorViewMounted).not.toHaveBeenCalled();
@@ -591,7 +639,7 @@ describe('FileEditor routing', () => {
     mockUseFileContent.mockImplementation(() => content);
     const pane = render(<FileEditor paneId='source-pane' filePath='main.ts' panelApi={mockPanelApi} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading main.ts');
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).toHaveAttribute('aria-busy', 'true');
     await waitFor(() => {
       expect(mockEditorRuntimeImported).toHaveBeenCalledOnce();
       expect(mockLoadEditorSyntax).toHaveBeenCalledWith('typescript', expect.any(AbortSignal));
@@ -609,6 +657,130 @@ describe('FileEditor routing', () => {
       />,
     );
     expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
+  });
+
+  /* Loading states UX blueprint P-i: the pane owns one "Opening file" wait, in its header's slot (the first child of
+     its file actions), which survives the body's move from the loading branch to the routed viewer and keeps its
+     500 ms minimum there. */
+  it('keeps one Opening file wait in the header slot across the move from loading to the file’s text', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    let content: FileContentResult = { kind: 'loading' };
+    mockUseFileContent.mockImplementation(() => content);
+    const pane = render(<FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).toHaveAttribute('data-state', 'waiting');
+    expect(slot).toHaveTextContent('Opening file…');
+    // In the header's actions group, first, as the inline skin: nothing overlays the code area.
+    const actions = screen.getByRole('group', { name: 'File actions for main.ts' });
+    expect(actions.firstElementChild).toContainElement(slot as HTMLElement);
+    expect(screen.getByRole('group', { name: 'Loading main.ts' })).not.toContainElement(slot as HTMLElement);
+    expect(slot?.closest('.absolute')).toBeNull();
+
+    now.mockReturnValue(1300);
+    content = { kind: 'text', content: new TextEncoder().encode('let ready = true;') };
+    pane.rerender(
+      <FileEditor paneId='wait-pane' filePath='main.ts' panelApi={mockPanelApi} parameters={{ filePath: 'main.ts' }} />,
+    );
+    expect(screen.getByTestId('viewer-content')).toHaveTextContent('let ready = true;');
+    // The same node, still first in the actions: shown at 1,100 ms, it holds until 1,600 ms, 300 ms after the text.
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(screen.getByRole('group', { name: 'File actions for main.ts' }).firstElementChild).toContainElement(
+      slot as HTMLElement,
+    );
+    expect(slot).toHaveAttribute('data-state', 'holding');
+    expect(
+      slot
+        ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+        ?.style.getPropertyValue('--wait-hide-delay'),
+    ).toBe('300ms');
+  });
+
+  it('reads the file again on Retry, times a new wait from it, and keeps focus in the pane', async () => {
+    const user = userEvent.setup();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    const retry = vi.fn();
+    mockUseFileContent.mockReturnValue({ kind: 'loading', retry });
+    const pane = render(<FileEditor paneId='retry-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    now.mockReturnValue(20_000);
+    // The slow words and Retry are laid out from the wait's start; CSS shows them at 10,000 ms.
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toContainElement(pane.container.querySelector('[data-slot="wait-indicator"]'));
+    const body = pane.container.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    expect(body?.style.getPropertyValue('--wait-reveal-delay')).toBe('1000ms');
+  });
+
+  /* A wait that starts late in an untouched page (a record apply opening a file) starts now, never at navigation. */
+  it('times a pane wait that starts late without a gesture from its own start, and does not announce it', () => {
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, {
+        userActivation: { isActive: false, hasBeenActive: false },
+      }),
+    );
+    const now = vi.spyOn(performance, 'now').mockReturnValue(30_000);
+    onTestFinished(() => {
+      now.mockRestore();
+      vi.unstubAllGlobals();
+    });
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    const pane = render(<FileEditor paneId='late-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    const revealDelay = slot
+      ?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]')
+      ?.style.getPropertyValue('--wait-reveal-delay');
+    expect(Number.parseFloat(revealDelay ?? '')).toBeGreaterThanOrEqual(1000);
+    expect(slot).not.toHaveAttribute('role');
+  });
+
+  /* A Retry is a gesture: the new wait is its own announcement group even in a pane restored without one. */
+  it('announces the wait a Retry starts in a pane restored without a gesture', async () => {
+    const user = userEvent.setup();
+    const activation = { isActive: false, hasBeenActive: false };
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator) as Navigator, { userActivation: activation }));
+    const now = vi.spyOn(performance, 'now').mockReturnValue(100);
+    onTestFinished(() => {
+      now.mockRestore();
+      vi.unstubAllGlobals();
+    });
+    const retry = vi.fn();
+    mockUseFileContent.mockReturnValue({ kind: 'loading', retry });
+    const pane = render(<FileEditor paneId='restored-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const slot = pane.container.querySelector('[data-slot="wait-indicator"]');
+    expect(slot).not.toHaveAttribute('role');
+
+    now.mockReturnValue(10_100);
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toBe(slot);
+    expect(slot).toHaveAttribute('role', 'status');
+  });
+
+  it('announces the wait of a pane a person opened', () => {
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator) as Navigator, {
+        userActivation: { isActive: true, hasBeenActive: true },
+      }),
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    mockUseFileContent.mockReturnValue({ kind: 'loading' });
+    const pane = render(<FileEditor paneId='opened-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    expect(pane.container.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('role', 'status');
   });
 
   it('does not rerender for unrelated or unchanged open file entries', () => {
@@ -903,6 +1075,29 @@ describe('FileEditor routing', () => {
     expect(region).toHaveStyle({ width: '344px' });
     expect(toggle).toHaveFocus();
     expect(screen.getByRole('region', { name: 'Files for main.ts' })).toBe(region);
+  });
+
+  it.each([
+    ['re-reads its file', { kind: 'loading' }],
+    ['loses its file', { kind: 'orphaned' }],
+  ] as const)('should keep the same open Files region while the pane %s', (_label, interim) => {
+    let content: FileContentResult = { kind: 'text', content: new TextEncoder().encode('hello') };
+    mockUseFileContent.mockImplementation(() => content);
+    const parameters = { filePath: 'main.ts', filesOpen: true, filesWidth: 240 };
+    const { rerender } = render(
+      <FileEditor paneId='test-pane' filePath='main.ts' parameters={parameters} panelApi={mockPanelApi} />,
+    );
+    const region = screen.getByRole('region', { name: 'Files for main.ts' });
+    const tree = screen.getByTestId('file-tree');
+
+    /* A move, rename or delete of the open file re-reads it: the tree beside it, and the folders open in it, stay. */
+    content = interim;
+    rerender(
+      <FileEditor paneId='test-pane' filePath='main.ts' parameters={{ ...parameters }} panelApi={mockPanelApi} />,
+    );
+
+    expect(screen.getByRole('region', { name: 'Files for main.ts' })).toBe(region);
+    expect(screen.getByTestId('file-tree')).toBe(tree);
   });
 
   it('should keep drag widths local and discard cancelled gestures before the next resize', () => {
@@ -1425,6 +1620,434 @@ describe('workbench adapter record apply (A0.3)', () => {
     expect(detach).toHaveBeenCalledOnce();
   });
 
+  // A8c, I1: the Dockview hands its adapter to the project's layout, or on a page without one (share and preview) to
+  // the editor, and takes it back when it unmounts.
+  it.each([
+    ['the layout', true],
+    ['the editor, on a page without a layout', false],
+  ])('should hand the workbench adapter to %s and release it on unmount', (_host, withLayout) => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    // The layout spawns the adapter on `dockReady`; the Dockview then attaches it, once the layout's step is over.
+    const spawned = { send: vi.fn() };
+    let spawnedId: string | undefined;
+    const layout = {
+      send: vi.fn((event: { type: string; dockId?: string }) => {
+        if (event.type === 'dockReady') {
+          spawnedId = dockAdapterId('workbench', event.dockId!);
+        }
+      }),
+      getSnapshot: () => ({ children: spawnedId === undefined ? {} : { [spawnedId]: spawned } }),
+    };
+    workspaceLayout.value = withLayout ? layout : undefined;
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      workspaceLayout.value = undefined;
+    });
+    mockEditorRef.send.mockClear();
+    const dockEvents = () =>
+      (withLayout ? layout.send : mockEditorRef.send).mock.calls
+        .map(([event]) => event as { type: string; api?: unknown })
+        .filter((event) => event.type === 'dockReady' || event.type === 'dockReleased');
+
+    const view = render(<WorkbenchDockview />);
+    expect(dockEvents()).toEqual([
+      expect.objectContaining({ type: 'dockReady', adapter: 'workbench', api: dockview.api }),
+    ]);
+    if (withLayout) {
+      expect(spawned.send.mock.calls).toEqual([[{ type: 'attach' }]]);
+    }
+    view.unmount();
+    expect(dockEvents().map((event) => event.type)).toEqual(['dockReady', 'dockReleased']);
+    if (withLayout) {
+      expect(mockEditorRef.send.mock.calls.some(([event]) => event.type === 'dockReady')).toBe(false);
+    }
+  });
+
+  // D21 round 3: a runtime replaced under a mounted Dockview (a lease renewed after its grace) is started by its
+  // provider's passive effect, after the Dockview's commit. Handed over in that commit, the adapter was spawned only
+  // when its host started, and nothing attached it: the Dockview hands over to a host only once that host has started.
+  it('should attach the workbench adapter to a runtime that starts after the commit that replaced it', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    Object.assign(dockview.api, {
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    readyDockviewApi = dockview.api;
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      workspaceLayout.value = undefined;
+    });
+    /* A layout that queues what it is sent until it starts, as an unstarted actor does, and spawns an adapter on
+     * `dockReady`. */
+    const runtimeLayout = () => {
+      let started = false;
+      const queued: Array<{ type: string; dockId?: string }> = [];
+      const children = new Map<string, { send: (event: { type: string }) => void }>();
+      const attached = vi.fn();
+      const handle = (event: { type: string; dockId?: string }): void => {
+        const id = dockAdapterId('workbench', event.dockId ?? '');
+        if (event.type === 'dockReady') {
+          children.set(id, { send: attached });
+        } else if (event.type === 'dockReleased') {
+          children.delete(id);
+        }
+      };
+      return {
+        send: (event: { type: string; dockId?: string }) => {
+          if (started) {
+            handle(event);
+          } else {
+            queued.push(event);
+          }
+        },
+        getSnapshot: () => ({ children: Object.fromEntries(children) }),
+        start: () => {
+          started = true;
+          for (const event of queued.splice(0)) {
+            handle(event);
+          }
+        },
+        attached,
+      };
+    };
+    /* The project provider: its runtime starts in its passive effect, after its children's. */
+    function Runtime({ layout }: { readonly layout: ReturnType<typeof runtimeLayout> }) {
+      useEffect(() => {
+        layout.start();
+      }, [layout]);
+      // The workspace context re-renders the Dockview with the new runtime; the mocked hook needs a new prop for it.
+      return <WorkbenchDockview onApiChange={() => layout} />;
+    }
+    const first = runtimeLayout();
+    workspaceLayout.value = first;
+    const view = render(<Runtime layout={first} />);
+    expect(first.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+
+    const second = runtimeLayout();
+    workspaceLayout.value = second;
+    view.rerender(<Runtime layout={second} />);
+
+    expect(second.attached.mock.calls).toEqual([[{ type: 'attach' }]]);
+    view.unmount();
+  });
+
+  // A8b review: a record apply waits for its files to open, and the layout holds every pane intent until the apply
+  // lands. A file that fails to open (deleted since) would hold them forever: the apply lands without its tab.
+  it('should land a held record apply without the tab of a file that failed to open', () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    let shown: SerializedDockview | undefined;
+    Object.assign(dockview.api, {
+      width: 900,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview API spelling
+      toJSON: () => shown,
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    dockview.restoreJson.mockImplementation((json: SerializedDockview) => {
+      shown = json;
+    });
+    readyDockviewApi = dockview.api;
+    type ApplyRecord = (node: WorkbenchLaneNode, applied: () => void) => void;
+    let applyRecord: ApplyRecord | undefined;
+    mockLayoutController.registerWorkbench.mockImplementation((...registered: unknown[]) => {
+      applyRecord = registered[0] as ApplyRecord;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      editorEventListeners.clear();
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+    });
+
+    render(<WorkbenchDockview />);
+    const applied = vi.fn();
+    act(() => {
+      applyRecord!(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'file', path: 'gone.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    expect(dockview.restoreJson).not.toHaveBeenCalled();
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    // It reports what it shows, which is less than it was handed: the layout takes that as an edit (I12).
+    expect(applied).toHaveBeenCalledExactlyOnceWith({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+    expect(fromDockview('workbench', shown!)).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+  });
+
+  /* A Dockview whose record apply a row drives: it shows what `fromJSON` hands it, and the adapter's apply and its
+   * connected file activation are captured. */
+  const mountRecordApply = () => {
+    const dockview = createTestDockview([panel('utility')]);
+    const subscribe = () => ({ dispose: vi.fn() });
+    let shown: SerializedDockview | undefined;
+    Object.assign(dockview.api, {
+      width: 900,
+      height: 600,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview API spelling
+      toJSON: () => shown,
+      onDidLayoutChange: subscribe,
+      onDidActivePanelChange: subscribe,
+      onDidRemovePanel: subscribe,
+      onWillDragPanel: subscribe,
+      onUnhandledDragOver: subscribe,
+      onDidAddPanel: subscribe,
+    });
+    dockview.restoreJson.mockImplementation((json: SerializedDockview) => {
+      shown = json;
+    });
+    readyDockviewApi = dockview.api;
+    type ApplyRecord = (node: WorkbenchLaneNode, applied: (landed?: WorkbenchLaneNode) => void) => void;
+    let applyRecord: ApplyRecord | undefined;
+    mockLayoutController.registerWorkbench.mockImplementation((...registered: unknown[]) => {
+      applyRecord = registered[0] as ApplyRecord;
+      return () => undefined;
+    });
+    let activateFile: ((path: string) => unknown) | undefined;
+    mockConnectWorkbench.mockImplementation((_openPanel, activate) => {
+      activateFile = activate;
+      return () => undefined;
+    });
+    onTestFinished(() => {
+      readyDockviewApi = undefined;
+      currentEditorSnapshot = editorMachineSnapshot;
+      mockConnectWorkbench.mockReset();
+      mockConnectWorkbench.mockImplementation(() => () => undefined);
+      mockLayoutController.registerWorkbench.mockReset();
+      mockLayoutController.registerWorkbench.mockImplementation(() => () => undefined);
+    });
+    render(<WorkbenchDockview />);
+    return {
+      dockview,
+      apply: (node: WorkbenchLaneNode, applied: (landed?: WorkbenchLaneNode) => void) => {
+        applyRecord!(node, applied);
+      },
+      activate: (path: string) => activateFile!(path),
+      get shown() {
+        return shown === undefined ? undefined : fromDockview('workbench', shown);
+      },
+    };
+  };
+
+  // A8b's carried risk (A8c): a chat switch (`setRequestedChatId`, `focusKnownChat`, `retryEnsureFocusedChat`) leaves
+  // the editor's materialisation of a held apply's file with neither `fileOpened` nor `fileOpenFailed`, and the layout
+  // holds every pane intent until the apply lands. The apply asks for the file again, so it lands with the file's tab.
+  it('should ask again for a held record apply file whose materialisation the editor dropped, and land the apply', () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    const recorded: WorkbenchLaneNode = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'file', path: 'part.ts' },
+      ],
+    };
+    const publish = (phase: 'materialising' | 'dropped' | 'opened'): void => {
+      const isMaterialising = phase === 'materialising';
+      currentEditorSnapshot = {
+        ...editorMachineSnapshot,
+        context: {
+          ...editorMachineSnapshot.context,
+          openFiles: phase === 'opened' ? [{ paneId: 'pane-part', path: 'part.ts' }] : [],
+          // A cancelled materialisation leaves the request behind, as the editor does today.
+          pendingOpenFile: phase === 'opened' ? undefined : { path: 'part.ts' },
+        },
+        matches: (value: unknown) =>
+          JSON.stringify(value) === JSON.stringify({ ready: { operation: 'materializingOpenFile' } })
+            ? isMaterialising
+            : true,
+      };
+      for (const listener of editorListeners) {
+        if (typeof listener === 'function') {
+          listener(currentEditorSnapshot);
+        } else {
+          listener.next(currentEditorSnapshot);
+        }
+      }
+    };
+    const opens = (): number =>
+      mockEditorRef.send.mock.calls.filter(
+        ([event]) => event.type === 'openFile' && (event as { path?: string }).path === 'part.ts',
+      ).length;
+    const before = opens();
+    act(() => {
+      host.apply(recorded, applied);
+    });
+    expect(opens() - before).toBe(1);
+    act(() => {
+      publish('materialising');
+    });
+    act(() => {
+      publish('dropped');
+    });
+    expect(opens() - before, 'the file whose materialisation was dropped is asked for again').toBe(2);
+    act(() => {
+      publish('opened');
+    });
+    expect(applied).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(host.shown).toEqual(recorded);
+  });
+
+  // A8b review: a landed apply releases the pane and file intents held behind it. They open once the restore is over,
+  // so a file activation answers with what the Dockview shows, not as a step of the restore.
+  it('should answer a file activation made as a record apply lands with what the Dockview shows', () => {
+    const host = mountRecordApply();
+    const recorded: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] };
+    let answer: unknown = 'not activated';
+    act(() => {
+      host.apply(recorded, () => {
+        answer = host.activate('a.ts');
+      });
+    });
+    expect(answer).toEqual(recorded);
+  });
+
+  // A8b review: a file that failed to open loses its tab in the group that held it, and nowhere else. The groups that
+  // never held it keep their active tab, and the group that did keeps its active tab where it moves.
+  it("should keep every active tab but the failed file's when a held record apply drops its tab", () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'split',
+          direction: 'row',
+          children: [
+            {
+              kind: 'group',
+              tabs: [
+                { kind: 'pane', pane: 'parameters' },
+                { kind: 'pane', pane: 'details' },
+              ],
+              active: 0,
+            },
+            {
+              kind: 'group',
+              tabs: [
+                { kind: 'file', path: 'gone.ts' },
+                { kind: 'pane', pane: 'share' },
+                { kind: 'pane', pane: 'export' },
+              ],
+              active: 1,
+            },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(applied).toHaveBeenCalledOnce();
+    expect(host.shown).toMatchObject({
+      kind: 'split',
+      children: [
+        { kind: 'group', active: 0 },
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'share' },
+            { kind: 'pane', pane: 'export' },
+          ],
+          active: 0,
+        },
+      ],
+    });
+  });
+
+  // A8b review: an apply that lost a tab reports what the Dockview shows, not what it was handed: a pane this build does
+  // not ship is pruned from what it shows as well, and is not written back as part of the arrangement.
+  it("should report what the Dockview shows when a held record apply drops a failed file's tab", () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'pane', pane: 'jobs' },
+            { kind: 'file', path: 'gone.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(host.shown).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+    expect(applied).toHaveBeenCalledExactlyOnceWith(host.shown);
+  });
+
+  // A8b review: a held apply waits for its files to open. A file the person opened for it and then closed is no longer
+  // wanted: the apply lands without its tab once the rest are open, and reports that it shows less.
+  it('should land a held record apply without the tab of a file the person closed meanwhile', () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'file', path: 'a.ts' },
+            { kind: 'file', path: 'b.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      publishOpenFiles([openFile('pane-a', 'a.ts')]);
+    });
+    act(() => {
+      publishOpenFiles([]);
+    });
+    expect(host.dockview.restoreJson).not.toHaveBeenCalled();
+    act(() => {
+      publishOpenFiles([openFile('pane-b', 'b.ts')]);
+    });
+    const landed: WorkbenchLaneNode = {
+      kind: 'group',
+      tabs: [
+        { kind: 'pane', pane: 'parameters' },
+        { kind: 'file', path: 'b.ts' },
+      ],
+    };
+    expect(applied).toHaveBeenCalledExactlyOnceWith(landed);
+    expect(host.shown).toEqual(landed);
+  });
+
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
   // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
   it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {
@@ -1727,6 +2350,7 @@ describe('Workbench file reconciliation', () => {
             if (id === 'files') {
               openWorkbenchFiles({ api: dockview.api });
             }
+            return undefined;
           });
         }, [mounted, workspace]);
         return (

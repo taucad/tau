@@ -1,5 +1,5 @@
 {
-  "//": "PicoGK runtime closure (D6, R2 Variant B): Microsoft's .NET runtime archive verbatim, pinned by the sha512 releases.json publishes, plus the Tau framework-dependent layer (ReadyToRun worker, patched PicoGK.dll, Roslyn, SkiaSharp, the Tau-built engine) that the macOS release job builds, ad-hoc signs, digests and uploads to the dependencies.tau.new blobs/ and an immutable GitHub Release. `dotnet/` and `tau-worker/` are siblings under the closure root. The worker pin is rewritten from a published layer's record (tau-layer.json on its picogk-layer-<16 hex> release) by scripts/compose-tau-plugin.mts, never by hand; publish.yml proves both URLs serve the pinned bytes.",
+  "//": "PicoGK runtime closure (D6, R2 Variant B): Microsoft's .NET runtime archive verbatim, pinned by the sha256 of the bytes whose sha512 releases.json publishes (prepare-picogk-dotnet.mts --layer checks both), so a locked prepare reads it from the dependency hosts' blobs/sha256/<hex>, plus the Tau framework-dependent layer (ReadyToRun worker, patched PicoGK.dll, Roslyn, SkiaSharp, the Tau-built engine) that the macOS release job builds, ad-hoc signs, digests and uploads to the dependencies.tau.new blobs/ and an immutable GitHub Release. `dotnet/` and `tau-worker/` are siblings under the closure root. The worker pin is rewritten from a published layer's record (tau-layer.json on its picogk-layer-<16 hex> release) by scripts/compose-tau-plugin.mts, never by hand; publish.yml proves both URLs serve the pinned bytes.",
   "schemaVersion": 1,
   "kernels": {
     "picogk": {
@@ -19,7 +19,7 @@
         "files": [
           {
             "name": "dotnet",
-            "integrity": "sha512-6WqKgQjVo7cOgnVnskk+3lQPNwXBIJ5/NHNrpqo5jdTQ0V8x62Z8nMo9vNMK2DsxWobV6aE/0sNw4vwM7OckNg==",
+            "integrity": "sha256-iEek8zIaXEKmgs34VRSJ2+1uvlLATxvlhJTsDVaHJAM=",
             "byteLength": 33246120,
             "format": "tar.gz",
             "origin": {
@@ -58,7 +58,7 @@
         "files": [
           {
             "name": "dotnet",
-            "integrity": "sha512-ZMd6X5jW38Yzk+1dL+1HwoVcfN1DIgCLOxPh0LcQrvwfun5WYS8l9+iisbbO9c93yzqDT/NoXnI60oZwPDOW2A==",
+            "integrity": "sha256-fYR+yqEj765AsRTF1FZB5Fa0zWXlEUtGEgldRdfHGmM=",
             "byteLength": 36639275,
             "format": "tar.gz",
             "origin": {

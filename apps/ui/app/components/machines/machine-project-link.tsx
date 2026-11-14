@@ -12,14 +12,10 @@ export function MachineProjectLink({
   readonly job: MachineJob;
   readonly hostId: string;
 }): React.JSX.Element {
-  const { getProjectListing, isLoading } = useProjectManager();
+  const { projectListingQuery, isLoading } = useProjectManager();
+  /* The library's own listing query: it is the only writer of `['projects']` (D9). */
   const listing = useQuery({
-    queryKey: ['projects'],
-    queryFn: async ({ signal }) => {
-      const value = await getProjectListing({ includeDeleted: true });
-      signal.throwIfAborted();
-      return value;
-    },
+    ...projectListingQuery,
     enabled: !isLoading,
     staleTime: 3000,
   });

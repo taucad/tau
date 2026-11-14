@@ -32,6 +32,12 @@ export type FlagDefinition = {
    * flags too, so a developer can turn one on from the console. A PostHog-backed flag never reads `tau:flags`.
    */
   readonly localOverride?: false;
+  /**
+   * The flag decides first-paint geometry (a row that is there or not). Its settled value is mirrored to the
+   * `layout-flags` cookie, so the server renders, omits or holds the flagged surface (`#flags/layout-flags`); read it
+   * with `useLayoutFlag`. Keep this list short: every entry rides every document request.
+   */
+  readonly affectsLayout?: true;
 };
 
 /**
@@ -128,6 +134,7 @@ export const flagRegistry = {
     showInExperimental: false,
     schema: z.boolean().default(false),
     posthogKey: 'onboarding',
+    affectsLayout: true,
     label: 'Onboarding',
     description: 'The setup route, the product tour and home suggestions',
   },
@@ -150,6 +157,17 @@ export const flagRegistry = {
 export type FeatureFlagName = keyof typeof flagRegistry;
 
 export const featureFlagNames = Object.keys(flagRegistry) as FeatureFlagName[];
+
+/** A flag marked `affectsLayout`. */
+export type LayoutFlagName = {
+  [K in FeatureFlagName]: (typeof flagRegistry)[K] extends { readonly affectsLayout: true } ? K : never;
+}[FeatureFlagName];
+
+/** The flags whose settled values ride the `layout-flags` cookie, in registry order. */
+export const layoutFlagNames = featureFlagNames.filter((name): name is LayoutFlagName => {
+  const definition: FlagDefinition = flagRegistry[name];
+  return definition.affectsLayout === true;
+});
 
 export const experimentalFeatureFlagNames = featureFlagNames.filter((name) => flagRegistry[name].showInExperimental);
 

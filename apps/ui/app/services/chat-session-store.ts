@@ -124,6 +124,12 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
 import type { SdkWatchInput } from '#chat-clients/_internal/sdk-watch.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import {
+  composerTraysOf,
+  readRememberedComposerTrays,
+  writeRememberedComposerTrays,
+} from '#services/chat-composer-trays.js';
+import type { ComposerTray } from '#services/chat-composer-trays.js';
 import { createChatMessageQueueStore, chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type {
   ChatMessageQueueIntent,
@@ -279,6 +285,16 @@ export type ChatSession = {
   /** Coherent visible transcript; the SDK array may be reconstructing a cumulative stream. */
   readonly messages: readonly MyUIMessage[];
   /**
+   * The transcript's load state (I21): `loaded` with the turns it shows, `empty` only once its load has settled with
+   * none, and `loading` until then. Read it with {@link selectChatTranscript}.
+   */
+  readonly transcript: ChatTranscriptState;
+  /**
+   * The composer trays this chat showed when it was last open on this device, known before its transcript loads,
+   * and the trays its transcript has once it has settled (U10). The lane reserves their height from it.
+   */
+  readonly rememberedComposerTrays: readonly ComposerTray[];
+  /**
    * This chat's state in the agent-state vocabulary (D32, S45).
    *
    * The store keeps the AI SDK `Chat`, its transport and its persistence; the
@@ -290,6 +306,18 @@ export type ChatSession = {
    * subscribed once stays subscribed to the chat's machine. */
   readonly stateActorRef: ChatSessionActorRef;
 };
+
+/** A transcript's load state (I21): empty is not loading. */
+export type ChatTranscriptState = 'loading' | 'loaded' | 'empty';
+
+/**
+ * The transcript state a view reads for a chat: a chat with no session is still loading.
+ *
+ * @param session - The chat's session, if it is acquired.
+ * @returns Its transcript's load state.
+ */
+export const selectChatTranscript = (session: ChatSession | undefined): ChatTranscriptState =>
+  session?.transcript ?? 'loading';
 
 type MessagePresentation = {
   readonly messagesById: ReadonlyMap<string, MyUIMessage>;
@@ -520,6 +548,19 @@ function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { ki
 // ChatSessionStore
 // ---------------------------------------------------------------------------
 
+/**
+ * The transcript's load state (I21). Turns shown are `loaded`, so the first turns and `loaded` arrive in one snapshot
+ * (U19). With none, it is `empty` only once its load has settled, which latches: a materialization of the log applied
+ * or failed, the host refused the read for good, or this tab created the chat empty. A lost read is retried, so it
+ * stays `loading` (U7).
+ */
+const transcriptOf = (session: Pick<InternalSession, 'messages' | 'transcriptSettled'>): ChatTranscriptState => {
+  if (session.messages.length > 0) {
+    return 'loaded';
+  }
+  return session.transcriptSettled ? 'empty' : 'loading';
+};
+
 type InternalSession = ChatSession & {
   readonly messageQueueStore: ChatMessageQueueStore;
   readonly messageQueueObservation: ObservationService<void>;
@@ -566,6 +607,12 @@ type InternalSession = ChatSession & {
     | undefined;
   materializeVersion: number;
   transcriptMaterialization: Promise<void> | undefined;
+  /** A materialization of the log applied (or failed) for this session: an empty transcript is now settled (I21). */
+  transcriptSettled: boolean;
+  /** An empty transcript applied while the scan of other devices' history was pending; it settles once that scan has. */
+  transcriptAwaitsForeignScan: boolean;
+  /** {@link ChatSession.rememberedComposerTrays}: this device's memory until the transcript settles. */
+  composerTrays: readonly ComposerTray[];
   recoveredRunId: string | undefined;
   blockedPresentationRunId: string | undefined;
   recoveringPresentation: boolean;
@@ -809,6 +856,10 @@ export class ChatSessionStore {
   readonly #ratings = new Map<string, RunRating['value']>();
   readonly #remoteReadVersions = new Map<string, number>();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
+  /** The scan version that last ended, read or failed: an empty transcript waits for it (I21). */
+  readonly #remoteReadEndedVersions = new Map<string, number>();
+  /** The scan version that last ended by failing: nothing was read for it. */
+  readonly #remoteReadFailedVersions = new Map<string, number>();
   readonly #remoteHistoryPresence = new WeakMap<NonNullable<ChatProjection['remote']>['views'], boolean>();
   readonly #remoteObservations = new Map<string, ObservationService<void>>();
   readonly #projectRunKeys = new Map<string, string>();
@@ -843,6 +894,8 @@ export class ChatSessionStore {
   readonly #deletedProjections = new WeakSet<Actor<typeof chatProjectionLogic>>();
   /** A read answer, not the projection's initially empty cursor, proves this chat's log was checked. */
   readonly #answeredLogReads = new Set<string>();
+  /** Chats this tab created empty and has not acquired yet: their transcript is settled `empty` at once (I21). */
+  readonly #createdEmpty = new Set<string>();
   /** Display eligibility for the existing validated projection; never command or read authority. */
   readonly #validatedDisplays = new WeakMap<
     Actor<typeof chatProjectionLogic>,
@@ -1465,8 +1518,14 @@ export class ChatSessionStore {
     this.#sessions.set(chatId, session);
     session.messageQueueRef.start();
     session.observationRelease = this.observe(chatId, projectId);
+    // A read the host refused before this session existed answers nothing more: the load has settled (I21).
+    if (this.#observed.get(chatId)?.status === 'refused') {
+      this.#latchUnreadTranscript(session);
+    }
     // A retained sidebar observation may already be caught up and emit no new answer.
     this.#syncProjection(chatId, 'open');
+    // Nor will a foreign watch that closed before this session existed: its load may already have settled (I21).
+    this.#latchIfForeignScanLost(chatId);
     // The root bound before the session was registered; its first read of the chat's waits is now.
     session.offerChatWaits();
     this.#refreshSnapshot();
@@ -1515,6 +1574,22 @@ export class ChatSessionStore {
         return;
       }
       pending = session.transcriptMaterialization;
+    }
+  }
+
+  /**
+   * Note a chat this tab has just created with no messages, before it is opened: its transcript is `empty` at once
+   * rather than `loading` until its log answers (I21, plan A12). A later log answer with turns still shows them.
+   *
+   * @param chatId - The new chat.
+   * @public
+   */
+  public noteCreatedEmpty(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      this.#createdEmpty.add(chatId);
+    } else {
+      this.#latchTranscriptSettled(session);
     }
   }
 
@@ -1713,8 +1788,13 @@ export class ChatSessionStore {
       if (observed !== undefined) {
         observed.status = answer.reason === 'unreadable' ? 'refused' : 'lost';
       }
+      if (answer.reason === 'unreadable' && session !== undefined) {
+        // Nothing answers a refused read: its load has settled, and a later reattach does not unsettle it.
+        this.#latchUnreadTranscript(session);
+      }
     }
     this.#projectionOf(chatId).send({ type: 'batch', answer });
+    this.#latchIfForeignScanLost(chatId);
     // A verified empty batch can leave the reducer unchanged while establishing read authority.
     if (answer.status === 'batch' && answer.events.length === 0) {
       this.#syncProjection(chatId, 'none');
@@ -2122,12 +2202,12 @@ export class ChatSessionStore {
    * receipt names. A legacy unread mark is a receipt that matches no row. Until this page has read the chat's log,
    * the legacy mark alone answers (D9).
    *
-   * @param chatId - A chat with a live session.
+   * @param chatId - A chat with a live session or an observed sidebar row.
    * @returns Whether the chat has something the person has not seen.
    * @public
    */
   public isUnread(chatId: string): boolean {
-    const projectId = this.#sessions.get(chatId)?.projectId;
+    const projectId = this.#chatProjectId(chatId);
     const record = projectId === undefined ? undefined : this.#unreadRecords.get(projectId);
     if (record === undefined) {
       return false;
@@ -2146,12 +2226,12 @@ export class ChatSessionStore {
    * on a log with no attention row no longer makes the chat unread, but the mark stays in the record, and the next page
    * answers from it until that page has read the log. `markViewed` clears it.
    *
-   * @param chatId - A chat with a live session.
+   * @param chatId - A chat with a live session or an observed sidebar row.
    * @returns Whether a loaded record marks the chat.
    * @public
    */
   public hasUnreadMark(chatId: string): boolean {
-    const projectId = this.#sessions.get(chatId)?.projectId;
+    const projectId = this.#chatProjectId(chatId);
     return projectId !== undefined && this.#unreadRecords.get(projectId)?.legacy.has(chatId) === true;
   }
 
@@ -2573,8 +2653,109 @@ export class ChatSessionStore {
       },
     });
     this.#remoteObservations.set(chatId, observation);
+    observation.subscribe(() => {
+      // A disposed observation was replaced or released; its successor's scan is the one an empty transcript waits for.
+      if (!observation.isDisposed) {
+        this.#resumeTranscriptAfterForeignScan(chatId);
+        this.#latchIfForeignScanLost(chatId);
+      }
+    });
     observation.acquire();
     return true;
+  }
+
+  /**
+   * Where the scan of the history other devices wrote for a chat stands. Until it has read, an empty local log does not
+   * show the chat empty (I21); a scan that failed, or a watch that closed before it read, settles the load without
+   * forgetting the trays the device remembers (U10), since nothing was read.
+   */
+  #foreignScanState(chatId: string): 'pending' | 'read' | 'failed' {
+    const version = this.#remoteReadVersions.get(chatId);
+    const observation = this.#remoteObservations.get(chatId);
+    if (observation !== undefined && !observation.isDisposed) {
+      switch (observation.getSnapshot().status) {
+        case 'registering':
+        case 'pending': {
+          return 'pending';
+        }
+        case 'ready': {
+          return 'read';
+        }
+        // A watch that closed reads nothing more, and closing invalidated its last read: the lane cannot present it.
+        case 'error':
+        case 'closed': {
+          return 'failed';
+        }
+      }
+    }
+    if (version === undefined) {
+      return 'read';
+    }
+    if (this.#remoteReadEndedVersions.get(chatId) !== version) {
+      return 'pending';
+    }
+    return this.#remoteReadFailedVersions.get(chatId) === version ? 'failed' : 'read';
+  }
+
+  /** Settle an empty transcript that waited for the scan of other devices' history, once that scan has ended. */
+  #resumeTranscriptAfterForeignScan(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (session?.transcriptAwaitsForeignScan !== true) {
+      return;
+    }
+    const scan = this.#foreignScanState(chatId);
+    if (scan === 'pending') {
+      return;
+    }
+    const projection = this.#projectionContext(chatId);
+    if (scan === 'read') {
+      // A log that has not caught up is not settled yet: its catch-up materializes and settles it, unless the host
+      // refused the read, and nothing will catch it up.
+      if (projection === undefined || !selectCaughtUp(projection)) {
+        if (this.#observed.get(chatId)?.status !== 'refused') {
+          return;
+        }
+        session.transcriptAwaitsForeignScan = false;
+        this.#latchTranscriptSettled(session);
+        return;
+      }
+      // Present what the scan brought: a new materialization settles the transcript, with or without turns.
+      const started = session.materializeVersion;
+      session.transcriptSource = undefined;
+      session.failedTranscriptProjection = undefined;
+      this.#materializeProjectedTranscript(session, projection);
+      if (session.materializeVersion !== started) {
+        return;
+      }
+    }
+    session.transcriptAwaitsForeignScan = false;
+    this.#latchTranscriptSettled(session);
+  }
+
+  /**
+   * Settle a chat whose local log has answered while the watch of other devices' history has ended without a read
+   * that counts, so the lane cannot present the log. Nothing will until the client is replaced, so the load has settled
+   * (I21); nothing was read to forget the trays by (U10).
+   */
+  #latchIfForeignScanLost(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (
+      session === undefined ||
+      session.transcriptSettled ||
+      session.messages.length > 0 ||
+      !this.#answeredLogReads.has(chatId) ||
+      this.#foreignScanState(chatId) !== 'failed'
+    ) {
+      return;
+    }
+    // A local log the lane can still present settles through its own materialization.
+    // A page that is not the log's end is not settled yet; nor is a log the lane can still present.
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection) || this.#hasDisplayAuthority(chatId, projection)) {
+      return;
+    }
+    session.transcriptAwaitsForeignScan = false;
+    this.#latchTranscriptSettled(session);
   }
 
   #stopRemoteObservationIfUnused(chatId: string): void {
@@ -2735,6 +2916,9 @@ export class ChatSessionStore {
             session.watchedRunId = undefined;
           }
           if (event.type === 'attachment.refused') {
+            if (session !== undefined) {
+              this.#latchUnreadTranscript(session);
+            }
             queueMicrotask(() => {
               if (observed.attachment === attachment) {
                 attachment.stop();
@@ -3804,12 +3988,16 @@ export class ChatSessionStore {
           session.chat.messages = retained;
         }
         session.failedTranscriptProjection = undefined;
+        this.#settleTranscript(session, retained);
       }
     } catch (error) {
       if (this.#sessions.get(session.chatId) !== session || session.materializeVersion !== version) {
         return;
       }
       session.failedTranscriptProjection = projection;
+      // A failed read has settled too: the lane is not held in `loading` by a transcript that cannot arrive. What the
+      // device remembers of the trays stays, since nothing was read.
+      this.#latchUnreadTranscript(session);
       console.warn('[ChatSessionStore] projected transcript could not be materialized', {
         chatId: session.chatId,
         runId: selectCurrentRun(projection)?.runId,
@@ -3818,6 +4006,59 @@ export class ChatSessionStore {
         ...presentationErrorFacts(error),
       });
     }
+  }
+
+  /**
+   * Mark the transcript settled and remember its trays (I21, U10). Views read both in the snapshot that carries the
+   * applied turns, so a change that leaves the turns as they were still notifies.
+   */
+  #settleTranscript(session: InternalSession, messages: readonly MyUIMessage[]): void {
+    // Trays are remembered only from the whole chat: other devices' history read, and this device's log answered.
+    if (this.#foreignScanState(session.chatId) !== 'read' || !this.#answeredLogReads.has(session.chatId)) {
+      if (messages.length === 0) {
+        this.#latchUnreadTranscript(session);
+      } else {
+        // Turns show, yet part of the chat is unread: the trays it may hold are not forgotten (U10).
+        session.transcriptAwaitsForeignScan = false;
+        this.#latchTranscriptSettled(session);
+      }
+      return;
+    }
+    session.transcriptAwaitsForeignScan = false;
+    const trays = composerTraysOf(messages);
+    const changed =
+      !session.transcriptSettled ||
+      trays.length !== session.composerTrays.length ||
+      trays.some((tray, index) => tray !== session.composerTrays[index]);
+    if (!changed) {
+      return;
+    }
+    session.transcriptSettled = true;
+    session.composerTrays = trays;
+    writeRememberedComposerTrays(session.chatId, trays);
+    this.#chatTopics.get(session.chatId)?.emit();
+  }
+
+  /**
+   * Settle a transcript whose read failed or was refused, unless the scan of other devices' history may still bring
+   * turns: then it waits for that scan (I21). The device keeps what it remembers of the trays.
+   */
+  #latchUnreadTranscript(session: InternalSession): void {
+    if (session.messages.length === 0 && this.#foreignScanState(session.chatId) === 'pending') {
+      session.transcriptAwaitsForeignScan = true;
+      return;
+    }
+    session.transcriptAwaitsForeignScan = false;
+    this.#latchTranscriptSettled(session);
+  }
+
+  /** Settle the transcript without a read to remember trays from (I21). */
+  #latchTranscriptSettled(session: InternalSession): void {
+    if (session.transcriptSettled) {
+      return;
+    }
+    session.transcriptSettled = true;
+    this.#chatTopics.get(session.chatId)?.emit();
   }
 
   async #clearAcceptedSeed(chatId: string, requestId: string): Promise<void> {
@@ -3943,6 +4184,14 @@ export class ChatSessionStore {
       runId,
       ...(phase === 'failed' && reason !== undefined ? { reason } : {}),
     });
+  }
+
+  /**
+   * The project a chat belongs to on this page: its session's, or, for a chat a sidebar row only observes (D-UI-06),
+   * its observation's. Unread is answered for both, so a row is never read through a session it does not hold.
+   */
+  #chatProjectId(chatId: string): string | undefined {
+    return this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
   }
 
   /** The chat's newest attention row, once this page holds its whole log; `undefined` while it is unknown. */
@@ -4522,6 +4771,12 @@ export class ChatSessionStore {
       get messages() {
         return session.presentationHold?.messages ?? chat.messages;
       },
+      get transcript() {
+        return transcriptOf(session);
+      },
+      get rememberedComposerTrays() {
+        return session.composerTrays;
+      },
       transport,
       projectId,
       chatRoot,
@@ -4553,6 +4808,9 @@ export class ChatSessionStore {
       presentationHold: undefined,
       materializeVersion: 0,
       transcriptMaterialization: undefined,
+      transcriptSettled: this.#createdEmpty.delete(chatId),
+      transcriptAwaitsForeignScan: false,
+      composerTrays: readRememberedComposerTrays(chatId),
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,
       recoveringPresentation: false,
@@ -4701,6 +4959,8 @@ export class ChatSessionStore {
     this.#historicalUsage.delete(chatId);
     this.#stopRemoteObservationIfUnused(chatId);
     this.#remoteReadCompletedVersions.delete(chatId);
+    this.#remoteReadEndedVersions.delete(chatId);
+    this.#remoteReadFailedVersions.delete(chatId);
   }
 
   #retireProjection(chatId: string, projectId: string): void {
@@ -4803,6 +5063,33 @@ export class ChatSessionStore {
     }
     const version = (this.#remoteReadVersions.get(chatId) ?? 0) + 1;
     this.#remoteReadVersions.set(chatId, version);
+    let failed = false;
+    try {
+      await this.#readRemoteSegmentsAt({ chatId, projectId, version, fence });
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      if (this.#remoteReadVersions.get(chatId) === version) {
+        this.#remoteReadEndedVersions.set(chatId, version);
+        if (failed) {
+          this.#remoteReadFailedVersions.set(chatId, version);
+        } else {
+          this.#remoteReadFailedVersions.delete(chatId);
+        }
+        this.#resumeTranscriptAfterForeignScan(chatId);
+        this.#latchIfForeignScanLost(chatId);
+      }
+    }
+  }
+
+  async #readRemoteSegmentsAt(scan: {
+    readonly chatId: string;
+    readonly projectId: string;
+    readonly version: number;
+    readonly fence: ObservationRead | undefined;
+  }): Promise<void> {
+    const { chatId, projectId, version, fence } = scan;
     const { client } = this.#deps;
     const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
     let entries: string[];

@@ -3,6 +3,7 @@ import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
 import { consumableBytes } from '@taucad/fs-bridge';
@@ -44,29 +45,28 @@ const mockCommitPendingProjectDirectory = vi.fn(async () => {
   return { status: 'committed' } as const;
 });
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
-    recordFiles: {
-      readFile: vi.fn(async () => lastManifest),
-      writeFiles: vi.fn(async () => {
-        phases.push('files');
-      }),
-      writeFile: vi.fn(async (_path: string, bytes: Uint8Array<ArrayBuffer>) => {
-        phases.push('manifest');
-        lastManifest = bytes;
-      }),
-      exists: vi.fn(async () => false),
-      rmdir: vi.fn(async () => undefined),
-    },
-    client: {
-      verifyProjectRoute: vi.fn(async () => ({ status: 'discovery-required' })),
-      listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
-      commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
-    },
-    workspace: { syncProjectRoots: mockSyncProjectRoots },
-    readDuplicateProjectFiles: mockReadDuplicateProjectFiles,
-  }),
-}));
+/* A4b: the library reads the root file facade the runtime builds; here, one over this double. */
+const rootFiles = testRootFiles({
+  recordFiles: {
+    readFile: vi.fn(async () => lastManifest),
+    writeFiles: vi.fn(async () => {
+      phases.push('files');
+    }),
+    writeFile: vi.fn(async (_path: string, bytes: Uint8Array<ArrayBuffer>) => {
+      phases.push('manifest');
+      lastManifest = bytes;
+    }),
+    exists: vi.fn(async () => false),
+    rmdir: vi.fn(async () => undefined),
+  },
+  client: {
+    verifyProjectRoute: vi.fn(async () => ({ status: 'discovery-required' })),
+    listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
+    commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
+  },
+  workspace: { syncProjectRoots: mockSyncProjectRoots },
+  readDuplicateProjectFiles: mockReadDuplicateProjectFiles,
+});
 
 const mockGetProjectFileSystemConfig = vi.fn();
 const mockGetWorkspace = vi.fn();
@@ -184,7 +184,7 @@ const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>(
 const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
   let library = libraries.get(queryClient);
   if (library === undefined) {
-    library = new ProjectLibrary({ queryClient });
+    library = new ProjectLibrary({ queryClient, rootFiles: () => rootFiles });
     library.start();
     libraries.set(queryClient, library);
     startedLibraries.push(library);
@@ -198,7 +198,7 @@ afterEach(() => {
     library.stop();
   }
 });
-const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
+const { tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

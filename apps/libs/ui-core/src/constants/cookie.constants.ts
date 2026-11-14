@@ -30,6 +30,8 @@ export const cookieName = {
   chatInterfaceFullHeight: 'chat-interface-full-height',
   // Whether the chat interface is transparent.
   chatInterfaceTransparent: 'chat-interface-transparent',
+  // The settled values of the flags that decide first-paint geometry (`affectsLayout`), for the server render.
+  layoutFlags: 'layout-flags',
 
   /* CAD */
   // The last selected kernel.

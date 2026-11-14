@@ -1,14 +1,4 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
-/* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
-import { recordInteraction } from '#lib/kill-work-context.js';
-import { parameterRecordInputValues } from '@taucad/parameters';
-import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
-import { isMemoryConstrainedDevice, runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class';
-import { usePreviewParameterLifetime } from '#hooks/use-preview-parameter-lifetime.js';
-import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
-import { ObservationService } from '@taucad/fs-client/observation-service';
-import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import type { ReactNode } from 'react';
 import {
   createContext,
@@ -17,61 +7,58 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useRef,
+  useReducer,
   useState,
   useSyncExternalStore,
 } from 'react';
-import { useActorRef, useSelector } from '@xstate/react';
-import { createCallbackLogic, waitFor } from 'xstate';
+import { useSelector } from '@xstate/react';
+import { waitFor } from 'xstate';
 import type { ActorRefFrom, InputFrom } from 'xstate';
-import type { Remote } from 'comlink';
-import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
-import {
-  describeProjectManifestIssue,
-  parameterEntryPath,
-  projectToManifest,
-  readProjectManifestBytes,
-  serializeProjectManifest,
-} from '@taucad/types';
-import type { Project, ProjectManifestParseIssue } from '@taucad/types';
-import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
-import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
-import { fileContentBytes } from '@taucad/fs-client/file-content-service';
-import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import type { Chat } from '@taucad/chat';
+import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
+import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
+import { toast } from 'sonner';
+import { Topic } from '@taucad/events';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
-import { projectMachine } from '#machines/project.machine.js';
-import type {
-  ProjectLoadInput,
-  ProjectRetrievedEvent,
-  ViewRecordSessionActorInput,
-} from '#machines/project.machine.js';
-import { editorMachine } from '#machines/editor.machine.js';
-import { disposeCadRuntime } from '#machines/cad.machine.js';
+import type { ParameterFilesClient } from '#hooks/use-file-manager.js';
+import type { projectMachine } from '#machines/project.machine.js';
+import type { editorMachine } from '#machines/editor.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { logMachine } from '#machines/logs.machine.js';
 import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
 import { inspect } from '#machines/inspector.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { Chat } from '@taucad/chat';
-import type { ChatStorage } from '#types/storage.types.js';
-import { localKernelOptions } from '#constants/local-kernel-options.js';
-import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
-import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
-import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
-import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
-import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
-import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
-import { createViewRecordPorts, startViewRecordSession } from '#workbench-records/view-record-session.js';
-import { deviceViewLevels } from '#workbench-records/view-levels.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
+import { useAppRuntime } from '#runtime/app-runtime-provider.js';
+import {
+  selectRuntimeChatSessions,
+  selectRuntimeLeases,
+  selectRuntimeProjectLibrary,
+  selectRuntimeQueryClient,
+} from '#runtime/app-runtime.js';
+import type { LeaseEntry } from '#runtime/leases.js';
+import {
+  createProjectRuntime,
+  selectEditorRef,
+  selectManifestObservationError,
+  selectProjectRef,
+} from '#runtime/project-runtime.js';
+import type {
+  ObservablePort,
+  ProjectRuntime,
+  ProjectRuntimeActor,
+  ProjectRuntimeProfileOptions,
+} from '#runtime/project-runtime.js';
+import { createProjectViewRecords } from '#runtime/project-runtime.view-records.js';
+import { createEntriesRecordSession } from '#workbench-records/entries-record-session.js';
+import type { EntriesRecordSession, EntriesRecordSnapshot } from '#workbench-records/entries-record-session.js';
+import type { ProjectViewRecords } from '#runtime/project-runtime.view-records.js';
 
 type ProjectContextType = {
   manifestObservationError: string | undefined;
@@ -86,16 +73,17 @@ type ProjectContextType = {
   appliedWorkbenchRevisions: ReadonlyMap<string, `sha256:${string}`>;
   setAppliedWorkbenchRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
   appliedEntryRevisions: ReadonlyMap<string, `sha256:${string}`>;
-  setAppliedEntryRevision: (path: string, digest: `sha256:${string}` | undefined) => void;
   setViewRecord: (viewId: string, record: WorkbenchView | undefined) => void;
   viewEntryPaths: ReadonlyMap<string, string | null>;
   setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
   entriesRecord: WorkbenchEntries | undefined;
-  setEntriesRecord: (record: WorkbenchEntries | undefined) => void;
-  registerEntryPathChange: (change: (operation: EntryPathChange) => Promise<boolean>) => () => void;
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
+  /** Add a producer to the runtime's producer set (`projectRuntime.producers`), which every flush walks (S40). */
   registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
+  /** Flush the runtime's producer set; rejects with every refusal. */
   flushWorkbenchRecordProducers: () => Promise<void>;
+  /** The project runtime this provider is a view of (A6b): its root, parameter service and producer set. */
+  projectRuntime: ProjectRuntime;
   /** The ports every view's record session shares (charter G6b): the host flushes them on close. */
   viewRecordPorts: ViewRecordPortsHandle;
   modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
@@ -144,70 +132,6 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Parameter operation failed.';
 
-/** Settlements that prove this actor wrote the bytes now held in its snapshot. */
-export const shouldDispatchParameterSettlement = (outcome: ParameterSetOutcome | undefined): boolean =>
-  outcome?.status === 'committed' && (outcome.write === 'applied' || outcome.write === 'reconciled');
-
-export const parameterStageForSettlement = ({
-  entryPath,
-  outcome,
-  bytes,
-}: Readonly<{
-  entryPath: string;
-  outcome: ParameterSetOutcome | undefined;
-  bytes: Uint8Array<ArrayBuffer> | undefined;
-}>): Record<string, Uint8Array<ArrayBuffer>> | undefined =>
-  shouldDispatchParameterSettlement(outcome) && bytes !== undefined
-    ? { [parameterEntryPath(entryPath)]: bytes }
-    : undefined;
-
-type FocusedChatWorker = Pick<ChatStorage, 'getChatRecordsForResource' | 'createNavigationRepairChat'>;
-
-export async function ensureFocusedChatForProject({
-  projectId,
-  requestedChatId,
-  persistedChatId,
-  worker,
-  onCreatedChat,
-  canCreateChat = () => true,
-}: {
-  readonly projectId: string;
-  readonly requestedChatId: string | undefined;
-  readonly persistedChatId: string | undefined;
-  readonly worker: FocusedChatWorker;
-  readonly onCreatedChat?: () => void;
-  readonly canCreateChat?: () => boolean;
-}): Promise<
-  { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
-> {
-  const couldCreateBeforeRead = canCreateChat();
-  const chats = await worker.getChatRecordsForResource(projectId);
-
-  for (const candidateChatId of [requestedChatId, persistedChatId]) {
-    const match = chats.find((chat) => chat.id === candidateChatId);
-    if (match) {
-      return { type: 'focusedChatEnsured', focusedChatId: match.id };
-    }
-  }
-
-  if (chats.length > 0) {
-    let mostRecent = chats[0]!;
-    for (const candidate of chats) {
-      if (compareChatsByRecency(candidate, mostRecent) < 0) {
-        mostRecent = candidate;
-      }
-    }
-    return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
-  }
-
-  if (!couldCreateBeforeRead || !canCreateChat()) {
-    return { type: 'focusedChatDeferred' };
-  }
-  const created = await worker.createNavigationRepairChat(projectId);
-  onCreatedChat?.();
-  return { type: 'focusedChatEnsured', focusedChatId: created.id };
-}
-
 /**
  * Whether `chatId` is a chat the client already holds — freshly created here, or
  * present in a current non-deleted chat list. Such a chat needs no async
@@ -240,142 +164,43 @@ export function isKnownChatId({
   });
 }
 
-/** What the workspace holds: the manifest it renders and why the bytes on disk are not that manifest. */
-type ObservedManifestState = {
-  readonly project: Project | undefined;
-  readonly issue: ProjectManifestParseIssue | undefined;
-};
+/** The file manager's parts this provider feeds its runtime: the parameter client (A6a R-b) and the record watch. */
+type ProjectProviderFiles = Readonly<{
+  parameterFiles: ParameterFilesClient;
+  watchRecordFile: ReturnType<typeof useFileManager>['watchRecordFile'];
+}>;
 
-const manifestStateKey = ({ project, issue }: ObservedManifestState): string =>
-  [
-    project === undefined ? '' : new TextDecoder().decode(serializeProjectManifest(projectToManifest(project))),
-    ...(issue === undefined ? [] : describeProjectManifestIssue(issue)),
-  ].join('\n');
+/** What a lease builds with the project runtime: its view records, and the file port the provider feeds. */
+type LeasedProjectRuntime = Readonly<{
+  runtime: ProjectRuntime;
+  viewRecords: ProjectViewRecords;
+  /** The entries record session (A9): only the editor loading from disk keeps one. */
+  entriesRecord: EntriesRecordSession | undefined;
+  /** Hand the runtime the file manager's current parts: the parameter port and the record sessions' host follow it. */
+  replaceFiles: (files: ProjectProviderFiles) => void;
+}>;
 
-/**
- * Follow `tau.json` while its project is open, never silently (blueprint R5).
- *
- * Valid JSON declarations (strict or degraded) reload
- * when it differs from what the workspace holds, so a degraded declaration
- * shows its issue at once. Syntax-invalid JSON retains the mounted manifest
- * and reports its issue. Bytes that no longer identify it — missing, unreadable, oversize, a
- * foreign `$schema` — are reported instead: the
- * workspace keeps its last good manifest open so the person can fix the file.
- */
-export const createProjectManifestChangeObserver = ({
-  projectId,
-  getCurrent,
-  reload,
-  report,
-  onSettled,
-}: {
-  readonly projectId: string;
-  readonly getCurrent: () => ObservedManifestState;
-  readonly reload: () => void;
-  readonly report: (issue: ProjectManifestParseIssue) => void;
-  readonly onSettled?: () => void;
-}): {
-  readonly check: (input: { readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>> }) => Promise<void>;
-  readonly invalidate: () => void;
-  readonly dispose: () => void;
-} => {
-  let disposed = false;
-  let generation = 0;
-  let lastObserved: string | undefined;
+/* What each leased root was built with, by root: the lease store holds only the actor. */
+const leasedRuntimes = new WeakMap<ProjectRuntimeActor, LeasedProjectRuntime>();
 
-  const reportIssue = (issue: ProjectManifestParseIssue): void => {
-    // A later return to the same bytes must reload to clear the report.
-    lastObserved = undefined;
-    report(issue);
-    onSettled?.();
-  };
-
+/** A value the provider replaces and the runtime follows: the parameter client port of A6a (R-b). */
+const createFedPort = <T,>(initial: T): ObservablePort<T> & Readonly<{ set: (next: T) => void }> => {
+  let current = initial;
+  const changes = new Topic<void>({ name: 'project-provider-parameter-files' });
   return {
-    invalidate: () => {
-      generation++;
-    },
-    check: async ({ readManifest }) => {
-      const attempt = ++generation;
-      let bytes: Uint8Array<ArrayBuffer>;
-      try {
-        bytes = await readManifest();
-      } catch (error) {
-        if (!disposed && attempt === generation) {
-          reportIssue(
-            error instanceof FileNotFoundError || isNotFound(error)
-              ? { code: 'manifest-missing' }
-              : { code: 'manifest-unreadable', message: errorMessage(error) },
-          );
-        }
+    get: () => current,
+    subscribe: (listener) => changes.subscribe(listener),
+    set: (next) => {
+      if (next === current) {
         return;
       }
-      if (disposed || attempt !== generation) {
-        return;
-      }
-      const read = readProjectManifestBytes(bytes);
-      if (!read.success) {
-        reportIssue(read.issue);
-        return;
-      }
-      const current = getCurrent();
-      if (current.project !== undefined && read.issue?.code === 'manifest-invalid-json') {
-        reportIssue(read.issue);
-        return;
-      }
-      const observed = manifestStateKey({ project: { ...read.data, id: projectId }, issue: read.issue });
-      if (current.project !== undefined && manifestStateKey(current) === observed) {
-        onSettled?.();
-        return;
-      }
-      if (observed === lastObserved) {
-        return;
-      }
-      lastObserved = observed;
-      if (current.project === undefined || manifestStateKey(current) !== observed) {
-        reload();
-      }
-    },
-    dispose: () => {
-      disposed = true;
+      current = next;
+      changes.emit();
     },
   };
 };
 
-/**
- * Read the open route's manifest: strict, or degraded with its issue. The
- * established route binding supplies identity independently of the declaration.
- */
-export async function resolveScopedProjectManifest({
-  contentService,
-  projectId,
-}: {
-  readonly contentService: FileContentService;
-  readonly projectId: string;
-}): Promise<{ readonly project: Project; readonly issue?: ProjectManifestParseIssue }> {
-  const outcome = await contentService.resolve('tau.json', { forceText: true });
-  if (outcome.kind !== 'text') {
-    throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
-  }
-
-  const read = readProjectManifestBytes(outcome.content);
-  if (!read.success) {
-    throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
-  }
-  return { project: { ...read.data, id: projectId }, ...(read.issue === undefined ? {} : { issue: read.issue }) };
-}
-
-export function ProjectProvider({
-  children,
-  projectId,
-  requestedChatId,
-  createdChatId,
-  onFocusedChatResolved,
-  provide,
-  input,
-  kernelOptionsFactory,
-  profile = 'editor',
-  previewParameterService,
-}: {
+type ProjectProviderProps = {
   readonly children: ReactNode;
   readonly projectId: string;
   readonly requestedChatId?: string;
@@ -390,239 +215,184 @@ export function ProjectProvider({
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
   readonly previewParameterService?: ParameterSetService;
-}): React.JSX.Element {
-  // A caller without a factory (the converter route) gets the local kernel, which
-  // reads the same preference the focused workbench does instead of silently
-  // opting into durable reuse (charter D3).
-  const computeMode = useComputeReuseMode();
-  const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId, undefined, computeMode);
-  const queryClient = useQueryClient();
-  // Create the project machine actor - it will auto-load based on projectId
-  const fileManager = useFileManager();
-  const projectManager = useProjectManager();
-  const fileSystemRoot = useSelector(fileManager.fileManagerRef, (state) => state.context.rootDirectory);
-  const parameterService = useMemo(
-    () =>
-      previewParameterService ??
-      createParameterSetService({
-        rootDirectory: fileSystemRoot,
-        client: fileManager.parameterFiles,
-        watchReady: (request, onEvent) => {
-          const content = fileManager.contentService;
-          if (!content) {
-            throw new Error('The parameter filesystem is not ready.');
-          }
-          const watch = content.watchReady(request, onEvent);
-          return {
-            ready: watch.ready,
-            closed: (async () => {
-              await watch.closed;
-            })(),
-            unsubscribe: watch.dispose,
-          };
-        },
-        onError: (error) => {
-          toast.error(errorMessage(error));
-        },
-      }),
-    [fileManager.parameterFiles, fileManager.contentService, fileSystemRoot, previewParameterService],
-  );
-  const workbenchRecordProducers = useRef(new Set<() => Promise<void>>());
-  const registerWorkbenchRecordProducer = useCallback((flush: () => Promise<void>) => {
-    workbenchRecordProducers.current.add(flush);
-    return () => {
-      workbenchRecordProducers.current.delete(flush);
-    };
-  }, []);
-  const flushWorkbenchRecordProducers = useCallback(async (): Promise<void> => {
-    const outcomes = await Promise.allSettled([...workbenchRecordProducers.current].map(async (flush) => flush()));
-    const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
-    if (failures.length > 0) {
-      const reasons = failures.map((failure) => failure.reason as unknown);
-      throw new AggregateError(
-        reasons,
-        reasons
-          .map((reason) => (reason instanceof Error ? reason.message : 'Workbench records are not confirmed saved.'))
-          .join(' '),
-      );
-    }
-  }, []);
-  /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
-   * the project session owns the final close and Strict Mode would close a live service. */
-  const previousParameterService = useRef(parameterService);
-  useEffect(() => {
-    const previous = previousParameterService.current;
-    previousParameterService.current = parameterService;
-    if (previous === parameterService) {
-      return;
-    }
-    // async-iife: bootstrap -- an effect cannot await the replaced service's close.
-    void (async () => {
-      try {
-        await previous.close();
-      } catch (error) {
-        toast.error(errorMessage(error));
-      }
-    })();
-  }, [parameterService]);
+};
 
-  usePreviewParameterLifetime(parameterService, profile === 'shared' && previewParameterService === undefined);
+/* One mount's identity, for its lease key. `useId` is the mount's tree position, which a keyed remount (a new kernel
+ * selection) keeps; a remount must lease a fresh runtime, so the key is a number the mount's state keeps instead. */
+let mountCount = 0;
+const nextMount = (): number => {
+  mountCount += 1;
+  return mountCount;
+};
 
-  const projectActors = {
-    loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
-      const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
-
-      const { contentService } = readySnapshot.context;
-      if (!contentService) {
-        throw new Error(`Project content service is unavailable for ${input.projectId}`);
-      }
-      const { project, issue } = await resolveScopedProjectManifest({
-        contentService,
-        projectId: input.projectId,
-      });
-      return {
-        type: 'projectRetrieved',
-        project,
-        ...(issue === undefined ? {} : { issue }),
-      };
-    }),
-    writeProjectActor: fromSafeAsync(async ({ input }) => {
-      const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
-      if (!contentService) {
-        throw new Error('File manager content service is not ready');
-      }
-      if (!input.repair) {
-        // Re-read: the bytes may have degraded since this workspace loaded them,
-        // and an implicit write must never replace a degraded manifest (R4).
-        const current = await contentService.resolve('tau.json', { forceText: true });
-        if (current.kind === 'text') {
-          const read = readProjectManifestBytes(current.content);
-          if (!read.success || read.issue !== undefined) {
-            throw new Error('tau.json needs repair before Tau can change it. Repair it, or fix it in the editor.');
-          }
-        }
-      }
-      await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
-    }),
-  } satisfies Partial<MachineActors<typeof projectMachine>>;
-
-  // D-RT-03: read once, as the actor's input is fixed at creation.
-  const [recycleHeapBytes] = useState(() => runtimeRecycleHeapBytes(isMemoryConstrainedDevice()));
-  /* Every view's record session runs beside its graphics actor in the project machine, over these ports (G6b). Only the
-   * editor writes view records: a project loaded from its own source (`provide`), an owned preview or a shared
-   * workbench shows the project without saving its views, as before G6b, when the record host was mounted by the
-   * editor's live sessions only. */
-  const viewRecordSession = createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(({ input: session }) =>
-    startViewRecordSession({ viewId: session.viewId, graphics: session.graphics, ports: viewRecordPorts }),
-  );
-  const providedMachine =
-    provide === undefined
-      ? profile === 'editor'
-        ? projectMachine.provide({ actors: { ...projectActors, viewRecord: viewRecordSession } })
-        : projectMachine.provide({ actors: projectActors })
-      : projectMachine.provide({ actors: provide.actors });
-  const actorRef = useActorRef(providedMachine, {
-    input: {
-      projectId,
-      fileManagerRef: fileManager.fileManagerRef,
-      fileSystemRoot,
-      kernelOptionsFactory: resolvedKernelOptionsFactory,
-      recycleHeapBytes,
-      ...input,
-    },
-    inspect,
+/**
+ * Lease this mount's project runtime (D6; plan § 4 A6b): read in render, idempotent per key, retained once the mount
+ * commits.
+ *
+ * The key is the mount's own, kept across StrictMode's double render and its remount, and new for a keyed remount, so
+ * a change of kernel selection still builds a new runtime, as the React key on the session's provider did. The store
+ * starts the root on the first retain; a release starts the grace on the app runtime's clock, so StrictMode's remount
+ * keeps the runtime and an unmount stops it after the grace (B3). The retain is the commit's passive effect, as the
+ * file-manager lease's is (A1b): a context provider renders no element for a ref callback, and a layout effect is
+ * cleaned up when a revealed Suspense boundary re-suspends. A render that commits after its entry's grace finds the
+ * entry dropped and renders again, which leases a fresh one. It neither sends, subscribes nor times (I1, I16).
+ *
+ * @param projectId - The project, part of the key.
+ * @param profile - The profile, part of the key.
+ * @param build - Builds the runtime for a key that has none.
+ * @returns The entry.
+ */
+function useLeasedProjectRuntime(
+  projectId: string,
+  profile: 'editor' | 'shared',
+  build: () => LeasedProjectRuntime,
+): LeaseEntry<ProjectRuntimeActor> {
+  const appRuntime = useAppRuntime();
+  const [mount] = useState(nextMount);
+  const key = JSON.stringify(['project-runtime', mount, projectId, profile]);
+  const lease = selectRuntimeLeases(appRuntime).get(key, () => {
+    const leased = build();
+    leasedRuntimes.set(leased.runtime.actor, leased);
+    return { actor: leased.runtime.actor };
   });
+  const [, renew] = useReducer((generation: number) => generation + 1, 0);
+  useEffect(() => {
+    const release = lease.retain();
+    if (lease.isDropped()) {
+      renew();
+    }
+    return release;
+  }, [lease]);
+  return lease;
+}
 
-  useEffect(
-    () => () => {
-      /* XState root stops do not run machine exit actions. This provider is
-       * the project resource boundary, so release each child runtime before
-       * React drops the actor tree. The helper is idempotent with the machine's
-       * normal `destroyKernel` path. */
-      for (const unit of actorRef.getSnapshot().context.geometryUnits.values()) {
-        disposeCadRuntime(unit.getSnapshot().context);
-      }
-    },
-    [actorRef],
+/* A runtime without an entries record session reads no record and changes no paths, as no host was mounted. */
+const noEntriesRecord: EntriesRecordSnapshot = { entriesRecord: undefined, appliedEntryRevisions: new Map() };
+const subscribeNoEntriesRecord = (): (() => void) => () => undefined;
+const readNoEntriesRecord = (): EntriesRecordSnapshot => noEntriesRecord;
+
+const leasedRuntimeOf = (actor: ProjectRuntimeActor): LeasedProjectRuntime => {
+  const leased = leasedRuntimes.get(actor);
+  if (leased === undefined) {
+    throw new Error('A project runtime lease is read only through useLeasedProjectRuntime');
+  }
+  return leased;
+};
+
+/**
+ * The project's actors for the tree below: a view of a leased project runtime (plan § 4 A6b). It creates nothing.
+ *
+ * The runtime (`runtime/project-runtime.ts`) builds the project and editor actors, the parameter service, the parameter
+ * observers, the manifest observation and the library events, and owns the producer set every flush walks. This
+ * provider leases it from the app runtime, keyed by its mount, so share, preview and the converter acquire theirs the
+ * same way (D6). The lease builds the runtime once, with the props of the render that first asks for it, as
+ * `useActorRef` read its input once. Until A6d the session's provider still passes the requested chat and its kernel
+ * selection as props, and the session remounts it on a new kernel selection.
+ *
+ * @param props - The project, the chat the route asks for, how the project loads, its kernel and profile.
+ * @returns The provider element.
+ */
+export function ProjectProvider({
+  children,
+  projectId,
+  requestedChatId,
+  createdChatId,
+  onFocusedChatResolved,
+  provide,
+  input,
+  kernelOptionsFactory,
+  profile = 'editor',
+  previewParameterService,
+}: ProjectProviderProps): React.JSX.Element {
+  const appRuntime = useAppRuntime();
+  const queryClient = selectRuntimeQueryClient(appRuntime);
+  const fileManager = useFileManager();
+  const files = useMemo<ProjectProviderFiles>(
+    () => ({ parameterFiles: fileManager.parameterFiles, watchRecordFile: fileManager.watchRecordFile }),
+    [fileManager.parameterFiles, fileManager.watchRecordFile],
   );
 
-  // Get the worker for Editor state persistence
-  const getReadiedWorker = useCallback(async (): Promise<Remote<ObjectStoreWorker>> => {
-    const snapshot = await waitFor(
-      projectManager.projectManagerRef,
-      (state) => state.matches('ready') || state.matches('error'),
-    );
-    if (snapshot.matches('error')) {
-      throw new Error('Project manager worker failed to initialize');
+  const lease = useLeasedProjectRuntime(projectId, profile, () => {
+    const parameterFiles = createFedPort(files.parameterFiles);
+    const viewRecordHost = (current: ProjectProviderFiles) => ({
+      files: current.parameterFiles,
+      watch: current.watchRecordFile,
+    });
+    const viewRecords = createProjectViewRecords({ projectId, host: viewRecordHost(files) });
+    /* Only the editor loading from disk writes view and entries records (G6b, A9); the options' type says so. */
+    const entriesRecord =
+      provide === undefined && profile === 'editor'
+        ? createEntriesRecordSession({ projectId, host: viewRecordHost(files), clock: appRuntime.clock })
+        : undefined;
+    const profileOptions: ProjectRuntimeProfileOptions =
+      provide === undefined
+        ? entriesRecord === undefined
+          ? { profile: 'shared' }
+          : { profile: 'editor', viewRecordPorts: viewRecords.ports, entriesRecord }
+        : profile === 'editor'
+          ? { profile, provide }
+          : { profile, provide };
+    const runtime = createProjectRuntime({
+      projectId,
+      fileManager: { fileManagerRef: fileManager.fileManagerRef, parameterFiles },
+      library: selectRuntimeProjectLibrary(appRuntime),
+      // A12 (I21): the repair chat it creates empty shows empty at once.
+      chatSessions: selectRuntimeChatSessions(appRuntime),
+      ...profileOptions,
+      ...(kernelOptionsFactory === undefined ? {} : { kernelSelection: { kernelOptionsFactory } }),
+      ...(input === undefined ? {} : { input }),
+      ...(requestedChatId === undefined ? {} : { requestedChatId }),
+      ...(previewParameterService === undefined ? {} : { previewParameterService }),
+      clock: appRuntime.clock,
+      ...(inspect === undefined ? {} : { inspect }),
+    });
+    return {
+      runtime,
+      viewRecords,
+      entriesRecord,
+      replaceFiles: (next) => {
+        parameterFiles.set(next.parameterFiles);
+        /* The filesystem's connections can be replaced (a new worker): each session reopens its store on the new ones. */
+        viewRecords.ports.replaceHost(viewRecordHost(next));
+        entriesRecord?.replaceHost(viewRecordHost(next));
+      },
+    };
+  });
+  const { runtime, viewRecords, entriesRecord: entriesRecordSession, replaceFiles } = leasedRuntimeOf(lease.actor);
+  const { actor } = runtime;
+  /* The root spawned both with itself and never replaces them, so one read is enough. */
+  const actorRef = selectProjectRef(actor.getSnapshot());
+  const editorRef = selectEditorRef(actor.getSnapshot());
+
+  /* The file manager's parts reach the runtime before any passive effect of this commit reads them, as the view
+   * records' host replacement did. It sends nothing to an actor. */
+  useLayoutEffect(() => {
+    replaceFiles(files);
+    /* A preview's scope rebuilds its service when its worker opener changes; the runtime follows it, as the memo did. */
+    if (previewParameterService !== undefined) {
+      runtime.replacePreviewParameterService(previewParameterService);
     }
+  }, [files, replaceFiles, runtime, previewParameterService]);
 
-    if (!snapshot.context.wrappedWorker) {
-      throw new Error('Project manager worker not initialized');
-    }
-
-    return snapshot.context.wrappedWorker;
-  }, [projectManager.projectManagerRef]);
-
-  const editorRef = useActorRef(
-    editorMachine.provide({
-      actors: {
-        loadEditorStateActor: fromSafeAsync(async ({ input }) => {
-          if (profile === 'shared') {
-            return { type: 'editorStateRetrieved', state: undefined };
-          }
-          const worker = await getReadiedWorker();
-          const state = await worker.getEditorState(input.projectId);
-          return { type: 'editorStateRetrieved', state };
-        }),
-        saveEditorStateActor: fromSafeAsync(async ({ input }) => {
-          if (profile === 'shared') {
-            return;
-          }
-          const worker = await getReadiedWorker();
-          await worker.updateEditorState(input.editorState);
-        }),
-        ensureFocusedChatActor: fromSafeAsync(async ({ input }) => {
-          if (profile === 'shared') {
-            return {
-              type: 'focusedChatEnsured',
-              focusedChatId: `shared:${input.projectId}`,
-            };
-          }
-          return ensureFocusedChatForProject({
-            projectId: input.projectId,
-            requestedChatId: input.requestedChatId,
-            persistedChatId: input.persistedChatId,
-            /* Chats are files now (W17): the project manager owns the store,
-             * and the object-store worker knows nothing about them. */
-            worker: projectManager,
-            canCreateChat: () => {
-              const status = peekRevisionClient(input.projectId)?.status();
-              if (isCloudProjectPending(input.projectId) && status?.sync.hasAppliedRemote !== true) {
-                return false;
-              }
-              return status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
-            },
-            onCreatedChat: () => {
-              // Surface the new chat through TanStack Query so `useChats`
-              // refetches and the history selector picks it up immediately.
-              void queryClient.invalidateQueries({
-                queryKey: ['chats', input.projectId],
-              });
-            },
-          });
-        }),
-      } satisfies Partial<MachineActors<typeof editorMachine>>,
-    }),
-    {
-      input: { projectId, requestedChatId },
-      inspect,
-    },
+  const parameterService = useSyncExternalStore(
+    runtime.parameterService.subscribe,
+    runtime.parameterService.get,
+    runtime.parameterService.get,
   );
+  const manifestObservationError = useSelector(actor, selectManifestObservationError);
+  const retryManifestObservation = useCallback(() => {
+    actor.send({ type: 'retryManifestObservation' });
+  }, [actor]);
+  const {
+    viewRecords: viewRecordMap,
+    viewEntryPaths,
+    appliedWorkbenchRevisions,
+  } = useSyncExternalStore(viewRecords.subscribe, viewRecords.getSnapshot, viewRecords.getSnapshot);
 
   /* A chat we already hold is focused synchronously. `setRequestedChatId` re-enters
    * `ensuringFocusedChat` for an async chat-list round trip, which flashes the chat
    * pane's skeleton — correct for an unknown/absent id, a visible flicker for every
-   * switch between chats the sidebar just listed. */
+   * switch between chats the sidebar just listed. A6d moves this into the session's open request. */
   useEffect(() => {
     editorRef.send(
       requestedChatId !== undefined && isKnownChatId({ chatId: requestedChatId, createdChatId, projectId, queryClient })
@@ -631,327 +401,30 @@ export function ProjectProvider({
     );
   }, [createdChatId, editorRef, projectId, queryClient, requestedChatId]);
 
-  // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
-  const [viewRecords, setViewRecords] = useState<ReadonlyMap<string, WorkbenchView>>(() => new Map());
-  const [appliedWorkbenchRevisions, setAppliedWorkbenchRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
-    () => new Map(),
+  /* The entries record session's record and acknowledgements (A9); it runs as a child of the runtime. */
+  const { entriesRecord, appliedEntryRevisions } = useSyncExternalStore(
+    entriesRecordSession?.subscribe ?? subscribeNoEntriesRecord,
+    entriesRecordSession?.getSnapshot ?? readNoEntriesRecord,
+    entriesRecordSession?.getSnapshot ?? readNoEntriesRecord,
   );
-  const [appliedEntryRevisions, setAppliedEntryRevisions] = useState<ReadonlyMap<string, `sha256:${string}`>>(
-    () => new Map(),
-  );
-  const setAppliedWorkbenchRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
-    setAppliedWorkbenchRevisions((current) => {
-      if (current.get(path) === digest) {
-        return current;
-      }
-      const next = new Map(current);
-      if (digest === undefined) {
-        next.delete(path);
-      } else {
-        next.set(path, digest);
-      }
-      return next;
-    });
-  }, []);
-  const setAppliedEntryRevision = useCallback((path: string, digest: `sha256:${string}` | undefined) => {
-    setAppliedEntryRevisions((current) => {
-      if (current.get(path) === digest) {
-        return current;
-      }
-      const next = new Map(current);
-      if (digest === undefined) {
-        next.delete(path);
-      } else {
-        next.set(path, digest);
-      }
-      return next;
-    });
-  }, []);
-  const [viewEntryPaths, setViewEntryPaths] = useState<ReadonlyMap<string, string | null>>(() => new Map());
-  const setViewEntryPath = useCallback((viewId: string, path: string | null | undefined) => {
-    setViewEntryPaths((current) => {
-      if (current.get(viewId) === path) {
-        return current;
-      }
-      const next = new Map(current);
-      if (path === undefined) {
-        next.delete(viewId);
-      } else {
-        next.set(viewId, path);
-      }
-      return next;
-    });
-  }, []);
-  const [entriesRecord, setEntriesRecord] = useState<WorkbenchEntries>();
-  const entryPathChangeRef = useRef<((operation: EntryPathChange) => Promise<boolean>) | undefined>(undefined);
-  const registerEntryPathChange = useCallback((change: (operation: EntryPathChange) => Promise<boolean>) => {
-    entryPathChangeRef.current = change;
-    return () => {
-      if (entryPathChangeRef.current === change) {
-        entryPathChangeRef.current = undefined;
-      }
-    };
-  }, []);
   const changeEntryPaths = useCallback(
-    async (operation: EntryPathChange) => (entryPathChangeRef.current ? entryPathChangeRef.current(operation) : false),
-    [],
+    async (operation: EntryPathChange) => (entriesRecordSession ? entriesRecordSession.changePaths(operation) : false),
+    [entriesRecordSession],
   );
-  const setViewRecord = useCallback((viewId: string, record: WorkbenchView | undefined) => {
-    setViewRecords((current) => {
-      if (current.get(viewId) === record) {
-        return current;
-      }
-      const next = new Map(current);
-      if (record) {
-        next.set(viewId, record);
-      } else {
-        next.delete(viewId);
-      }
-      return next;
-    });
-  }, []);
-  const viewRecordHost = useMemo(
-    () => ({ files: fileManager.parameterFiles, watch: fileManager.watchRecordFile }),
-    [fileManager.parameterFiles, fileManager.watchRecordFile],
-  );
-  const [viewRecordPorts] = useState(() =>
-    createViewRecordPorts({
-      projectId,
-      root: `/projects/${projectId}`,
-      host: viewRecordHost,
-      levels: deviceViewLevels(projectId),
-      setViewRecord,
-      setViewEntryPath,
-      setAppliedWorkbenchRevision,
-    }),
-  );
-  /* The filesystem's connections can be replaced (a new worker): each session reopens its store on the new ones. */
-  useLayoutEffect(() => {
-    viewRecordPorts.replaceHost(viewRecordHost);
-  }, [viewRecordHost, viewRecordPorts]);
   const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
-  const mainEntryPath = useSelector(
-    actorRef,
-
-    (state) => state.context.mainEntryPath,
-  );
+  const mainEntryPath = useSelector(actorRef, (state) => state.context.mainEntryPath);
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
-  /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path
-   * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
-  const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
 
-  const previewValuesByRuntime = useRef(new WeakMap<object, string>());
-  const publishPreviewParameters = useCallback(
-    (entryPath: string): void => {
-      if (previewParameterService === undefined) {
-        return;
-      }
-      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
-      const snapshot = previewParameterService.snapshot(entryPath);
-      if (cadRef === undefined || snapshot === undefined) {
-        return;
-      }
-      const runtime = cadRef.getSnapshot();
-      const { document } = runtime.context;
-      if (document === undefined || !runtime.can({ type: 'setPreviewParameters', parameters: {} })) {
-        return;
-      }
-      const parameters = parameterRecordInputValues(snapshot.entry);
-      const signature = JSON.stringify(parameters);
-      if (previewValuesByRuntime.current.get(document) === signature) {
-        return;
-      }
-      previewValuesByRuntime.current.set(document, signature);
-      cadRef.send({ type: 'setPreviewParameters', parameters });
-    },
-    [actorRef, previewParameterService],
-  );
-
-  const observeParameters = useCallback(
-    (entryPath: string): void => {
-      const actor = parameterService.actor(entryPath);
-      const existing = parameterObservers.current.get(entryPath);
-      if (actor === undefined || existing?.actor === actor) {
-        return;
-      }
-      existing?.unsubscribe();
-      const subscription = actor.on('settled', ({ outcome }) => {
-        performance.mark('tau:parameter-settled', { detail: { entryPath } });
-        const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
-        const current = parameterService.snapshot(entryPath);
-        if (cadRef === undefined || current === undefined) {
-          return;
-        }
-        if (previewParameterService !== undefined) {
-          if (shouldDispatchParameterSettlement(outcome)) {
-            publishPreviewParameters(entryPath);
-          }
-          return;
-        }
-        const stage = parameterStageForSettlement({ entryPath, outcome, bytes: current.bytes ?? undefined });
-        if (stage !== undefined) {
-          /* Only the bytes the authority just persisted travel: the runtime resolves the values from
-           * them and observes that revision itself, so the sidecar's own watch event has nothing left
-           * to re-render, and this machine keeps no second copy of the stored values. */
-          performance.mark('tau:parameter-dispatch', { detail: { entryPath } });
-          recordMemoryBreadcrumb('render');
-          recordInteraction('parameter');
-          cadRef.send({ type: 'commitParameters', stage });
-        }
-      });
-      parameterObservers.current.set(entryPath, {
-        actor,
-        unsubscribe: () => {
-          subscription.unsubscribe();
-        },
-      });
-    },
-    [actorRef, parameterService, previewParameterService, publishPreviewParameters],
-  );
-
-  useEffect(() => {
-    const observers = parameterObservers.current;
-    const observeAll = (): void => {
-      for (const entryPath of geometryUnits.keys()) {
-        observeParameters(entryPath);
-        publishPreviewParameters(entryPath);
-      }
-    };
-    const runtimeSubscriptions = [...geometryUnits].map(([entryPath, cadRef]) =>
-      cadRef.subscribe(() => {
-        publishPreviewParameters(entryPath);
-      }),
-    );
-    observeAll();
-    const unsubscribeActors = parameterService.subscribeActors(observeAll);
-    for (const [entryPath, { unsubscribe }] of observers) {
-      if (!geometryUnits.has(entryPath)) {
-        unsubscribe();
-        observers.delete(entryPath);
-      }
-    }
-    return () => {
-      unsubscribeActors();
-      for (const subscription of runtimeSubscriptions) {
-        subscription.unsubscribe();
-      }
-      for (const { unsubscribe } of observers.values()) {
-        unsubscribe();
-      }
-      observers.clear();
-    };
-  }, [geometryUnits, observeParameters, parameterService, publishPreviewParameters]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
-  useEffect(() => {
-    editorRef.send({ type: 'load' });
-  }, [editorRef]);
-
   useEffect(() => {
     if (focusedChatResolved && focusedChatId !== undefined && resolvedRequestedChatId === requestedChatId) {
       onFocusedChatResolved?.(focusedChatId);
     }
   }, [focusedChatId, focusedChatResolved, onFocusedChatResolved, requestedChatId, resolvedRequestedChatId]);
-
-  useEffect(() => {
-    if (profile === 'shared') {
-      return;
-    }
-    const subscription = actorRef.on('projectUpdated', () => {
-      void queryClient.invalidateQueries({ queryKey: ['projects'] });
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [actorRef, profile, queryClient]);
-
-  useEffect(() => {
-    if (profile === 'shared') {
-      return;
-    }
-    const activity = actorRef.on('projectActivity', async () => {
-      await projectManager.touchProject(projectId);
-      await queryClient.invalidateQueries({ queryKey: ['projects'] });
-    });
-    return () => {
-      activity.unsubscribe();
-    };
-  }, [actorRef, profile, projectId, projectManager, queryClient]);
-
-  const projectIsReady = useSelector(actorRef, (state) => state.matches('ready'));
-  const manifestObservationRef = useRef<ObservationService<void> | undefined>(undefined);
-  const [manifestObservationError, setManifestObservationError] = useState<string>();
-  const retryManifestObservation = useCallback(() => {
-    manifestObservationRef.current?.refresh();
-  }, []);
-  useEffect(() => {
-    if (!projectIsReady) {
-      return;
-    }
-    const { contentService } = fileManager;
-    if (!contentService) {
-      return;
-    }
-
-    const observer = createProjectManifestChangeObserver({
-      projectId,
-      onSettled: () => {
-        if (
-          isCloudProjectPending(projectId) &&
-          canOpenCloudProject(projectId) &&
-          peekRevisionClient(projectId)?.status()?.sync.hasAppliedRemote === true
-        ) {
-          tauCloudIntent.set(projectId, undefined);
-        }
-      },
-      getCurrent: () => {
-        const { project, manifestIssue } = actorRef.getSnapshot().context;
-        return { project, issue: manifestIssue };
-      },
-      reload: () => {
-        actorRef.send({ type: 'reloadProject' });
-      },
-      report: (issue) => {
-        actorRef.send({ type: 'manifestIssueObserved', issue });
-      },
-    });
-    const observation = new ObservationService({
-      resource: 'tau.json',
-      invalidate: observer.invalidate,
-      read: async (read) =>
-        observer.check({
-          readManifest: async () => {
-            return fileContentBytes({
-              path: 'tau.json',
-              result: await read.observe(contentService.observeContent('tau.json')),
-            });
-          },
-        }),
-    });
-    manifestObservationRef.current = observation;
-    const updateHealth = (): void => {
-      const snapshot = observation.getSnapshot();
-      if (snapshot.status === 'ready') {
-        setManifestObservationError(undefined);
-      } else if (snapshot.status === 'closed' || snapshot.status === 'error') {
-        setManifestObservationError(snapshot.error);
-      }
-    };
-    const unsubscribe = observation.subscribe(updateHealth);
-    const lease = observation.acquire();
-    return () => {
-      unsubscribe();
-      if (manifestObservationRef.current === observation) {
-        manifestObservationRef.current = undefined;
-      }
-      observer.dispose();
-      lease.release();
-    };
-  }, [actorRef, fileManager, projectId, projectIsReady]);
 
   const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
     const report = async (): Promise<void> => {
@@ -974,7 +447,8 @@ export function ProjectProvider({
       const settle = async (): Promise<void> => {
         try {
           await operation;
-          publishPreviewParameters(filePath);
+          /* A preview's resolved values reach its kernel through the runtime's parameter observers. */
+          actor.send({ type: 'parameterEntryResolved', entryPath: filePath });
         } catch {
           // The set actor holds the typed diagnostic.
         }
@@ -982,7 +456,7 @@ export function ProjectProvider({
       // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
       void settle();
     },
-    [parameterService, publishPreviewParameters],
+    [actor, parameterService],
   );
 
   const setGeometryUnitParameters = useCallback(
@@ -1102,21 +576,19 @@ export function ProjectProvider({
       projectRef: actorRef,
       editorRef,
       viewGraphics,
-      viewRecords,
+      viewRecords: viewRecordMap,
       appliedWorkbenchRevisions,
-      setAppliedWorkbenchRevision,
+      setAppliedWorkbenchRevision: viewRecords.setAppliedWorkbenchRevision,
       appliedEntryRevisions,
-      setAppliedEntryRevision,
-      setViewRecord,
+      setViewRecord: viewRecords.setViewRecord,
       viewEntryPaths,
-      setViewEntryPath,
+      setViewEntryPath: viewRecords.setViewEntryPath,
       entriesRecord,
-      setEntriesRecord,
-      registerEntryPathChange,
       changeEntryPaths,
-      registerWorkbenchRecordProducer,
-      flushWorkbenchRecordProducers,
-      viewRecordPorts,
+      registerWorkbenchRecordProducer: runtime.producers.register,
+      flushWorkbenchRecordProducers: runtime.producers.flushAll,
+      projectRuntime: runtime,
+      viewRecordPorts: viewRecords.ports,
       modelInteractionRef,
       geometryUnits,
       mainEntryPath,
@@ -1144,20 +616,13 @@ export function ProjectProvider({
     editorRef,
     viewGraphics,
     viewRecords,
+    viewRecordMap,
     appliedWorkbenchRevisions,
-    setAppliedWorkbenchRevision,
     appliedEntryRevisions,
-    setAppliedEntryRevision,
-    setViewRecord,
     viewEntryPaths,
-    setViewEntryPath,
     entriesRecord,
-    setEntriesRecord,
-    registerEntryPathChange,
     changeEntryPaths,
-    registerWorkbenchRecordProducer,
-    flushWorkbenchRecordProducers,
-    viewRecordPorts,
+    runtime,
     modelInteractionRef,
     geometryUnits,
     mainEntryPath,

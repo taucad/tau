@@ -1,7 +1,8 @@
 import { Wrench } from 'lucide-react';
+import { useSyncExternalStore } from 'react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
-import { systemSkillBundles } from '@taucad/skills/resources';
+import type { SystemSkillBundle } from '@taucad/skills/resources';
 import type { FileProvenance } from '@taucad/types';
 import { Badge } from '@taucad/ui/components/badge';
 import {
@@ -14,6 +15,7 @@ import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
+import { loadedSystemSkillBundles, subscribeSystemSkillBundles } from '#lib/lazy-skill-resolver.js';
 
 type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;
 
@@ -42,8 +44,11 @@ function LoadingSkillRow({ skillName }: { readonly skillName: string }): React.J
  * (a1 review R2); it names the bundle the pane serves today, which the notice
  * below is what flags when the chat read an older one.
  */
-const systemSkillProvenance = (skillName: string): FileProvenance => {
-  const bundle = systemSkillBundles.find((candidate) => candidate.slug === skillName);
+const systemSkillProvenance = (
+  skillName: string,
+  systemSkillBundles: readonly SystemSkillBundle[] | undefined,
+): FileProvenance => {
+  const bundle = systemSkillBundles?.find((candidate) => candidate.slug === skillName);
   return {
     source: 'system-skills',
     versioned: false,
@@ -53,13 +58,38 @@ const systemSkillProvenance = (skillName: string): FileProvenance => {
 };
 
 /** Whether the bundle shipped today differs from the one this chat read. */
-const hasBundleChanged = (skillName: string, fingerprint: string | undefined): boolean => {
+const hasBundleChanged = (
+  skillName: string,
+  fingerprint: string | undefined,
+  systemSkillBundles: readonly SystemSkillBundle[] | undefined,
+): boolean => {
   if (fingerprint === undefined) {
     return false;
   }
-  const current = systemSkillBundles.find((bundle) => bundle.slug === skillName)?.fingerprint;
+  const current = systemSkillBundles?.find((bundle) => bundle.slug === skillName)?.fingerprint;
   return current !== undefined && current !== fingerprint;
 };
+
+const subscribeNothing = (): (() => void) => () => undefined;
+const noBundles = (): undefined => undefined;
+
+/**
+ * The shipped bundles, which the row imports on demand rather than with the transcript (D4, LB4c).
+ *
+ * Only a system row subscribes. Until the import lands the row is the one it draws for a skill with no
+ * shipped bundle: the same box and words, a link without the overlay identity and no changed-bundle
+ * notice. The catalog's first read imports the same chunk, so on an open project it is usually here.
+ *
+ * @param isSystem - Whether the row is a system skill's.
+ * @returns The bundles once imported.
+ */
+function useSystemSkillBundles(isSystem: boolean): readonly SystemSkillBundle[] | undefined {
+  return useSyncExternalStore(
+    isSystem ? subscribeSystemSkillBundles : subscribeNothing,
+    isSystem ? loadedSystemSkillBundles : noBundles,
+    noBundles,
+  );
+}
 
 function ReadSkillRow({
   skillName,
@@ -73,8 +103,9 @@ function ReadSkillRow({
   readonly fingerprint?: string;
 }): React.JSX.Element {
   const isSystem = source === 'system';
+  const systemSkillBundles = useSystemSkillBundles(isSystem);
   const label = skillPath ? (
-    <FileLink path={skillPath} provenance={isSystem ? systemSkillProvenance(skillName) : undefined}>
+    <FileLink path={skillPath} provenance={isSystem ? systemSkillProvenance(skillName, systemSkillBundles) : undefined}>
       {skillName}
     </FileLink>
   ) : (
@@ -95,7 +126,7 @@ function ReadSkillRow({
                   system
                 </Badge>
               )}
-              {isSystem && hasBundleChanged(skillName, fingerprint) && (
+              {isSystem && hasBundleChanged(skillName, fingerprint, systemSkillBundles) && (
                 <span className='ml-1.5 text-muted-foreground'>This bundle changed since the chat read it</span>
               )}
             </ChatToolDescription>

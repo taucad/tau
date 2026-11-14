@@ -760,6 +760,33 @@ describe('ProjectNavigation', () => {
         slugs: { workspaceSlug: 'home', projectSlug: `project-${index + 1}` },
       }));
 
+    /** The list as drawn: each row's link name, or a label row's text. */
+    const drawnRows = (): (string | null)[] =>
+      [...document.querySelectorAll('section > ul > li')].map(
+        (item) => item.querySelector('a')?.textContent ?? item.textContent,
+      );
+
+    /*
+     * U6 (frame row on the project route): the open project's session goes
+     * live after the remembered rows are drawn. The open project already sits
+     * above the rest, with "Earlier" below it, so nothing moves when its
+     * session goes live and the listing answers.
+     */
+    it.fails('U6: the open project is drawn first before its session is live, so no row moves when it goes live', () => {
+      pathname = '/w/home/one';
+      rememberedShape = { count: 2, projects: [secondProject, firstProject] };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      const view = render(<ProjectNavigation />);
+      const before = drawnRows();
+
+      liveProjectIds = ['proj_one'];
+      mockUseProjects.mockReturnValue(projectsResult);
+      view.rerender(<ProjectNavigation />);
+
+      expect(before).toEqual(['One', 'Earlier', 'Two']);
+      expect(drawnRows()).toEqual(before);
+    });
+
     /*
      * U6/H5 for project rows while nothing is live: the rows are reserved from
      * the remembered listing (R5), so this is a guard, not an expected failure.

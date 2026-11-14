@@ -1,40 +1,42 @@
 {
+  "actions": {
+    "focus.accessAnswered": "AccessAnswered",
+    "focus.focusedChatResolved": "Unmodelled",
+    "focus.leaveFlushSettled": "LeaveFlushSettled",
+    "focus.libraryChanged": "LibraryChanged",
+    "focus.moduleLoaded": "ModuleLoaded",
+    "focus.openRequested": "PersonOpenAsked",
+    "focus.openSettled": "TOpenAsked",
+    "focus.opening.live.xstate.after": "OpenBoundPassed",
+    "focus.retry": "TRetry",
+    "focus.routeLeft": "TRouteHeard",
+    "focus.routeRequested": "TRouteHeard",
+    "focus.sessionFacts": "ChatReady",
+    "focus.windowFocused": "Unmodelled",
+    "focus.xstate.error.*": "Unmodelled"
+  },
   "alphabet": [
-    "AccessAnswered",
-    "AccessAsked",
-    "BudgetSwitchClose",
-    "ChatForwarded",
-    "ChatReady",
-    "CloseFailed",
-    "CloseFlushFailed",
-    "Edit",
-    "FirstCheckSettled",
-    "FlushRegistered",
-    "IdleExpired",
-    "LeaveFlushSettled",
-    "LeaveFlushStarted",
-    "LibraryChanged",
-    "ModuleLoaded",
-    "OpenAsked",
-    "OpenBoundPassed",
-    "OpenJoined",
-    "OpenLost",
-    "OpenOnFailed",
-    "PersonClosed",
-    "PersonDiscarded",
-    "PersonOpenAsked",
-    "Retry",
-    "RouteCommitted",
-    "RouteHeard",
-    "SessionClosed"
+    "accessAnswered",
+    "focusedChatResolved",
+    "leaveFlushSettled",
+    "libraryChanged",
+    "moduleLoaded",
+    "openRequested",
+    "openSettled",
+    "retry",
+    "routeLeft",
+    "routeRequested",
+    "sessionFacts",
+    "windowFocused"
   ],
   "sources": {
+    "apps/ui/app/machines/focus.route-state.ts": "b0c957ceb2719138e839ef9bb02138da3b1fbb0b4e625c3ebf014806ba57e3dd",
     "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "4d411e8b910de3440e5903a09104146ebdc573a4c7897a0d38a21989f60bd704",
     "apps/ui/app/routes/w.$workspace.$project/project-route-state.ts": "27da214e00f98eac9a8ab1d42e1e8b5467ddaed534c580d5d7410cdb99af07f2",
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "4cea41ab878b3d473d4df2709bd04504409e7bb8f68d329514ae47e798a01685"
   },
   "specs": {
-    "ProjectFocus.tla": "c55bd1ff53efbdea671c237175ae217a729b09da3789df4a66a4a17eb52ce30f"
+    "ProjectFocus.tla": "9087b1bb0272d13a96a57457ce3b382cb5a81c1919af185b323c46b1a50089fe"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",
@@ -68,5 +70,8 @@
     "ProjectFocus.today-superseded-open.cfg": "bb79efb47575e428d1b6c1e59b4020593c27e8f76a49cd5c58719591933b9e13",
     "ProjectFocus.wide.cfg": "89b78eb0662313104defd5ab54306da66b63a2d96b1eec2fdc53f899d1b9e4f4",
     "expected.json": "94e1be0187cd75f52fa2dd3d8b611dc36b34c0310f70088d59bd4044eed2a5db"
+  },
+  "versions": {
+    "focus": "1"
   }
 }

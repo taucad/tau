@@ -16,7 +16,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 tier="${TAU_SHELL_TIER:-full}"
 [[ "$tier" == full || "$tier" == semantics ]] || { printf 'Unknown shell tier: %s\n' "$tier" >&2; exit 1; }
 # The guest takes the projects as a comma list of shape-checked names.
-all_projects='["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop","desktop-e2e"]'
+all_projects='["sandbox","native-process-core","shell-service","host","desktop-terminal","desktop-services-host","desktop-e2e"]'
 projects="$(jq -r 'if type == "array" and length > 0 and all(.[]; type == "string" and test("^[a-z0-9-]+$")) then join(",") else error("projects must be a non-empty JSON array of project names") end' <<< "${TAU_SHELL_PROJECTS:-$all_projects}")"
 # The same dated, checksum-pinned images as apps/desktop/scripts/hosted-linux-vm.sh.
 case "$TAU_VM_DISTRO" in

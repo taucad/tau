@@ -59,7 +59,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { createSourceModelInteractionUnitId } from '@taucad/viewer/machines/model-interaction.machine';
 import { decodeTextFile, encodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
-import { createSkillResolver } from '#lib/skill-resolver.js';
+import { createLazySkillResolver } from '#lib/lazy-skill-resolver.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import {
@@ -857,7 +857,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
   };
   /* A file still downloading is never read as its pointer or written over. */
   const fileSystem = guardLargeObjectFiles(createBrowserRpcFileSystem(fileManager));
-  const skillResolver = createSkillResolver({
+  const skillResolver = createLazySkillResolver({
     async readFile(path) {
       return fileManager.readRawBytes(path);
     },

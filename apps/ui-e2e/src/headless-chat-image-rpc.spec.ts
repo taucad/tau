@@ -106,7 +106,7 @@ test('agent RPC uses the real service for GLTF single and ordered six-view captu
   expect(new Set(evidence.map(({ digest }) => digest)).size).toBe(6);
 });
 
-test('agent RPC returns an SVG drawing and rejects planar multi-angle capture', async () => {
+test('agent RPC returns one SVG drawing for single and multi-angle capture', async () => {
   await seedVisionModel();
   await target.navigate('/__e2e/headless-chat-image-capture?kind=svg');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
@@ -124,11 +124,13 @@ test('agent RPC returns an SVG drawing and rejects planar multi-angle capture', 
   expect(single.images.map(({ view }) => view)).toEqual(['drawing']);
   expectAnnotated(await readDataUrlEvidence(single.images[0]!.dataUrl), 'image/png');
 
-  await expect(captureImages({ mode: 'multi_angle', targetFile: 'src/main.ts' })).resolves.toEqual({
-    success: false,
-    errorCode: 'IO_ERROR',
-    message: 'Planar SVG drawings have one canonical view; use a single drawing capture',
-  });
+  // A 2D view produces one image in either mode (capture_images tool description): multi_angle names 3D camera angles.
+  const multiAngle = await captureImages({ mode: 'multi_angle', targetFile: 'src/main.ts' });
+  if (!multiAngle.success) {
+    throw new Error(multiAngle.message);
+  }
+  expect(multiAngle.images.map(({ view }) => view)).toEqual(['drawing']);
+  expectAnnotated(await readDataUrlEvidence(multiAngle.images[0]!.dataUrl), 'image/png');
 });
 
 test('should capture a section of one and of two plane cuts through the packaged browser worker', async () => {

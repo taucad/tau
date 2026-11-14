@@ -1355,8 +1355,9 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
 
 /**
  * F12 on a wait a person starts: opening a file from the Files tree with its read held, so the clock starts at the
- * click. The blueprint names the chat lane, whose indicator A15d adds; the source pane's "Opening file" is the
- * indicator on `main` today (A15f), so the ladder is asserted there.
+ * click. The blueprint's F12 names no surface; the "skeleton at 300 ms" it cites is the code pane's placeholder
+ * (`editor-pane-placeholder.tsx`, blueprint § Timing). A15f replaced it with the pane's "Opening file" indicator on the
+ * ladder, so both cases assert on the source pane. A15d's other surfaces have their own rows (F6, F13).
  */
 const openedFile = 'notes.ts';
 const openedFileRegions = {
@@ -1401,7 +1402,7 @@ const measureSourceOpen = async (
   return { record, click: click!, answeredAt: Math.min(...late.map((delivery) => delivery.t)) };
 };
 
-knownDefect('F12 (A15f): a file opened from the tree with its read 600 ms late shows no wait indicator', {
+knownDefect('F12 source pane (A15f): a file opened from the tree with its read 600 ms late shows no wait indicator', {
   artifact: 'f12-600-wide',
   expectedFailure: false,
   budget: loadBudget,
@@ -1417,7 +1418,7 @@ knownDefect('F12 (A15f): a file opened from the tree with its read 600 ms late s
 });
 
 knownDefect(
-  'F12 (A15f): a file opened from the tree with its read 1,100 ms late shows its indicator from 1,000 ms after the click for at least 500 ms',
+  'F12 source pane (A15f): a file opened from the tree with its read 1,100 ms late shows its indicator from 1,000 ms after the click for at least 500 ms',
   {
     artifact: 'f12-1100-wide',
     expectedFailure: false,

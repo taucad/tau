@@ -536,7 +536,9 @@ knownDefect(
 const thumbnailRead: WorkerReadDelay = { method: 'readFile', path: String.raw`thumbnail\.webp$`, milliseconds: 2000 };
 const thumbnailRegions = {
   boxIcon: 'ul[aria-label="Projects"] svg[aria-label="No saved preview"]',
-  media: 'ul[aria-label="Projects"] [data-slot="card"] :has(> svg[aria-label="No saved preview"], > img)',
+  /* The media box by its structure, whatever it holds: the icon, an image, or nothing while the read is pending. */
+  media: 'ul[aria-label="Projects"] [data-slot="card"] div.overflow-hidden.bg-muted',
+  card: 'ul[aria-label="Projects"] [data-slot="card"]',
 } as const;
 
 knownDefect(
@@ -555,20 +557,33 @@ knownDefect(
     assert: ({ record, since }) => {
       const settledAt = since + thumbnailRead.milliseconds;
       const early = regionsOf(record, 'boxIcon').filter((entry) => entry.present && entry.t < settledAt);
-      const media = regionsOf(record, 'media').filter((entry) => entry.present);
-      const settled = media.at(-1);
+      /* From the first frame with a card: the media box as it stood then, and every change after. */
+      const firstCard = regionsOf(record, 'card').find((entry) => entry.present);
+      const allMedia = regionsOf(record, 'media');
+      const atCard = firstCard === undefined ? undefined : allMedia.findLast((entry) => entry.t <= firstCard.t);
+      const media =
+        firstCard === undefined
+          ? []
+          : [...(atCard === undefined ? [] : [atCard]), ...allMedia.filter((entry) => entry.t > firstCard.t)];
+      const last = allMedia.at(-1);
+      precondition(last?.present === true, 'H-d: the settled page has no card media box');
+      const settled = last!;
       const moved = media.filter(
         (entry) =>
-          settled !== undefined &&
-          (Math.abs(entry.x - settled.x) > 1 ||
-            Math.abs(entry.y - settled.y) > 1 ||
-            Math.abs(entry.width - settled.width) > 1 ||
-            Math.abs(entry.height - settled.height) > 1),
+          !entry.present ||
+          Math.abs(entry.x - settled.x) > 1 ||
+          Math.abs(entry.y - settled.y) > 1 ||
+          Math.abs(entry.width - settled.width) > 1 ||
+          Math.abs(entry.height - settled.height) > 1,
       );
+      const absentAtCard = firstCard !== undefined && atCard === undefined;
       expectMeasured(
         {
           earlyIcon: early.slice(0, 3).map((entry) => describeEntry(entry)),
-          mediaMoves: moved.slice(0, 3).map((entry) => describeEntry(entry)),
+          mediaMoves: [
+            ...(absentAtCard ? [`no media box when the first card drew at ${firstCard.t} ms`] : []),
+            ...moved.slice(0, 3).map((entry) => describeEntry(entry)),
+          ],
         },
         `H-d: the thumbnail read was sent at ${since} ms and answered from ${settledAt} ms`,
         { earlyIcon: [], mediaMoves: [] },

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 import { mock } from 'vitest-mock-extended';
@@ -811,6 +811,42 @@ describe('ProjectNavigation', () => {
      * the device has never listed. The list is empty and busy, and the wait is
      * the label's trailing slot, so the arriving rows displace nothing.
      */
+    /*
+     * P-d's Slow and accessibility lines, with remembered rows (programme-control
+     * ruling, 2026-11-14T01:20Z): the list is busy while its listing is pending,
+     * and the label's wait says it is slow at 10 s, with Retry.
+     */
+    it.fails('P-d: with remembered rows the list is busy and the label carries the slow wait with Retry', () => {
+      const retry = vi.fn(async () => undefined);
+      rememberedShape = { count: 2, projects: [firstProject, secondProject] };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true, retry });
+      render(<ProjectNavigation />);
+
+      expect(screen.getAllByRole('link')).toHaveLength(2);
+      expect(document.querySelector('section > ul')).toHaveAttribute('aria-busy', 'true');
+      const wait = document.querySelector('section > div [data-slot=wait-indicator]');
+      expect(wait).toHaveAttribute('data-state', 'waiting');
+      expect(wait?.querySelector('[data-slot=wait-indicator-slow]')).toHaveTextContent('Still loading projects…');
+      fireEvent.click(within(wait as HTMLElement).getByRole('button', { name: 'Retry' }));
+      expect(retry).toHaveBeenCalledOnce();
+    });
+
+    /* P-d's Failed line: a failed listing keeps the remembered rows, with the failure row below them. */
+    it.fails('P-d: a failed listing keeps the remembered rows above the failure row', () => {
+      rememberedShape = { count: 2, projects: [firstProject, secondProject] };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], error: new Error('offline') });
+      render(<ProjectNavigation />);
+
+      const items = [...document.querySelectorAll('section > ul > li')];
+      expect(items.map((item) => item.querySelector('a')?.textContent ?? item.getAttribute('data-slot'))).toEqual([
+        'Two',
+        'One',
+        null,
+      ]);
+      expect(items.at(-1)?.querySelector('[data-slot=failure-row]')).not.toBeNull();
+      expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
+    });
+
     it('H1: with nothing remembered the first list is empty and busy, with the wait in the label slot', () => {
       mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
       render(<ProjectNavigation />);

@@ -675,6 +675,20 @@ describe('ProjectChatList', () => {
       expect(screen.queryAllByTestId('skeleton')).toHaveLength(0);
     });
 
+    /* The accessibility line (programme-control ruling, 2026-11-14T01:20Z): busy while the listing is pending, rows or not. */
+    it.fails('C8: with remembered chats the loading list is busy until the chat listing answers', () => {
+      rememberChats(project.id, [chat(1), chat(2)]);
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+      const view = render(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(screen.getAllByRole('link')).toHaveLength(2);
+      expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
+
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [chat(1), chat(2)] });
+      view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
+      expect(document.querySelector(`#project-chats-${project.id}`)).not.toHaveAttribute('aria-busy');
+    });
+
     it('C8: with nothing remembered the loading list has no row and is busy', () => {
       mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
       render(<ProjectChatList project={project} isProjectActive={false} />);

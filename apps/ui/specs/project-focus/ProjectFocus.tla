@@ -673,6 +673,7 @@ DRetry ==
 
 \* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 793 to 808, 717): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
+\* The today-late-effect configurations cite the same lines.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration
   /\ reg # RegTarget

@@ -175,11 +175,19 @@ const createModel = (unitsById: Record<string, UnitDisplay> = {}) =>
 type CadDouble = ReturnType<typeof createCad>;
 type ModelDouble = ReturnType<typeof createModel>;
 
+/**
+ * The doubles implement only the snapshot and subscription surface the session reads, so each stands in for its
+ * actor through this one documented assertion rather than a cast at every call site.
+ */
+const asActor = <T>(double: unknown): T =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a read-surface double stands in for the actor
+  double as T;
+
 const createProject = (units: ReadonlyArray<readonly [string, CadDouble]>, model: ModelDouble = createModel()) =>
   createActorDouble(
     {
-      geometryUnits: new Map(units) as unknown as ReadonlyMap<string, CadRef>,
-      modelInteractionRef: model as unknown as ModelRef,
+      geometryUnits: asActor<ReadonlyMap<string, CadRef>>(new Map(units)),
+      modelInteractionRef: asActor<ModelRef>(model),
     },
     () => undefined,
   );
@@ -217,7 +225,7 @@ const startSession = (
     }
   });
   const producers = createProducers();
-  const stopSession = session.start({ project: project as unknown as EntriesRecordProject, producers });
+  const stopSession = session.start({ project: asActor<EntriesRecordProject>(project), producers });
   let stopped = false;
   const stop = (): void => {
     if (!stopped) {
@@ -332,6 +340,22 @@ describe('the entries record session', () => {
     expect(hostFiles.writeFileChecked).not.toHaveBeenCalled();
   });
 
+  it("clears a closed watch's issue as soon as the file manager hands over a new watch", async () => {
+    hostFiles.set(recordBytes({ 'a.ts': { renderTimeout: 30_000 } }));
+    const { session, records } = startSession();
+    await vi.waitFor(() => {
+      expect(records.length).toBeGreaterThan(0);
+    });
+    watchClosures[0]!.resolve();
+    await vi.waitFor(() => {
+      expect(readRecordIssues('p')[0]?.state).toBe('unavailable');
+    });
+    // The new watch registers slowly: the closed watch's failure is not the new one's.
+    nextWatchReady = Promise.withResolvers<void>().promise;
+    session.replaceHost({ files: hostFiles, watch: (path, listener) => watchRecordFile(path, listener) });
+    expect(readRecordIssues('p')).toEqual([]);
+  });
+
   it("reads and writes the project's own record whatever the code checkout", async () => {
     liveRootOnly = true;
     hostFiles.set(recordBytes({ 'a.ts': { renderTimeout: 30_000 } }));
@@ -408,10 +432,12 @@ describe('the entries record session', () => {
     // A bounded retry is not a problem yet: nothing reaches the trigger.
     expect(readRecordIssues('p')).toEqual([]);
     project.change({
-      geometryUnits: new Map([
-        ['a.ts', cad],
-        ['b.ts', cad],
-      ]) as unknown as ReadonlyMap<string, CadRef>,
+      geometryUnits: asActor<ReadonlyMap<string, CadRef>>(
+        new Map([
+          ['a.ts', cad],
+          ['b.ts', cad],
+        ]),
+      ),
     });
     await Promise.resolve();
     expect(acknowledged().has('b.ts')).toBe(false);
@@ -508,7 +534,7 @@ describe('the entries record session', () => {
      * its observers, and the project's own observers hear of them after. */
     project.state.context = {
       ...project.state.context,
-      geometryUnits: new Map([['b.ts', cad]]) as unknown as ReadonlyMap<string, CadRef>,
+      geometryUnits: asActor<ReadonlyMap<string, CadRef>>(new Map([['b.ts', cad]])),
     };
     model.change({ unitsById: { 'file:b.ts': unit } });
     project.change({});
@@ -611,8 +637,8 @@ describe('the entry applier', () => {
     const cad = createCad(180_000);
     const applier = createEntryApplier({
       path: 'a.ts',
-      cad: cad as unknown as CadRef,
-      model: createModel() as unknown as ModelRef,
+      cad: asActor<CadRef>(cad),
+      model: asActor<ModelRef>(createModel()),
     });
     applier.apply({ renderTimeout }, undefined);
     expect(cad.send).toHaveBeenCalledOnce();
@@ -626,8 +652,8 @@ describe('the entry applier', () => {
     });
     const applier = createEntryApplier({
       path: 'a.ts',
-      cad: cad as unknown as CadRef,
-      model: model as unknown as ModelRef,
+      cad: asActor<CadRef>(cad),
+      model: asActor<ModelRef>(model),
     });
     const empty: Entry = { renderTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn((_next: Entry) => undefined);
@@ -659,8 +685,8 @@ describe('the entry applier', () => {
     });
     const applier = createEntryApplier({
       path: 'a.ts',
-      cad: cad as unknown as CadRef,
-      model: model as unknown as ModelRef,
+      cad: asActor<CadRef>(cad),
+      model: asActor<ModelRef>(model),
     });
     const initial: Entry = { renderTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn((_next: Entry) => undefined);

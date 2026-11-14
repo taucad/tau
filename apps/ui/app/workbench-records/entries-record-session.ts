@@ -551,6 +551,8 @@ export function createEntriesRecordSession(
           publishIssue();
         }
       });
+      // A new watch's own state replaces the last one's at once, as the host's owner read it in the same render.
+      observedError = lease.getSnapshot().error;
       return {
         observation,
         watch,

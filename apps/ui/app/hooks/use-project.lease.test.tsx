@@ -142,7 +142,7 @@ describe('ProjectProvider over a leased project runtime (A6b)', () => {
     });
     const { projectRef } = seen.at(-1)!;
     expect(projectRef.getSnapshot().status).toBe('active');
-    expect(new Set(seen.slice(-2).map((value) => value.projectRef)).size).toBe(1);
+    expect(new Set(seen.slice(-2).map((value) => value?.projectRef)).size).toBe(1);
   });
 
   it('leases a fresh project runtime when the session remounts the provider for a new kernel selection', async () => {
@@ -182,13 +182,12 @@ describe('ProjectProvider over a leased project runtime (A6b)', () => {
       ),
     );
     await act(flush);
-    const context = seen.at(-1)! as ProjectContextValue & {
-      projectRuntime?: { producers: { register: (flush: () => Promise<void>) => () => void } };
-    };
+    const context = seen.at(-1)!;
     // The set belongs to the runtime (D26, R3-F5): a runtime child reaches it with no React in between.
-    expect(context.projectRuntime?.producers).toBeDefined();
+    const { producers } = context.projectRuntime;
+    expect(producers).toBeDefined();
     const producer = vi.fn(async () => undefined);
-    const unregister = context.projectRuntime!.producers.register(producer);
+    const unregister = producers.register(producer);
     // The provider's function keeps its signature and walks the runtime's set.
     await context.flushWorkbenchRecordProducers();
     expect(producer).toHaveBeenCalledTimes(1);

@@ -50,7 +50,9 @@
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
       "apps/ui/app/runtime/project-library.ts",
+      "apps/ui/app/runtime/project-runtime.helpers.ts",
       "apps/ui/app/runtime/project-runtime.ts",
+      "apps/ui/app/runtime/project-runtime.view-records.ts",
       "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
@@ -66,7 +68,6 @@
     ]
   },
   "counts": {
-    "apps/ui/app/hooks/use-project.tsx#useActorRef": 2,
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
     "apps/ui/app/hooks/use-revision-status.ts#useFlushOnClose": 1,

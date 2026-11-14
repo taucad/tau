@@ -49,7 +49,7 @@
   "apps/ui/app/hooks/use-memory-release.ts": 2,
   "apps/ui/app/hooks/use-project-availability.ts": 1,
   "apps/ui/app/hooks/use-project-manager.tsx": 9,
-  "apps/ui/app/hooks/use-project.tsx": 14,
+  "apps/ui/app/hooks/use-project.tsx": 3,
   "apps/ui/app/hooks/use-projects.ts": 2,
   "apps/ui/app/hooks/use-revision-status.ts": 2,
   "apps/ui/app/hooks/use-sessions.tsx": 3,

@@ -55,7 +55,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
 
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach the seven A1a, A1b and A2 compose', () => {
+  it('should list the nine static children once, and attach the eight A1a, A1b, A2 and A6b compose', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -69,6 +69,7 @@ describe('app runtime root', () => {
     ]);
     expect(appRuntimeAttachedChildren).toEqual([
       'environment',
+      'choices',
       'fileManagerHost',
       'rootFiles',
       'leases',
@@ -349,6 +350,22 @@ describe('app runtime root totality', () => {
     memoryClassChanged: [
       { type: 'memoryClassChanged', constrained: true },
       { type: 'memoryClassChanged', constrained: false },
+    ],
+    choicesChanged: [
+      {
+        type: 'choicesChanged',
+        choices: {
+          computePlacement: { state: 'local' },
+          computeSelectionRevision: 0,
+          computeReuseMode: 'durable',
+          computeReuseRevision: 0,
+          defaultExecution: { kind: 'tau', model: '' },
+          modelCatalog: { status: 'loading' },
+          modelPinning: false,
+          defaultKernel: 'openscad',
+          testingEnabled: true,
+        },
+      },
     ],
   };
 

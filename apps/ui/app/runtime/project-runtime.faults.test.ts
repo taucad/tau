@@ -6,22 +6,24 @@ import { createActor, createCallbackLogic, setup } from 'xstate';
 import type { AnyStateMachine } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { guardActors } from '@taucad/xstate-testing/inspect';
-import { editorIgnoredEvents, editorMachine, reportEditorFault } from '#machines/editor.machine.js';
-import { projectIgnoredEvents, projectMachine, reportProjectFault } from '#machines/project.machine.js';
+import { editorIgnoredEvents, editorMachine } from '#machines/editor.machine.js';
+import { projectIgnoredEvents, projectMachine } from '#machines/project.machine.js';
 import { projectRuntimeMachine, selectProjectRuntimeFault } from '#runtime/project-runtime.js';
 import type {
   ManifestObservationEvent,
+  ParameterObserversEvent,
   ProjectChildInput,
   ProjectRuntimeFileManager,
 } from '#runtime/project-runtime.js';
 import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
+import type * as AppRuntimeFaultsModule from '#runtime/app-runtime-faults.js';
 
 const reporter = vi.hoisted(() => ({ reportUiError: vi.fn(async () => undefined) }));
 vi.mock('#lib/error-reporting.js', () => reporter);
 /* The app runtime's one fault hook (D23), which the composed machines and the runtime root report through. */
 const runtimeFaults = vi.hoisted(() => ({ reportAppRuntimeFault: vi.fn() }));
 vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#runtime/app-runtime-faults.js')>()),
+  ...(await importOriginal<typeof AppRuntimeFaultsModule>()),
   reportAppRuntimeFault: runtimeFaults.reportAppRuntimeFault,
 }));
 
@@ -63,26 +65,24 @@ describe('the root onError of the composed machines', () => {
     ).toEqual({ context: { fault: 'boom' } });
   });
 
+  /* A6b: each machine's own reporter is gone; the named effect is the app runtime's one fault hook (D23). */
   it.each([
-    ['project', projectMachine, reportProjectFault],
-    ['editor', editorMachine, reportEditorFault],
-  ] as const)('%s should report the first fault once and no later one', (_name, machine, report) => {
+    ['project', projectMachine],
+    ['editor', editorMachine],
+    ['project-runtime', projectRuntimeMachine],
+  ] as const)('%s should report the first fault once and no later one', (_name, machine) => {
     const { onError } = machine.config as { onError?: RootErrorHandler };
     const enq = vi.fn();
     const first = new Error('boom');
     onError!({ context: { fault: undefined }, event: { type: 'xstate.error.execution', error: first } }, enq);
-    expect(enq.mock.calls).toEqual([[report, first]]);
+    expect(enq.mock.calls).toEqual([[runtimeFaults.reportAppRuntimeFault, first]]);
     onError!({ context: { fault: 'boom' }, event: { type: 'xstate.error.actor', error: new Error('later') } }, enq);
     expect(enq).toHaveBeenCalledTimes(1);
-    // The named effect hands the fault to the app's error reporter.
-    reporter.reportUiError.mockClear();
-    report(first);
-    expect(reporter.reportUiError.mock.calls).toEqual([[first]]);
   });
 
-  it("should report a running project's first fault once through the error reporter, and no later one", () => {
+  it("should report a running project's first fault once through the app runtime's fault hook, and no later one", () => {
     const guard = guardActors({ ignore: { project: projectIgnoredEvents } });
-    reporter.reportUiError.mockClear();
+    runtimeFaults.reportAppRuntimeFault.mockClear();
     const first = new Error('the log child failed');
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a failing stand-in for the log child.
     const failingLogs = createCallbackLogic(() => {
@@ -106,7 +106,7 @@ describe('the root onError of the composed machines', () => {
     actor.start();
     expect(guard.take('fault').length).toBeGreaterThanOrEqual(2);
     expect(actor.getSnapshot().context.fault).toBe('the log child failed');
-    expect(reporter.reportUiError.mock.calls).toEqual([[first]]);
+    expect(runtimeFaults.reportAppRuntimeFault.mock.calls).toEqual([[first]]);
     actor.stop();
   });
 
@@ -144,7 +144,7 @@ describe('the project runtime root', () => {
       projectRuntimeMachine.provide({
         actors: {
           project: projectMachine.provide({ guards: { isNotBrowser: () => false, shouldAutoLoad: () => false } }),
-          parameterObservers: createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => {
+          parameterObservers: createCallbackLogic<ParameterObserversEvent, ProjectChildInput>(() => {
             throw new Error('the first child failed');
           }),
           manifestObservation: createCallbackLogic<ManifestObservationEvent, ProjectChildInput>(() => {
@@ -214,8 +214,8 @@ describe('the project runtime root', () => {
  * single D23 hook, and the project runtime root reports its first child fault through it once. */
 describe('the single D23 fault hook (A6b)', () => {
   /** Run what a root `onError` enqueued, as the interpreter would. */
-  const runEnqueued = (fn: (...args: unknown[]) => void, ...args: unknown[]): void => {
-    fn(...args);
+  const runEnqueued = (effect: (...args: unknown[]) => void, ...args: unknown[]): void => {
+    effect(...args);
   };
 
   it.each([
@@ -241,7 +241,7 @@ describe('the single D23 fault hook (A6b)', () => {
       projectRuntimeMachine.provide({
         actors: {
           project: projectMachine.provide({ guards: { isNotBrowser: () => false, shouldAutoLoad: () => false } }),
-          parameterObservers: createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => {
+          parameterObservers: createCallbackLogic<ParameterObserversEvent, ProjectChildInput>(() => {
             throw first;
           }),
           manifestObservation: createCallbackLogic<ManifestObservationEvent, ProjectChildInput>(() => {

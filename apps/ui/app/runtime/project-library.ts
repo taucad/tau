@@ -1006,6 +1006,16 @@ export class ProjectLibrary {
     discovery.on('epochMoved', (event) => {
       access.send(event);
     });
+    /* DF20: a pass that skipped its writes in a stop is redone once the stop ends (rule 3). Today's skew listener
+     * refetched the listing as it ran that pass, so a listing published during the stop is replaced by the redo's. */
+    let { skipped } = discovery.getSnapshot().context;
+    discovery.subscribe((snapshot) => {
+      // Only the redo clears a skip (the redo pass may start within the same step, so `redo` is not seen).
+      if (skipped && !snapshot.context.skipped) {
+        void this.queryClient.invalidateQueries({ queryKey: ['projects'] });
+      }
+      ({ skipped } = snapshot.context);
+    });
     recovery.on('journalReady', (event) => {
       access.send(event);
       // Rows are pending: they replay after the bootstrap pass, which a question then also waits for.

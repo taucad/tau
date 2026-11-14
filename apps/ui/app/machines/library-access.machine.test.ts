@@ -162,6 +162,9 @@ describe('libraryAccess', () => {
       ask(harness);
       await resolve(harness.verify, { status: 'unavailable' });
       expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+      // The answered question keeps nothing: the library asks every question under a new id.
+      expect(harness.actor.getSnapshot().context.questions).toEqual({});
+      expect(harness.actor.getSnapshot().context.generations).toEqual({});
     });
 
     it('should answer ready from a pass that finds the project, counting a cached listing', async () => {

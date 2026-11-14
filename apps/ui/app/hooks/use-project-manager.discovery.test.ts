@@ -12,7 +12,7 @@
  */
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { renderHook, act } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
@@ -275,7 +275,7 @@ const createHarness = () => {
       createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
-  return { ...renderHook(() => useProjectManager(), { wrapper }), publishedListings };
+  return { ...renderHook(() => useProjectManager(), { wrapper }), publishedListings, queryClient };
 };
 
 /** Drain every pending continuation; the fake clock yields once and fires nothing. */
@@ -498,6 +498,30 @@ describe('useProjectManager discovery (I7, I9)', () => {
 
       expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
       expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledOnce();
+    });
+
+    it('I9: should refetch the projects listing as the skipped pass is redone, so the stop-time listing is replaced', async () => {
+      mockBuildSuperseded = true;
+      const { result, publishedListings, queryClient } = createHarness();
+      // The listing a person sees: one observed `['projects']` query, as the sidebar's.
+      const observer = new QueryObserver(queryClient, {
+        queryKey: ['projects'],
+        queryFn: async () => result.current.getProjectListing(),
+      });
+      const unsubscribe = observer.subscribe(() => undefined);
+      await settle();
+      expect(publishedListings).toHaveLength(1);
+      expect(mockListProjectManifests).toHaveBeenCalledOnce();
+
+      mockBuildSuperseded = false;
+      act(() => {
+        announceBuildSkew();
+      });
+      await settle();
+
+      expect(mockListProjectManifests).toHaveBeenCalledTimes(2);
+      expect(publishedListings).toHaveLength(2);
+      unsubscribe();
     });
 
     it('I9: should let a pass still in flight end before redoing the writes it skipped', async () => {

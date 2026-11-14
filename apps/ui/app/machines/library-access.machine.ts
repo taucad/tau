@@ -805,8 +805,11 @@ export const libraryAccessMachine = setup({
         outcome: accessOutcomeOf(event.answer),
         cacheHits: event.cacheHits,
       });
+      // The answered query is final, so no report of it can follow: its generation goes with it, as the library mints
+      // a new id for every question and would otherwise keep one entry per question for the life of the tab.
       const { [event.requestId]: _answered, ...questions } = context.questions;
-      return { context: { questions } };
+      const { [event.requestId]: _generation, ...generations } = context.generations;
+      return { context: { questions, generations } };
     }),
     /*
      * The question's query needs the bootstrap pass: it has not run (a `discovery-required` verification), or it failed

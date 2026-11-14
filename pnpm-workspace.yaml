@@ -207,7 +207,7 @@ catalog:
   eslint-plugin-import-x: ^4.16.2
   eslint-plugin-jsdoc: ^62.9.0
   eslint-plugin-max-params-no-constructor: ^0.0.4
-  eslint-plugin-n: ^17.24.0
+  eslint-plugin-n: ^18.5.0
   eslint-plugin-no-use-extend-native: ^0.7.3
   eslint-plugin-react: ^7.37.5
   eslint-plugin-unicorn: ^63.0.0

@@ -44,7 +44,7 @@ import {
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
-import { useLiveProjectIds } from '#hooks/use-sessions.js';
+import { useLiveProjectIds, useProjectLiveness } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import {
@@ -75,10 +75,10 @@ export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 
 type ReloadOpen = { readonly id: string; readonly pathname: string } | 'ended' | undefined;
 
 /**
- * The projects the list draws as live: the live sessions, and the project the page was loaded on until its session
- * first goes live. A reload draws the remembered rows, then the listing answers, and only then does the open
- * project's session go live; it would otherwise move above the rest at that point (U6). After that, or once the page
- * leaves that project, only the registry says what is live (R1/P46), so a session that closes is not drawn as live.
+ * The projects the list draws as live: the live sessions, and the open project from the remembered rows until its
+ * session first goes live. A reload draws the remembered rows, then the listing answers, and only then does the open
+ * project's session go live; it would otherwise move above the rest at that point (U6). After that, once the page
+ * leaves that project, or when its session is closed, only the registry says what is live (R1/P46).
  */
 const useShownLiveIds = (
   liveProjectIds: readonly string[],
@@ -89,18 +89,24 @@ const useShownLiveIds = (
   const rememberedOpenId = rememberedProjects?.find(
     (project) => project.slugs !== undefined && pathname === projectUrlOr(project.slugs),
   )?.id;
+  /* A closed session is the registry's answer already (R1/P46): the phone
+   * sidebar mounts again over remembered rows when a failed listing keeps them. */
+  const isOpenClosed = useProjectLiveness(rememberedOpenId ?? '').closedReason !== undefined;
   /* Render-time state adjustments, not effects: latched once, from the remembered rows, and ended once. */
-  if (reloadOpen === undefined && rememberedOpenId !== undefined) {
+  if (reloadOpen === undefined && rememberedOpenId !== undefined && !isOpenClosed) {
     setReloadOpen({ id: rememberedOpenId, pathname });
   }
   const pendingId =
-    typeof reloadOpen === 'object' && reloadOpen.pathname === pathname && !liveProjectIds.includes(reloadOpen.id)
+    typeof reloadOpen === 'object' &&
+    reloadOpen.pathname === pathname &&
+    !liveProjectIds.includes(reloadOpen.id) &&
+    !isOpenClosed
       ? reloadOpen.id
       : undefined;
   if (typeof reloadOpen === 'object' && pendingId === undefined) {
     setReloadOpen('ended');
   }
-  const shownOpenId = pendingId ?? (reloadOpen === undefined ? rememberedOpenId : undefined);
+  const shownOpenId = pendingId ?? (reloadOpen === undefined && !isOpenClosed ? rememberedOpenId : undefined);
   return useMemo(
     () => new Set(shownOpenId === undefined ? liveProjectIds : [...liveProjectIds, shownOpenId]),
     [liveProjectIds, shownOpenId],

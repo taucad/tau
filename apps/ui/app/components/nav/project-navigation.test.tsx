@@ -835,7 +835,7 @@ describe('ProjectNavigation', () => {
      * remembered rows. An open project whose session closed is not drawn as
      * live there either.
      */
-    it.fails('R1: over remembered rows after a failed listing, a closed open project is not drawn as live', () => {
+    it('R1: over remembered rows after a failed listing, a closed open project is not drawn as live', () => {
       pathname = '/w/home/one';
       liveProjectIds = ['proj_two'];
       closedReasons = { [firstProject.id]: 'Closed to save memory' };

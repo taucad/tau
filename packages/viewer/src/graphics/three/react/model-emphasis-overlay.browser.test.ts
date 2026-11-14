@@ -11,6 +11,7 @@ import {
   MeshBasicMaterial,
   OrthographicCamera,
   PerspectiveCamera,
+  PlaneGeometry,
   RGBAFormat,
   Scene,
   SphereGeometry,
@@ -298,3 +299,77 @@ it.each([false, true])('preserves fractional and occluded highlights with node W
     renderer.dispose();
   }
 });
+
+// Finding 5 of docs/research/orthographic-controls-distance-clip-and-low-fov-grid-blueprint.md: a component of nested
+// layers (a PCB's core, mask and silkscreen tens of µm apart) took one wash per layer wherever no surface separated them.
+it.each(['webgpu', 'webgl'] as const)(
+  'should wash nested layers of one component once per pixel on %s',
+  async (backend) => {
+    const renderer = await createRenderer('viewport', backend, {
+      canvas: document.createElement('canvas'),
+      nodePipeline: true,
+    });
+    if (!(renderer instanceof WebGPURenderer)) {
+      throw new Error('Expected node renderer');
+    }
+    // 512-byte rows: WebGPU pads readback rows to 256 bytes.
+    const width = 128;
+    const height = 96;
+    // Millimetre scale: a 100 mm board, layers 22 µm apart, seen at a slant so depth varies across the frame.
+    const geometry = new PlaneGeometry(2000, 2000);
+    const front = new Mesh(geometry, new MeshBasicMaterial());
+    const buried = new Mesh(geometry, new MeshBasicMaterial());
+    buried.position.z = -0.022;
+    for (const layer of [front, buried]) {
+      layer.updateMatrixWorld();
+    }
+    const camera = new PerspectiveCamera(60, width / height, 1, 5000);
+    camera.position.set(0, -120, 160);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    const target = new WebGLRenderTarget(width, height);
+    const resources = createModelEmphasisResources(backend, createSectionClip(backend));
+    // The wash alone; the composite needs a mask pass and is covered above.
+    resources.overlayGroup.children[1]!.visible = false;
+    const output = new Scene();
+    output.add(resources.overlayGroup);
+    const capture = async (hover: Mesh[]): Promise<Uint8Array<ArrayBuffer>> => {
+      syncModelEmphasisProxies(resources, { hover, selected: [] });
+      syncModelEmphasisFrame(resources);
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(0x00_00_00, 1);
+      renderer.autoClear = true;
+      renderer.render(output, camera);
+      const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height);
+      renderer.setRenderTarget(null);
+      return new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength).slice();
+    };
+    try {
+      const single = await capture([front]);
+      const nested = await capture([front, buried]);
+      let maxDifference = 0;
+      for (const [index, value] of nested.entries()) {
+        maxDifference = Math.max(maxDifference, Math.abs(value - single[index]!));
+      }
+      expect(maxDifference).toBeLessThanOrEqual(1);
+
+      // At full strength the depth tie must hold everywhere: a pixel the prepass claims but its wash misses stays black.
+      resources.wash.hover.opacity = 1;
+      const opaque = await capture([front, buried]);
+      let missed = 0;
+      for (let index = 0; index < opaque.length; index += 4) {
+        if (opaque[index]! + opaque[index + 1]! + opaque[index + 2]! === 0) {
+          missed++;
+        }
+      }
+      expect(missed).toBe(0);
+    } finally {
+      resources.dispose();
+      target.dispose();
+      geometry.dispose();
+      front.material.dispose();
+      buried.material.dispose();
+      renderer.dispose();
+    }
+  },
+);

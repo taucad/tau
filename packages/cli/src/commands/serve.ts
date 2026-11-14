@@ -602,7 +602,7 @@ export const resolveServePort = async (options: {
  * The host labels every model call from this daemon names (LW17): a self-hosted serve as `daemon` with this CLI's
  * version as its build, and the provisioned cloud host (`TAU_CLOUD_HOST=1`) as `cloud` with no build, because its
  * observer's own facts carry none (LW23) and a run's generations must read the release its root does. The transport
- * adds each call's model; the run's kernel is not known to the host, so none is sent.
+ * adds each call's model, and the session each run's kernel from its turn's snapshot.
  *
  * @internal
  * @param environment - The process environment.

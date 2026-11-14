@@ -14,7 +14,9 @@
  * callback children, never in its context (D4). The root's context holds the two child refs, the manifest
  * observation's health and the first fault its root `onError` caught (MC-R12, D23).
  *
- * Nothing in the app imports this module yet (A6b wires it, A6d loads it lazily from the session).
+ * `ProjectProvider` builds one through the app runtime's lease store (A6b); A6d loads it lazily from the session. The
+ * runtime also owns the producer set a leave, close or unload flush walks (R3-F5, row S40), so a runtime child can
+ * register in it without a mount, and reports its first fault once through the app runtime's one fault hook (D23).
  *
  * @module
  */
@@ -31,6 +33,7 @@ import type {
   SnapshotFrom,
 } from 'xstate';
 import { toast } from 'sonner';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { Topic } from '@taucad/events';
 import { parameterRecordInputValues } from '@taucad/parameters';
 import { projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
@@ -54,7 +57,7 @@ import {
   parameterStageForSettlement,
   resolveScopedProjectManifest,
   shouldDispatchParameterSettlement,
-} from '#hooks/use-project.js';
+} from '#runtime/project-runtime.helpers.js';
 import type { ParameterFilesClient } from '#hooks/use-file-manager.js';
 import type { ProjectKernelSelection } from '#hooks/use-project-kernel-options.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
@@ -165,16 +168,22 @@ export type ProjectRuntimeContext = {
 
 export type ProjectRuntimeEvent =
   | Readonly<{ type: 'retryManifestObservation' }>
-  | Readonly<{ type: 'manifestObservationChanged'; error: string | undefined }>;
+  | Readonly<{ type: 'manifestObservationChanged'; error: string | undefined }>
+  /** A parameter entry's resolve settled: a preview's resolved values go to its kernel (A6b). */
+  | Readonly<{ type: 'parameterEntryResolved'; entryPath: string }>;
 
 /** The public alphabet, in union order. */
 export const projectRuntimeEventTypes = [
   'retryManifestObservation',
   'manifestObservationChanged',
+  'parameterEntryResolved',
 ] as const satisfies ReadonlyArray<ProjectRuntimeEvent['type']>;
 
 /** The (state, event) pairs the runtime root leaves unanswered (MC-R17): none. */
 export const projectRuntimeIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [];
+
+/** What the parameter observers child receives: a resolve that settled, whose preview values it publishes. */
+export type ParameterObserversEvent = Readonly<{ type: 'publishPreviewParameters'; entryPath: string }>;
 
 /** What the manifest observation child receives. */
 export type ManifestObservationEvent = Readonly<{ type: 'refresh' }>;
@@ -188,9 +197,10 @@ type ProjectChildLogic<Received extends EventObject = Readonly<{ type: 'never' }
 >;
 
 /* Each slot's default keeps nothing: a callback driver may default to a no-op (MC-R8). The factory provides them. */
-const parameterObservers: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, ProjectChildInput>(
-  () => undefined,
-);
+const parameterObservers: ProjectChildLogic<ParameterObserversEvent> = createCallbackLogic<
+  ParameterObserversEvent,
+  ProjectChildInput
+>(() => undefined);
 const manifestObservation: ProjectChildLogic<ManifestObservationEvent> = createCallbackLogic<
   ManifestObservationEvent,
   ProjectChildInput
@@ -214,13 +224,24 @@ export const projectRuntimeActors = {
 const describeFault = (error: unknown): string =>
   String(typeof error === 'object' && error !== null && 'message' in error ? error.message : error);
 
-/** Each invoked child's own `onError` (MC-R12): the runtime records the fault, keeps the first and keeps running. */
-const recordChildFault = ({
-  context,
-  event,
-}: Readonly<{ context: Readonly<{ fault: string | undefined }>; event: Readonly<{ error: unknown }> }>) => ({
-  context: { fault: context.fault ?? describeFault(event.error) },
-});
+/**
+ * The root's `onError` and each invoked child's own (MC-R12): the runtime records the fault, keeps the first and keeps
+ * running. The first is reported once through the app runtime's one fault hook (D23); later ones are usually its
+ * consequences, so they are neither kept nor reported.
+ */
+const recordFault = (
+  {
+    context,
+    event,
+  }: Readonly<{ context: Readonly<{ fault: string | undefined }>; event: Readonly<{ error: unknown }> }>,
+  enq: (effect: (error: unknown) => void, error: unknown) => void,
+) => {
+  if (context.fault !== undefined) {
+    return { context: { fault: context.fault } };
+  }
+  enq(reportAppRuntimeFault, event.error);
+  return { context: { fault: describeFault(event.error) } };
+};
 
 /**
  * The project runtime's root. Its children are the project and editor actors (spawned with the root, so their refs
@@ -236,9 +257,9 @@ export const projectRuntimeMachine = setup({
 }).createMachine({
   id: 'project-runtime',
   version: '1',
-  // A defect is recorded and the runtime keeps running: the first is kept, since later ones are usually its
-  // consequences (MC-R12, D23, B2).
-  onError: ({ context, event }) => ({ context: { fault: context.fault ?? describeFault(event.error) } }),
+  // A defect is recorded and the runtime keeps running: the first is kept and reported once, since later ones are
+  // usually its consequences (MC-R12, D23, B2).
+  onError: recordFault,
   context: ({ input, spawn, actors }) => ({
     projectId: input.projectId,
     profile: input.profile,
@@ -261,6 +282,13 @@ export const projectRuntimeMachine = setup({
     },
     manifestObservationChanged: ({ context, event }) =>
       context.manifestObservationError === event.error ? {} : { context: { manifestObservationError: event.error } },
+    parameterEntryResolved: ({ children, event }, enq) => {
+      const observers = children['parameterObservers'];
+      if (observers !== undefined) {
+        enq.sendTo(observers, { type: 'publishPreviewParameters', entryPath: event.entryPath });
+      }
+      return {};
+    },
   },
   initial: 'running',
   states: {
@@ -268,30 +296,30 @@ export const projectRuntimeMachine = setup({
       // The project and editor actors spawned in context stop first; of the invoked children the owner stops first,
       // so a file-manager change during the root's stop cannot rebuild after the shared close.
       invoke: [
-        { id: 'parameterServiceOwner', src: 'parameterServiceOwner', onError: recordChildFault },
+        { id: 'parameterServiceOwner', src: 'parameterServiceOwner', onError: recordFault },
         {
           id: 'parameterObservers',
           src: 'parameterObservers',
           input: ({ context }) => ({ project: context.projectRef }),
-          onError: recordChildFault,
+          onError: recordFault,
         },
         {
           id: 'manifestObservation',
           src: 'manifestObservation',
           input: ({ context }) => ({ project: context.projectRef }),
-          onError: recordChildFault,
+          onError: recordFault,
         },
         {
           id: 'libraryEvents',
           src: 'libraryEvents',
           input: ({ context }) => ({ project: context.projectRef }),
-          onError: recordChildFault,
+          onError: recordFault,
         },
         {
           id: 'resources',
           src: 'resources',
           input: ({ context }) => ({ project: context.projectRef }),
-          onError: recordChildFault,
+          onError: recordFault,
         },
       ],
     },
@@ -301,11 +329,72 @@ export const projectRuntimeMachine = setup({
 export type ProjectRuntimeActor = Actor<typeof projectRuntimeMachine>;
 export type ProjectRuntimeSnapshot = SnapshotFrom<typeof projectRuntimeMachine>;
 
-/** A built project runtime: the unstarted root and the parameter service its children share, which can be rebuilt. */
+/** One producer: it writes what it holds and settles, rejecting when it cannot confirm it saved. */
+type ProjectProducerFlush = () => Promise<void>;
+
+/**
+ * The producer set a leave, close or unload flush walks (R3-F5, row S40; the flush-ownership table of plan § 4 A7). Each
+ * producer writes what it holds and settles; `flushAll` runs every registered producer at once and rejects with every
+ * refusal, so one producer that cannot confirm its records never hides another's.
+ */
+export type ProjectRuntimeProducers = Readonly<{
+  /**
+   * Add a producer to the set.
+   *
+   * @param flush - Writes what the producer holds; rejects when it cannot confirm it saved.
+   * @returns The removal. Registering the same function twice keeps it once.
+   */
+  register: (flush: () => Promise<void>) => () => void;
+  /**
+   * Flush every registered producer and wait for each to settle.
+   *
+   * @returns Resolves when every producer confirmed; rejects with an `AggregateError` of every refusal otherwise.
+   */
+  flushAll: () => Promise<void>;
+}>;
+
+/** A built project runtime: the unstarted root, the parameter service its children share, and its producer set. */
 export type ProjectRuntime = Readonly<{
   actor: ProjectRuntimeActor;
   parameterService: ObservablePort<ParameterSetService>;
+  producers: ProjectRuntimeProducers;
+  /**
+   * Hand a preview's runtime the service its scope rebuilt (a new worker opener): the observers rebind to it, as the
+   * provider's memo followed the prop. The scope owns and closes the services; a runtime built without one ignores it.
+   */
+  replacePreviewParameterService: (service: ParameterSetService) => void;
 }>;
+
+/**
+ * Build a project's producer set. It is a host object of the runtime, beside its root and never in its context (D4).
+ *
+ * @returns The set.
+ */
+export const createProjectRuntimeProducers = (): ProjectRuntimeProducers => {
+  /* A producer set awaited as a whole, not an event fan-out: `flushAll` needs every producer's own settlement. */
+  const producers = new Set<ProjectProducerFlush>();
+  return {
+    register: (flush) => {
+      producers.add(flush);
+      return () => {
+        producers.delete(flush);
+      };
+    },
+    flushAll: async () => {
+      const outcomes = await Promise.allSettled([...producers].map(async (flush) => flush()));
+      const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+      if (failures.length > 0) {
+        const reasons = failures.map((failure) => failure.reason as unknown);
+        throw new AggregateError(
+          reasons,
+          reasons
+            .map((reason) => (reason instanceof Error ? reason.message : 'Workbench records are not confirmed saved.'))
+            .join(' '),
+        );
+      }
+    },
+  };
+};
 
 /** The runtime's current parameter service, which its owner child replaces. */
 type ParameterServiceHolder = ObservablePort<ParameterSetService> &
@@ -346,11 +435,12 @@ const errorMessage = (error: unknown): string =>
 export const createParameterObserversLogic = (
   options: Readonly<{
     parameterService: ObservablePort<ParameterSetService>;
-    previewParameterService?: ParameterSetService;
+    /** A preview's: its resolved values reach the kernel as temporary parameters instead of committed stages. */
+    publishesPreviewParameters?: boolean;
   }>,
-): ProjectChildLogic => {
-  const { previewParameterService } = options;
-  return createCallbackLogic<{ type: 'never' }, ProjectChildInput>(({ input: { project } }) => {
+): ProjectChildLogic<ParameterObserversEvent> => {
+  const publishesPreviewParameters = options.publishesPreviewParameters === true;
+  return createCallbackLogic<ParameterObserversEvent, ProjectChildInput>(({ input: { project }, receive }) => {
     /* The service the observers are bound to: a rebuilt service rebinds them, as the provider's effect re-runs. */
     let parameterService = options.parameterService.get();
     /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path gets a fresh
@@ -359,11 +449,11 @@ export const createParameterObserversLogic = (
     const previewValuesByRuntime = new WeakMap<WeakKey, string>();
 
     const publishPreviewParameters = (entryPath: string): void => {
-      if (previewParameterService === undefined) {
+      if (!publishesPreviewParameters) {
         return;
       }
       const cadRef = project.getSnapshot().context.geometryUnits.get(entryPath);
-      const snapshot = previewParameterService.snapshot(entryPath);
+      const snapshot = parameterService.snapshot(entryPath);
       if (cadRef === undefined || snapshot === undefined) {
         return;
       }
@@ -395,7 +485,7 @@ export const createParameterObserversLogic = (
         if (cadRef === undefined || current === undefined) {
           return;
         }
-        if (previewParameterService !== undefined) {
+        if (publishesPreviewParameters) {
           if (shouldDispatchParameterSettlement(outcome)) {
             publishPreviewParameters(entryPath);
           }
@@ -450,6 +540,10 @@ export const createParameterObserversLogic = (
       };
     };
 
+    /* A resolve that settled: its values reach a preview's kernel, as the provider published them after `resolve`. */
+    receive((event) => {
+      publishPreviewParameters(event.entryPath);
+    });
     let { geometryUnits } = project.getSnapshot().context;
     let release = observeUnits(geometryUnits);
     const projectSubscription = project.subscribe((snapshot) => {
@@ -730,7 +824,7 @@ export const createParameterServiceOwnerLogic = (
  *
  * @param options - The project, its file manager and library, the profile, the kernel selection and the actor
  *   options tests inject.
- * @returns The unstarted root and the parameter service its children share.
+ * @returns The unstarted root, the parameter service its children share and its producer set.
  */
 export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRuntime {
   const { projectId, fileManager, library, profile, provide, previewParameterService, viewRecordPorts, chatSessions } =
@@ -836,7 +930,7 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
       editor: providedEditor,
       parameterObservers: createParameterObserversLogic({
         parameterService,
-        ...(previewParameterService === undefined ? {} : { previewParameterService }),
+        publishesPreviewParameters: previewParameterService !== undefined,
       }),
       manifestObservation: createManifestObservationLogic({ projectId, fileManagerRef }),
       libraryEvents: createLibraryEventsLogic({ projectId, profile, library }),
@@ -874,5 +968,14 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
       },
     },
   });
-  return { actor, parameterService: { get: parameterService.get, subscribe: parameterService.subscribe } };
+  return {
+    actor,
+    parameterService: { get: parameterService.get, subscribe: parameterService.subscribe },
+    producers: createProjectRuntimeProducers(),
+    replacePreviewParameterService: (service) => {
+      if (previewParameterService !== undefined && service !== parameterService.get()) {
+        parameterService.replace(service);
+      }
+    },
+  };
 }

@@ -168,7 +168,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('the 
 
     // Tip 3: the real action, a parameter changed.
     await showParameters();
-    const field = selectors.getByCss('[data-slot=parameters] input').first();
+    const field = selectors.getByLabelText('Input for Width', { exact: true }).first();
     await target.fill(field, '12');
     await target.press(field, 'Enter');
     await target.expectVisible(tipNamed('Check it against what you need'), 30_000);
@@ -261,6 +261,10 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('the 
     // A completion list open in the code editor closes on Escape; the tip stays.
     const file = selectors.getByRole('treeitem', { name: /touch-parameters\.js$/u }).first();
     if (!(await target.isVisible(file))) {
+      // The Files pane is not part of the seed's opening layout: open it from the command palette.
+      await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+      await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open files');
+      await target.click(selectors.getByText('Open files', { exact: true }));
       for (const folder of ['public', 'models']) {
         await target.click(selectors.getByRole('treeitem', { name: folder, exact: true }).first());
       }
@@ -290,7 +294,8 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('the 
         }
       });
     });
-    await target.click(viewerCanvas());
+    // The viewer's region lies over its canvas and takes the pointer: clicking it focuses the viewer.
+    await target.click(selectors.getByRole('application', { name: 'CAD canvas' }).first());
     await target.keyboardPress('Escape');
     expect(
       await target.evaluate(

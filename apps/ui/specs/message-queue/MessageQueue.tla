@@ -95,12 +95,15 @@
 \* The app runtime builds the session store with its dependencies at construction (app state
 \* orchestration A2): the library's chat-record ports, and its record client and watch, taken again
 \* when the root worker is replaced. The closures it calls are the same; queue paths unchanged.
+\* A chat a sidebar row only observes answers unread from its observation's project, as an
+\* acquired chat answers from its session's; admission, delivery and the queue never read it.
 \* The session store reports its transcript's load state and the composer trays a chat remembers
 \* (app state orchestration A12, I21): read-only derivations of the applied transcript and a
 \* per-device memory, latched once the load settles (a refused read, or a chat this tab created
 \* empty, noted by the create paths); an empty log waits for the scan of other devices' history before
 \* it settles, and a refused or failed read waits for it too; a scan that fails or never reads
-\* latches. Admission, delivery, persistence and the queue barrier are unchanged.
+\* latches, as does a chat refused before it was opened or whose watch closed after it read.
+\* Admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

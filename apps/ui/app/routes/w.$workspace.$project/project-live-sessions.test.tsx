@@ -3,10 +3,11 @@
  * orchestration A0.2, inventory S1 to S7, S12, S26, S27 and S40).
  *
  * The registry is real (`createSessionsActor` on a `StepClock`), and so are the unload sequencer,
- * `LiveProjectSessions`, the binding, the persistence guard and `ProjectProvider` with its producer set.
- * Only the leaves are stand-ins: the project and editor actors (as `useActorRef` returns them), the
- * file manager, the revision client and the chat store. Each row renders under StrictMode, as the
- * app does in development.
+ * `LiveProjectSessions`, the binding, the persistence guard and `ProjectProvider` with its lease and the
+ * runtime's producer set. Only the leaves are stand-ins: the project and editor actors (as the leased
+ * project runtime spawns them, since A6b; before it, as `useActorRef` returned them), the file manager,
+ * the revision client and the chat store. Each row renders under StrictMode, as the app does in
+ * development.
  */
 
 import { StrictMode, createContext, useContext, useEffect, useSyncExternalStore } from 'react';
@@ -18,6 +19,11 @@ import type { Actor } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import type * as XstateReactModule from '@xstate/react';
 import type * as UseProjectModule from '#hooks/use-project.js';
+import type * as ProjectRuntimeModule from '#runtime/project-runtime.js';
+import type { ProjectRuntimeOptions } from '#runtime/project-runtime.js';
+import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
+import { createAppRuntime } from '#runtime/app-runtime.js';
+import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type * as CloudProjectsModule from '#hooks/use-cloud-projects.js';
 import type * as SessionsStoreModule from '#services/sessions-store.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
@@ -325,9 +331,39 @@ vi.mock('@xstate/react', async (importOriginal) => {
   const actual = await importOriginal<typeof XstateReactModule>();
   return {
     ...actual,
-    /* `ProjectProvider` builds its project and editor actors here; the rows read their stand-ins. */
+    /* A component that still builds an actor here gets its stand-in. */
     useActorRef: (logic: { readonly id: string }, options: { readonly input: { readonly projectId: string } }) =>
       actorFor(`${logic.id}:${options.input.projectId}`),
+  };
+});
+
+/* `ProjectProvider` leases its project runtime, which spawns the project and editor actors (A6b): the stand-in
+ * runtime hands the rows' stand-ins to the provider and owns the real producer set. Its start is the editor's
+ * `load`, as the real root's entry is. */
+vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectRuntimeModule>();
+  return {
+    ...actual,
+    createProjectRuntime: (options: ProjectRuntimeOptions) => {
+      const projectRef = actorFor(`project:${options.projectId}`);
+      const editorRef = actorFor(`editor:${options.projectId}`);
+      const snapshot = { status: 'active', context: { projectRef, editorRef, manifestObservationError: undefined } };
+      const actor = {
+        getSnapshot: () => snapshot,
+        subscribe: () => ({ unsubscribe: () => undefined }),
+        send: () => undefined,
+        start: () => {
+          editorRef.send({ type: 'load' });
+          return actor;
+        },
+        stop: () => actor,
+      };
+      return {
+        actor,
+        parameterService: { get: () => parameterService, subscribe: () => () => undefined },
+        producers: actual.createProjectRuntimeProducers(),
+      };
+    },
   };
 });
 
@@ -405,6 +441,8 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatSessions }));
 vi.mock('#hooks/use-models.js', () => ({
+  /* The app runtime's `choices` derives the default model with it (A6b). */
+  catalogDefaultModelId: () => undefined,
   useModels: () => {
     const { model } = useSyncExternalStore(choiceStore.subscribe, choiceStore.get);
     return {
@@ -414,6 +452,7 @@ vi.mock('#hooks/use-models.js', () => ({
   },
 }));
 vi.mock('#hooks/use-kernel.js', () => ({
+  resolveRememberedKernel: () => ({ kernel: 'openscad' }),
   useKernel: () => ({ kernel: useSyncExternalStore(choiceStore.subscribe, choiceStore.get).kernel }),
 }));
 vi.mock('#services/sessions-store.js', async (importOriginal) => {
@@ -551,6 +590,8 @@ let visibility: DocumentVisibilityState = 'visible';
 let clock: StepClock;
 let registry: Actor<typeof sessionsMachine>;
 let queryClient: QueryClient;
+/* The app runtime `ProjectProvider` leases its project runtime from; the rows' query client is its own (A6b). */
+let appRuntime: ReturnType<typeof createAppRuntime>;
 const flushRegistrations: Array<ProjectSessionFlushRegistration | undefined> = [];
 
 type Focus = Readonly<{ projectId: string; requestedChatId?: string; createdChatId?: string }> | undefined;
@@ -589,15 +630,17 @@ function SessionStageProbe(): undefined {
   return undefined;
 }
 
-/** The app's root composition around the live sessions: unload sequencer, query client, registry. */
+/** The app's root composition around the live sessions: app runtime, unload sequencer, query client, registry. */
 const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => (
   <StrictMode>
-    <UnloadProvider>
-      {sessionProbe ? <SessionStageProbe /> : null}
-      <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
-      </QueryClientProvider>
-    </UnloadProvider>
+    <AppRuntimeProvider runtime={appRuntime}>
+      <UnloadProvider>
+        {sessionProbe ? <SessionStageProbe /> : null}
+        <QueryClientProvider client={queryClient}>
+          <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
+        </QueryClientProvider>
+      </UnloadProvider>
+    </AppRuntimeProvider>
   </StrictMode>
 );
 
@@ -652,6 +695,12 @@ beforeEach(() => {
   clock = new StepClock();
   registry = createSessionsActor({ clock }).start();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  appRuntime = createAppRuntime({
+    clock,
+    environment: () => createFakeEnvironmentHost(),
+    idleFileManagers: true,
+    queryClient,
+  });
   fixtures.order.length = 0;
   fixtures.actors.clear();
   fixtures.revisionClients.clear();
@@ -670,6 +719,7 @@ beforeEach(() => {
 
 afterEach(() => {
   registry.stop();
+  appRuntime.stop();
   tauCloudIntent.set(projectA, undefined);
 });
 

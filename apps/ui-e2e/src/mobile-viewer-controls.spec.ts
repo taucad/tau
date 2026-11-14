@@ -144,6 +144,8 @@ test.each([
   const drawer = selectors.getByRole('dialog', { name: 'Viewer settings' });
   await target.expectVisible(drawer);
   await target.expectCount(selectors.getByRole('menu'), 0);
+  // The drawer slides up from below the screen, so its box is the resting one only once the slide has finished.
+  await sheetSettled(drawer);
   const box = await target.boundingBox(drawer);
   if (!box) {
     throw new Error('The settings drawer has no layout box.');
@@ -158,8 +160,11 @@ test.each([
   await target.expectVisible(drawer.getByRole('group', { name: 'Grid & units' }));
   await target.click(drawer.getByRole('button', { name: 'Back to Viewer settings' }), { touch: true });
   await target.expectVisible(drawer.getByRole('switch', { name: 'Grid', exact: true }));
-  const layout = await readLayout();
-  expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+  // The open drawer is modal, so the bar behind it is out of the accessibility tree; read the page itself.
+  const pageOverflow = await target.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(pageOverflow).toBeLessThanOrEqual(0);
 
   await target.click(drawer.getByRole('button', { name: 'Close' }), { touch: true });
   await target.expectCount(drawer, 0);

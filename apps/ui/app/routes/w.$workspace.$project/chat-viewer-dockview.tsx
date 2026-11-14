@@ -602,35 +602,27 @@ export type ViewerFileActions = Readonly<{
 type ViewerDockHost = Readonly<{ send: (event: ViewerDockReady | ViewerDockReleased) => void }>;
 
 /**
- * Hand the viewer's Dockview to its adapter (D11): the dock's ref callback sends `dockReady` once Dockview's `onReady`
- * gave it an api, and its cleanup sends `dockReleased`, so the host spawns and stops the adapter and the component
- * starts and stops nothing (I1). A new host, api or port hands the dock over again; a release names its mount.
+ * Hand the viewer's Dockview to its adapter (D11): once Dockview's `onReady` gave an api, a layout effect sends
+ * `dockReady` and its cleanup (run with the dock's unmount) sends `dockReleased`, so the host spawns and stops the
+ * adapter and the component starts and stops nothing (I1). A new host, api or port hands the dock over again; a release
+ * names its mount. It runs as a layout effect after the one that feeds the adapter's facts, so a dock handed over again
+ * (a project switch) starts its new adapter on that commit's facts, never the previous one's.
  *
  * @param host - The project's layout, or its editor on a page without one.
  * @param api - The Dockview api, once `onReady` gave it.
  * @param ports - The adapter's ports.
- * @returns The ref callback for the dock's box.
  */
-function useViewerDockRef(
-  host: ViewerDockHost,
-  api: DockviewApi | undefined,
-  ports: ViewerAdapterPorts,
-  // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
-): (element: HTMLDivElement | null) => (() => void) | undefined {
+function useViewerDock(host: ViewerDockHost, api: DockviewApi | undefined, ports: ViewerAdapterPorts): void {
   const dockId = useId();
-  return useCallback(
-    // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
-    (element: HTMLDivElement | null): (() => void) | undefined => {
-      if (element === null || api === undefined) {
-        return undefined;
-      }
-      host.send({ type: 'dockReady', adapter: 'viewer', dockId, api, ports });
-      return () => {
-        host.send({ type: 'dockReleased', adapter: 'viewer', dockId });
-      };
-    },
-    [api, dockId, host, ports],
-  );
+  useLayoutEffect(() => {
+    if (api === undefined) {
+      return undefined;
+    }
+    host.send({ type: 'dockReady', adapter: 'viewer', dockId, api, ports });
+    return () => {
+      host.send({ type: 'dockReleased', adapter: 'viewer', dockId });
+    };
+  }, [api, dockId, host, ports]);
 }
 
 /**
@@ -767,15 +759,13 @@ export const ViewerDockview = memo(function ({
   useLayoutEffect(() => {
     factsPort.set(adapterFacts);
   }, [adapterFacts, factsPort]);
-  // The layout spawns the adapter on a page with one; elsewhere (a shared embed, a project without a layout) the editor
-  // does (programme control, 2026-11-14).
   const adapterPorts = useMemo(
     () => ({ profile, projectId, project: projectRef, facts: factsPort }),
     [factsPort, profile, projectId, projectRef],
   );
   // The layout runs the adapter on a page with one; elsewhere (a shared embed, a project without a layout) the editor
   // does (programme control, 2026-11-14).
-  const dockRef = useViewerDockRef(workspace?.layout ?? editorRef, api, adapterPorts);
+  useViewerDock(workspace?.layout ?? editorRef, api, adapterPorts);
 
   // Track active viewer panel for settings inheritance
   useEffect(() => {
@@ -925,7 +915,7 @@ export const ViewerDockview = memo(function ({
           entryPath={activeViewerEntryPath}
         />
       ) : null}
-      <div ref={dockRef} className='@container/viewer relative size-full'>
+      <div className='@container/viewer relative size-full'>
         {/* D1: phones keep the mounted viewer and its file state without desktop tabs or split/close actions.
           Dockview observes the hidden header's zero height and gives that space back to the canvas. */}
         <Dockview

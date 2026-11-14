@@ -264,8 +264,10 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
     let isApplying = false;
     /* What the adapter last put on screen, so Dockview's deferred report of it is not the person's edit. */
     let adopted: string | undefined;
-    /* The last viewer panel that was active: a new view is made from it (V8). */
-    let activeViewerId: string | undefined;
+    /* The active viewer panel, if the active panel is one: a new view is made from it (V8). */
+    const { activePanel } = api;
+    let activeViewerId =
+      activePanel !== undefined && isViewerPanelParameters(activePanel.params) ? activePanel.id : undefined;
     /* Demand (Y9): graphics owners created, geometry units created, and the entry each visible panel demands. */
     const admittedGraphics = new Set<string>();
     const admittedGeometry = new Map<string, string>();
@@ -303,7 +305,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       } else {
         const current = facts.get();
         const source = viewSourceOf(
-          api.panels.find((panel) => panel.id === activeViewerId) ?? api.activePanel,
+          api.panels.find((panel) => panel.id === activeViewerId),
           current.viewRecords,
         );
         const viewId = mintViewRecordId();
@@ -467,9 +469,8 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
 
     listen(
       api.onDidActivePanelChange(({ panel }) => {
-        if (panel && isViewerPanelParameters(panel.params)) {
-          activeViewerId = panel.id;
-        }
+        // A non-viewer tab (the launcher) clears it: a view opened then starts from defaults, as the dock's others do.
+        activeViewerId = panel && isViewerPanelParameters(panel.params) ? panel.id : undefined;
       }),
     );
     listen(api.onDidAddPanel(watch));

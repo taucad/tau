@@ -168,8 +168,7 @@ export function createWorkbenchLayoutControllerShim(
       open === undefined ||
       target.kind !== 'pane' ||
       entry?.state !== 'delivered' ||
-      entry.deliveryId !== deliveryId ||
-      latest?.refused === true
+      entry.deliveryId !== deliveryId
     ) {
       layout.send({ type: 'intentUnavailable', intentId, deliveryId });
       return;
@@ -178,8 +177,9 @@ export function createWorkbenchLayoutControllerShim(
     if (node !== undefined) {
       onScreen.set('viewer', JSON.stringify(node));
     }
-    if (node === undefined || latest === undefined) {
-      // The record could not be read at all: the viewer opens, but there is no record to hold it, so no edit.
+    if (node === undefined || latest === undefined || latest.refused) {
+      // The record could not be read, or was refused: the viewer opens, as it did before a request was an intent, but
+      // there is no record to hold it, so no edit.
       layout.send({ type: 'intentUnavailable', intentId, deliveryId });
       return;
     }

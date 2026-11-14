@@ -268,9 +268,13 @@ const hostDock = (event: { type: string }): void => {
       adapter.stop();
       dockAdapters.delete(id);
     }
-    const adapter = createActor(workbenchAdapterLogic, { input: { api: ready.api, ports: ready.ports } });
+    const adapter = createActor(workbenchAdapterLogic, {
+      input: { api: ready.api, dockId: ready.dockId, ports: ready.ports },
+    });
     dockAdapters.set(dockAdapterId('workbench', ready.dockId), adapter);
     adapter.start();
+    // As a host answers the adapter's `dockSettled`: nothing it sent at start is waiting here.
+    adapter.send({ type: 'settled' });
   } else if (event.type === 'dockReleased') {
     const id = dockAdapterId('workbench', (event as WorkbenchDockReleased).dockId);
     dockAdapters.get(id)?.stop();

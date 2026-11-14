@@ -19,7 +19,11 @@ import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
 import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
-import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
+import type {
+  WorkbenchDockReady,
+  WorkbenchDockReleased,
+  WorkbenchDockSettled,
+} from '#workbench-records/workbench-adapter.js';
 
 const maxOpenFiles = 200;
 
@@ -198,7 +202,8 @@ export type EditorStateEvent =
   /* A layout-less page's workbench Dockview hands over its adapter (A8c): share and preview have no workbench layout
    * to run it, so the editor, whose open files it places, runs it as a child until the same Dockview releases it. */
   | WorkbenchDockReady
-  | WorkbenchDockReleased;
+  | WorkbenchDockReleased
+  | WorkbenchDockSettled;
 
 /**
  * The editor machine's public alphabet: every {@link EditorStateEvent} type, in the union's order. The totality test
@@ -231,6 +236,7 @@ export const editorEventTypes = [
   'retryEnsureFocusedChat',
   'dockReady',
   'dockReleased',
+  'dockSettled',
 ] as const satisfies ReadonlyArray<EditorStateEvent['type']>;
 
 /** The events only `ready` answers: tab, chat, panel and flush verbs, and the focused-chat retry. */
@@ -529,8 +535,16 @@ export const editorMachine = setup({
       }
       enq.spawn(actors.workbenchAdapter, {
         id: dockAdapterId(event.adapter, event.dockId),
-        input: { api: event.api, ports: event.ports },
+        input: { api: event.api, dockId: event.dockId, ports: event.ports },
       });
+      return {};
+    },
+    // The adapter has started: it finishes its start after what its start sent has been handled.
+    dockSettled: ({ children, event }, enq) => {
+      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
+      if (adapter !== undefined) {
+        enq.sendTo(adapter, { type: 'settled' });
+      }
       return {};
     },
     dockReleased: ({ children, event }, enq) => {

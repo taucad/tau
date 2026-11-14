@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -348,17 +348,6 @@ export function ProjectLibrary({
   /* A shown wait that ends keeps its indicator for its 500 ms minimum, so a failure is said once that hold is over. */
   const [releasedCloudHold, setReleasedCloudHold] = useState<WaitIndicatorTiming>();
   const isCloudWaitHolding = cloudWaitTiming.state === 'holding' && releasedCloudHold !== cloudWaitTiming;
-  useEffect(() => {
-    if (cloudWaitTiming.state !== 'holding') {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setReleasedCloudHold(cloudWaitTiming);
-    }, Number.parseFloat(cloudWaitTiming.hideDelay));
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [cloudWaitTiming]);
   /* On a phone whose top bar carries the /projects header, the header row is visually hidden until a notice is shown;
      once shown, it stays for this page view, so a Retry or a recovery does not move the grid again. */
   const [hasShownCloudNotice, setHasShownCloudNotice] = useState(false);
@@ -688,6 +677,17 @@ export function ProjectLibrary({
             })
       }
       onRetryCloud={handleRetryCloud}
+      /* The hold ends on the clock the indicator's own CSS keeps, with no script timer. */
+      hold={
+        isCloudWaitHolding
+          ? {
+              hideDelay: cloudWaitTiming.hideDelay,
+              onEnd: () => {
+                setReleasedCloudHold(cloudWaitTiming);
+              },
+            }
+          : undefined
+      }
     >
       <WaitIndicator
         className='min-w-0 justify-end overflow-hidden'
@@ -1210,6 +1210,16 @@ function retryRevealStyle(slowDelay: string): React.CSSProperties & Record<'--wa
 }
 
 /**
+ * The hold a shown wait still owes, as the indicator's `wait-hold` reads it.
+ *
+ * @param hideDelay - When the hold ends, as the indicator's `--wait-hide-delay`.
+ * @returns The hold's style.
+ */
+function holdStyle(hideDelay: string): React.CSSProperties & Record<'--wait-hide-delay', string> {
+  return { '--wait-hide-delay': hideDelay };
+}
+
+/**
  * The Projects header's trailing status slot (P-k): one line, as tall as the wait indicator, that takes the row's
  * spare width and clips there, so it never wraps the header. It says Tau Cloud is offline or failed, with Retry for
  * the failure, and otherwise holds the wait indicator it is given.
@@ -1219,6 +1229,7 @@ function LibraryStatusSlot({
   announcement,
   retry,
   onRetryCloud,
+  hold,
   children,
 }: {
   readonly notice: CloudNotice | undefined;
@@ -1227,6 +1238,8 @@ function LibraryStatusSlot({
   /** How Tau Cloud's Retry is offered, if at all. */
   readonly retry: CloudRetry | undefined;
   readonly onRetryCloud: () => void;
+  /** A shown Tau Cloud wait's hold after it ended: how long it lasts, and what ends it. */
+  readonly hold?: Readonly<{ hideDelay: string; onEnd: () => void }>;
   readonly children: ReactNode;
 }): React.JSX.Element {
   return (
@@ -1234,6 +1247,16 @@ function LibraryStatusSlot({
       data-slot='project-library-status'
       className='flex min-h-6 min-w-0 flex-1 basis-0 items-center justify-end gap-1.5 overflow-hidden text-xs text-muted-foreground'
     >
+      {/* The shown wait's 500 ms hold, kept by a CSS animation whose end releases it. Out of the flow, it shows nothing. */}
+      {hold === undefined ? null : (
+        <span
+          aria-hidden
+          data-slot='project-library-hold'
+          className='absolute size-0 wait-hold'
+          style={holdStyle(hold.hideDelay)}
+          onAnimationEnd={hold.onEnd}
+        />
+      )}
       {/* One status region, always present, so the offline words and a Retry's wait are announced when they arrive. */}
       {/* Never `display: none`, even empty: a live region must be in the tree before its words arrive. Out of the
           flow while it shows nothing, it adds no gap. */}

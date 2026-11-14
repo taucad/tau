@@ -1778,9 +1778,12 @@ describe('ProjectLibrary', () => {
       expect(within(slot.header()).queryByRole('alert')).toBeNull();
       expect(slot.header().querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'holding');
       expect(retry).toBeInTheDocument();
-      await waitFor(() => {
-        expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
-      });
+      /* The hold is a CSS animation; its end, not a script timer, releases the failure. */
+      const hold = slot.header().querySelector<HTMLElement>('[data-slot="project-library-hold"]');
+      expect(hold).toHaveClass('wait-hold');
+      expect(hold?.style.getPropertyValue('--wait-hide-delay')).toBe('400ms');
+      fireEvent.animationEnd(hold!);
+      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
       expect(retry).toBeInTheDocument();
     });
 

@@ -34,7 +34,10 @@ export function CloudProjectPreview({
       observer.disconnect();
     };
   }, []);
+  /* A retried read with nothing cached clears its error while it runs, so its Retry is kept through its own request. */
+  const [isRetrying, setIsRetrying] = useState(false);
   const hasImage = preview.url !== undefined && failedUrl !== preview.url;
+  const isRetryBusy = isRetrying || preview.isLoading;
   /* P-g: the media box stays plain until the read settles; the icon says it settled with no image (or failed). */
   return (
     <div
@@ -65,20 +68,30 @@ export function CloudProjectPreview({
           Preview unavailable. Open the project to view it.
         </p>
       ) : null}
-      {!isCompact && ((preview.isFailed && preview.canRetry) || (preview.url && failedUrl === preview.url)) ? (
+      {!isCompact &&
+      (isRetrying || (preview.isFailed && preview.canRetry) || (preview.url && failedUrl === preview.url)) ? (
         <Button
           size='sm'
           variant='outline'
           className='absolute bottom-2 z-20'
-          disabled={preview.isLoading}
-          aria-busy={preview.isLoading}
+          /* Not `disabled`, which would drop the focus of the person who pressed it. */
+          aria-disabled={isRetryBusy}
+          aria-busy={isRetryBusy}
           onClick={async () => {
+            if (isRetryBusy) {
+              return;
+            }
             setFailedUrl(undefined);
-            await preview.retry();
+            setIsRetrying(true);
+            try {
+              await preview.retry();
+            } finally {
+              setIsRetrying(false);
+            }
           }}
         >
-          {preview.isLoading ? <Loader className='size-3 motion-reduce:animate-none' /> : null}
-          {preview.isLoading ? 'Loading preview…' : 'Retry preview'}
+          {isRetryBusy ? <Loader className='size-3 motion-reduce:animate-none' /> : null}
+          {isRetryBusy ? 'Loading preview…' : 'Retry preview'}
         </Button>
       ) : null}
     </div>

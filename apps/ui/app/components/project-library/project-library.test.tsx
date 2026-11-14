@@ -1597,7 +1597,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 4: each Retry is a new request, so a second press in an announced slow wait restarts it from the press. */
-    it.fails('C14: restarts an announced Tau Cloud wait from a second Retry, keeping its focus', async () => {
+    it('C14: restarts an announced Tau Cloud wait from a second Retry, keeping its focus', async () => {
       cloudListing.retry.mockImplementation(
         async () =>
           new Promise<void>(() => {
@@ -1694,7 +1694,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 4: on a phone a wait is read, not seen, so its controls are not reachable while the row is unseen. */
-    it.fails("C14: keeps the phone header row's unseen controls out of the focus order", () => {
+    it("C14: keeps the phone header row's unseen controls out of the focus order", () => {
       cloudListing.isFetching = true;
       const slot = renderSlot({ isPhoneBar: true });
       const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;

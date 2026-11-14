@@ -294,32 +294,46 @@ export function ProjectLibrary({
   /* A wait is timed from when this library saw it begin, so one that begins well into the page (a client navigation
      to Home, a Retry, another account) starts its own 1,000 ms. Only a wait a Retry started is announced: the first
      belongs to the page's open, which the sidebar announces. */
-  const [isCloudRetried, setIsCloudRetried] = useState(false);
-  const [cloudWait, setCloudWait] = useState<{ readonly startedAt: number; readonly isAnnounced: boolean }>();
+  /* The time of the latest Retry press while its request runs: each press is a new request, so a new wait. */
+  const [cloudRetriedAt, setCloudRetriedAt] = useState<number>();
+  const [cloudWait, setCloudWait] = useState<{
+    readonly startedAt: number;
+    readonly isAnnounced: boolean;
+    readonly retriedAt?: number;
+  }>();
   if (isAwaitingCloud && cloudWait === undefined) {
-    setCloudWait({ startedAt: waitClock.now(), isAnnounced: isCloudRetried });
+    setCloudWait({
+      startedAt: cloudRetriedAt ?? waitClock.now(),
+      isAnnounced: cloudRetriedAt !== undefined,
+      retriedAt: cloudRetriedAt,
+    });
   } else if (!isAwaitingCloud && cloudWait !== undefined) {
     setCloudWait(undefined);
-    setIsCloudRetried(false);
-  } else if (isCloudRetried && cloudWait?.isAnnounced === false) {
-    /* A Retry pressed beside the first wait's slow words starts a wait of its own, timed and announced from the press. */
-    setCloudWait({ startedAt: waitClock.now(), isAnnounced: true });
+    setCloudRetriedAt(undefined);
+  } else if (cloudWait !== undefined && cloudRetriedAt !== undefined && cloudWait.retriedAt !== cloudRetriedAt) {
+    /* A Retry pressed during a wait, slow or not, starts a wait of its own, timed and announced from the press. */
+    setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt });
   }
   /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
   const { timing: cloudWaitTiming } = useWaitClock({ active: isAwaitingCloud, startedAt: cloudWait?.startedAt ?? 0 });
   /* On a phone whose top bar carries the /projects header, the header row is visually hidden until a notice is shown;
      once shown, it stays for this page view, so a Retry or a recovery does not move the grid again. */
   const [hasShownCloudNotice, setHasShownCloudNotice] = useState(false);
-  /* The flag lasts as long as the Retry's own request, so a Retry that starts no wait (a failed refresh over listed
-     projects) leaves nothing behind for a later one. */
+  /* The press lasts as long as the Retry's own request, so a Retry that starts no wait (a failed refresh over listed
+     projects) leaves nothing behind for a later one; an earlier press's end does not clear a later one. */
+  const latestCloudRetry = useRef<number>(undefined);
   const retryCloudListing = useCallback(async () => {
-    setIsCloudRetried(true);
+    const pressedAt = waitClock.now();
+    latestCloudRetry.current = pressedAt;
+    setCloudRetriedAt(pressedAt);
     try {
       await retryCloud();
     } finally {
-      setIsCloudRetried(false);
+      if (latestCloudRetry.current === pressedAt) {
+        setCloudRetriedAt(undefined);
+      }
     }
-  }, [retryCloud]);
+  }, [retryCloud, waitClock]);
   const handleRetryCloud = useCallback(() => {
     void retryCloudListing();
   }, [retryCloudListing]);
@@ -655,8 +669,9 @@ export function ProjectLibrary({
               className={cn(
                 'flex min-w-0 flex-1 basis-0 items-center justify-end gap-2',
                 /* On a phone the row is read before it is seen, so its status region announces offline words as
-                   they arrive; a notice shown gives it its height from then on, and a wait is not seen. */
-                isHeaderInPhoneBar && !hasShownCloudNotice && 'max-md:sr-only',
+                   they arrive; a notice shown gives it its height from then on. A wait is not seen there, so its
+                   Retry is not in the focus order until the row is. */
+                isHeaderInPhoneBar && !hasShownCloudNotice && 'max-md:sr-only max-md:[&_button]:hidden',
               )}
             >
               {statusSlot}

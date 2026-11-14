@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CloudProjectPreview } from '#components/project-library/cloud-project-preview.js';
 
@@ -40,7 +40,7 @@ describe('cloud project preview recovery', () => {
     expect(screen.queryByRole('button', { name: 'Retry preview' })).not.toBeInTheDocument();
   });
 
-  it('should retry a transient failure, announce progress, then show the recovered image', () => {
+  it('should retry a transient failure, announce progress, then show the recovered image', async () => {
     Object.assign(preview, { isFailed: true, isSettled: true });
     const view = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
@@ -48,17 +48,20 @@ describe('cloud project preview recovery', () => {
     Object.assign(preview, { isLoading: true, isSettled: false });
     view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(view.container.querySelector('[data-slot="skeleton"]')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Loading preview…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Loading preview…' })).toHaveAttribute('aria-disabled', 'true');
     Object.assign(preview, { isLoading: false, isFailed: false, isSettled: true, url: 'blob:recovered' });
     view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.getByRole('img', { name: 'Saved preview of Cloud cube' })).toHaveAttribute('src', 'blob:recovered');
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    /* The Retry leaves once its own request has ended. */
+    await waitFor(() => {
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
     expect(screen.queryByText('Saved preview')).not.toBeInTheDocument();
   });
 
   /* D21 round 4: a retried read with nothing cached clears its error while it runs; the Retry keeps its place and focus,
      and says it is loading, through its own request. */
-  it.fails('should keep the focused Retry, saying it is loading, while a failed read is retried', async () => {
+  it('should keep the focused Retry, saying it is loading, while a failed read is retried', async () => {
     preview.retry.mockImplementationOnce(
       async () =>
         new Promise<undefined>(() => {
@@ -70,7 +73,7 @@ describe('cloud project preview recovery', () => {
     const retry = screen.getByRole('button', { name: 'Retry preview' });
     retry.focus();
     fireEvent.click(retry);
-    /* react-query resets a retried query with no data to pending, clearing its error. */
+    /* A retried query with no data is reset to pending, which clears its error. */
     Object.assign(preview, { isFailed: false, isLoading: true, isSettled: false });
     view.rerender(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(retry).toBeInTheDocument();

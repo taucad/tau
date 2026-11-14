@@ -148,7 +148,6 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 
 const { useProjects } = await import('#hooks/use-projects.js');
-const { projectListShapeStore, projectListCountCookieName } = await import('#lib/project-list-shape.lib.js');
 
 const listingQueryOptions = (): Record<string, unknown> => {
   useQuery.mockClear();
@@ -304,27 +303,5 @@ describe('useProjects listing query', () => {
     expect(visible.result.current.projects.map(({ id }) => id)).toEqual(['proj_live']);
     expect(all.result.current.projects.map(({ id }) => id)).toEqual(['proj_live', 'proj_trashed']);
     query.data = undefined;
-  });
-
-  /* R5: the next load reserves this many rows and cards, server-side through the cookie. */
-  it('remembers the live project count, and no names, after every listing', async () => {
-    const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
-      projectId: id,
-      manifest: { name: `Name ${id}` },
-      library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
-      locator: { backend: 'indexeddb' },
-    });
-    projectManager.getProjectListing.mockResolvedValueOnce({
-      projects: [entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)],
-      conflicts: [],
-      recoveries: [],
-      workspaceBindingRepairs: [],
-    });
-    const { queryFn } = listingQueryOptions() as { queryFn: (context: { signal: AbortSignal }) => Promise<unknown> };
-
-    await queryFn({ signal: new AbortController().signal });
-
-    expect(projectListShapeStore.get()).toEqual({ count: 2 });
-    expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
   });
 });

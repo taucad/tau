@@ -6,7 +6,6 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#runtime/project-library-commands.js';
 import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
@@ -42,11 +41,10 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     // One key for one whole-workspace discovery pass per navigation: the deleted rows are
     // filtered below rather than scanned again under a second key (W21).
     queryKey: ['projects'],
+    /* R5, A13: the library remembers each listing that lands here in the listing snapshot. */
     async queryFn({ signal }) {
       const listing = await getProjectListing({ includeDeleted: true });
       signal.throwIfAborted();
-      /* R5: remember the list's shape, so the next load reserves its rows and cards. */
-      projectListShapeStore.remember(projectListShapeOf(listing.projects.map(projectLibraryEntryToListItem)));
       return listing;
     },
     enabled: !isWorkerLoading,

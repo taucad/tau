@@ -50,7 +50,7 @@ import { createActor, matchesState, setup, types } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, StateValue } from 'xstate';
 import type { Project } from '@taucad/types';
 import type { EventSchemaMap } from '@taucad/ui-core/lib/xstate.lib';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { AccessAnswer } from '#machines/library-access.machine.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 /**
@@ -65,20 +65,15 @@ export const openPatienceMilliseconds = 1000;
 export type FocusSlugs = Readonly<{ workspaceSlug: string; projectSlug: string }>;
 
 /**
- * The library's access answer for a project URL: today's `ProjectRouteAccess`, restated here because infrastructure
- * does not import hooks (A3a's access machine will own the one type).
+ * The library's access answer for a project URL. It is `ProjectRouteAccess`, the access machine's answer without its
+ * port failure (`#runtime/project-library.js`); focus names it from the machine that owns the one type.
  *
  * @public
  */
-export type FocusRouteAccess =
-  | Readonly<{ status: 'ready'; project: Project }>
-  | Readonly<{ status: 'trashed'; project: Project }>
-  | Readonly<{ status: 'recovering'; recovery: Extract<PendingProjectRecovery, { status: 'recovering' }> }>
-  | Readonly<{ status: 'recovery-failed'; recovery: Extract<PendingProjectRecovery, { status: 'failed' }> }>
-  | Readonly<{ status: 'conflict' | 'unavailable' | 'missing' }>;
+export type FocusRouteAccess = Exclude<AccessAnswer, Readonly<{ status: 'error' }>>;
 
-/** The library's access answer, or the port's failure to give one. @public */
-export type FocusAccessAnswer = FocusRouteAccess | Readonly<{ status: 'error'; message: string }>;
+/** The library's access answer, or the port's failure to give one (the access machine's `AccessAnswer`). @public */
+export type FocusAccessAnswer = AccessAnswer;
 
 /**
  * What focus holds as its answer: the library's answer, a project URL whose slugs name no project (`missing` with no
@@ -125,10 +120,11 @@ export type FocusSessionStatus = 'absent' | 'starting' | 'live' | 'closing' | 'f
  * - `on-failed`: the open landed on a session that failed to close and holds its slot;
  * - `dropped`: the registry dropped the waiting open (stale under A5c), so focus sends it again;
  * - `refused`: `budgetRefused` named the waiting open while its project is still in the live set.
+ * - `declined`: the person turned the waiting open down (the budget dialog's Not now), so nothing opens it.
  *
  * @public
  */
-export type FocusOpenResult = 'live' | 'waiting' | 'start-failed' | 'on-failed' | 'dropped' | 'refused';
+export type FocusOpenResult = 'live' | 'waiting' | 'start-failed' | 'on-failed' | 'dropped' | 'refused' | 'declined';
 
 /** Session availability: the first file check settled, or not yet. @public */
 export type FocusAvailability = 'pending' | 'settled';
@@ -413,7 +409,7 @@ const focusEventSchemas = {
   moduleLoaded: z.object({}),
   openSettled: z.object({
     requestId: z.string(),
-    result: z.enum(['live', 'waiting', 'start-failed', 'on-failed', 'dropped', 'refused']),
+    result: z.enum(['live', 'waiting', 'start-failed', 'on-failed', 'dropped', 'refused', 'declined']),
   }),
   sessionFacts: z.object({
     projectId: z.string(),
@@ -844,6 +840,8 @@ export const createFocusMachine = (policy: FocusPolicy) => {
             ...context.kept,
             [projectId]: {
               ...rest,
+              // The workspace comes from the project's own slugs, which a same-project request may have moved.
+              workspace: request.slugs?.workspaceSlug ?? rest.workspace,
               ...(request.chatId === undefined ? {} : { chatId: request.chatId }),
               ...(request.createdChatId === undefined ? {} : { createdChatId: request.createdChatId }),
             },
@@ -1320,6 +1318,21 @@ export const createFocusMachine = (policy: FocusPolicy) => {
               break;
             }
             case 'on-failed': {
+              const target = context.answer?.projectId;
+              patch.open = { ...context.open, live: true };
+              if (state === 'opening' && target !== undefined) {
+                next = settleOn(patch, target);
+              }
+              break;
+            }
+            case 'declined': {
+              /* The person chose not to open it: focus settles on the project as for a failed session, which derives
+               * `closed` with the reopen offer, as main does (D14). A person's own declined open leaves focus put. */
+              if (context.open.person) {
+                patch.open = { ...context.open, openId: undefined };
+                next = 'focused';
+                break;
+              }
               const target = context.answer?.projectId;
               patch.open = { ...context.open, live: true };
               if (state === 'opening' && target !== undefined) {

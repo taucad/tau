@@ -96,6 +96,21 @@
 \* A4b: `tauCloudIntent` and its type moved from `hooks/use-cloud-projects.ts` to
 \* `lib/tau-cloud-intent.ts`; the route gate and the live sessions import them from there. No action or
 \* correspondence changes.
+\* A5b: the route gate's effects are gone. The route reports to focus (`project-route-intent.tsx`) and
+\* the runtime composes focus with the registry, the library epoch and the module import over ordered ports
+\* (`runtime/app-runtime-focus.ts`): registry facts reach focus after the open's answer they follow, every
+\* epoch reaches the registry before an open that names it, and a resume the registry drops as stale is
+\* answered `dropped`. Those ports are the environment this spec assumes, so they join the drift sources.
+\* The route sink applies a `chatShown` only once the router is at rest on the commit focus answered (I2):
+\* the model's route steps are atomic, and the sink's deferral is what keeps the app's ones so.
+\* A held `chatShown` is dropped when the person's move changed the route's chat: focus answers that commit
+\* (I18). The sink's own replace, judged where it lands and used once, is not such a move, so the last chat
+\* shown still wins. Where that replace lands, even while another move loads, a held command is judged against it.
+\* The person's Not now on the budget dialog empties `pendingOpen` and is not modelled (a person step, like
+\* `PersonClosed`, outside the registry's own replies). The port answers focus's waiting open `declined`,
+\* and focus settles on the project as it does for `TOpenOnFailed`, deriving `closed` with the reopen offer,
+\* as main does. No action or verdict changes.
+\* Focus = "today" stays the record of the code as built at c5f528dd; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

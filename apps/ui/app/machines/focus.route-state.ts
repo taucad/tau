@@ -11,10 +11,10 @@
  * It is a module-level helper (MC-R20, MC-R25): React reads it through `useSyncExternalStore` over focus and the
  * registry once A5b wires it.
  */
-import type { SnapshotFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { FocusMachine, FocusSlugs } from '#machines/focus.machine.js';
 import type { SessionsMachineContext } from '#machines/sessions.machine.js';
-import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteState } from '#types/project-route-state.types.js';
 
 /** The route the router committed: its slugs, the project the library's slug selector resolves them to, its chat. @public */
 export type CommittedProjectRoute = Readonly<{
@@ -23,6 +23,9 @@ export type CommittedProjectRoute = Readonly<{
   projectId: string | undefined;
   chatId: string | undefined;
 }>;
+
+/** Focus's snapshot as a ref hands it out: the runtime's child and a started focus both fit. @public */
+export type FocusSnapshot = SnapshotFrom<ActorRefFrom<FocusMachine>>;
 
 /** What the selector reads of the registry. @public */
 export type FocusRegistryView = Pick<SessionsMachineContext, 'status' | 'closed'>;
@@ -42,7 +45,7 @@ const resolving: ProjectRouteState = { kind: 'resolving' };
  * The committed route names what focus's request names: the same project, or, while the committed slugs have no
  * project (a renamed directory's retained route, or a slug not resolved yet), the same slugs.
  */
-const matches = (focus: SnapshotFrom<FocusMachine>, committed: CommittedProjectRoute): boolean => {
+const matches = (focus: FocusSnapshot, committed: CommittedProjectRoute): boolean => {
   const { request } = focus.context;
   if (request === undefined || request.home) {
     return false;
@@ -67,7 +70,7 @@ const matches = (focus: SnapshotFrom<FocusMachine>, committed: CommittedProjectR
  */
 // oxlint-disable-next-line complexity -- One flat decision table over the model's `TargetView`.
 export const selectProjectRouteState = (
-  focus: SnapshotFrom<FocusMachine>,
+  focus: FocusSnapshot,
   registry: FocusRegistryView,
   committed: CommittedProjectRoute | undefined,
 ): ProjectRouteState | undefined => {

@@ -304,7 +304,8 @@ export function ProjectLibrary({
   const [hasCloudFailed, setHasCloudFailed] = useState(false);
   if (cloud === 'failed' && !hasCloudFailed) {
     setHasCloudFailed(true);
-  } else if (cloud === 'ready' && hasCloudFailed) {
+  } else if (isCloudSettled && hasCloudFailed) {
+    /* Only an answer clears it: a paused request (a hidden tab) reads `ready` but has not answered. */
     setHasCloudFailed(false);
   }
   /* A wait is timed from when this library saw it begin, so one that begins well into the page (a client navigation

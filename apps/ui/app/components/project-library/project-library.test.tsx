@@ -1638,6 +1638,25 @@ describe('ProjectLibrary', () => {
       expect(retry).not.toHaveClass('wait-after-slow');
     });
 
+    /* D21 round 10: a follow-up request that pauses (a hidden tab) is no answer, so the failure's Retry survives it. */
+    it("C14: keeps the failure's Retry from the start of a wait that resumes after a paused follow-up request", () => {
+      cloudListing.isFailed = true;
+      const slot = renderSlot();
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      /* The retryer pauses while the tab is hidden: neither failed, fetching nor settled. */
+      cloudListing.isFetching = false;
+      cloudListing.isPaused = true;
+      slot.rerender();
+      /* Back on the tab, the request resumes. */
+      cloudListing.isPaused = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      expect(retry).not.toHaveClass('wait-after-slow');
+    });
+
     /* D21 round 5: a Retry over a failed refresh of listed projects is a wait the person sees and hears. */
     it('C14: says a Retry over a failed refresh of listed projects is loading, and its answer again', async () => {
       cloudListing.current = [

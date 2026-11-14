@@ -1,5 +1,5 @@
 /**
- * The ten inheritable view fields, keyed by leaf path, and their frozen version 1 format values.
+ * The nine inheritable view fields, keyed by leaf path, and their frozen version 1 format values.
  *
  * `display` and `grid` are nested objects in a view record, so a level above the view (the person's defaults, later a
  * project) holds a sparse map keyed by leaf path rather than a partial record: setting the grid must not also "set" the
@@ -42,7 +42,6 @@ export type ViewFieldValues = {
   'display.grid': boolean;
   'display.axes': boolean;
   'display.matcap': boolean;
-  'display.postProcessing': boolean;
   'grid.unit': LengthUnit;
 };
 
@@ -55,7 +54,7 @@ export type ViewFieldPath = keyof ViewFieldValues;
 
 /**
  * The version 1 view record's schema default for each inheritable leaf: Z up, 60 degrees, surfaces, lines, gizmo, grid
- * and axes on, matcap and post-processing off, millimetres.
+ * and axes on, matcap off, millimetres.
  *
  * These values are part of the version 1 file format: a leaf a view file holds at its format value reads as "not set
  * in this view". They never change without a new record version. What Tau shows when no level sets a leaf is a
@@ -79,7 +78,6 @@ export const viewRecordV1Defaults: Readonly<ViewFieldValues> = Object.freeze({
   'display.grid': true,
   'display.axes': true,
   'display.matcap': false,
-  'display.postProcessing': false,
   'grid.unit': 'mm',
 });
 
@@ -90,7 +88,7 @@ export const viewRecordV1Defaults: Readonly<ViewFieldValues> = Object.freeze({
  * ```typescript
  * import { viewFieldPaths } from '@taucad/workbench';
  *
- * console.log(viewFieldPaths.length); // 10
+ * console.log(viewFieldPaths.length); // 9
  * ```
  *
  * @public

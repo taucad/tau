@@ -11,24 +11,17 @@
  * It listens on the controls' surface in the capture phase, so it runs before the controls' own `wheel` listener.
  *
  * Given a camera input (T4.2 onward), the same listeners become the viewer's input router: each press takes the
- * button binding its preset or the trackpad mapping gives it ({@link resolveDrag}), each wheel step the binding
- * {@link resolveWheel} gives it, and the router also applies the right-button click threshold, macOS's Ctrl + click,
+ * button binding its preset gives it ({@link resolveDrag}), each wheel step zooms, and the router also applies the right-button click threshold, macOS's Ctrl + click,
  * zoom to cursor, orbit around cursor and inverted zoom. Without one, every binding is today's.
  */
 import CameraControlsImpl from 'camera-controls';
 import { detectPlatform } from '@taucad/ui/utils/platform';
 import { OrthographicCamera, Plane, Quaternion, Raycaster, Vector2, Vector3 } from 'three';
 import type { Camera } from 'three';
-import {
-  resolveCameraMapping,
-  resolveDrag,
-  resolveWheel,
-  toCameraDragButton,
-} from '#graphics/three/controls/camera-presets.js';
+import { resolveDrag, toCameraDragButton } from '#graphics/three/controls/camera-presets.js';
 import type {
   CameraDragButton,
   CameraGesture,
-  CameraInputDevice,
   CameraModifiers,
   CameraPresetId,
 } from '#graphics/three/controls/camera-presets.js';
@@ -84,7 +77,7 @@ export const resolvePinchRatio = ({
 };
 
 /**
- * How the person navigates the viewer: their mouse preset, this device's input device and the three toggles. Every
+ * How the person navigates the viewer: their mouse preset and the three toggles. Every
  * field is optional; an absent one takes its built-in value.
  *
  * @public
@@ -92,8 +85,6 @@ export const resolvePinchRatio = ({
 export type CameraInput = Readonly<{
   /** The mouse preset. Absent: Tau's default (P1). */
   preset?: CameraPresetId;
-  /** `trackpad` replaces the preset with the trackpad mapping (P7). Absent: mouse. */
-  inputDevice?: CameraInputDevice;
   /** Whether a wheel or pinch zooms toward the point under the cursor. Absent: on. */
   zoomToCursor?: boolean;
   /** Whether an orbit turns about the surface point under the cursor. Absent: off. */
@@ -475,9 +466,8 @@ type HeldPress = {
  *   orthographic by the change of the gesture's scale, and never zooms the page. A `ctrlKey` wheel inside a Safari
  *   pinch is dropped, so a browser that sends both moves the camera once.
  *
- * With a routing, each mouse press sets the button's action from the preset or the trackpad mapping, and a button and
- * modifier combination the mapping does not list does nothing (C1 to C8). Each wheel step zooms, pans or orbits as the
- * mapping says; a zoom goes toward the cursor unless `zoomToCursor` is off and reverses with `invertZoom`, and a
+ * With a routing, each mouse press sets the button's action from the preset, and a button and modifier combination the
+ * preset does not list does nothing (C1 to C8). Each wheel step zooms; the zoom goes toward the cursor unless `zoomToCursor` is off and reverses with `invertZoom`, and a
  * `ctrlKey` wheel never zooms the page (C10, C12, C14). A right-button press moves the camera only once it travels past
  * {@link cameraSecondaryClickThresholdPx}, so a click stays a click (C13), and on macOS a Ctrl + click is that click.
  * With `orbitAboutCursor` and a `pickPivot`, an orbit turns about the surface point under the press (C11).
@@ -506,8 +496,7 @@ export const attachCameraWheelRouter = ({
   let held: HeldPress | undefined;
   const { ownerDocument } = element;
 
-  const routedMapping = (routing: CameraInputRouting) =>
-    resolveCameraMapping({ preset: routing.cameraInput.preset, inputDevice: routing.cameraInput.inputDevice });
+  const routedPreset = (routing: CameraInputRouting): CameraPresetId => routing.cameraInput.preset ?? 'tau';
 
   const allowed = (gesture: CameraGesture, routing: CameraInputRouting): CameraGesture =>
     (gesture === 'pan' && !routing.enablePan) || (gesture === 'zoom' && !routing.enableZoom) ? 'none' : gesture;
@@ -543,20 +532,11 @@ export const attachCameraWheelRouter = ({
       event.stopImmediatePropagation();
       return;
     }
-    const modifiers = { shift: event.shiftKey, ctrl: event.metaKey, alt: event.altKey };
-    const gesture = allowed(resolveWheel(routedMapping(routing), { pinch: event.ctrlKey, modifiers }), routing);
-    if (gesture === 'zoom') {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (allowed('zoom', routing) === 'zoom') {
       zoomByWheel(event, routing);
-      return;
     }
-    if (gesture === 'none') {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return;
-    }
-    controls.mouseButtons.wheel = toCameraControlsAction(gesture, isPerspective(controls));
   };
 
   const onWheel = (event: WheelEvent): void => {
@@ -696,7 +676,7 @@ export const attachCameraWheelRouter = ({
     const gesture =
       pressed === undefined
         ? 'none'
-        : allowed(resolveDrag(routedMapping(routing), pressed.button, pressed.modifiers), routing);
+        : allowed(resolveDrag(routedPreset(routing), pressed.button, pressed.modifiers), routing);
     controls.mouseButtons[slot] = toCameraControlsAction(gesture, isPerspective(controls));
     releaseHeld();
     if (gesture === 'none') {

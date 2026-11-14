@@ -288,7 +288,6 @@ export const viewDisplaySchema = z.strictObject({
   grid: z.boolean().default(viewRecordV1Defaults['display.grid']),
   axes: z.boolean().default(viewRecordV1Defaults['display.axes']),
   matcap: z.boolean().default(viewRecordV1Defaults['display.matcap']),
-  postProcessing: z.boolean().default(viewRecordV1Defaults['display.postProcessing']),
 });
 
 /** The grid's display unit (`setGridUnit`). Session-only before the workbench records; persisted since (blueprint B2). */
@@ -334,7 +333,6 @@ export const viewFieldsSchema = z.strictObject({
     grid: viewRecordV1Defaults['display.grid'],
     axes: viewRecordV1Defaults['display.axes'],
     matcap: viewRecordV1Defaults['display.matcap'],
-    postProcessing: viewRecordV1Defaults['display.postProcessing'],
   }),
   grid: viewGridSchema.default({ unit: viewRecordV1Defaults['grid.unit'] }),
   section: sectionSchema.default({ active: false, cuts: [] }),

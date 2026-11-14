@@ -684,7 +684,7 @@ const ViewerContent = memo(function ({
   // on every emission, causing unnecessary re-renders.
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
   const enableGizmo = useGraphicsSelector((state) => state.context.enableGizmo);
-  // The person's preset, trackpad switch, toggles and gizmo style, with `viewerControls` on; none with it off.
+  // The person's preset, toggles and gizmo style, with `viewerControls` on; none with it off.
   const { cameraInput, gizmoStyle } = useViewerCameraInput();
   const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);

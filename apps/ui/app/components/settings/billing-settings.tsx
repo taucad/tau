@@ -15,7 +15,6 @@ import { useCredits } from '@taucad/billing/hooks/use-credits';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
 import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
-import { Button } from '@taucad/ui/components/button';
 import { CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { PaymentMethod } from '@taucad/ui-kit/components/payment-method';
@@ -31,6 +30,7 @@ import { PlanCards } from '#components/billing/plan-cards.js';
 import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';
 import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js';
 import { useBillingBinding } from '#components/billing/use-billing-binding.js';
+import { Button } from '@taucad/ui/components/button';
 
 const proPlan = tauPlanCatalog.find((entry) => entry.id === 'pro');
 const proMonthlyPriceLabel = formatMonthlyPrice(proPlan?.priceLabel ?? '');
@@ -135,7 +135,6 @@ export function BillingSettings(): React.JSX.Element {
   const portalButton = (label: string): React.JSX.Element => (
     <Button
       variant='outline'
-      size='sm'
       disabled={isPortalBusy}
       onClick={async () => {
         await openPortal();
@@ -167,7 +166,7 @@ export function BillingSettings(): React.JSX.Element {
           tone='warning'
           role='alert'
           action={
-            <Button size='sm' disabled={binding === undefined} onClick={openTopup}>
+            <Button disabled={binding === undefined} onClick={openTopup}>
               Add credits
             </Button>
           }
@@ -314,7 +313,6 @@ export function BillingSettings(): React.JSX.Element {
                 {availableBalance !== undefined || isBalanceLoading ? undefined : (
                   <Button
                     variant='outline'
-                    size='sm'
                     onClick={() => {
                       void queryClient.invalidateQueries({ queryKey: ['billing', 'credits'] });
                     }}
@@ -323,7 +321,7 @@ export function BillingSettings(): React.JSX.Element {
                   </Button>
                 )}
                 {/* Buying stays available when the balance cannot be shown: the purchase does not depend on this read. */}
-                <Button variant='outline' size='sm' disabled={binding === undefined} onClick={openTopup}>
+                <Button variant='outline' disabled={binding === undefined} onClick={openTopup}>
                   <Plus className='size-4' />
                   Add credits
                 </Button>

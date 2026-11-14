@@ -54,14 +54,16 @@ INCORRECT:
 
 Group related rows in one `SettingsGroup`: an optional sentence-case heading above one bordered card whose rows are divided by hairlines. In each row the title and description sit on the left and the control (switch, select, button) on the right. Do not nest cards, add per-row borders, or invent a bespoke layout for one setting.
 
-| Need                         | Use                                                               |
-| ---------------------------- | ----------------------------------------------------------------- |
-| On/off choice                | `Switch` with `aria-label` equal to the row title                 |
-| One of a few named options   | Select button (`ComboBoxResponsive`), `size='sm'`                 |
-| Opens a flow or another page | Outline `Button size='sm'` with a verb: Manage, Change, Connect   |
-| Destructive or plan-changing | `variant='destructive' size='sm'`, in its own group at the bottom |
-| List of things (repos, keys) | One row per item, the item's action as its control                |
-| Status or progress           | Row `children` under the title, `text-xs text-muted-foreground`   |
+| Need                         | Use                                                             |
+| ---------------------------- | --------------------------------------------------------------- |
+| On/off choice                | `Switch` with `aria-label` equal to the row title               |
+| One of a few named options   | `Select size='md'`, or an outline `Button` picker               |
+| Opens a flow or another page | Outline `Button` with a verb: Manage, Change                    |
+| Destructive or plan-changing | `variant='destructive'`, in its own group at the end            |
+| List of things (repos, keys) | One row per item, the item's action as its control              |
+| Status or progress           | Row `children` under the title, `text-xs text-muted-foreground` |
+
+Every field, select and button in a settings page is one size, 32 px: `Input`, `Select size='md'` and `Button` at its `default` size share that height, 14 px text and 16 px icons, and an icon-only button is `size='icon'`, the same 32 px square. Settings is a form read occasionally, so it takes the app's default control height rather than a denser one. A marker inside a select's value, such as Suggested, sits at its right edge beside the chevron.
 
 ### 3. Organize By the User's Question, Not By the Code Owner
 
@@ -75,7 +77,7 @@ Put each setting in the section a user would open to answer their question. Each
 | Repositories  | Which code can Tau read and write?    | GitHub repository connection, repository access, per-repository write permission     |
 | Billing       | What do I pay and what do I get?      | Plan, plan limits, credits, automatic reload, cancel plan                            |
 | Data controls | What does Tau collect, keep and use?  | Usage and diagnostics, improving the service, cookie preferences, close account      |
-| Viewer        | How do 3D views look and respond?     | Mouse controls, trackpad, zoom and orbit, gizmo style, personal view defaults        |
+| Viewer        | How do 3D views look and respond?     | Mouse controls, zoom and orbit, gizmo style, personal view defaults                  |
 | Compute       | Where does work run?                  | Compute reuse, remote hosts                                                          |
 | Models        | Which models can I use?               | Model availability                                                                   |
 | Agents        | How does the agent behave?            | Context the agent receives, tools, permissions, chat display                         |

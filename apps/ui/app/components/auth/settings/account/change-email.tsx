@@ -6,7 +6,6 @@ import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
-import { Button } from '@taucad/ui/components/button';
 import { Card, CardContent, CardFooter } from '@taucad/ui/components/card';
 import { Field, FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
@@ -14,6 +13,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
+import { Button } from '@taucad/ui/components/button';
 
 export type ChangeEmailProps = {
   className?: string;
@@ -99,7 +99,7 @@ export function ChangeEmail({ className }: ChangeEmailProps): React.JSX.Element 
           </CardContent>
 
           <CardFooter>
-            <Button type='submit' size='sm' disabled={isPending || !session}>
+            <Button type='submit' disabled={isPending || !session}>
               {isPending && <Spinner />}
 
               {localization.settings.updateEmail}

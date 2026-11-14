@@ -47,7 +47,7 @@ describe('the person record across sign-out', () => {
       person.result.current.writeProfile({ goals: ['art'], tool: 'blender' });
       person.result.current.writeViewer({ gizmo: { style: 'axis-balls' } });
       person.result.current.writeOnboarding({ setupStatus: 'completed', seenAdd: ['ask'] });
-      device.result.current.writeDevice({ inputDevice: 'trackpad' });
+      device.result.current.writeDevice({ tourPaused: true });
     });
     const before = storedSections();
     expect(Object.values(before).every((raw) => raw !== undefined)).toBe(true);
@@ -59,6 +59,6 @@ describe('the person record across sign-out', () => {
 
     expect(storedSections()).toEqual(before);
     expect(person.result.current.profile).toEqual({ version: 1, goals: ['art'], tool: 'blender', languages: [] });
-    expect(device.result.current.device).toEqual({ version: 1, inputDevice: 'trackpad' });
+    expect(device.result.current.device).toEqual({ version: 1, tourPaused: true });
   });
 });

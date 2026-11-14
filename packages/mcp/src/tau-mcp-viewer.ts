@@ -265,7 +265,6 @@ const viewSchema = z
         'display.grid': z.boolean(),
         'display.axes': z.boolean(),
         'display.matcap': z.boolean(),
-        'display.postProcessing': z.boolean(),
         'grid.unit': z.enum(lengthUnits),
       })
       .partial()
@@ -281,7 +280,6 @@ const viewSchema = z
         'display.grid': commandSequenceSchema,
         'display.axes': commandSequenceSchema,
         'display.matcap': commandSequenceSchema,
-        'display.postProcessing': commandSequenceSchema,
         'grid.unit': commandSequenceSchema,
       })
       .partial()

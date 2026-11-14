@@ -266,7 +266,6 @@ export type SectionViewTestBridgeApi = Readonly<{
   /** Where a drawn handle is on screen; only the selected cut has drag handles. */
   projectSectionHandle(kind: SectionHandleTarget['kind'], cutId: string): SectionViewTestProjectedPoint | undefined;
   setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
-  setPostProcessingEnabled(enabled: boolean): void;
   setGridPresentationClipPolicy(policy: Readonly<{ far: boolean; near: boolean }>): void;
   getModelComponents(): SectionViewTestModelComponent[];
   getModelVisibility(): SectionViewTestModelVisibility;
@@ -900,12 +899,6 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         graphicsActor.send({
           type: 'setLinesVisibility',
           payload: presentation.lines,
-        });
-      },
-      setPostProcessingEnabled(enabled) {
-        graphicsActor.send({
-          type: 'setPostProcessingVisibility',
-          payload: enabled,
         });
       },
       setGridPresentationClipPolicy(policy) {

@@ -16,8 +16,8 @@ import { cameraMappings, cameraPresetIds } from '#graphics/three/controls/camera
 import type {
   CameraDragButton,
   CameraGesture,
-  CameraMappingId,
   CameraModifier,
+  CameraPresetId,
 } from '#graphics/three/controls/camera-presets.js';
 import type { CameraInput, CameraInputRouting } from '#graphics/three/controls/camera-wheel-router.js';
 
@@ -240,9 +240,8 @@ const classify = (before: CameraReading, after: CameraReading): CameraGesture | 
   return changes.length === 1 ? (changes[0] as CameraGesture) : 'mixed';
 };
 
-const mappingIds: readonly CameraMappingId[] = [...cameraPresetIds, 'trackpad'];
-const inputOf = (mapping: CameraMappingId): CameraInput =>
-  mapping === 'trackpad' ? { inputDevice: 'trackpad', preset: 'alt' } : { preset: mapping };
+const mappingIds: readonly CameraPresetId[] = cameraPresetIds;
+const inputOf = (mapping: CameraPresetId): CameraInput => ({ preset: mapping });
 
 const modifierSets: ReadonlyArray<readonly CameraModifier[]> = [
   [],
@@ -282,7 +281,7 @@ const unlisted = mappingIds.flatMap((mapping) =>
 
 describe('camera input router in the browser', () => {
   it.each(listed)(
-    '$mapping: $modifiers + $button drag → $gesture (C1 to C7)',
+    '$mapping: $modifiers + $button drag → $gesture (C1 to C6)',
     ({ mapping, button, modifiers, gesture }) => {
       const viewer = mountRoutedViewer(inputOf(mapping));
       const before = readCamera(viewer);
@@ -307,32 +306,10 @@ describe('camera input router in the browser', () => {
     expect(classify(before, readCamera(viewer))).toBe('zoom');
   });
 
-  it.each([
-    { name: 'a two-finger scroll pans', init: { deltaX: 12, deltaY: 30 }, gesture: 'pan' },
-    { name: 'Alt + two-finger scroll orbits', init: { deltaX: 12, deltaY: 30, altKey: true }, gesture: 'orbit' },
-    { name: 'a pinch zooms', init: { deltaY: 30, ctrlKey: true }, gesture: 'zoom' },
-  ] as const)('trackpad: $name (C7)', ({ init, gesture }) => {
-    const viewer = mountRoutedViewer({ inputDevice: 'trackpad', preset: 'middle-ctrl' });
+  it.each(cameraPresetIds)('%s: a pinch zooms', (preset) => {
+    const viewer = mountRoutedViewer({ preset });
     const before = readCamera(viewer);
-    wheel(viewer, init);
-    expect(classify(before, readCamera(viewer))).toBe(gesture);
-  });
-
-  it('turning the trackpad switch off restores the stored preset (C7)', () => {
-    const viewer = mountRoutedViewer({ inputDevice: 'trackpad', preset: 'middle-ctrl' });
-    let before = readCamera(viewer);
-    drag(viewer, { button: 'left' });
-    expect(classify(before, readCamera(viewer))).toBe('orbit');
-
-    viewer.setInput({ inputDevice: 'mouse', preset: 'middle-ctrl' });
-    before = readCamera(viewer);
-    drag(viewer, { button: 'left' });
-    expect(classify(before, readCamera(viewer))).toBe('none');
-    before = readCamera(viewer);
-    drag(viewer, { button: 'middle' });
-    expect(classify(before, readCamera(viewer))).toBe('orbit');
-    before = readCamera(viewer);
-    wheel(viewer, { deltaY: 30 });
+    wheel(viewer, { deltaY: 30, ctrlKey: true });
     expect(classify(before, readCamera(viewer))).toBe('zoom');
   });
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
@@ -12,7 +12,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ co
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
-const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');
+const { personRecordStores } = await import('#preferences/person-record.store.js');
 
 describe('setup when the device refuses the write', () => {
   afterEach(() => {
@@ -60,8 +60,9 @@ describe('setup when the device refuses the write', () => {
     await user.click(screen.getByRole('radio', { name: 'SolidWorks' }));
     expect(screen.getByTestId('setup-storage-status')).toHaveTextContent('Tau could not save this on this device.');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await user.click(screen.getByRole('switch', { name: /trackpad/i }));
-    expect(deviceRecordStore.read().inputDevice).toBe('trackpad');
+    await user.click(
+      within(screen.getByRole('group', { name: 'Mouse controls' })).getByRole('radio', { name: /Right-drag orbit/ }),
+    );
     expect(screen.getByTestId('setup-storage-status')).toHaveTextContent('Tau could not save this on this device.');
   });
 });

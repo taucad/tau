@@ -21,7 +21,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ co
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
-const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');
+const { personRecordStores } = await import('#preferences/person-record.store.js');
 
 const renderSetup = (path = '/welcome'): ReturnType<typeof createMemoryRouter> => {
   const router = createMemoryRouter(
@@ -219,7 +219,6 @@ describe('setup', () => {
 
   it('shows stored answers on re-entry', () => {
     personRecordStores.profile.write({ goals: ['art'], tool: 'blender', languages: ['python'] });
-    deviceRecordStore.write({ inputDevice: 'trackpad' });
     renderSetup();
     expect(screen.getByRole('checkbox', { name: /3D art and game props/ })).toBeChecked();
   });

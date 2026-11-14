@@ -6,9 +6,9 @@ import Bowser from 'bowser';
 import { LogOut, Monitor, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Button } from '@taucad/ui/components/button';
 import { SettingsRow } from '#components/settings/settings-item.js';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
+import { Button } from '@taucad/ui/components/button';
 
 function timeAgo(date: Date) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -81,7 +81,6 @@ export function ActiveSession({ activeSession }: ActiveSessionProps): React.JSX.
       control={
         <Button
           variant='outline'
-          size='sm'
           onClick={() => {
             if (isCurrentSession) {
               navigate({

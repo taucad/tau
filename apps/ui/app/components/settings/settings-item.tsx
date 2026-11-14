@@ -216,7 +216,7 @@ export function SettingsRowSkeleton({
         <Skeleton className='h-3.5 w-32 max-w-full' />
         <Skeleton className='h-3 w-56 max-w-full' />
       </div>
-      {hasControl ? <Skeleton className='h-8 w-20 shrink-0' /> : undefined}
+      {hasControl ? <Skeleton className='h-7 w-20 shrink-0' /> : undefined}
     </div>
   );
 }

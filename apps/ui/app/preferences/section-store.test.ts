@@ -136,17 +136,17 @@ describe('storage refused (RC3)', () => {
     const { result } = renderHook(() => useDeviceRecord());
     let outcome: string | undefined;
     act(() => {
-      outcome = result.current.writeDevice({ inputDevice: 'trackpad' });
+      outcome = result.current.writeDevice({ inviteDismissed: true });
     });
     expect(outcome).toBe('refused');
-    expect(result.current.device).toEqual({ version: 1, inputDevice: 'trackpad' });
+    expect(result.current.device).toEqual({ version: 1, inviteDismissed: true });
 
     vi.mocked(Storage.prototype.setItem).mockRestore();
     act(() => {
       outcome = result.current.writeDevice({ tourPaused: true });
     });
     expect(outcome).toBe('saved');
-    expect(storedValue(`tau-${cookieName.device}`)).toEqual({ version: 1, inputDevice: 'trackpad', tourPaused: true });
+    expect(storedValue(`tau-${cookieName.device}`)).toEqual({ version: 1, inviteDismissed: true, tourPaused: true });
   });
 });
 

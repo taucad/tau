@@ -41,6 +41,7 @@ const cases = [
   { name: 'publication access', size: 'default', width: 144, selected: 'Last' },
   { name: 'account field', size: 'default', width: 320, selected: 'Selected' },
   { name: 'workspace recovery', size: 'default', width: 240 },
+  { name: 'settings row', size: 'md', width: 160, selected: 'Selected' },
   { name: 'grouped presets', size: 'sm', width: 160, selected: 'Selected', grouped: true },
   { name: 'rich label', size: 'sm', width: 160, selected: 'Selected', rich: true },
   { name: 'RTL', size: 'sm', width: 160, selected: 'Selected', direction: 'rtl' },

@@ -197,7 +197,6 @@ const displayEvents = {
   'display.grid': 'setGridVisibility',
   'display.axes': 'setAxesVisibility',
   'display.matcap': 'setMatcapVisibility',
-  'display.postProcessing': 'setPostProcessingVisibility',
 } as const;
 
 const isLengthUnit = (unit: string): unit is ViewFieldValues['grid.unit'] =>
@@ -238,7 +237,6 @@ const displayFlags = [
   ['display.grid', 'enableGrid'],
   ['display.axes', 'enableAxes'],
   ['display.matcap', 'enableMatcap'],
-  ['display.postProcessing', 'enablePostProcessing'],
 ] as const;
 
 /* Show each resolved inheritable leaf on the live graphics owner, so no value carries over from the entry before. */

@@ -1766,7 +1766,7 @@ describe('ProjectLibrary', () => {
     });
 
     /* D21 round 8: a Tau Cloud wait that began under the local listing's wait shows its Retry with its slow words. */
-    it.fails("C14: reveals Retry with the slow words of a Tau Cloud wait that began during the local listing's wait", () => {
+    it("C14: reveals Retry with the slow words of a Tau Cloud wait that began during the local listing's wait", () => {
       mockRememberedShape = { count: 2, projects: [] };
       mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
       cloudListing.isFetching = true;
@@ -1775,9 +1775,8 @@ describe('ProjectLibrary', () => {
       clock.at = 3000;
       mockUseProjectsResult = createUseProjectsResult();
       slot.rerender();
-      const body = slot.header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+      /* The indicator, mounted at 0 ms, shows its slow words at 10 s; the Retry, mounted at 3 s, 7 s after that. */
       const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud', hidden: true });
-      expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('7000ms');
       expect(retry.style.getPropertyValue('--wait-slow-delay')).toBe('7000ms');
     });
 

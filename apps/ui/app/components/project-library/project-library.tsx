@@ -277,6 +277,10 @@ export function ProjectLibrary({
     retry: retryCloud,
   } = useCloudProjects();
   const auth = useResolvedAuth();
+  const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
+  /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
+     empty frames alike; the grid itself is busy for as long. */
+  const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
   /* Read before the host's empty-content return below, so the hooks run in one order. */
   const phoneTopBar = usePhoneTopBar();
   const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
@@ -323,7 +327,8 @@ export function ProjectLibrary({
   /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
   /* Active once the wait's start is recorded, so this render, which may still be recording it, times nothing from 0. */
   const { timing: cloudWaitTiming } = useWaitClock({
-    active: isAwaitingCloud && cloudWait !== undefined,
+    /* The listing's own wait holds the slot until it answers, so the Retry is timed from when it can show. */
+    active: isAwaitingCloud && cloudWait !== undefined && !isAwaitingListing,
     startedAt: cloudWait?.startedAt ?? 0,
   });
   /* A shown wait that ends keeps its indicator for its 500 ms minimum, so a failure is said once that hold is over. */
@@ -622,7 +627,6 @@ export function ProjectLibrary({
     </DropdownMenu>
   );
 
-  const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
   const isCatalogUnavailable = !showDeleted && auth === 'authed' && (cloudPending || isCloudFailed);
   /* A host with its own empty content (Home) shows it in place of an empty section. The section stays
      whenever it has something to say: the Trash, a failure, a repair, or Tau Cloud still listing. An
@@ -639,9 +643,6 @@ export function ProjectLibrary({
     return emptyContent;
   }
 
-  /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
-     empty frames alike; the grid itself is busy for as long. */
-  const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
   /* The latch reads the notice the slot shows, not one the listing's own wait still holds back. */
   /* A Retry's wait over a failure says the wait, not the failure, until its own request answers. */
   const isFailureHeld = cloudNotice === 'failed' && (cloudWait?.isAnnounced === true || isCloudWaitHolding);

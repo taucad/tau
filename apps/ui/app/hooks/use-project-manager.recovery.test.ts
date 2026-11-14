@@ -635,6 +635,16 @@ describe('useProjectManager recovery (I8)', () => {
       expect(reloaded.result.current.recoveries).toEqual([]);
     });
 
+    it("should reject the listing with the journal read's own error, as the direct read did", async () => {
+      const unreadable = Object.assign(new Error('The journal store is closing.'), { name: 'InvalidStateError' });
+      mockGetPendingProjectOperations.mockRejectedValueOnce(unreadable);
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectListing()).rejects.toBe(unreadable);
+      });
+    });
+
     it("I8: should reject a discard that fails with the journal's own error, and keep the row", async () => {
       mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
       mockListProjectManifests.mockResolvedValue(emptyDiscovery);

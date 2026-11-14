@@ -283,10 +283,12 @@ export class ProjectLibrary {
   readonly #scans = new Map<number, DiscoveryScan>();
   /*
    * The errors the machines carry only as messages (MC-R5 keeps them out of context): the last discovery port failure
-   * with its pass's epoch, and each discard's, so a caller rejects with the error itself, as today's direct calls did.
+   * with its pass's epoch, each discard's and the last journal read's, so a caller rejects with the error itself, as
+   * today's direct calls did.
    */
   #passError: Readonly<{ epoch: number; error: Error }> | undefined;
   readonly #discardErrors = new Map<string, Error>();
+  #journalError: Error | undefined;
   /**
    * The operations behind the journal rows, by id: host data the replay port reads, never machine context (MC-R5).
    * `fresh` while no attempt has consumed its bytes; a later attempt reads the journal again, as a retry does today.
@@ -385,8 +387,15 @@ export class ProjectLibrary {
       ...options,
       ports: {
         readJournal: async () => {
-          const worker = await this.getReadiedWorker();
-          const operations = await worker.getPendingProjectOperations();
+          let operations: PendingProjectOperation[];
+          try {
+            const worker = await this.getReadiedWorker();
+            operations = await worker.getPendingProjectOperations();
+            this.#journalError = undefined;
+          } catch (error) {
+            this.#journalError = asError(error);
+            throw error;
+          }
           for (const operation of operations) {
             if (!this.#operations.has(operation.operationId)) {
               this.#operations.set(operation.operationId, { operation, fresh: true });
@@ -896,7 +905,7 @@ export class ProjectLibrary {
           this.recovery.on('journalFailed', (event) => {
             done();
             this.recovery.send({ type: 'mutationAbandoned', requestId });
-            reject(new Error(event.message));
+            reject(this.#journalError ?? new Error(event.message));
           }),
         ];
         const done = (): void => {
@@ -1107,7 +1116,9 @@ export class ProjectLibrary {
       }
       const read = await until(this.recovery, (snapshot) => !snapshot.matches('loading'));
       if (read.matches('loadFailed')) {
-        throw new Error(read.context.loadError ?? 'The pending project operations could not be read.');
+        throw (
+          this.#journalError ?? new Error(read.context.loadError ?? 'The pending project operations could not be read.')
+        );
       }
       try {
         await this.#requestPass({ reuse: false });

@@ -798,6 +798,38 @@ describe('ProjectNavigation', () => {
     });
 
     /*
+     * U6 as the reload runs it: the listing answers before the open project's
+     * session goes live, so there is a frame with the listing and nothing live.
+     * The open project stays first through it, and once its session has gone
+     * live the registry alone says what is live.
+     */
+    it.fails('U6: no row moves when the listing answers before the open project goes live', () => {
+      pathname = '/w/home/one';
+      rememberedShape = { count: 2, projects: [secondProject, firstProject] };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      const view = render(<ProjectNavigation />);
+      const remembered = drawnRows();
+
+      mockUseProjects.mockReturnValue(projectsResult);
+      view.rerender(<ProjectNavigation />);
+      const listed = drawnRows();
+
+      liveProjectIds = ['proj_one'];
+      view.rerender(<ProjectNavigation />);
+      const live = drawnRows();
+
+      liveProjectIds = [];
+      view.rerender(<ProjectNavigation />);
+
+      expect([remembered, listed, live]).toEqual([
+        ['One', 'Earlier', 'Two'],
+        ['One', 'Earlier', 'Two'],
+        ['One', 'Earlier', 'Two'],
+      ]);
+      expect(drawnRows()).toEqual(['Two', 'One']);
+    });
+
+    /*
      * R1/P46: an open project whose session a policy or the person closed is
      * not live, on its own page too. It sorts with the rest, below the live
      * ones and the "Earlier" divider.

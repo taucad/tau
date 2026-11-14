@@ -1507,8 +1507,8 @@ jobs:
       # registry-1.docker.io (`HEAD /v2/library/postgres/manifests/17-alpine`, Docker-Content-Digest).
       # The launcher (apps/libs/api-billing/scripts/test-billing-foundation.mts) runs `postgres:17-alpine`
       # with `pull_policy: never`, so the pinned image is tagged locally under that name. Refresh: resolve
-      # the tag's current digest the same way and replace it in every pull step of ci.yml and
-      # billing-nightly.yml (scripts/src/billing-stripe-lanes.test.ts requires one digest everywhere).
+      # the tag's current digest the same way and replace it in every pull step of ci.yml
+      # (scripts/src/billing-stripe-lanes.test.ts requires one digest everywhere).
       - name: Pull the billing foundation PostgreSQL image
         run: |
           docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac

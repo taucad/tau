@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { CodeEditor, markCodeEditorMilestone } from '#components/code/code-editor.client.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import { useEditorDocument, useEditorLanguageEnvironment } from '#hooks/use-editor-document-session.js';
 import { useProject } from '#hooks/use-project.js';
 import type { EditorDocument } from '#lib/editor-document.js';
@@ -14,6 +13,7 @@ import { useEditorSymbolPathReporter } from '#routes/w.$workspace.$project/edito
 export function ChatEditorCodeViewer({
   paneId,
   filePath,
+  content,
   language,
   onApply,
   onHistory,
@@ -21,7 +21,7 @@ export function ChatEditorCodeViewer({
 }: ChatEditorViewerProps): React.JSX.Element {
   const document = useEditorDocument(filePath);
   const { projectId } = useProject();
-  const placeholder = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
+  const loadingLabel = `Loading ${filePath.split('/').pop() ?? filePath}`;
   return (
     <MountedCodeEditor
       document={document}
@@ -30,7 +30,8 @@ export function ChatEditorCodeViewer({
       onApply={onApply}
       onHistory={onHistory}
       readOnly={readOnly}
-      placeholder={placeholder}
+      loadingLabel={loadingLabel}
+      loadingText={content}
       projectId={projectId}
     />
   );
@@ -43,11 +44,13 @@ function MountedCodeEditor({
   onApply,
   onHistory,
   readOnly,
-  placeholder,
+  loadingLabel,
+  loadingText,
   projectId,
 }: Pick<ChatEditorViewerProps, 'paneId' | 'language' | 'onApply' | 'onHistory' | 'readOnly'> & {
   readonly document: EditorDocument | undefined;
-  readonly placeholder: React.JSX.Element;
+  readonly loadingLabel: string;
+  readonly loadingText: string;
   readonly projectId: string;
 }): React.JSX.Element {
   const environment = useEditorLanguageEnvironment();
@@ -125,7 +128,8 @@ function MountedCodeEditor({
         document={document}
         viewId={paneId}
         languageId={language}
-        loading={placeholder}
+        loadingLabel={loadingLabel}
+        loadingText={loadingText}
         className='h-full bg-background'
         readOnly={readOnly}
         extensions={

@@ -7,7 +7,13 @@ import { MachineProjectLink } from '#components/machines/machine-project-link.js
 import { agentJob } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 const { getProjectListing } = vi.hoisted(() => ({ getProjectListing: vi.fn() }));
 vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ getProjectListing, isLoading: false }),
+  useProjectManager: () => ({
+    projectListingQuery: {
+      queryKey: ['projects'],
+      queryFn: async (): Promise<unknown> => getProjectListing() as Promise<unknown>,
+    },
+    isLoading: false,
+  }),
 }));
 afterEach(cleanup);
 describe('machine source provenance', () => {

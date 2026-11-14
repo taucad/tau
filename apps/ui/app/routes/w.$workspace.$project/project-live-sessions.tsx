@@ -73,7 +73,7 @@ import {
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import { useTauCloudIntent, useTauCloudIntentConnection } from '#hooks/use-cloud-projects.js';
-import type { TauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import {
   useRevisionClientLifecycle,
   useRevisionClientStatus,

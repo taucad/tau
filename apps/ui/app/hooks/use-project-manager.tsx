@@ -1,31 +1,19 @@
 import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';
-import { createContext, useContext, useMemo, useCallback, useEffect, useSyncExternalStore } from 'react';
+import { createContext, useContext, useMemo, useCallback, useSyncExternalStore } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { Project, ProjectManifest } from '@taucad/types';
-import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
+import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
-import { generatePrefixedId } from '@taucad/utils/id';
-import { idPrefix } from '@taucad/types/constants';
 import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
-import {
-  getWorkspaceMetadata,
-  requestHandlePermission,
-  setProjectFileSystemConfig,
-  repairWorkspaceBindings as repairStoredWorkspaceBindings,
-} from '#filesystem/handle-store.js';
-import type { Workspace, WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
-import { directoryPicker } from '#constants/browser.constants.js';
-import type { DirectoryPick } from '#constants/browser.constants.js';
+import type { WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
-import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { selectWorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import {
   selectDiscoveryObservationError,
   selectLibraryError,
@@ -36,25 +24,14 @@ import {
   selectMetadataObservationError,
   selectMetadataObservationErrors,
 } from '#runtime/project-library.js';
-import {
-  deriveWorkspaceBindingRepairs,
-  rememberChatPlacement,
-  routeConfigFor,
-} from '#runtime/project-library-storage.js';
 import type { ProjectListing } from '#runtime/project-library-storage.js';
-import type { ProjectLibrary, ProjectRouteAccess, WorkspaceConnectionTrace } from '#runtime/project-library.js';
+import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
 import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
+import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
 import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
-import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
-
-export type ConnectedWorkspace = {
-  readonly workspace: Workspace;
-  readonly projectCount: number;
-  readonly minted: boolean;
-};
 
 type ProjectManagerContextType = {
   discoveryObservationError: string | undefined;
@@ -83,6 +60,8 @@ type ProjectManagerContextType = {
   duplicateProject: (projectId: string) => Promise<CreatedProject>;
   getProjects: (options?: { includeDeleted?: boolean }) => Promise<ProjectLibraryEntry[]>;
   getProjectListing: (options?: { includeDeleted?: boolean }) => Promise<ProjectListing>;
+  /** The listing's query: the one key and function that write `['projects']` (D9). Readers spread it into `useQuery`. */
+  projectListingQuery: ProjectLibrary['listingQuery'];
   getProject: (projectId: string) => Promise<Project | undefined>;
   getProjectRouteAccess: (projectId: string) => Promise<ProjectRouteAccess>;
   getProjectLibraryState: (projectId: string) => Promise<ProjectLibraryState | undefined>;
@@ -177,28 +156,6 @@ export function ProjectManagerProvider({
     throw new Error('ProjectManagerProvider must be used within <AppRuntimeProvider>, or be given a library');
   }
   const actorRef = library.projectManager;
-  const fileManager = useFileManager();
-  /*
-   * The library's transitional binding (programme-control D15 ruling, A2): the root file manager's facade, which
-   * `FileManagerScope` builds in React. It is handed over in render, so a session acquired in this pass already reads
-   * through it. Since A3b the library owns everything else it reads: the chat store over the facade's record client,
-   * the two filesystem observations, discovery, the journal and route access. A4b builds the facade over `rootFiles`
-   * and deletes the binding.
-   */
-  library.bind({ fileManager });
-  const { chatStore } = library;
-  if (chatStore === undefined) {
-    throw new Error('The project library has no chat store after its binding');
-  }
-  /* The observations' reads run through this provider's binding: a remount releases it, and the next mount resumes it
-   * (B9, StrictMode). */
-  useEffect(() => {
-    library.resume();
-    return () => {
-      library.release();
-    };
-  }, [library]);
-  const workspaceTelemetry = useWorkspaceTelemetry();
 
   /* What the library publishes, read through its module-level selectors (MC-R25). */
   const librarySnapshot = useSyncExternalStore(library.subscribe, library.getSnapshot, library.getSnapshot);
@@ -213,45 +170,34 @@ export function ProjectManagerProvider({
   const discoveryObservationError = selectDiscoveryObservationError(librarySnapshot);
   const metadataObservationError = selectMetadataObservationError(librarySnapshot);
   const metadataObservationErrors = selectMetadataObservationErrors(librarySnapshot);
+  const workspaceConnection = selectLibraryWorkspaceConnection(librarySnapshot);
   const getMetadataObservationError = useCallback(
     (resourceId: string): string | undefined => metadataObservationErrors.get(resourceId),
     [metadataObservationErrors],
   );
 
+  /* A facade (A4b): every command is the library's, read off it here; the wrappers below only compose them. */
   const {
+    commands,
+    workspaceCommands,
     discardRecovery,
     getProjectListing,
     getReadiedWorker,
     invalidateChatQueries,
     invalidateListing,
+    listingQuery: projectListingQuery,
     refreshObservations: refreshFilesystemObservations,
     routeAccess: getProjectRouteAccess,
     touchProject,
     whenDiscoveryReady,
+    createNavigationRepairChat,
+    patchChat,
+    touchChatRecency,
+    consumeChatStartupRequest,
+    commitCancelledDraftRestore,
+    readChats,
+    adoptLegacyChatPlacement,
   } = library;
-
-  const invalidateProjectedChats = useCallback(
-    (resourceId: string, chatIds: readonly string[]) => {
-      for (const chatId of chatIds) {
-        invalidateChatQueries(resourceId, chatId);
-      }
-    },
-    [invalidateChatQueries],
-  );
-
-  /** A discovery pass's result: the one in flight, or a new one. */
-  const discoverProjects = useCallback(async (): Promise<ProjectDiscoveryResult> => {
-    const { result } = await library.discover();
-    return result;
-  }, [library]);
-
-  const { commands } = library;
-  const { generate: generateProjectName } = useProjectNameClient();
-  const createProject = useCallback(
-    async (options: CreateProjectOptions): Promise<CreatedProject> =>
-      commands.createProject(options, { generate: generateProjectName }),
-    [commands, generateProjectName],
-  );
   const {
     prepareImportStaging,
     ownsImportStaging,
@@ -266,6 +212,39 @@ export function ProjectManagerProvider({
     verifyProjectQuiescent,
     closeProjectSession,
   } = commands;
+  const {
+    connectWorkspace,
+    retryWorkspaceConnection,
+    refreshWorkspaceCatalog,
+    repairWorkspaceBindings,
+    chooseProjectDirectory,
+    assertWorkspaceMutationAllowed,
+  } = workspaceCommands;
+
+  /** The chat store over the facade's current record client, read when a command runs. */
+  const chatStoreOf = useCallback((): ChatStorage => {
+    const { chatStore } = library;
+    if (chatStore === undefined) {
+      throw new Error('The project library has no chat store before the root file facade');
+    }
+    return chatStore;
+  }, [library]);
+
+  const invalidateProjectedChats = useCallback(
+    (resourceId: string, chatIds: readonly string[]) => {
+      for (const chatId of chatIds) {
+        invalidateChatQueries(resourceId, chatId);
+      }
+    },
+    [invalidateChatQueries],
+  );
+
+  const { generate: generateProjectName } = useProjectNameClient();
+  const createProject = useCallback(
+    async (options: CreateProjectOptions): Promise<CreatedProject> =>
+      commands.createProject(options, { generate: generateProjectName }),
+    [commands, generateProjectName],
+  );
 
   const setGeoSpecCandidateConsent = useCallback(
     async (projectId: string, enabled: boolean): Promise<ProjectLibraryState | undefined> => {
@@ -285,192 +264,12 @@ export function ProjectManagerProvider({
     [getReadiedWorker, whenDiscoveryReady],
   );
 
-  const refreshWorkspaceCatalog = useCallback(async (): Promise<void> => {
-    const catalog = await library.prepareCurrentWorkspaceCatalog(undefined);
-    await catalog.publish();
-  }, [library]);
-
-  const repairWorkspaceBindings = useCallback(
-    async (canonicalWorkspaceId: string): Promise<WorkspaceBindingRepairResult> => {
-      await whenDiscoveryReady();
-      const groups = await deriveWorkspaceBindingRepairs(await discoverProjects());
-      const group = groups.find((candidate) => candidate.canonicalWorkspaceId === canonicalWorkspaceId);
-      if (!group) {
-        return { repairedProjectCount: 0, removedWorkspaceIds: [], skipped: [] };
-      }
-      const result = await repairStoredWorkspaceBindings({ canonicalWorkspaceId, repairs: group.repairs });
-      if (result.repairedProjectCount === 0) {
-        return result;
-      }
-      await fileManager.workspace.syncProjectRoots();
-      const catalog = await library.prepareCurrentWorkspaceCatalog(undefined);
-      await catalog.publish();
-      return result;
-    },
-    [discoverProjects, fileManager.workspace, library, whenDiscoveryReady],
-  );
-
-  const workspaceConnectionRef = library.workspaceConnection;
-  const workspaceConnection = selectLibraryWorkspaceConnection(librarySnapshot);
-
-  const waitForWorkspaceConnection = useCallback(
-    async (operationId: string): Promise<ConnectedWorkspace> =>
-      new Promise<ConnectedWorkspace>((resolve, reject) => {
-        const settle = (snapshot: ReturnType<typeof workspaceConnectionRef.getSnapshot>): void => {
-          if (snapshot.context.operationId !== operationId) {
-            /* Only a later `beginSelection` sets another id: this operation was superseded, so it settles. The
-             * library's connection outlives a provider remount, which clears the in-flight promise (A2). */
-            if (snapshot.context.operationId !== undefined) {
-              subscription.unsubscribe();
-              reject(new Error('Workspace connection was superseded.'));
-            }
-            return;
-          }
-          if (snapshot.matches('ready')) {
-            subscription.unsubscribe();
-            resolve({
-              workspace: snapshot.context.workspace!.workspace,
-              projectCount: snapshot.context.catalog!.projectCount,
-              minted: snapshot.context.workspace!.minted,
-            });
-          } else if (snapshot.matches('failed')) {
-            subscription.unsubscribe();
-            const failure = snapshot.context.error;
-            reject(failure instanceof Error ? failure : new Error('Workspace connection failed.', { cause: failure }));
-          }
-        };
-        const subscription = workspaceConnectionRef.subscribe(settle);
-        settle(workspaceConnectionRef.getSnapshot());
-      }),
-    [workspaceConnectionRef],
-  );
-
-  const connectWorkspace = useCallback(
-    async (selectedHandle?: FileSystemDirectoryHandle): Promise<ConnectedWorkspace | undefined> => {
-      const picker = directoryPicker();
-      if (!picker.available) {
-        return undefined;
-      }
-      return library.connectOnce(async (): Promise<ConnectedWorkspace | undefined> => {
-        const operationId = generatePrefixedId(idPrefix.request);
-        workspaceConnectionRef.send({ type: 'beginSelection', operationId });
-        let selection: DirectoryPick | undefined =
-          selectedHandle === undefined ? undefined : { backend: 'webaccess', handle: selectedHandle };
-        try {
-          selection ??= await picker.pick({ id: 'tau-workspace', mode: 'readwrite' });
-          if (selection === undefined) {
-            workspaceConnectionRef.send({ type: 'selectionCancelled' });
-            return undefined;
-          }
-        } catch (error) {
-          workspaceConnectionRef.send({ type: 'selectionCancelled' });
-          throw error;
-        }
-        const trace: WorkspaceConnectionTrace = {
-          operationId,
-          startedAt: performance.now(),
-          workspaceId: undefined,
-          registeringDuration: 0,
-          mountingDuration: 0,
-          catalogDuration: 0,
-          publishingDuration: 0,
-          candidateCount: 0,
-          projectCount: 0,
-          conflictCount: 0,
-        };
-        library.connectionTrace = trace;
-        const completion = waitForWorkspaceConnection(operationId);
-        workspaceConnectionRef.send({ type: 'workspaceSelected', operationId, selection });
-        try {
-          const connected = await completion;
-          if (library.connectionTrace === trace) {
-            const { startedAt, ...metrics } = trace;
-            workspaceTelemetry.workspaceConnection({
-              ...metrics,
-              outcome: 'ready',
-              totalMs: performance.now() - startedAt,
-            });
-          }
-          return connected;
-        } catch (error) {
-          if (library.connectionTrace === trace) {
-            const { startedAt, ...metrics } = trace;
-            workspaceTelemetry.workspaceConnection({
-              ...metrics,
-              outcome: 'failed',
-              totalMs: performance.now() - startedAt,
-            });
-          }
-          throw error;
-        }
-      });
-    },
-    [library, waitForWorkspaceConnection, workspaceConnectionRef, workspaceTelemetry],
-  );
-
-  const retryWorkspaceConnection = useCallback(async (): Promise<ConnectedWorkspace | undefined> => {
-    const current = selectWorkspaceConnectionState(workspaceConnectionRef.getSnapshot());
-    if (current.phase !== 'failed') {
-      return undefined;
-    }
-    if (current.retry === 'pick-again') {
-      return connectWorkspace();
-    }
-    if (current.retry === 'grant-access') {
-      const { selection } = workspaceConnectionRef.getSnapshot().context;
-      if (selection?.backend !== 'webaccess' || !(await requestHandlePermission(selection.handle))) {
-        return undefined;
-      }
-    }
-    workspaceConnectionRef.send({ type: 'retry' });
-    return waitForWorkspaceConnection(current.operationId);
-  }, [connectWorkspace, waitForWorkspaceConnection, workspaceConnectionRef]);
-
   const getProjects = useCallback(
     async (options?: { includeDeleted?: boolean }): Promise<ProjectLibraryEntry[]> => {
       const listing = await getProjectListing(options);
       return [...listing.projects];
     },
     [getProjectListing],
-  );
-
-  const chooseProjectDirectory = useCallback(
-    async (locator: ProjectLocator, projectId: string): Promise<void> => {
-      await whenDiscoveryReady();
-      // Re-verify on a fresh scan: the folder may have changed since the card
-      // rendered. Only the route binding moves; no project file is written (R7).
-      const discovery = await discoverProjects();
-      const chosen = discovery.entries.find(
-        (entry) =>
-          (entry.status === 'duplicate-id' || entry.status === 'valid') &&
-          entry.projectId === projectId &&
-          entry.locator.storageRootKey === locator.storageRootKey &&
-          entry.locator.relativeDirectory === locator.relativeDirectory,
-      );
-      if (!chosen) {
-        throw new Error('This folder no longer holds that project.');
-      }
-      await setProjectFileSystemConfig(routeConfigFor(projectId, chosen.locator));
-      await fileManager.workspace.syncProjectRoots();
-      invalidateListing();
-    },
-    [discoverProjects, fileManager.workspace, invalidateListing, whenDiscoveryReady],
-  );
-
-  const assertWorkspaceMutationAllowed = useCallback(
-    async (workspaceId: string): Promise<void> => {
-      const worker = await getReadiedWorker();
-      const workspace = await getWorkspaceMetadata(workspaceId);
-      const operations = workspace?.path === undefined ? [] : await worker.getPendingProjectOperations();
-      const pendingNative = operations.some((operation) => {
-        const storage = operation.kind === 'permanent-delete' ? operation.storage : operation;
-        return storage.backend === 'node' && storage.path === workspace?.path;
-      });
-      if (pendingNative || (await worker.hasPendingProjectOperationForWorkspace(workspaceId))) {
-        throw new Error('This workspace is required to recover an unfinished project operation');
-      }
-    },
-    [getReadiedWorker],
   );
 
   // ============================================================================
@@ -497,11 +296,11 @@ export function ProjectManagerProvider({
         id?: string;
       },
     ): Promise<Chat> => {
-      const chat = await chatStore.createChat(resourceId, chatData);
-      await rememberChatPlacement(fileManager.recordFiles, {
+      const chat = await chatStoreOf().createChat(resourceId, chatData);
+      await library.rememberChatPlacement({
         projectId: resourceId,
         chatId: chat.id,
-        execution: chatData.activeExecution,
+        ...(chatData.activeExecution === undefined ? {} : { execution: chatData.activeExecution }),
       });
       /* W9: the new chat copies the Settings default; one never seeded reads Ask. */
       await seedChatPermission(resourceId, chat.id);
@@ -509,30 +308,24 @@ export function ProjectManagerProvider({
       invalidateListing();
       return chat;
     },
-    [chatStore, fileManager.recordFiles, invalidateListing, touchProject],
+    [chatStoreOf, invalidateListing, library, touchProject],
   );
 
-  const { createNavigationRepairChat } = library;
-
   const updateChat = useCallback(
-    async (chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> => {
-      return chatStore.updateChat(chatId, update);
-    },
-    [chatStore],
+    async (chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> =>
+      chatStoreOf().updateChat(chatId, update),
+    [chatStoreOf],
   );
 
   const applyGeneratedChatName = useCallback(
-    async (chatId: string, name: string): Promise<Chat | undefined> => {
-      return chatStore.applyGeneratedChatName(chatId, name);
-    },
-    [chatStore],
+    async (chatId: string, name: string): Promise<Chat | undefined> =>
+      chatStoreOf().applyGeneratedChatName(chatId, name),
+    [chatStoreOf],
   );
-
-  const { patchChat, touchChatRecency, consumeChatStartupRequest, commitCancelledDraftRestore } = library;
 
   const softDeleteChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
-      const result = await chatStore.softDeleteChat(chatId);
+      const result = await chatStoreOf().softDeleteChat(chatId);
       if (result) {
         await touchProject(result.resourceId);
         invalidateListing();
@@ -540,11 +333,10 @@ export function ProjectManagerProvider({
 
       return result;
     },
-    [chatStore, invalidateListing, touchProject],
+    [chatStoreOf, invalidateListing, touchProject],
   );
 
-  /* The provider's reads end with it: one its unmount fails is not asked again (the library's own ports are). */
-  const { readChats, adoptLegacyChatPlacement } = library;
+  /* The provider's reads are not asked again (the library's own ports are). */
   const once = { retry: false } as const;
 
   const getChatsForResource = useCallback(
@@ -579,6 +371,7 @@ export function ProjectManagerProvider({
 
   const deleteChat = useCallback(
     async (chatId: string): Promise<void> => {
+      const chatStore = chatStoreOf();
       const chat = await chatStore.getChat(chatId);
       await chatStore.deleteChat(chatId);
       if (chat) {
@@ -587,11 +380,12 @@ export function ProjectManagerProvider({
       }
       invalidateListing();
     },
-    [chatStore, invalidateListing, touchProject],
+    [chatStoreOf, invalidateListing, touchProject],
   );
 
   const purgeChat = useCallback(
     async (chatId: string): Promise<void> => {
+      const chatStore = chatStoreOf();
       const chat = await chatStore.getChat(chatId);
       await chatStore.purgeChat(chatId);
       if (chat) {
@@ -600,7 +394,7 @@ export function ProjectManagerProvider({
       }
       invalidateListing();
     },
-    [chatStore, invalidateListing, touchProject],
+    [chatStoreOf, invalidateListing, touchProject],
   );
 
   /* A newcomer's first project asks for the product tour: decided before the project exists, stored once it does. */
@@ -651,6 +445,7 @@ export function ProjectManagerProvider({
       duplicateProject,
       getProjects,
       getProjectListing,
+      projectListingQuery,
       getProject,
       getProjectRouteAccess,
       getProjectLibraryState,
@@ -709,6 +504,7 @@ export function ProjectManagerProvider({
     duplicateProject,
     getProjects,
     getProjectListing,
+    projectListingQuery,
     getProject,
     getProjectRouteAccess,
     getProjectLibraryState,

@@ -52,14 +52,13 @@ vi.stubGlobal(
   }),
 );
 
+const { canOpenCloudProject, tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 const {
-  canOpenCloudProject,
   backupByDefaultNotice,
   fetchCloudProjects,
   materializeOnSignIn,
   materializedCloudProjects,
   nextTauCloudStep,
-  tauCloudIntent,
   useTauCloudIntent,
   useTauCloudIntentConnection,
 } = await import('#hooks/use-cloud-projects.js');

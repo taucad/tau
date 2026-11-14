@@ -14,6 +14,7 @@ import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { testRootFiles } from '#runtime/project-library.fixture.js';
 import { mock } from 'vitest-mock-extended';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
@@ -204,7 +205,8 @@ const mockFileManager = {
   workspace: { syncProjectRoots: mockSyncProjectRoots },
   scopedStorage: { readShallowDirectory: vi.fn(async () => []) },
 };
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
+/* A4b: the library reads the root file facade the runtime builds; here, one over the double. */
+const rootFiles = testRootFiles(mockFileManager);
 
 // ── Durable route configuration double ──────────────────────────────────────
 
@@ -336,7 +338,7 @@ const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>(
 const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
   let library = libraries.get(queryClient);
   if (library === undefined) {
-    library = new ProjectLibrary({ queryClient });
+    library = new ProjectLibrary({ queryClient, rootFiles: () => rootFiles });
     library.start();
     libraries.set(queryClient, library);
     startedLibraries.push(library);

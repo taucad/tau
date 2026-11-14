@@ -83,6 +83,9 @@ vi.mock('@tanstack/react-query', () => ({
 
 /* The quiescence check and the session close are the library's commands since A4a (row L7): the real ones, over the
  * registry and chat-store doubles below. */
+/** The library's listing query, as `useProjectManager()` hands it down. */
+const listingQuery = vi.hoisted(() => ({ queryKey: ['projects'], queryFn: async () => undefined }));
+
 const commands = vi.hoisted(() => ({
   current: undefined as Pick<ProjectCommands, 'verifyProjectQuiescent' | 'closeProjectSession'> | undefined,
 }));
@@ -115,6 +118,8 @@ vi.mock('#hooks/use-project-manager.js', async () => {
     replayForPerson: notCalled,
     invalidateProjectListing: notCalled,
     invalidateListing: () => undefined,
+    invalidateProject: () => undefined,
+    forgetProject: () => undefined,
     noteLibraryChanged: () => undefined,
     sessions: () => registry.actor,
     chatSessions: () => chatStore,
@@ -135,6 +140,7 @@ vi.mock('#hooks/use-project-manager.js', async () => {
       permanentlyDeleteProject: projectManager.permanentlyDeleteProject,
       duplicateProject: vi.fn(),
       isLoading: worker.isLoading,
+      projectListingQuery: listingQuery,
     }),
   };
 });
@@ -303,5 +309,12 @@ describe('useProjects listing query', () => {
     expect(visible.result.current.projects.map(({ id }) => id)).toEqual(['proj_live']);
     expect(all.result.current.projects.map(({ id }) => id)).toEqual(['proj_live', 'proj_trashed']);
     query.data = undefined;
+  });
+
+  /* D9: the hook queries with the library's listing query, so the library alone writes the listing. */
+  it("queries the listing with the library's own key and function", () => {
+    const options = listingQueryOptions();
+    expect(options['queryKey']).toBe(listingQuery.queryKey);
+    expect(options['queryFn']).toBe(listingQuery.queryFn);
   });
 });

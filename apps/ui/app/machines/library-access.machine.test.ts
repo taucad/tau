@@ -162,6 +162,9 @@ describe('libraryAccess', () => {
       ask(harness);
       await resolve(harness.verify, { status: 'unavailable' });
       expect(harness.answers('q1')).toEqual([{ status: 'unavailable' }]);
+      // The answered question keeps nothing: the library asks every question under a new id.
+      expect(harness.actor.getSnapshot().context.questions).toEqual({});
+      expect(harness.actor.getSnapshot().context.generations).toEqual({});
     });
 
     it('should answer ready from a pass that finds the project, counting a cached listing', async () => {
@@ -388,10 +391,43 @@ describe('libraryAccess', () => {
       expect(harness.answers('q1')).toEqual([]);
       expect(harness.verify.calls).toHaveLength(2);
       await resolve(harness.verify, { status: 'discovery-required' });
-      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      // Once for the first verification, which found the bootstrap pass not yet run (A3b), and once after it failed.
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(2);
       harness.send({ type: 'discoveryReady' });
       expect(harness.discovery.calls).toHaveLength(1);
     });
+
+    it('should ask for the bootstrap pass once a verification needs discovery before it has run, and wait for it', async () => {
+      const harness = start();
+      harness.send({ type: 'journalReady', pending: 0 });
+      ask(harness);
+      await resolve(harness.verify, { status: 'discovery-required' });
+      expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+      expect(harness.discovery.calls).toHaveLength(0);
+      harness.send({ type: 'discoveryReady' });
+      expect(harness.discovery.calls).toHaveLength(1);
+    });
+
+    it.each([
+      ['a current listing from a pass the bootstrap did not run', { type: 'epochMoved', epoch: 1, current: true }],
+      [
+        'a row this tab holds for another project',
+        { type: 'recoveriesChanged', recoveries: [recovery('p2', 'recovering')] },
+      ],
+    ] as const)(
+      'should ask for the bootstrap pass when %s skips the verification before it has run, and wait for it',
+      (_case, fact) => {
+        const harness = start();
+        harness.send(fact);
+        harness.send({ type: 'journalReady', pending: 0 });
+        ask(harness);
+        expect(harness.verify.calls).toHaveLength(0);
+        expect(harness.emitted.filter((event) => event.type === 'discoveryWanted')).toHaveLength(1);
+        expect(harness.discovery.calls).toHaveLength(0);
+        harness.send({ type: 'discoveryReady' });
+        expect(harness.discovery.calls).toHaveLength(1);
+      },
+    );
 
     it('should wait for the bootstrap pass when rows were pending, even with a row held, and answer the row if it fails', () => {
       const harness = start();

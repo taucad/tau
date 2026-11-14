@@ -117,13 +117,14 @@
     "writeStopEnded"
   ],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "8407788fd0580bb08558f683776660ed62ff02710a5b3e1141a05a05dc9636b1",
-    "apps/ui/app/machines/library-access.machine.ts": "8a61621385a89c44a27032be930c83b84d66fe214b2e58a7f24fc1db300c2364",
-    "apps/ui/app/machines/library-discovery.machine.ts": "a798216553e066e59a9defb8bc6d55a39f82d8c4d91ea9285b4eb113f826f58e",
-    "apps/ui/app/machines/library-recovery.machine.ts": "c4d48b456798a47db27ebfdf3f67b2101a106f48276d91d720e91295df279ed2"
+    "apps/ui/app/hooks/use-project-manager.tsx": "e16ee9bb2541ce30d08443fdec522fe8e47d7d0ce05431efdc1aa61b8d782384",
+    "apps/ui/app/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
+    "apps/ui/app/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
+    "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
+    "apps/ui/app/runtime/project-library.ts": "18df559aad88b7f4727df40120d4047c2f992d799d05120d680c3a36d0f65c4a"
   },
   "specs": {
-    "LibraryCatalog.tla": "25f03e96e0b217cfc1c522bd56a5cf230c1a5b16d9dee19a780a3a6344aaef10"
+    "LibraryCatalog.tla": "ce2160e321c9443c44948b2d48b83e9e161bb2e3e5e4e6a9938eb0bebca92f39"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",
@@ -137,11 +138,11 @@
     "LibraryCatalog.target-environment.cfg": "25b8a1d60faef487feee9829776174ab53430cd52dfb9e2b1ecf1a48803bd4e5",
     "LibraryCatalog.target-workspace.cfg": "194511b98b8dd7635873136f2d38dde1236be914e104f15e965b90d9716b70c2",
     "LibraryCatalog.target.cfg": "e826c31e4b37809a7aec2a94fac8571f8aa636e73439ca857b8c36014d61d147",
-    "LibraryCatalog.today-access-loop.cfg": "3e729ddb9599b89ccf580ccb9ac6de69d58d0e21943308f1bd0ae745dc156c0f",
+    "LibraryCatalog.today-access-loop.cfg": "6342f473e732f99b5974247c293f2dc55bcf99c1960bf038c85d21e35cac6352",
     "LibraryCatalog.today-ref-epoch-safe.cfg": "6820ab1b6b89c0a0d47de908ceae256d01e4111049d8004d2daebb0e6c24f67b",
     "LibraryCatalog.today-ref-epoch.cfg": "bbd222e64dd0e6b9cbf59057f4346110ab64658a0c6f3f251023330665c0a87c",
     "LibraryCatalog.wide.cfg": "13bb12904b6222c282f37460eb225ff6f402cc2fa5d96f34bb54836ad214822c",
-    "expected.json": "ab5df4c34ff06385edb879591d9b8417f5b96d758d405948a9be1ab365652a4c"
+    "expected.json": "39ac767ddcb30243751b7cfda54b2bd2b44c7b228b87219524f7ca5ba11a5f0a"
   },
   "versions": {
     "library-access": "1",

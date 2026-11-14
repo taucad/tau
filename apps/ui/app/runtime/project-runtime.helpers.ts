@@ -54,7 +54,8 @@ export async function ensureFocusedChatForProject({
   readonly requestedChatId: string | undefined;
   readonly persistedChatId: string | undefined;
   readonly worker: FocusedChatWorker;
-  readonly onCreatedChat?: () => void;
+  /** Called with the chat it created empty. */
+  readonly onCreatedChat?: (chatId: string) => void;
   readonly canCreateChat?: () => boolean;
 }): Promise<
   { type: 'focusedChatEnsured'; focusedChatId: string } | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
@@ -83,7 +84,7 @@ export async function ensureFocusedChatForProject({
     return { type: 'focusedChatDeferred' };
   }
   const created = await worker.createNavigationRepairChat(projectId);
-  onCreatedChat?.();
+  onCreatedChat?.(created.id);
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
 }
 

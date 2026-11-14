@@ -70,7 +70,7 @@
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
 (*                  of ProjectPersistenceGuard after the commit that       *)
 (*                  mounts the session it names (project-live-sessions.tsx *)
-(*                  652, 795 to 810), so the person may edit before it     *)
+(*                  656, 799 to 814), so the person may edit before it     *)
 (*                  lands; React runs it before the next render, so it has *)
 (*                  landed before the next commit or effect run            *)
 (*                  (RegFlushed). FALSE: it is current at every step.      *)
@@ -91,6 +91,8 @@
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
+\* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
+\* route gate imports the type from there. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to
@@ -678,7 +680,7 @@ DRetry ==
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
 
-\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 795 to 810, 719): the
+\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 799 to 814, 723): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration

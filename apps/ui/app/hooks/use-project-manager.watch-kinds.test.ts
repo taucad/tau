@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import type { ChangeSet } from '@taucad/filesystem';
-import { chatMetadataWatchRequest, manifestWatchRequest } from '#hooks/use-project-manager.js';
+import { chatMetadataWatchRequest, manifestWatchRequest } from '#runtime/project-library-observations.js';
 
 const workspace = async () => {
   const registry = new ProviderRegistry();

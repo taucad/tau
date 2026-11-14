@@ -786,11 +786,14 @@ const sameLanes = (left: readonly ProjectLoadBox[], right: readonly ProjectLoadB
   left.length === right.length &&
   left.every((box, index) => Math.abs(box.x - right[index]!.x) <= 1 && Math.abs(box.width - right[index]!.width) <= 1);
 
-/** Every recorded lane set that differs from the settled one, from the first frame that drew a lane. */
-const laneMismatches = (record: ProjectLoadRecord, settled: readonly ProjectLoadBox[]): string[] =>
-  (record.boxSets['lanes'] ?? [])
-    .filter((entry) => entry.boxes.length > 0 && !sameLanes(entry.boxes, settled))
+/** Every recorded lane set that differs from the settled one, from the first frame that drew a lane; a later frame with no lanes counts. */
+const laneMismatches = (record: ProjectLoadRecord, settled: readonly ProjectLoadBox[]): string[] => {
+  const entries = record.boxSets['lanes'] ?? [];
+  const first = entries.findIndex((entry) => entry.boxes.length > 0);
+  return (first === -1 ? [] : entries.slice(first))
+    .filter((entry) => !sameLanes(entry.boxes, settled))
     .map((entry) => `${describeFrame(entry)}: lanes ${describeBoxes(entry.boxes)}`);
+};
 
 type ClosedWorkbenchLoad = {
   readonly record: ProjectLoadRecord;
@@ -1266,9 +1269,13 @@ knownDefect(
   },
 );
 
-/* F9's clause past the mount: the editor's first line moves once CodeMirror lays out its gutters, after A15f. */
+/*
+ * F9's clause past the mount: on `main` the editor's first line moves 14 px about 2 s after the editor mounts, as
+ * CodeMirror lays out its gutters. A15f has merged and no lane owns this, so it is carried to A10, as other ownerless
+ * defects were; programme control may name another owner.
+ */
 knownDefect(
-  "F9 (A15f follow-up): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
+  "F9 (A10, carried): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
   {
     artifact: 'f9-after-mount-wide',
     expectedFailure: true,

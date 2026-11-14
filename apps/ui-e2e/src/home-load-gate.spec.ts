@@ -423,8 +423,9 @@ cloudDefectRow(
 
 /*
  * A15a frame rows for Home (loading states UX blueprint, § Red-first tests, Home), on A0.10's recorder: added after
- * A0.10 so later lanes only flip. H-a is S-flags' (#2180). A guard that holds on `main` (H-f's cancel, H-g) asserts as
- * a plain passing row; every other row stands as an expected failure, and its title names the lane that flips it.
+ * A0.10 so later lanes only flip. H-a is S-flags' (#2180). The one guard that holds on `main`, H-g, asserts as a plain
+ * passing row; every other row stands as an expected failure, and its title names the lane that flips it. H-f's cancel
+ * case is red until A15d: on `main` an Enter typed before hydration becomes a line break, so there is no send to cancel.
  */
 
 /** A row's defect assertion, with what was measured in its message, so a failure names every frame it counted. */

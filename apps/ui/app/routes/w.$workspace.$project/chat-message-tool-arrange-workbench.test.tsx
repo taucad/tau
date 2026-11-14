@@ -95,14 +95,18 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       listener?.();
     });
     expect(screen.getByRole('status')).toHaveTextContent('Written');
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
-    rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
+    // The layout acknowledges the digest once its adapters show it (A8b: the snapshot carries it).
+    act(() => {
+      current = { layout, layoutDigest: digest, appliedDigest: digest, refused: [], restoreTarget: 'prior' };
+      listener?.();
+    });
     expect(screen.getByRole('status')).toHaveTextContent('Shown');
     expect(screen.getByRole('button', { name: 'Restore previous layout' })).toBeEnabled();
     act(() => {
       current = {
         layout,
         layoutDigest: digest,
+        appliedDigest: digest,
         refused: [{ tab: { kind: 'pane', pane: 'kernel' }, reason: 'debug-only' }],
       };
       listener?.();
@@ -114,10 +118,17 @@ describe('ChatMessageToolArrangeWorkbench', () => {
   });
 
   it('should keep a restore receipt visible when collapsed and disable an immediate toggle', async () => {
-    const current = { layout, layoutDigest: digest, refused: [], restoreTarget: 'prior' };
-    controller.snapshot.mockReturnValue(current);
+    const shown: WorkbenchLayoutSnapshot = {
+      layout,
+      layoutDigest: digest,
+      appliedDigest: digest,
+      refused: [],
+      restoreTarget: 'prior',
+    };
+    const unknown: WorkbenchLayoutSnapshot = { ...shown, appliedDigest: undefined };
+    let current = shown;
+    controller.snapshot.mockImplementation(() => current);
     controller.subscribe.mockReturnValue(() => undefined);
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     const gate = Promise.withResolvers<boolean>();
     controller.restorePreviousArrangement.mockReturnValue(gate.promise);
     const rendered = render(<ChatMessageToolArrangeWorkbench part={output} />);
@@ -130,10 +141,10 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     expect(submitted.layoutDigest).toBe(digest);
     expect(submitted.target).toBe('prior');
     expect(submitted.eligible()).toBe(true);
-    appliedWorkbenchRevisions = new Map();
+    current = unknown;
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
     expect(submitted.eligible()).toBe(false);
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
+    current = shown;
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={output} />);
     expect(restore).toHaveAttribute('aria-busy', 'true');
     await userEvent.click(header);
@@ -189,7 +200,7 @@ describe('ChatMessageToolArrangeWorkbench', () => {
   );
 
   it('waits for both a view and an entry owner even when the layout digest is unchanged', () => {
-    controller.snapshot.mockReturnValue({ layout, layoutDigest: digest, refused: [] });
+    controller.snapshot.mockReturnValue({ layout, layoutDigest: digest, appliedDigest: digest, refused: [] });
     controller.subscribe.mockReturnValue(() => undefined);
     const part: Extract<Invocation, { state: 'output-available' }> = {
       ...output,
@@ -209,7 +220,6 @@ describe('ChatMessageToolArrangeWorkbench', () => {
         ],
       },
     };
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     const rendered = render(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Written');
 
@@ -224,17 +234,11 @@ describe('ChatMessageToolArrangeWorkbench', () => {
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Written');
 
-    appliedWorkbenchRevisions = new Map([
-      [workbenchPaths.layout, digest],
-      [workbenchPaths.view('iso'), entriesDigest],
-    ]);
+    appliedWorkbenchRevisions = new Map([[workbenchPaths.view('iso'), entriesDigest]]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Written');
 
-    appliedWorkbenchRevisions = new Map([
-      [workbenchPaths.layout, digest],
-      [workbenchPaths.view('iso'), viewDigest],
-    ]);
+    appliedWorkbenchRevisions = new Map([[workbenchPaths.view('iso'), viewDigest]]);
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Shown');
 
@@ -268,16 +272,25 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       },
     };
     controller.subscribe.mockReturnValue(() => undefined);
-    controller.snapshot.mockReturnValue({ layout, layoutDigest: closedDigest, refused: [] });
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
+    controller.snapshot.mockReturnValue({ layout, layoutDigest: closedDigest, appliedDigest: digest, refused: [] });
     const rendered = render(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Written');
 
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, closedDigest]]);
+    controller.snapshot.mockReturnValue({
+      layout,
+      layoutDigest: closedDigest,
+      appliedDigest: closedDigest,
+      refused: [],
+    });
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Written');
 
-    controller.snapshot.mockReturnValue({ layout: closedLayout, layoutDigest: closedDigest, refused: [] });
+    controller.snapshot.mockReturnValue({
+      layout: closedLayout,
+      layoutDigest: closedDigest,
+      appliedDigest: closedDigest,
+      refused: [],
+    });
     rendered.rerender(<ChatMessageToolArrangeWorkbench part={part} />);
     expect(screen.getByRole('status')).toHaveTextContent('Shown');
   });
@@ -310,9 +323,14 @@ describe('ChatMessageToolArrangeWorkbench', () => {
   });
 
   it.each(['false', 'reject'] as const)('reports a %s Restore outcome and enables retry', async (outcome) => {
-    controller.snapshot.mockReturnValue({ layout, layoutDigest: digest, refused: [], restoreTarget: 'prior' });
+    controller.snapshot.mockReturnValue({
+      layout,
+      layoutDigest: digest,
+      appliedDigest: digest,
+      refused: [],
+      restoreTarget: 'prior',
+    });
     controller.subscribe.mockReturnValue(() => undefined);
-    appliedWorkbenchRevisions = new Map([[workbenchPaths.layout, digest]]);
     if (outcome === 'false') {
       controller.restorePreviousArrangement.mockResolvedValue(false);
     } else {

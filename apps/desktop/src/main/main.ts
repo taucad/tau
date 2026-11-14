@@ -103,6 +103,7 @@ import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
+  bundledStoreGuardEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -571,6 +572,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const logDirectory = join(app.getPath('userData'), 'logs');
   /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
   const gitEnvironment = bundledGitEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+  );
+  /* The store guard the Linux Terminal writes the project's git store through, when this build ships one (LP5). */
+  const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
@@ -1068,6 +1073,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
        */
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
+      ...storeGuardEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

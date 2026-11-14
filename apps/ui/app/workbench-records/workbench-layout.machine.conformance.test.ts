@@ -301,10 +301,15 @@ const adapter: ConformanceAdapter<Harness> = {
       wbOpen: context.workbenchOpen,
       intent: ids.map((intentId) => {
         const entry = context.intents[intentId];
+        // A settled intent is retired to its outcome once no late answer can reach it.
+        const outcome = context.outcomes[intentId];
         // The export graph's intents all target the viewer, whose intents the spec only ever kinds `file` (a `pane`
         // kind exists for desktop workbench intents alone), so this field is the same on both sides; rule 7's kinds
         // are checked by the TLC configurations and the unit rows.
         const kind = intentsHaveKind ? { kind: 'file' } : {};
+        if (outcome !== undefined) {
+          return { state: outcome.outcome === 'applied' ? 'applied' : outcome.reason, target: 'viewer', ...kind };
+        }
         if (entry === undefined) {
           return { state: 'unsent', target: 'viewer', ...kind };
         }

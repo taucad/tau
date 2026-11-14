@@ -1,6 +1,12 @@
 import { useSyncExternalStore } from 'react';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ChatStorage } from '#types/storage.types.js';
+import { mock } from 'vitest-mock-extended';
+import type { Chat } from '@taucad/chat';
+import type { ProjectCommands, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import type { ProjectClosePlan } from '#services/chat-session-store.js';
 
 const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(() => {
   const listeners = new Set<
@@ -75,26 +81,72 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), removeQueries: vi.fn() }),
 }));
 
-vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({
-    getProjectListing: projectManager.getProjectListing,
-    getChatsForResource: projectManager.getChatsForResource,
-    updateProject: vi.fn(),
-    getProject: vi.fn(),
-    deleteProject: projectManager.deleteProject,
-    restoreProject: vi.fn(),
-    permanentlyDeleteProject: projectManager.permanentlyDeleteProject,
-    duplicateProject: vi.fn(),
-    isLoading: worker.isLoading,
-  }),
+/* The quiescence check and the session close are the library's commands since A4a (row L7): the real ones, over the
+ * registry and chat-store doubles below. */
+/** The library's listing query, as `useProjectManager()` hands it down. */
+const listingQuery = vi.hoisted(() => ({ queryKey: ['projects'], queryFn: async () => undefined }));
+
+const commands = vi.hoisted(() => ({
+  current: undefined as Pick<ProjectCommands, 'verifyProjectQuiescent' | 'closeProjectSession'> | undefined,
 }));
 
-vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => registry.actor }));
+vi.mock('#hooks/use-project-manager.js', async () => {
+  const commandsModule = await import('#runtime/project-library-commands.js');
+  const notCalled = async (): Promise<never> => {
+    throw new Error('not called in this test');
+  };
+  const chatStore = mock<ProjectLibraryChatSessions>({
+    observedChatIdsOf: () => chats.observed,
+    getProjection: () => (chats.projection === undefined ? undefined : mock<ChatProjection>(chats.projection)),
+    getProjectClosePlan: async () => mock<ProjectClosePlan>(chats.plan),
+  });
+  const chatSource = mock<ChatStorage>({
+    getChatsForResource: async () => {
+      const stored = await projectManager.getChatsForResource();
+      return stored.map(({ id }) => mock<Chat>({ id }));
+    },
+  });
+  const built = new commandsModule.ProjectCommands({
+    facade: notCalled,
+    chatStore: () => undefined,
+    readChats: async (operation) => operation(chatSource),
+    readiedWorker: notCalled,
+    whenDiscoveryReady: notCalled,
+    whenReplaysDrained: notCalled,
+    discover: notCalled,
+    beginMutation: notCalled,
+    replayForPerson: notCalled,
+    invalidateProjectListing: notCalled,
+    invalidateListing: () => undefined,
+    invalidateProject: () => undefined,
+    forgetProject: () => undefined,
+    noteLibraryChanged: () => undefined,
+    sessions: () => registry.actor,
+    chatSessions: () => chatStore,
+  });
+  commands.current = {
+    verifyProjectQuiescent: built.verifyProjectQuiescent,
+    closeProjectSession: built.closeProjectSession,
+  };
+  return {
+    useProjectManager: () => ({
+      ...commands.current,
+      getProjectListing: projectManager.getProjectListing,
+      getChatsForResource: projectManager.getChatsForResource,
+      updateProject: vi.fn(),
+      getProject: vi.fn(),
+      deleteProject: projectManager.deleteProject,
+      restoreProject: vi.fn(),
+      permanentlyDeleteProject: projectManager.permanentlyDeleteProject,
+      duplicateProject: vi.fn(),
+      isLoading: worker.isLoading,
+      projectListingQuery: listingQuery,
+    }),
+  };
+});
+
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
-    observedChatIdsOf: () => chats.observed,
-    getProjection: () => chats.projection,
-    getProjectClosePlan: async () => chats.plan,
     removeProject: async (projectId: string) => {
       registry.operations.push(`remove-composers:${projectId}`);
     },
@@ -102,7 +154,6 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 
 const { useProjects } = await import('#hooks/use-projects.js');
-const { projectListShapeStore, projectListCountCookieName } = await import('#lib/project-list-shape.lib.js');
 
 const listingQueryOptions = (): Record<string, unknown> => {
   useQuery.mockClear();
@@ -260,25 +311,10 @@ describe('useProjects listing query', () => {
     query.data = undefined;
   });
 
-  /* R5: the next load reserves this many rows and cards, server-side through the cookie. */
-  it('remembers the live project count, and no names, after every listing', async () => {
-    const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
-      projectId: id,
-      manifest: { name: `Name ${id}` },
-      library: { lastActivityAt, ...(deletedAt === undefined ? {} : { deletedAt }) },
-      locator: { backend: 'indexeddb' },
-    });
-    projectManager.getProjectListing.mockResolvedValueOnce({
-      projects: [entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)],
-      conflicts: [],
-      recoveries: [],
-      workspaceBindingRepairs: [],
-    });
-    const { queryFn } = listingQueryOptions() as { queryFn: (context: { signal: AbortSignal }) => Promise<unknown> };
-
-    await queryFn({ signal: new AbortController().signal });
-
-    expect(projectListShapeStore.get()).toEqual({ count: 2 });
-    expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
+  /* D9: the hook queries with the library's listing query, so the library alone writes the listing. */
+  it("queries the listing with the library's own key and function", () => {
+    const options = listingQueryOptions();
+    expect(options['queryKey']).toBe(listingQuery.queryKey);
+    expect(options['queryFn']).toBe(listingQuery.queryFn);
   });
 });

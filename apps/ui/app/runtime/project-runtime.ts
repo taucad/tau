@@ -49,7 +49,7 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
-import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 import {
   createProjectManifestChangeObserver,
@@ -73,7 +73,22 @@ import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import { startViewRecordSession } from '#workbench-records/view-record-session.js';
+import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
+import { flushWorkbenchLayout, workbenchLayoutMachine } from '#workbench-records/workbench-layout.machine.js';
+import type { WorkbenchLayoutInput } from '#workbench-records/workbench-layout.machine.js';
+import {
+  createLayoutBridgeLogic,
+  createProjectLayoutHost,
+  createProjectShellPort,
+} from '#runtime/project-runtime.layout.js';
+import type {
+  LayoutBridgeInput,
+  ProjectLayoutHost,
+  ProjectShellPort,
+  WorkbenchLayoutRef,
+} from '#runtime/project-runtime.layout.js';
 
 /** The editor writes the project's records; `shared` shows a project without saving editor state or chats. */
 export type ProjectRuntimeProfile = 'editor' | 'shared';
@@ -122,13 +137,28 @@ export type ProjectRuntimeProvide = Readonly<{
 
 /**
  * The profile and how the project loads. The editor profile loading from disk always runs each view's record session
- * over the ports every view shares (charter G6b), so it must be given them; a project with its own loader, and a
- * shared workbench, keep no view records.
+ * over the ports every view shares (charter G6b) and the project's entries record session (A9), so it must be given
+ * them; a project with its own loader, and a shared workbench, keep neither.
  */
 export type ProjectRuntimeProfileOptions =
-  | Readonly<{ profile: 'editor'; provide?: undefined; viewRecordPorts: ViewRecordPortsHandle }>
-  | Readonly<{ profile: 'editor'; provide: ProjectRuntimeProvide; viewRecordPorts?: undefined }>
-  | Readonly<{ profile: 'shared'; provide?: ProjectRuntimeProvide; viewRecordPorts?: undefined }>;
+  | Readonly<{
+      profile: 'editor';
+      provide?: undefined;
+      viewRecordPorts: ViewRecordPortsHandle;
+      entriesRecord: EntriesRecordSession;
+    }>
+  | Readonly<{
+      profile: 'editor';
+      provide: ProjectRuntimeProvide;
+      viewRecordPorts?: undefined;
+      entriesRecord?: undefined;
+    }>
+  | Readonly<{
+      profile: 'shared';
+      provide?: ProjectRuntimeProvide;
+      viewRecordPorts?: undefined;
+      entriesRecord?: undefined;
+    }>;
 
 export type ProjectRuntimeOptions = Readonly<{
   projectId: string;
@@ -153,6 +183,11 @@ type ProjectRuntimeInput = Readonly<{
   profile: ProjectRuntimeProfile;
   project: ProjectMachineInput;
   editor: NonNullable<InputFrom<typeof editorMachine>>;
+  /**
+   * A project that writes view records has a workbench layout (A8b). It starts before the editor has loaded its lanes,
+   * so it awaits them: the bridge seeds them once the editor is ready.
+   */
+  layout?: Omit<WorkbenchLayoutInput, 'workbenchOpen' | 'lanes' | 'awaitsLanes'> | undefined;
 }>;
 
 export type ProjectRuntimeContext = {
@@ -160,6 +195,8 @@ export type ProjectRuntimeContext = {
   profile: ProjectRuntimeProfile;
   projectRef: ProjectRef;
   editorRef: ActorRefFrom<typeof editorMachine>;
+  /** The workbench layout of a project that writes view records (A8b); spawned with the root. */
+  layoutRef: WorkbenchLayoutRef | undefined;
   /** Why `tau.json` is not being followed, while its observation is closed or failed. */
   manifestObservationError: string | undefined;
   /** The first defect the root `onError` caught; later ones are usually its consequences (MC-R12, D23). */
@@ -210,6 +247,11 @@ const resources: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, Proj
 const parameterServiceOwner: CallbackActorLogic<{ type: 'never' }> = createCallbackLogic<{ type: 'never' }>(
   () => undefined,
 );
+const entriesRecord: ProjectChildLogic = createCallbackLogic<{ type: 'never' }, ProjectChildInput>(() => undefined);
+const layoutBridge: CallbackActorLogic<{ type: 'never' }, LayoutBridgeInput> = createCallbackLogic<
+  { type: 'never' },
+  LayoutBridgeInput
+>(() => undefined);
 
 export const projectRuntimeActors = {
   project: projectMachine,
@@ -219,6 +261,9 @@ export const projectRuntimeActors = {
   libraryEvents,
   resources,
   parameterServiceOwner,
+  entriesRecord,
+  workbenchLayout: workbenchLayoutMachine,
+  layoutBridge,
 };
 
 const describeFault = (error: unknown): string =>
@@ -260,14 +305,27 @@ export const projectRuntimeMachine = setup({
   // A defect is recorded and the runtime keeps running: the first is kept and reported once, since later ones are
   // usually its consequences (MC-R12, D23, B2).
   onError: recordFault,
-  context: ({ input, spawn, actors }) => ({
-    projectId: input.projectId,
-    profile: input.profile,
-    projectRef: spawn(actors.project, { id: 'project', input: input.project }),
-    editorRef: spawn(actors.editor, { id: 'editor', input: input.editor }),
-    manifestObservationError: undefined,
-    fault: undefined,
-  }),
+  context: ({ input, spawn, actors }) => {
+    const editorRef = spawn(actors.editor, { id: 'editor', input: input.editor });
+    // The editor's lanes are its defaults until `load` hydrates them: the layout awaits the ones it loads.
+    const { desktopLayout } = editorRef.getSnapshot().context.panelState;
+    const lanes = { chat: desktopLayout.chatOpen, workbench: desktopLayout.workbenchOpen };
+    return {
+      projectId: input.projectId,
+      profile: input.profile,
+      projectRef: spawn(actors.project, { id: 'project', input: input.project }),
+      editorRef,
+      layoutRef:
+        input.layout === undefined
+          ? undefined
+          : spawn(actors.workbenchLayout, {
+              id: 'workbenchLayout',
+              input: { ...input.layout, workbenchOpen: lanes.workbench, lanes, awaitsLanes: true },
+            }),
+      manifestObservationError: undefined,
+      fault: undefined,
+    };
+  },
   // The runtime's start is the editor's `load` (row S14).
   entry: ({ context }, enq) => {
     enq.sendTo(context.editorRef, { type: 'load' });
@@ -298,6 +356,12 @@ export const projectRuntimeMachine = setup({
       invoke: [
         { id: 'parameterServiceOwner', src: 'parameterServiceOwner', onError: recordFault },
         {
+          id: 'layoutBridge',
+          src: 'layoutBridge',
+          input: ({ context }) => ({ editor: context.editorRef, layout: context.layoutRef }),
+          onError: recordFault,
+        },
+        {
           id: 'parameterObservers',
           src: 'parameterObservers',
           input: ({ context }) => ({ project: context.projectRef }),
@@ -318,6 +382,12 @@ export const projectRuntimeMachine = setup({
         {
           id: 'resources',
           src: 'resources',
+          input: ({ context }) => ({ project: context.projectRef }),
+          onError: recordFault,
+        },
+        {
+          id: 'entriesRecord',
+          src: 'entriesRecord',
           input: ({ context }) => ({ project: context.projectRef }),
           onError: recordFault,
         },
@@ -356,6 +426,10 @@ export type ProjectRuntimeProducers = Readonly<{
 /** A built project runtime: the unstarted root, the parameter service its children share, and its producer set. */
 export type ProjectRuntime = Readonly<{
   actor: ProjectRuntimeActor;
+  /** The workbench layout's host, for a project that writes view records (A8b): the shell feeds its facts here. */
+  layout: ProjectLayoutHost | undefined;
+  /** The focused workspace's handlers for the editor's open and reveal events (A8b). */
+  shell: ProjectShellPort;
   parameterService: ObservablePort<ParameterSetService>;
   producers: ProjectRuntimeProducers;
   /**
@@ -417,6 +491,8 @@ const createParameterServiceHolder = (initial: ParameterSetService): ParameterSe
 export const selectProjectRef = (snapshot: ProjectRuntimeSnapshot): ProjectRef => snapshot.context.projectRef;
 export const selectEditorRef = (snapshot: ProjectRuntimeSnapshot): ActorRefFrom<typeof editorMachine> =>
   snapshot.context.editorRef;
+export const selectWorkbenchLayoutRef = (snapshot: ProjectRuntimeSnapshot): WorkbenchLayoutRef | undefined =>
+  snapshot.context.layoutRef;
 export const selectManifestObservationError = (snapshot: ProjectRuntimeSnapshot): string | undefined =>
   snapshot.context.manifestObservationError;
 export const selectProjectRuntimeFault = (snapshot: ProjectRuntimeSnapshot): string | undefined =>
@@ -705,6 +781,23 @@ export const createLibraryEventsLogic = (
 };
 
 /**
+ * The entries record session as a runtime child (plan § 4 A9, rows S24 and S25): it starts with the runtime, follows
+ * the project's geometry units, and registers its flush in the runtime's producer set at its start (D12), so the leave,
+ * close and unload flushes reach it with nothing mounted.
+ *
+ * @param options - The session and the runtime's producer set.
+ * @returns The child's callback logic.
+ */
+export const createEntriesRecordLogic = (
+  options: Readonly<{ session: EntriesRecordSession; producers: ProjectRuntimeProducers }>,
+): ProjectChildLogic => {
+  const { session, producers } = options;
+  return createCallbackLogic<{ type: 'never' }, ProjectChildInput>(({ input: { project } }) =>
+    session.start({ project, producers }),
+  );
+};
+
+/**
  * What the runtime releases when it stops: each geometry unit's kernel runtime (a root stop runs no machine exit), and
  * on the shared profile without a preview service, the parameter service it built.
  *
@@ -829,6 +922,7 @@ export const createParameterServiceOwnerLogic = (
 export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRuntime {
   const { projectId, fileManager, library, profile, provide, previewParameterService, viewRecordPorts, chatSessions } =
     options;
+  const producers = createProjectRuntimeProducers();
   const { fileManagerRef } = fileManager;
   const fileSystemRoot = fileManagerRef.getSnapshot().context.rootDirectory;
   const kernelOptionsFactory =
@@ -869,16 +963,32 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
     }),
   } satisfies Partial<MachineActors<typeof projectMachine>>;
 
+  /* A project that writes view records has a workbench layout, as a child that outlives any mount (A8b, I13). */
+  const layoutHost =
+    viewRecordPorts === undefined
+      ? undefined
+      : createProjectLayoutHost({
+          projectId,
+          ports: viewRecordPorts,
+          ...(options.clock === undefined ? {} : { clock: options.clock }),
+        });
+
+  const shell = createProjectShellPort();
+
   /* Only the editor loading from disk writes view records (G6b), and only it is given the ports (by its options' type). */
   const providedProject =
     provide === undefined
-      ? viewRecordPorts === undefined
+      ? layoutHost === undefined
         ? projectMachine.provide({ actors: projectActors })
         : projectMachine.provide({
             actors: {
               ...projectActors,
               viewRecord: createCallbackLogic<{ type: 'never' }, ViewRecordSessionActorInput>(({ input: session }) =>
-                startViewRecordSession({ viewId: session.viewId, graphics: session.graphics, ports: viewRecordPorts }),
+                startViewRecordSession({
+                  viewId: session.viewId,
+                  graphics: session.graphics,
+                  ports: layoutHost.viewRecordPorts,
+                }),
               ),
             },
           })
@@ -942,6 +1052,12 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
         previewParameterService === undefined
           ? createParameterServiceOwnerLogic({ fileManager, holder: parameterService, source: parameterSource })
           : parameterServiceOwner,
+      entriesRecord:
+        options.entriesRecord === undefined
+          ? entriesRecord
+          : createEntriesRecordLogic({ session: options.entriesRecord, producers }),
+      layoutBridge: createLayoutBridgeLogic({ shell, host: layoutHost }),
+      workbenchLayout: layoutHost?.logic ?? workbenchLayoutMachine,
     },
   });
 
@@ -966,12 +1082,23 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
         projectId,
         ...(options.requestedChatId === undefined ? {} : { requestedChatId: options.requestedChatId }),
       },
+      layout: layoutHost === undefined ? undefined : layoutHost.input,
     },
   });
+  /* The layout registers its flush at creation (A8b; the flush-ownership table of plan § 4 A7): every leave, close and
+   * unload flush that walks the set settles the layout's owed edit, with no workbench mounted. */
+  const layoutRef = selectWorkbenchLayoutRef(actor.getSnapshot());
+  if (layoutRef !== undefined) {
+    producers.register(async () =>
+      confirmFlush(async () => flushWorkbenchLayout(layoutRef), 'Pane layout is not confirmed saved.'),
+    );
+  }
   return {
     actor,
+    layout: layoutHost,
+    shell,
     parameterService: { get: parameterService.get, subscribe: parameterService.subscribe },
-    producers: createProjectRuntimeProducers(),
+    producers,
     replacePreviewParameterService: (service) => {
       if (previewParameterService !== undefined && service !== parameterService.get()) {
         parameterService.replace(service);

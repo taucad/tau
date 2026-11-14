@@ -13,7 +13,7 @@
 import { createContext, useContext } from 'react';
 import type { Project } from '@taucad/types';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 
 /** The slugs a project URL was addressed by, for a route that resolved to nothing. */

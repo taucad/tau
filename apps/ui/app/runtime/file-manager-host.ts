@@ -10,6 +10,7 @@
  * and its builder sends it the backend when the host emits `homeBackendResolved`.
  */
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import { Topic } from '@taucad/events';
 import type { Actor, ActorOptions, ActorRefFrom, AnyActorLogic, EventObject, InputFrom, SnapshotFrom } from 'xstate';
 import type { FileSystemBackend } from '@taucad/types';
 import { getHomeStorageBackend } from '#filesystem/handle-store.js';
@@ -67,6 +68,13 @@ export type FileManagerHost = Readonly<{
   /** The shared worker `rootFiles` holds, once it has one. */
   sharedWorker: () => Worker | undefined;
   /**
+   * Listen for the shared worker changing: `rootFiles` connecting, losing its worker, or replacing it (A6c).
+   *
+   * @param listener - Called after each change, with the new worker or `undefined`.
+   * @returns The unsubscribe.
+   */
+  onSharedWorker: (listener: (worker: Worker | undefined) => void) => () => void;
+  /**
    * Build an unstarted file-manager actor for `spec`.
    *
    * @param host - The running host, read for the backend and listened to while it resolves.
@@ -93,6 +101,14 @@ export function createFileManagerHost({
   loadHomeBackend = getHomeStorageBackend,
 }: FileManagerHostPorts): FileManagerHost {
   let sharedWorker: Worker | undefined;
+  const sharedWorkerChanges = new Topic<Worker | undefined>({ name: 'fileManagerHost.sharedWorker' });
+  const setSharedWorker = (worker: Worker | undefined): void => {
+    if (worker === sharedWorker) {
+      return;
+    }
+    sharedWorker = worker;
+    sharedWorkerChanges.emit(worker);
+  };
   const telemetry = buildWorkspaceTelemetry(analytics);
 
   const loadBackend = createAsyncLogic<HomeBackendOutcome>({
@@ -108,13 +124,13 @@ export function createFileManagerHost({
 
   const watchSharedWorker = createCallbackLogic<EventObject, { rootFiles: FileManagerRef }>(({ input }) => {
     const observe = (snapshot: SnapshotFrom<typeof fileManagerMachine>): void => {
-      sharedWorker = snapshot.context.worker;
+      setSharedWorker(snapshot.context.worker);
     };
     const subscription = input.rootFiles.subscribe(observe);
     observe(input.rootFiles.getSnapshot());
     return () => {
       subscription.unsubscribe();
-      sharedWorker = undefined;
+      setSharedWorker(undefined);
     };
   });
 
@@ -139,6 +155,7 @@ export function createFileManagerHost({
     rootFilesInput: ({ idle = false } = {}) =>
       inputFor({ rootDirectory: '/', backend: 'home', shouldInitializeOnStart: !idle }, undefined, undefined),
     sharedWorker: () => sharedWorker,
+    onSharedWorker: (listener) => sharedWorkerChanges.subscribe(listener),
     build: (host, spec, options) => {
       const resolved = spec.backend === 'home' ? selectHomeBackend(host.getSnapshot()) : spec.backend;
       const actor = createActor(fileManagerMachine, { ...options, input: inputFor(spec, resolved, sharedWorker) });

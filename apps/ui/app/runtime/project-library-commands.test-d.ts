@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 
 describe('CreateProjectOptions location contract', () => {
   it('accepts Home, an exact workspace, and an omitted remembered location', () => {

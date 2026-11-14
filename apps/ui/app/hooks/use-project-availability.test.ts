@@ -17,7 +17,8 @@ import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
-vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn(), canOpenCloudProject: vi.fn() }));
+vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn() }));
+vi.mock('#lib/tau-cloud-intent.js', () => ({ canOpenCloudProject: vi.fn() }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
   mock<RevisionStatusProjection>({

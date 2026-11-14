@@ -21,7 +21,7 @@
  *
  * `passRequested{requestId, reuse}` is answered with `passSettled{requestId, epoch, result}`, or `passFailed` when a
  * port rejected. Requests join the pass in flight (single flight). With `reuse`, a request is answered at once from
- * the last listing when its epoch is still current, as the cache at `use-project-manager.tsx` line 2495 does today.
+ * the last listing when its epoch is still current, as the cache at `use-project-manager.tsx` line 2495 (at `7918b118`) did before A3b.
  * `poll` starts a pass when none is in flight: an explicit refresh.
  *
  * An owed pass starts when someone asks for one, as today: an invalidation refetches the active `projects` query
@@ -35,7 +35,7 @@
  * root provides them. They report with `invalidated` and `observationChanged`.
  *
  * Context holds the epoch, what is owed and the last listing, which is rebuilt by the next pass; nothing here survives
- * a reload (MC-R5). Nothing in the app runs this machine yet: A3b wires it.
+ * a reload (MC-R5). `ProjectLibrary` runs it (A3b).
  *
  * @module
  */
@@ -60,6 +60,12 @@ export type DiscoveryWrites = Readonly<{
   /** Project ids whose route config and resources go. */
   deletes: readonly string[];
 }>;
+
+/**
+ * What the `apply` port answers. `skipped`: a newer build stopped durable writes after the deletes had started, so the
+ * upserts were not written (DF20); the pass counts as one that skipped its writes in this stop (rule 3).
+ */
+export type DiscoveryApplied = Readonly<{ skipped: boolean }> | undefined;
 
 /** What the `plan` port answers: the listing with its route-blocked marks, and the writes it would make. */
 export type DiscoveryPlan = Readonly<{ result: ProjectDiscoveryResult; writes: DiscoveryWrites }>;
@@ -271,7 +277,7 @@ const plan = createAsyncLogic<DiscoveryPlan, { epoch: number; result: ProjectDis
   },
 });
 
-const apply = createAsyncLogic<void, { epoch: number; writes: DiscoveryWrites }>({
+const apply = createAsyncLogic<DiscoveryApplied, { epoch: number; writes: DiscoveryWrites }>({
   run: async () => {
     throw new Error('libraryDiscovery: the apply port was not provided; createLibraryDiscovery provides it.');
   },
@@ -438,11 +444,23 @@ export const libraryDiscoveryMachine = setup({
                   epoch: context.passEpoch ?? context.epoch,
                   writes: context.writes ?? { upserts: [], deletes: [] },
                 }),
-                onDone: settles('PassSettled', ({ context }: Done<void>, enq) =>
-                  isStale(context)
-                    ? startPass(context, enq)
-                    : publish(context, enq, { result: context.read ?? { entries: [], roots: [] }, skipped: false }),
-                ),
+                onDone: settles('PassSettled', ({ context, event, value }: Done<DiscoveryApplied>, enq) => {
+                  if (isStale(context)) {
+                    return startPass(context, enq);
+                  }
+                  const skipped = event.output?.skipped === true;
+                  const step = publish(context, enq, { result: context.read ?? { entries: [], roots: [] }, skipped });
+                  // Rule 3: the stop that skipped these upserts already ended while the deletes ran, so the redo it
+                  // owes starts now, as `writeStopEnded` would have started it had the skip come first.
+                  if (skipped && (value as { stop?: string }).stop === 'running') {
+                    const published = { ...context, ...step.context };
+                    return {
+                      ...step,
+                      context: { ...step.context, ...invalidate(published, enq), skipped: false, redo: true },
+                    };
+                  }
+                  return step;
+                }),
                 onError: settles('PassSettled', ({ context, event }: Failed, enq) => failed(context, event.error, enq)),
               },
             },
@@ -524,7 +542,9 @@ export type LibraryDiscoveryPorts = Readonly<{
   plan: (
     input: Readonly<{ epoch: number; result: ProjectDiscoveryResult; signal: AbortSignal }>,
   ) => Promise<DiscoveryPlan>;
-  apply: (input: Readonly<{ epoch: number; writes: DiscoveryWrites; signal: AbortSignal }>) => Promise<void>;
+  apply: (
+    input: Readonly<{ epoch: number; writes: DiscoveryWrites; signal: AbortSignal }>,
+  ) => Promise<DiscoveryApplied>;
   /** The manifest watch; it sends `invalidated` and `observationChanged`. Absent: no watch. */
   discoveryObservation?: typeof discoveryObservation;
   /** The chat-metadata watch; it sends `observationChanged` and takes `refreshObservations`. Absent: no watch. */
@@ -550,7 +570,7 @@ export const createLibraryDiscovery = (
       plan: createAsyncLogic<DiscoveryPlan, { epoch: number; result: ProjectDiscoveryResult }>({
         run: async ({ input: { epoch, result }, signal }) => ports.plan({ epoch, result, signal }),
       }),
-      apply: createAsyncLogic<void, { epoch: number; writes: DiscoveryWrites }>({
+      apply: createAsyncLogic<DiscoveryApplied, { epoch: number; writes: DiscoveryWrites }>({
         run: async ({ input: { epoch, writes }, signal }) => ports.apply({ epoch, writes, signal }),
       }),
       discoveryObservation: ports.discoveryObservation ?? discoveryObservation,

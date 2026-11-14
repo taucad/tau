@@ -41,8 +41,12 @@
 (* registry's recency order are not modelled: a policy close may take any  *)
 (* candidate.                                                              *)
 (*                                                                         *)
-(* Every configuration but `wide` runs on the pr tier, in this family's    *)
-(* own target, ui:formal:tla:project-focus (README).                       *)
+(* Every configuration but `wide` and the six `-wide` siblings runs on     *)
+(* the pr tier, in this family's own target, ui:formal:tla:project-focus   *)
+(* (README). Each `-wide` sibling holds the full bounds of its narrowed pr *)
+(* form. `target-person-epoch` keeps a person's waiting open with a        *)
+(* library change, in flushFailed too, and `target-start-retry` a retry    *)
+(* after a failed start with a library change, at pr.                      *)
 (*                                                                         *)
 (* Switches. The first value of each is the target.                        *)
 (*   Focus          "target": the focus machine (D7).                      *)
@@ -66,7 +70,7 @@
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
 (*                  of ProjectPersistenceGuard after the commit that       *)
 (*                  mounts the session it names (project-live-sessions.tsx *)
-(*                  652, 795 to 810), so the person may edit before it     *)
+(*                  655, 797 to 812), so the person may edit before it     *)
 (*                  lands; React runs it before the next render, so it has *)
 (*                  landed before the next commit or effect run            *)
 (*                  (RegFlushed). FALSE: it is current at every step.      *)
@@ -87,6 +91,11 @@
 (*   Labelled       TRUE: `act` names each step, for the graph export and  *)
 (*                  the covering suite. FALSE: `act` is constant.          *)
 (***************************************************************************)
+\* A3b: `ProjectRouteAccess` moved from `use-project-manager.tsx` to `runtime/project-library.ts`; the
+\* route gate imports the type from there. No action or correspondence changes.
+\* A4b: `tauCloudIntent` and its type moved from `hooks/use-cloud-projects.ts` to
+\* `lib/tau-cloud-intent.ts`; the route gate and the live sessions import them from there. No action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to
@@ -674,8 +683,9 @@ DRetry ==
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
 
-\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 795 to 810, 719): the
+\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 797 to 812, 721): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
+\* ProjectFocus.today-late-effect.cfg cites 655 and 797 to 812 too.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration
   /\ reg # RegTarget

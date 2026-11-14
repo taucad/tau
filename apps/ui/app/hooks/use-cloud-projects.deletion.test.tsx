@@ -6,14 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import {
   assertCloudProjectActive,
-  canOpenCloudProject,
   cloudProjectsQueryKeyFor,
   fetchCloudProjects,
-  getCloudDeletionState,
-  tauCloudIntent,
   useCloudProjects,
   useDeleteCloudProject,
 } from '#hooks/use-cloud-projects.js';
+import { canOpenCloudProject, getCloudDeletionState, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Deployment environment keys.

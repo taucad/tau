@@ -1,6 +1,8 @@
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
+import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 /**
  * One live project (S44, A35).
@@ -15,6 +17,14 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
  * The children are **injected**: the store module provides the real logics and
  * a test provides fakes, so this file imports no worker, no DOM and no React
  * (I27 — browser and desktop share the machine with different actors).
+ *
+ * A6c: the `fileManager` child is real. It builds the project's file manager through the file-manager host for
+ * `/projects/<id>` once `rootFiles` holds the shared worker, owns it for the session's life and reports the views
+ * region from its snapshot, with nothing mounted (I5). It tells the session the file manager's ref
+ * (`fileManagerChanged`), which the session keeps so the subtree's provider and later children read it, and tells it
+ * again when the shared worker is lost or replaced and it rebuilds the file manager; the child, never the session,
+ * stops it. A root fault is recorded
+ * once, the first kept, and reported through the app runtime's one hook (D23, B2).
  */
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
@@ -111,11 +121,17 @@ export type ProjectSessionMachineContext = Readonly<{
   closeReason: ProjectSessionCloseReason | undefined;
   /** The last state this session told the registry it was in. */
   reportedState: ProjectSessionState;
-  fileManagerRef: AnyActorRef | undefined;
+  /** The `fileManager` child, which owns the project's file manager. */
+  fileManagerChildRef: AnyActorRef | undefined;
+  /**
+   * The project's file manager, as the `fileManager` child reported it (A6c). The child built it and stops it; the
+   * session only hands it to its readers. `undefined` until the child reports it.
+   */
+  fileManagerRef: FileManagerRef | undefined;
   projectRef: AnyActorRef | undefined;
   agentHostRef: AnyActorRef | undefined;
   computeRef: AnyActorRef | undefined;
-  /** An effect or child failure no transition modelled; the session keeps answering (MC-R12). */
+  /** The first effect or child failure no transition modelled; the session keeps answering (MC-R12, D23). */
   fault: string | undefined;
 }>;
 
@@ -125,6 +141,11 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'confirmClose' }
   | { readonly type: 'cancelClose' }
   | { readonly type: 'childReady'; readonly region: ProjectSessionRegion }
+  /**
+   * The `fileManager` child built and started the project's file manager, or closed it because the shared worker was
+   * lost or replaced or the child is stopping (A6c).
+   */
+  | { readonly type: 'fileManagerChanged'; readonly fileManagerRef: FileManagerRef | undefined }
   | { readonly type: 'childFailed'; readonly region: ProjectSessionRegion; readonly reason: string }
   | {
       readonly type: 'projectedRunsChanged';
@@ -167,6 +188,7 @@ export const projectSessionEventTypes = [
   'confirmClose',
   'cancelClose',
   'childReady',
+  'fileManagerChanged',
   'childFailed',
   'projectedRunsChanged',
   'activity',
@@ -248,9 +270,9 @@ const releaseAgentHost = createAsyncLogic<void, { projectId: string }>({ run: un
  * The browser gets a file-manager actor over the shared worker and a worker
  * agent-host registration; the desktop gets the same session with a Node-served
  * file manager and the always-on launcher. Same machine, different actors. Each
- * reports `childReady` or `childFailed` to this parent; the defaults here do
- * neither, so an unprovided child fails its region at the start bound rather
- * than pretending to be up.
+ * reports `childReady` or `childFailed` to this parent, and the `fileManager` child
+ * also `fileManagerChanged`; the defaults here do neither, so an unprovided child
+ * fails its region at the start bound rather than pretending to be up.
  */
 const fileManager = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
 /* R14: no separate `editor` child. The editor actor lives inside the runtime
@@ -341,15 +363,16 @@ const recordCloseFailure = (context: ProjectSessionMachineContext, error: unknow
   failures: { ...context.failures, close: error instanceof Error ? error.message : 'failed' },
 });
 
-/* I23: every project-scoped resource dies with the session. */
+/* I23: every project-scoped resource dies with the session. Stopping the `fileManager` child stops its file manager. */
 const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue) => {
-  for (const ref of [context.fileManagerRef, context.projectRef, context.agentHostRef, context.computeRef]) {
+  for (const ref of [context.fileManagerChildRef, context.projectRef, context.agentHostRef, context.computeRef]) {
     if (ref !== undefined) {
       enq.stop(ref);
     }
   }
   return {
     context: {
+      fileManagerChildRef: undefined,
       fileManagerRef: undefined,
       projectRef: undefined,
       agentHostRef: undefined,
@@ -462,11 +485,16 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '2',
-  /* A fault no transition modelled is recorded and the session keeps answering (MC-R12). */
-  onError: ({ event }) => ({
-    context: { fault: event.error instanceof Error ? event.error.message : 'project-session fault' },
-  }),
+  version: '3',
+  /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
+   * later ones are usually its consequences (MC-R12, D23; B2). */
+  onError: ({ context, event }, enq) => {
+    if (context.fault !== undefined) {
+      return {};
+    }
+    enq(reportAppRuntimeFault, event.error);
+    return { context: { fault: faultMessage(event.error, 'project-session fault') } };
+  },
   context: ({ input }) => ({
     projectId: input.projectId,
     request: input.request,
@@ -489,6 +517,7 @@ export const projectSessionMachine = setup({
     openFailed: false,
     closeReason: undefined,
     reportedState: 'opening',
+    fileManagerChildRef: undefined,
     fileManagerRef: undefined,
     projectRef: undefined,
     agentHostRef: undefined,
@@ -506,6 +535,10 @@ export const projectSessionMachine = setup({
       reportFacts({ ...context, ...patch }, enq);
       return { context: patch };
     },
+    /* The child reports each file manager it builds, and `undefined` when it closes one because the shared worker was
+     * lost or replaced or the child is stopping (A6c). A stopped child tells nothing more, and `stopChildren` clears
+     * the ref itself, so a report reaches only a session whose child runs. */
+    fileManagerChanged: ({ event }) => ({ context: { fileManagerRef: event.fileManagerRef } }),
     /* Answered in every state: the request is a fact the session keeps, whatever it is doing (MC-R16). */
     chatRequested: ({ context, event }) =>
       context.request === undefined
@@ -562,7 +595,7 @@ export const projectSessionMachine = setup({
         starting: {
           entry: ({ context, actors }, enq) => ({
             context: {
-              fileManagerRef: enq.spawn(actors.fileManager, {
+              fileManagerChildRef: enq.spawn(actors.fileManager, {
                 id: 'fileManager',
                 input: { projectId: context.projectId },
               }),

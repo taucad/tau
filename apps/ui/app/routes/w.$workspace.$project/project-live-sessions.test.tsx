@@ -33,7 +33,8 @@ import { projectSessionParkWindowMilliseconds } from '#machines/project-session.
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createSessionsActor, forgetProjectRegions } from '#services/sessions-store.js';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 
 // ===========================================================================
@@ -203,6 +204,8 @@ const fixtures = vi.hoisted(() => ({
   revisionClients: new Map<string, unknown>(),
   lifecycleMounts: [] as string[],
   fileManagers: new Map<string, unknown>(),
+  /** The file manager each project's session provider was last rendered with. */
+  providedFileManagers: new Map<string, unknown>(),
   retryManifestObservation: new Map<string, unknown>(),
   chatProducers: new Map<string, () => Promise<void>>(),
   /** The S40 rows give each project a second producer; other rows keep the one. */
@@ -339,7 +342,9 @@ vi.mock('@xstate/react', async (importOriginal) => {
 
 /* `ProjectProvider` leases its project runtime, which spawns the project and editor actors (A6b): the stand-in
  * runtime hands the rows' stand-ins to the provider and owns the real producer set. Its start is the editor's
- * `load`, as the real root's entry is. */
+ * `load`, as the real root's entry is. The runtime's entries record child stands in for every record producer of a
+ * live project, focused or not: it registers in the producer set when the runtime starts and leaves it when the
+ * runtime stops (A9, S40). */
 vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
   const actual = await importOriginal<typeof ProjectRuntimeModule>();
   return {
@@ -348,27 +353,57 @@ vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
       const projectRef = actorFor(`project:${options.projectId}`);
       const editorRef = actorFor(`editor:${options.projectId}`);
       const snapshot = { status: 'active', context: { projectRef, editorRef, manifestObservationError: undefined } };
+      const producers = actual.createProjectRuntimeProducers();
+      const { projectId } = options;
+      const registrations: Array<() => void> = [];
       const actor = {
         getSnapshot: () => snapshot,
         subscribe: () => ({ unsubscribe: () => undefined }),
         send: () => undefined,
         start: () => {
           editorRef.send({ type: 'load' });
+          if (options.entriesRecord !== undefined) {
+            registrations.push(
+              producers.register(async () => {
+                fixtures.order.push(`producer:${projectId}`);
+                await fixtures.chatProducers.get(projectId)?.();
+              }),
+            );
+            /* A second member of the set, so the guard is seen walking every producer, not the first. */
+            if (fixtures.secondProducer) {
+              registrations.push(
+                producers.register(async () => {
+                  fixtures.order.push(`producer:${projectId}:second`);
+                  await fixtures.chatProducers.get(`${projectId}:second`)?.();
+                }),
+              );
+            }
+          }
           return actor;
         },
-        stop: () => actor,
+        stop: () => {
+          for (const unregister of registrations.splice(0)) {
+            unregister();
+          }
+          return actor;
+        },
       };
       return {
         actor,
         parameterService: { get: () => parameterService, subscribe: () => () => undefined },
-        producers: actual.createProjectRuntimeProducers(),
+        producers,
       };
     },
   };
 });
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  SessionFileManagerProvider: ({
+    children,
+    projectId,
+    fileManagerRef,
+  }: React.PropsWithChildren<{ projectId: string; fileManagerRef: unknown }>) => {
+    fixtures.providedFileManagers.set(projectId, fileManagerRef);
     useEffect(() => {
       fixtures.order.push(`mount:${projectId}`);
       return () => {
@@ -504,38 +539,6 @@ vi.mock('#hooks/use-editor-document-session.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-/*
- * The entries host stands in for every record host of a live project, focused or not: it registers one
- * producer in the project's producer set, as `entries-sync-host.tsx` does (S40).
- */
-vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', async () => {
-  const { useProject } = await import('#hooks/use-project.js');
-  return {
-    EntriesSyncHost: () => {
-      const { projectId, registerWorkbenchRecordProducer } = useProject();
-      useEffect(
-        () =>
-          registerWorkbenchRecordProducer(async () => {
-            fixtures.order.push(`producer:${projectId}`);
-            await fixtures.chatProducers.get(projectId)?.();
-          }),
-        [projectId, registerWorkbenchRecordProducer],
-      );
-      /* A second member of the set, so the guard is seen walking every producer, not the first. */
-      useEffect(
-        () =>
-          fixtures.secondProducer
-            ? registerWorkbenchRecordProducer(async () => {
-                fixtures.order.push(`producer:${projectId}:second`);
-                await fixtures.chatProducers.get(`${projectId}:second`)?.();
-              })
-            : undefined,
-        [projectId, registerWorkbenchRecordProducer],
-      );
-      return null;
-    },
-  };
-});
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({ RevisionSaveShortcut: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
@@ -693,7 +696,9 @@ beforeEach(() => {
   visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
   clock = new StepClock();
-  registry = createSessionsActor({ clock }).start();
+  fixtures.providedFileManagers.clear();
+  /* Each session opens a stand-in file manager, ready at once, so the provider is handed a real session's ref. */
+  registry = createSessionsActor({ clock, openFileManager: (id) => openSessionFileManagerStandIn(id) }).start();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   appRuntime = createAppRuntime({
     clock,
@@ -732,6 +737,16 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     await openAndRender([projectA], { projectId: projectA });
 
     expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it("should render the session subtree over the file manager its session's child opened (A6c)", async () => {
+    await openAndRender([projectA, projectB], { projectId: projectA });
+
+    const fileManagerOf = (projectId: string) => sessionOf(projectId)?.getSnapshot().context.fileManagerRef;
+    expect(fileManagerOf(projectA)).toBeDefined();
+    expect(fixtures.providedFileManagers.get(projectA)).toBe(fileManagerOf(projectA));
+    expect(fixtures.providedFileManagers.get(projectB)).toBe(fileManagerOf(projectB));
+    expect(fileManagerOf(projectA)).not.toBe(fileManagerOf(projectB));
   });
 
   it('should record a kernel refusal on the session and clear it when the kernel is back (S7)', async () => {

@@ -14,7 +14,7 @@
  * 6. A row that fails with `workspace-unavailable` keeps its attempts and is replayed again only when its workspace
  *    is back: `workspaceReturned`, or a `retryRequested` whose workspace check finds it present. That second path is
  *    a named change (programme control, 2026-11-13T08:13Z): today every cross-tab or desktop root-configuration
- *    message (`use-project-manager.tsx` 2156 to 2172) and every `prepareCurrentWorkspaceCatalog` (2861 to 2867) replay
+ *    message (`use-project-manager.tsx` at `7918b118`, 2156 to 2172) and every `prepareCurrentWorkspaceCatalog` (2861 to 2867) replay
  *    such a row with no check. A lapsed permission (`'prompt'`) with its handle held counts as present (D14); the check
  *    port decides. `replayAsked`, the replay `createProject(id)` makes under its named lock (2323 to 2327), is the one
  *    replay outside this rule, kept as today.
@@ -24,7 +24,7 @@
  *
  * Attempt counts live in context and per tab: a reload reads every journal row again as `waiting` with none, as today.
  * Context holds each row's recovery projection (operation id, project, kind and storage), never the operation's files
- * (MC-R5); the replay port reads the operation it replays. Nothing in the app runs this machine yet: A3b wires it.
+ * (MC-R5); the replay port reads the operation it replays: the journal read's copy for a row's first attempt, and the journal again once an attempt has consumed its bytes. `ProjectLibrary` runs it (A3b).
  *
  * @module
  */

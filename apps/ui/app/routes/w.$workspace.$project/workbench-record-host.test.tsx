@@ -129,6 +129,8 @@ function mount(
     failAllReads?: boolean;
     /** The layout record's watch cannot be opened. */
     failLayoutWatch?: boolean;
+    /** The files the editor holds open. */
+    openFiles?: readonly string[];
   } = {},
 ) {
   let bytes: Uint8Array<ArrayBuffer> | undefined = options.missing
@@ -265,7 +267,11 @@ function mount(
     }
   });
   const editorSnapshot = () => ({
-    context: { previousLayout, panelState: { desktopLayout }, openFiles: [] as Array<{ path: string }> },
+    context: {
+      previousLayout,
+      panelState: { desktopLayout },
+      openFiles: (options.openFiles ?? []).map((path) => ({ path })),
+    },
     // The editor has loaded its lanes: the bridge seeds the layout with them at once.
     matches: (state: string) => state === 'ready',
   });
@@ -360,6 +366,13 @@ function mount(
           reportLayoutChange();
           return workbenchShows;
         },
+        activateFile: (path: string) => {
+          const showing = workbenchShows ?? emptyGroup();
+          workbenchShows =
+            showing.kind === 'group' ? { ...showing, tabs: [...showing.tabs, { kind: 'file', path }] } : showing;
+          reportLayoutChange();
+          return workbenchShows;
+        },
       });
       return () => {
         disconnect();
@@ -392,6 +405,8 @@ function mount(
     get watchesOpened() {
       return watchesOpened;
     },
+    fileIntent: (path: string) =>
+      sendPaneIntent(layout, layoutHost.facts(), { source: 'person', target: { kind: 'file', path } }),
     intent: (pane: WorkbenchPanelId) =>
       sendPaneIntent(layout, layoutHost.facts(), {
         source: 'person',
@@ -921,6 +936,49 @@ describe('live workbench record host', () => {
     host.unmount();
   });
 
+  /* A8b review: a foreign arrangement that closes the workbench lane is shown in one step: its lanes reach the editor
+   * first, whose close the layout hears only after that step, and its workbench apply lands at once, which releases a
+   * held file intent inside the same step. The lane close drops that intent (rule 7), so it opens nothing and is not
+   * counted as an edit. */
+  it('opens nothing for a held file intent released by an apply whose arrangement closes the workbench lane', async () => {
+    const host = mount({ openFiles: ['a.ts'] });
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    let holding = true;
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((_node, applied) => {
+        // The first apply waits, as one whose file must open first; later ones land at once.
+        if (holding) {
+          holding = false;
+          return;
+        }
+        applied();
+      });
+    });
+    let intentId = '';
+    await act(async () => {
+      intentId = host.fileIntent('a.ts');
+    });
+    const closing: WorkbenchLayout = { ...second(), lanes: { chat: true, workbench: false } };
+    await host.set(encoder.encode(workbenchRecords.layout.serialize(closing)));
+    await waitFor(() => {
+      expect(host.layout.getSnapshot().context.arrangement).toEqual(closing);
+    });
+    expect(selectIntentOutcome(host.layout.getSnapshot(), intentId)).toEqual({
+      outcome: 'dropped',
+      reason: 'workbenchClosed',
+    });
+    expect(host.dockview.shows).toEqual(closing.workbench);
+    expect(intentOf(host.layout.getSnapshot().context.intents, intentId)).toBeUndefined();
+    await act(async () => {
+      await host.producer();
+    });
+    expect(host.writes).not.toHaveBeenCalled();
+    host.unmount();
+  });
+
   /* A8b review: an apply can land with less than it was handed (a tab whose file did not open). What it shows is the
    * arrangement now, an edit, and the revision it was handed is not acknowledged until the edit is written back. */
   it('reports an apply that lands with less than it was handed as an edit, and does not acknowledge the revision', async () => {
@@ -943,6 +1001,34 @@ describe('live workbench record host', () => {
       await host.producer();
     });
     expect(workbenchRecords.layout.read(host.bytes!)).toMatchObject({ record: { workbench: emptyGroup() } });
+    host.unmount();
+  });
+
+  /* A8b review: a person's edit made while an apply is held is the arrangement. The held apply still lands over it on
+   * screen (the I10 gap), but what it lands is not counted as an edit too, which would write it over the person's. */
+  it("does not count a held apply that lands with less as an edit over a person's edit made while it was held", async () => {
+    const host = mount();
+    await waitFor(() => {
+      expect(host.controller.snapshot()?.layout).toEqual(first());
+    });
+    let land: ((shown?: WorkbenchLaneNode) => void) | undefined;
+    act(() => {
+      host.controller.registerViewer((_node, applied) => applied());
+      host.dockview.attach((_node, applied) => {
+        land = applied;
+      });
+    });
+    const person = withPane(emptyGroup(), 'details');
+    act(() => {
+      host.controller.personWorkbenchChanged(person);
+    });
+    await act(async () => {
+      land?.(emptyGroup());
+    });
+    expect(host.received.filter((event) => event.type === 'personEdited')).toEqual([
+      { type: 'personEdited', adapter: 'workbench', node: person },
+    ]);
+    expect(host.layout.getSnapshot().context.arrangement?.workbench).toEqual(person);
     host.unmount();
   });
 

@@ -309,6 +309,36 @@ describe('workbenchLayout', () => {
       expect(harness.shown()).toEqual(stored);
     });
 
+    it('should take an unavailable answer naming the delivery as the late answer of a dropped intent, and retire it', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      harness.actor.send({ type: 'routeChanged', routeKey: 'route-2' });
+      expect(harness.context().intents.model).toMatchObject({ state: 'dropped', late: delivery!.deliveryId });
+      const edits = harness.context().editCount;
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId });
+      expect(harness.context().intents.model).toBeUndefined();
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toEqual({
+        outcome: 'dropped',
+        reason: 'routeChanged',
+      });
+      // Its late answer was taken: a late apply after it is not folded in as an edit.
+      harness.applyIntent('model', panes('parameters', 'model'));
+      expect(harness.context().editCount).toBe(edits);
+      expect(harness.shown()).toEqual(stored);
+    });
+
+    it('should ignore an unavailable answer naming a stale delivery', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId + 1 });
+      expect(harness.context().intents.model).toMatchObject({ state: 'delivered', deliveryId: delivery!.deliveryId });
+      harness.actor.send({ type: 'routeChanged', routeKey: 'route-2' });
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId + 1 });
+      expect(harness.context().intents.model).toMatchObject({ state: 'dropped', late: delivery!.deliveryId });
+    });
+
     it('should treat ids that name inherited object properties as new ids', () => {
       const harness = ready();
       harness.intent('constructor', modelPane);

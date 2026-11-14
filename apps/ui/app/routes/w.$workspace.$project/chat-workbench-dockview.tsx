@@ -601,11 +601,29 @@ const workbenchFilePaths = (node: WorkbenchLaneNode): string[] =>
     ? node.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
     : node.children.flatMap(workbenchFilePaths);
 
-/** A workbench node without the tabs of the file at `path`. */
-const withoutFileTab = (node: WorkbenchLaneNode, path: string): WorkbenchLaneNode =>
-  node.kind === 'group'
-    ? { ...node, tabs: node.tabs.filter((tab) => tab.kind !== 'file' || tab.path !== path), active: undefined }
-    : { ...node, children: node.children.map((child) => withoutFileTab(child, path)) };
+/**
+ * A workbench node without the tabs of the file at `path`. Only a group that held the file changes: its active tab
+ * stays active, and only a removed active tab leaves the group to Dockview's choice.
+ */
+const withoutFileTab = (node: WorkbenchLaneNode, path: string): WorkbenchLaneNode => {
+  if (node.kind !== 'group') {
+    return { ...node, children: node.children.map((child) => withoutFileTab(child, path)) };
+  }
+  const removed = (index: number): boolean => {
+    const tab = node.tabs[index];
+    return tab?.kind === 'file' && tab.path === path;
+  };
+  const tabs = node.tabs.filter((_tab, index) => !removed(index));
+  if (tabs.length === node.tabs.length) {
+    return node;
+  }
+  const { active, ...rest } = node;
+  if (active === undefined || removed(active)) {
+    return { ...rest, tabs };
+  }
+  const shift = node.tabs.slice(0, active).filter((_tab, index) => removed(index)).length;
+  return { ...rest, tabs, active: active - shift };
+};
 
 export function openWorkbenchFiles({
   api,
@@ -1981,6 +1999,7 @@ export const WorkbenchDockview = memo(function ({
       const launcherId = api.panels.find((panel) => getPlaceholderParameters(panel)?.mode === 'launcher')?.id;
       const landed = pendingRecordAppliedRef.current;
       const requested = pendingRecordRequestedRef.current;
+      let shown: WorkbenchLaneNode | undefined;
       isRestoringLayout.current = true;
       try {
         // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
@@ -1993,7 +2012,8 @@ export const WorkbenchDockview = memo(function ({
           }),
           { reuseExistingPanels: true },
         );
-        adoptedProjectionRef.current = JSON.stringify(fromDockview('workbench', api.toJSON()));
+        shown = fromDockview('workbench', api.toJSON());
+        adoptedProjectionRef.current = JSON.stringify(shown);
         pendingRecordNodeRef.current = undefined;
         pendingRecordAppliedRef.current = undefined;
         pendingRecordRequestedRef.current = undefined;
@@ -2001,8 +2021,9 @@ export const WorkbenchDockview = memo(function ({
         isRestoringLayout.current = false;
         active?.focus({ preventScroll: true });
       }
-      // Answered once the restore is over: what the answer opens (a held pane or file intent) is not taken for it.
-      landed?.(requested === undefined || requested === node ? undefined : node);
+      // Answered once the restore is over: what the answer opens (a held pane or file intent) is not taken for it. An
+      // apply that lost a tab reports what the Dockview shows, so the arrangement the layout records is the one on screen.
+      landed?.(requested === undefined || requested === node ? undefined : shown);
     },
     [api, editorRef, profile],
   );

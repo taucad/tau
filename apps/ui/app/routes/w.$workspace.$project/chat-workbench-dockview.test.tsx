@@ -1690,6 +1690,84 @@ describe('workbench adapter record apply (A0.3)', () => {
     expect(answer).toEqual(recorded);
   });
 
+  // A8b review: a file that failed to open loses its tab in the group that held it, and nowhere else. The groups that
+  // never held it keep their active tab, and the group that did keeps its active tab where it moves.
+  it("should keep every active tab but the failed file's when a held record apply drops its tab", () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'split',
+          direction: 'row',
+          children: [
+            {
+              kind: 'group',
+              tabs: [
+                { kind: 'pane', pane: 'parameters' },
+                { kind: 'pane', pane: 'details' },
+              ],
+              active: 0,
+            },
+            {
+              kind: 'group',
+              tabs: [
+                { kind: 'file', path: 'gone.ts' },
+                { kind: 'pane', pane: 'share' },
+                { kind: 'pane', pane: 'export' },
+              ],
+              active: 1,
+            },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(applied).toHaveBeenCalledOnce();
+    expect(host.shown).toMatchObject({
+      kind: 'split',
+      children: [
+        { kind: 'group', active: 0 },
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'share' },
+            { kind: 'pane', pane: 'export' },
+          ],
+          active: 0,
+        },
+      ],
+    });
+  });
+
+  // A8b review: an apply that lost a tab reports what the Dockview shows, not what it was handed: a pane this build does
+  // not ship is pruned from what it shows as well, and is not written back as part of the arrangement.
+  it("should report what the Dockview shows when a held record apply drops a failed file's tab", () => {
+    const host = mountRecordApply();
+    const applied = vi.fn();
+    act(() => {
+      host.apply(
+        {
+          kind: 'group',
+          tabs: [
+            { kind: 'pane', pane: 'parameters' },
+            { kind: 'pane', pane: 'jobs' },
+            { kind: 'file', path: 'gone.ts' },
+          ],
+        },
+        applied,
+      );
+    });
+    act(() => {
+      emitEditor({ type: 'fileOpenFailed', path: 'gone.ts', error: new Error('not found') });
+    });
+    expect(host.shown).toEqual({ kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }] });
+    expect(applied).toHaveBeenCalledExactlyOnceWith(host.shown);
+  });
+
   // A8b review: a held apply waits for its files to open. A file the person opened for it and then closed is no longer
   // wanted: the apply lands without its tab once the rest are open, and reports that it shows less.
   it('should land a held record apply without the tab of a file the person closed meanwhile', () => {

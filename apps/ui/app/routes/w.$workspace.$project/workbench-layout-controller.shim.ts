@@ -147,6 +147,9 @@ export function createWorkbenchLayoutControllerShim(
   /* The show the workbench is applying, if any: Dockview may hold an apply (a file it shows opens first), and a pane
    * opened on what it shows before then would be replaced by it, so deliveries wait for the apply to land. */
   let workbenchApplying: number | undefined;
+  /* Whether the person changed the workbench while its apply was held: the apply lands over that edit (the I10 gap), and
+   * what it lands is not then counted as an edit too, which would write it over the person's edit. */
+  let editedWhileApplying = false;
 
   function deliverNow(
     delivery: Readonly<{
@@ -157,14 +160,31 @@ export function createWorkbenchLayoutControllerShim(
     target: WorkbenchIntentTarget,
   ): void {
     const { intentId, deliveryId } = delivery;
+    const facts = host.facts();
+    const heard = layout.getSnapshot().context;
+    // A delivery made inside the layout's own step (an apply that lands at once releases what it held) reads the layout
+    // before the events sent in that step: what the shell and editor say now is compared with what the layout has
+    // heard. A route the shell has left (rule 6) and a lane the editor has closed (rule 7) drop the delivery once the
+    // layout hears them, so it opens nothing now.
+    const routeLeft = heard.routeKey !== facts.routeKey;
+    const laneClosing =
+      heard.workbenchOpen &&
+      !editor.getSnapshot().context.panelState.desktopLayout.workbenchOpen &&
+      (delivery.target.kind === 'file' || delivery.target.pane === 'files');
     // Rule 6: the layout hears the route the shell is on now, which drops what was queued under another.
-    syncLayoutFacts(layout, host.facts());
+    syncLayoutFacts(layout, facts);
     const { latest, arrangement, intents } = layout.getSnapshot().context;
     const entry = intentOf(intents, intentId);
-    if (entry?.state !== 'delivered' || entry.deliveryId !== deliveryId || latest?.refused === true) {
-      // A delivery dropped while it was held (the route moved, rule 6, or the lane closed, rule 7) opens nothing; nor
-      // does one on a refused record, whose workbench shows only what is on disk, as the record host did. The answer
-      // names the delivery, so a dropped one's late answer is taken and nothing is counted.
+    if (
+      routeLeft ||
+      laneClosing ||
+      entry?.state !== 'delivered' ||
+      entry.deliveryId !== deliveryId ||
+      latest?.refused === true
+    ) {
+      // A delivery dropped while it was held, or about to be, opens nothing; nor does one on a refused record, whose
+      // workbench shows only what is on disk, as the record host did. The answer names the delivery and reaches the
+      // layout after the route or lane change, so the dropped intent's late answer is taken and nothing is counted.
       layout.send({ type: 'intentUnavailable', intentId, deliveryId });
       return;
     }
@@ -234,12 +254,13 @@ export function createWorkbenchLayoutControllerShim(
         }
         if (adapter === 'workbench') {
           workbenchApplying = event.showId;
+          editedWhileApplying = false;
         }
         apply(node, (landed?: Node) => {
           if (registered) {
             const actual = landed === undefined ? shown : JSON.stringify(landed);
             onScreen.set(adapter, actual);
-            if (landed !== undefined && actual !== shown) {
+            if (landed !== undefined && actual !== shown && !(adapter === 'workbench' && editedWhileApplying)) {
               // It shows less than it was handed (a tab whose file did not open): that is the arrangement now, an edit
               // reported before the show, so the revision it was handed is not acknowledged (I12).
               layout.send(
@@ -357,6 +378,9 @@ export function createWorkbenchLayoutControllerShim(
         return;
       }
       onScreen.set('workbench', shown);
+      if (workbenchApplying !== undefined) {
+        editedWhileApplying = true;
+      }
       layout.send({ type: 'personEdited', adapter: 'workbench', node });
     },
     ready: () => selectLayoutReady(layout.getSnapshot()),

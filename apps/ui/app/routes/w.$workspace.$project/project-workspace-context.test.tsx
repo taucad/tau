@@ -1157,6 +1157,30 @@ describe('ProjectWorkspaceProvider', () => {
       },
     );
 
+    // A8b review: the Dockview attached before the first read, so the read's apply lands inside the layout's own step
+    // and releases the intent there, before the layout has heard the route the shell pushed to meanwhile. It opens
+    // nothing: the intent was asked for under a route the shell has left.
+    it('should drop a pane intent when the route changes before the first read on a workbench attached before it', async () => {
+      const view = renderLive();
+      const opener = vi.fn();
+      act(() => {
+        attachWorkbench();
+        workspace.connectWorkbench(opener);
+      });
+      act(() => {
+        workspace.openPanel('share');
+      });
+      route.key = 'next-route';
+      view.rerender(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+      currentRuntime?.answerRead();
+      await settle();
+      expect(opener).not.toHaveBeenCalled();
+    });
+
     // A0.3 row 2 (I11, A0.1 row 2): a replace navigation, such as a route intent's own parameter cleanup, keeps the
     // intents queued under the route it corrects.
     it('should keep a pane intent across a replace navigation', async () => {

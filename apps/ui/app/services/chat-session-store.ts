@@ -609,6 +609,8 @@ type InternalSession = ChatSession & {
   transcriptMaterialization: Promise<void> | undefined;
   /** A materialization of the log applied (or failed) for this session: an empty transcript is now settled (I21). */
   transcriptSettled: boolean;
+  /** An empty transcript applied while the scan of other devices' history was pending; it settles once that scan has. */
+  transcriptAwaitsForeignScan: boolean;
   /** {@link ChatSession.rememberedComposerTrays}: this device's memory until the transcript settles. */
   composerTrays: readonly ComposerTray[];
   recoveredRunId: string | undefined;
@@ -854,6 +856,8 @@ export class ChatSessionStore {
   readonly #ratings = new Map<string, RunRating['value']>();
   readonly #remoteReadVersions = new Map<string, number>();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
+  /** The scan version that last ended, read or failed: an empty transcript waits for it (I21). */
+  readonly #remoteReadEndedVersions = new Map<string, number>();
   readonly #remoteHistoryPresence = new WeakMap<NonNullable<ChatProjection['remote']>['views'], boolean>();
   readonly #remoteObservations = new Map<string, ObservationService<void>>();
   readonly #projectRunKeys = new Map<string, string>();
@@ -2640,8 +2644,44 @@ export class ChatSessionStore {
       },
     });
     this.#remoteObservations.set(chatId, observation);
+    observation.subscribe(() => {
+      this.#resumeTranscriptAfterForeignScan(chatId, observation.getSnapshot().status === 'error');
+    });
     observation.acquire();
     return true;
+  }
+
+  /**
+   * Whether the history other devices wrote for a chat is still being scanned. Until it has been, an empty local log
+   * does not show the chat empty (I21) nor forget its trays (U10).
+   */
+  #foreignScanPending(chatId: string): boolean {
+    const observation = this.#remoteObservations.get(chatId);
+    if (observation !== undefined) {
+      const { status } = observation.getSnapshot();
+      return status === 'registering' || status === 'pending';
+    }
+    const version = this.#remoteReadVersions.get(chatId);
+    return version !== undefined && this.#remoteReadEndedVersions.get(chatId) !== version;
+  }
+
+  /** Settle an empty transcript that waited for the scan of other devices' history, once that scan has ended. */
+  #resumeTranscriptAfterForeignScan(chatId: string, failed: boolean): void {
+    const session = this.#sessions.get(chatId);
+    if (session?.transcriptAwaitsForeignScan !== true || this.#foreignScanPending(chatId)) {
+      return;
+    }
+    if (failed) {
+      // Nothing was read, so the device keeps what it remembers of the trays.
+      session.transcriptAwaitsForeignScan = false;
+      this.#latchTranscriptSettled(session);
+      return;
+    }
+    const projection = this.#projectionContext(chatId);
+    if (projection !== undefined) {
+      session.transcriptSource = undefined;
+      this.#materializeProjectedTranscript(session, projection);
+    }
   }
 
   #stopRemoteObservationIfUnused(chatId: string): void {
@@ -3899,6 +3939,11 @@ export class ChatSessionStore {
    * applied turns, so a change that leaves the turns as they were still notifies.
    */
   #settleTranscript(session: InternalSession, messages: readonly MyUIMessage[]): void {
+    if (messages.length === 0 && this.#foreignScanPending(session.chatId)) {
+      session.transcriptAwaitsForeignScan = true;
+      return;
+    }
+    session.transcriptAwaitsForeignScan = false;
     const trays = composerTraysOf(messages);
     const changed =
       !session.transcriptSettled ||
@@ -4662,6 +4707,7 @@ export class ChatSessionStore {
       materializeVersion: 0,
       transcriptMaterialization: undefined,
       transcriptSettled: this.#createdEmpty.delete(chatId),
+      transcriptAwaitsForeignScan: false,
       composerTrays: readRememberedComposerTrays(chatId),
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,
@@ -4811,6 +4857,7 @@ export class ChatSessionStore {
     this.#historicalUsage.delete(chatId);
     this.#stopRemoteObservationIfUnused(chatId);
     this.#remoteReadCompletedVersions.delete(chatId);
+    this.#remoteReadEndedVersions.delete(chatId);
   }
 
   #retireProjection(chatId: string, projectId: string): void {
@@ -4913,6 +4960,27 @@ export class ChatSessionStore {
     }
     const version = (this.#remoteReadVersions.get(chatId) ?? 0) + 1;
     this.#remoteReadVersions.set(chatId, version);
+    let failed = false;
+    try {
+      await this.#readRemoteSegmentsAt({ chatId, projectId, version, fence });
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      if (this.#remoteReadVersions.get(chatId) === version) {
+        this.#remoteReadEndedVersions.set(chatId, version);
+        this.#resumeTranscriptAfterForeignScan(chatId, failed);
+      }
+    }
+  }
+
+  async #readRemoteSegmentsAt(scan: {
+    readonly chatId: string;
+    readonly projectId: string;
+    readonly version: number;
+    readonly fence: ObservationRead | undefined;
+  }): Promise<void> {
+    const { chatId, projectId, version, fence } = scan;
     const { client } = this.#deps;
     const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
     let entries: string[];

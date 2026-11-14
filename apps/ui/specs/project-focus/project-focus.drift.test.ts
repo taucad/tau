@@ -1,53 +1,27 @@
 import path from 'node:path';
 import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { driftManifestProblems, hashFiles } from '@taucad/formal/drift';
+import { driftManifestProblems, hashFiles, machineActions, machineAlphabet } from '@taucad/formal/drift';
+import { createFocusMachine } from '#machines/focus.machine.js';
 
 const specs = import.meta.dirname;
 const workspace = path.resolve(specs, '../../../..');
 
-/**
- * The seam's verbs: the model's action labels (`Labels` in ProjectFocus.tla, without `Init`). No focus
- * machine exists yet; the lane that builds it replaces this list with its machine's alphabet and version.
- */
-const alphabet = [
-  'AccessAnswered',
-  'AccessAsked',
-  'BudgetSwitchClose',
-  'ChatForwarded',
-  'ChatReady',
-  'CloseFailed',
-  'CloseFlushFailed',
-  'Edit',
-  'FirstCheckSettled',
-  'FlushRegistered',
-  'IdleExpired',
-  'LeaveFlushSettled',
-  'LeaveFlushStarted',
-  'LibraryChanged',
-  'ModuleLoaded',
-  'OpenAsked',
-  'OpenBoundPassed',
-  'OpenJoined',
-  'OpenLost',
-  'OpenOnFailed',
-  'PersonClosed',
-  'PersonDiscarded',
-  'PersonOpenAsked',
-  'Retry',
-  'RouteCommitted',
-  'RouteHeard',
-  'SessionClosed',
-];
+/** The machine the target conforms to (A5a); its alphabet, version and `meta.tla` actions are the seam's verbs. */
+const machine = createFocusMachine({ nativeKernelOf: () => undefined });
 
 describe('ProjectFocus.tla implementation correspondence', () => {
   it('should require review of the model when the route, focus or session-mount seam changes', () => {
     expect(
       driftManifestProblems(path.join(specs, 'ProjectFocus/drift.json'), {
-        alphabet,
+        alphabet: machineAlphabet([machine]),
+        versions: { [machine.id]: String(machine.version) },
+        actions: machineActions([machine]),
         tables: hashFiles(specs, ['expected.json', ...readdirSync(specs).filter((file) => file.endsWith('.cfg'))]),
-        // The today code the model describes. The registry (sessions.machine) is environment here.
+        // The today code the model describes, and the target's selector, which has no alphabet of its own. The
+        // registry (sessions.machine) is environment here.
         sources: hashFiles(workspace, [
+          'apps/ui/app/machines/focus.route-state.ts',
           'apps/ui/app/routes/w.$workspace.$project/project-route.tsx',
           'apps/ui/app/routes/w.$workspace.$project/project-route-state.ts',
           'apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx',

@@ -20,6 +20,7 @@
  *
  * @module
  */
+import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { createActor, createCallbackLogic, setup, types, waitFor } from 'xstate';
 import type {
   Actor,
@@ -157,6 +158,8 @@ export type ProjectRuntimeOptions = Readonly<{
   requestedChatId?: string;
   /** A preview's own parameter service: used instead of building one, and its values reach the kernel as previews. */
   previewParameterService?: ParameterSetService;
+  /** The chat store, told of a chat the focused-chat ensure created empty so it shows empty at once (A12, I21). */
+  chatSessions?: Pick<ChatSessionStore, 'noteCreatedEmpty'>;
 }> &
   ProjectRuntimeProfileOptions &
   Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
@@ -865,7 +868,8 @@ export const createParameterServiceOwnerLogic = (
  * @returns The unstarted root, the parameter service its children share and its producer set.
  */
 export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRuntime {
-  const { projectId, fileManager, library, profile, provide, previewParameterService, viewRecordPorts } = options;
+  const { projectId, fileManager, library, profile, provide, previewParameterService, viewRecordPorts, chatSessions } =
+    options;
   const producers = createProjectRuntimeProducers();
   const { fileManagerRef } = fileManager;
   const fileSystemRoot = fileManagerRef.getSnapshot().context.rootDirectory;
@@ -953,7 +957,8 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
             }
             return status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
           },
-          onCreatedChat: () => {
+          onCreatedChat: (chatId) => {
+            chatSessions?.noteCreatedEmpty(chatId);
             void library.invalidateChatListing(input.projectId);
           },
         });

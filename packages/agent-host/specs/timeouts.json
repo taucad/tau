@@ -8,7 +8,7 @@
     "packages/cli/src",
     "apps/desktop/src/main/main.ts",
     "apps/desktop/src/main/services-broker.ts",
-    "apps/desktop/src/tau",
+    "apps/libs/desktop-services-host/src",
     "apps/libs/desktop-terminal/src",
     "apps/ui/app/workers/agent-host.impl.ts",
     "apps/ui/app/workers/agent-host.worker.ts",
@@ -250,7 +250,7 @@
     {
       "id": "B14",
       "bound": "Runtime-port request to main",
-      "site": "apps/desktop/src/tau/services-host.ts",
+      "site": "apps/libs/desktop-services-host/src/services-host.ts",
       "token": "runtimePortTimeout",
       "class": "Peer",
       "owner": "W6",
@@ -259,7 +259,7 @@
     {
       "id": "B14G",
       "bound": "Geometry-runner port request to main (10 s)",
-      "site": "apps/desktop/src/tau/services-host.ts",
+      "site": "apps/libs/desktop-services-host/src/services-host.ts",
       "token": "geometryPortTimeout",
       "class": "Peer",
       "owner": "desktop geometry broker",
@@ -268,7 +268,7 @@
     {
       "id": "B14I",
       "bound": "Desktop agent-tool runtime client idle retirement (120 s with no tool call or open document)",
-      "site": "apps/desktop/src/tau/idle-runtime-clients.ts",
+      "site": "apps/libs/desktop-services-host/src/idle-runtime-clients.ts",
       "token": "entry.timer = setTimeout(",
       "class": "Debounce",
       "owner": "desktop memory"
@@ -276,7 +276,7 @@
     {
       "id": "B15",
       "bound": "Agent-host configuration from main",
-      "site": "apps/desktop/src/tau/services-host.impl.ts",
+      "site": "apps/libs/desktop-services-host/src/services-host.impl.ts",
       "token": "agentHostConfigTimeout",
       "class": "Peer",
       "owner": "W6",
@@ -285,7 +285,7 @@
     {
       "id": "IMPORT-GRANT-WAIT",
       "bound": "Desktop import grant not yet seen by the services utility (2 s): main mints it and sends it on another channel just before the renderer's request can arrive",
-      "site": "apps/desktop/src/tau/services-host.impl.ts",
+      "site": "apps/libs/desktop-services-host/src/services-host.impl.ts",
       "token": "setTimeout(wake, Math.max(0, deadline - Date.now()))",
       "class": "Peer",
       "owner": "W7.4",
@@ -294,7 +294,7 @@
     {
       "id": "B18",
       "bound": "Geometry-runner port request to main (10 s)",
-      "site": "apps/desktop/src/tau/services-host.ts",
+      "site": "apps/libs/desktop-services-host/src/services-host.ts",
       "token": "geometryPortTimeout",
       "class": "Peer",
       "owner": "GM",
@@ -923,7 +923,7 @@
     {
       "id": "M8",
       "bound": "Refused machines channel held open 1 s so calls made together read the same refusal",
-      "site": "apps/desktop/src/tau/services-host.impl.ts",
+      "site": "apps/libs/desktop-services-host/src/services-host.impl.ts",
       "token": "server.dispose(reason.message)",
       "class": "Debounce",
       "owner": "machines"

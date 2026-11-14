@@ -16,8 +16,9 @@
 (*             epoch current when it answers (LibraryCatalog's             *)
 (*             AccessAnswerFenced); the epoch may move again before focus  *)
 (*             acts on the answer                                          *)
-(*   focus     the machine this spec rules or, with Focus = "today", the   *)
-(*             effects of ProjectRouteGate as written                      *)
+(*   focus     the machine this spec rules (machines/focus.machine.ts and  *)
+(*             its selector, focus.route-state.ts; A5a) or, with Focus =   *)
+(*             "today", the effects of ProjectRouteGate as written         *)
 (*   leaving   the session being left (`f.from`), dirty or clean, and its  *)
 (*             leave flush, which completes, fails or is still running     *)
 (*   module    the project runtime import, one for every project           *)
@@ -65,7 +66,7 @@
 (*                  (`activeSessionFlushRef`) is set by a passive effect   *)
 (*                  of ProjectPersistenceGuard after the commit that       *)
 (*                  mounts the session it names (project-live-sessions.tsx *)
-(*                  651, 793 to 808), so the person may edit before it     *)
+(*                  655, 797 to 812), so the person may edit before it     *)
 (*                  lands; React runs it before the next render, so it has *)
 (*                  landed before the next commit or effect run            *)
 (*                  (RegFlushed). FALSE: it is current at every step.      *)
@@ -176,6 +177,8 @@ PersonCommands == MaxPersonOpens > 0
 \* Focus holds an answer for the library's current epoch.
 Fresh == f.ans # "none" /\ f.ansEpoch = lib.epoch
 \* Target: focus's own open waiting in the registry's pendingOpen slot for the project it is opening.
+\* It is by project: a person's open of that project takes the slot in its place, and the machine then
+\* waits for that open's reply (focus.machine.ts, `personOpen`).
 FocusPending == pendingOpen # NoPending /\ pendingOpen.req # NoOpenReq /\ pendingOpen.project = f.ansProj
                 /\ f.st = "opening" /\ f.opened
 \* Target: focus withdraws that open (the registry's cancelPendingOpen) in the step it stops opening
@@ -671,9 +674,9 @@ DRetry ==
   /\ UNCHANGED <<route, nreq, lib, dirty, reg, keep>>
   /\ act' = Label("Retry")
 
-\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 793 to 808, 717): the
+\* ProjectPersistenceGuard's passive effect (project-live-sessions.tsx 797 to 812, 721): the
 \* focused session registers its flush, and the one that lost focus clears it, after the commit.
-\* The today-late-effect configurations cite the same lines.
+\* ProjectFocus.today-late-effect.cfg cites 655 and 797 to 812 too.
 RegSync ==
   /\ Focus = "today" /\ LateRegistration
   /\ reg # RegTarget

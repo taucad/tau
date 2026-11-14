@@ -2,9 +2,29 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import type { HomeInspection, HomeLoadRecord } from '#support/home-load-recorder.js';
-import { inspectServerHtml, installHomeLoadRecorder, readHomeLoad } from '#support/home-load-recorder.js';
+import type {
+  HomeInspection,
+  HomeLoadRecord,
+  ProjectLoadRecord,
+  WorkerReadDelay,
+} from '#support/home-load-recorder.js';
+import {
+  armWorkerReadDelay,
+  inspectServerHtml,
+  installHomeLoadRecorder,
+  installProjectLoadRecorder,
+  installWorkerReadDelay,
+  knownDefectRows,
+  precondition,
+  projectRowMoves,
+  readHomeLoad,
+  readProjectLoad,
+  firstDelayedRead,
+  readWorkerDeliveries,
+  readWorkerReads,
+} from '#support/home-load-recorder.js';
 import type { CloudLoadRecord, CloudStandInDelays } from '#support/cloud-stand-ins.js';
+import { useFlagState } from '#support/flag-state-test.js';
 import {
   cloudDefectRow,
   cloudLoadProbe,
@@ -166,11 +186,150 @@ test.each(
 );
 
 /*
+ * A0.10 (app state orchestration charter, D25): Home's loading defects for a returning visitor, frame by frame. Each
+ * row forces its defect by delivering a file-manager worker reply late, so its defect shows on every run. The title
+ * names the defect; the defect assertion names the frame and the node. Each is a plain test that stands as an
+ * expected failure until the fixing lane sets `expectedFailure: false`. A row measures first and asserts after: an
+ * error while measuring, in setup or teardown, or the defect assertion passing fails the row (`knownDefectRows`).
+ */
+
+/** How late a delayed worker read answers. Milliseconds. */
+const readDelay = 3000;
+/** The project listing Home's library and sidebar wait for. */
+const projectListingRead: WorkerReadDelay = { method: 'listProjectManifests', path: '', milliseconds: readDelay };
+/** Every project's chat listing. */
+const chatListingRead: WorkerReadDelay = {
+  method: 'readdir',
+  path: String.raw`^\.tau/chats$`,
+  milliseconds: readDelay,
+};
+
+const knownDefect = knownDefectRows('home-load-gate');
+/** The measure budget of a row: seven projects created through the UI, then two loads of Home. Milliseconds. */
+const homeBudget = 600_000;
+
+/** The returning visitor, then one reload of Home with `delays` armed, watched until the late reads answered. */
+const measureReturningReload = async ({
+  viewport,
+  delays,
+  label,
+  prepare,
+}: {
+  readonly viewport: ViewportName;
+  readonly delays: readonly WorkerReadDelay[];
+  readonly label: string;
+  /** What the visitor did on Home before the measured reload. */
+  readonly prepare?: () => Promise<void>;
+}): Promise<{ readonly record: ProjectLoadRecord; readonly since: number }> => {
+  await target.setViewport(viewports.wide);
+  await target.installModelCatalogFixture(catalogLatency);
+  await target.startModelCatalogApi();
+  await installHomeLoadRecorder();
+  await installProjectLoadRecorder();
+  await installWorkerReadDelay();
+  await seedReturningVisitor();
+  await target.setViewport(viewports[viewport]);
+  await target.navigate('/');
+  await waitForSettledHome(seededProjects, 1);
+  await prepare?.();
+  await armWorkerReadDelay(delays);
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(readDelay + settleWindow);
+  await waitForSettledHome(seededProjects, 1);
+  const record = await readProjectLoad();
+  const reads = await readWorkerReads();
+  const deliveries = await readWorkerDeliveries();
+  await target.writeArtifact(
+    `home-load-gate/${label}.json`,
+    `${JSON.stringify({ record, workerReads: reads, workerDeliveries: deliveries }, null, 2)}\n`,
+  );
+  const held = delays.map((rule) => firstDelayedRead(deliveries, rule));
+  for (const [index, rule] of delays.entries()) {
+    precondition(
+      held[index] !== undefined,
+      `${label}: no ${rule.method} reply matching /${rule.path}/ was delivered late`,
+    );
+  }
+  return { record, since: Math.min(...held.map((t) => t!)) };
+};
+
+for (const viewport of ['wide', 'phone'] as const) {
+  knownDefect(
+    `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
+    {
+      artifact: `h1-${viewport}`,
+      expectedFailure: true,
+      budget: homeBudget,
+      measure: async () => {
+        const { record } = await measureReturningReload({
+          viewport,
+          delays: [projectListingRead],
+          label: `h1-${viewport}`,
+        });
+        precondition(record.hydratedFirstFrame !== undefined, 'H1: the rich composer never mounted');
+        precondition(
+          record.dropped['skeletonFrames'] === undefined,
+          'H1: the record dropped skeleton frames past its frame limit',
+        );
+        return record;
+      },
+      assert: (record) => {
+        const hydrated = record.hydratedFirstFrame!;
+        const after = record.skeletonFrames.filter((frame) => frame.frame >= hydrated.frame);
+        expect(
+          after.map((frame) => `frame ${frame.frame} (${frame.t} ms): ${frame.count}`).slice(0, 5),
+          `H1: hydrated by frame ${hydrated.frame} (${hydrated.t} ms), then [data-slot=skeleton] blocks in ${after.length} frames`,
+        ).toEqual([]);
+      },
+    },
+  );
+}
+
+knownDefect(
+  'H5: no sidebar project row moves on a returning reload of Home with a project expanded and the chat listing 3 s late',
+  {
+    artifact: 'h5-wide',
+    expectedFailure: true,
+    budget: homeBudget,
+    measure: async () => {
+      /* The visitor left the newest project expanded: Home's sidebar then lists its chats, as the audit's did. */
+      const expanded = seededProjects.at(-1)!;
+      const measured = await measureReturningReload({
+        viewport: 'wide',
+        delays: [chatListingRead],
+        label: 'h5-wide',
+        prepare: async () => {
+          const disclosure = selectors.getByRole('button', { name: `Expand ${expanded}`, exact: true });
+          await target.click(disclosure);
+          await target.expectAttribute(
+            selectors.getByRole('button', { name: `Collapse ${expanded}`, exact: true }),
+            'aria-expanded',
+            'true',
+          );
+          /* The disclosure is persisted before the measured load. */
+          await target.delay(settleWindow);
+        },
+      });
+      precondition(measured.record.projectRows.length > 0, 'H5: no sidebar project row was on screen');
+      return measured;
+    },
+    assert: ({ record, since }) => {
+      /* Only what the late listing can move: a move before it was requested is not this defect's. */
+      const moved = projectRowMoves(record, since);
+      expect(
+        moved,
+        `H5: after the chat listing was requested at ${since} ms, a sidebar project row moved between frames: ${moved.join(' | ')}`,
+      ).toEqual([]);
+    },
+  },
+);
+
+/*
  * N1 and H7 (lane A0.11), in the cloud-build tier only (`ui-e2e:test:e2e:cloud-load`): the self-host build has no
  * billing fence, so these cases cannot show the defect there. The stand-ins sign the owner in with no API
- * (`#support/cloud-stand-ins.js`). Each is an expected failure until side lane N1 flips it, by setting its
- * `cloudDefectRow` `expectedFailure` to `false`. Each is a plain test: only its defect assertion's failure is
- * recorded as the standing defect, and any other fault, or that assertion passing, fails the row.
+ * (`#support/cloud-stand-ins.js`). Side lane N1 fixed both defects and set each `cloudDefectRow`'s
+ * `expectedFailure` to `false`, so each now passes as a guard and any fault, its defect assertion among them, fails it.
  */
 const cloud = cloudStandInCommands(target.commands);
 const cloudLoadTier = await cloud.uiIsCloudLoadTier();
@@ -253,3 +412,249 @@ cloudDefectRow(
     });
   },
 );
+
+/*
+ * H-a (loading-states blueprint, H2; lane S-flags): with `onboarding` on, Home's suggestions row is decided or held by
+ * the server, so nothing under the composer moves when the flag resolves. Measured on a first visit (no
+ * `layout-flags` cookie: the row's box is held and filled in place) and on the reload that follows (the cookie says
+ * on: the server renders the box). The setup invite, which `onboarding` also shows, is dismissed on this device so
+ * the row is the only flagged surface on Home. A self-host row, so `cloudDefectRow` runs under plain `test`.
+ */
+type SuggestionsRowRecord = {
+  readonly shifts: ReadonlyArray<{ readonly t: number; readonly value: number; readonly sources: readonly string[] }>;
+  /** Every distinct top of each element under the composer, from the first frame it was on screen. */
+  readonly tops: Readonly<Record<string, ReadonlyArray<{ readonly t: number; readonly y: number }>>>;
+  /** Every distinct height of the row's list, from the first frame it was on screen. */
+  readonly rowHeights: ReadonlyArray<{ readonly t: number; readonly height: number }>;
+};
+
+/** The elements under the composer whose tops H-a follows, by name. */
+const underComposer = {
+  buildFromCode: 'main a[href="/projects/new"]',
+  suggestionsBox: '[data-slot="home-suggestions"]',
+} as const;
+
+/** Installed before any page script: layout shifts, and the tops of the elements under the composer every frame. */
+const recordSuggestionsRow = (watched: Readonly<Record<string, string>>): void => {
+  const record: {
+    shifts: Array<{ t: number; value: number; sources: string[] }>;
+    tops: Record<string, Array<{ t: number; y: number }>>;
+    rowHeights: Array<{ t: number; height: number }>;
+  } = { shifts: [], tops: {}, rowHeights: [] };
+  Object.defineProperty(globalThis, '__TAU_SUGGESTIONS_ROW__', { value: record });
+  new PerformanceObserver((list) => {
+    for (const entry of list.getEntries() as Array<
+      PerformanceEntry & {
+        value: number;
+        hadRecentInput: boolean;
+        sources?: Array<{ node?: Node; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }>;
+      }
+    >) {
+      if (entry.hadRecentInput) {
+        continue;
+      }
+      record.shifts.push({
+        t: Math.round(entry.startTime),
+        value: entry.value,
+        sources: (entry.sources ?? []).map(
+          (source) =>
+            `${source.node instanceof HTMLElement ? source.node.outerHTML.slice(0, 80) : (source.node?.nodeName ?? 'unknown')} y ${Math.round(source.previousRect.y)} -> ${Math.round(source.currentRect.y)}`,
+        ),
+      });
+    }
+  }).observe({ type: 'layout-shift', buffered: true });
+  const sample = (): void => {
+    const t = Math.round(performance.now());
+    for (const [name, selector] of Object.entries(watched)) {
+      const element = document.querySelector(selector);
+      if (element) {
+        const y = Math.round(element.getBoundingClientRect().y);
+        record.tops[name] ??= [];
+        const seen = record.tops[name];
+        if (seen.at(-1)?.y !== y) {
+          seen.push({ t, y });
+        }
+      }
+    }
+    const row = document.querySelector('[aria-label="Suggestions"]');
+    if (row) {
+      const height = Math.round(row.getBoundingClientRect().height);
+      if (record.rowHeights.at(-1)?.height !== height) {
+        record.rowHeights.push({ t, height });
+      }
+    }
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+};
+
+/** Load Home, wait until the row holds its suggestions and the page has settled, and keep the record as evidence. */
+const measureSuggestionsRow = async (load: () => Promise<unknown>, label: string): Promise<SuggestionsRowRecord> => {
+  await load();
+  await target.expectVisible(richComposer, 60_000);
+  await target.expectVisible(selectors.getByRole('list', { name: 'Suggestions' }).getByRole('button').first(), 60_000);
+  await target.delay(settleWindow);
+  const record = await target.evaluate(
+    () => (globalThis as typeof globalThis & { __TAU_SUGGESTIONS_ROW__: SuggestionsRowRecord }).__TAU_SUGGESTIONS_ROW__,
+  );
+  await target.writeArtifact(`home-load-gate/${label}.json`, `${JSON.stringify(record, null, 2)}\n`);
+  return record;
+};
+
+/** The setup invite stays dismissed on this device, so `onboarding` adds only the suggestions row to Home. */
+const dismissSetupInvite = (key: string): void => {
+  globalThis.localStorage.setItem(key, JSON.stringify({ value: { version: 1, inviteDismissed: true } }));
+};
+
+/** No shift above 0.001, and every element under the composer kept the first top it was painted at. */
+const expectRowInPlace = (label: string, record: SuggestionsRowRecord): void => {
+  const shifts = record.shifts.filter((shift) => shift.value > 0.001);
+  expect(shifts, `H2 (${label}): the page shifted when the suggestions row resolved`).toEqual([]);
+  const moved = Object.fromEntries(Object.entries(record.tops).filter(([, tops]) => tops.length > 1));
+  expect(moved, `H2 (${label}): these elements under the composer moved (top, ms)`).toEqual({});
+};
+
+/** H-a's loads: the two audit viewports, a tablet whose hero is narrowed by the open sidebar, and stored goals. */
+const suggestionsRowCases = [
+  { name: 'wide', viewport: viewports.wide, title: 'on a wide viewport' },
+  { name: 'phone', viewport: viewports.phone, title: 'on a phone viewport' },
+  {
+    name: 'tablet-sidebar',
+    viewport: { width: 820, height: 1180 },
+    title: 'at 820 x 1180 with the sidebar open',
+  },
+  {
+    name: 'phone-goals',
+    viewport: viewports.phone,
+    goals: ['mechanical'],
+    title: 'on a phone viewport with the goal mechanical stored',
+  },
+] as const satisfies ReadonlyArray<{
+  readonly name: string;
+  readonly viewport: { readonly width: number; readonly height: number };
+  readonly goals?: readonly string[];
+  readonly title: string;
+}>;
+
+/** Store the person's goals on this device, as setup does. */
+const storeGoals = (goals: readonly string[]): void => {
+  globalThis.localStorage.setItem(
+    'tau-person-profile',
+    JSON.stringify({ value: { version: 1, goals, languages: [] } }),
+  );
+};
+
+/** The sidebar is open on a wide layout: the remembered state, and the shell's default. */
+const isSidebarOpen = async (): Promise<boolean> =>
+  target.evaluate(
+    () => document.querySelector<HTMLElement>('[data-slot="application-shell"]')?.dataset['sidebarOpen'] === 'true',
+  );
+
+for (const row of suggestionsRowCases) {
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title: `H-a: keeps everything under the composer in place with onboarding on, ${row.title}, on a first visit and its reload`,
+    },
+    async (defect) => {
+      await useFlagState('viewer-controls-onboarding');
+      await target.addInitScript(dismissSetupInvite, 'tau-device');
+      if ('goals' in row) {
+        await target.addInitScript(storeGoals, row.goals);
+      }
+      await target.setViewport(row.viewport);
+      await target.installModelCatalogFixture(catalogLatency);
+      await target.startModelCatalogApi();
+      await target.addInitScript(recordSuggestionsRow, underComposer);
+      const firstVisit = await measureSuggestionsRow(async () => target.navigate('/'), `h-a-${row.name}-first-visit`);
+      if (row.name === 'tablet-sidebar') {
+        expect(await isSidebarOpen(), 'the sidebar is open beside the hero').toBe(true);
+      }
+      const reload = await measureSuggestionsRow(async () => target.reload(), `h-a-${row.name}-reload`);
+      await defect(() => {
+        expectRowInPlace(`${row.name} first visit`, firstVisit);
+        expectRowInPlace(`${row.name} reload`, reload);
+      });
+    },
+  );
+}
+
+/** What the server's HTML for Home holds of the suggestions row, fetched with the page's cookies. */
+const serverSuggestionsRow = async (): Promise<{ box: boolean; list: boolean; buttons: number }> =>
+  target.evaluate(
+    async ({ box, list }) => {
+      const response = await fetch('/', { credentials: 'same-origin' });
+      const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+      return {
+        box: html.querySelector(box) !== null,
+        list: html.querySelector(list) !== null,
+        buttons: html.querySelectorAll(`${box} button`).length,
+      };
+    },
+    { box: underComposer.suggestionsBox, list: '[aria-label="Suggestions"]' },
+  );
+
+/** The layout-flags cookie this browser holds, if any. */
+const layoutFlagsCookie = async (): Promise<string | undefined> => {
+  const cookies = await target.cookies();
+  return cookies.find((cookie) => cookie.name === 'tau-layout-flags')?.value;
+};
+
+/*
+ * H-a guard: the `layout-flags` cookie decides the row on the server. With no cookie the box is held empty from the
+ * first frame and the row fills that same box; once the flag has settled on, the server renders the box and its empty
+ * list (the buttons are the client's); with the flag settled off, the server renders no box and neither does the page.
+ */
+test('H-a guard: the layout-flags cookie decides the suggestions row on the server, and an unknown flag holds its box', async () => {
+  await useFlagState('viewer-controls-onboarding');
+  await target.addInitScript(dismissSetupInvite, 'tau-device');
+  await target.setViewport(viewports.wide);
+  await target.addInitScript(recordSuggestionsRow, underComposer);
+
+  const firstVisit = await measureSuggestionsRow(async () => target.navigate('/'), 'h-a-guard-first-visit');
+  const boxTops = firstVisit.tops['suggestionsBox'] ?? [];
+  expect(boxTops, 'the held box never moved and was there from the first frame').toHaveLength(1);
+  expect(boxTops[0]?.t, 'the box was painted with the first frame of the page below the composer').toBe(
+    firstVisit.tops['buildFromCode']?.[0]?.t,
+  );
+  expect(await layoutFlagsCookie(), 'the settled flag rides the next request').toBe('onboarding.1');
+  expect(await serverSuggestionsRow(), 'with the cookie on, the server renders the box and its empty list').toEqual({
+    box: true,
+    list: true,
+    buttons: 0,
+  });
+
+  await target.evaluate(async () => {
+    await cookieStore.delete({ name: 'tau-layout-flags', path: '/' });
+  });
+  expect(await serverSuggestionsRow(), 'with no cookie, the server holds the box empty').toEqual({
+    box: true,
+    list: false,
+    buttons: 0,
+  });
+
+  await useFlagState('all-off');
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.waitFor(
+    async () => {
+      const cookie = await cookieStore.get('tau-layout-flags');
+      return cookie?.value === 'onboarding.0';
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  expect(await serverSuggestionsRow(), 'with the cookie off, the server renders no box').toEqual({
+    box: false,
+    list: false,
+    buttons: 0,
+  });
+  await target.reload();
+  await target.expectVisible(richComposer, 60_000);
+  await target.delay(settleWindow);
+  expect(
+    await target.evaluate((box) => document.querySelector(box) === null, underComposer.suggestionsBox),
+    'with the flag off and the cookie off, the page renders no box',
+  ).toBe(true);
+});

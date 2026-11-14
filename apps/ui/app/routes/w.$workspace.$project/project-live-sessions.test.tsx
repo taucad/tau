@@ -33,6 +33,7 @@ import { projectSessionParkWindowMilliseconds } from '#machines/project-session.
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createSessionsActor, forgetProjectRegions } from '#services/sessions-store.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 
@@ -203,6 +204,8 @@ const fixtures = vi.hoisted(() => ({
   revisionClients: new Map<string, unknown>(),
   lifecycleMounts: [] as string[],
   fileManagers: new Map<string, unknown>(),
+  /** The file manager each project's session provider was last rendered with. */
+  providedFileManagers: new Map<string, unknown>(),
   retryManifestObservation: new Map<string, unknown>(),
   chatProducers: new Map<string, () => Promise<void>>(),
   /** The S40 rows give each project a second producer; other rows keep the one. */
@@ -395,7 +398,12 @@ vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
 });
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  SessionFileManagerProvider: ({
+    children,
+    projectId,
+    fileManagerRef,
+  }: React.PropsWithChildren<{ projectId: string; fileManagerRef: unknown }>) => {
+    fixtures.providedFileManagers.set(projectId, fileManagerRef);
     useEffect(() => {
       fixtures.order.push(`mount:${projectId}`);
       return () => {
@@ -688,7 +696,9 @@ beforeEach(() => {
   visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
   clock = new StepClock();
-  registry = createSessionsActor({ clock }).start();
+  fixtures.providedFileManagers.clear();
+  /* Each session opens a stand-in file manager, ready at once, so the provider is handed a real session's ref. */
+  registry = createSessionsActor({ clock, openFileManager: (id) => openSessionFileManagerStandIn(id) }).start();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   appRuntime = createAppRuntime({
     clock,
@@ -727,6 +737,16 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     await openAndRender([projectA], { projectId: projectA });
 
     expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it("should render the session subtree over the file manager its session's child opened (A6c)", async () => {
+    await openAndRender([projectA, projectB], { projectId: projectA });
+
+    const fileManagerOf = (projectId: string) => sessionOf(projectId)?.getSnapshot().context.fileManagerRef;
+    expect(fileManagerOf(projectA)).toBeDefined();
+    expect(fixtures.providedFileManagers.get(projectA)).toBe(fileManagerOf(projectA));
+    expect(fixtures.providedFileManagers.get(projectB)).toBe(fileManagerOf(projectB));
+    expect(fileManagerOf(projectA)).not.toBe(fileManagerOf(projectB));
   });
 
   it('should record a kernel refusal on the session and clear it when the kernel is back (S7)', async () => {

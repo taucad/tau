@@ -11,7 +11,8 @@ import { validated } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
+import { createActor, createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { AnyEventObject, EventObject } from 'xstate';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
@@ -326,6 +327,42 @@ describe('file-manager host composition', () => {
     );
     expect(built.actor.getSnapshot().context.backendType).toBe('memory');
     built.dispose();
+  });
+
+  it('should tell each listener when rootFiles connects, replaces or loses its worker, and once per change (A6c)', () => {
+    const host = createFileManagerHost({ analytics: noAnalytics, loadHomeBackend: async () => 'opfs' });
+    /* Only the worker in `rootFiles`' context is read: a small machine that a row sets stands in for it. */
+    const rootFiles = createActor(
+      setup({
+        schemas: {
+          context: types<{ worker: Worker | undefined }>(),
+          events: eventSchemas<{ type: 'set'; worker: Worker | undefined }>(),
+        },
+      }).createMachine({
+        context: { worker: undefined },
+        on: { set: ({ event }) => ({ context: { worker: event.worker } }) },
+      }),
+    ).start();
+    const ref = createActor(host.logic, { input: { rootFiles: rootFiles as unknown as FileManagerRef } }).start();
+    const heard: Array<Worker | undefined> = [];
+    const unsubscribe = host.onSharedWorker((worker) => {
+      heard.push(worker);
+    });
+    const first = mock<Worker>();
+    const second = mock<Worker>();
+
+    rootFiles.send({ type: 'set', worker: first });
+    rootFiles.send({ type: 'set', worker: first });
+    rootFiles.send({ type: 'set', worker: second });
+    rootFiles.send({ type: 'set', worker: undefined });
+
+    expect(heard).toEqual([first, second, undefined]);
+    expect(host.sharedWorker()).toBeUndefined();
+    unsubscribe();
+    rootFiles.send({ type: 'set', worker: first });
+    expect(heard).toHaveLength(3);
+    ref.stop();
+    rootFiles.stop();
   });
 
   it('should give rootFiles the root and wait for Home as its input', () => {

@@ -103,6 +103,7 @@ export const revisionStatusHarness = {
     restore: vi.fn<(revisionId: string) => void>(),
     undo: vi.fn(),
     undoOperation: vi.fn(),
+    undoMerge: vi.fn(),
     switchTo: vi.fn<(branch: string) => void>(),
     /* Resolves like the real verb does (P4); a caller places a chat on it. */
     createBranch: vi.fn<(name: string, from?: string) => Promise<BranchCreated>>(async (name) => ({

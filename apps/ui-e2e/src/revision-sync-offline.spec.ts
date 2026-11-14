@@ -3,6 +3,8 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import {
   awaitSaved,
+  backupChooser,
+  backupLine,
   focusSource,
   openBackupChooser,
   openFixture,
@@ -21,11 +23,26 @@ import * as target from '#support/external-target.js';
  */
 const offlineWindowMilliseconds = 17_000;
 
-/** The Sync row's status line: what is backed up, and whether this device is offline. */
+/** The Backup line's status: what is backed up, and whether this device is offline. */
 const backupStatus = (): Locator =>
   selectors.getByCss(`${visibleRevisionsPanel} [role="status"][aria-label="Backup status"]`);
 
-/** Link the open project to the fixture's repository through the Sync region's picker. */
+/** What the Backup line says of a GitHub link with nothing pushed yet (C1, 13ae1b6fab). */
+const notPushed = /Saved · Not pushed to GitHub/u;
+
+/**
+ * Open the Backup line's Manage, which holds the repository's writes, its push
+ * and *Fetch latest* (C4, M8, dbee175fd2), unless it is open already.
+ */
+const openManage = async (): Promise<void> => {
+  const popover = selectors.getByRole('dialog', { name: 'Manage backup' });
+  if (!(await target.isVisible(popover))) {
+    await target.click(backupLine().getByRole('button', { name: 'Manage', exact: true }));
+  }
+  await target.expectVisible(popover, 30_000);
+};
+
+/** Link the open project to the fixture's repository through the Backup line's picker. */
 const linkThroughPicker = async (repositoryFullName: string): Promise<void> => {
   try {
     await openBackupChooser();
@@ -33,7 +50,7 @@ const linkThroughPicker = async (repositoryFullName: string): Promise<void> => {
     await target.screenshot(undefined, 'github-chooser-failure.png');
     throw error;
   }
-  await target.click(selectors.getByRole('radio', { name: 'Git remote' }));
+  await target.click(backupChooser().getByRole('radio', { name: 'GitHub or another Git host' }));
   const repository = selectors.getByRole('button', { name: /^Repository\b/u });
   await target.expectVisible(repository, 60_000);
   await target.click(repository);
@@ -42,7 +59,7 @@ const linkThroughPicker = async (repositoryFullName: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Connect repository', exact: true }));
 };
 
-/** Wait for the Sync row to read `sentence` as its first words. */
+/** Wait for the Backup line's status to read `sentence`. */
 const awaitBackup = async (sentence: RegExp, timeout = 120_000): Promise<void> => {
   await expect.poll(async () => (await target.textContent(backupStatus())) ?? '', { timeout }).toMatch(sentence);
 };
@@ -63,9 +80,10 @@ test('keeps GitHub read-only until approval and a separate explicit push, includ
   await target.click(revisionChip());
   await target.expectVisible(selectors.getByCss(visibleRevisionsPanel), 30_000);
   await linkThroughPicker(linked.repositoryFullName);
-  await awaitBackup(/^Saved locally/u);
+  await awaitBackup(notPushed);
   const linkedState = await target.commands.uiReadLinkedGithubFixture();
   expect(linkedState.pushes).toBe(0);
+  await openManage();
   await target.click(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
   await target.expectVisible(selectors.getByRole('alertdialog'));
   await target.screenshot(undefined, 'github-enable-writes');
@@ -99,10 +117,11 @@ test('keeps GitHub read-only until approval and a separate explicit push, includ
 
   await target.click(revisionChip());
   await target.expectVisible(selectors.getByCss(visibleRevisionsPanel), 30_000);
+  await openManage();
   await target.click(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
   await target.click(selectors.getByRole('button', { name: 'Fetch latest', exact: true }));
-  await awaitBackup(/^Saved locally/u);
+  await awaitBackup(notPushed);
   const disabled = await target.commands.uiReadLinkedGithubFixture();
   expect(disabled.writeEnabled).toBe(false);
   expect(disabled.pushes).toBe(pushed.pushes);

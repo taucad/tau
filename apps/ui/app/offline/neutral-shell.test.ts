@@ -80,5 +80,15 @@ it('never revalidates the root server loader for the offline shell route', () =>
 
   expect(revalidate('/usage?range=30d')).toBe(false);
   expect(revalidate('/usage/')).toBe(false);
-  expect(revalidate('/projects')).toBe(true);
+  // U23: a client navigation between two other pages keeps the root data it has.
+  expect(revalidate('/projects')).toBe(false);
+  // The offline shell rule is narrow: a submission elsewhere still revalidates.
+  expect(
+    shouldRevalidate({
+      currentUrl: new URL('https://tau.new/'),
+      nextUrl: new URL('https://tau.new/projects'),
+      formMethod: 'POST',
+      defaultShouldRevalidate: true,
+    } as Parameters<typeof shouldRevalidate>[0]),
+  ).toBe(true);
 });

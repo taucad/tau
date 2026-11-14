@@ -3,11 +3,13 @@ import { createCallbackLogic, setup, types } from 'xstate';
 import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type * as FileSystemBridgeModule from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import {
   getProjectFileSystemConfig,
   getWorkspace,
@@ -194,6 +196,8 @@ type FileManagerContext = {
   onRootSkipped: ((skip: WorkspaceRootSkip) => void) | undefined;
   /** Explicit local diagnostic recorder; absent in ordinary project opens. */
   openPerformance: ProjectOpenPerformance | undefined;
+  /** The first effect or child failure no transition modelled; later ones are usually its consequences (D23). */
+  fault: string | undefined;
 };
 
 // ============ Lifecycle Actors ============
@@ -240,6 +244,25 @@ type WebAccessUnavailableEvent = {
   activeWorkspaceName: string | undefined;
 };
 
+let fileSystemBridgeModule: Promise<typeof FileSystemBridgeModule> | undefined;
+
+/**
+ * The bridge module, loaded once: file managers that connect together (`rootFiles` and a lease the same backend
+ * resolution reaches) share one import instead of racing two.
+ */
+const loadFileSystemBridge = async (): Promise<typeof FileSystemBridgeModule> => {
+  /* A failed load is forgotten, so "Try again" fetches the chunk again instead of replaying the failure. */
+  fileSystemBridgeModule ??= (async () => {
+    try {
+      return await import('@taucad/fs-bridge');
+    } catch (error) {
+      fileSystemBridgeModule = undefined;
+      throw error;
+    }
+  })();
+  return fileSystemBridgeModule;
+};
+
 const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileManagerContext }>(
   async ({ input, signal }) => {
     const { context } = input;
@@ -252,7 +275,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     context.disposeComposedView?.();
 
     const { createFileSystemBridge, createFileSystemBridgeProxy, openFileSystemBridge, waitForWorkerReady } =
-      await import('@taucad/fs-bridge');
+      await loadFileSystemBridge();
 
     if (context.worker && !context.sharedWorker) {
       safeDispose(() => context.worker?.terminate());
@@ -501,7 +524,7 @@ const initializeServicesActor = fromSafeAsync<
    * project roots, discovery — stay on the workspace surface, which owns no
    * content.
    */
-  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const { createFileSystemBridgeProxy } = await loadFileSystemBridge();
   signal.throwIfAborted();
   const viewConnection = context.openFileSystemBridge!(context.rootDirectory, 'user');
   const viewProxy = createFileSystemBridgeProxy(viewConnection);
@@ -727,11 +750,73 @@ type FileManagerEventLifecycle =
    */
   | { type: 'reloadWorkspace' };
 
-type FileManagerEvent =
+/** Events accepted by fileManagerMachine. @public */
+export type FileManagerEvent =
   | FileManagerEventLifecycle
   | WorkerConnectedEvent
   | WorkerInitializedEvent
   | WebAccessUnavailableEvent;
+
+/**
+ * The file manager machine's public alphabet: every {@link FileManagerEvent} type, in the union's order. The totality
+ * test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const fileManagerEventTypes = [
+  'initialize',
+  'resolveInitialBackend',
+  'setRoot',
+  'setBackendType',
+  'reloadWorkspace',
+  'workerConnected',
+  'workerInitialized',
+  'webAccessUnavailable',
+] as const satisfies ReadonlyArray<FileManagerEvent['type']>;
+
+const fileManagerStates = [
+  'initializing',
+  'connectingWorker',
+  'initializingServices',
+  'ready',
+  'webAccessUnavailable',
+  'error',
+] as const;
+
+/** Every state but the ones named, for a pair the machine answers in those states only. */
+const fileManagerStatesExcept = (...answered: ReadonlyArray<(typeof fileManagerStates)[number]>) =>
+  fileManagerStates.filter((state) => !answered.includes(state));
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline. A pair names a state
+ * where some event of its type goes unanswered; a mixed pair's type is also answered there with other context (a
+ * pair cannot say which), and the totality test checks that answer with its own row.
+ *
+ * - `initialize` once started, except from `error`, where it is the retry.
+ * - `resolveInitialBackend` once started: the engine was chosen before the worker connected.
+ * - `setRoot` to the current root, after `initializing` and outside `error`: nothing moves.
+ * - `setBackendType` outside `ready`.
+ * - `reloadWorkspace` before an init settles: `initializing` waits for `initialize`, and in `connectingWorker` and
+ *   `initializingServices` the running init reads the persistent binding itself.
+ * - `workerConnected` outside `connectingWorker`, `workerInitialized` and `webAccessUnavailable` outside
+ *   `initializingServices`: an effect's report lands only while its invoke runs.
+ *
+ * @public
+ */
+export const fileManagerIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...fileManagerStatesExcept('initializing', 'error').map((state) => [state, 'initialize'] as const),
+  ...fileManagerStatesExcept('initializing').map((state) => [state, 'resolveInitialBackend'] as const),
+  ...fileManagerStatesExcept('initializing', 'error').map((state) => [state, 'setRoot'] as const),
+  ...fileManagerStatesExcept('ready').map((state) => [state, 'setBackendType'] as const),
+  ...(['initializing', 'connectingWorker', 'initializingServices'] as const).map(
+    (state) => [state, 'reloadWorkspace'] as const,
+  ),
+  ...fileManagerStatesExcept('connectingWorker').map((state) => [state, 'workerConnected'] as const),
+  ...fileManagerStatesExcept('initializingServices').flatMap((state) => [
+    [state, 'workerInitialized'] as const,
+    [state, 'webAccessUnavailable'] as const,
+  ]),
+];
 
 type FileManagerInput = {
   rootDirectory: string;
@@ -769,15 +854,28 @@ const disposeServices = (context: FileManagerContext): void => {
   context.disposeComposedView?.();
 };
 
+/**
+ * Release what a file manager's context holds: its services, proxy and bridge, and its worker unless it shares one.
+ *
+ * The machine's own teardown, and the lease store's after it stops a leased actor: `stop()` runs no `exit`, so a
+ * dropped lease releases its resources through this rather than through the root's `exit`.
+ *
+ * @param context - The file manager's context, read after it stopped.
+ * @public
+ */
+export const releaseFileManagerResources = (context: FileManagerContext): void => {
+  disposeServices(context);
+  safeDispose(() => context.proxy?.dispose());
+  safeDispose(context.bridgeDispose);
+
+  if (!context.sharedWorker) {
+    safeDispose(() => context.worker?.terminate());
+  }
+};
+
 const destroyWorkerAndServices = (context: FileManagerContext, enq: FileManagerEnqueue): FileManagerPatch => {
   enq(() => {
-    disposeServices(context);
-    safeDispose(() => context.proxy?.dispose());
-    safeDispose(context.bridgeDispose);
-
-    if (!context.sharedWorker) {
-      safeDispose(() => context.worker?.terminate());
-    }
+    releaseFileManagerResources(context);
   });
 
   return {
@@ -905,7 +1003,20 @@ export const fileManagerMachine = setup({
     onExternalPollTelemetry: input.onExternalPollTelemetry,
     onRootSkipped: input.onRootSkipped,
     openPerformance: input.openPerformance ?? readLocalProjectOpenPerformance(),
+    fault: undefined,
   }),
+  /* A fault no transition modelled is recorded and reported once, and the machine keeps answering in the state it was
+   * in: the first is kept, later ones are its consequences (MC-R12, D23; B2). Today's modelled failures still enter
+   * `error` through their invokes' own `onError`. */
+  onError: ({ context, event }, enq) => {
+    if (context.fault !== undefined) {
+      return {};
+    }
+    enq(() => {
+      reportAppRuntimeFault(event.error);
+    });
+    return { context: { fault: faultMessage(event.error, 'file manager fault') } };
+  },
   initial: 'initializing',
   exit: ({ context }, enq) => {
     stopPolling(context, enq);

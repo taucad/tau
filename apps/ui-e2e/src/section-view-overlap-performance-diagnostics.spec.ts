@@ -12,8 +12,13 @@ type SectionCapStencilDiagnostics = Readonly<{
         crossingSourceCount: number;
         overlapCandidateSourceCount: number;
         outlineSourceCount: number;
+        loopSourceCount: number;
+        openChainDrawCount: number;
         meshDrawCount: number;
         polygonDrawCount: number;
+        /** Whether the frame built its draw list or reused a camera-only frame's (#1298): a flag, not a count. */
+        rebuilt: boolean;
+        buildMilliseconds: number;
         submitMilliseconds: number;
       }>
     | undefined;
@@ -177,7 +182,9 @@ const driveAndReadPerformance = async (
 const expectStencilShape = (diagnostics: SectionCapStencilDiagnostics, label: string): void => {
   expect(diagnostics.sequence, `${label}: sequence`).toBeGreaterThan(0);
   expect(diagnostics.latest, `${label}: latest frame`).toBeDefined();
-  for (const [key, value] of Object.entries(diagnostics.latest ?? {})) {
+  const { rebuilt, ...counts } = diagnostics.latest ?? { rebuilt: false };
+  expect(rebuilt, `${label}.rebuilt should be a flag`).toBeTypeOf('boolean');
+  for (const [key, value] of Object.entries(counts)) {
     expect(Number.isFinite(value), `${label}.${key} should be finite`).toBe(true);
     expect(value, `${label}.${key} should be non-negative`).toBeGreaterThanOrEqual(0);
   }

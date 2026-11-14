@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { openBackupChooser } from '#support/revision-session.js';
+import { backupLine } from '#support/revision-session.js';
 
 const seedRoute = '/__e2e/project-file-tree';
 const liveProjectBudget = 8;
@@ -142,7 +142,7 @@ const projectRowDescription = async (path: string): Promise<string> =>
       .join(' ');
   }, path);
 
-/** Wait until the real Sync and project-row surfaces say this fresh project is closable. */
+/** Wait until the real Backup and project-row surfaces say this fresh project is closable. */
 const waitForCurrentProjectToSettle = async (path: string): Promise<void> => {
   /* The viewer header's revision action opens the Revisions panel whether or
    * not the restored workbench layout already carries its tab (a reopened
@@ -154,15 +154,10 @@ const waitForCurrentProjectToSettle = async (path: string): Promise<void> => {
   });
   await target.expectVisible(openRevisions, 120_000);
   await target.click(openRevisions);
-  await openBackupChooser();
-  const noRemote = selectors.getByRole('radio', { name: 'No remote' });
-  await target.expectVisible(noRemote, 60_000);
-  await expect
-    .poll(async () => target.getAttribute(noRemote, 'aria-checked'), {
-      timeout: 60_000,
-    })
-    .toBe('true');
-  await target.expectHidden(selectors.getByText('Checking…', { exact: true }), 120_000);
+  /* No remote: the pane's Backup line reads *This device only* (C2, C4, dbee175fd2), and with no remote nothing is
+   * being checked against one. */
+  await target.expectContainingText(backupLine(), 'This device only', 60_000);
+  await target.expectHidden(selectors.getByText('Checking for changes…', { exact: true }), 120_000);
   /* A seeded project has unsaved edits until a revision records its files
    * (I24: a dirty checkout is never policy-closable), so save one the way a
    * person does — `Mod+S` is the checkout's own save cut. The Revisions pane

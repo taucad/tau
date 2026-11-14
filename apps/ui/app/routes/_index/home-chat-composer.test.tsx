@@ -21,13 +21,13 @@ const composer = {
     effort: undefined,
   },
   execution: { execution: { kind: 'tau' } },
+  kernel: { preference: 'auto' },
 };
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => composer }));
 
 const composerModule = vi.hoisted(() => ({
   resolve: undefined as undefined | (() => void),
   adopted: [] as EarlyChatInput[],
-  kernelChips: [] as boolean[],
 }));
 vi.mock('#components/chat/new-project-chat-composer.js', async () => {
   // The import the component under test awaits; held open so the pre-composer window is observable.
@@ -35,15 +35,8 @@ vi.mock('#components/chat/new-project-chat-composer.js', async () => {
     composerModule.resolve = resolve;
   });
   return {
-    NewProjectChatComposer: ({
-      adoptedEarlyInput,
-      enableKernelChips,
-    }: {
-      readonly adoptedEarlyInput: EarlyChatInput;
-      readonly enableKernelChips: boolean;
-    }) => {
+    NewProjectChatComposer: ({ adoptedEarlyInput }: { readonly adoptedEarlyInput: EarlyChatInput }) => {
       composerModule.adopted.push(adoptedEarlyInput);
-      composerModule.kernelChips.push(enableKernelChips);
       return <div>Rich composer</div>;
     },
   };
@@ -53,24 +46,23 @@ describe('Home chat composer', () => {
   beforeEach(() => {
     send.mockClear();
     composerModule.adopted.length = 0;
-    composerModule.kernelChips.length = 0;
   });
 
-  /* R2: the served composer has the rich one's shape — kernel chips, the box, and its bar at rest —
+  /* R2: the served composer has the rich one's shape — the box and its bar at rest, kernel pill included —
    * so nothing below it moves when the rich composer arrives. R11: it asks for focus at first paint. */
-  it('should serve the kernel chips and the composer bar at rest around an autofocusing input', () => {
+  it('should serve the composer bar at rest, with the Auto kernel pill, around an autofocusing input', () => {
     const container = document.createElement('div');
     container.innerHTML = renderToString(
       <TooltipProvider>
         <HomeChatComposer />
       </TooltipProvider>,
     );
-    expect(within(container).getAllByText('OpenSCAD')).toHaveLength(1);
     expect(container.querySelector('textarea')).toHaveAttribute('autofocus');
     const bar = container.querySelector('[data-slot="composer-bar"]')!;
     expect(bar).toHaveAttribute('inert');
     expect(bar.querySelector('[aria-label="Add"]')).not.toBeNull();
     expect(bar.querySelector('[aria-label="Create in Home"]')).not.toBeNull();
+    expect(bar.querySelector('[data-slot="kernel-pill"]')).toHaveAttribute('aria-label', 'Kernel: Auto');
     expect(bar.querySelector('[data-slot="trigger-model"]')).toHaveTextContent('Haiku 5.5');
     expect(bar.querySelector('[aria-label="Send"]')).toHaveAttribute('aria-disabled', 'true');
   });
@@ -93,7 +85,7 @@ describe('Home chat composer', () => {
       container.querySelector('textarea')!,
       container.querySelector('[data-slot="composer-bar"]')!,
       container.querySelector('[data-slot="trigger-model"]')!,
-      within(container).getByText('OpenSCAD'),
+      container.querySelector('[data-slot="kernel-pill"]')!,
     ]) {
       expect(part.compareDocumentPosition(marker)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     }
@@ -144,9 +136,6 @@ describe('Home chat composer', () => {
       });
       await within(container).findByText('Rich composer');
       expect(composerModule.adopted.map((input_) => input_.text)).toEqual(['A bracket for a 3 mm shaft']);
-      /* The chips stay where they were served; the rich composer does not draw a second set. */
-      expect(composerModule.kernelChips).toEqual([false]);
-      expect(within(container).getAllByText('OpenSCAD')).toHaveLength(1);
       expect(send).toHaveBeenCalledExactlyOnceWith({
         type: 'setDraftText',
         text: 'A bracket for a 3 mm shaft',

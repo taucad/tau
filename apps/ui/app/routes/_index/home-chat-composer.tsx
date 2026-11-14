@@ -1,9 +1,6 @@
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import { ChatComposerStaticBar } from '#components/chat/chat-composer-static-bar.js';
-import { NewProjectKernelChips } from '#components/chat/kernel-selector.js';
 import { useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
-import { useKernel } from '#hooks/use-kernel.js';
-import { useFeature } from '#flags/use-feature.js';
 
 /** The marker after Home's composer that first paint waits for (`rel=expect`). */
 export const homeComposerEndId = 'home-composer-end';
@@ -18,8 +15,7 @@ export const homeComposerEndId = 'home-composer-end';
  * an effect, so that graph is a dynamic chunk: Home's static closure loses it, and the input that
  * satisfies the first-action contract is in the served document as before.
  *
- * The served composer has the rich one's final shape (R2): the kernel chips are drawn here, once,
- * and stay mounted across the swap, and the native input sits in the rich composer's box over its
+ * The served composer has the rich one's final shape (R2): the native input sits in the rich composer's box over its
  * bar at rest, so the swap moves nothing. The native input takes focus at first paint with the rich
  * composer's outline (R11); adoption hands its text, caret and focus to the editor.
  *
@@ -35,9 +31,6 @@ export function HomeChatComposer({
   readonly enableAutoFocus?: boolean;
 }): React.JSX.Element {
   const Composer = useNewProjectComposer();
-  const { kernel, setKernel } = useKernel();
-  /* With the `autoKernel` flag on the kernel is the bar's pill, beside the location, and the chips leave (D8). */
-  const isAutoEnabled = useFeature('autoKernel');
 
   return (
     <>
@@ -48,16 +41,13 @@ export function HomeChatComposer({
        * browser without `rel=expect` ignores it. */}
       <link rel='expect' href={`#${homeComposerEndId}`} blocking='render' />
       <div className='space-y-4'>
-        {isAutoEnabled ? null : <NewProjectKernelChips kernel={kernel} onKernelChange={setKernel} />}
         <ChatEarlyInput
           isHostReady={Composer !== undefined}
           enableAutoFocus={enableAutoFocus}
           bar={({ isEmpty }) => <ChatComposerStaticBar isEmpty={isEmpty} />}
         >
           {(input) =>
-            Composer === undefined ? null : (
-              <Composer adoptedEarlyInput={input} enableAutoFocus={enableAutoFocus} enableKernelChips={false} />
-            )
+            Composer === undefined ? null : <Composer adoptedEarlyInput={input} enableAutoFocus={enableAutoFocus} />
           }
         </ChatEarlyInput>
       </div>

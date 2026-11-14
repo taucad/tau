@@ -6,13 +6,12 @@ import { expectVisible } from '#support/scenario.js';
 // oxlint-disable-next-line no-restricted-imports -- The flag states are harness-only data both hosts must agree on.
 import { flagProbeGlobal, flagStateFlags, flagStateNames } from '../../ui-e2e/src/support/flag-state.ts';
 // oxlint-disable-next-line no-restricted-imports -- The resolved-flags type is shared by the two harnesses only.
-import type { OnboardingFlags } from '../../ui-e2e/src/support/flag-state.ts';
+import type { FlagStateName, OnboardingFlags } from '../../ui-e2e/src/support/flag-state.ts';
 /* eslint-enable @nx/enforce-module-boundaries -- Restore normal boundaries after the harness-only imports. */
 
 /*
  * FL4 harness smoke on desktop (T0.4): each launch opens the renderer in the flag state it names, and the app
- * resolves exactly that state; a fresh profile opens setup by itself only in the state with every flag on. A stored
- * `tau:flags` override changes nothing (FL1, FL2).
+ * resolves exactly that state. A stored `tau:flags` override changes nothing (FL1, FL2).
  */
 
 let session: DesktopSession | undefined;
@@ -39,18 +38,22 @@ const readAppFlags = async (current: DesktopSession): Promise<OnboardingFlags> =
     return flags;
   }, flagProbeGlobal);
 
+/**
+ * The screen a fresh launch opens on. `onboardingAutoOpen` sends a first run to setup at `/welcome` (#1925), which
+ * has no composer; every other state opens Home. A reload stays on whichever it is.
+ */
+const firstScreen = (
+  page: DesktopSession['page'],
+  state: FlagStateName,
+): ReturnType<DesktopSession['page']['locator']> =>
+  flagStateFlags[state].onboardingAutoOpen
+    ? page.getByRole('heading', { level: 1, name: 'What do you want to make?' })
+    : page.locator('[aria-label="Ask Tau to build anything..."]');
+
 test.for(flagStateNames)('opens the renderer in the %s flag state', async (state) => {
   session = await launchDesktopApp({ token: 'unused', flagState: state });
   const { page } = session;
-  if (flagStateFlags[state].onboardingAutoOpen) {
-    // A fresh profile is a first run, and only this state opens setup by itself on one.
-    await page.waitForURL((url) => url.pathname === '/welcome' && url.searchParams.get('entry') === 'first_launch', {
-      timeout: 120_000,
-    });
-    await expectVisible(page.getByRole('heading', { level: 1, name: 'What do you want to make?' }), 60_000);
-  } else {
-    await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-  }
+  await expectVisible(firstScreen(page, state), 120_000);
   expect(await readAppFlags(session)).toStrictEqual(flagStateFlags[state]);
 
   await page.evaluate(() => {
@@ -60,6 +63,6 @@ test.for(flagStateNames)('opens the renderer in the %s flag state', async (state
     );
   });
   await page.reload({ waitUntil: 'load' });
-  await expectVisible(page.getByRole('main'), 120_000);
+  await expectVisible(firstScreen(page, state), 120_000);
   expect(await readAppFlags(session)).toStrictEqual(flagStateFlags[state]);
 });

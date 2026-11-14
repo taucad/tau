@@ -56,7 +56,9 @@ export type RestoreFailureCode =
   /** *Undo*'s inverse overlaps a later revision's changes, so it refused rather than revert them (D15). */
   | 'UNDO_CONFLICT'
   /** *Undo* reached a merge this host made, which it never reaches past (D15, RV-W7 #7). */
-  | 'UNDO_PAST_MERGE';
+  | 'UNDO_PAST_MERGE'
+  /** The merge toast's *Undo* found a newer entry on the branch than the merge, so it wrote nothing (I11, rule 10). */
+  | 'UNDO_MERGE_MOVED';
 
 /**
  * How long one of a restore's cuts waits for the checkout's answer.
@@ -80,11 +82,13 @@ const undoUnavailableMessage = 'There is no restore on this line to undo.';
 
 /**
  * Which verb a run of the machine is: a *Restore*, D2's *Undo restore* (a
- * restore of the restore row's first parent) or D15's *Undo*.
+ * restore of the restore row's first parent), D15's *Undo*, or the merge
+ * toast's *Undo* (a restore of the branch's head before the merge, only while
+ * the merge is still its head).
  *
  * @public
  */
-export type RestoreMode = 'restore' | 'undoRestore' | 'undo';
+export type RestoreMode = 'restore' | 'undoRestore' | 'undo' | 'undoMerge';
 
 /** Input accepted when creating the restoreMachine actor. @public */
 export type RestoreMachineInput = Readonly<{
@@ -118,6 +122,8 @@ export type RestoreMachineContext = Readonly<{
   target: string | undefined;
   /** Which verb is running. */
   mode: RestoreMode;
+  /** The head an *Undo* of a merge requires: the entry the merge left the branch at. */
+  expectHead: string | undefined;
   /** What the running verb's own pre-cut minted: the person's work, never what *Undo* reverses. */
   recordedRevisionId: string | undefined;
   /** Whether *Undo* has an operation of this device's to reverse on the selected line (D15). */
@@ -175,6 +181,13 @@ export type RestoreMachineEvent =
   | Readonly<{ type: 'undo' }>
   /** Reverse this device's newest operation on the selection's line (D15). */
   | Readonly<{ type: 'undoOperation' }>
+  /**
+   * The merge toast's *Undo* (I11): a new entry whose files are `before`'s,
+   * written only while the selected line's head is still `revisionId`, the
+   * entry the merge landed. History stays append-only; the merged branch is
+   * untouched.
+   */
+  | Readonly<{ type: 'undoMerge'; revisionId: string; before: string }>
   /** The selected checkout minted, so whether *Undo* has something to reverse may have changed. */
   | Readonly<{ type: 'lineMinted' }>
   /** The root re-roots the workbench, or its line moved; the next restore applies to whatever it selected (F10). */
@@ -190,7 +203,7 @@ export type RestoreMachineEmitted =
    */
   | Readonly<{
       type: 'toast.restored';
-      mode: 'restore' | 'undoRestore';
+      mode: 'restore' | 'undoRestore' | 'undoMerge';
       revisionId: string;
       revisionNumber: number | undefined;
     }>
@@ -224,6 +237,8 @@ export type RestoreComputePlanActorInput =
       target: string;
       /** Plan the first parent of `target` instead of `target` itself (D2). */
       firstParent?: true;
+      /** Refuse unless the line's head is this entry, here and again at the write (a merge's *Undo*). */
+      expectHead?: string;
     }>
   | Readonly<{
       checkoutId: string;
@@ -279,6 +294,7 @@ const clearTransient = {
   requestId: undefined,
   target: undefined,
   mode: 'restore',
+  expectHead: undefined,
   recordedRevisionId: undefined,
   planId: undefined,
   revisionId: undefined,
@@ -376,6 +392,7 @@ const restoreMachineDefinition = setup({
     cutCount: 0,
     target: undefined,
     mode: 'restore',
+    expectHead: undefined,
     recordedRevisionId: undefined,
     canUndo: false,
     restoredRevisionId: undefined,
@@ -446,6 +463,19 @@ const restoreMachineDefinition = setup({
             reasonCode: undefined,
           },
         }),
+        /* The pre-cut records anything newer than the merge, which the plan then refuses over (rule 10). */
+        undoMerge: ({ context, event }) => ({
+          target: 'recording',
+          context: {
+            restoringCheckoutId: context.checkoutId,
+            restoringBranch: context.branch,
+            target: event.before,
+            expectHead: event.revisionId,
+            mode: 'undoMerge',
+            reason: undefined,
+            reasonCode: undefined,
+          },
+        }),
         /* Where its restore landed or nowhere, and said either way (M1, I12). */
         undo: ({ context }, enq) => {
           const target = context.restoredRevisionId;
@@ -500,6 +530,9 @@ const restoreMachineDefinition = setup({
             checkoutId,
             target: context.target ?? '',
             ...(context.mode === 'undoRestore' ? { firstParent: true } : {}),
+            ...(context.mode === 'undoMerge' && context.expectHead !== undefined
+              ? { expectHead: context.expectHead }
+              : {}),
           };
         },
         /* No question: step 1 saved the files and the restore is undoable, so it applies at once (I11). */

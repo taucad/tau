@@ -8,6 +8,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { getEnvironment } from '@taucad/api-core';
 import { TelemetryModule } from '@taucad/api-observability';
 import { RedisModule } from '@taucad/api-redis';
+import { WebSocketModule } from '@taucad/api-lifecycle';
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { AuthModule } from '@taucad/api-auth/module';
 import { AuthExtensionsModule } from '#composition/auth-extensions.module.js';
@@ -30,6 +31,7 @@ import { LoggerModule } from '@taucad/api-observability/logger-module';
     LoggerModule, // Provides the PinoLogger DatabaseService injects
     TelemetryModule, // @Global() — must precede RedisModule (RedisService depends on MetricsService)
     RedisModule, // @Global()
+    WebSocketModule, // @Global(): BillingModule reaches HostsModule, whose gateway registers socket handlers
     DatabaseModule,
     BillingModule,
     AuthExtensionsModule.forRoot({ tauCloudEnabled: true }),

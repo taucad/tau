@@ -8,7 +8,9 @@
  * store's own copy is re-made whenever a cut finds it gone.
  */
 
-import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -58,6 +60,8 @@ const fetchedProject = async (
     remoteCredential?: (mirror: GitHttpBackendFixture) => NativeGitRemoteCredential;
     /** A `git` the clone runs in place of the toolchain's, given the fixture's root. */
     cloneGit?: (root: string) => Promise<string>;
+    /** Give the clone a checkouts directory, so it can open linked checkouts. */
+    checkouts?: boolean;
   }> = {},
 ) => {
   const root = await mkdtemp(join(tmpdir(), 'tau-lazy-lfs-'));
@@ -90,6 +94,7 @@ const fetchedProject = async (
     repositoryPath: clonePath,
     tauCredential,
     ...(options.cloneGit === undefined ? {} : { gitExecutable: await options.cloneGit(root) }),
+    ...(options.checkouts === true ? { checkouts: { projectId: 'lazy', directory: join(root, 'checkouts') } } : {}),
     ...(options.remoteCredential === undefined ? {} : { remoteCredential: () => options.remoteCredential?.(mirror) }),
   });
   await clone.init({ author });
@@ -300,6 +305,55 @@ process.exit(result.status ?? 1);
     await fill.stop();
     expect([...files].filter(([, content]) => readLfsPointer(content) !== undefined)).toEqual([]);
     expect(files.get('restored.bin')?.byteLength).toBe(olderPointer.size);
+  }, 120_000);
+
+  it('opens a linked checkout over a large object that has not arrived, and the fill brings its bytes', async () => {
+    const { tau, mirror, clone, head, bytes } = await fetchedProject({ checkouts: true });
+    await clone.updateRef({ name: 'side', expectedHead: undefined, head });
+    /* The network is down: neither remote answers while the checkout opens. */
+    await clone.setRemote({ name: 'tau', url: 'http://127.0.0.1:9/project.git' });
+    await clone.setRemote({
+      name: 'mirror',
+      url: 'http://127.0.0.1:9/mirror.git',
+      provider: 'github',
+      repositoryId: '7',
+    });
+    const linked = await clone.addCheckout!({ branch: 'side' });
+    const placeholder = await readFile(join(linked.root, 'large.bin'));
+    expect(readLfsPointer(new Uint8Array(placeholder))).toMatchObject({ size: bytes.byteLength });
+    expect(downloads(tau) + downloads(mirror)).toBe(0);
+    /* The network returns, and the host's fill writes the bytes over the placeholder. */
+    await clone.setRemote({ name: 'tau', url: tau.url });
+    await clone.setRemote({ name: 'mirror', url: mirror.url, provider: 'github', repositoryId: '7' });
+    const read = async (path: string): Promise<Uint8Array<ArrayBuffer>> =>
+      new Uint8Array(await readFile(join(linked.root, path)));
+    const fill = createLargeObjectFill({
+      port: clone,
+      capture: async () =>
+        new ImmutableRevisionTree([
+          [generatedGitattributesPath, await read(generatedGitattributesPath)],
+          ['large.bin', await read('large.bin')],
+          ['small.txt', await read('small.txt')],
+        ]),
+      withCheckoutFence: async (_id, operation) => operation(),
+      materializeTree: async (_place, target) => {
+        for (const { path, content } of target.entries()) {
+          // oxlint-disable-next-line no-await-in-loop -- three files, in order.
+          await writeFile(join(linked.root, path), content);
+        }
+      },
+      flushMilliseconds: 1,
+      reportMilliseconds: 1,
+    });
+    await fill.fill(linked, revisionId(head));
+    await fill.stop();
+    expect(await read('large.bin')).toEqual(bytes);
+    const git = async (...args: string[]): Promise<string> => {
+      const { stdout } = await promisify(execFile)('git', ['-C', linked.root, ...args]);
+      return stdout;
+    };
+    expect(await git('status', '--porcelain')).toBe('');
+    expect(await git('lfs', 'status', '--porcelain')).toBe('');
   }, 120_000);
 
   it('makes one transfer for concurrent reads of one commit', async () => {

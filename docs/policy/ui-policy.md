@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-11-11'
+updated: '2026-11-13'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -12,6 +12,7 @@ related:
   - docs/policy/rendering-policy.md
   - docs/policy/react-policy.md
   - docs/research/billing-redesign-blueprint.md
+  - docs/research/loading-states-ux-blueprint.md
 ---
 
 # UI Policy
@@ -157,13 +158,13 @@ A piece of UI that appears on more than one surface has one implementation, and 
 | Piece                                                                            | Owner                                                                   |
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Dialog and sheet close control                                                   | `DialogContent`, `SheetContent` in `packages/ui`                        |
-| Loading placeholder                                                              | `Skeleton` in `packages/ui`                                             |
+| Wait indicator                                                                   | `WaitIndicator` and `utils/wait-timing` in `packages/ui`                |
 | Plan cards, coming-soon icon and legend                                          | `@taucad/ui-kit/components/plan-cards` (app Billing and public pricing) |
 | Card brand and saved payment method                                              | `@taucad/ui-kit/components/payment-method`                              |
 | Plan catalogue (names, prices, features)                                         | `@taucad/billing/plan-catalog`                                          |
 | Money formatting                                                                 | `formatUsd*`, `formatMonthlyPrice` in `@taucad/billing`                 |
 | Billing badge, notice, inline error, summary rows, billing date, first-line icon | `apps/ui/app/components/billing/billing-primitives.tsx`                 |
-| Settings rows, groups and their loading placeholders                             | `apps/ui/app/components/settings/settings-item.tsx`                     |
+| Settings rows and groups                                                         | `apps/ui/app/components/settings/settings-item.tsx`                     |
 
 **Why**: the billing surfaces carried three card-brand formatters, four money formats and two plan grids that disagreed with the pricing page; one owner makes a wording or styling change a one-file change.
 
@@ -203,11 +204,24 @@ Mark a feature that is not available yet with the coming-soon icon (`ComingSoonI
 
 **Why**: a tick means "you get this"; a list that mixes shipped and unshipped features under one mark misleads a buyer, and an unexplained icon is a puzzle.
 
-### Loading Placeholders
+### Loading
 
-Content that is loading is drawn as its own shape: `Skeleton` bars where the text, controls and cards are about to appear, at their final size, so nothing moves when the data arrives. Do not show a centred spinner, a "Loading…" sentence or an empty card for content. One wrapper carries `role='status'`, `aria-busy='true'` and the words for screen readers; the bars are `aria-hidden`. A spinner remains correct inside a busy button and for work whose result has no shape yet (an upload, a running job).
+A region that is loading keeps its own node at its final geometry. It shows real content when any exists (current, remembered, or the previous frame of the same entity), otherwise its bare frame. After 1,000 ms it shows `WaitIndicator` in a slot the frame already has (a header's trailing slot, the viewer's status slot). Do not draw `Skeleton` shapes, swap a placeholder node for content, show an empty state before the content is known to be empty, or animate loaded content in.
 
-**Why**: a spinner tells the person nothing about what is coming and shifts the layout when it is replaced.
+A region is in an in-place loading state only when all four hold:
+
+1. **Same node.** The node on screen during the wait holds the content afterwards; nothing is unmounted, or overlaid and then removed.
+2. **True geometry.** Its box comes from a source of truth for this person and this project (a request hint, a device record, a fixed aspect ratio), and does not change when the content arrives.
+3. **Nothing imitated.** It draws real content, the region's own frame (border, background, header, real controls), or nothing. No bar, block, grey card or icon stands for content that is not there.
+4. **One arrival.** Content appears once, without an entrance animation, and changes pixels only inside the region.
+
+The previous frame is held only for the same entity: a model being rebuilt keeps its last render and a list being refetched keeps its rows, but another project or chat shows its own remembered content or its frame, never the old one's under the new title. A native control that accepts real input from first paint and hands it to its richer successor once, keeping text, caret, selection, focus and composition, is content, not a placeholder.
+
+Work with no shape to hold and an expected length over a second (the first download of a cloud project, a failed read, offline with nothing stored) shows an operation notice inside the frame: a title, one sentence, and a progress bar or Retry. A spinner remains correct inside a busy button.
+
+`loading-state.ratchet.node.test.ts` in `apps/ui` holds the remaining `Skeleton` sites per file and only lets them go down.
+
+**Why**: the staging load audit found a skeleton or a stand-in page on every Home load and every editor load, replaced a few hundred milliseconds later; each one is a second change on screen. A remembered frame and remembered content paint the truth first and reconcile in place ([loading states UX blueprint](../research/loading-states-ux-blueprint.md)).
 
 ## 6. Motion
 
@@ -222,7 +236,7 @@ Prefer CSS transitions. Honor `prefers-reduced-motion`. Animations are functiona
 
 Only animate `transform` and `opacity` — these are GPU-composited. Never animate `width`, `height`, `margin`, or position properties.
 
-Loading states: delay spinner appearance by 150-300ms. Once visible, keep for at least 300ms to avoid flicker. Content loads as a layout-matching skeleton, not a spinner (§5 Loading Placeholders).
+Loading timing (§5 Loading): acknowledge a gesture within 100 ms. Delay an indicator 1,000 ms from the navigation or gesture. Keep a shown indicator 500 ms. At 10,000 ms say the wait is long and offer Retry. Do not hold content back for an indicator. The clock is one per wait, never per mount, so a region that mounts 900 ms into a wait shows its indicator 100 ms later. The constants live in `@taucad/ui/utils/wait-timing`; nothing on a load path defines its own delay or minimum. The indicator fades in over 150 ms, with no entrance under reduced motion; loaded content has no entrance animation.
 
 ```css
 @media (prefers-reduced-motion: reduce) {
@@ -248,7 +262,7 @@ Use `0.01ms` rather than `0s` to preserve `transitionend` and `animationend` eve
 - `text-[11px]` or any arbitrary size below 12px without accessibility justification
 - A second implementation of a piece that has an owner in §5 (a local money formatter, card-brand label, plan grid or status badge)
 - A bare `X` glyph as a close control, or a restyled dialog close button
-- A spinner or "Loading…" text where the content's shape is known
+- A `Skeleton`, a full-window stand-in or an empty state for content that is not known yet; an indicator before 1,000 ms (see §5 Loading)
 - A tick, or no explanation, on a feature that is not available yet
 - A tinted border to signal state on a badge; state is a glyph plus words on the standard badge variants
 - Size, weight, line-height or tracking utilities on a heading or title slot, or a heading level picked for its size (use `Heading` and its variants; see §3)

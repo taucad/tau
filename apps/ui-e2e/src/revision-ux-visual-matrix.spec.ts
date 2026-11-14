@@ -2,20 +2,25 @@
 import axe from 'axe-core';
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
-import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import {
   awaitSaved,
+  backupChooser,
+  backupLine,
+  branchChipOn,
+  createBranchHere,
   editSource,
   focusSource,
   openBackupChooser,
   openFixture,
   openSourceFile,
+  pickBranchVerb,
   replaceSource,
   restoreFromHistory,
   revisionChip,
   revisionStrip,
   saveShortcut,
+  switchToBranch,
 } from '#support/revision-session.js';
 
 const revisionsPanel = '[data-slot="revisions-panel-body"]';
@@ -24,10 +29,10 @@ const visibleRevisionsPanel = `${revisionsPanel}:visible`;
  * Height is part of the matrix, not a constant (C60).
  *
  * Every viewport here used to be 900 tall, which is exactly why C36 shipped:
- * the History list only overflowed its own section — and painted over Sync —
- * when the pane was shorter than its content. The two 520-tall rows are the
- * reproduction; the 320- and 512-wide rows are the reflow widths a person hits
- * at phone size and at 200% zoom.
+ * the History list only overflowed its own section — and painted over what
+ * followed it — when the pane was shorter than its content. The two 520-tall
+ * rows are the reproduction; the 320- and 512-wide rows are the reflow widths
+ * a person hits at phone size and at 200% zoom.
  */
 const viewports = [
   { width: 320, height: 800 },
@@ -64,13 +69,17 @@ const expectRevisionLayout = async (): Promise<void> => {
      * The vertical half (C60). C36 was a section that shrank below its own
      * `<ol>`: the list then painted outside its box and over whatever followed
      * it. Two numbers say that, and both are `1_000_000` when the element the
-     * assertion is about is missing, so an absent History or Sync fails loudly
-     * rather than passing vacuously.
+     * assertion is about is missing, so an absent History or Backup line fails
+     * loudly rather than passing vacuously. The Backup line is the pane's last
+     * line, under the column that scrolls History (C2, C4), so the second
+     * number is that column's bottom against the line's top.
      */
     const historyList = panel.querySelector<HTMLElement>('ol[aria-label="History entries"]');
     const historySection = historyList?.closest('section');
-    const syncSection = panel.querySelector<HTMLElement>('#revision-sync-heading')?.closest('section');
+    const historyColumn = panel.querySelector<HTMLElement>('[role="group"][aria-label="History and branches"]');
+    const backupSection = panel.querySelector<HTMLElement>('section[aria-label="Backup"]');
     const historyRect = historySection?.getBoundingClientRect();
+    const columnRect = historyColumn?.getBoundingClientRect();
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
       panelOverflow: panel.scrollWidth - panel.clientWidth,
@@ -79,7 +88,7 @@ const expectRevisionLayout = async (): Promise<void> => {
       historyOverflow:
         historyList && historyRect ? historyList.getBoundingClientRect().bottom - historyRect.bottom : 1_000_000,
       sectionOverlap:
-        historyRect && syncSection ? historyRect.bottom - syncSection.getBoundingClientRect().top : 1_000_000,
+        columnRect && backupSection ? columnRect.bottom - backupSection.getBoundingClientRect().top : 1_000_000,
     };
   }, revisionsPanel);
   expect(result.documentOverflow).toBeLessThanOrEqual(0);
@@ -119,34 +128,29 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   });
   await target.click(openRevisions);
   await target.expectVisible(selectors.getByCss(visibleRevisionsPanel), 60_000);
-  const emptyTitle = selectors.getByCss(`${visibleRevisionsPanel} [data-slot="panel-empty-state-title"]`);
-  const emptyDescription = selectors.getByCss(`${visibleRevisionsPanel} [data-slot="panel-empty-state-description"]`);
-  await target.expectVisible(emptyTitle, 60_000);
-  await target.expectText(emptyTitle, 'No history yet');
-  await target.expectVisible(emptyDescription, 60_000);
-  await target.expectText(emptyDescription, 'Save a revision or send a request and it will appear here.');
+  /* S1 (A6, 1c9fd4ee34): a project starts with its Start version, so a fresh pane lists one row, `V1 · Start`, and
+   * never says *No history yet*; the strip says where the files are in one sentence. */
+  const historyRows = selectors.getByCss(
+    `${visibleRevisionsPanel} ol[aria-label="History entries"] button[data-revision-row]`,
+  );
+  await target.expectVisible(
+    selectors.getByCss(
+      `${visibleRevisionsPanel} ol[aria-label="History entries"] button[data-revision-row][aria-label^="V1 · Start"]`,
+    ),
+    60_000,
+  );
+  const { count: freshRows } = await target.read(historyRows);
+  expect(
+    await target.isVisible(selectors.getByCss(`${visibleRevisionsPanel} [data-slot="panel-empty-state-title"]`)),
+  ).toBe(false);
   expect(
     await target.evaluate(
       () =>
         (globalThis as typeof globalThis & { revisionLoadingContradictions?: number }).revisionLoadingContradictions,
     ),
   ).toBe(0);
-  /* S1: the strip says so plainly, and nothing offers a branch or a backup before there is a revision. */
   const stripStatus = selectors.getByCss(`${visibleRevisionsPanel} [role="status"][aria-label="History status"]`);
   await target.expectVisible(stripStatus, 60_000);
-  expect(await target.isVisible(selectors.getByRole('button', { name: 'New branch' }))).toBe(false);
-  expect(await target.isVisible(selectors.getByRole('button', { name: 'Back up' }))).toBe(false);
-
-  const emptyStateSpacing = await target.evaluate(() => {
-    const title = [...document.querySelectorAll<HTMLElement>('[data-slot="panel-empty-state-title"]')]
-      .find((candidate) => candidate.getClientRects().length > 0)
-      ?.getBoundingClientRect();
-    const description = [...document.querySelectorAll<HTMLElement>('[data-slot="panel-empty-state-description"]')]
-      .find((candidate) => candidate.getClientRects().length > 0)
-      ?.getBoundingClientRect();
-    return title && description ? description.top - title.bottom : -1;
-  });
-  expect(emptyStateSpacing).toBeGreaterThanOrEqual(0);
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-S1-fresh-1440-light.png');
 
   /* Two revisions with different files, as a person makes them: an edit, then Save. */
@@ -161,10 +165,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   if (!(await target.isVisible(selectors.getByCss(visibleRevisionsPanel)))) {
     await target.click(openRevisions);
   }
-  const historyRows = selectors.getByCss(
-    `${visibleRevisionsPanel} ol[aria-label="History entries"] button[data-revision-row]`,
-  );
-  await target.expectCount(historyRows, 2, 120_000);
+  await target.expectCount(historyRows, freshRows + 2, 120_000);
 
   /* Round 16/18: naming lives in the row's More; Cancel hands focus back to it. */
   const olderRow = historyRows.nth(1);
@@ -189,38 +190,30 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
     olderRow,
     selectors.getByCss(`${visibleRevisionsPanel} button[data-revision-row][aria-label^="Restored "]`),
   );
-  await target.expectVisible(
-    selectors
-      .getByCss(`${visibleRevisionsPanel} [data-slot="strip-actions"]`)
-      .getByRole('button', { name: 'Undo restore' }),
-    30_000,
-  );
+  await target.expectVisible(revisionStrip().getByRole('button', { name: 'Undo restore' }), 30_000);
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-S5-restored-1440-light.png');
 
-  /* S25: New branch has one home, on the strip; Branches appears with the line it made. */
-  await target.click(
-    selectors
-      .getByCss(`${visibleRevisionsPanel} [aria-label="Where you are"]`)
-      .getByRole('button', { name: 'New branch' }),
-  );
-  const branchName = selectors.getByRole('textbox', { name: 'Branch name' });
-  await target.expectFocused(branchName);
-  await target.fill(branchName, 'fillet-exploration');
-  await target.click(selectors.getByRole('button', { name: 'Create branch' }));
-  await target.expectVisible(selectors.getByCss(`${visibleRevisionsPanel} #revision-branches-heading`), 60_000);
-  await target.expectVisible(selectors.getByRole('list', { name: 'Branches' }).getByText('fillet-exploration'), 30_000);
+  /* S25: New branch has one home, the header chip's menu (C2, D3); the new line's chip, with its ⋮, appears in
+   * History's lanes, and the files stay where they were. */
+  await createBranchHere('fillet-exploration');
+  await target.expectVisible(branchChipOn('main'));
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-S25-first-branch-1440-light.png');
 
+  /* The Backup line's chooser (C4, dbee175fd2): Back up to Tau Cloud opens it on Tau Cloud; *This device only* is
+   * what the project already is, so the chooser's own Back up to Tau Cloud waits for another choice. */
   await openBackupChooser();
-  const noRemote = selectors.getByRole('radio', { name: 'No remote' });
-  const tauCloud = selectors.getByRole('radio', { name: 'Tau Cloud' });
-  const connectBackup = selectors.getByRole('button', { name: 'Connect backup' });
-  await target.expectAttribute(noRemote, 'aria-checked', 'true');
+  const thisDeviceOnly = backupChooser().getByRole('radio', { name: 'This device only' });
+  const tauCloud = backupChooser().getByRole('radio', { name: 'Tau Cloud' });
+  const connectBackup = backupLine().getByRole('button', { name: 'Back up to Tau Cloud', exact: true });
+  await target.expectAttribute(tauCloud, 'aria-checked', 'true');
+  expect(await target.getAttribute(connectBackup, 'disabled')).toBeNull();
+  await target.expectVisible(backupLine().getByRole('switch', { name: 'Include chats' }));
+  await target.click(thisDeviceOnly);
+  await target.expectAttribute(thisDeviceOnly, 'aria-checked', 'true');
   await target.expectAttribute(connectBackup, 'disabled', '');
   await target.click(tauCloud);
   await target.expectAttribute(tauCloud, 'aria-checked', 'true');
   expect(await target.getAttribute(connectBackup, 'disabled')).toBeNull();
-  await target.expectVisible(selectors.getByRole('switch', { name: 'Sync chats' }));
   const coarsePointer = await target.evaluate(() => matchMedia('(pointer: coarse)').matches);
 
   for (const { width, height } of viewports) {
@@ -246,10 +239,9 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
       }
       await target.expectVisible(selectors.getByCss(visibleRevisionsPanel));
     }
-    const syncHeading = selectors.getByCss(`${visibleRevisionsPanel} #revision-sync-heading`);
-    if (!(await target.isVisible(syncHeading))) {
+    if (!(await target.isVisible(backupChooser()))) {
       await openBackupChooser();
-      await target.expectVisible(syncHeading);
+      await target.expectVisible(backupChooser());
     }
     await expectRevisionLayout();
     await target.screenshot(
@@ -274,10 +266,9 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   });
   await target.click(zoomHistoryTab, { touch: coarsePointer });
   await target.expectVisible(selectors.getByCss(visibleRevisionsPanel));
-  const zoomSyncHeading = selectors.getByCss(`${visibleRevisionsPanel} #revision-sync-heading`);
-  if (!(await target.isVisible(zoomSyncHeading))) {
+  if (!(await target.isVisible(backupChooser()))) {
     await openBackupChooser();
-    await target.expectVisible(zoomSyncHeading);
+    await target.expectVisible(backupChooser());
   }
   await expectRevisionLayout();
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-200-percent-zoom.png');
@@ -288,10 +279,9 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
     await target.click(openRevisions);
     await target.expectVisible(selectors.getByCss(visibleRevisionsPanel));
   }
-  const desktopSyncHeading = selectors.getByCss(`${visibleRevisionsPanel} #revision-sync-heading`);
-  if (!(await target.isVisible(desktopSyncHeading))) {
+  if (!(await target.isVisible(backupChooser()))) {
     await openBackupChooser();
-    await target.expectVisible(desktopSyncHeading);
+    await target.expectVisible(backupChooser());
   }
 
   await target.emulateColorScheme('dark');
@@ -303,7 +293,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   await target.emulateContrast('more');
   await target.emulateForcedColors('active');
   await target.expectVisible(selectors.getByCss(`${visibleRevisionsPanel} #revision-history-heading`));
-  await target.expectVisible(selectors.getByCss(`${visibleRevisionsPanel} #revision-sync-heading`));
+  await target.expectVisible(backupLine());
   await target.screenshot(selectors.getByCss(visibleRevisionsPanel), 'revisions-1024-forced-colors.png');
   await target.emulateForcedColors('none');
   await target.emulateContrast('no-preference');
@@ -372,42 +362,19 @@ const saveSource = async (line: string): Promise<void> => {
   await awaitSaved();
 };
 
-/** The Branches row a branch's own *Actions for* button sits in. */
-const branchRow = (name: string, isCurrent = false): Locator =>
-  selectors
-    .getByCss(`${visibleRevisionsPanel} ul[aria-label="Branches"] > li${isCurrent ? '[aria-current="true"]' : ''}`)
-    .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) });
-
-/** S25's gesture: New branch on the strip, named, then the Branches row it made. */
-const createBranch = async (name: string): Promise<void> => {
-  await target.click(revisionStrip().getByRole('button', { name: 'New branch' }));
-  await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), name);
-  await target.click(selectors.getByRole('button', { name: 'Create branch' }));
-  await target.expectVisible(branchRow(name), 60_000);
-};
-
-/** Put the workbench on a branch through its row's Switch, which acts at once (C7). */
-const workOn = async (name: string): Promise<void> => {
-  if (await target.isVisible(branchRow(name, true))) {
-    return;
-  }
-  await target.click(selectors.getByRole('button', { name: `Switch to ${name}`, exact: true }));
-};
-
-test('S24: places the chat in focus on a branch from its row, then offers Switch to the branch', async () => {
+test('S24: places the chat in focus on a branch from its chip, then offers Switch to the branch', async () => {
   await target.emulateColorScheme('light');
   await openFixture('?chat=1');
   await target.expectVisible(revisionChip(), 120_000);
   await saveSource('// S24 base');
   await openPane();
-  await createBranch(branchName);
+  await createBranchHere(branchName);
   /* The chat in focus works in main, the live checkout, as the canvas row has it. */
-  await workOn('main');
-  await target.click(branchRow(branchName).getByRole('button', { name: `Actions for ${branchName}`, exact: true }));
-  const place = selectors.getByRole('menuitem', { name: `Use ${branchName} in this chat`, exact: true });
-  await target.expectVisible(place, 30_000);
-  await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
-  await target.click(place);
+  await switchToBranch('main');
+  /* D3 (bee2a79e41): the branch's chip ⋮ offers Run this chat here while it would move the chat in focus. */
+  await pickBranchVerb(branchName, 'Run this chat here', async () => {
+    await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
+  });
   await target.expectVisible(selectors.getByRole('button', { name: `Switch to ${branchName}`, exact: true }), 60_000);
   await target.screenshot(undefined, 'revisions-S24-follow-chat-1440-light.png');
 });
@@ -418,15 +385,15 @@ test('S7: a merge that changed the same lines on both branches waits for a decis
   await target.expectVisible(revisionChip(), 120_000);
   await saveSource('// S7 base');
   await openPane();
-  await createBranch(branchName);
-  await workOn(branchName);
+  await createBranchHere(branchName);
+  await switchToBranch(branchName);
   await saveSource('// S7 fillet side');
   await openPane();
-  await workOn('main');
+  await switchToBranch('main');
   await saveSource('// S7 main side');
   await openPane();
-  await target.click(branchRow(branchName).getByRole('button', { name: `Actions for ${branchName}`, exact: true }));
-  await target.click(selectors.getByRole('menuitem', { name: `Merge ${branchName} into main`, exact: true }));
+  /* D3 (bee2a79e41): Merge is on the branch's chip ⋮, as *Merge into ⟨the branch the files are on⟩*. */
+  await pickBranchVerb(branchName, 'Merge into main');
   const decision = selectors.getByCss(`${visibleRevisionsPanel} #revision-conflicts-heading`);
   await target.expectVisible(decision, 120_000);
   /* HQ1, HQ2: one sentence, naming the line the decision lands on; main is untouched until then. */

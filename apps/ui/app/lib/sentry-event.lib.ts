@@ -8,7 +8,7 @@ import { applyErrorDetails, withoutUserWhenAnonymous } from '#lib/error-details.
 import { isDesktopTarget } from '#lib/build-target.js';
 import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
-import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
+import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
 /*
@@ -22,7 +22,7 @@ import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
  * @param url - A URL an event or breadcrumb carries.
  * @returns The URL without credentials.
  */
-export const scrubUrl = (url: string): string => redactInvitationTokens(url.split(/[?#]/u, 1)[0] ?? '');
+export const scrubUrl = (url: string): string => redactUrlCredentials(url.split(/[?#]/u, 1)[0] ?? '');
 
 /** The one request header an event keeps, so Sentry derives the browser, OS and device contexts (SB1). */
 const userAgentHeader = 'User-Agent';
@@ -87,7 +87,7 @@ export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
   }
   // Stack frames and messages can quote the page URL too.
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON round trip of the same event.
-  return JSON.parse(redactInvitationTokens(JSON.stringify(event))) as ErrorEvent;
+  return JSON.parse(redactUrlCredentials(JSON.stringify(event))) as ErrorEvent;
 };
 
 /**

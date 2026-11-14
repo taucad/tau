@@ -1206,6 +1206,18 @@ describe('Revisions pane vocabulary and History', () => {
     },
   );
 
+  /* The pane's host is the History landmark (the phone surface, the Workbench tab), so the list is a named group:
+     a second `region` called History fails axe's landmark-unique on the phone sheet. */
+  it('names its History card as a group, never a second History landmark', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toContainElement(screen.getByRole('heading', { name: 'History' }));
+    expect(screen.queryByRole('region', { name: 'History' })).not.toBeInTheDocument();
+  });
+
   /* M2 (I6, S20): an unlocated line is loading geometry, never *No revisions yet*, never `main`. */
   it('renders History’s loading geometry while the line is unknown', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };

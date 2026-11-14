@@ -796,7 +796,8 @@ const rejectPlatform = (
 // A platform candidate is not the all-platform production candidate: `all` still needs all five routes.
 rejectPlatform(linuxProduction, linuxProductionReceipts, { scope: 'all', pattern: /all five in production/u });
 rejectPlatform(macProduction, macProductionReceipts, { scope: 'all', pattern: /all five in production/u });
-// Every route's CI and VM receipt stays individually required in production; clean-host is never pending there.
+// Every route's CI receipt stays individually required in production, and a VM receipt that is present must be complete.
+// Linux always needs its VM receipts; a Mac-only production publication may record clean-host as pending (2026-11-13).
 for (const index of linuxProductionReceipts.keys()) {
   rejectPlatform(
     linuxProduction,
@@ -811,10 +812,18 @@ for (const index of macProductionReceipts.keys()) {
     { scope: 'macos' },
   );
 }
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(
+    macProduction,
+    macProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
+    { trust: productionTrust, scope: 'macos' },
+  ).routes.map((route) => route.cleanHost),
+  ['pending'],
+);
 rejectPlatform(
-  macProduction,
-  macProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
-  { scope: 'macos', pattern: /vm receipt/u },
+  linuxProduction,
+  linuxProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
+  { scope: 'linux', pattern: /vm receipt/u },
 );
 rejectPlatform(linuxProduction, [...linuxProductionReceipts, linuxProductionReceipts[0]], { scope: 'linux' });
 // Signer, digest, source and tag binding are unchanged for a platform scope.

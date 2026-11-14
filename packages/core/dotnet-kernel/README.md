@@ -108,7 +108,7 @@ reference shape of the framing, request loop, parent watchdog and artifact confi
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `@taucad/dotnet-kernel-core`         | `createDotnetSession` (the worker session on `NativeProcessSession`), `createDotnetWorkspaceMirror` (the mirror without `bin`, `obj`, `.vs` and compiled binaries) and `bindDotnetKernel`                                                  |
 | `@taucad/dotnet-kernel-core/adopter` | `defineDotnetKernelAdopter`, `dotnetLaunchSet`, `dotnetOptionsFromClosure`, `dotnetKernelOptionsSchema`, `dotnetClosureSchema`, `dotnetClosureOptionsSchema`. Imports no session code, so a host reads deployments without loading kernels |
-| `@taucad/dotnet-kernel-core/layer`   | `createDotnetLayer` (layer record schema, CDN and release URLs, the `worker` pin, the CycloneDX SBOM), `runComposeTauPlugin`, `dependencyBaseUrl`, `dependencyKey`, `manifestText`                                                         |
+| `@taucad/dotnet-kernel-core/layer`   | `createDotnetLayer` (layer record schema, dependency host and release URLs, the `worker` pin, the CycloneDX SBOM), `runComposeTauPlugin`, `dependencyBaseUrl`, `dependencyKey`, `manifestText`                                             |
 
 ## Rust or other single-binary kernel
 

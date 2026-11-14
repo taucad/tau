@@ -279,11 +279,17 @@ const completedArtifactForbiddenEnvironment = ['NODE_OPTIONS', 'NODE_PATH', 'TAU
  * headless runners without one set `TAU_E2E_WEBGPU_PROFILE=software`. Copied
  * from `apps/ui-e2e/src/support/webgpu-profile.ts` rather than imported —
  * cross-e2e-project source imports are not a dependency this suite should own.
+ *
+ * The software profile also lets WebGL fall back to SwiftShader. Chromium no
+ * longer does that by itself, so on a runner with no GPU every WebGL context
+ * fails. Playwright's own Chromium always passes `--enable-unsafe-swiftshader`,
+ * which is why the browser suites have WebGL on the same runners. Electron
+ * launched through Playwright gets no such default.
  */
 const webGpuArguments = (): readonly string[] => {
   const profile = process.env['TAU_E2E_WEBGPU_PROFILE'] ?? 'hardware';
   if (profile === 'software') {
-    return ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader'];
+    return ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--enable-unsafe-swiftshader'];
   }
   if (profile === 'hardware') {
     return ['--enable-unsafe-webgpu'];

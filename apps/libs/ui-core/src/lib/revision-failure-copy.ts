@@ -102,6 +102,11 @@ export const revisionFailureCopy: Readonly<
       ],
       /* D15, RV-W7 #7: Undo never reaches past a merge made here; nothing was written. */
       ['UNDO_PAST_MERGE', 'Your last change on this branch was a merge. Restore an earlier point instead.'],
+      /* The Merged toast's Undo (I11): the branch has a newer entry than the merge, so nothing was written over it. */
+      [
+        'UNDO_MERGE_MOVED',
+        'This branch changed after the merge, so the merge can’t be undone. Restore an earlier point instead.',
+      ],
     ]),
     titles: new Map([
       ['RESTORE_UNRECORDED', 'Files restored'],
@@ -109,6 +114,7 @@ export const revisionFailureCopy: Readonly<
       ['NOTHING_TO_UNDO', 'Nothing to undo here'],
       ['UNDO_CONFLICT', 'That change can’t be undone'],
       ['UNDO_PAST_MERGE', 'A merge can’t be undone'],
+      ['UNDO_MERGE_MOVED', 'That merge can’t be undone'],
     ]),
   },
   branch: {
@@ -139,6 +145,17 @@ export const revisionFailureCopy: Readonly<
       ['UNKNOWN_REVISION', 'The point this branch would start from is not in this project any more.'],
       /* Another branch change is running or waiting for an answer (RM-R11). */
       ['REVISIONS_BUSY', 'Another branch change is still in progress. Wait for it to finish, then try again.'],
+      /* M1: a merge that would bring nothing; nothing moved, so it is never *Merged*. */
+      ['MERGE_UP_TO_DATE', 'Everything on that branch is already here. Nothing changed.'],
+      /* M1: a restore or an Undo on either side took back what the two share, so a merge would leave work out. */
+      [
+        'MERGE_UNDONE',
+        'An Undo or a Restore took back part of what these branches share, so merging now would leave work out. Nothing changed. To bring the work back, open History and restore the entry that has it.',
+      ],
+    ]),
+    titles: new Map([
+      ['MERGE_UP_TO_DATE', 'Nothing to merge'],
+      ['MERGE_UNDONE', 'Nothing was merged'],
     ]),
   },
   save: {
@@ -208,8 +225,12 @@ export const describeRevisionFailure = (
   const { branch } = about;
   const copy = revisionFailureCopy[subject];
   const description = (code === undefined ? undefined : copy.codes.get(code)) ?? copy.fallback;
+  const title = (code === undefined ? undefined : copy.titles?.get(code)) ?? copy.title;
+  if (branch !== undefined && code === 'MERGE_UP_TO_DATE') {
+    return { title, description: `Everything on ${branch} is already here. Nothing changed.` };
+  }
   return {
-    title: (code === undefined ? undefined : copy.titles?.get(code)) ?? copy.title,
+    title,
     description:
       branch === undefined || code !== 'CHECKOUT_CONFLICT'
         ? description

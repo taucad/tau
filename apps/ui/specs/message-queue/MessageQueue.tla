@@ -92,6 +92,9 @@
 \* (automatic kernel selection M4); queue delivery, persistence and placement are unchanged.
 \* The turn host passes the Auto kernel preference and owner to turn telemetry (automatic kernel
 \* selection AKS-10); admission, delivery and the queue barrier are unchanged.
+\* The app runtime builds the session store with its dependencies at construction (app state
+\* orchestration A2): the library's chat-record ports, and its record client and watch, taken again
+\* when the root worker is replaced. The closures it calls are the same; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

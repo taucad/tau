@@ -37,13 +37,24 @@
     },
     "test:shell-conformance": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "runtime": "node scripts/src/shell-evidence.ts fingerprint"
+        }
+      ],
+      "outputs": [
+        "{workspaceRoot}/out/test-results/shell-conformance/*/host-receipt.json",
+        "{workspaceRoot}/out/test-results/shell-conformance/*/host-receipt.verdict.json"
+      ],
       "metadata": {
-        "description": "The host's shell conformance rows (H08-H10: H08-H09 end to end through a scripted model, a real Tau agent host and the host's tool registry; A20 in H10), extending shell-service's rows H01-H07 and the sandbox's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+        "description": "The host's shell conformance rows (H08-H10: H08-H09 end to end through a scripted model, a real Tau agent host and the host's tool registry; A20 in H10), extending shell-service's rows H01-H07 and the sandbox's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Cacheable only under the shell environment fingerprint (scripts/src/shell-evidence.ts, CF-1): the hash covers the source closure and the row's OS, kernel, Bash, runner image, sandbox runtime and node-pty, and is a fresh nonce unless the run asked for reuse, so candidate, drift and promotion runs never hit. A hit restores the receipt that first proved the verdict and its verdict record; the workflow's uncached stamp step says so."
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/host",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.host.conformance.test.ts",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.host.conformance.test.ts && node \"$NX_WORKSPACE_ROOT/scripts/src/shell-evidence.ts\" record",
         "env": {
           "TAU_SHELL_CONFORMANCE": "1"
         }
@@ -51,13 +62,24 @@
     },
     "test:shell-qualification": {
       "executor": "nx:run-commands",
-      "cache": false,
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "runtime": "node scripts/src/shell-evidence.ts fingerprint"
+        }
+      ],
+      "outputs": [
+        "{workspaceRoot}/out/test-results/shell-conformance/*/qualification-receipt.json",
+        "{workspaceRoot}/out/test-results/shell-conformance/*/qualification-receipt.verdict.json"
+      ],
       "metadata": {
-        "description": "The shell's application and adversarial qualification rows (desktop shell blueprint W7: T01-T10, T12 (a copied candidate and, as T12-custody, a real revision checkout adopted by merge), T16, T19, the E rows the agent entrypoint reaches and the stress workloads S01-S04, the lifecycle and concurrency ones three times). A scripted model drives the official shell tool through a real Tau agent host, its registry and fixture admission, the shell service, the real sandbox provider and the machine's own Bash; negatives are judged outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+        "description": "The shell's application and adversarial qualification rows (desktop shell blueprint W7: T01-T10, T12 (a copied candidate and, as T12-custody, a real revision checkout adopted by merge), T16, T19, the E rows the agent entrypoint reaches and the stress workloads S01-S04, the lifecycle and concurrency ones three times). A scripted model drives the official shell tool through a real Tau agent host, its registry and fixture admission, the shell service, the real sandbox provider and the machine's own Bash; negatives are judged outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Cacheable only under the shell environment fingerprint (scripts/src/shell-evidence.ts, CF-1): the hash covers the source closure and the row's OS, kernel, Bash, runner image, sandbox runtime and node-pty, and is a fresh nonce unless the run asked for reuse, so candidate, drift and promotion runs never hit. A hit restores the receipt that first proved the verdict and its verdict record; the workflow's uncached stamp step says so."
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/host",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-qualification.conformance.test.ts",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-qualification.conformance.test.ts && node \"$NX_WORKSPACE_ROOT/scripts/src/shell-evidence.ts\" record",
         "env": {
           "TAU_SHELL_CONFORMANCE": "1"
         }

@@ -26,7 +26,7 @@ on:
         description: Trusted native qualification run (W9, promotion only)
         type: string
       vm-run-id:
-        description: Trusted operator VM acceptance run (W10, promotion only; may be left empty only for a staging Mac-only promotion, which then publishes its routes as clean-host pending)
+        description: Trusted operator VM acceptance run (W10, promotion only; may be left empty only for a Mac-only (scope macos) promotion on either channel, which then publishes its routes as clean-host pending)
         type: string
       manifest-sha256:
         description: Reviewed canonical manifest digest (promotion only)
@@ -152,6 +152,9 @@ jobs:
       # only a candidate whose own commit has five green shell conformance rows. They come from the
       # staging gate that created the tag (its run is named in the release notes) or from a green
       # `shell-conformance.yml` run on that commit. This reads results; it never runs the rows again.
+      # Only the workflow's own fresh full-tier triggers count (the nightly and a dispatch). A `pull_request` run may
+      # reuse a cached verdict (CF-1), and a labelled PR whose head is a `main` commit (the `production` trail PR) would
+      # otherwise satisfy this lookup; the merge queue's semantics-tier call may reuse too and runs a subset of rows.
       - name: Require green shell conformance on the candidate's commit
         if: steps.selected.outputs.run == 'true' && matrix.channel == 'production' && inputs.operation == 'promote-routes'
         env:
@@ -161,7 +164,8 @@ jobs:
           set -euo pipefail
           [ -n "$TAG" ] || { echo '::error::A production promotion names its candidate tag.'; exit 1; }
           sha=$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha)
-          green=$(gh api "repos/${GH_REPO}/actions/workflows/shell-conformance.yml/runs?head_sha=${sha}&status=success&per_page=1" --jq '.total_count')
+          green=$(gh api "repos/${GH_REPO}/actions/workflows/shell-conformance.yml/runs?head_sha=${sha}&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.event == "schedule" or .event == "workflow_dispatch")] | length')
           if [ "$green" -gt 0 ]; then
             echo "Shell conformance passed on ${sha} in a shell-conformance.yml run."
             exit 0

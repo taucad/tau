@@ -6,7 +6,6 @@ import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import type { Auth } from 'better-auth';
 import {
   chatStateMessage,
   createAgentSession,
@@ -33,7 +32,8 @@ import type { KernelOwner, KernelRoutingProfile } from '@taucad/chat/prompts';
 import { getProviderFacingToolGrant } from '@taucad/chat/schemas';
 import type { AgentPerson, ToolSelection } from '@taucad/chat';
 import type { KernelPreference } from '@taucad/types/constants';
-import { authInstanceKey } from '@taucad/api-auth';
+import { SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
 import { httpBodyLimit } from '@taucad/api-core/constants/http-body';
 import { getEnvironment } from '@taucad/api-core';
 import { HostsService } from '@taucad/api-hosts';
@@ -352,13 +352,13 @@ export type LiveGateway = {
 };
 
 /**
- * The gateway guard's session path needs a better-auth instance injected. The
+ * The gateway guard's session path needs a session resolver injected. The
  * harness holds no cookie jar, so this one reports no session and the guard
  * falls through to its device-credential path — the same path the desktop
  * launcher and a paired daemon authenticate on. The guard itself is production
  * code and runs unchanged.
  */
-const sessionlessAuth = { api: { getSession: async () => null } } as unknown as Auth;
+const sessionlessResolver = fakeSessionResolver(() => null);
 
 /**
  * Boot the production LLM gateway in self-host mode on a loopback port.
@@ -386,7 +386,7 @@ export const startLiveGateway = async (options: { readonly principalId?: string 
     providers: [
       LlmGatewayService,
       LlmGatewayAuthGuard,
-      { provide: authInstanceKey, useValue: sessionlessAuth },
+      { provide: SessionResolver, useValue: sessionlessResolver },
       {
         provide: HostsService,
         useValue: {

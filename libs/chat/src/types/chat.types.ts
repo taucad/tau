@@ -45,9 +45,9 @@ export type Chat = {
    */
   activeKernel?: KernelId;
   /**
-   * The chat's kernel preference, `auto` or one kernel (automatic kernel selection blueprint D2), written only while
-   * the `autoKernel` flag is on. A row without it reads as Auto, unless its legacy {@link Chat.activeKernel} differs
-   * from the project's owner, which marks a real manual pick.
+   * The chat's kernel preference, `auto` or one kernel (automatic kernel selection blueprint D2). A row without it
+   * reads as Auto, unless its legacy {@link Chat.activeKernel} differs from the project's owner, which marks a real
+   * manual pick.
    */
   kernelPreference?: KernelPreference;
   /**

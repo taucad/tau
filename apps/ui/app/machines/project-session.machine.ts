@@ -26,9 +26,39 @@ export type ProjectSessionRegion = 'views' | 'runtime' | 'agentHost' | 'compute'
 /** What the registry and the sidebar read off a session. @public */
 export type ProjectSessionState = 'opening' | 'live' | 'closing' | 'closed' | 'failed';
 
+/**
+ * What focus asks the session to open with (R3-F2, D7).
+ *
+ * Focus builds it from a ready access answer: the workspace from the project's own slugs, the native kernel id from
+ * the answer (row S34), the chat ids from the route. `epoch` is the library epoch of that answer, so the registry can
+ * drop a resumed open whose answer a library change has made stale (spec-pf `RegistryChecksEpoch`).
+ *
+ * @public
+ */
+export type ProjectSessionOpenRequest = Readonly<{
+  workspace: string;
+  nativeKernelId?: string;
+  chatId?: string;
+  createdChatId?: string;
+  /** The library epoch of the ready answer the request was built from. */
+  epoch?: number;
+}>;
+
+/**
+ * How far the session's first file check has come (A14 makes it real).
+ *
+ * `pending` until the revision client has published a status and the model is not checking files; `slow` once the
+ * open bound passed while still pending; `settled` after.
+ *
+ * @public
+ */
+export type ProjectSessionAvailability = 'pending' | 'slow' | 'settled';
+
 /** Input accepted when creating a projectSessionMachine actor. @public */
 export type ProjectSessionMachineInput = Readonly<{
   projectId: string;
+  /** What this session was opened with. Optional until A10: the sidebar and the notice send bare opens until A5b. */
+  request?: ProjectSessionOpenRequest;
   /** The sessions registry; this session reports its liveness to it. */
   parentRef?: AnyActorRef;
   /** EQ15: the liveness idle-close window, handed down by the registry. */
@@ -44,6 +74,15 @@ export type ProjectSessionMachineInput = Readonly<{
 /** State owned by projectSessionMachine, plus its child refs. @public */
 export type ProjectSessionMachineContext = Readonly<{
   projectId: string;
+  /** The request this session was opened with; `chatRequested` moves its chat fields. */
+  request: ProjectSessionOpenRequest | undefined;
+  /**
+   * The chat session is ready, for focus's `opening` join (D25, I20). A constant `true` until A6d makes it real,
+   * which is today's behaviour: nothing waits for it.
+   */
+  chatReady: boolean;
+  /** The first file check, for the same join. A constant `settled` until A14 makes it real. */
+  availability: ProjectSessionAvailability;
   parentRef: AnyActorRef | undefined;
   idleWindowMilliseconds: number;
   parkWindowMilliseconds: number;
@@ -110,7 +149,32 @@ export type ProjectSessionMachineEvent =
       readonly recording?: boolean;
       /** `sync.pendingCount`, for the quit overlay's `Backing up n`. */
       readonly pendingCount?: number;
-    };
+    }
+  /**
+   * Focus's request moved to another chat of this project (R3-F1). It sets both chat fields, so an `undefined`
+   * clears one. A session opened without a request has no request to update, and keeps none.
+   */
+  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string };
+
+/**
+ * The project session machine's public alphabet: every {@link ProjectSessionMachineEvent} type, in the union's order.
+ * The totality test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const projectSessionEventTypes = [
+  'close',
+  'confirmClose',
+  'cancelClose',
+  'childReady',
+  'childFailed',
+  'projectedRunsChanged',
+  'activity',
+  'visibilityChanged',
+  'attention',
+  'revisionState',
+  'chatRequested',
+] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
 /** What a session tells its watchers. @public */
 export type ProjectSessionMachineEmitted =
@@ -232,6 +296,8 @@ const reportState = (
       dirty: context.dirty,
       pushed: context.pushed,
       pending: context.pending,
+      chatReady: context.chatReady,
+      availability: context.availability,
     });
   }
   return { reportedState: state };
@@ -251,6 +317,8 @@ const reportFacts = (context: ProjectSessionMachineContext, enq: ProjectSessionE
     dirty: context.dirty,
     pushed: context.pushed,
     pending: context.pending,
+    chatReady: context.chatReady,
+    availability: context.availability,
   });
 };
 
@@ -334,13 +402,14 @@ const startupRegion = (region: ProjectSessionRegion) =>
     },
   }) as const;
 
+/* The close steps after `closing.asking` (which answers the dialog's `confirmClose` and `cancelClose`), where those
+ * answers go unanswered. `closing.stopping` is transient (its `always` leaves at once), so no pair
+ * names it: the totality test fails on a pair that names a state no event reaches. */
 const closingSteps = [
   'closing.cancellingRuns',
   'closing.flushingProducers',
   'closing.flushing',
-  'closing.releasing',
   'closing.releasingAgentHost',
-  'closing.stopping',
 ] as const;
 
 /**
@@ -393,13 +462,16 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '1',
+  version: '2',
   /* A fault no transition modelled is recorded and the session keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'project-session fault' },
   }),
   context: ({ input }) => ({
     projectId: input.projectId,
+    request: input.request,
+    chatReady: true,
+    availability: 'settled',
     parentRef: input.parentRef,
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? projectSessionIdleWindowMilliseconds,
     parkWindowMilliseconds: input.parkWindowMilliseconds ?? projectSessionParkWindowMilliseconds,
@@ -434,6 +506,11 @@ export const projectSessionMachine = setup({
       reportFacts({ ...context, ...patch }, enq);
       return { context: patch };
     },
+    /* Answered in every state: the request is a fact the session keeps, whatever it is doing (MC-R16). */
+    chatRequested: ({ context, event }) =>
+      context.request === undefined
+        ? {}
+        : { context: { request: { ...context.request, chatId: event.chatId, createdChatId: event.createdChatId } } },
     attention: ({ context, event }, enq) => {
       enq.emit({ type: 'attention', projectId: context.projectId, count: event.count });
       return { context: { attention: event.count } };

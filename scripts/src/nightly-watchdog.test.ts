@@ -67,7 +67,27 @@ describe('nightly watchdog', () => {
     expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'formal-nightly.yml', 'nightly-watchdog.yml']));
   });
 
-  describe('candidate shell gate (WD-1a)', () => {
+  describe('drift check (WD-1b)', () => {
+    // `drift-check.yml` waits for every workflow it dispatches and fails on a red one, so its own newest scheduled
+    // run being green and recent covers both "it ran in the last 36 h" and "every dispatch it made is green".
+    it('should watch the drift check as a daily scheduled workflow', async () => {
+      const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
+      const drift = found.find((workflow) => workflow.file === 'drift-check.yml');
+      expect(drift).toMatchObject({ name: 'Drift check', crons: ['17 6 * * *'] });
+      expect(maxAge(drift!.crons)).toBe(36 * 60 * 60 * 1000);
+    });
+
+    it('should report a missing drift run, and a drift run whose dispatch was red', () => {
+      const drift: ScheduledWorkflow = { file: 'drift-check.yml', name: 'Drift check', crons: ['17 6 * * *'] };
+      // Synthetic: the newest drift run is 37 h old, so the check did not run in its window.
+      expect(judge(drift, run('2026-11-07T05:30:00Z', 'completed', 'success'), now).state).toBe('missing');
+      expect(judge(drift, undefined, now).state).toBe('missing');
+      expect(judge(drift, run('2026-11-08T06:20:00Z', 'completed', 'failure'), now).state).toBe('failed');
+      expect(judge(drift, run('2026-11-08T06:20:00Z', 'completed', 'success'), now).state).toBe('ok');
+    });
+  });
+
+  describe('candidate shell and packaged gates (WD-1a, WD-1c)', () => {
     const candidate = (number: number, createdAt: string): CandidateRun => ({
       id: number * 10,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub REST field.
@@ -82,10 +102,12 @@ describe('nightly watchdog', () => {
       status,
       conclusion,
     });
-    const green = [
+    const greenShell = [
       job('Shell gate / Shell conformance on LNX-U', 'success'),
       job('Shell gate / Shell conformance on MAC-A', 'success'),
     ];
+    const greenPackaged = [job('Packaged desktop gate / Packaged desktop end-to-end (darwin-arm64)', 'success')];
+    const green = [...greenShell, ...greenPackaged];
 
     it('should read the build number from a candidate tag', () => {
       expect(candidateRunNumber('desktop-staging@0.4.1-staging.953')).toBe(953);
@@ -99,7 +121,10 @@ describe('nightly watchdog', () => {
         jobsOf: () => green,
         now,
       });
-      expect(verdicts.map((verdict) => verdict.state)).toEqual(['ok']);
+      expect(verdicts.map((verdict) => [verdict.workflow.name, verdict.state])).toEqual([
+        ['Candidate shell gate', 'ok'],
+        ['Candidate packaged gate', 'ok'],
+      ]);
     });
 
     it('should fail a recent candidate whose gate is red, cancelled or absent', () => {
@@ -109,8 +134,8 @@ describe('nightly watchdog', () => {
         candidate(953, '2026-11-08T03:00:00Z'),
       ];
       const jobs: Record<number, readonly RunJob[]> = {
-        9510: [job('Shell gate / Shell conformance on LNX-U', 'failure')],
-        9520: [job('Shell gate / Shell conformance on MAC-X', 'cancelled')],
+        9510: [job('Shell gate / Shell conformance on LNX-U', 'failure'), job('Packaged desktop gate', 'skipped')],
+        9520: [job('Shell gate / Shell conformance on MAC-X', 'cancelled'), ...greenPackaged],
         9530: [job('Tag the staging desktop candidate', 'success')],
       };
       const verdicts = judgeCandidates({
@@ -123,8 +148,38 @@ describe('nightly watchdog', () => {
         jobsOf: (run) => jobs[run.id] ?? [],
         now,
       });
-      expect(verdicts.map((verdict) => verdict.state)).toEqual(['failed', 'failed', 'failed']);
-      expect(verdicts[2]?.detail).toContain('no gate jobs');
+      expect(verdicts.map((verdict) => verdict.state)).toEqual([
+        'failed',
+        'failed',
+        'failed',
+        'ok',
+        'failed',
+        'failed',
+      ]);
+      expect(verdicts[1]?.detail).toContain('packaged desktop gate not green (skipped)');
+      expect(verdicts[4]?.detail).toContain('no gate jobs');
+    });
+
+    it('should fail a recent candidate whose shell gate is green but whose packaged gate is red or absent (WD-1c)', () => {
+      const runs = [candidate(961, '2026-11-08T01:00:00Z'), candidate(962, '2026-11-08T02:00:00Z')];
+      const jobs: Record<number, readonly RunJob[]> = {
+        9610: [...greenShell, job('Packaged desktop gate / Packaged desktop end-to-end (darwin-arm64)', 'failure')],
+        9620: greenShell,
+      };
+      const verdicts = judgeCandidates({
+        tags: ['desktop-staging@0.4.1-staging.961', 'desktop-staging@0.4.1-staging.962'],
+        runs,
+        jobsOf: (run) => jobs[run.id] ?? [],
+        now,
+      });
+      expect(verdicts.map((verdict) => [verdict.workflow.name, verdict.state])).toEqual([
+        ['Candidate shell gate', 'ok'],
+        ['Candidate packaged gate', 'failed'],
+        ['Candidate shell gate', 'ok'],
+        ['Candidate packaged gate', 'failed'],
+      ]);
+      expect(verdicts[1]?.detail).toContain('packaged desktop gate not green (failure)');
+      expect(verdicts[3]?.detail).toContain('packaged desktop gate not green (no gate jobs)');
     });
 
     it('should flag a synthetic candidate tag that no release run cut', () => {

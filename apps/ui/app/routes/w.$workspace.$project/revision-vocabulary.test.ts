@@ -22,6 +22,7 @@ import {
   undoLabel,
   versionOf,
   versionPhrase,
+  waitingSentence,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 
@@ -363,5 +364,38 @@ describe('the copy table', () => {
       expect(switchedSentence('enclosure-v2', undefined, true)).toBe('Switched to enclosure-v2');
       expect(switchRefusedSentence('enclosure-v2')).toBe('Couldn’t switch to enclosure-v2');
     });
+  });
+});
+
+/**
+ * Engine coexistence: while the person's own Git holds the files, every save
+ * waits, and the trigger and the strip say why and offer nothing that would
+ * write under the operation.
+ */
+describe('a save waiting on the person’s Git', () => {
+  const where = { branch: 'main', head: 3, isDirty: true } as const;
+  const waitingOn = (waiting: Parameters<typeof waitingSentence>[0]) =>
+    ({ ...revisionStatusHarness.status, dirty: true, waiting }) as const;
+
+  it('should name a merge in progress and what ends it', () => {
+    expect(selectRevisionFacts(waitingOn({ kind: 'merge' }), where)).toMatchObject({
+      mark: 'attention',
+      sentence: 'Saving paused · Finish or abort the merge in Git',
+    });
+    expect(waitingSentence({ kind: 'cherryPick' })).toBe('Saving paused · Finish or abort the cherry-pick in Git');
+    expect(waitingSentence({ kind: 'locked' })).toBe('Saving paused · Git is busy');
+  });
+
+  it('should give a detached head its way back', () => {
+    expect(selectRevisionFacts(waitingOn({ kind: 'detached', branch: 'main' }), where).sentence).toBe(
+      'Not on a branch · Run git switch main to go back',
+    );
+    expect(waitingSentence({ kind: 'detached' })).toBe('Not on a branch · Switch to a branch in Git to keep saving');
+  });
+
+  it('should offer neither Save nor Discard', () => {
+    expect(selectStripVerbs({ status: waitingOn({ kind: 'rebase' }), where, undoable: false, canWrite: true })).toEqual(
+      { primary: undefined, secondary: [] },
+    );
   });
 });

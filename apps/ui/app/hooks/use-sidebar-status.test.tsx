@@ -15,6 +15,8 @@ import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/cha
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions.machine.js';
+import { sessionsMachine } from '#machines/sessions.machine.js';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -258,7 +260,16 @@ const resetRegistry = (): void => {
 const liveProject = (projectId: string, status: Partial<SessionsProjectStatus> = {}): void => {
   fakeRegistry.refs[projectId] = sessionRefFor(projectId);
   fakeRegistry.chatReferences[projectId] ??= {};
-  fakeRegistry.status[projectId] = { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0, ...status };
+  fakeRegistry.status[projectId] = {
+    state: 'live',
+    runs: 0,
+    dirty: false,
+    pushed: true,
+    pending: 0,
+    chatReady: true,
+    availability: 'settled',
+    ...status,
+  };
 };
 
 const closeProject = (projectId: string, reason: ProjectSessionCloseReason): void => {
@@ -1323,5 +1334,46 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
     expect(screen.getByTestId('project').textContent).toBe('busy');
     expect(screen.getByTestId('chat').textContent).toBe('queued');
     expect(screen.getByTestId('header').textContent).toBe('2 live · gearbox');
+  });
+});
+
+/*
+ * A0.2 (row S39): the sidebar's `openProject` is one of the two other senders of `open`. It sends a bare
+ * project id. Whether the reopened session carries the request focus kept (I4) is pinned over the route
+ * gate harness in `project-route.test.tsx`, which is the one that ever held that request.
+ */
+describe('use-sidebar-status — pin (A0.2 S39): the sidebar open', () => {
+  const reopened = 'proj_sidebar_open_aaaaaaa';
+  let registry: ReturnType<typeof createActor<typeof sessionsMachine>> | undefined;
+
+  afterEach(() => {
+    registry?.stop();
+    registry = undefined;
+  });
+
+  function Open(): React.JSX.Element {
+    const { openProject } = useSidebarCommands();
+    return (
+      <button
+        type='button'
+        onClick={() => {
+          openProject(reopened);
+        }}
+      >
+        Open
+      </button>
+    );
+  }
+
+  it('should send the registry an open that spawns a session for the project', () => {
+    const started = createActor(sessionsMachine, { input: {}, clock: new StepClock() }).start();
+    registry = started;
+    vi.mocked(useSessions).mockImplementation(() => started);
+    render(<Open />);
+    act(() => {
+      screen.getByRole('button', { name: 'Open' }).click();
+    });
+
+    expect(started.getSnapshot().context.refs[reopened]?.getSnapshot().context.projectId).toBe(reopened);
   });
 });

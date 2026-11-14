@@ -44,6 +44,10 @@ import {
 } from '#components/view-stack.js';
 import type { ViewStack } from '#components/view-stack.js';
 import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
+import {
+  dropdownMenuDrawerContext as DropdownMenuDrawerContext,
+  useIsDropdownMenuDrawer,
+} from '#hooks/dropdown-menu-drawer.js';
 
 /**
  * Owns the open state and focus lifecycle for a dropdown menu.
@@ -80,16 +84,6 @@ function DropdownMenu({
   );
 }
 
-type DropdownMenuDrawerState = {
-  /** Closes the drawer, as choosing an item closes a menu. */
-  readonly close: () => void;
-  /** The trigger, where focus returns when the drawer closes and nothing else took it. */
-  readonly triggerRef: React.RefObject<HTMLElement | undefined>;
-};
-
-/** A responsive menu's drawer on a phone; absent wherever the menu is a dropdown. */
-const DropdownMenuDrawerContext = React.createContext<DropdownMenuDrawerState | undefined>(undefined);
-
 /**
  * Selects a drawer row as a menu item selects: `onSelect` gets a cancelable select event, and the drawer closes unless
  * it was prevented.
@@ -104,6 +98,9 @@ function selectDrawerRow(onSelect: ((event: Event) => void) | undefined, close: 
 
 /* A checkbox or radio row's text starts past its indicator column (`pl-11`), so its divider does too. */
 const drawerIndicatorRowClass = 'pl-11 [--drawer-row-text-start:2.75rem]';
+
+/* A row that holds its own controls (a toggle group) and does nothing itself: it draws no highlight of its own. */
+const drawerStaticRowClass = 'relative [--drawer-row-highlight:transparent]';
 
 /** Hands a node to a ref the caller passed, as React would: a callback ref is called, an object ref is set. */
 function assignRef<T>(
@@ -913,6 +910,7 @@ function DropdownMenuToggleGroupItem<T extends string>({
   options,
   onValueChange,
 }: DropdownMenuToggleGroupItemProperties<T>): React.JSX.Element {
+  const isInDrawer = useIsDropdownMenuDrawer();
   const handleValueChange = React.useCallback(
     (newValue: string) => {
       if (newValue) {
@@ -925,9 +923,23 @@ function DropdownMenuToggleGroupItem<T extends string>({
   return (
     <div
       data-slot='dropdown-menu-toggle-group-item'
-      className={cn('flex items-center justify-between px-3 py-1.5', className)}
+      {...(isInDrawer ? drawerRowAttributes : {})}
+      className={cn(
+        'flex items-center justify-between',
+        /* In a drawer it is a touch row with the drawer's geometry; the row itself does nothing, so it takes no
+           highlight, and its options are touch-sized. */
+        isInDrawer ? cn(drawerRowClass, drawerStaticRowClass) : 'px-3 py-1.5',
+        className,
+      )}
     >
-      <span className={cn(menuItemLayoutClass, menuItemIconClass, 'text-sm')}>
+      <span
+        className={cn(
+          menuItemLayoutClass,
+          menuItemIconClass,
+          'text-sm',
+          isInDrawer && "[&_svg:not([class*='size-'])]:size-4",
+        )}
+      >
         {children}
         {infoTooltip}
       </span>
@@ -943,7 +955,7 @@ function DropdownMenuToggleGroupItem<T extends string>({
             key={option.value}
             value={option.value}
             aria-label={option.ariaLabel ?? option.value}
-            className='h-7 flex-1'
+            className={cn('flex-1', isInDrawer ? 'h-9 min-w-11' : 'h-7')}
           >
             {option.label}
           </ToggleGroupItem>
@@ -1117,7 +1129,7 @@ type DropdownMenuSubState = {
   readonly isOpen: boolean;
   /** The sub-view is the one shown. */
   readonly isTop: boolean;
-  /** The sub-view's title, from its trigger: the Back row shows it. */
+  /** The sub-view's title, from its trigger: it names the sub-view's group, and its Back row's `Back to` target. */
   readonly title: string | undefined;
   readonly setTitle: (title: string | undefined) => void;
   readonly setOpen: (open: boolean, origin?: HTMLElement) => void;
@@ -1224,8 +1236,9 @@ const focusFirstRow = (view: HTMLElement | undefined): void => {
 };
 
 /**
- * A submenu's items as a sub-view: while open they replace the menu's items, under a Back row naming the sub-view.
- * Escape and the Back row step back to the row that opened it.
+ * A submenu's items as a sub-view: while open they replace the menu's items, under a Back row that reads "Back" and is
+ * named `Back to <parent>`. The sub-view's group keeps its title, so assistive technology still names the view; a view
+ * whose rows do not say what it is shows its own heading. Escape and the Back row step back to the row that opened it.
  *
  * @public
  * @example <caption>Render nested menu content.</caption>
@@ -1243,7 +1256,7 @@ function DropdownMenuSubContent({
 }: {
   readonly className?: string;
   readonly children?: React.ReactNode;
-  /** The Back row's title; defaults to the trigger's text. */
+  /** The sub-view's title, which names its group for assistive technology; defaults to the trigger's text. */
   readonly title?: string;
 }): React.JSX.Element | undefined {
   const drawer = React.useContext(DropdownMenuDrawerContext);
@@ -1274,7 +1287,7 @@ function DropdownMenuSubContent({
       className={cn(viewStackBackRowClass, drawerRowClass)}
       onClick={back}
     >
-      <ViewStackBackContent title={title} />
+      <ViewStackBackContent />
     </button>
   ) : (
     <DropdownMenuPrimitive.Item
@@ -1287,7 +1300,7 @@ function DropdownMenuSubContent({
         back();
       }}
     >
-      <ViewStackBackContent title={title} />
+      <ViewStackBackContent />
     </DropdownMenuPrimitive.Item>
   );
   return createPortal(

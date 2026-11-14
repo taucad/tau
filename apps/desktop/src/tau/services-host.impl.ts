@@ -69,6 +69,7 @@ import {
 import type {
   AcpAdapter,
   HostMcpEndpoint,
+  RevisionEngineFailure,
   MachineHostIdentity,
   HostPreparableKernel,
   HostPrepareKernel,
@@ -348,6 +349,11 @@ export type ServicesHostOptions = {
     workspaceRoot: string,
     event: Readonly<{ reason: string; missing: readonly string[] }>,
   ) => void;
+  /**
+   * Tell main a revision-engine command failed, so its error reporting can send it redacted. The failure is raw: its
+   * `detail` is git's own stderr, which main redacts before anything leaves the machine.
+   */
+  readonly onRevisionEngineFailure?: (failure: RevisionEngineFailure) => void;
 };
 
 /** Result returned to main after a graceful quiesce request. */
@@ -454,6 +460,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     machinesStreaming,
     terminalSessionsAnswered,
     nativeKernels,
+    onRevisionEngineFailure,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -552,6 +559,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let authToken: string | undefined;
   /** The signed-in account's user id, which main reads from `get-session` and sends with the bearer. */
   let sessionPrincipal: string | undefined;
+  /** The signed-in account's display name, sent with its id; the Terminal's git commits under both. */
+  let sessionPrincipalName: string | undefined;
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
@@ -630,6 +639,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     shell: options.terminalShell,
     isTrustedRoot,
     canonicalRoot: canonicalPath,
+    /* Read at each open: a session opened after a sign-in, a sign-out or an account switch commits as the new state. */
+    account: () =>
+      sessionPrincipal === undefined
+        ? undefined
+        : {
+            id: sessionPrincipal,
+            ...(sessionPrincipalName === undefined ? {} : { name: sessionPrincipalName }),
+          },
     log,
   });
 
@@ -1213,6 +1230,16 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           onRevisionsUnavailable?.(workspaceRoot, event);
           return;
         }
+        if (event.type === 'revision.engine-failed') {
+          /* The local log keeps the port's sentence; git's stderr goes only to main, which redacts it. */
+          log('agent-host.revision-engine-failed', { workspaceRoot, code: event.code, message: event.message }, 'warn');
+          onRevisionEngineFailure?.({
+            code: event.code,
+            message: event.message,
+            ...(event.detail === undefined ? {} : { detail: event.detail }),
+          });
+          return;
+        }
         log('agent-host.revision-not-recorded', { workspaceRoot, event: event.type });
       },
     };
@@ -1381,6 +1408,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         authToken = frame['token'] as string | undefined;
         sessionPrincipal =
           authToken !== undefined && typeof frame['principal'] === 'string' ? frame['principal'] : undefined;
+        sessionPrincipalName =
+          sessionPrincipal !== undefined && typeof frame['principalName'] === 'string'
+            ? frame['principalName']
+            : undefined;
         log('credential-updated', { present: authToken !== undefined });
         return;
       }

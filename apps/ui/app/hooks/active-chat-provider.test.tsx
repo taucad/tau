@@ -47,7 +47,6 @@ const harness = vi.hoisted(() => ({
   selectedModelName: 'Cookie Model',
   setKernel: vi.fn(),
   cookieKernel: 'openscad' as 'openscad' | 'manifold' | 'replicad',
-  isAutoKernelEnabled: false,
   owner: undefined as { kernel: 'openscad' | 'manifold' | 'replicad'; entryPath: string } | undefined,
   homeFiles: new Map<string, Uint8Array<ArrayBuffer>>(),
   homeReadFile: vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>(),
@@ -229,10 +228,6 @@ vi.mock('#hooks/use-project-kernel-owner.js', () => ({
   useProjectKernelOwner: () => harness.owner,
 }));
 
-vi.mock('#flags/use-feature.js', () => ({
-  useFeature: (name: string) => name === 'autoKernel' && harness.isAutoKernelEnabled,
-}));
-
 vi.mock('#hooks/use-file-manager.js', () => {
   /*
    * An in-memory Home workspace: the composer record and its attachment
@@ -277,7 +272,10 @@ const {
   useChatAutoResume,
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
+  await import('#hooks/chat-session-store.fixture.js');
 const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 
 const testModel: DraftAttachmentModel = {
@@ -345,7 +343,6 @@ beforeEach(() => {
   harness.selectedModelName = 'Cookie Model';
   harness.setKernel.mockReset();
   harness.cookieKernel = 'openscad';
-  harness.isAutoKernelEnabled = false;
   harness.owner = undefined;
   harness.homeFiles.clear();
   harness.homeReadFile.mockReset().mockImplementation(async (path: string) => {
@@ -1236,11 +1233,12 @@ describe('ActiveChatProvider', () => {
 
   // ── Session-backed kernel resolver ──
   describe('kernel resolver', () => {
-    it('should prefer Chat.activeKernel when present', async () => {
+    it('should run a stored manual preference', async () => {
       harness.getChat.mockResolvedValue(
         makeChat({
           id: 'chat_with_kernel',
           activeKernel: 'manifold',
+          kernelPreference: 'manifold',
         }),
       );
 
@@ -1255,7 +1253,7 @@ describe('ActiveChatProvider', () => {
       expect(result.current.kernel.unavailableKernel).toBeUndefined();
     });
 
-    it('should fall back to the cookie when Chat.activeKernel is undefined', async () => {
+    it('should read a row with no kernel as Auto, running the cookie kernel until a model has an owner', async () => {
       harness.getChat.mockResolvedValue(makeChat({ id: 'chat_no_kernel' }));
 
       const { result } = renderHook(() => useChatComposer(), {
@@ -1266,6 +1264,7 @@ describe('ActiveChatProvider', () => {
         expect(harness.getChat).toHaveBeenCalledWith('chat_no_kernel', 'home');
       });
       expect(result.current.kernel.kernelId).toBe('openscad');
+      expect(result.current.kernel.preference).toBe('auto');
     });
 
     it('should heal a retired openscad chat value through the cookie fallback', async () => {
@@ -1283,7 +1282,9 @@ describe('ActiveChatProvider', () => {
 
     it('should run the cookie kernel beside a desktop-only chat kernel, keeping the chat’s preference', async () => {
       // Build123d needs a native runtime only Tau Desktop advertises; this runtime has none.
-      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_desktop_kernel', activeKernel: 'build123d' }));
+      harness.getChat.mockResolvedValue(
+        makeChat({ id: 'chat_desktop_kernel', activeKernel: 'build123d', kernelPreference: 'build123d' }),
+      );
 
       const { result } = renderHook(() => useChatComposer(), {
         wrapper: createSessionWrapper('chat_desktop_kernel'),
@@ -1297,7 +1298,7 @@ describe('ActiveChatProvider', () => {
       expect(harness.setKernel).not.toHaveBeenCalled();
     });
 
-    it('should dual-write (chat row + cookie) when setActiveKernel is called', async () => {
+    it('should write the chat row’s kernel and preference, not the remembered Home selection, on setActiveKernel', async () => {
       harness.getChat.mockResolvedValue(makeChat({ id: 'chat_kernel_dual_write' }));
 
       const { result } = renderHook(() => useChatComposer(), {
@@ -1315,66 +1316,63 @@ describe('ActiveChatProvider', () => {
       await waitFor(() => {
         expect(harness.patchChat).toHaveBeenCalledWith('chat_kernel_dual_write', 'activeKernel', 'manifold');
       });
-      expect(harness.setKernel).toHaveBeenCalledWith('manifold');
+      await waitFor(() => {
+        expect(harness.patchChat).toHaveBeenCalledWith('chat_kernel_dual_write', 'kernelPreference', 'manifold');
+      });
+      expect(harness.setKernel).not.toHaveBeenCalled();
     });
 
-    describe('with the autoKernel flag on', () => {
-      beforeEach(() => {
-        harness.isAutoKernelEnabled = true;
+    it('should read a legacy row that matches its owner as Auto, running the owner kernel', async () => {
+      harness.owner = { kernel: 'replicad', entryPath: 'main.ts' };
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_legacy_auto', activeKernel: 'replicad' }));
+
+      const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_legacy_auto') });
+
+      await waitFor(() => {
+        expect(result.current.kernel.kernelId).toBe('replicad');
       });
+      expect(result.current.kernel.preference).toBe('auto');
+    });
 
-      it('should read a legacy row that matches its owner as Auto, running the owner kernel', async () => {
-        harness.owner = { kernel: 'replicad', entryPath: 'main.ts' };
-        harness.getChat.mockResolvedValue(makeChat({ id: 'chat_legacy_auto', activeKernel: 'replicad' }));
+    it('should keep a legacy row that differs from its owner as that manual pick', async () => {
+      harness.owner = { kernel: 'replicad', entryPath: 'main.ts' };
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_legacy_manual', activeKernel: 'manifold' }));
 
-        const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_legacy_auto') });
+      const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_legacy_manual') });
 
-        await waitFor(() => {
-          expect(result.current.kernel.kernelId).toBe('replicad');
-        });
+      await waitFor(() => {
+        expect(result.current.kernel.preference).toBe('manifold');
+      });
+      expect(result.current.kernel.kernelId).toBe('manifold');
+    });
+
+    it('should change only the chat on an in-chat pick, leaving the remembered Home selection', async () => {
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_pick' }));
+
+      const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_pick') });
+
+      await waitFor(() => {
         expect(result.current.kernel.preference).toBe('auto');
       });
 
-      it('should keep a legacy row that differs from its owner as that manual pick', async () => {
-        harness.owner = { kernel: 'replicad', entryPath: 'main.ts' };
-        harness.getChat.mockResolvedValue(makeChat({ id: 'chat_legacy_manual', activeKernel: 'manifold' }));
-
-        const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_legacy_manual') });
-
-        await waitFor(() => {
-          expect(result.current.kernel.preference).toBe('manifold');
-        });
-        expect(result.current.kernel.kernelId).toBe('manifold');
+      act(() => {
+        result.current.kernel.setActivePreference('manifold');
       });
 
-      it('should change only the chat on an in-chat pick, leaving the remembered Home selection', async () => {
-        harness.getChat.mockResolvedValue(makeChat({ id: 'chat_pick' }));
-
-        const { result } = renderHook(() => useChatComposer(), { wrapper: createSessionWrapper('chat_pick') });
-
-        await waitFor(() => {
-          expect(result.current.kernel.preference).toBe('auto');
-        });
-
-        act(() => {
-          result.current.kernel.setActivePreference('manifold');
-        });
-
-        await waitFor(() => {
-          expect(harness.patchChat).toHaveBeenCalledWith('chat_pick', 'kernelPreference', 'manifold');
-        });
-        expect(result.current.kernel.preference).toBe('manifold');
-        expect(harness.setKernel).not.toHaveBeenCalled();
-
-        act(() => {
-          result.current.kernel.setActivePreference('auto');
-        });
-
-        await waitFor(() => {
-          expect(harness.patchChat).toHaveBeenCalledWith('chat_pick', 'kernelPreference', 'auto');
-        });
-        expect(harness.setKernel).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(harness.patchChat).toHaveBeenCalledWith('chat_pick', 'kernelPreference', 'manifold');
       });
+      expect(result.current.kernel.preference).toBe('manifold');
+      expect(harness.setKernel).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.kernel.setActivePreference('auto');
+      });
+
+      await waitFor(() => {
+        expect(harness.patchChat).toHaveBeenCalledWith('chat_pick', 'kernelPreference', 'auto');
+      });
+      expect(harness.setKernel).not.toHaveBeenCalled();
     });
   });
 

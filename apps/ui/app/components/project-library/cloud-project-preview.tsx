@@ -56,9 +56,12 @@ export function CloudProjectPreview({
             setFailedUrl(preview.url);
           }}
         />
-      ) : preview.isSettled ? (
+      ) : preview.isSettled || isRetrying ? (
+        /* A retried failure has answered once already, so its icon stays until the Retry's own answer. */
         <Box
-          aria-label={preview.isFailed || failedUrl ? 'Saved preview unavailable' : 'No saved preview'}
+          aria-label={
+            preview.isFailed || failedUrl !== undefined || isRetrying ? 'Saved preview unavailable' : 'No saved preview'
+          }
           className={isCompact ? 'size-4' : 'size-8'}
         />
       ) : null}

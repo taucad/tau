@@ -83,7 +83,7 @@ describe('cloud project preview recovery', () => {
   });
 
   /* Review (PR #2217): a failed read that is retried has still answered, so its icon stays, still saying unavailable. */
-  it.fails('should keep the unavailable icon while a failed read is retried', async () => {
+  it('should keep the unavailable icon while a failed read is retried', async () => {
     preview.retry.mockImplementationOnce(
       async () =>
         new Promise<undefined>(() => {

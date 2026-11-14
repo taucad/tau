@@ -76,10 +76,10 @@ export const readLayoutFlagsFromHeader = (header: string | undefined): LayoutFla
   header ? parseLayoutFlags(Cookies.parse(header)[layoutFlagsCookieName]) : {};
 
 /**
- * The layout flags the server renders with. A PostHog-backed flag the cookie does not carry is still known when no
- * PostHog value can reach this page view (analytics not admitted by the request's consent, or no client key): the
- * client's remote source then settles as absent, so the flag keeps its registry default and the server can omit the
- * flagged surface instead of holding its box. A build that honours a seeded end-to-end flag state keeps it unknown,
+ * The layout flags the server renders with. When no PostHog value can reach this page view (analytics not admitted
+ * by the request's consent, or no client key), the client's remote source settles as absent, so every PostHog-backed
+ * layout flag is its registry default, whatever a cookie written under earlier consent says: the server omits the
+ * flagged surface instead of holding or rendering it. A build that honours a seeded end-to-end flag state keeps it unknown,
  * because the seed is invisible to the server.
  *
  * @param remembered - The flags the request's cookie carried.
@@ -96,7 +96,7 @@ export const resolveServerLayoutFlags = (
   const resolved: Partial<Record<LayoutFlagName, boolean>> = { ...remembered };
   for (const name of layoutFlagNames) {
     const definition: FlagDefinition = flagRegistry[name];
-    if (definition.posthogKey !== undefined && resolved[name] === undefined) {
+    if (definition.posthogKey !== undefined) {
       resolved[name] = featureFlagDefaults[name];
     }
   }

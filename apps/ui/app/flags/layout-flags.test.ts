@@ -116,9 +116,9 @@ describe('the layout flags the server renders with', () => {
     expect(resolveServerLayoutFlags({ onboarding: true }, true)).toEqual({ onboarding: true });
   });
 
-  it('knows a PostHog-backed flag as its default when no answer can reach the page view, and keeps the cookie', () => {
+  it('knows a PostHog-backed flag as its default when no answer can reach the page view, over a stale cookie', () => {
     expect(resolveServerLayoutFlags({}, false)).toEqual({ onboarding: false });
-    expect(resolveServerLayoutFlags({ onboarding: true }, false)).toEqual({ onboarding: true });
+    expect(resolveServerLayoutFlags({ onboarding: true }, false)).toEqual({ onboarding: false });
   });
 });
 

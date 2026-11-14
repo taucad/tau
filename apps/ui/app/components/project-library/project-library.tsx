@@ -682,6 +682,8 @@ export function ProjectLibrary({
               notice: isFailureHeld ? 'failed' : shownCloudNotice,
               wait: cloudWait,
               timing: cloudWaitTiming,
+              /* A follow-up request that paused (a hidden tab) has not answered the failure, so its Retry stays. */
+              isFailureUnanswered: hasCloudFailed && !isCloudSettled,
             })
       }
       onRetryCloud={handleRetryCloud}
@@ -1169,22 +1171,25 @@ type CloudRetry = Readonly<{ slowDelay?: string }>;
  * Tau Cloud's one Retry: beside a failure, through the wait a Retry starts or that follows a failure, and from the
  * slow mark of a first wait the person did not start. None beside the offline words, which a Retry cannot help.
  *
- * @param state - The slot's notice, the Tau Cloud wait and its timing.
+ * @param state - The slot's notice, the Tau Cloud wait and its timing, and whether a failure is still unanswered.
  * @returns How Retry is offered, or `undefined` for none.
  */
 function cloudRetryOf({
   notice,
   wait,
   timing,
+  isFailureUnanswered,
 }: {
   readonly notice: CloudNotice | undefined;
   readonly wait: CloudWait | undefined;
   readonly timing: WaitIndicatorTiming;
+  /** The listing's last answer was a failure and nothing has answered since. */
+  readonly isFailureUnanswered: boolean;
 }): CloudRetry | undefined {
   if (notice === 'offline') {
     return undefined;
   }
-  if (notice === 'failed' || wait?.isAnnounced === true || wait?.followsFailure === true) {
+  if (notice === 'failed' || isFailureUnanswered || wait?.isAnnounced === true || wait?.followsFailure === true) {
     return {};
   }
   if (wait !== undefined && timing.state === 'waiting') {

@@ -556,4 +556,43 @@ describe('the route sink takes the cloudOpen marker (round 9)', () => {
     });
     expect(router.state.location.pathname).toBe('/w/ws/other');
   });
+
+  it('should keep a held cloud-open marker when a chat correction is held behind it (round 15)', async () => {
+    const loading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            if (new URL(request.url).searchParams.has('panel')) {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/c3?cloudOpen=tau'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+    act(() => {
+      void router.navigate('/w/ws/c3?cloudOpen=tau&panel=files');
+    });
+    /* Focus emits both for one request: the marker first, then the chat it shows. */
+    act(() => {
+      sinks[0]?.({ type: 'cloudOpenTaken', projectId: 'c3' });
+      sinks[0]?.({ type: 'chatShown', projectId: 'c3', chatId: 'chat-c' });
+    });
+    await act(async () => {
+      loading.resolve();
+      await loading.promise;
+    });
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toBe('?panel=files&chat=chat-c');
+    });
+    expect(tauCloudIntent.get('c3')).toBe('open');
+  });
 });

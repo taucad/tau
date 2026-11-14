@@ -177,6 +177,8 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
    * It keeps the chat the route showed when it arrived: a move the person made that changed it is a request focus has
    * not answered. A move this sink made itself (its own replace) is not the person's, so it never drops a command. */
   const deferred = useRef<Readonly<{ command: FocusRouteCommand; chatId: string | undefined }> | undefined>(undefined);
+  /* The cloud-open marker waits in its own slot: a chat command held after it must not replace it (round 15). */
+  const deferredCloud = useRef<FocusRouteCommand | undefined>(undefined);
   /* The sink's own replace while it is in flight. The next commit of a new location either is that replace or
    * superseded it, so it is read there once and cleared: a later visit to the same URL is the person's. */
   const pendingOwn = useRef<string | undefined>(undefined);
@@ -207,7 +209,11 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
       live !== undefined &&
       (live.navigation.state !== 'idle' || `${live.location.pathname}${live.location.search}` !== current.currentUrl)
     ) {
-      deferred.current = { command, chatId: chatOf(current.currentUrl) };
+      if (command.type === 'cloudOpenTaken') {
+        deferredCloud.current = command;
+      } else {
+        deferred.current = { command, chatId: chatOf(current.currentUrl) };
+      }
       return;
     }
     if (command.type === 'cloudOpenTaken') {
@@ -240,8 +246,16 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
        * judged against it, so the person's move off it counts as theirs (I18). */
       deferred.current = { ...deferred.current, chatId: chatOf(latest.current.currentUrl) };
     }
+    if (navigationState === 'loading' || navigationState === 'submitting') {
+      return;
+    }
+    const cloud = deferredCloud.current;
+    if (cloud !== undefined) {
+      deferredCloud.current = undefined;
+      sink(cloud);
+    }
     const held = deferred.current;
-    if (held === undefined || navigationState === 'loading' || navigationState === 'submitting') {
+    if (held === undefined) {
       return;
     }
     deferred.current = undefined;

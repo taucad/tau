@@ -1734,6 +1734,37 @@ describe('ProjectLibrary', () => {
       expect(retry).toBeInTheDocument();
     });
 
+    /* D21 round 7: the slot's status region stays in the accessibility tree while empty, so words entering it are heard. */
+    it.fails("C14: keeps the slot's empty status region in the accessibility tree", () => {
+      const slot = renderSlot();
+      const region = slot.header().querySelector('[data-slot="project-library-status"] > [role="status"]');
+      expect(region).toBeEmptyDOMElement();
+      expect(region).not.toHaveClass('empty:hidden');
+      expect(region).toHaveClass('sr-only');
+    });
+
+    /* D21 round 7: offline, Retry cannot help, so it is not offered, even while a Retry's request hangs. */
+    it.fails('C14: offers no Retry beside the offline words while a Retry is in flight', async () => {
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
+      cloudListing.isFailed = true;
+      const slot = renderSlot();
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      cloudListing.isFailed = false;
+      cloudListing.isFetching = true;
+      slot.rerender();
+      vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+      act(() => {
+        globalThis.dispatchEvent(new Event('offline'));
+      });
+      expect(within(slot.header()).getByText('Offline. Showing projects on this device.')).toBeInTheDocument();
+      expect(within(slot.header()).queryByRole('button', { name: 'Retry Tau Cloud' })).toBeNull();
+    });
+
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
     it("C14: keeps focus on the failure's Retry through the wait it starts", async () => {
       /* The Retry's request is still in flight. */

@@ -67,8 +67,10 @@ import {
   registerProjectOverHttp,
   registrationOrigin,
   RevisionPortError,
+  revisionCommitAuthorSchema,
   tauRemoteUrl,
   watchRevisionStream,
+  withCommitAuthor,
 } from '@taucad/revisions';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
@@ -81,6 +83,7 @@ import type {
   PublishDraft,
   PublishPublicationActorInput,
   PublishPublicationActorOutput,
+  RevisionCommitAuthor,
   RevisionDiffEntry,
   RevisionEngineDescriptor,
   RevisionLogRequest,
@@ -572,6 +575,8 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const fallbackActor = options.actor ?? hostRevisionActor();
   /* The person the page signed in on this device last named (`setActor`), for every mint after it. */
   let session: RevisionUserActor | undefined;
+  /* That person's linked forge identity (D33), for the git author line alone: no record carries it (I3). */
+  let sessionCommitAuthor: RevisionCommitAuthor | undefined;
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
   let channelWriteCredential: NativeGitRemoteCredential | undefined;
   const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
@@ -638,7 +643,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     ((checkout: Parameters<NonNullable<ProjectRevisionsOptions['filesystem']>>[0]) =>
       new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root));
   const tree = createProjectRevisionsActor({
-    port,
+    port: withCommitAuthor(port, (person) => (person.id === session?.id ? sessionCommitAuthor : undefined)),
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
@@ -1408,9 +1413,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * braces and destructuring here add ceremony without narrowing the wire. */
     /* oxlint-disable unicorn/switch-case-braces, prefer-destructuring -- Mirrors the established worker command switch without per-case ceremony. */
     switch (request.command) {
-      case 'setActor':
-        session = revisionUserActorSchema.parse(request['actor']);
+      case 'setActor': {
+        const person = revisionUserActorSchema.parse(request['actor']);
+        const commitAuthor =
+          request['commitAuthor'] === undefined ? undefined : revisionCommitAuthorSchema.parse(request['commitAuthor']);
+        session = person;
+        sessionCommitAuthor = commitAuthor;
         return null;
+      }
       case 'status':
       case 'setDeviceId':
       case 'flushKeepalive':

@@ -105,21 +105,24 @@ export function useCanonicalProjectUrlCorrection(
   const canonicalSlugs = canonical.status === 'resolved' ? canonical.value : undefined;
   const target = canonicalSlugs ? `${projectUrl(canonicalSlugs)}${suffix}` : undefined;
   /* `replaceState` is invisible to the router, so after a write the bar shows this path, not `from`. */
-  const written = useRef<string | undefined>(undefined);
+  const written = useRef<Readonly<{ projectId: string | undefined; url: string }> | undefined>(undefined);
   useEffect(() => {
     const shown = globalThis.location.pathname;
-    if (from !== undefined && shown !== from && shown !== written.current) {
+    /* Only this project's last write: a bar showing another project's corrected URL is the person's (Back). */
+    const wrote = written.current;
+    const wroteThis = wrote !== undefined && wrote.projectId === projectId && shown === wrote.url;
+    if (from !== undefined && shown !== from && !wroteThis) {
       return;
     }
     if (target !== undefined && shown !== target) {
-      written.current = target;
+      written.current = { projectId, url: target };
       globalThis.history.replaceState(
         globalThis.history.state,
         '',
         `${target}${globalThis.location.search}${globalThis.location.hash}`,
       );
     }
-  }, [target, from]);
+  }, [target, from, projectId]);
 
   return canonicalSlugs;
 }

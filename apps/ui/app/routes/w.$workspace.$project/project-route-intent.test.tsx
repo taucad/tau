@@ -312,4 +312,106 @@ describe('useRouterRouteSink under a data router (I2)', () => {
       expect(router.state.location.search).toBe('?chat=chat-1');
     });
   });
+
+  it("should drop a correction held across its own replace when the person's move superseded that replace (I18)", async () => {
+    const loading = deferred();
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            if (new URL(request.url).searchParams.get('chat') === 'chat-1') {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/b'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+    });
+    expect(router.state.navigation.state).toBe('loading');
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-3' });
+    });
+    /* The person follows a link to chat 2, which cancels the sink's replace before it lands. */
+    await act(async () => {
+      await router.navigate('/w/ws/b?chat=chat-2');
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+
+    expect(router.state.navigation.state).toBe('idle');
+    expect(router.state.location.search).toBe('?chat=chat-2');
+  });
+
+  it('should drop a held correction when the person goes Back to a URL the sink once wrote (I18)', async () => {
+    const loading = deferred();
+    let armed = false;
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/w/:workspace/:project',
+          element: <Probe />,
+          loader: async ({ request }) => {
+            if (armed && new URL(request.url).searchParams.get('chat') === 'chat-1') {
+              await loading.promise;
+            }
+            return null;
+          },
+        },
+      ],
+      { initialEntries: ['/w/ws/b'] },
+    );
+    render(<RouterProvider router={router} />);
+    await vi.waitFor(() => {
+      expect(sinks).toHaveLength(1);
+    });
+    await act(async () => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-1' });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(router.state.location.search).toBe('?chat=chat-1');
+    });
+    await act(async () => {
+      await router.navigate('/w/ws/b?chat=chat-2');
+    });
+    armed = true;
+
+    act(() => {
+      void router.navigate(-1);
+    });
+    await vi.waitFor(() => {
+      expect(router.state.navigation.state).toBe('loading');
+    });
+    act(() => {
+      sinks[0]?.({ type: 'chatShown', projectId: 'b', chatId: 'chat-3' });
+    });
+    await act(async () => {
+      loading.resolve();
+      await loading.promise;
+    });
+    await vi.waitFor(() => {
+      expect(router.state.navigation.state).toBe('idle');
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 20);
+      });
+    });
+
+    expect(router.state.location.search).toBe('?chat=chat-1');
+  });
 });

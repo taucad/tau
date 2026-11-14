@@ -368,6 +368,56 @@ export type ProjectLoadRecord = {
   readonly textFirstFrame: ProjectLoadFrame | undefined;
   /** Entries each list dropped past the frame limit, by the list's name. A list that dropped any is incomplete. */
   readonly dropped: Readonly<Record<string, number>>;
+  /** Each watched region's state whenever it changed, by the region's name (`regions`), from the first frame on. */
+  readonly regions: Readonly<Record<string, readonly ProjectLoadRegionEntry[]>>;
+  /** Each distinct node a watched region matched, when it entered the document, by the region's name. */
+  readonly regionMounts: Readonly<Record<string, readonly ProjectLoadFrame[]>>;
+  /** Each time a node a watched region had matched left the document, by the region's name. */
+  readonly regionRemovals: Readonly<Record<string, readonly ProjectLoadFrame[]>>;
+  /**
+   * The boxes of every visible node a watched set matched (`boxSets`), whenever any changed, by the set's name: the
+   * workspace's lanes, whatever draws them.
+   */
+  readonly boxSets: Readonly<
+    Record<string, ReadonlyArray<ProjectLoadFrame & { readonly boxes: readonly ProjectLoadBox[] }>>
+  >;
+  /** Every sampled frame's time, by frame index from 1 (`frameTimes[0]` is frame 1), when asked for (`frameTimes`). */
+  readonly frameTimes: readonly number[];
+};
+
+/** A node's rounded box. */
+export type ProjectLoadBox = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
+ * One watched region's state in one frame (A15 frame rows): the first node its selector matches that is on screen, or
+ * the first in the document when none is. A new entry is kept only when any field but the frame changed.
+ */
+export type ProjectLoadRegionEntry = ProjectLoadFrame & {
+  readonly present: boolean;
+  /** Which distinct node matched: 1 is the first this region saw. 0 when none. */
+  readonly node: number;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** The rounded position of the first non-blank character inside the node, when it has one. */
+  readonly glyph: { readonly x: number; readonly y: number } | undefined;
+  /** `[data-slot=skeleton]` blocks inside the node, itself included. */
+  readonly skeletons: number;
+  /** An input's value, or the node's text, trimmed, at most 120 characters. */
+  readonly text: string;
+  /** Rendered, with neither `opacity: 0` nor `visibility: hidden` on it or an ancestor. */
+  readonly visible: boolean;
+  /** Running animations on the node itself, and in its subtree. */
+  readonly animations: number;
+  readonly subtreeAnimations: number;
+  /** Its `aria-busy`. */
+  readonly busy: boolean;
 };
 
 type ProjectLoadGlobal = typeof globalThis & {
@@ -392,6 +442,12 @@ export const recordProjectLoad = (input: {
   readonly limit: number;
   readonly laneBorders: boolean;
   readonly watchText: string | undefined;
+  /** Regions to watch in every frame and on every mutation, by name: a CSS selector each. */
+  readonly regions?: Readonly<Record<string, string>>;
+  /** Sets of nodes whose boxes are kept together in every frame, by name: a CSS selector each. */
+  readonly boxSets?: Readonly<Record<string, string>>;
+  /** Keep every frame's time, so a row can tell when the frame before a change was painted. */
+  readonly frameTimes?: boolean;
 }): void => {
   const { probe, limit } = input;
   const describe = (node: Node | undefined): string => {
@@ -429,6 +485,11 @@ export const recordProjectLoad = (input: {
     marks: [] as Array<ProjectLoadFrame & { name: string }>,
     textFirstFrame: undefined as ProjectLoadFrame | undefined,
     dropped: Object.create(null) as Record<string, number>,
+    regions: Object.create(null) as Record<string, ProjectLoadRegionEntry[]>,
+    regionMounts: Object.create(null) as Record<string, ProjectLoadFrame[]>,
+    regionRemovals: Object.create(null) as Record<string, ProjectLoadFrame[]>,
+    boxSets: Object.create(null) as Record<string, Array<ProjectLoadFrame & { boxes: ProjectLoadBox[] }>>,
+    frameTimes: [] as number[],
     mark: (name: string): void => {
       record.marks.push({ frame: record.frames + 1, t: now(), name });
     },
@@ -486,6 +547,151 @@ export const recordProjectLoad = (input: {
     }
   };
   new MutationObserver(track).observe(document, { childList: true, subtree: true });
+
+  /* Watched regions (A15 frame rows): every node each selector matched, so a node built twice or removed once is seen
+     even inside one frame, and the region's state in every frame. */
+  const regionSelectors = Object.entries(input.regions ?? {});
+  const regionNodeIds = new Map<string, WeakMap<Element, number>>();
+  const regionConnected = new Map<string, Set<Element>>();
+  const regionLast = new Map<string, string>();
+  const keepRegion = <Entry>(bucket: Record<string, Entry[]>, name: string, entry: Entry): void => {
+    bucket[name] ??= [];
+    const list = bucket[name];
+    if (list.length < limit) {
+      list.push(entry);
+      return;
+    }
+    record.dropped[`region:${name}`] = (record.dropped[`region:${name}`] ?? 0) + 1;
+  };
+  const regionNodeId = (name: string, node: Element): number => {
+    const ids = regionNodeIds.get(name) ?? new WeakMap<Element, number>();
+    regionNodeIds.set(name, ids);
+    let id = ids.get(node);
+    if (id === undefined) {
+      id = (record.regionMounts[name]?.length ?? 0) + 1;
+      ids.set(node, id);
+      keepRegion(record.regionMounts, name, nextFrame());
+    }
+    return id;
+  };
+  const trackRegions = (): void => {
+    for (const [name, selector] of regionSelectors) {
+      const connected = regionConnected.get(name) ?? new Set<Element>();
+      regionConnected.set(name, connected);
+      for (const node of connected) {
+        if (!node.isConnected) {
+          connected.delete(node);
+          keepRegion(record.regionRemovals, name, nextFrame());
+        }
+      }
+      for (const node of document.querySelectorAll(selector)) {
+        regionNodeId(name, node);
+        connected.add(node);
+      }
+    }
+  };
+  if (regionSelectors.length > 0) {
+    new MutationObserver(trackRegions).observe(document, { childList: true, subtree: true });
+  }
+  const firstGlyph = (node: Element): { x: number; y: number } | undefined => {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      const offset = (text.textContent ?? '').search(/\S/u);
+      if (offset >= 0) {
+        const range = document.createRange();
+        range.setStart(text, offset);
+        range.setEnd(text, offset + 1);
+        const rect = range.getBoundingClientRect();
+        if (rect.width > 0 || rect.height > 0) {
+          return { x: Math.round(rect.x), y: Math.round(rect.y) };
+        }
+      }
+    }
+    return undefined;
+  };
+  const boxSetSelectors = Object.entries(input.boxSets ?? {});
+  const boxSetLast = new Map<string, string>();
+  const scanBoxSets = (frame: ProjectLoadFrame): void => {
+    for (const [name, selector] of boxSetSelectors) {
+      const boxes = [...document.querySelectorAll(selector)]
+        .filter((node) => node.checkVisibility())
+        .map((node) => node.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map((rect) => ({
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        }))
+        .toSorted((left, right) => left.x - right.x || left.y - right.y);
+      const key = JSON.stringify(boxes);
+      if (boxSetLast.get(name) !== key) {
+        boxSetLast.set(name, key);
+        keepRegion(record.boxSets, name, { ...frame, boxes });
+      }
+    }
+  };
+  /* Visible motion only: an animation in its delay phase, or one lasting 1 ms or less (the wait ladder's timers), moves nothing. */
+  const running = (animations: readonly Animation[]): number =>
+    animations.filter((animation) => {
+      if (animation.playState !== 'running') {
+        return false;
+      }
+      const timing = animation.effect?.getComputedTiming();
+      const local = Number(timing?.localTime ?? 0);
+      const startDelay = timing?.delay ?? 0;
+      const active = Number(timing?.activeDuration ?? 0);
+      return active > 1 && local >= startDelay && local < startDelay + active;
+    }).length;
+  const scanRegions = (frame: ProjectLoadFrame): void => {
+    trackRegions();
+    for (const [name, selector] of regionSelectors) {
+      const nodes = [...document.querySelectorAll(selector)];
+      const node = nodes.find((candidate) => candidate.checkVisibility()) ?? nodes[0];
+      let state: Omit<ProjectLoadRegionEntry, 'frame' | 't'>;
+      if (node === undefined) {
+        state = {
+          present: false,
+          node: 0,
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          glyph: undefined,
+          skeletons: 0,
+          text: '',
+          visible: false,
+          animations: 0,
+          subtreeAnimations: 0,
+          busy: false,
+        };
+      } else {
+        const rect = node.getBoundingClientRect();
+        const value =
+          node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement ? node.value : node.textContent;
+        state = {
+          present: true,
+          node: regionNodeId(name, node),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          glyph: firstGlyph(node),
+          skeletons: (node.matches(probe.skeleton) ? 1 : 0) + node.querySelectorAll(probe.skeleton).length,
+          text: value.trim().slice(0, 120),
+          visible: node.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
+          animations: running(node.getAnimations()),
+          subtreeAnimations: running(node.getAnimations({ subtree: true })),
+          busy: node.getAttribute('aria-busy') === 'true',
+        };
+      }
+      const key = JSON.stringify(state);
+      if (regionLast.get(name) !== key) {
+        regionLast.set(name, key);
+        keepRegion(record.regions, name, { ...frame, ...state });
+      }
+    }
+  };
 
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries() as Array<
@@ -617,6 +823,15 @@ export const recordProjectLoad = (input: {
     if (skeletons > 0) {
       keep(record.skeletonFrames, { ...frame, count: skeletons });
     }
+    if (regionSelectors.length > 0) {
+      scanRegions(frame);
+    }
+    if (boxSetSelectors.length > 0) {
+      scanBoxSets(frame);
+    }
+    if (input.frameTimes === true) {
+      keep(record.frameTimes, frame.t);
+    }
     requestAnimationFrame(sample);
   };
   requestAnimationFrame(sample);
@@ -648,16 +863,27 @@ export const projectRowMoves = (record: ProjectLoadRecord, since = 0): string[] 
  * Install the project load recorder on every document the target page loads from now on.
  *
  * @param options - `laneBorders` also records every frame's lane borders, which costs a pass over the document;
- *   `watchText` records the first frame the document's text holds that text.
+ *   `watchText` records the first frame the document's text holds that text; `regions` watches each named selector
+ *   in every frame, `boxSets` keeps the boxes of everything a selector matches, and `frameTimes` every frame's time
+ *   (A15 frame rows).
  */
 export const installProjectLoadRecorder = async (
-  options: { readonly laneBorders?: boolean; readonly watchText?: string } = {},
+  options: {
+    readonly laneBorders?: boolean;
+    readonly watchText?: string;
+    readonly regions?: Readonly<Record<string, string>>;
+    readonly boxSets?: Readonly<Record<string, string>>;
+    readonly frameTimes?: boolean;
+  } = {},
 ): Promise<void> =>
   target.addInitScript(recordProjectLoad, {
     probe: projectLoadProbe,
     limit: projectLoadFrameLimit,
     laneBorders: options.laneBorders === true,
     watchText: options.watchText,
+    regions: options.regions,
+    boxSets: options.boxSets,
+    frameTimes: options.frameTimes,
   });
 
 /** The current document's project load record, without its page-side helpers. */
@@ -793,6 +1019,23 @@ export const delayWorkerReads = (key: string): void => {
         log.push({ t: Math.round(performance.now()), method, path, delayed: rule !== undefined });
       }
     }
+    /* A15 frame rows: a revision client's question (`{ command, id }`), held as `revision:<command>`. */
+    const question = message as { command?: unknown; id?: unknown } | undefined;
+    if (question && typeof question === 'object' && typeof question.command === 'string') {
+      const method = `revision:${question.command}`;
+      const rule = rules.find((candidate) => candidate.method === method);
+      if (rule && typeof question.id === 'number') {
+        held.set(`revision:${question.id}`, {
+          milliseconds: rule.milliseconds,
+          sentAt: Math.round(performance.now()),
+          method,
+          path: undefined,
+        });
+      }
+      if (log.length < 2000) {
+        log.push({ t: Math.round(performance.now()), method, path: undefined, delayed: rule !== undefined });
+      }
+    }
     // oxlint-disable-next-line typescript/no-unsafe-argument -- forwards the caller's own transfer arguments.
     (postMessage as (...parameters: unknown[]) => void).call(this, message, ...rest);
   };
@@ -812,10 +1055,32 @@ export const delayWorkerReads = (key: string): void => {
     };
     const wrapper = function (this: unknown, event: Event): void {
       const { data } = event as MessageEvent<{ k?: unknown; i?: unknown } | undefined>;
-      const late =
+      let late =
         data && typeof data === 'object' && data.k === 'rs' && typeof data.i === 'string'
           ? held.get(data.i)
           : undefined;
+      /* A15 frame rows: a revision answer by its question's id, and a status projection whose readiness matches
+         the `revisionStatus` rule (the status after a file check), each delivered late. */
+      const answer = data as { type?: unknown; id?: unknown; status?: { readiness?: unknown } } | undefined;
+      if (late === undefined && answer && typeof answer === 'object') {
+        if ((answer.type === 'result' || answer.type === 'error') && typeof answer.id === 'number') {
+          late = held.get(`revision:${answer.id}`);
+        } else if (answer.type === 'status') {
+          const readiness = JSON.stringify(answer.status?.readiness ?? null);
+          const rule = rules.find(
+            (candidate) => candidate.method === 'revisionStatus' && candidate.path.test(readiness),
+          );
+          late =
+            rule === undefined
+              ? undefined
+              : {
+                  milliseconds: rule.milliseconds,
+                  sentAt: Math.round(performance.now()),
+                  method: rule.method,
+                  path: readiness.slice(0, 300),
+                };
+        }
+      }
       if (late === undefined) {
         deliver(this, event);
         return;
@@ -907,8 +1172,48 @@ declare module 'vitest/browser' {
   interface BrowserCommands {
     uiDelayTargetRequests: (pattern: string, milliseconds: number) => Promise<void>;
     uiReadDelayedTargetRequests: () => Promise<readonly string[]>;
+    uiOpenBeforeHydration: (request: EarlyInputRequest) => Promise<EarlyInput>;
   }
 }
+
+/** A15 frame rows (F7, H-f, H-g): what to do on the served page before it hydrates. */
+export type EarlyInputRequest = {
+  readonly path: string;
+  /** The served input, acted on the moment it is visible. */
+  readonly input: string;
+  /** Matches once the page has hydrated. */
+  readonly hydrated: string;
+  readonly text?: string;
+  readonly enter?: boolean;
+  /** Typed after Enter, which cancels a queued send. */
+  readonly afterEnter?: string;
+  /** Capture the input's box at first sight and again after hydration. */
+  readonly screenshots?: boolean;
+  /** The box the screenshots clip to, when not the input's own. */
+  readonly region?: string;
+  /** How long the served input is looked for. Milliseconds. */
+  readonly wait: number;
+  /** How long after hydration the second screenshot waits. Milliseconds. */
+  readonly settle: number;
+};
+
+/** What happened on the served page (`uiOpenBeforeHydration`). */
+export type EarlyInput = {
+  readonly found: boolean;
+  readonly hydratedBeforeAct: boolean;
+  readonly box?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  readonly before?: string;
+  readonly after?: string;
+};
+
+/**
+ * Open `path` without waiting for its load and act on its served input before hydration (A15 frame rows).
+ *
+ * @param request - The path, the input, what to type, and whether to capture its box across adoption.
+ * @returns Whether the input was found before hydration, and the screenshots.
+ */
+export const openBeforeHydration = async (request: EarlyInputRequest): Promise<EarlyInput> =>
+  commands.uiOpenBeforeHydration(request);
 
 /**
  * Hold every request whose URL matches `pattern` for `milliseconds`, for the rest of the test. Routing turns the

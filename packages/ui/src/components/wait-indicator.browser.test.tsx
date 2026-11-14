@@ -167,8 +167,8 @@ function holdMainThread(milliseconds: number): void {
 }
 
 /** When the body's `name` animation takes effect, on the document timeline: its start, once it has one, plus its delay. */
-async function effectTime(name: string): Promise<number> {
-  const animation = find('wait-indicator-body')
+async function effectTime(name: string, body: HTMLElement = find('wait-indicator-body')): Promise<number> {
+  const animation = body
     .getAnimations()
     .find((candidate) => candidate instanceof CSSAnimation && candidate.animationName === name);
   expect(animation, `the indicator runs ${name}`).toBeDefined();
@@ -218,4 +218,39 @@ it('should hold an indicator that a long task revealed late 500 ms from the fram
   });
 
   expect((await effectTime('wait-conceal')) - shownAt).toBeGreaterThanOrEqual(499);
+});
+
+/** Holds the main thread while it renders, as a heavy component between two waiting regions does. */
+function Busy({ milliseconds }: { readonly milliseconds: number }): undefined {
+  holdMainThread(milliseconds);
+  return undefined;
+}
+
+it('should reveal the second of two waits started in one long render 1,000 ms after its start, not early', async () => {
+  /* Both regions' waits start together; a 400 ms render between them runs the performance clock ahead of the document
+     timeline their reveals count from. A delay measured on the performance clock would reveal the second at ~600 ms. */
+  await nextFrame();
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  const startedAt = performance.now();
+  const view = render(
+    <>
+      <div data-region='first'>
+        <WaitIndicator active label='Loading chat' startedAt={startedAt} />
+      </div>
+      <Busy milliseconds={400} />
+      <div data-region='second'>
+        <WaitIndicator active label='Loading history' startedAt={startedAt} />
+      </div>
+    </>,
+  );
+  const second = view.container.querySelector<HTMLElement>('[data-region=second] [data-slot=wait-indicator-body]')!;
+
+  const revealed = (await effectTime('wait-reveal', second)) - startedAt;
+  expect(
+    revealed,
+    'the second wait revealed before the 1,000 ms ladder: its delay was read off the performance clock',
+  ).toBeGreaterThanOrEqual(999);
+  expect(revealed).toBeLessThan(1034);
 });

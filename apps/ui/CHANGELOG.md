@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.10.0 (2026-11-14)
+
+### Features
+
+- feat(ui): move the project library into a runtime-owned service (A2) (#2119) (7918b118e)
+- feat(ui): add the workbench layout machine and pane intents (A8a) (#2115) (d66b3c6a5)
+- feat(shell-service): one Terminal git store policy with remotes, branches and folded spellings (LP1, LP6) (#2124) (80c065da7)
+- feat(ui): Carry the open request through the sessions registry (A5c) (#2112) (674cf3173)
+- feat(taucad-ui): Add WaitIndicator, the loading timing ladder and the skeleton ratchet (A15a) (#2110) (a8d599ceb)
+- feat(viewer): open Viewer settings as a bottom drawer on phones (#2106) (069eb7f05)
+- feat(ui): Specify project focus with a ProjectFocus TLA+ family (#2041) (4e3ca8318)
+- feat(ui): Record replay text and redact sign-in tokens from URLs (#2020) (399cfa78c)
+- feat(ui): Add the file-manager host, rootFiles and leases (A1b) (#2062) (1e274f697)
+- feat(ui): add LayoutApply formal model (#2042) (03bd88827)
+- feat(shell-service): let the macOS Terminal commit, branch, stash and merge (TG5) (#2061) (255e24e5a)
+- feat(ui): Add the session revisions and host connector children (#2057) (7b177f95d)
+- feat(revisions): keep the person's staging and wait out their Git operations (TG4, TG7b) (#2058) (fe7b4dfa8)
+- feat(ui): Compose the app runtime root and start it after hydration (A1a) (#2049) (dbcb6b643)
+- feat(ui): Add the LibraryCatalog formal spec (#2045) (5508e5c3d)
+- feat(api-git-core): back up commits you make with git (TG3) (#2053) (9b2f1aa2a)
+- feat(ui): Add the project runtime factory and choices actor (#2048) (dd5eeedb8)
+- feat(desktop): Report Git LFS and revision-engine failures, and guard the Linux payload (TG7c) (#2047) (8a1f7dcb3)
+- feat(api-auth): Resolve sessions once per request through a single-flight resolver (#2027) (5617b2054)
+- feat(ui): Offer Undo on the Merged and Closed toasts (#2025) (56d89e740)
+- feat(viewer): move grid and kernel settings into viewer settings sub-views (#2022) (94841e892)
+
+### Fixes
+
+- fix(revisions): pin the engine's common dir, refuse planted commondir, warn on rebase exec (LP4, LP7) (#2148) (1abaf069d)
+- fix(three): Send a rig's clip policy and render frame before presenting them (#2144) (3ed9257d4)
+- fix(ui): Draw the AR glyph's letters as strokes instead of SVG text (#2137) (9aaa23910)
+- fix(ui): Do not report the requests a closed editor left in flight (#2133) (84aaf506a)
+- fix(ui): Let the composer's labels leave while the model name is still pending (#2131) (74b7462f3)
+- fix(ui): Mask unsent chat composer text in session replay (#2122) (e4ba7c096)
+- fix(ui): Keep a client navigation off the root loader (U23) (#2121) (839871327)
+- fix(ui): Start showcase loaders again on WebGL when a WebGPU canvas cannot present (#2098) (96078531b)
+- fix(ui): Clear a chat's legacy unread mark when the person views it (#2097) (68ccfcd70)
+- fix(revisions): Refuse a merge built on history an undo took back (#2111) (82fc8f4b5)
+- fix(ui): Answer a stalled shell navigation with the cached shell after 3,000 ms (#2116) (facb5c83b)
+- fix(ui): keep handed-back pane intents through a LayoutApply lane close (#2063) (7aef35a10)
+- fix(revisions): Back up past a v<n> tag that is not a version (#2107) (2c5a458e0)
+- fix(ui): Decide the desktop first run only from a completed project scan (#2093) (d86a53875)
+- fix(ui): List the dependency mount before its first install creates it (#2085) (7e439ad9d)
+- fix(ui): Name the History card a group so the phone sheet keeps one History landmark (#2078) (31b185620)
+- fix(ui): Keep the app mounted when the first billing owner signs in (#2028) (23e9ac1fa)
+- fix(agent-observability): Let a host claim the protection the API reads for the account (#2052) (475b2f403)
+- fix(shell-service): Let the Terminal read the real git store and run the bundled git and git-lfs (#2007) (52506ee4d)
+- fix(agent-tools): Keep test statuses and source revisions in a reduced test_model result (#2017) (7fe168ed2)
+- fix(agent-observability): Do not let a todo update after the last check hide task success (#2023) (89fa095c4)
+- fix(api): Remove only conflict lines through the audited ref verb (#2021) (d83a5354e)
+
+### Other changes
+
+- test(ui): Run the sized ProjectFocus configs on the pr tier in their own target (#2147) (9257031b2)
+- ci(formal): Run each TLA+ family in a parallel target of its own (#2092) (2cdaf1520)
+- test(host): probe the Linux store guard's launch shape on the shell rows (LP0) (#2108) (50a5e6308)
+- test(ui-e2e): Seed the stability circuit's projects with their entry file open (#2081) (f443311d2)
+- test(ui): pin chat loading defects U7, U19 and U10 as red rows (#2031) (7fd6f8e4a)
+- test(ui): Baseline event totality for the seven orchestration machines (#2035) (b28f640da)
+- test(ui): Widen the event-layer counter, add the ownership ratchet and the wide formal job (A0.6) (#2032) (11b943eae)
+
 ## 0.9.1 (2026-11-13)
 
 ### Fixes

@@ -81,4 +81,26 @@ describe('focus: the chat a session is given', () => {
 
     expect(harness.sent.route).toEqual([]);
   });
+
+  it("should show a chat the person picks in the editor after the URL took the session's chat", () => {
+    const harness = createFocusHarness();
+    harness.focusOn('r1', 'a');
+    harness.send({ type: 'focusedChatResolved', projectId: 'a', chatId: 'chat-9' });
+    harness.route('r2', 'a', { chatId: 'chat-9' });
+    harness.send({ type: 'focusedChatResolved', projectId: 'a', requestedChatId: 'chat-9', chatId: 'chat-10' });
+
+    expect(harness.sent.route.at(-1)).toEqual({ type: 'chatShown', projectId: 'a', chatId: 'chat-10' });
+    expect(harness.context().kept['a']?.chatId).toBe('chat-10');
+  });
+
+  it("should show the editor's correction of the route's chat before the session was given that chat", () => {
+    const harness = createFocusHarness();
+    harness.route('r1', 'a', { chatId: 'chat-x' });
+    harness.ready('r1', 'a');
+    harness.loaded();
+    harness.route('r2', 'a', { chatId: 'chat-y' });
+    harness.send({ type: 'focusedChatResolved', projectId: 'a', requestedChatId: 'chat-y', chatId: 'chat-z' });
+
+    expect(harness.sent.route).toEqual([{ type: 'chatShown', projectId: 'a', chatId: 'chat-z' }]);
+  });
 });

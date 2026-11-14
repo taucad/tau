@@ -200,7 +200,7 @@ export type FocusEvent =
       chatReady: boolean;
       availability: FocusAvailability;
     }>
-  /** The session resolved its focused chat for `requestedChatId`, the chat it was given (none when it was given none). */
+  /** The editor resolved its focused chat for `requestedChatId`, the route's chat it was asked for (none when none). */
   | Readonly<{ type: 'focusedChatResolved'; projectId: string; requestedChatId?: string; chatId: string }>
   | Readonly<{ type: 'openRequested'; projectId: string }>
   | Readonly<{ type: 'retry' }>
@@ -1401,9 +1401,9 @@ export const createFocusMachine = (policy: FocusPolicy) => {
           }
           const kept = context.kept[event.projectId];
           const given = context.forwarded[event.projectId];
-          if (event.requestedChatId !== given?.chatId || event.requestedChatId !== context.request.chatId) {
+          if (event.requestedChatId !== context.request.chatId) {
             /* I18: a resolution of a chat the route has switched away from, whether or not the session has been
-             * given the new chat yet. */
+             * given the new chat yet (as `use-project.tsx` guards it today). */
             return {};
           }
           enq.sendTo(context.ports.route, {

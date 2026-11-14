@@ -1149,7 +1149,7 @@ function cloudRetryOf({
   if (notice === 'failed' || wait?.isAnnounced === true || wait?.followsFailure === true) {
     return {};
   }
-  if (notice === undefined && wait !== undefined && timing.state === 'waiting') {
+  if (wait !== undefined && timing.state === 'waiting') {
     return { slowDelay: timing.slowDelay };
   }
   return undefined;

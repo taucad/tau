@@ -17,9 +17,9 @@ The Terminal has git with git-lfs built in. Both ship with Tau Desktop, so the T
 | Platform | What git can do                                                                                                              |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | macOS    | Read the project's history with `status`, `diff`, `log`, `show` and `blame`, and change it: commit, branch, stash and merge. |
-| Linux    | Read only, for now. `.git` is read-only, so `add`, `commit`, `switch -c` and `stash` fail with a permission error.           |
+| Linux    | The same, where Tau's store guard can start. Without `/dev/fuse`, `.git` is read-only and commits fail.                      |
 
-On macOS, `.git/config`, `.git/hooks` and the few other files that make git run a program or follow another path stay read-only, so `git config` and adding a hook fail.
+`.git/config`, `.git/hooks` and the few other files that make git run a program or follow another path stay read-only, so `git config`, `git remote add` and adding a hook fail.
 
 Tau backs up a commit you make in the Terminal like a save made in Tau. History names you, marked "made with git". Tau keeps what you staged, and while a merge, rebase or other git operation is in progress, it waits to save until the operation ends.
 

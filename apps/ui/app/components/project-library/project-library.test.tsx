@@ -854,6 +854,28 @@ describe('ProjectLibrary', () => {
       expect(screen.getByRole('list', { name: 'Projects' })).toHaveAttribute('aria-busy', 'true');
     });
 
+    it('calls its hooks in one order when the listing replaces the host empty content', () => {
+      const error = vi.spyOn(console, 'error');
+      try {
+        mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+        const view = renderLibrary();
+        expect(screen.getByText('community builds')).toBeInTheDocument();
+        mockUseProjectsResult = createUseProjectsResult();
+        view.rerender(
+          <TestRouter>
+            <TooltipProvider>
+              <ProjectLibrary headingLevel={2} emptyContent={<div>community builds</div>} />
+            </TooltipProvider>
+          </TestRouter>,
+        );
+        expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
+        const messages = error.mock.calls.map((call) => String(call[0]));
+        expect(messages.filter((message) => /order of Hooks/u.test(message))).toEqual([]);
+      } finally {
+        error.mockRestore();
+      }
+    });
+
     it('keeps the section once a project exists or a listing failure needs a retry', () => {
       mockUseProjectsResult = createUseProjectsResult();
       const listed = renderLibrary();
@@ -1016,11 +1038,14 @@ describe('ProjectLibrary', () => {
     };
     view.rerender(tree());
 
-    expect(within(screen.getByRole('list', { name: 'Projects' })).getAllByRole('listitem')).toEqual(remembered);
-    const messages = [...warn.mock.calls, ...error.mock.calls].map((call) => String(call[0]));
-    expect(messages.filter((message) => /uncontrolled to controlled/u.test(message))).toEqual([]);
-    warn.mockRestore();
-    error.mockRestore();
+    try {
+      expect(within(screen.getByRole('list', { name: 'Projects' })).getAllByRole('listitem')).toEqual(remembered);
+      const messages = [...warn.mock.calls, ...error.mock.calls].map((call) => String(call[0]));
+      expect(messages.filter((message) => /uncontrolled to controlled/u.test(message))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   /* P-g: the remembered cards follow the list's sort and search, so the listing moves nothing it agrees with. */

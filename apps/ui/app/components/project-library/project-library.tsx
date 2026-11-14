@@ -274,6 +274,9 @@ export function ProjectLibrary({
     retry: retryCloud,
   } = useCloudProjects();
   const auth = useResolvedAuth();
+  /* Read before the host's empty-content return below, so the hooks run in one order. */
+  const phoneTopBar = usePhoneTopBar();
+  const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
   const cloudPending = auth === 'authed' && !isCloudSettled && !isCloudFailed;
   const openCloudProject = useOpenCloudProject();
   useMaterializeCloudProjects({
@@ -555,13 +558,13 @@ export function ProjectLibrary({
 
   /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
      empty frames alike; the grid itself is busy for as long. */
-  const phoneTopBar = usePhoneTopBar();
-  const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
   const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
   /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
   const listingWait = (
     <WaitIndicator
       className='min-w-0 flex-1 basis-0 justify-end overflow-hidden'
+      /* Seen, not announced: the sidebar's Recents label announces the same listing wait (one announcement per group). */
+      live={false}
       active={isAwaitingListing}
       label='Loading projects'
       slowLabel='Still loading projects'

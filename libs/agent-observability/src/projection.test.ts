@@ -568,6 +568,20 @@ describe('projectRun with the content grant (LW6)', () => {
     expect(outcome.payload).toMatchObject({ plane: 'summary', fact: { turn: { kernel: 'replicad' } } });
   });
 
+  it('labels each tool with the host, kernel and model its run names on its outcome (LW17)', async () => {
+    const projection = await projectRun({ ...contentRun(), kernel: 'replicad' }, context({ host: 'browser' }));
+    const tools = projection.evidence.filter((item) => item.semantic.kind === 'tool');
+    const labels = { host: 'browser', kernel: 'replicad', model: await contractId('model', 'anthropic/model-b') };
+
+    expect(tools).toHaveLength(2);
+    for (const tool of tools) {
+      expect(evidenceSchema.safeParse(tool).success).toBe(true);
+      expect(tool.payload).toMatchObject({ plane: 'summary', fact: { kind: 'tool', labels } });
+    }
+    const outcome = outcomeOf(projection)!;
+    expect(outcome.payload).toMatchObject({ fact: { turn: labels } });
+  });
+
   it('writes a tool’s arguments in and its result out, and nothing of either without the grant', async () => {
     const granted_ = await projectRun(contentRun(), granted());
     const [edit] = granted_.evidence;

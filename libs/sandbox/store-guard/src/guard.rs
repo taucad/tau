@@ -338,8 +338,8 @@ impl Guard {
         if self.policy.protects(path) { refused() } else { Ok(()) }
     }
 
-    /// Refuse a name that would be created or opened for writing: a protected name, or a protected name's lock, which
-    /// git outside renames over the protected name with whatever its writer left in it.
+    /// Refuse a name the Terminal would create, open for writing, change, remove, move or link: a protected name, or a
+    /// protected name's lock, which git outside renames over the protected name with whatever its writer left in it.
     fn guard_write(&self, path: &Path) -> Outcome<()> {
         self.guard(path)?;
         if self.policy.locks(path) { refused() } else { Ok(()) }
@@ -396,7 +396,7 @@ impl Guard {
 
     fn set_attributes(&self, ino: INodeNo, change: Change, fh: Option<FileHandle>) -> Outcome<FileAttr> {
         let path = self.path(ino)?;
-        self.guard(&path)?;
+        self.guard_write(&path)?;
         let contents = change.mode.is_some() || change.uid.is_some() || change.gid.is_some() || change.size.is_some();
         if path.as_os_str().is_empty() {
             // The store's own directory keeps its mode and owner; only its times may change.
@@ -484,7 +484,7 @@ impl Guard {
 
     fn remove(&self, parent: INodeNo, name: &OsStr, flags: libc::c_int) -> Outcome<()> {
         let path = self.child(parent, name)?;
-        self.guard(&path)?;
+        self.guard_write(&path)?;
         let (directory_path, leaf) = split(&path)?;
         let directory = self.directory(directory_path)?;
         sys::with_name(leaf, |leaf| {
@@ -499,11 +499,8 @@ impl Guard {
     fn rename_entry(&self, from: (INodeNo, &OsStr), to: (INodeNo, &OsStr), flags: RenameFlags) -> Outcome<()> {
         let source = self.child(from.0, from.1)?;
         let target = self.child(to.0, to.1)?;
-        self.guard(&source)?;
+        self.guard_write(&source)?;
         self.guard_write(&target)?;
-        if flags.contains(RenameFlags::RENAME_EXCHANGE) && self.policy.locks(&source) {
-            return refused();
-        }
         if flags.contains(RenameFlags::RENAME_WHITEOUT) {
             return refused();
         }
@@ -539,7 +536,7 @@ impl Guard {
         let source = self.path(ino)?;
         let target = self.child(parent, name)?;
         // No second name for a protected file, and no protected name for any file.
-        self.guard(&source)?;
+        self.guard_write(&source)?;
         self.guard_write(&target)?;
         let (source_parent, source_name) = split(&source)?;
         let (target_parent, target_name) = split(&target)?;

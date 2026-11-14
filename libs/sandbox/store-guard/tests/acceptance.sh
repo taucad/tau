@@ -144,6 +144,9 @@ project="$work/two"
 new_store "$project"
 sync_dir="$work/sync"
 mkdir -p "$sync_dir"
+cp "$project/.git/config" "$project/.git/config.lock"
+chmod 0644 "$project/.git/config.lock"
+lock_before="$(stat -c '%s %a %Y' "$project/.git/config.lock") $(sha256sum < "$project/.git/config.lock")"
 cat > "$work/two.sh" <<'EOF'
 set -u
 sync="$1"
@@ -151,6 +154,14 @@ rc() { "$@" > /dev/null 2>&1; printf '%s\n' "$?"; }
 printf 'before-append=%s\n' "$(rc sh -c 'printf x >> .git/config')"
 # A protected name's lock is never opened for writing: git outside would rename it over the name.
 printf 'lock-open=%s\n' "$(rc sh -c 'exec 3>> .git/config.lock')"
+# Git outside's lock in flight: the Terminal can neither change, remove, move nor link it.
+printf 'lock-truncate=%s\n' "$(rc truncate -s 0 .git/config.lock)"
+printf 'lock-grow=%s\n' "$(rc truncate -s 1M .git/config.lock)"
+printf 'lock-chmod=%s\n' "$(rc chmod 0666 .git/config.lock)"
+printf 'lock-touch=%s\n' "$(rc touch .git/config.lock)"
+printf 'lock-unlink=%s\n' "$(rc rm -f .git/config.lock)"
+printf 'lock-rename=%s\n' "$(rc mv .git/config.lock .git/moved)"
+printf 'lock-link=%s\n' "$(rc ln .git/config.lock .git/linked)"
 # A descriptor held on an ordinary name, whose file git outside then renames over config.
 exec 3>> .git/held
 printf 'held-open=%s\n' "$?"
@@ -171,6 +182,8 @@ EOF
 guarded "$project" "$work/two.sh" "$sync_dir" > "$work/two.out" 2>&1 &
 session=$!
 for _ in $(seq 300); do [[ -e "$sync_dir/inside-ready" ]] && break; sleep 0.1; done
+lock_after="$(stat -c '%s %a %Y' "$project/.git/config.lock") $(sha256sum < "$project/.git/config.lock")"
+rm -f "$project/.git/config.lock"
 {
   git -C "$project" config branch.main.remote origin &&
     cp "$project/.git/config" "$project/.git/held" && mv -f "$project/.git/held" "$project/.git/config" &&
@@ -187,6 +200,11 @@ printf '%s\n' "$transcript" >> "$evidence"
 [[ "$(value lock-open)" != 0 && -n "$(value lock-open)" ]] && pass "config.lock refused for writing (rc $(value lock-open))" ||
   fail "config.lock opened for writing: rc $(value lock-open)"
 expect 'a descriptor held on an ordinary name' 0 "$(value held-open)"
+for case in lock-truncate lock-grow lock-chmod lock-touch lock-unlink lock-rename lock-link; do
+  [[ "$(value "$case")" != 0 && -n "$(value "$case")" ]] && pass "$case on git outside's lock refused" ||
+    fail "$case: rc $(value "$case") on git outside's lock"
+done
+[[ "$lock_after" == "$lock_before" ]] && pass "git outside's lock unchanged" || fail "lock changed: $lock_before -> $lock_after"
 [[ "$(value held-write)" != 0 && -n "$(value held-write)" ]] &&
   pass "the held descriptor cannot write once its file is config (rc $(value held-write))" ||
   fail "the held descriptor wrote into config: rc $(value held-write)"
@@ -216,7 +234,8 @@ git branch -D renamed > /dev/null 2>&1; printf 'delete-packed=%s\n' "$?"
 git gc -q > /dev/null 2>&1; printf 'gc=%s\n' "$?"
 git switch -qc rebased HEAD~2 && printf 'r\n' > r.txt && git add r.txt && git commit -qm R && git rebase -q main > /dev/null 2>&1
 printf 'rebase=%s\n' "$?"
-git fsck > /dev/null 2>&1; printf 'fsck=%s\n' "$?"
+fsck_output="$(git fsck 2>&1)"; printf 'fsck=%s\n' "$?"
+printf '%s\n' "$fsck_output" | sed 's/^/fsck-output: /'
 EOF
 transcript="$(guarded "$project" "$work/three.sh" 2>&1)" || true
 printf '%s\n' "$transcript" >> "$evidence"

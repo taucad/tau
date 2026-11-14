@@ -319,8 +319,9 @@ export const recordCloudLoad = (probe: CloudLoadProbe): void => {
     const grid = document.querySelector(probe.projectGrid);
     if (grid) {
       const top = Math.round(grid.getBoundingClientRect().top + globalThis.scrollY);
-      const cloudListing = [...document.querySelectorAll('[role="status"]')].some((status) =>
-        status.textContent.includes(probe.cloudListingText),
+      /* The Projects header's slot holds the wait whether or not it is announced; only a Retry's wait is. */
+      const cloudListing = [...document.querySelectorAll(probe.statusSlot)].some((slot) =>
+        slot.textContent.includes(probe.cloudListingText),
       );
       const last = record.gridTops.at(-1);
       if (last?.top !== top || last.cloudListing !== cloudListing) {

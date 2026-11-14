@@ -142,6 +142,30 @@ describe('cloud project deletion', () => {
     expect(getCloudDeletionState(project.id)).toBe('deleting');
   });
 
+  /* D21 round 3: a failed listing with no projects to watch keeps its failure and Retry; the deletion poll waits for the
+     person's Retry rather than turning the failure back into a wait every 3 s. */
+  it.fails('should not poll a failed listing that has no projects while a deletion is pending', async () => {
+    const { wrapper } = createWrapper();
+    const view = renderHook(useDeleteCloudProject, { wrapper });
+    await act(async () => {
+      await view.result.current.mutateAsync(project);
+    });
+    expect(getCloudDeletionState(project.id)).toBe('deleting');
+    const isListing = ([input]: Parameters<typeof fetch>): boolean =>
+      typeof input === 'string' && input.endsWith('/v1/projects');
+    fetchMock.mockImplementation(async () => new Response(undefined, { status: 400 }));
+    const listing = renderHook(useCloudProjects, createWrapper());
+    await waitFor(() => {
+      expect(listing.result.current.cloud).toBe('failed');
+    });
+    const asked = fetchMock.mock.calls.filter((call) => isListing(call)).length;
+    await new Promise((resolve) => {
+      setTimeout(resolve, 3500);
+    });
+    expect(fetchMock.mock.calls.filter((call) => isListing(call))).toHaveLength(asked);
+    expect(listing.result.current.cloud).toBe('failed');
+  });
+
   it('should discard stale active listings after authoritative deletion', async () => {
     const { wrapper, client } = createWrapper();
     const view = renderHook(useDeleteCloudProject, { wrapper });

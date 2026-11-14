@@ -1544,13 +1544,56 @@ describe('ProjectLibrary', () => {
       cloudListing.isFetching = true;
       const clock = { at: 0 };
       const { header } = renderSlot({ clock });
-      const retry = within(header()).getByRole('button', { name: 'Retry', hidden: true });
+      const retry = within(header()).getByRole('button', { name: /^Retry/u, hidden: true });
       /* Pressed at 11 s, once the slow words and their Retry show. */
       clock.at = 11_000;
       await userEvent.click(retry);
       expect(cloudListing.retry).toHaveBeenCalledOnce();
       expect(retry).toBeInTheDocument();
       expect(retry).toHaveFocus();
+    });
+
+    /* D21 round 3: the slow wait's Retry is the failure's Retry, so a Retry that fails keeps its focus. */
+    it.fails("C14: keeps focus on the slow wait's Retry when the request it starts fails", async () => {
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
+      cloudListing.isFetching = true;
+      const clock = { at: 0 };
+      const slot = renderSlot({ clock });
+      const retry = within(slot.header()).getByRole('button', { name: /^Retry/u, hidden: true });
+      clock.at = 11_000;
+      await userEvent.click(retry);
+      cloudListing.isFetching = false;
+      cloudListing.isFailed = true;
+      slot.rerender();
+      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
+      expect(retry).toBeInTheDocument();
+      expect(retry).toHaveFocus();
+    });
+
+    /* D21 round 3: a Retry pressed beside the first wait's slow words starts a wait of its own, which is announced. */
+    it.fails("C14: announces the wait the slow wait's Retry starts, timed from the press", async () => {
+      cloudListing.retry.mockImplementationOnce(
+        async () =>
+          new Promise<void>(() => {
+            /* Never answers in this row. */
+          }),
+      );
+      cloudListing.isFetching = true;
+      const clock = { at: 0 };
+      const slot = renderSlot({ clock });
+      clock.at = 11_000;
+      await userEvent.click(within(slot.header()).getByRole('button', { name: /^Retry/u, hidden: true }));
+      const announced = within(slot.header())
+        .queryAllByRole('status')
+        .filter((status) => status.textContent.includes('Tau Cloud'));
+      expect(announced).toHaveLength(1);
+      const body = slot.header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+      expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
     });
 
     /* D21 round 2: Retry on a failure keeps its focus while the wait it starts runs. */
@@ -1611,6 +1654,28 @@ describe('ProjectLibrary', () => {
       cloudListing.isFetching = true;
       slot.rerender();
       expect(row).not.toHaveClass('max-md:hidden');
+    });
+
+    /* D21 round 3: on a phone the slot's status region is in the accessibility tree before its first words, so they
+       are announced when they arrive. */
+    it.fails("C14: keeps the phone header row's status region readable before a notice shows", () => {
+      const slot = renderSlot({ isPhoneBar: true });
+      const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
+      expect(row).not.toHaveClass('max-md:hidden');
+      expect(row).toHaveClass('max-md:sr-only');
+    });
+
+    /* D21 round 3: the phone row shows for a notice the slot shows, not one the local listing's wait still holds back. */
+    it.fails("C14: keeps the phone header row hidden while the local listing's wait holds a notice back", () => {
+      mockRememberedShape = { count: 2, projects: [] };
+      mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], isLoading: true };
+      cloudListing.isFailed = true;
+      const slot = renderSlot({ isPhoneBar: true });
+      const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
+      expect(row).toHaveClass('max-md:sr-only');
+      mockUseProjectsResult = createUseProjectsResult();
+      slot.rerender();
+      expect(row).not.toHaveClass('max-md:sr-only');
     });
 
     it('C14: keeps the Tau Cloud wait inside the header slot, with no row above the grid', () => {

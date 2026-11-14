@@ -229,6 +229,10 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await waitForSettledHome();
       const record = await keep('h6-listing-held');
       expect(record.gridTops.length, 'the project grid was never on screen').toBeGreaterThan(0);
+      precondition(
+        record.gridTops.some((sample) => sample.cloudListing),
+        'H6: the Tau Cloud listing was never awaited while the grid was on screen',
+      );
       const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
       await defect(() => {
         expect(tops, `H6: the project grid's top offset moved (${JSON.stringify(record.gridTops)})`).toEqual([

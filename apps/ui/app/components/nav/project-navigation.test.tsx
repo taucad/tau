@@ -803,10 +803,10 @@ describe('ProjectNavigation', () => {
      * not live, on its own page too. It sorts with the rest, below the live
      * ones and the "Earlier" divider.
      */
-    it.fails('R1: the open project whose session closed sits below the live ones and the divider', () => {
+    it('R1: the open project whose session closed sits below the live ones and the divider', () => {
       pathname = '/w/home/one';
       liveProjectIds = ['proj_two'];
-      closedReasons = { proj_one: 'Closed to save memory' };
+      closedReasons = { [firstProject.id]: 'Closed to save memory' };
       mockUseProjects.mockReturnValue({
         ...projectsResult,
         projects: [{ ...firstProject, lastActivityAt: 30 }, secondProject],

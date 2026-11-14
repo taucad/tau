@@ -44,7 +44,7 @@ import {
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
-import { useLiveProjectIds } from '#hooks/use-sessions.js';
+import { useLiveProjectIds, useProjectLiveness } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import {
@@ -72,8 +72,9 @@ export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
 /**
- * The projects the list draws as live: the live sessions, and the open project from the first frame. Its session goes
- * live after the remembered rows are drawn, and it would otherwise move above them then (U6).
+ * The projects the list draws as live: the live sessions, and the open project from the first frame until its session
+ * closes. Its session goes live after the remembered rows are drawn, and it would otherwise move above them then (U6).
+ * Once closed (a policy or the person closed it), it is not live, on its own page too (R1/P46).
  */
 const useShownLiveIds = (
   rows: readonly SidebarProject[],
@@ -83,9 +84,11 @@ const useShownLiveIds = (
   const openProjectId = rows.find(
     (project) => project.slugs !== undefined && pathname === projectUrlOr(project.slugs),
   )?.id;
+  const isOpenProjectClosed = useProjectLiveness(openProjectId ?? '').closedReason !== undefined;
+  const shownOpenId = isOpenProjectClosed ? undefined : openProjectId;
   return useMemo(
-    () => new Set(openProjectId === undefined ? liveProjectIds : [...liveProjectIds, openProjectId]),
-    [liveProjectIds, openProjectId],
+    () => new Set(shownOpenId === undefined ? liveProjectIds : [...liveProjectIds, shownOpenId]),
+    [liveProjectIds, shownOpenId],
   );
 };
 

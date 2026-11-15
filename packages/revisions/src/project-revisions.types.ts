@@ -143,8 +143,9 @@ export type RevisionStatusProjection = Readonly<{
 /**
  * The readiness vocabulary of D10: `connected → treeReady → entryReady →
  * materialized → filled`. The editor, tree and viewer open at `treeReady` and
- * `entryReady`; search, export, the LSP workspace and a revision cut wait for
- * `materialized`; a model render waits for `filled`.
+ * `entryReady`; search, export, the LSP workspace, a revision cut and a model
+ * render wait for `materialized`. A render then waits only on the large objects
+ * its own closure reads (T6); `filled` is every large object here.
  *
  * @public
  */

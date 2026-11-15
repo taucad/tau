@@ -113,7 +113,30 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       }
     }
     const reads: string[] = [];
+    /* While set, a write of the comparison record waits for it: the record is never a comparison's to wait on. */
+    let recordWrites: Promise<void> | undefined;
+    const holdRecordWrites = (): (() => void) => {
+      let release: () => void = () => undefined;
+      recordWrites = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        recordWrites = undefined;
+        release();
+      };
+    };
+    const store = rooted.privateStore ?? rooted;
+    const privateStore = Object.assign(Object.create(store) as typeof store, {
+      writeFile: (async (path: string, ...rest: readonly unknown[]) => {
+        if (path.includes('tau-compare-')) {
+          await recordWrites;
+        }
+        // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the store's own overloads.
+        return (store.writeFile as (...arguments_: any[]) => Promise<unknown>).call(store, path, ...rest);
+      }) as typeof store.writeFile,
+    });
     const counted = Object.assign(Object.create(rooted) as RevisionFileSystem, {
+      privateStore,
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
         reads.push(path);
         // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
@@ -151,7 +174,7 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       service.dispose();
     };
     cleanups.push(close);
-    return { root, rooted, port, actors, walking, reads, fillChecked, close };
+    return { root, rooted, port, actors, walking, reads, fillChecked, holdRecordWrites, close };
   };
   return { root, session };
 };
@@ -249,6 +272,51 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
 
     expect(second.reads.length).toBeGreaterThan(0);
     expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should answer a comparison without waiting for its record to be written', async () => {
+    const { session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    const release = first.holdRecordWrites();
+    const answered = await Promise.race([
+      compare(first.actors),
+      new Promise<'waited'>((resolve) => {
+        setTimeout(() => {
+          resolve('waited');
+        }, 2000);
+      }),
+    ]);
+    release();
+    await first.close();
+
+    expect(answered).not.toBe('waited');
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toEqual([]);
+    expect(treeId).toBe(answered);
+  });
+
+  it('should keep the newest comparison of a session, taken from the index, for the next one', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    await compare(first.actors);
+    await writeFile(join(root, 'dir1/f6.txt'), 'edited in the first session\n');
+    await utimes(join(root, 'dir1/f6.txt'), settledTime, new Date(Date.now() - 30_000));
+    const edited = await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toEqual([]);
+    expect(treeId).toBe(edited);
     expect(treeId).toBe(await compare(second.walking));
   });
 

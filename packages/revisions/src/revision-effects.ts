@@ -238,7 +238,7 @@ import {
   recordAnswers,
   serializeCompareRecord,
 } from '#compare-record.js';
-import type { CompareObservation } from '#compare-record.js';
+import type { CompareObservation, CompareReading } from '#compare-record.js';
 
 /** The head a listing was read under: the paths it tracks are never ignored. */
 type TrackedHead = Readonly<{ revisionId: string; tree: ImmutableRevisionTree }>;
@@ -771,6 +771,8 @@ const isUnderRoot = (path: string, roots: ReadonlySet<string>): boolean => {
   }
   return false;
 };
+/* How long a checkout's comparisons pause before the newest one's record is written (Tau #2013). */
+const keepComparisonDelayMilliseconds = 2000;
 const isMissingFile = (error: unknown): boolean => {
   const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
   return code === 'ENOENT' || name === 'NotFoundError';
@@ -1105,26 +1107,35 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* Captures begin in this order; `last` only moves forward along it. */
   let captureSequence = 0;
   /*
-   * When each file of a captured tree was read: a clock reading taken before
-   * its bytes were, carried over from the tree a capture started from for the
-   * files it kept. A comparison's record keys its racy guard on it (Tau #2013).
+   * How each file of a captured tree was read: the index's stats of it and a
+   * clock reading, both taken before its bytes were, carried over from the tree
+   * a capture started from for the files it kept. A comparison's record keys on
+   * them (Tau #2013): stats taken after the read could name an edit the bytes
+   * never saw.
    */
-  const readings = new WeakMap<ImmutableRevisionTree, ReadonlyMap<string, number>>();
+  const readings = new WeakMap<ImmutableRevisionTree, ReadonlyMap<string, CompareReading>>();
   const recordReadings = (
     tree: ImmutableRevisionTree,
     at: number,
+    stats: readonly FileStatEntry[] | undefined,
     kept?: Readonly<{ from: ImmutableRevisionTree; roots: ReadonlySet<string> }>,
   ): void => {
     const before = kept === undefined ? undefined : readings.get(kept.from);
-    const read = new Map<string, number>();
+    const stated = new Map((stats ?? []).map((entry) => [entry.path, entry] as const));
+    const read = new Map<string, CompareReading>();
     for (const path of revisionTreeFiles(tree).keys()) {
       const reread = kept === undefined || isUnderRoot(path, kept.roots);
-      const when = reread ? at : before?.get(path);
-      if (when === undefined) {
-        /* A kept file with no reading of its own: no record can key on this tree. */
+      const stat = reread ? stated.get(path) : undefined;
+      const reading = reread
+        ? stat === undefined
+          ? undefined
+          : { readAt: at, size: stat.size, mtimeMs: stat.mtimeMs }
+        : before?.get(path);
+      if (reading === undefined) {
+        /* A file with no reading of its own: no record can key on this tree. */
         return;
       }
-      read.set(path, when);
+      read.set(path, reading);
     }
     readings.set(tree, read);
   };
@@ -1184,8 +1195,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             ...(signal === undefined ? {} : { signal }),
           });
           const treeId = await checkoutTreeId(input.checkoutId, tree);
-          /* Evidence for the next session, never this comparison's outcome. */
-          await keepComparison(place, rooted, { treeId, head, tree }).catch(() => undefined);
+          /* Evidence for the next session, never this comparison's outcome: kept off its path. */
+          keepSoon(place, { treeId, head, tree });
           return { treeId, tree };
         });
       } finally {
@@ -1249,10 +1260,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const keptComparisons = new Map<string, string>();
   /*
    * Keep a comparison's answer for the next session (Tau #2013): its tree id
-   * with the index's stats of every file it captured and when each was read.
-   * Kept only when everything the stats name is accounted for: each captured
-   * file has a reading, the head did not move under the capture, and every
-   * versioned path it left out is one the ignore rules leave out.
+   * with the index's stats of every file it captured, as they stood before
+   * each was read. Kept only when everything the stats name is accounted for:
+   * each captured file has a reading and has not moved since, the head did not
+   * move under the capture, and every versioned path it left out is one the
+   * ignore rules leave out.
    */
   const keepComparison = async (
     place: Checkout,
@@ -1260,8 +1272,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     compared: Readonly<{ treeId: string; head: string | undefined; tree: ImmutableRevisionTree }>,
   ): Promise<void> => {
     const path = compareRecordPath(place.id);
-    const readAt = readings.get(compared.tree);
-    if (path === undefined || readAt === undefined || readAt.size > compareRecordMaximumFiles) {
+    const read = readings.get(compared.tree);
+    if (path === undefined || read === undefined || read.size > compareRecordMaximumFiles) {
       return;
     }
     const kept = await (async () => {
@@ -1269,7 +1281,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (now === undefined || now.head !== compared.head || now.stats.length > compareRecordMaximumFiles) {
         return undefined;
       }
-      const left = now.stats.flatMap(({ path: statPath }) => (readAt.has(statPath) ? [] : [statPath]));
+      const left = now.stats.flatMap(({ path: statPath }) => (read.has(statPath) ? [] : [statPath]));
       if (left.length > 0) {
         const listing = new Set(
           (await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root, left)) ?? [],
@@ -1285,7 +1297,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       return compareRecordOf(
         { treeId: compared.treeId, head: now.head, ignores: now.ignores, modes },
         now.stats,
-        readAt,
+        read,
       );
     })();
     if (kept === undefined) {
@@ -1297,6 +1309,55 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     await writeControlRecord(controlPlaneFiles(await recordsFileSystem()), path, text);
     keptComparisons.set(place.id, text);
+  };
+  /*
+   * A comparison's record is written off its path (Tau #2013): the newest
+   * comparison of each checkout is kept once comparisons pause, and any still
+   * waiting when the actors settle is kept then. One keep runs at a time, so an
+   * older answer never lands over a newer one.
+   */
+  const pendingKeeps = new Map<
+    string,
+    Readonly<{ place: Checkout; compared: Parameters<typeof keepComparison>[2]; timer: ReturnType<typeof setTimeout> }>
+  >();
+  let keeping: Promise<void> = Promise.resolve();
+  const runKeep = (checkoutId: string): Promise<void> => {
+    const pending = pendingKeeps.get(checkoutId);
+    if (pending === undefined) {
+      return keeping;
+    }
+    clearTimeout(pending.timer);
+    pendingKeeps.delete(checkoutId);
+    const before = keeping;
+    // async-iife: bootstrap -- chained so keeps land in order; a keep that fails leaves the record as it was.
+    keeping = (async (): Promise<void> => {
+      await before;
+      try {
+        await useFileSystem(pending.place, async (rooted) => keepComparison(pending.place, rooted, pending.compared));
+      } catch {
+        /* Evidence for the next session only: a keep that fails costs that session a walk. */
+      }
+    })();
+    return keeping;
+  };
+  const keepSoon = (place: Checkout, compared: Parameters<typeof keepComparison>[2]): void => {
+    if (compareRecordPath(place.id) === undefined || !readings.has(compared.tree)) {
+      return;
+    }
+    const previous = pendingKeeps.get(place.id);
+    if (previous !== undefined) {
+      clearTimeout(previous.timer);
+    }
+    const timer = setTimeout(() => {
+      void runKeep(place.id);
+    }, keepComparisonDelayMilliseconds); // Bound: keepComparisonDelayMilliseconds.
+    pendingKeeps.set(place.id, { place, compared, timer });
+  };
+  const flushKeeps = async (): Promise<void> => {
+    for (const checkoutId of [...pendingKeeps.keys()]) {
+      void runKeep(checkoutId);
+    }
+    await keeping;
   };
   /*
    * The tree id an earlier session's record answers for the files now, or
@@ -1435,6 +1496,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * never from the close that waits for it. */
     }
     await stopFills();
+    await flushKeeps();
     while (activeOperations.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- operations may admit another tracked authority operation before settling.
       await Promise.allSettled(activeOperations);
@@ -1950,7 +2012,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (leavesRecords !== true) {
         await recordedBlobOids(rooted, read, stats);
       }
-      recordReadings(captured, observedAt);
+      recordReadings(captured, observedAt, stats);
       return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
@@ -2054,7 +2116,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         changedSince: { tree: last, paths: [...paths] },
         ...(signal === undefined ? {} : { signal }),
       });
-      recordReadings(captured, observedAt, { from: last, roots: paths });
+      recordReadings(captured, observedAt, stats, { from: last, roots: paths });
       return captured;
     };
     /* A complete feed names the paths: only they are asked about, unless an ignore rule changed, which walks. */
@@ -2064,6 +2126,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (!(await askAgain(paths, new Set()))) {
         return walk();
       }
+      const roots = new Set(paths);
+      /* The index's stats of the named paths alone, before their bytes: what a record keys their reading on. */
+      const above = new Set(paths.flatMap((path) => [...path.matchAll(/\//gu)].map(({ index }) => path.slice(0, index))));
+      const stats = await rooted
+        .statTree?.('', {
+          admits: (path, kind) => isUnderRoot(path, roots) || (kind === 'dir' && above.has(path)),
+        })
+        .catch(() => undefined);
       /* `last` carries the modes it inherited, and a moved head empties the paths, so it is still the head's (I6). */
       const captured = await captureRevisionTree(rooted, {
         exclude,
@@ -2071,7 +2141,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         changedSince: { tree: from, paths },
         ...(signal === undefined ? {} : { signal }),
       });
-      recordReadings(captured, readAt, { from, roots: new Set(paths) });
+      recordReadings(captured, readAt, stats, { from, roots });
       return captured;
     };
     const tree =

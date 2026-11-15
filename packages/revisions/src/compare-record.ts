@@ -28,6 +28,9 @@ import type { FileMode, FileStatEntry } from '@taucad/filesystem';
  */
 export type CompareStat = readonly [path: string, size: number, mtimeMs: number, readAt: number];
 
+/** How one captured file was read: the index's stats of it and a clock reading, both taken before its bytes. */
+export type CompareReading = Readonly<{ readAt: number; size: number; mtimeMs: number }>;
+
 /** What a comparison was answered over. @internal */
 export type CompareRecord = Readonly<{
   treeId: string;
@@ -83,10 +86,11 @@ const byPath =(left: string, right: string): number => (left < right ? -1 : left
  * @internal
  * @param answer - The tree id, head and ignore context it was answered under, and each captured file's mode where
  *   the provider reports modes.
- * @param stats - The index's stats once the capture ended, of every versioned path.
- * @param readAt - When each captured file was read, by path: a clock reading taken before the read.
- * @returns The record, or `undefined` when a captured file has no stat or reading to key it on, or an ignored
- *   path is a `.gitignore`, whose edit no captured stat would show.
+ * @param stats - The index's stats now, of every versioned path.
+ * @param readings - How each captured file was read, by path.
+ * @returns The record, or `undefined` when a captured file has no reading, or has moved since it was read (the
+ *   record would only ever be refused), or an ignored path is a `.gitignore`, whose edit no captured stat would
+ *   show.
  */
 export const compareRecordOf = (
   answer: Readonly<{
@@ -96,20 +100,22 @@ export const compareRecordOf = (
     modes?: Readonly<Record<string, FileMode>> | undefined;
   }>,
   stats: readonly FileStatEntry[],
-  readAt: ReadonlyMap<string, number>,
+  readings: ReadonlyMap<string, CompareReading>,
 ): CompareRecord | undefined => {
   const { modes, ...answered } = answer;
   const files: CompareStat[] = [];
   const ignored: string[] = [];
   for (const { path, size, mtimeMs } of stats) {
-    const read = readAt.get(path);
-    if (read === undefined) {
+    const reading = readings.get(path);
+    if (reading === undefined) {
       ignored.push(path);
+    } else if (reading.size !== size || reading.mtimeMs !== mtimeMs) {
+      return undefined;
     } else {
-      files.push([path, size, mtimeMs, read]);
+      files.push([path, size, mtimeMs, reading.readAt]);
     }
   }
-  if (files.length !== readAt.size || ignored.some((path) => ignoreRulesFile.test(path))) {
+  if (files.length !== readings.size || ignored.some((path) => ignoreRulesFile.test(path))) {
     return undefined;
   }
   return {

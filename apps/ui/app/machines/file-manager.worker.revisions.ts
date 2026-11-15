@@ -109,6 +109,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '@taucad/ui-core/lib/geospec-candidate-git';
 
 /**
@@ -686,6 +687,12 @@ export type WorkerProjectRevisionsOptions = Readonly<{
    * publishing is refused rather than guessed.
    */
   apiBaseUrl?: () => string | undefined;
+  /**
+   * The page's resolved telemetry consent, read per sync attempt (runtime observability PR-7, AR-W6-02). The worker
+   * cannot read the device preference, the cookie banner or the account, so the page says it on the port; only
+   * `granted` reports, and absent (never said) reports nothing.
+   */
+  telemetryConsent?: () => ReportingConsent | undefined;
   /** Whether this project may hold its `revision` long poll now (RV-W5b F12); every project may without it. */
   attention?: RemoteAttention;
 }>;
@@ -1281,10 +1288,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   actor.start();
   published = statusOf(actor.getSnapshot());
-  /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own. */
+  /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own.
+   * PR-7 (AR-W6-02): only under the page's resolved consent, so the switch stops it; `unknown` sends nothing. */
   actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
     const apiBaseUrl = options.apiBaseUrl?.();
-    if (apiBaseUrl === undefined || isDesktopTarget()) {
+    if (apiBaseUrl === undefined || isDesktopTarget() || options.telemetryConsent?.() !== 'granted') {
       return;
     }
     const { type: _type, durationMilliseconds, ...detail } = attempt;
@@ -2110,7 +2118,10 @@ export type WorkerRevisionRequest =
   | (GitRemoteCredential & Readonly<{ command: 'pushGithub'; id?: number }>)
   /* Whether this project is the page's focused one (RV-W5b F12): a port frame,
    * because focus is the page's fact about its projects, not the tree's. */
-  | Readonly<{ command: 'focus'; focused: boolean; id?: number }>;
+  | Readonly<{ command: 'focus'; focused: boolean; id?: number }>
+  /* The page's resolved telemetry consent (runtime observability PR-7, AR-W6-02): a port frame, said on every new
+   * port and on every change, because only the page can resolve it. The sync attempt reporter reads it. */
+  | Readonly<{ command: 'telemetryConsent'; consent: ReportingConsent; id?: number }>;
 
 /**
  * What one correlated command answered.
@@ -2304,6 +2315,8 @@ type ProjectEntry = {
   readonly setApiBaseUrl: (apiBaseUrl: string) => void;
   /** Whether this project is the page's focused one, which alone holds the long poll (F12). */
   readonly setFocused: (focused: boolean) => void;
+  /** Record the page's resolved telemetry consent, which the sync attempt reporter reads (PR-7). */
+  readonly setTelemetryConsent: (consent: ReportingConsent) => void;
   readonly revisions: Promise<WorkerProjectRevisions>;
   readonly unsubscribe: () => void;
 };
@@ -2447,6 +2460,8 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     /* Held apart from the credential: the origin outlives any one remote, and
      * Publish names it without minting anything (review R4). */
     let apiBaseUrl: string | undefined;
+    /* The page's last word; never said means nothing is reported (PR-7). */
+    let telemetryConsent: ReportingConsent | undefined;
     const attention = createRemoteAttention();
     const revisions = (async (): Promise<WorkerProjectRevisions> =>
       createWorkerProjectRevisions({
@@ -2467,6 +2482,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         /* The same fact the credential frame carries, read per use: a page that
          * signs in after the project opened publishes without reopening it. */
         apiBaseUrl: () => apiBaseUrl ?? credential?.apiBaseUrl,
+        telemetryConsent: () => telemetryConsent,
         ...((): Readonly<{ recordHistoryPush?: <Result>(run: () => Promise<Result>) => Promise<Result> }> => {
           const record = options.recordHistoryPush?.(projectId);
           return record === undefined ? {} : { recordHistoryPush: record };
@@ -2541,6 +2557,9 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         apiBaseUrl = url;
       },
       setFocused: attention.setFocused,
+      setTelemetryConsent: (consent) => {
+        telemetryConsent = consent;
+      },
       revisions,
       unsubscribe: () => {
         unsubscribe();
@@ -2709,6 +2728,13 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           /* Focus is the page's fact about its projects (F12); a reader has none to give. */
           if (!reader) {
             entry.setFocused(data.focused);
+          }
+          return;
+        }
+        if (data.command === 'telemetryConsent') {
+          /* The page's consent, like focus: a reader has none to give (PR-7). */
+          if (!reader) {
+            entry.setTelemetryConsent(data.consent);
           }
           return;
         }

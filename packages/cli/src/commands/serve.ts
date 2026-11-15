@@ -1177,7 +1177,11 @@ export const serveCommand = defineCommand({
         ...(configuredAgent ? { agent: configuredAgent } : {}),
         ...(runtimeTelemetry === undefined
           ? {}
-          : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
+          : {
+              observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller),
+              /* PR-7 (AR-W6-02): sync attempts under the same rule as the runtime reporter. */
+              syncTelemetryConsent: () => runtimeTelemetry.status().consent,
+            }),
         ...(observeChats === undefined ? {} : { observeChats }),
         onEvent,
       });

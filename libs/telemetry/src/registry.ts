@@ -747,6 +747,12 @@ export const TauMetrics = {
     }),
   }),
 
+  /*
+   * Deprecated, in the runtime-telemetry dual-write window (package "Dual-write window (after PR-9)"): the legacy
+   * `observability.createGeometry`/`exportGeometry` entries still record here, and the API also writes each recorded
+   * `runtime.operation` evaluate/render (executions, duration) and export (export duration, `export.format` `_OTHER`).
+   * Dashboards read `tau_runtime_*`; a follow-up removes these three once 14 days pass with no old-entry receipts.
+   */
   kernelExecutionDuration: defineHistogram({
     name: 'kernel.execution.duration',
     unit: 's',

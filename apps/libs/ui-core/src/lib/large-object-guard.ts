@@ -14,6 +14,7 @@ import type {
 } from '@taucad/chat/rpc';
 import { rpcClientErrorCode } from '@taucad/chat';
 import { getErrno } from '@taucad/utils/error';
+import { resolveRootedPath } from '@taucad/utils/path';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { LargeObjectsFacet, ProjectReadiness } from '@taucad/revisions';
 import { reachesReadiness } from '@taucad/revisions';
@@ -186,6 +187,18 @@ const mirrorEntryExtensions: ReadonlySet<string> = new Set(
   kernelConfigurations.filter(({ id }) => workspaceMirrorKernels.has(id)).map(({ mainFile }) => extensionOf(mainFile)),
 );
 
+/*
+ * A caller's path as the facet names it, checkout-relative: an agent's `targetFile` may carry a leading `/` or `./`,
+ * repaired as the project-path tool inputs are. A path that cannot be made rooted stays as it was, and matches nothing.
+ */
+const checkoutPathOf = (path: string): string => {
+  try {
+    return resolveRootedPath(path.startsWith('/') && !path.startsWith('//') ? path.slice(1) : path);
+  } catch {
+    return path;
+  }
+};
+
 /** What a kernel run reads before anything else: named paths, or the whole workspace. */
 export type KernelClosure = readonly string[] | 'workspace';
 
@@ -198,12 +211,13 @@ export type KernelClosure = readonly string[] | 'workspace';
  * @returns The closure.
  */
 export const kernelClosure = (entryPath: string, kernel?: KernelId): KernelClosure => {
-  if (entryPath === '') {
+  const path = checkoutPathOf(entryPath);
+  if (path === '') {
     return ['tau.json'];
   }
   const mirrors =
-    kernel === undefined ? mirrorEntryExtensions.has(extensionOf(entryPath)) : workspaceMirrorKernels.has(kernel);
-  return mirrors ? 'workspace' : ['tau.json', entryPath];
+    kernel === undefined ? mirrorEntryExtensions.has(extensionOf(path)) : workspaceMirrorKernels.has(kernel);
+  return mirrors ? 'workspace' : ['tau.json', path];
 };
 
 /**

@@ -244,6 +244,14 @@ describe('kernel closure', () => {
     expect(kernelClosure('main.ts', 'replicad')).toStrictEqual(['tau.json', 'main.ts']);
     expect(kernelClosure('')).toStrictEqual(['tau.json']);
   });
+  /* An agent's `targetFile` may carry a leading `/` or `./`; the facet's paths are checkout-relative. */
+  it('names its entry as the facet does, whatever spelling the caller used', () => {
+    expect(kernelClosure('/main.scad')).toStrictEqual(['tau.json', 'main.scad']);
+    expect(kernelClosure('./lib/gear.ts')).toStrictEqual(['tau.json', 'lib/gear.ts']);
+    expect(kernelClosure('/')).toStrictEqual(['tau.json']);
+    expect(kernelClosure('../outside.scad')).toStrictEqual(['tau.json', '../outside.scad']);
+    expect(closureHasPending(kernelClosure('/models/part.step'), ['models/part.step'])).toBe(true);
+  });
   /* A workspace mirror lists sizes raw and reads through, so a pending pointer reads as "changed while mirroring". */
   it('is the whole workspace for a kernel that mirrors it, named or known only by its entry', () => {
     expect(kernelClosure('main.py', 'build123d')).toBe('workspace');

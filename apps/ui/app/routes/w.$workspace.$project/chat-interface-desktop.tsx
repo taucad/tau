@@ -119,13 +119,18 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
   /* A composer focus asked for by the navigation (`focusChatComposer`) runs when the chat lane mounts, while the panes
    * are still unrendered and cannot take focus. It is given again in the commit that reveals them. */
+  const focusAtMountRef = useRef<Element | undefined>(undefined);
+  useLayoutEffect(() => {
+    focusAtMountRef.current = document.activeElement ?? undefined;
+  }, []);
   useLayoutEffect(() => {
     const state = globalThis.history.state as { usr?: { focusChatComposer?: unknown } } | undefined;
     if (!areLanesLaidOut || state?.usr?.focusChatComposer !== true) {
       return;
     }
-    const active = document.activeElement;
-    if (active !== null && active !== document.body) {
+    /* Only if nothing has taken focus since the workspace mounted (the control that navigated may still hold it). */
+    const active = document.activeElement ?? undefined;
+    if (active !== focusAtMountRef.current && active !== document.body && active !== undefined) {
       return;
     }
     containerRef.current

@@ -71,7 +71,7 @@ export function WorkspaceFrame({
     <div
       data-slot='workspace-frame'
       className={cn(
-        '@container size-full bg-background md:relative md:isolate',
+        'size-full bg-background md:relative md:isolate',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route
@@ -80,20 +80,24 @@ export function WorkspaceFrame({
       )}
       style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
     >
-      <div aria-hidden='true' data-slot='workspace-frame-lanes' className='absolute inset-0 -z-10 flex max-md:hidden'>
+      <div
+        aria-hidden='true'
+        data-slot='workspace-frame-lanes' /* The query container is the lanes layer, the frame's own width, so the content over it gains none. */
+        className='@container absolute inset-0 -z-10 flex max-md:hidden'
+      >
         <div
           data-slot='workspace-lane'
           data-lane='chat'
-          className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1119px]:[display:var(--frame-chat-compact-display,flex)]'
+          className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'
         >
           <ChatLaneFrame />
         </div>
         <div data-slot='workspace-lane' data-lane='viewer' className='h-full min-w-0 flex-1' />
         <div
-          /* 1120px is `compactWorkspaceWidth` in `chat-interface-desktop.tsx`; Tailwind needs the literal. */
+          /* `@max-[1120px]` is below `compactWorkspaceWidth` (1120px) in `chat-interface-desktop.tsx`; Tailwind needs the literal. */
           data-slot='workspace-lane'
           data-lane='workbench'
-          className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1119px]:[display:var(--frame-workbench-compact-display,none)]'
+          className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
         />
       </div>
       {children}

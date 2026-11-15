@@ -123,6 +123,17 @@ describe('WorkspaceFrame', () => {
     );
   });
 
+  /* Review round 2: the lanes follow the live layout's compact rule (under 1120 px), and the query container is the
+   * lanes layer, so the content over the frame gains no container for its own queries. */
+  it('switches to the compact lanes below 1120 px and gives the content no query container', () => {
+    const frame = renderFrame('/w/home/one');
+
+    expect(lane(frame, 'workbench').className).toContain('@max-[1120px]:');
+    expect(lane(frame, 'chat').className).toContain('@max-[1120px]:');
+    expect(frame).not.toHaveClass('@container');
+    expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveClass('@container');
+  });
+
   it('renders no variables on the server, where the pre-paint script owns them', () => {
     writeWideFrameHint('home/one', workbenchClosed);
     const html = renderToString(frameAt('/w/home/one'));

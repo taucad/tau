@@ -261,7 +261,7 @@ describe('ChatInterfaceDesktop', () => {
     /* The workbench lane drops at the compact width through the frame's own container query, which jsdom
      * does not evaluate: the class is the assertion, the width is checked in a browser. */
     expect(frame?.querySelector('[data-lane="workbench"]')?.className).toContain(
-      '@max-[1119px]:[display:var(--frame-workbench-compact-display,none)]',
+      '@max-[1120px]:[display:var(--frame-workbench-compact-display,none)]',
     );
     expect(compactWorkspaceWidth).toBe(1120);
     /* No wait is held back and nothing eases in: the frame is at rest from its first paint (U15). */
@@ -330,6 +330,25 @@ describe('ChatInterfaceDesktop', () => {
       expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
     } finally {
       globalThis.history.replaceState(null, '');
+    }
+  });
+
+  /* Review round 2: the control that navigated (the sidebar's "New chat") still holds focus when the panes are
+   * revealed; the requested focus still goes to the composer. */
+  it('gives the requested composer focus even while the navigating control still holds focus', async () => {
+    splitView.laysOut = true;
+    const navigating = document.createElement('button');
+    document.body.append(navigating);
+    navigating.focus();
+    globalThis.history.replaceState({ usr: { focusChatComposer: true } }, '');
+    try {
+      renderDesktop();
+      await screen.findByTestId('allotment');
+
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
+    } finally {
+      globalThis.history.replaceState(null, '');
+      navigating.remove();
     }
   });
 

@@ -420,7 +420,10 @@ export const sessionRevisionsCallback =
         try {
           await mounted;
         } catch (error) {
-          ports.reportFault(error);
+          /* An installation the session stopped or a newer selection overtook is cut short, not faulted (D23). */
+          if (live.current) {
+            ports.reportFault(error);
+          }
           return;
         }
         if (live.current) {

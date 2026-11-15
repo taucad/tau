@@ -207,6 +207,8 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       /* S1: the chats have arrived, and the last pair the retry was decided on. */
       let chatsReady = false;
       let retryDecidedOn: Readonly<{ deferred: boolean; chatsReady: boolean }> | undefined;
+      /* S5: the session's last parking, which a runtime built while it holds comes up under. */
+      let parked = false;
       const retryDeferredChat = (runtime: SessionRuntime): void => {
         const { chatDeferred } = runtime.facts();
         if (retryDecidedOn?.deferred === chatDeferred && retryDecidedOn.chatsReady === chatsReady) {
@@ -309,6 +311,9 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
           focused = undefined;
           retryDecidedOn = undefined;
           sendBack({ type: 'runtimeChanged', runtimeRef: runtime.runtimeRef });
+          if (parked) {
+            runtime.park(true);
+          }
           runtime.requestChat(chat);
           if (previous !== undefined) {
             previous.unsubscribe();
@@ -337,6 +342,8 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
             return;
           }
           fileManagerRef = next;
+          /* S1: the chats were the old revision client's; the one started on the new file manager reports its own. */
+          chatsReady = false;
           /* The runtime reads the file manager it was built on, which its child has closed. */
           if (current !== undefined) {
             closeCurrent();
@@ -346,7 +353,8 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
           return;
         }
         if (event.type === 'runtimeParking') {
-          current?.runtime.park((event as Readonly<{ type: 'runtimeParking'; parked: boolean }>).parked);
+          ({ parked } = event as Readonly<{ type: 'runtimeParking'; parked: boolean }>);
+          current?.runtime.park(parked);
           return;
         }
         if (event.type === 'revisionChatsChanged') {

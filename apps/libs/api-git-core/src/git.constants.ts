@@ -740,6 +740,18 @@ ${versionNumberCheckScript}
 TAU_VERSION_CHECK
 }
 
+# The objects the version check reads: each non-zero id among the \`<old> <new> <ref>\`
+# words in \`$versions\`. A function, not a loop inside \`$( … )\`: bash 3.2 reads the
+# \`)\` that ends a \`case\` pattern there as the end of the substitution.
+version_object_ids() {
+  for word in $versions; do
+    case "$word" in
+      refs/*) ;;
+      *[!0]*) printf '%s\\n' "$word" ;;
+    esac
+  done
+}
+
 status=0
 arriving=''
 history=''
@@ -868,11 +880,7 @@ if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$versions" ]; then
     echo "Tau: nothing was written." >&2
     exit 1
   fi
-  version_objects=$(
-    for word in $versions; do
-      case "$word" in refs/*) ;; *[!0]*) printf '%s\n' "$word" ;; esac
-    done | sort -u
-  )
+  version_objects=$(version_object_ids | sort -u)
   if ! printf '%s\n' "$version_objects" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$version_check" "$versions" "$held_tags"; then
     echo "Tau: nothing was written." >&2
     exit 1

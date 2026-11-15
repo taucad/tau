@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { TelemetryModule } from '#telemetry.module.js';
+import { TelemetryModule, finalScrapeWait } from '#telemetry.module.js';
 import { TracerService } from '#tracer.service.js';
 import { MetricsService } from '#metrics.js';
 
@@ -73,5 +73,21 @@ describe('TelemetryModule', () => {
 
       expect(elapsed).toBeLessThan(8000);
     });
+  });
+
+  it('holds the metrics endpoint for one final scrape on Fly before shutting the SDK down', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('FLY_MACHINE_ID', 'test-machine');
+    try {
+      const done = telemetryModule.onApplicationShutdown();
+      await vi.advanceTimersByTimeAsync(finalScrapeWait - 1);
+      expect(mockShutdown).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(mockShutdown).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.useRealTimers();
+    }
   });
 });

@@ -159,17 +159,32 @@ const delays = (route: string, le: string, perMinute: Rate): Series[] =>
   );
 
 /**
- * `process_uptime` of one Fly machine: it restarts every 5 minutes while `active` holds and `scale` is non-zero, and
- * stands still when `scale` is 0.
+ * `target_info` of one Fly machine's `app` process: one series per process start (`process_pid`), labelled with the
+ * image it runs (`service_version`), as the OTel resource sends it. The process starts again every 5 minutes while
+ * `active` holds and `scale` is non-zero; `deploys` gives each start a new image, as a deploy does.
  */
-const uptime = (active: (t: number) => boolean, scale: number): Series => {
-  const samples: Sample[] = [];
-  let value = 3 * day;
+const starts = (active: (t: number) => boolean, scale: number, { deploys = false } = {}): Series[] => {
+  const series: Series[] = [];
+  let samples: Sample[] = [];
+  const begin = (pid: number): void => {
+    samples = [];
+    series.push({
+      labels: api('target_info', {
+        tau_process: 'app',
+        process_pid: String(pid),
+        service_version: `registry.fly.io/tau-api:${deploys ? pid : 0}`,
+      }),
+      samples,
+    });
+  };
+  begin(1);
   for (let t = 0; t <= end; t += minute) {
-    samples.push([t, value]);
-    value = scale > 0 && active(t) && (t - burstFrom) % (5 * minute) === 4 * minute ? 0 : value + minute * scale;
+    if (scale > 0 && active(t) && (t - burstFrom) % (5 * minute) === 4 * minute) {
+      begin(series.length + 1);
+    }
+    samples.push([t, 1]);
   }
-  return { labels: api('process_uptime', { tau_process: 'app' }), samples };
+  return series;
 };
 
 type Scenario = Readonly<{
@@ -200,12 +215,13 @@ const errors = 'tau_runtime_operation_errors_total';
 const scenarios: Readonly<Record<string, Scenario>> = {
   'tau-process-restarting': {
     window: 30 * minute,
-    traffic: (active, scale) => [uptime(active, scale)],
-    // A restart every 5 minutes: six resets in any 30-minute window.
-    value: 6,
-    // A deploy restarts the process once.
-    low: () => [uptime((t) => t === start + hour - 4 * minute, 1)],
-    redeployCounts: 'a deploy restarts the process, and the low-traffic case shows one restart does not fire',
+    traffic: (active, scale) => starts(active, scale),
+    // A start every 5 minutes: six whole processes and the one before them report in any 30-minute window.
+    value: 7,
+    // A deploy on every merge, as staging sees it: each start runs a new image, so none counts twice.
+    low: () => starts(always, 1, { deploys: true }),
+    redeployCounts:
+      'a deploy restarts the process, and the low-traffic case shows a deploy every 5 minutes does not fire',
   },
   'runtime-implementation-failures': {
     window: 15 * minute,

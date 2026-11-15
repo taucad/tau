@@ -83,15 +83,19 @@ export const lfsPointerFor = (
   });
 };
 
-/* The pointer `readLfsPointer` accepts is fixed text around a 64-digit oid and a one- to nineteen-digit size. */
+/*
+ * The pointer `readLfsPointer` accepts is fixed text around a 64-digit oid and
+ * a one- to nineteen-digit size: 126 to 144 bytes.
+ */
 const pointerBytesWith = (sizeDigits: number): number =>
   `version ${specVersion}\noid sha256:${'0'.repeat(64)}\nsize ${'0'.repeat(sizeDigits)}\n`.length;
 const smallestPointerBytes = pointerBytesWith(1);
 const largestPointerBytes = pointerBytesWith(19);
 
 /**
- * Whether a file of this many bytes could be a pointer {@link readLfsPointer}
- * accepts, so a scan for placeholders reads only such files (charter D4, I3).
+ * Whether a file of this many bytes (126 to 144) could be a pointer
+ * {@link readLfsPointer} accepts, so a scan for placeholders reads only such
+ * files (charter D4, I3).
  *
  * @internal
  * @param size - The file's size in bytes.

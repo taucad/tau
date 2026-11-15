@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.11.0 (2026-11-15)
+
+### Features
+
+- feat(ui): Run each session's flushes and close over its real children (A7c) (#2245) (648a28cef)
+- feat(telemetry): Retire the legacy observability middleware and put every producer under the one consent rule (PR-7) (#2259) (8ba8f3552)
+- feat(api-email): Receive signed Resend delivery events (#2255) (665aeef9f)
+- feat(ui): Trim Settings → Viewer and size every settings control alike (#1983) (21c5bd82e)
+- feat(ui): Let the API policy alone gate signed-out runtime telemetry on the web (#2251) (54708a070)
+- feat(ui): Replace the session's runtime through replaceRuntime, after a flush (A6e) (#2241) (f9a1bd111)
+- feat(ui): Let each project session own its revisions, connector, presence and parking (A7b) (#2242) (8bf5ef7cd)
+- feat(ui): Send Server-Timing for the document's render, catalog and cold instance (LB0a) (#2235) (44cf81e52)
+- feat(ui): Build the project runtime as a lazy session child (A6d) (#2218) (eab9d6d98)
+- feat(ui): Say Tau Cloud's state in the Projects header and drop the last Home skeletons (A15g2) (#2217) (9611c6543)
+- feat(ui): Compose focus with the registry, library and route in the runtime (A5b) (#2209) (8015bb572)
+- feat(ui): Paint Home cards from the listing snapshot with no skeleton (A15g) (#2214) (7dcbabd2b)
+- feat(sandbox): Write the Linux Terminal's git store through a FUSE store guard (LP2, LP3, LP5, LP8) (#2187) (277277b3a)
+- feat(ui): run the viewer Dockview adapter as a runtime child actor and fix the M2 phone watermark (A8d) (#2213) (71175a269)
+- feat(ui): run the workbench Dockview adapter as a runtime child actor (A8c) (#2211) (fb5b95a53)
+- feat(ui): Move the workspace commands and root file facade into ProjectLibrary (A4b) (#2212) (f74574e2d)
+- feat(ui): serve the listing snapshot and the cloud listing state (A13) (#2164) (118205f8d)
+- feat(ui): Run the entries record session as a project runtime child (A9) (#2200) (2f317e890)
+- feat(ui): Move the project commands into ProjectLibrary (A4a) (#2207) (7d91d68be)
+- feat(ui): host the workbench layout in the project runtime and deliver pane intents through it (A8b) (#2202) (55295309e)
+- feat(ui): Run the library's discovery, recovery and access machines in ProjectLibrary (A3b) (#2203) (fbdd3621d)
+- feat(ui): Build the project file manager as a session child (A6c) (#2201) (63da51047)
+- feat(ui): report the chat transcript's load state and reserve the tray (A12) (#2177) (4933acd4c)
+- feat(ui): Add the focus machine and the project route-state selector (A5a) (#2117) (a772c957f)
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+- feat(ui): Write tau.load measures on deployed pages, with no network export (LB0b) (#2120) (d50cbbd3e)
+- feat(ui): Lease the project runtime from the app runtime and own its producers (A6b) (#2181) (dcab0102b)
+
+### Fixes
+
+- fix(host): Refuse an ACP CLI probe that times out but exits cleanly (#2265) (0f06774c7)
+- fix(host): Make every ACP agent work from desktop-app and CLI installs (#2262) (7caef4598)
+- fix(ui): Skip the saved-preview backfill once the server is known to hold one (#2257) (0ae3f626c)
+- fix(ui): Give switches and the settings info button 24px pointer targets (#2258) (003d8f84e)
+- fix(ui): Cache hashed sprites for a year and serve the manifest as a manifest (LB6a) (#2248) (b7cf66626)
+- fix(ui): Probe a project's agent host for the log its own storage provides (#2253) (7b85e00a6)
+- fix(ui): Hold wait indicators 500 ms from the painted reveal, and keep the lint gutter's width (A15f2) (#2224) (8c224db31)
+- fix(ui): Keep measuring later project opens once a tab reaches the tau.load bound (#2243) (4e4e24dec)
+- fix(ui): Build the viewer's tab bar once on a project open (U16) (#2240) (16416027b)
+- fix(ui): Publish each esm.sh package's types without waiting behind wider imports (LB3b-f2) (#2239) (b25749cde)
+- fix(ui): Type wide esm.sh declaration packages such as lodash-es and date-fns (LB3b-f1) (#2238) (c535b9317)
+- fix(viewer): Adopt three-viewport-gizmo 2.3.0 and present Bottom views upright (#2234) (199d037db)
+- fix(ui): End a resumed attempt whose reopening and end fold in one read (#2229) (451eaccce)
+- fix(ui): Keep the route and the editor on the same chat after A6d (D21 rounds 1 and 2) (#2226) (13524411e)
+- fix(onboarding): FL4 follow-ups, and remove Home's suggestions row (#2198) (62c14dbc7)
+- fix(revisions): Keep a rename when only another ref of the atomic push moved (#2188) (d91fe9505)
+- fix(sandbox): Close the store guard's follow-up review nits (#2216) (ed5fc1389)
+- fix(shell-service): never admit a shell call whose signal aborted before the gate (E09) (#2215) (8352062ed)
+- fix(picogk): Pin the .NET runtime archives by sha256 for locked prepare (#2208) (47c0292ce)
+- fix(ui): Decide or hold Home's suggestions row on the server (H2) (#2180) (32bb3c794)
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(ui): Keep a file pane's Files tree mounted while its file is re-read or gone (#2182) (739301dde)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(ui): Paint the phone sheet where it rests on load, with no slide or fade (#2114) (39205cc24)
+- fix(ui): Let webmail load the email wordmark and fonts cross-origin (#2192) (442a4573d)
+
+### Performance
+
+- perf(revisions): Read cold-open pack ranges past the HTTP cache (#2261) (cfeb76969)
+- perf(ui): Load the RPC handler stack and semver on demand (LB4d) (#2237) (3d4520907)
+- perf(ui): Acquire editor types in parallel, bounded, with no malformed @types path (LB3b) (#2113) (875074843)
+- perf(ui): Load compiled skill bodies on first use, not with the composer (LB4c) (#2118) (b2aed0809)
+
+### Other changes
+
+- test(sandbox): Give C05 a rebinding name the test owns instead of localtest.me (#2254) (3333a67d6)
+- chore(picogk): Pin the PicoGK browser host to manifest 93d4634b0a1b (#1791) (8d237f7db)
+- test(ui): Run each Vitest Browser config of test:e2e as its own Nx task (#2223) (e533150f9)
+- test(ui): Keep the ProjectFocus pr target within 3 minutes on CI (#2149) (e8a22553d)
+- build(ui): Stop retaining and pinning the PicoGK browser host (#2206) (27a370637)
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+- test(viewer): Run each Vitest Browser config of test:e2e as its own Nx task (#2169) (b01ac3873)
+
 ## 0.10.0 (2026-11-14)
 
 ### Features

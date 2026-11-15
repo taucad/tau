@@ -6,13 +6,7 @@
   "tags": ["scope:ui", "type:app-lib", "layer:data-access"],
   "targets": {
     "test": {
-      "inputs": [
-        "default",
-        "^production",
-        "serviceEnvironment",
-        "reactEventLayer",
-        "{workspaceRoot}/packages/plugins/*/package.json"
-      ]
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
     },
     "typecheck": {
       "inputs": ["default", "^production", "reactEventLayer"]

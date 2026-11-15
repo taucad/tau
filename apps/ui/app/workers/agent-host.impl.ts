@@ -827,7 +827,6 @@ const composeProjectHost = async (
           },
         ),
         () => revisions?.largeObjects(),
-        () => revisions?.readiness(),
       ),
       parameters,
       ...(residentRuntime === undefined ? {} : { machines: residentRuntime.machines }),

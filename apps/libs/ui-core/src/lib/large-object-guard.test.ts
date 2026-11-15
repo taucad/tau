@@ -1,12 +1,9 @@
 // @vitest-environment node
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClient } from '@taucad/chat/rpc';
 import { toRpcError } from '@taucad/chat/rpc';
-import type { LargeObjectsFacet, ProjectReadiness } from '@taucad/revisions';
+import type { LargeObjectsFacet } from '@taucad/revisions';
 import { lfsPointerFor } from '@taucad/revisions';
 import {
   closureHasPending,
@@ -14,7 +11,6 @@ import {
   guardLargeObjectKernel,
   isLargeObjectPlaceholder,
   kernelClosure,
-  workspaceMirrorKernels,
 } from '#lib/large-object-guard.js';
 
 const encoder = new TextEncoder();
@@ -160,9 +156,9 @@ describe('the agent tools while large objects download', () => {
     graphics.exportModel.mockResolvedValue(mock());
     geospec.runTests.mockResolvedValue(mock());
     const guarded = guardLargeObjectKernel({ kernelClient, graphics, geospec }, () => facet);
-    /* A workspace-mirroring kernel (build123d) copies every file, the pending one among them. */
-    const evaluate: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.py' };
-    const exported: Parameters<RpcGraphicsClient['exportModel']>[0] = { targetFile: 'main.py', to: 'stl' };
+    /* A run whose entry is the pending object. */
+    const evaluate: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'models/part.step' };
+    const exported: Parameters<RpcGraphicsClient['exportModel']>[0] = { targetFile: 'models/part.step', to: 'stl' };
     const tests: Parameters<RpcGeoSpecClient['runTests']>[0] = {};
 
     const waiting = await guarded.kernelClient.evaluateModel(evaluate);
@@ -206,42 +202,21 @@ describe('the agent tools while large objects download', () => {
     expect(kernelClient.evaluateModel).toHaveBeenCalledTimes(1);
   });
 
-  /* `materialized` with no facet is a fill that has not reported yet: a mirroring kernel would copy pointers. */
-  it('holds a mirroring kernel call until the fill has reported, and lets an entry-only call through', async () => {
-    let readiness: ProjectReadiness | undefined = 'materialized';
+  /* A workspace mirror (build123d) lists a pending file at its object's size and its read waits (D9): no wider gate. */
+  it('runs a mirroring kernel call over its own closure, as any other', async () => {
     const kernelClient = mock<RpcRuntimeClient>();
-    const geospec = mock<RpcGeoSpecClient>();
     kernelClient.evaluateModel.mockResolvedValue(mock());
-    geospec.runTests.mockResolvedValue(mock());
-    const guarded = guardLargeObjectKernel(
-      { kernelClient, geospec },
-      () => undefined,
-      () => readiness,
-    );
+    const guarded = guardLargeObjectKernel({ kernelClient }, () => downloading);
     const mirrored: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.py' };
-    const entryOnly: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.scad' };
-
-    await expect(guarded.kernelClient.evaluateModel(mirrored)).resolves.toMatchObject({
-      success: false,
-      errorCode: 'OPERATION_TIMEOUT',
-      retryable: true,
-    });
-    await expect(guarded.geospec.runTests({})).resolves.toMatchObject({ retryable: true });
-    await guarded.kernelClient.evaluateModel(entryOnly);
-    expect(kernelClient.evaluateModel).toHaveBeenCalledExactlyOnceWith(entryOnly, undefined);
-
-    readiness = 'filled';
     await guarded.kernelClient.evaluateModel(mirrored);
-    await guarded.geospec.runTests({});
-    expect(kernelClient.evaluateModel).toHaveBeenCalledTimes(2);
-    expect(geospec.runTests).toHaveBeenCalledTimes(1);
+    expect(kernelClient.evaluateModel).toHaveBeenCalledExactlyOnceWith(mirrored, undefined);
   });
 });
 
 describe('kernel closure', () => {
   it('is the manifest and the entry for a kernel that reads only what it opens', () => {
     expect(kernelClosure('main.scad')).toStrictEqual(['tau.json', 'main.scad']);
-    expect(kernelClosure('main.ts', 'replicad')).toStrictEqual(['tau.json', 'main.ts']);
+    expect(kernelClosure('main.ts')).toStrictEqual(['tau.json', 'main.ts']);
     expect(kernelClosure('')).toStrictEqual(['tau.json']);
   });
   /* An agent's `targetFile` may carry a leading `/` or `./`; the facet's paths are checkout-relative. */
@@ -252,44 +227,14 @@ describe('kernel closure', () => {
     expect(kernelClosure('../outside.scad')).toStrictEqual(['tau.json', '../outside.scad']);
     expect(closureHasPending(kernelClosure('/models/part.step'), ['models/part.step'])).toBe(true);
   });
-  /* A workspace mirror lists sizes raw and reads through, so a pending pointer reads as "changed while mirroring". */
-  it('is the whole workspace for a kernel that mirrors it, named or known only by its entry', () => {
-    expect(kernelClosure('main.py', 'build123d')).toBe('workspace');
-    expect(kernelClosure('main.cs', 'picogk')).toBe('workspace');
-    expect(kernelClosure('main.py')).toBe('workspace');
-    expect(kernelClosure('main.cs')).toBe('workspace');
-    expect(kernelClosure('main.ts', 'picovoxel')).toStrictEqual(['tau.json', 'main.ts']);
+  it('is the manifest and the entry for a kernel that mirrors the workspace too', () => {
+    expect(kernelClosure('main.py')).toStrictEqual(['tau.json', 'main.py']);
+    expect(kernelClosure('main.cs')).toStrictEqual(['tau.json', 'main.cs']);
   });
   it('is pending when a closure path is, or for a workspace closure when anything is', () => {
     expect(closureHasPending(['tau.json', 'main.ts'], ['assets/a.png'])).toBe(false);
     expect(closureHasPending(['tau.json', 'main.ts'], ['main.ts'])).toBe(true);
     expect(closureHasPending('workspace', ['assets/a.png'])).toBe(true);
     expect(closureHasPending('workspace', [])).toBe(false);
-  });
-});
-
-/*
- * The mirror set is named by hand (the catalog has no capability for it), so it is checked against the plugins
- * themselves: a kernel plugin mirrors the workspace when it builds on a core that does (`createPythonWorkspaceMirror`,
- * `createDotnetWorkspaceMirror`, the native-process `createWorkspaceMirror`). A new one cannot fail open unnoticed.
- */
-describe('workspace-mirroring kernels', () => {
-  const mirrorCores = ['@taucad/python-kernel-core', '@taucad/dotnet-kernel-core', '@taucad/native-process-core'];
-  const pluginsDirectory = fileURLToPath(new URL('../../../../../packages/plugins/', import.meta.url));
-
-  it('are exactly the kernel plugins built on a workspace-mirroring core', async () => {
-    const plugins = await readdir(pluginsDirectory, { withFileTypes: true });
-    const mirroring: string[] = [];
-    for (const plugin of plugins.filter((entry) => entry.isDirectory())) {
-      // oxlint-disable-next-line no-await-in-loop -- a handful of manifests, read in order.
-      const manifest = JSON.parse(await readFile(join(pluginsDirectory, plugin.name, 'package.json'), 'utf8')) as {
-        dependencies?: Record<string, string>;
-      };
-      if (mirrorCores.some((core) => Object.hasOwn(manifest.dependencies ?? {}, core))) {
-        mirroring.push(plugin.name);
-      }
-    }
-    expect(mirroring.length).toBeGreaterThan(0);
-    expect(new Set(mirroring)).toStrictEqual(new Set(workspaceMirrorKernels));
   });
 });

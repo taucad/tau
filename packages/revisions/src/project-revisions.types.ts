@@ -156,8 +156,8 @@ export type ProjectReadiness = 'connected' | 'treeReady' | 'entryReady' | 'mater
  *
  * The files open as soon as the checkout is written; a file whose object has
  * not arrived holds its pointer until it does. A model render waits only while
- * `paths` holds a path its closure reads (T6), or any path for a kernel that
- * mirrors the whole workspace; other readers read pending paths through.
+ * `paths` holds a path its closure reads (T6); other readers, a kernel that
+ * mirrors the whole workspace among them, read pending paths through.
  *
  * @public
  */

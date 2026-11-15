@@ -154,18 +154,3 @@ it("should answer the newest status's large objects, and none once closed", asyn
   expect(client.largeObjects()).toBeUndefined();
   port2.close();
 });
-
-/* A mirroring kernel tool waits for the fill's first report: the guard reads the newest readiness beside the facet. */
-it("should answer the newest status's readiness, and none once closed", async () => {
-  const { port1, port2 } = new MessageChannel();
-  port2.start();
-  const client = createPortRevisionsClient(port1);
-  expect(client.readiness()).toBeUndefined();
-  port2.postMessage({ type: 'status', status: { readiness: 'materialized' } });
-  await expect.poll(() => client.readiness()).toBe('materialized');
-  port2.postMessage({ type: 'status', status: { readiness: 'filled' } });
-  await expect.poll(() => client.readiness()).toBe('filled');
-  client.close();
-  expect(client.readiness()).toBeUndefined();
-  port2.close();
-});

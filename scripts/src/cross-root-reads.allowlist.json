@@ -335,11 +335,6 @@
     "reason": "reads a Tau example from tau-examples as a fixture or source"
   },
   {
-    "file": "apps/libs/ui-core/src/lib/large-object-guard.test.ts",
-    "target": "packages/plugins",
-    "reason": "checks the hand-named workspace-mirror kernel set against every plugin manifest's dependencies; the manifests are an input of the ui-core test"
-  },
-  {
     "file": "apps/react-e2e/apps/**",
     "target": "apps/react-e2e/support/*",
     "reason": "framework e2e app imports the shared harness in the parent react-e2e project"

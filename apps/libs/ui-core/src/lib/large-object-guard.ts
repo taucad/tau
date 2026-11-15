@@ -16,10 +16,7 @@ import { rpcClientErrorCode } from '@taucad/chat';
 import { getErrno } from '@taucad/utils/error';
 import { resolveRootedPath } from '@taucad/utils/path';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
-import type { LargeObjectsFacet, ProjectReadiness } from '@taucad/revisions';
-import { reachesReadiness } from '@taucad/revisions';
-import { kernelConfigurations } from '@taucad/types/constants';
-import type { KernelId } from '@taucad/types/constants';
+import type { LargeObjectsFacet } from '@taucad/revisions';
 
 /* A pointer is at most this many bytes (`@taucad/revisions` lfs.ts), and starts with its spec line. */
 const maximumPointerBytes = 1024;
@@ -172,21 +169,6 @@ type KernelClients = Readonly<{
   geospec?: RpcGeoSpecClient | undefined;
 }>;
 
-/**
- * Catalog kernels that mirror the whole workspace before they run (`createPythonWorkspaceMirror`,
- * `createDotnetWorkspaceMirror`, the PicoGK browser snapshot). A mirror lists each file's size raw and then reads it
- * through, so a pending pointer reads as a file that changed while mirroring: every pending path is in their closure.
- * The catalog declares no such capability yet, so the set is named here, and a test holds it to the plugins.
- */
-export const workspaceMirrorKernels: ReadonlySet<KernelId> = new Set<KernelId>(['picogk', 'build123d', 'smlibpy']);
-
-const extensionOf = (path: string): string => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-
-/* Entry extensions a mirroring kernel authors: an entry not yet bound to its kernel is read as one of them. */
-const mirrorEntryExtensions: ReadonlySet<string> = new Set(
-  kernelConfigurations.filter(({ id }) => workspaceMirrorKernels.has(id)).map(({ mainFile }) => extensionOf(mainFile)),
-);
-
 /*
  * A caller's path as the facet names it, checkout-relative: an agent's `targetFile` may carry a leading `/` or `./`,
  * repaired as the project-path tool inputs are. A path that cannot be made rooted stays as it was, and matches nothing.
@@ -203,21 +185,17 @@ const checkoutPathOf = (path: string): string => {
 export type KernelClosure = readonly string[] | 'workspace';
 
 /**
- * The closure of a kernel run over one entry (T6): `tau.json` and the entry, or the whole workspace for a kernel that
- * mirrors it. Any other pending path the kernel opens is read through to its object and waits for it (D9).
+ * The closure of a kernel run over one entry (T6): `tau.json` and the entry, whichever kernel runs it. Any other
+ * pending path the kernel opens is read through to its object and waits for it (D9), and a kernel that mirrors the
+ * whole workspace lists a pending path at its object's size (`@taucad/filesystem` pending stats), so a mirror needs
+ * no wider closure.
  *
  * @param entryPath - The entry the kernel runs; empty while the project names none.
- * @param kernel - The catalog kernel bound for it, when known; otherwise the entry's extension decides.
  * @returns The closure.
  */
-export const kernelClosure = (entryPath: string, kernel?: KernelId): KernelClosure => {
+export const kernelClosure = (entryPath: string): readonly string[] => {
   const path = checkoutPathOf(entryPath);
-  if (path === '') {
-    return ['tau.json'];
-  }
-  const mirrors =
-    kernel === undefined ? mirrorEntryExtensions.has(extensionOf(path)) : workspaceMirrorKernels.has(kernel);
-  return mirrors ? 'workspace' : ['tau.json', path];
+  return path === '' ? ['tau.json'] : ['tau.json', path];
 };
 
 /**
@@ -233,31 +211,6 @@ export const closureHasPending = (closure: KernelClosure, pendingPaths: readonly
 /* The facet a run over this closure waits on: a failed fill always, so its reason and retry reach the caller. */
 const blockingFacet = (facet: LargeObjectsFacet | undefined, closure: KernelClosure): LargeObjectsFacet | undefined =>
   facet !== undefined && (facet.phase === 'failed' || closureHasPending(closure, facet.paths)) ? facet : undefined;
-
-/**
- * Whether a run over this closure waits for the fill's first word: with no facet, a project that has not reached
- * `filled` may still hold pointers the fill has not reported (`readinessOf` reads `materialized` then). A closure of
- * named paths reads any of them through; a workspace mirror lists their raw sizes first, so it waits.
- *
- * @param closure - See {@link kernelClosure}.
- * @param readiness - The published readiness; `undefined` where the host publishes none.
- * @returns `true` while the run must wait for the fill to report.
- */
-export const awaitsFillReport = (closure: KernelClosure, readiness: ProjectReadiness | undefined): boolean =>
-  closure === 'workspace' && readiness !== undefined && !reachesReadiness(readiness, 'filled');
-
-/** The retryable answer a mirroring kernel call gets while the fill has not reported what it brings. */
-const largeObjectsCheckingResult: Readonly<{
-  success: false;
-  errorCode: 'OPERATION_TIMEOUT';
-  message: string;
-  retryable: true;
-}> = {
-  success: false,
-  errorCode: rpcClientErrorCode.operationTimeout,
-  message: "The project's files are still being checked for large files to download. Try again in a moment.",
-  retryable: true,
-};
 
 /**
  * The retryable answer a kernel call gets while any of the checkout's large objects is still to land.
@@ -283,21 +236,15 @@ export const largeObjectsPendingResult = (
  *
  * @param clients - The evaluate, export, capture and GeoSpec clients.
  * @param largeObjects - The checkout's current large-object facet; `undefined` once everything is local.
- * @param readiness - The published readiness, so a mirroring kernel waits for the fill's first report.
  * @returns The same clients, gated.
  */
 export const guardLargeObjectKernel = <Clients extends KernelClients>(
   clients: Clients,
   largeObjects: () => LargeObjectsFacet | undefined,
-  readiness: () => ProjectReadiness | undefined = () => undefined,
 ): Clients => {
   /* The answer a run over this closure gets now, or `undefined` when it may run. */
   const refusal = (closure: KernelClosure): ReturnType<typeof largeObjectsPendingResult> | undefined => {
-    const facet = largeObjects();
-    if (facet === undefined) {
-      return awaitsFillReport(closure, readiness()) ? largeObjectsCheckingResult : undefined;
-    }
-    const blocking = blockingFacet(facet, closure);
+    const blocking = blockingFacet(largeObjects(), closure);
     return blocking === undefined ? undefined : largeObjectsPendingResult(blocking);
   };
   const { kernelClient, graphics, images, geospec } = clients;

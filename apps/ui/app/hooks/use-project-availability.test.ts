@@ -21,7 +21,6 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn() }));
 vi.mock('#lib/tau-cloud-intent.js', () => ({ canOpenCloudProject: vi.fn() }));
-vi.mock('#hooks/use-project-kernel-owner.js', () => ({ useProjectKernelOwner: vi.fn() }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
   mock<RevisionStatusProjection>({
@@ -138,21 +137,17 @@ describe('render closure', () => {
     phase: 'fetching',
     paths,
   });
-  it('waits on every pending file for a kernel that mirrors the workspace', () => {
-    const mirror = kernelClosure('main.py', 'build123d');
+  /* A workspace mirror lists a pending file at its object's size and its read waits (D9): its closure is its entry's. */
+  it('waits on a mirroring kernel’s own closure only, as on any other kernel’s', () => {
+    const mirror = kernelClosure('main.py');
+    expect(mirror).toStrictEqual(['tau.json', 'main.py']);
     expect(
       modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'materialized' }, mirror),
-    ).toBe('files');
-    expect(modelAvailability('ready', { readiness: 'filled' }, mirror)).toBe('ready');
-    expect(modelAvailability('ready', undefined, mirror)).toBe('ready');
-  });
-  /* `materialized` with no facet is a fill that has not reported yet (readinessOf): a mirror would copy pointers. */
-  it('holds a mirroring kernel as a check until the fill has reported, whatever is authored', () => {
-    const mirror = kernelClosure('main.py', 'build123d');
-    expect(modelAvailability('ready', { readiness: 'materialized' }, mirror)).toBe('filesChecking');
-    expect(modelAvailability('ready', { readiness: 'materialized' }, kernelClosure('main.ts', 'replicad'))).toBe(
-      'ready',
+    ).toBe('ready');
+    expect(modelAvailability('ready', { largeObjects: fetching(['main.py']), readiness: 'materialized' }, mirror)).toBe(
+      'files',
     );
+    expect(modelAvailability('ready', { readiness: 'materialized' }, mirror)).toBe('ready');
   });
   it('waits on nothing but the manifest while the project names no main entry', () => {
     const entryless = kernelClosure('');
@@ -164,27 +159,18 @@ describe('render closure', () => {
     ).toBe('files');
   });
   /* Every view's entry runs a kernel the gate admits, not only main's. */
-  it('is every viewed entry’s closure, the whole workspace when any of them mirrors it', () => {
-    expect(projectRenderClosure('main.ts', 'replicad', ['main.ts', 'part.py'])).toBe('workspace');
-    expect(projectRenderClosure('main.ts', 'replicad', ['main.ts', 'lib/gear.ts'])).toStrictEqual([
+  it('is every viewed entry’s closure', () => {
+    expect(projectRenderClosure('main.ts', ['main.ts', 'lib/gear.ts'])).toStrictEqual([
       'tau.json',
       'main.ts',
       'lib/gear.ts',
     ]);
-    const multi = projectRenderClosure('main.ts', 'replicad', ['lib/gear.ts']);
+    const multi = projectRenderClosure('main.ts', ['lib/gear.ts']);
     expect(
       modelAvailability('ready', { largeObjects: fetching(['lib/gear.ts']), readiness: 'materialized' }, multi),
     ).toBe('files');
-    const withMirror = projectRenderClosure('main.ts', 'replicad', ['part.py']);
-    expect(
-      modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'materialized' }, withMirror),
-    ).toBe('files');
-  });
-  it('mirrors for an entry-less project viewing a .py or .cs file, and not for one viewing a .scad file', () => {
-    expect(projectRenderClosure('', undefined, ['part.py'])).toBe('workspace');
-    expect(projectRenderClosure('', undefined, ['Part.cs'])).toBe('workspace');
-    expect(projectRenderClosure('', undefined, ['part.scad'])).toStrictEqual(['tau.json', 'part.scad']);
-    expect(projectRenderClosure('', undefined, [])).toStrictEqual(['tau.json']);
+    expect(projectRenderClosure('', ['part.py'])).toStrictEqual(['tau.json', 'part.py']);
+    expect(projectRenderClosure('', [])).toStrictEqual(['tau.json']);
   });
 });
 

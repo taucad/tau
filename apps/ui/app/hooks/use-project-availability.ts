@@ -6,10 +6,8 @@ import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
-import { awaitsFillReport, closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import type { KernelClosure } from '@taucad/ui-core/lib/large-object-guard';
-import type { KernelId } from '@taucad/types/constants';
-import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
 export type ProjectAvailability =
@@ -71,10 +69,11 @@ export function useProjectAvailability(): ProjectAvailability {
  * The operator's "open the UI, model waits": code, files and chats open once
  * the checkout is written. A render waits until every authored file is a file,
  * and for a large object only when its closure (the manifest and the entry the
- * kernel opens, or the whole workspace for a kernel that mirrors it) still
- * holds that object's pointer; media and assets it never reads arrive in the
- * background. A kernel read of any other pending path goes
- * through to its object and waits for it (D9), never reading the pointer.
+ * kernel opens) still holds that object's pointer; media and assets it never
+ * reads arrive in the background. A kernel read of any other pending path goes
+ * through to its object and waits for it (D9), never reading the pointer, and
+ * a kernel that mirrors the whole workspace lists such a path at its object's
+ * size, so it waits in the same reads.
  */
 export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed' | 'filesChecking';
 
@@ -90,8 +89,7 @@ export type ModelStatus = Readonly<{
  *
  * A render opens at `materialized` (D10, {@link surfaceReadiness}): a project
  * whose host publishes readiness waits for it there, a check and never a
- * download (T5). A workspace mirror also waits there for the fill's first
- * report ({@link awaitsFillReport}). From there, only a pending path in the closure holds it; a
+ * download (T5). From there, only a pending path in the closure holds it; a
  * failed fill is shown whatever it was fetching, so Try again stays reachable.
  *
  * @param project - The project's availability.
@@ -112,7 +110,7 @@ export function modelAvailability(
     return 'filesChecking';
   }
   if (largeObjects === undefined) {
-    return awaitsFillReport(closure, readiness) ? 'filesChecking' : 'ready';
+    return 'ready';
   }
   if (largeObjects.phase === 'failed') {
     return 'filesFailed';
@@ -121,45 +119,27 @@ export function modelAvailability(
 }
 
 /**
- * The render closure of every entry the project's views run (T6): the main entry under its owner kernel, and each other
- * viewed entry under the kernel its extension names, the whole workspace when any of them mirrors it.
+ * The render closure of every entry the project's views run (T6): the main entry and each other viewed entry, each
+ * with the manifest ({@link kernelClosure}).
  *
  * @param mainEntryPath - The main entry; empty while the project names none.
- * @param kernel - The owner kernel bound for it, when known.
  * @param viewEntryPaths - The entries the views and geometry units run.
  * @returns Their combined closure.
  */
-export function projectRenderClosure(
-  mainEntryPath: string,
-  kernel: KernelId | undefined,
-  viewEntryPaths: Iterable<string>,
-): KernelClosure {
-  const paths = new Set<string>();
-  for (const closure of [
-    kernelClosure(mainEntryPath, kernel),
-    ...[...viewEntryPaths].filter((path) => path !== mainEntryPath).map((path) => kernelClosure(path)),
-  ]) {
-    if (closure === 'workspace') {
-      return 'workspace';
-    }
-    for (const path of closure) {
-      paths.add(path);
-    }
-  }
-  return [...paths];
+export function projectRenderClosure(mainEntryPath: string, viewEntryPaths: Iterable<string>): readonly string[] {
+  return [...new Set([mainEntryPath, ...viewEntryPaths].flatMap((path) => kernelClosure(path)))];
 }
 
 /** Shared readiness for the viewer, export and the other kernel surfaces. */
 export function useModelAvailability(): ModelAvailability {
   const { mainEntryPath, viewRecords, geometryUnits } = useProject();
-  const kernel = useProjectKernelOwner()?.kernel;
   const project = useProjectAvailability();
   const status = useRevisionStatus();
   const viewEntryPaths = [
     ...[...viewRecords.values()].map(({ entryPath }) => entryPath),
     ...geometryUnits.keys(),
   ].filter((path): path is string => typeof path === 'string' && path !== '');
-  return modelAvailability(project, status, projectRenderClosure(mainEntryPath, kernel, viewEntryPaths));
+  return modelAvailability(project, status, projectRenderClosure(mainEntryPath, viewEntryPaths));
 }
 
 /**

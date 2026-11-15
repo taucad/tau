@@ -40,6 +40,7 @@ import {
 import { QueryClient } from '@tanstack/react-query';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
+import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 import { createEnvironmentLogic } from '#runtime/environment.js';
 import { sessionsRegistryLogic } from '#services/sessions-store.js';
 import { store as preferences } from '#hooks/use-cookie.js';
@@ -115,8 +116,10 @@ describe('app runtime root', () => {
     expect(registry.getSnapshot().status).toBe('stopped');
   });
 
-  it('should be the one listener of both unload phases, and of no other unload event (D26)', () => {
+  it('should be the one listener of both unload phases, and hold beforeunload only while a write is owed (D26 as amended)', () => {
     const host = createFakeEnvironmentHost();
+    /* Nothing owes a record write here, so `beforeunload` is not held (A7c). */
+    expect(owedRecordWrites.owes()).toBe(false);
     const runtime = createAppRuntime({ environment: () => host }).start();
 
     const types = host.everAdded().map((listener) => listener.split(':')[1]);

@@ -16,7 +16,12 @@ const decoder = new TextDecoder();
 
 type Fields = Readonly<Record<string, string>>;
 const policy: RecordPolicy<Fields, Fields> = {
-  read: (bytes) => ({ status: 'current', record: JSON.parse(decoder.decode(bytes)) as Fields }),
+  read: (bytes) => {
+    const content = decoder.decode(bytes);
+    return content.startsWith('!')
+      ? { status: 'invalid', code: 'INVALID_RECORD', message: 'The record does not parse.' }
+      : { status: 'current', record: JSON.parse(content) as Fields };
+  },
   serialize: (record) => JSON.stringify(record),
   diff: (base, next) => Object.fromEntries(Object.entries(next).filter(([key, value]) => base?.[key] !== value)),
   combine: (earlier, later) => ({ ...earlier, ...later }),
@@ -32,8 +37,8 @@ afterEach(() => {
 });
 
 /** One store over a file whose writes wait until the row lands them. */
-const store = () => {
-  let bytes = encoder.encode(JSON.stringify({ name: 'seed' }));
+const store = (file = JSON.stringify({ name: 'seed' })) => {
+  let bytes = encoder.encode(file);
   const writes: Array<{ input: CheckedWriteInput; settle: (outcome: CheckedWriteOutcome) => void }> = [];
   const sync = createRecordSync({
     machine: createRecordSyncMachine(policy),
@@ -133,6 +138,26 @@ describe('owed record writes (A7c, D26 as amended)', () => {
 
     expect(await Promise.all([early, hidden, later])).toEqual([true, true, true]);
     expect(record.writes).toHaveLength(1);
+  });
+
+  it('should owe nothing for edits over a refused record, which wait for its reset', async () => {
+    const record = store('!not a record');
+    await record.commands.read();
+
+    void record.commands.edit({ name: 'Front' });
+
+    expect(owedRecordWrites.owes()).toBe(false);
+  });
+
+  it('should owe nothing once a store is closed with an edit no write took', async () => {
+    const record = store();
+    await record.commands.read();
+    void record.commands.edit({ name: 'Front' });
+
+    record.commands.close();
+
+    expect(record.writes).toHaveLength(0);
+    expect(owedRecordWrites.owes()).toBe(false);
   });
 
   it('should pay the debt of a store that stops with an edit owed', async () => {

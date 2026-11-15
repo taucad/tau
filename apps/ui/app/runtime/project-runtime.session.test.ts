@@ -18,6 +18,7 @@ import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
 import { selectEditorRef } from '#runtime/project-runtime.js';
 import { waitFor } from 'xstate';
+import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
 
@@ -158,6 +159,22 @@ describe("a session runtime's replacement flush (A6e)", () => {
     await runtime.flush('replace', new AbortController().signal);
 
     expect(saved).toEqual(['editor state']);
+  });
+
+  it('should owe the page a write while the editor store waits to write, and nothing once it lands (A7c)', async () => {
+    const save = Promise.withResolvers<void>();
+    const runtime = await withOwedEditorEdit(async () => save.promise);
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    const flushed = runtime.flush('replace', new AbortController().signal);
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    save.resolve();
+    await flushed;
+
+    expect(owedRecordWrites.owes()).toBe(false);
   });
 
   it("should reject with the editor store's refusal when its write fails", async () => {

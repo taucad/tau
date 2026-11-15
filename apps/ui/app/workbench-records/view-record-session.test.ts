@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
 import type { ViewResolutionLevels } from '#workbench-records/view-record-binding-changes.js';
+import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 import {
   createViewRecordPorts,
   startViewRecordSession,
@@ -389,6 +390,42 @@ describe('view record session', () => {
     harness.stop();
     await settle();
     expect(harness.file()?.section.cuts[0]).toMatchObject({ offset: 0.75 });
+  });
+
+  it('should owe the page a write while its section is inside the quiet gate, and nothing once it is saved (A7c)', async () => {
+    const harness = await mount();
+    await harness.frame();
+    harness.graphics.send({ type: 'setSectionViewActive', payload: true });
+    await harness.quiet();
+
+    expect(owedRecordWrites.owes()).toBe(false);
+
+    const [cut] = harness.graphics.getSnapshot().context.sectionCuts;
+    harness.graphics.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.5 } } });
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    harness.clock.increment(sectionSettleDelay);
+    await harness.quiet();
+
+    expect(harness.file()?.section.cuts[0]).toMatchObject({ offset: 0.5 });
+    expect(owedRecordWrites.owes()).toBe(false);
+  });
+
+  it('should pay the section debt of a session stopped inside the quiet gate (A7c)', async () => {
+    const harness = await mount();
+    await harness.frame();
+    harness.graphics.send({ type: 'setSectionViewActive', payload: true });
+    await harness.quiet();
+    const [cut] = harness.graphics.getSnapshot().context.sectionCuts;
+    harness.graphics.send({ type: 'updateSectionCut', payload: { id: cut!.id, patch: { offset: 0.5 } } });
+
+    /* The stop saves the section; the page owes that write until it lands. */
+    harness.stop();
+    await settle();
+
+    expect(harness.file()?.section.cuts[0]).toMatchObject({ offset: 0.5 });
+    expect(owedRecordWrites.owes()).toBe(false);
   });
 
   it('should write what is owed when the session stops', async () => {

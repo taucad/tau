@@ -227,15 +227,34 @@ describe('deployed project-open performance recorder', () => {
     }
   });
 
-  it('should stop at a bounded number of measures per page', () => {
+  // The Mac qualification of #2120 found a deployed tab stopped measuring at its 256th measure, the eighth in-app open;
+  // the timeline stays bounded, and a later open in the same tab is still measured.
+  it('should keep a bounded timeline per page and still measure a later open', () => {
     const { measure } = stubDeployedPage();
+    const timeline: string[] = [];
+    measure.mockImplementation((name) => {
+      timeline.push(name);
+    });
+    const clearMeasures = vi.fn((name: string) => {
+      timeline.splice(0, timeline.length, ...timeline.filter((entry) => entry !== name));
+    });
+    vi.stubGlobal('performance', { ...performance, clearMeasures });
 
     const recorder = pageProjectOpenPerformance();
+    let largest = 0;
     for (let index = 0; index < 1000; index++) {
-      recorder.record('canvas.2d', { start: index, end: index + 1, outcome: 'ok' });
+      recorder.record(index % 2 === 0 ? 'canvas.2d' : 'viewer.mount', { start: index, end: index + 1, outcome: 'ok' });
+      largest = Math.max(largest, timeline.length);
     }
+    recorder.begin('editor.mount').finish('ok');
 
-    expect(measure).toHaveBeenCalledTimes(256);
+    expect(measure).toHaveBeenCalledTimes(1001);
+    expect(largest).toBe(256);
+    expect(timeline.length).toBeLessThanOrEqual(256);
+    expect(timeline.at(-1)).toBe('tau.load.editor.mount');
+    expect(new Set(clearMeasures.mock.calls.map(([name]) => name))).toEqual(
+      new Set(['tau.load.canvas.2d', 'tau.load.viewer.mount']),
+    );
   });
 
   it('should stay inert outside a browser page, as in server rendering', () => {

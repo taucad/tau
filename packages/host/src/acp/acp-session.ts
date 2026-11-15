@@ -71,6 +71,13 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       exited.resolve();
     }
   });
+  /* An agent may push its model list after `session/new` (`_x.ai/models/update`); the model probe waits on it. */
+  const modelListPushed = Promise.withResolvers<void>();
+  actor.subscribe((snapshot) => {
+    if (snapshot.context.grokModels !== undefined) {
+      modelListPushed.resolve();
+    }
+  });
   actor.subscribe({
     error: (error) => {
       closed.resolve(failureOfError(error, options.adapter));
@@ -117,6 +124,7 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     get configOptions() {
       return context().configOptions;
     },
+    modelListPushed: modelListPushed.promise,
     probeModel: async (model: string): Promise<readonly SessionConfigOption[] | undefined> => {
       await waitFor(actor, (snapshot) => snapshot.matches({ idle: 'resting' }));
       const requestId = `probe-${String(sequence++)}`;

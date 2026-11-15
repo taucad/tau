@@ -47,6 +47,7 @@
  * | Mode | Behaviour |
  * | --- | --- |
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
+ * | `pushed-models` | `session/new` offers two models, then Grok's `_x.ai/models/update` lists four a moment later, as grok 1.0.52 does after starting on a renewable sign-in; every later answer offers all four |
  * | `auth-required` | `initialize` advertises codex-acp 1.7.0's own methods (`api-key`, `chat-gpt`, and `chat-gpt-device-code` to a client that advertised `elicitation.url`), none with a terminal command, and `session/new` errors `-32000` |
  * | `claude-terminal-auth` | `initialize` advertises claude-agent-acp 0.70.0's two methods to a client that sent `_meta['terminal-auth']`, each naming *this* process (`process.execPath` and `process.argv.slice(1)`) as its command, exactly as the real adapter does |
  * | `restore-auth` | restoring an existing session errors `-32000` instead of silently starting fresh |
@@ -108,6 +109,10 @@ type SessionState = {
 
 /** Model ids this fixture offers; the first is the `codex` pin's own default. */
 const models = ['gpt-5.3-codex-spark', 'gpt-5.3-codex'];
+/** Models only `pushed-models` adds, in its `_x.ai/models/update`. */
+const pushedModels = ['pushed-model-a', 'pushed-model-b'];
+/** Whether `pushed-models` has sent its push, after which every answer lists the pushed models too. */
+let modelsPushed = false;
 
 const mode = process.env['TAU_FAKE_AGENT_MODE'] ?? '';
 /** One mode may combine several behaviours, comma-separated (`silent,stubborn`). */
@@ -390,7 +395,7 @@ const promptText = (blocks: readonly unknown[]): string =>
  * @returns The full option set, as `session/new` and friends must return it.
  */
 const configOptionsOf = (session: SessionState): readonly unknown[] => {
-  const options = models.map((value) => ({ value, name: value }));
+  const options = [...models, ...(modelsPushed ? pushedModels : [])].map((value) => ({ value, name: value }));
   return [
     {
       id: 'model',
@@ -1134,7 +1139,22 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
         return;
       }
       const sessionId = nextSessionId();
-      reply({ sessionId, configOptions: configOptionsOf(openSession(sessionId, params)) });
+      const session = openSession(sessionId, params);
+      reply({ sessionId, configOptions: configOptionsOf(session) });
+      if (inMode('pushed-models')) {
+        /* Grok's push carries no session id and arrives after the answer (69-157 ms on a real CLI). */
+        setTimeout(() => {
+          modelsPushed = true;
+          send({
+            jsonrpc: '2.0',
+            method: '_x.ai/models/update',
+            params: {
+              currentModelId: session.model,
+              availableModels: [...models, ...pushedModels].map((modelId) => ({ modelId, name: modelId })),
+            },
+          });
+        }, 100);
+      }
       return;
     }
     case 'session/resume': {

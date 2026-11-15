@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NormalBlending } from 'three';
@@ -33,6 +34,12 @@ describe('infiniteGridNodeMaterial TSL snapshots', () => {
     } finally {
       material.dispose();
     }
+  });
+  it('should centre the proxy on the view target uniform, not the camera position', () => {
+    const source = readFileSync(join(currentDirectory, 'infinite-grid-material.node.ts'), 'utf8');
+
+    expect(source).not.toContain('cameraPosition');
+    expect(source).toContain('add(uGridCenter, mul(positionLocal.xy, uGridDistance))');
   });
   it('matches stable stripped material JSON snapshot', async () => {
     const material = infiniteGridNodeMaterial({

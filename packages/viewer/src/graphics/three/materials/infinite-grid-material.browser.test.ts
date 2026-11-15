@@ -74,3 +74,60 @@ it.each(['webgpu', 'webgl'] as const)(
     }
   },
 );
+
+it.each(['webgpu', 'webgl'] as const)('should draw the grid around the centre uniform on %s', async (backend) => {
+  const renderer = await createRenderer('viewport', backend, {
+    canvas: document.createElement('canvas'),
+    nodePipeline: true,
+  });
+  if (!(renderer instanceof WebGPURenderer)) {
+    throw new Error('Expected the node renderer');
+  }
+  renderer.setSize(size, size);
+  renderer.toneMapping = NoToneMapping;
+  const target = new RenderTarget(size, size, { type: UnsignedByteType, samples: 0 });
+  const grid = createInfiniteGridNodeMaterial({
+    axes: 'xzy',
+    color: new Color(0, 1, 0),
+    lineOpacity: 1,
+    smallSize: 0.05,
+    smallThickness: 3,
+    gridDistance: 50,
+  });
+  const proxyGeometry = new PlaneGeometry(1, 1);
+  const gridMesh = new Mesh(proxyGeometry, grid.material);
+  gridMesh.frustumCulled = false;
+  const scene = new Scene();
+  scene.background = new Color(0);
+  scene.add(gridMesh);
+  // The camera stays put: only the centre moves the proxy and its fade.
+  const camera = new PerspectiveCamera(40, 1, 0.01, 100);
+  camera.position.set(0, 1.5, 2.5);
+  camera.lookAt(0, 0, 0);
+  const countGreen = async (): Promise<number> => {
+    renderer.setRenderTarget(target);
+    renderer.render(scene, camera);
+    const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size);
+    let green = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index + 1]! > 64) {
+        green++;
+      }
+    }
+    return green;
+  };
+  try {
+    expect(await countGreen()).toBeGreaterThan(size * 4);
+    // Twenty units away is past the fade end (0.2 × 50 = 10), so nothing under this camera draws.
+    grid.applyVisualOverrides({ gridCenter: [20, 20] });
+    expect(await countGreen()).toBe(0);
+    grid.applyVisualOverrides({ gridCenter: [0, 0] });
+    expect(await countGreen()).toBeGreaterThan(size * 4);
+  } finally {
+    renderer.setRenderTarget(null);
+    target.dispose();
+    proxyGeometry.dispose();
+    grid.material.dispose();
+    renderer.dispose();
+  }
+});

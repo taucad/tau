@@ -20,7 +20,7 @@ export function createEmphasisMaskCrop(): {
   let width = 0;
   let height = 0;
   let sourceCamera: Camera | undefined;
-  let cropCamera: Camera | undefined;
+  let cropCamera: (Camera & { updateProjectionMatrix: () => void }) | undefined;
   const reset = (): void => {
     capacityWidth = 0;
     capacityHeight = 0;
@@ -55,7 +55,15 @@ export function createEmphasisMaskCrop(): {
       }
       if (sourceCamera !== camera || !cropCamera) {
         sourceCamera = camera;
-        cropCamera = camera.clone();
+        const clone = camera.clone();
+        // The crop camera owns its projection: three recomputes it on first use by a renderer whose depth convention
+        // or coordinate system differs (`Renderer._renderScene`), which must reproduce the crop, not the full frame.
+        cropCamera = Object.assign(clone, {
+          updateProjectionMatrix: (): void => {
+            clone.projectionMatrix.multiplyMatrices(crop, camera.projectionMatrix);
+            clone.projectionMatrixInverse.copy(clone.projectionMatrix).invert();
+          },
+        });
       }
       cropCamera.copy(camera, false);
       // The detached clone borrows the source's already-resolved world/view matrices.
@@ -81,8 +89,7 @@ export function createEmphasisMaskCrop(): {
         0,
         1,
       );
-      cropCamera.projectionMatrix.multiplyMatrices(crop, camera.projectionMatrix);
-      cropCamera.projectionMatrixInverse.copy(cropCamera.projectionMatrix).invert();
+      cropCamera.updateProjectionMatrix();
       return cropCamera;
     },
   };

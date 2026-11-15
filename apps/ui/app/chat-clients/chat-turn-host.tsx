@@ -19,8 +19,7 @@ import { externalAdmissionConfig, wireAdmissionConfig } from '#services/agent-ho
 import { buildEditedUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
-import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
-import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
+import { useTelemetryConsent } from '#hooks/use-telemetry-consent.js';
 
 /** The route publishes command composition; project-scoped host observation lives in ProjectSessionBinding. */
 export function ChatTurnHost(): ReactNode {
@@ -37,10 +36,9 @@ export function ChatTurnHost(): ReactNode {
   const kernelOwnerRef = useRef(kernelOwner);
   const isAutoRef = useRef(kernelPreference === 'auto');
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
-  /* Usage metrics (the turn's context and Tau tool names) need the stored preference; unknown reads as off. */
-  const { preferences } = usePrivacyPreferences();
-  const allowsUsageMetrics = preferences?.allowsUsageMetrics === true && !isGlobalPrivacyControlEnabled();
-  const allowsUsageMetricsRef = useRef(allowsUsageMetrics);
+  /* Agent usage follows the one switch's resolved consent (AR-W6-02); only `granted` reports, `unknown` does not. */
+  const { consent } = useTelemetryConsent();
+  const consentRef = useRef(consent);
   const agentRef = useRef(agent);
   const resolveModelRef = useRef(resolveModel);
   const setActiveExecutionRef = useRef(setActiveExecution);
@@ -55,12 +53,12 @@ export function ChatTurnHost(): ReactNode {
   );
   useEffect(() => {
     agentRef.current = agent;
-    allowsUsageMetricsRef.current = allowsUsageMetrics;
+    consentRef.current = consent;
     resolveModelRef.current = resolveModel;
     setActiveExecutionRef.current = setActiveExecution;
     kernelOwnerRef.current = kernelOwner;
     isAutoRef.current = kernelPreference === 'auto';
-  }, [agent, allowsUsageMetrics, resolveModel, setActiveExecution, kernelOwner, kernelPreference]);
+  }, [agent, consent, resolveModel, setActiveExecution, kernelOwner, kernelPreference]);
 
   const admit = useCallback(
     async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
@@ -83,7 +81,7 @@ export function ChatTurnHost(): ReactNode {
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
       const turnTelemetry = telemetry.begin(execution, {
         kernelId: turnAgent.kernel,
-        allowsUsageMetrics: allowsUsageMetricsRef.current,
+        consent: consentRef.current,
         ...(isAutoRef.current
           ? { autoKernel: { ownerAtAdmission: kernelOwnerRef.current, readOwner: () => kernelOwnerRef.current } }
           : {}),

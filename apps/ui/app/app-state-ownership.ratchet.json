@@ -57,7 +57,6 @@
       "apps/ui/app/runtime/image-runtime.worker.ts",
       "apps/ui/app/runtime/leases.machine.ts",
       "apps/ui/app/runtime/leases.ts",
-      "apps/ui/app/runtime/observability/observability.middleware.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
       "apps/ui/app/runtime/project-library-commands.ts",

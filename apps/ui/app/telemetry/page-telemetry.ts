@@ -14,7 +14,7 @@
  * - **Worker facts** (AR-W16-03, AR-W17-02): a client is asked for `facts` only once the policy is `on`; on `off` the
  *   page stops listening and listens again when the cached answer expires (FR-22).
  *
- * The legacy observability middleware is untouched and ungated until PR-7 (AR-W4-13).
+ * PR-7 deleted the legacy observability middleware and its ungated kernel timings (D-T8, AR-W4-13).
  *
  * @module
  */

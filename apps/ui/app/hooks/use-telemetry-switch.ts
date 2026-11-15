@@ -8,20 +8,16 @@
  */
 
 import { useEffect } from 'react';
-import { useSession } from '@better-auth-ui/react';
-import { resolveTelemetryConsent } from '@taucad/telemetry/client';
-import type { DevicePreference, ReportingConsent } from '@taucad/telemetry/client';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { useCookie } from '#hooks/use-cookie.js';
-import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
-import { authClient } from '#lib/auth-client.js';
-import { isGlobalPrivacyControlEnabled } from '@taucad/ui-core/lib/global-privacy-control.lib';
+import { useTelemetryConsent } from '#hooks/use-telemetry-consent.js';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 
 /**
- * The switch's disclosure. Until PR-7 retires the legacy producers, the copy names each one this switch does not yet
- * stop (AR-W5-04, AR-W6-02), and in every phase it names what the switch never governs (AR-W7-01).
+ * The switch's disclosure. Before PR-7 retired the legacy producers, the copy named each one this switch did not yet
+ * stop (AR-W5-04, AR-W6-02); in every phase it names what the switch never governs (AR-W7-01).
  */
 export const telemetryCopy = {
   label: 'Share usage and diagnostics',
@@ -36,7 +32,7 @@ export const telemetryCopy = {
     'Other error reports and product analytics are separate. On the web, analytics follow your cookie preferences; in the desktop app, the Analytics switch in Data controls.',
   ],
   untilActivation: {
-    /** True to the switch's current reach: three legacy producers still ignore it. */
+    /** True to the switch's reach before PR-7: three legacy producers ignored it. */
     caveat:
       'For now, kernel operation timings, project sync outcomes and agent usage may still be sent while this is off.',
   },
@@ -46,12 +42,10 @@ export const telemetryCopy = {
 } as const;
 
 /**
- * Which disclosure applies (AR-W5-04): `untilActivation` until PR-7 deletes the legacy middleware and moves its
- * producers onto the one rule, in the same change that switches this to `afterActivation`.
+ * Which disclosure applies (AR-W5-04): `afterActivation` since PR-7 deleted the legacy middleware and moved kernel
+ * timings, sync attempts and agent usage onto the one rule, so `off` stops every producer the switch governs.
  */
-const telemetryCopyPhase: 'untilActivation' | 'afterActivation' = 'untilActivation';
-
-const devicePreferenceOf = (value: unknown): DevicePreference => (value === 'on' || value === 'off' ? value : 'unset');
+const telemetryCopyPhase: 'untilActivation' | 'afterActivation' = 'afterActivation';
 
 /** What the Privacy section renders. */
 export type TelemetrySwitch = Readonly<{
@@ -74,25 +68,16 @@ export type TelemetrySwitch = Readonly<{
  * @returns The switch's state and handler.
  */
 export function useTelemetrySwitch(): TelemetrySwitch {
-  const { data: session, isPending: isSessionPending } = useSession(authClient);
-  const isSignedIn = session !== null && session !== undefined;
-  const [deviceValue, setDevice] = useCookie<unknown>(cookieName.telemetry, 'unset');
-  const device = devicePreferenceOf(deviceValue);
-  const analytics = useCookieConsent();
-  const { preferences, updatePreferences, isLoading, isUpdating } = usePrivacyPreferences({ enabled: isSignedIn });
-  const globalPrivacyControl = isGlobalPrivacyControlEnabled();
-  const server: boolean | 'none' | undefined = isSignedIn
-    ? preferences?.allowsUsageMetrics
-    : isSessionPending
-      ? undefined
-      : 'none';
+  const { consent, globalPrivacyControl, analytics, device, server, isSignedIn, isSessionPending } =
+    useTelemetryConsent();
+  const [, setDevice] = useCookie<unknown>(cookieName.telemetry, 'unset');
+  const { updatePreferences, isLoading, isUpdating } = usePrivacyPreferences({ enabled: isSignedIn });
 
   useEffect(() => {
     pageTelemetry()?.onConsentInputsChanged({ updatePending: isUpdating, observed: { server, device, analytics } });
   }, [server, device, analytics, isUpdating]);
 
   const caveat: string | undefined = telemetryCopy[telemetryCopyPhase].caveat;
-  const consent = resolveTelemetryConsent({ globalPrivacyControl, analytics, device, server });
   return {
     checked: consent === 'granted',
     pending: consent === 'unknown' && (isLoading || isSessionPending),

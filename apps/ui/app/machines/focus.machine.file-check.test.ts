@@ -17,11 +17,11 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
-import type { EventObject } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { openPatienceMilliseconds } from '#machines/focus.machine.js';
 import type { FocusAccessAnswer } from '#machines/focus.machine.js';
+import type { ProjectSessionMachineEvent } from '#machines/project-session.machine.js';
 import { selectProjectRouteState } from '#machines/focus.route-state.js';
 import { modelCheckPatienceMilliseconds } from '#machines/session-file-check.machine.js';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
@@ -50,9 +50,9 @@ const ready = (id: string): FocusAccessAnswer => ({
 /** The `revisions` children the row drives: each one's report, and the module load they wait behind. */
 const createRevisionsStandIn = () => {
   const module = Promise.withResolvers<void>();
-  const children: Array<(event: EventObject) => void> = [];
+  const children: Array<(event: ProjectSessionMachineEvent) => void> = [];
   const callback: SessionRevisionsCallback = ({ sendBack }) => {
-    children.push(sendBack as (event: EventObject) => void);
+    children.push(sendBack as (event: ProjectSessionMachineEvent) => void);
     return () => undefined;
   };
   return {

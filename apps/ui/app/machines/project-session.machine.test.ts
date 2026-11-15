@@ -425,8 +425,9 @@ describe('projectSessionMachine', () => {
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
-    /* Four regions and the session's presence, and no chat: the store owns each chat's root (PV-S5). */
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(5);
+    /* Four regions, the session's presence and its file check's patience (A14), and no chat: the store owns each
+     * chat's root (PV-S5). */
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(6);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });

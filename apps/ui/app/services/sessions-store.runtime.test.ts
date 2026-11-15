@@ -9,7 +9,7 @@
  * report the runtime region, `chatReady` was a constant `true`, and nothing was built: every row below fails there.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flush } from '@taucad/xstate-testing/clock';
+import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import {
   createSessionsActor,
   registerProjectSessionServices,
@@ -20,6 +20,7 @@ import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fi
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeFacts } from '#services/sessions-store.js';
+import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
 import type * as AppRuntimeFaultsModule from '#runtime/app-runtime-faults.js';
 
@@ -47,7 +48,7 @@ type Harness = Readonly<{
 
 let current: Harness | undefined;
 
-const harness = (facts: Partial<SessionRuntimeFacts> = {}): Harness => {
+const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock): Harness => {
   const files: SessionFileManagerStandIn[] = [];
   const closes: string[] = [];
   const opener = sessionRuntimeOpenerStandIn(facts);
@@ -85,6 +86,7 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}): Harness => {
         };
       },
     },
+    ...(clock === undefined ? {} : { clock }),
   }).start();
   current = { registry, files, opener, closes };
   return current;
@@ -512,5 +514,94 @@ describe('a change of kernel selection replaces the runtime through the session 
     } finally {
       unregister();
     }
+  });
+
+  it('A6 exit: should open, park, replace the runtime of and close a project in order, with no React', async () => {
+    const clock = new StepClock();
+    const { registry, opener, closes } = harness({}, clock);
+    await open(registry, { workspace: 'ws' });
+    const session = sessionOf(registry)!;
+    const parking: boolean[] = [];
+    session.on('runtimeParking', (event) => parking.push(event.parked));
+
+    session.send({ type: 'visibilityChanged', visible: false, focused: false });
+    clock.advance(projectSessionParkWindowMilliseconds);
+    await flush();
+    expect(parking).toEqual([true]);
+
+    opener.built[0]?.owed.push('editor state');
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+    expect(opener.built[0]?.landed).toEqual(['editor state']);
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0']);
+
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
+    expect(sessionOf(registry)).toBeUndefined();
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0', 'runtime:1', 'fileManager']);
+  });
+
+  it('should build nothing mid-close when a replacement handed on before the close settles its flush (D21 round 3)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+    const closing = held();
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: closing.flush,
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+      const before = [...closes];
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      flushing.settle();
+      await flush();
+      await flush();
+      expect(closes).toEqual(before);
+
+      /* The close is refused: the session is live again and the replacement goes ahead, flushed afresh. */
+      closing.settle(new Error('Unsaved parameter drafts'));
+      await flush();
+      await flush();
+      flushing.settle();
+      await flush();
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+      expect(closes).toEqual([...before, 'flush:0', 'open:1', 'runtime:0']);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('should not report a flush the close cut short as a fault (D21 round 3)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    reportFault.mockClear();
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
+    flushing.settle(new Error('Actor terminated without satisfying predicate'));
+    await flush();
+    await flush();
+
+    expect(reportFault).not.toHaveBeenCalled();
   });
 });

@@ -452,7 +452,8 @@ describe('projectSessionMachine', () => {
     await settle();
     expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
     actor.send({ type: 'replaceRuntime' });
-    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime']);
+    /* The close holds any replacement already handed on, and hands on no other. */
+    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime', 'project:holdReplacement']);
     releaseFlush();
     actor.stop();
   });

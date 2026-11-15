@@ -809,6 +809,13 @@ export const projectSessionMachine = setup({
           },
         },
         cancellingRuns: {
+          /* A6e: a replacement handed on before the close builds nothing once its flush settles; the close stops the
+           * child, and a close step that fails hands `replaceRuntime` back, which lifts the hold. */
+          entry: ({ context }, enq) => {
+            if (context.projectRef !== undefined) {
+              enq.sendTo(context.projectRef, { type: 'holdReplacement' });
+            }
+          },
           invoke: {
             src: 'cancelRuns',
             input: ({ context }) => ({ projectId: context.projectId, runs: context.stoppableRuns }),

@@ -189,6 +189,9 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       let stopped = false;
       /* A replacement's flush is under way (A6e): another report waits for it, and the build after it reads the choices. */
       let replacing = false;
+      /* The session's close is under way (A6e): a flush that settles now builds nothing, and the close stops the child.
+       * A close step that fails hands `replaceRuntime` back, which lifts the hold. */
+      let held = false;
       /* Aborted when the child stops, so a replacement's flush stops waiting on the runtime it no longer owns. */
       const gone = new AbortController();
 
@@ -310,15 +313,19 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
         }
         replacing = true;
         const settle = async (): Promise<void> => {
+          const overtaken = (): boolean => stopped || held || current !== superseded;
           try {
             await superseded.runtime.flush(gone.signal);
           } catch (error) {
-            reportAppRuntimeFault(error);
+            /* A flush cut short by a stop, a close or a newer runtime is a cancellation, not a fault (D23). */
+            if (!overtaken()) {
+              reportAppRuntimeFault(error);
+            }
           } finally {
             replacing = false;
           }
-          /* A stop or a new file manager overtook the flush, or the choices came back to this kernel. */
-          if (stopped || current !== superseded || superseded.runtime.kernelIsCurrent()) {
+          /* A stop, the close or a new file manager overtook the flush, or the choices came back to this kernel. */
+          if (overtaken() || superseded.runtime.kernelIsCurrent()) {
             return;
           }
           build();
@@ -329,7 +336,12 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
 
       receive((event) => {
         if (event.type === 'replaceRuntime') {
+          held = false;
           replace();
+          return;
+        }
+        if (event.type === 'holdReplacement') {
+          held = true;
           return;
         }
         if (event.type === 'fileManagerChanged') {

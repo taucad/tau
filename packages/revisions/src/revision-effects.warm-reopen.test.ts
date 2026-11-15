@@ -6,7 +6,7 @@
  * not read again. Anything the stats cannot vouch for — an edit by another
  * program, a racy timestamp, a moved head — is read, as a walk would (I5).
  */
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -368,6 +368,27 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
     const treeId = await compare(second.actors);
 
     expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it.each([
+    ['another checkout', { checkoutId: 'linked-1' }],
+    ['other rules that turn files into a tree id', { rules: 'an earlier release' }],
+  ])('should read the checkout when the record was kept for %s', async (_, altered) => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    await compare(first.actors);
+    await first.close();
+    const recordPath = join(root, '.git/tau-compare-live.json');
+    const record = JSON.parse(await readFile(recordPath, 'utf8')) as Record<string, unknown>;
+    await writeFile(recordPath, `${JSON.stringify({ ...record, ...altered })}\n`);
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads.length).toBeGreaterThan(0);
     expect(treeId).toBe(await compare(second.walking));
   });
 

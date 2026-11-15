@@ -34,6 +34,14 @@ export type CompareReading = Readonly<{ readAt: number; size: number; mtimeMs: n
 /** What a comparison was answered over. @internal */
 export type CompareRecord = Readonly<{
   treeId: string;
+  /** The checkout it was answered for: a record is never another checkout's. */
+  checkoutId: string;
+  /**
+   * A fingerprint of the rules that turn files into a tree id (the path
+   * registry, the large-object threshold, the store's engine and format), so a
+   * release that changes them cannot answer an earlier one's tree id.
+   */
+  rules: string;
   /** The checkout's head: the store records the files over it, and inherits its modes. */
   head: string | undefined;
   /** The ignore rules' context, or `''` for a store that applies none. */
@@ -48,13 +56,15 @@ export type CompareRecord = Readonly<{
 
 /** What a session sees now: the head, the ignore context and every versioned file the index states. @internal */
 export type CompareObservation = Readonly<{
+  checkoutId: string;
+  rules: string;
   head: string | undefined;
   ignores: string;
   stats: readonly FileStatEntry[];
 }>;
 
 const recordFormat = 'tau-checkout-compare';
-const recordVersion = 1;
+const recordVersion = 2;
 
 /**
  * Past this many files no record is kept: the record would cost more to write
@@ -84,8 +94,8 @@ const byPath =(left: string, right: string): number => (left < right ? -1 : left
  * The record of one comparison's tree.
  *
  * @internal
- * @param answer - The tree id, head and ignore context it was answered under, and each captured file's mode where
- *   the provider reports modes.
+ * @param answer - The tree id, the checkout, rules, head and ignore context it was answered under, and each
+ *   captured file's mode where the provider reports modes.
  * @param stats - The index's stats now, of every versioned path.
  * @param readings - How each captured file was read, by path.
  * @returns The record, or `undefined` when a captured file has no reading, or has moved since it was read (the
@@ -95,6 +105,8 @@ const byPath =(left: string, right: string): number => (left < right ? -1 : left
 export const compareRecordOf = (
   answer: Readonly<{
     treeId: string;
+    checkoutId: string;
+    rules: string;
     head: string | undefined;
     ignores: string;
     modes?: Readonly<Record<string, FileMode>> | undefined;
@@ -128,7 +140,7 @@ export const compareRecordOf = (
 
 /**
  * Whether a fresh observation holds the files a record was answered over: the
- * same head and ignore context, every captured file at the same size and
+ * same checkout, rules, head and ignore context, every captured file at the same size and
  * timestamp, each written more than the racy window before it was read (a file
  * written that close to its read may have changed again without moving its
  * stats), and the same versioned paths left out.
@@ -140,6 +152,8 @@ export const compareRecordOf = (
  */
 export const recordAnswers = (record: CompareRecord, now: CompareObservation): boolean => {
   if (
+    record.checkoutId !== now.checkoutId ||
+    record.rules !== now.rules ||
     record.head !== now.head ||
     record.ignores !== now.ignores ||
     record.files.length + record.ignored.length !== now.stats.length
@@ -195,10 +209,15 @@ export const parseCompareRecord = (text: string): CompareRecord | undefined => {
   if (typeof value !== 'object' || value === null) {
     return undefined;
   }
-  const { format, version, head, ignores, files, ignored, treeId, modes } = value as Record<string, unknown>;
+  const { format, version, checkoutId, rules, head, ignores, files, ignored, treeId, modes } = value as Record<
+    string,
+    unknown
+  >;
   if (
     format !== recordFormat ||
     version !== recordVersion ||
+    typeof checkoutId !== 'string' ||
+    typeof rules !== 'string' ||
     (head !== undefined && typeof head !== 'string') ||
     typeof ignores !== 'string' ||
     typeof treeId !== 'string' ||
@@ -211,6 +230,8 @@ export const parseCompareRecord = (text: string): CompareRecord | undefined => {
     return undefined;
   }
   return {
+    checkoutId,
+    rules,
     head,
     ignores,
     files,

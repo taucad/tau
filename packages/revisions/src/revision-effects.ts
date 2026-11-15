@@ -113,6 +113,7 @@ import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref
 import { LfsQuotaError } from '#lfs-client.js';
 import { cleanLargeObjects, largeObjectBasisOf, mayBeLfsPointerSize, withOwedAttributes } from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
+import { digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import { publishMachine } from '#publish.machine.js';
@@ -154,6 +155,7 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  largeObjectThresholdBytes,
   tauRevisionPolicy,
 } from '#workspace-config.js';
 import type {
@@ -1241,6 +1243,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (rooted.capabilities.trustworthyMtime !== true || compareIndex === undefined || statTree === undefined) {
       return undefined;
     }
+    const rules = await compareRules();
+    if (rules === undefined) {
+      return undefined;
+    }
     const ignores =
       port.ignoredPaths === undefined ? '' : await port.ignoreContext?.(place.kind === 'live' ? undefined : place.root);
     if (ignores === undefined) {
@@ -1251,7 +1257,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       await compareIndex.call(rooted);
     }
     const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
-    return { head, ignores, stats };
+    return { checkoutId: place.id, rules, head, ignores, stats };
+  };
+  /*
+   * What turns a checkout's files into a tree id beyond the files themselves:
+   * the registry that versions paths, the threshold that makes a file a large
+   * object, and the store's engine, format and attributes matching. A record
+   * kept under other rules answers nothing. A host's own policy is opaque, so
+   * it keeps no record.
+   */
+  let registryRules: string | undefined;
+  const compareRules = async (): Promise<string | undefined> => {
+    if (policy !== tauRevisionPolicy.policy) {
+      return undefined;
+    }
+    const { engine, version, objectFormat, largeObjects, ignoreCase, keepsLargeObjectFiles } = await describePort();
+    registryRules ??= JSON.stringify([largeObjectThresholdBytes, tauRevisionPolicy.rows]);
+    const rules = JSON.stringify([registryRules, engine, version, objectFormat, largeObjects, ignoreCase, keepsLargeObjectFiles]);
+    return digestHex('sha256', textEncoder.encode(rules));
   };
   /* Every path the registry versions, as a capture lists it: a reserved temporary sibling is none. */
   const versionedAdmits = (path: string): boolean =>
@@ -1295,7 +1318,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           ? undefined
           : Object.fromEntries([...revisionTreeFiles(compared.tree)].map(([file, { mode }]) => [file, mode]));
       return compareRecordOf(
-        { treeId: compared.treeId, head: now.head, ignores: now.ignores, modes },
+        {
+          treeId: compared.treeId,
+          checkoutId: now.checkoutId,
+          rules: now.rules,
+          head: now.head,
+          ignores: now.ignores,
+          modes,
+        },
         now.stats,
         read,
       );

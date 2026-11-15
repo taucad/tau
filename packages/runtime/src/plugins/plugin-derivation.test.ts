@@ -34,8 +34,8 @@ const transcoder = defineTranscoder({
   name: 'Fixture',
   version: '1.0.0',
   edges: [
-    { from: 'glb', to: 'obj', fidelity: 'mesh' },
-    { from: 'step', to: 'stl', fidelity: 'mesh' },
+    { from: 'glb', to: 'obj' },
+    { from: 'step', to: 'stl' },
   ],
   async initialize() {
     return {};

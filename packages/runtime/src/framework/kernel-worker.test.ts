@@ -3376,8 +3376,8 @@ describe('transcoder loading', () => {
 
   it('should load transcoder modules and populate transcodeEdges in capabilities manifest', async () => {
     const mockModule = createMockTranscoderModule([
-      { from: 'glb', to: 'usdz', fidelity: 'mesh' },
-      { from: 'glb', to: '3mf', fidelity: 'mesh' },
+      { from: 'glb', to: 'usdz' },
+      { from: 'glb', to: '3mf' },
     ]);
 
     const worker = createConfiguredWorker({
@@ -3422,7 +3422,7 @@ describe('transcoder loading', () => {
       issues: [],
     };
 
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
     mockModule.transcode.mockResolvedValue(transcoderResult);
 
     const kernelExportResult: ExportGeometryResult = {
@@ -3467,7 +3467,7 @@ describe('transcoder loading', () => {
   });
 
   it('should fall through to direct kernel export when no transcoder route matches', async () => {
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
 
     const kernelExportResult: ExportGeometryResult = {
       success: true,
@@ -3504,7 +3504,7 @@ describe('transcoder loading', () => {
   });
 
   it('should not initialize or clean up an unused transcoder', async () => {
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
 
     const worker = createConfiguredWorker({
       transcoders: [createMockTranscoderPlugin('cleanup-transcoder', mockModule)],
@@ -3523,7 +3523,7 @@ describe('transcoder loading', () => {
   });
 
   it('should propagate kernel export failure without calling transcoder', async () => {
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
 
     const worker = createConfiguredWorker({
       exportResult: {
@@ -3549,7 +3549,7 @@ describe('transcoder loading', () => {
 
   it('should validate transcoder edge options before transcoding', async () => {
     const optionsSchema = z.object({ quality: z.number().min(0).max(1) });
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh', optionsSchema }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', optionsSchema }]);
 
     const worker = createConfiguredWorker({
       nativeHandle: { kind: 'mock-native-handle' },
@@ -3569,7 +3569,7 @@ describe('transcoder loading', () => {
 
   it('should hard-fail when transcoder edge options are invalid', async () => {
     const optionsSchema = z.object({ quality: z.number().min(0).max(1) });
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh', optionsSchema }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', optionsSchema }]);
 
     const worker = createConfiguredWorker({
       transcoders: [createMockTranscoderPlugin('invalid-opts-transcoder', mockModule)],
@@ -3597,7 +3597,7 @@ describe('transcoder loading', () => {
 
   it('should reject unknown transcoder export option keys at runtime', async () => {
     const optionsSchema = z.object({ quality: z.number().min(0).max(1) }).strict();
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh', optionsSchema }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', optionsSchema }]);
     const worker = createConfiguredWorker({
       transcoders: [createMockTranscoderPlugin('unknown-opts-transcoder', mockModule)],
     });
@@ -3646,7 +3646,7 @@ describe('transcoder loading', () => {
   });
 
   it('should invoke transcoder.transcode exactly once for a matching route without any runtime guard', async () => {
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
 
     const worker = createConfiguredWorker({
       exportZodSchemas: {
@@ -3695,8 +3695,8 @@ describe('transcoder loading', () => {
   });
 
   it('should prefer brep routes over mesh routes via manifest order', async () => {
-    const brepModule = createMockTranscoderModule([{ from: 'step', to: 'iges', fidelity: 'brep' }]);
-    const meshModule = createMockTranscoderModule([{ from: 'glb', to: 'iges', fidelity: 'mesh' }]);
+    const brepModule = createMockTranscoderModule([{ from: 'step', to: 'iges' }]);
+    const meshModule = createMockTranscoderModule([{ from: 'glb', to: 'iges' }]);
 
     const worker = createConfiguredWorker({
       exportZodSchemas: {
@@ -3825,7 +3825,7 @@ describe('transcoder loading', () => {
   });
 
   it('should include merged schema and defaults on transcoded export routes', async () => {
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
     const glbSchema = tessellationSchema.extend(coordinateSystemSchema.shape);
 
     const worker = createConfiguredWorker({
@@ -3876,9 +3876,7 @@ describe('transcoder loading', () => {
         .strict()
         .meta({ title: 'Batch' }),
     ]);
-    const mockModule = createMockTranscoderModule([
-      { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: edgeSchema },
-    ]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'webp', optionsSchema: edgeSchema }]);
     const worker = createConfiguredWorker({
       nativeHandle: { kind: 'mock-native-handle' },
       exportZodSchemas: { glb: tessellationSchema },
@@ -3925,7 +3923,6 @@ describe('transcoder loading', () => {
       {
         from: 'glb',
         to: 'stl',
-        fidelity: 'mesh',
         optionsSchema: z.strictObject({ binary: z.boolean().default(false) }),
         sourceOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
       },
@@ -3970,7 +3967,6 @@ describe('transcoder loading', () => {
       (Object.keys(imageEdgeSchemas) as Array<keyof typeof imageEdgeSchemas>).map((target) => ({
         from: 'glb',
         to: target,
-        fidelity: 'mesh',
         optionsSchema: imageEdgeSchemas[target],
         content: ['includeEdges'] as const,
         sourceOptions: { coordinateSystem: 'z-up', unit: { length: 'meter' } },
@@ -4053,7 +4049,6 @@ describe('transcoder loading', () => {
       {
         from: 'glb',
         to: 'usdz',
-        fidelity: 'mesh',
         optionsSchema: edgeSchema,
         sourceOptions: { coordinateSystem: 'y-up' },
       },
@@ -4091,7 +4086,7 @@ describe('transcoder loading', () => {
     const mockModule = {
       name: 'QualityTranscoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'usdz', fidelity: 'mesh', optionsSchema: qualitySchema }],
+      edges: [{ from: 'glb', to: 'usdz', optionsSchema: qualitySchema }],
       initialize: vi.fn().mockResolvedValue({ initialized: true }),
       transcode: vi.fn().mockResolvedValue({
         success: true,
@@ -4139,9 +4134,7 @@ describe('transcoder loading', () => {
       quality: z.number().min(0).max(1).default(0.8).describe('Transcoding quality'),
     });
 
-    const mockModule = createMockTranscoderModule([
-      { from: 'glb', to: 'usdz', fidelity: 'mesh', optionsSchema: qualitySchema },
-    ]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', optionsSchema: qualitySchema }]);
 
     const glbSchema = tessellationSchema.extend(coordinateSystemSchema.shape);
 
@@ -4189,9 +4182,9 @@ describe('transcoder loading', () => {
     const gltfSchema = tessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape);
 
     const mockModule = createMockTranscoderModule([
-      { from: 'glb', to: 'usdz', fidelity: 'mesh' },
-      { from: 'glb', to: '3mf', fidelity: 'mesh' },
-      { from: 'glb', to: 'obj', fidelity: 'mesh' },
+      { from: 'glb', to: 'usdz' },
+      { from: 'glb', to: '3mf' },
+      { from: 'glb', to: 'obj' },
     ]);
 
     const worker = createConfiguredWorker({
@@ -4283,7 +4276,7 @@ describe('transcoder loading', () => {
         .default({ linearTolerance: 0.01, angularTolerance: 30 }),
     });
 
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz' }]);
 
     const worker = createConfiguredWorker({
       exportZodSchemas: { glb: glbSchema },
@@ -4315,7 +4308,7 @@ describe('transcoder loading', () => {
     // PicoGK declares `stl` for the author's own files and meshes `glb`; a build that wrote no
     // authored file still reaches `glb` -> `stl`, rather than planning a native `stl` export the
     // evaluation never offered.
-    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'stl', fidelity: 'mesh' }]);
+    const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'stl' }]);
     class ShadowedFormatWorker extends MockKernelWorker {
       protected override resolveDocumentExportTarget(
         _owner: OperationOwner,

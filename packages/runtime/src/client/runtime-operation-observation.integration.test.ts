@@ -674,7 +674,7 @@ describe('operation observation over the in-process transport', () => {
         id: 'converter',
         name: 'Converter',
         version: '1.0.0',
-        edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }],
+        edges: [{ from: 'glb', to: 'stl' }],
         async initialize() {
           return {};
         },

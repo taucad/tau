@@ -67,6 +67,8 @@ const harness = (options?: {
   readonly clock?: StepClock;
   /** The `project` child never answers a leave or unload flush. */
   readonly holdAskedFlushes?: boolean;
+  /** The `project` child never answers the close's `closeParameters`. */
+  readonly holdCloseParameters?: boolean;
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
@@ -142,7 +144,9 @@ const harness = (options?: {
               sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
             } else if (event.type === 'closeParameters') {
               order.push('closeParameters');
-              sendBack({ type: 'parametersClosed', requestId: event.requestId, ...failure('closeParameters') });
+              if (options?.holdCloseParameters !== true) {
+                sendBack({ type: 'parametersClosed', requestId: event.requestId, ...failure('closeParameters') });
+              }
             } else if (event.type === 'closeRuntime') {
               order.push('closeRuntime');
               sendBack({ type: 'runtimeClosed', requestId: event.requestId, ...failure('closeRuntime') });
@@ -249,6 +253,26 @@ describe('projectSessionMachine', () => {
     expect(actor.getSnapshot().matches('live')).toBe(true);
     expect(order).not.toContain('closeParameters');
     expect(order).not.toContain('closeRuntime');
+    actor.stop();
+  });
+
+  it('should not start the close again once the parameter service is closing, when quit closes it again (A7c review)', async () => {
+    const clock = new StepClock();
+    const { actor, order } = harness({ clock, holdCloseParameters: true });
+    await settle();
+    actor.send({ type: 'close', reason: 'user' });
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'closingParameters' })).toBe(true);
+
+    /* Quit closes every session again. A restarted close would flush anew and could expire back to live while this
+     * step's parameter close still lands, leaving a live session with its parameter service closed. */
+    actor.send({ type: 'close', reason: 'quit' });
+    await settle();
+    clock.advance(machineModule.projectSessionProducerFlushMilliseconds);
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'closingParameters' })).toBe(true);
+    expect(order.filter((step) => step === 'flushProducers')).toHaveLength(1);
+    expect(order.filter((step) => step === 'closeParameters')).toHaveLength(1);
     actor.stop();
   });
 

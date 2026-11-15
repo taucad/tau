@@ -117,11 +117,11 @@ const samples: Samples = {
   ],
   syncQuiesced: [
     ...answeredIds.map((requestId) => ({ type: 'syncQuiesced', requestId }) as const),
-    { type: 'syncQuiesced', requestId: 'close:2', error: 'refused' },
+    { type: 'syncQuiesced', requestId: 'close:3', error: 'refused' },
   ],
   parametersClosed: [
     ...answeredIds.map((requestId) => ({ type: 'parametersClosed', requestId }) as const),
-    { type: 'parametersClosed', requestId: 'close:1', error: 'refused' },
+    { type: 'parametersClosed', requestId: 'close:2', error: 'refused' },
   ],
   runtimeClosed: [
     ...answeredIds.map((requestId) => ({ type: 'runtimeClosed', requestId }) as const),

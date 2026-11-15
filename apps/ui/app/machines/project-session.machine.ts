@@ -687,6 +687,13 @@ const startupRegion = (region: ProjectSessionRegion) =>
     },
   }) as const;
 
+/**
+ * A close asked again once the close is committed, from the parameter service's close on: the close under way answers
+ * it. Started over (quit closes every session), it would flush anew and could expire back to live while this close
+ * still lands, leaving a live session whose parameter service is closed (A7c review).
+ */
+const ignoreCommittedClose = (): Record<string, never> => ({});
+
 /* The close steps after `closing.asking` (which answers the dialog's `confirmClose` and `cancelClose`), where those
  * answers go unanswered. `closing.stopping` is transient (its `always` leaves at once), so no pair
  * names it: the totality test fails on a pair that names a state no event reaches. */
@@ -1161,6 +1168,7 @@ export const projectSessionMachine = setup({
           },
           always: ({ context }) => (context.projectRef === undefined ? { target: 'flushing' } : undefined),
           on: {
+            close: ignoreCommittedClose,
             parametersClosed: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
                 return {}; // MC-R18: not this step's answer.
@@ -1195,6 +1203,7 @@ export const projectSessionMachine = setup({
           /* No revision client was started (no file manager yet, or a registry composed without wiring). */
           always: ({ context }) => (context.revisionsRef === undefined ? { target: 'closingRuntime' } : undefined),
           on: {
+            close: ignoreCommittedClose,
             syncQuiesced: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
                 return {}; // MC-R18: an earlier attempt's answer; this step asks under its own id.
@@ -1226,6 +1235,7 @@ export const projectSessionMachine = setup({
           },
           always: ({ context }) => (context.projectRef === undefined ? { target: 'releasingAgentHost' } : undefined),
           on: {
+            close: ignoreCommittedClose,
             runtimeClosed: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
                 return {}; // MC-R18: not this step's answer.
@@ -1237,6 +1247,7 @@ export const projectSessionMachine = setup({
           },
         },
         releasingAgentHost: {
+          on: { close: ignoreCommittedClose },
           invoke: {
             src: 'releaseAgentHost',
             input: ({ context }) => ({ projectId: context.projectId }),

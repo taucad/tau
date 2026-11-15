@@ -305,8 +305,12 @@ function ChangePasswordForm({
             <FieldError>{fieldErrors.confirmPassword}</FieldError>
           </Field>
         )}
-        <div className='flex justify-end'>
-          <Button type='submit' disabled={isPending || !session}>
+        <div className='flex items-center justify-end gap-3'>
+          {/* The submit always sends `revokeOtherSessions: true`, so say so before it is pressed. */}
+          <p id='changePasswordSignOutNote' className='text-xs text-muted-foreground'>
+            Your other devices will be signed out.
+          </p>
+          <Button type='submit' disabled={isPending || !session} aria-describedby='changePasswordSignOutNote'>
             {isPending && <Spinner />}
 
             {localization.settings.updatePassword}

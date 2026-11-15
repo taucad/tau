@@ -155,8 +155,9 @@ export type ProjectReadiness = 'connected' | 'treeReady' | 'entryReady' | 'mater
  * The large objects one checkout is still waiting for.
  *
  * The files open as soon as the checkout is written; a file whose object has
- * not arrived holds its pointer until it does, and a reader that must see real
- * bytes — a model render — waits for `paths` to empty.
+ * not arrived holds its pointer until it does. A model render waits only while
+ * `paths` holds a path its closure reads (T6), or any path for a kernel that
+ * mirrors the whole workspace; other readers read pending paths through.
  *
  * @public
  */

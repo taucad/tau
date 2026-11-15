@@ -88,7 +88,7 @@ export const compareRecordPath = (checkoutId: string): string | undefined =>
  */
 const ignoreRulesFile = /(?:^|\/)\.gitignore$/iu;
 
-const byPath =(left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+const byPath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
 /**
  * The record of one comparison's tree.

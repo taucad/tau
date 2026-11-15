@@ -1118,8 +1118,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const readings = new WeakMap<ImmutableRevisionTree, ReadonlyMap<string, CompareReading>>();
   const recordReadings = (
     tree: ImmutableRevisionTree,
-    at: number,
-    stats: readonly FileStatEntry[] | undefined,
+    { at, stats }: Readonly<{ at: number; stats: readonly FileStatEntry[] | undefined }>,
     kept?: Readonly<{ from: ImmutableRevisionTree; roots: ReadonlySet<string> }>,
   ): void => {
     const before = kept === undefined ? undefined : readings.get(kept.from);
@@ -1278,7 +1277,15 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const { engine, version, objectFormat, largeObjects, ignoreCase, keepsLargeObjectFiles } = await describePort();
     registryRules ??= JSON.stringify([largeObjectThresholdBytes, tauRevisionPolicy.rows]);
-    const rules = JSON.stringify([registryRules, engine, version, objectFormat, largeObjects, ignoreCase, keepsLargeObjectFiles]);
+    const rules = JSON.stringify([
+      registryRules,
+      engine,
+      version,
+      objectFormat,
+      largeObjects,
+      ignoreCase,
+      keepsLargeObjectFiles,
+    ]);
     return digestHex('sha256', textEncoder.encode(rules));
   };
   /* Every path the registry versions, as a capture lists it: a reserved temporary sibling is none. */
@@ -1356,10 +1363,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     Readonly<{ place: Checkout; compared: Parameters<typeof keepComparison>[2]; timer: ReturnType<typeof setTimeout> }>
   >();
   let keeping: Promise<void> = Promise.resolve();
-  const runKeep = (checkoutId: string): Promise<void> => {
+  const runKeep = (checkoutId: string): void => {
     const pending = pendingKeeps.get(checkoutId);
     if (pending === undefined) {
-      return keeping;
+      return;
     }
     clearTimeout(pending.timer);
     pendingKeeps.delete(checkoutId);
@@ -1373,7 +1380,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         /* Evidence for the next session only: a keep that fails costs that session a walk. */
       }
     })();
-    return keeping;
   };
   const keepSoon = (place: Checkout, compared: Parameters<typeof keepComparison>[2]): void => {
     if (compareRecordPath(place.id) === undefined || !readings.has(compared.tree)) {
@@ -1384,13 +1390,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       clearTimeout(previous.timer);
     }
     const timer = setTimeout(() => {
-      void runKeep(place.id);
+      runKeep(place.id);
     }, keepComparisonDelayMilliseconds); // Bound: keepComparisonDelayMilliseconds.
     pendingKeeps.set(place.id, { place, compared, timer });
   };
   const flushKeeps = async (): Promise<void> => {
-    for (const checkoutId of [...pendingKeeps.keys()]) {
-      void runKeep(checkoutId);
+    for (const checkoutId of pendingKeeps.keys()) {
+      runKeep(checkoutId);
     }
     await keeping;
   };
@@ -1432,10 +1438,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (getFileMode === undefined) {
       return true;
     }
-    const moved = await mapConcurrent(Object.entries(record.modes ?? {}), captureModeConcurrency, async ([file, mode]) => {
-      const current = await getFileMode.call(rooted, file).catch(() => undefined);
-      return current !== mode;
-    });
+    const moved = await mapConcurrent(
+      Object.entries(record.modes ?? {}),
+      captureModeConcurrency,
+      async ([file, mode]) => {
+        const current = await getFileMode.call(rooted, file).catch(() => undefined);
+        return current !== mode;
+      },
+    );
     return !moved.some(Boolean);
   };
   /*
@@ -2089,7 +2099,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (leavesRecords !== true) {
         await recordedBlobOids(rooted, read, stats);
       }
-      recordReadings(captured, observedAt, stats);
+      recordReadings(captured, { at: observedAt, stats });
       return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
@@ -2193,7 +2203,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         changedSince: { tree: last, paths: [...paths] },
         ...(signal === undefined ? {} : { signal }),
       });
-      recordReadings(captured, observedAt, stats, { from: last, roots: paths });
+      recordReadings(captured, { at: observedAt, stats }, { from: last, roots: paths });
       return captured;
     };
     /* A complete feed names the paths: only they are asked about, unless an ignore rule changed, which walks. */
@@ -2205,7 +2215,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const roots = new Set(paths);
       /* The index's stats of the named paths alone, before their bytes: what a record keys their reading on. */
-      const above = new Set(paths.flatMap((path) => [...path.matchAll(/\//gu)].map(({ index }) => path.slice(0, index))));
+      const above = new Set(
+        paths.flatMap((path) => [...path.matchAll(/\//gu)].map(({ index }) => path.slice(0, index))),
+      );
       const stats = await rooted
         .statTree?.('', {
           admits: (path, kind) => isUnderRoot(path, roots) || (kind === 'dir' && above.has(path)),
@@ -2218,7 +2230,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         changedSince: { tree: from, paths },
         ...(signal === undefined ? {} : { signal }),
       });
-      recordReadings(captured, readAt, stats, { from, roots });
+      recordReadings(captured, { at: readAt, stats }, { from, roots });
       return captured;
     };
     const tree =

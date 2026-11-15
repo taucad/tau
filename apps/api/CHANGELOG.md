@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.13.0 (2026-11-15)
+
+### Features
+
+- feat(telemetry): Retire the legacy observability middleware and put every producer under the one consent rule (PR-7) (#2259) (8ba8f3552)
+- feat(api-email): Receive signed Resend delivery events (#2255) (665aeef9f)
+- feat(ui): Trim Settings → Viewer and size every settings control alike (#1983) (21c5bd82e)
+- feat(api-llm-gateway): Recommend Gemini 4 Carbon so it shows in the picker (#2231) (143c097f1)
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+
+### Fixes
+
+- fix(host): Make every ACP agent work from desktop-app and CLI installs (#2262) (7caef4598)
+- fix(api-git-core): Move pre-receive's version-object loop out of a command substitution (#2260) (2b896847d)
+- fix(api-git-core): Keep pre-receive's Node checks out of command substitutions for macOS sh (#2249) (a360ce848)
+- fix(revisions): Keep a rename when only another ref of the atomic push moved (#2188) (d91fe9505)
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(api-agent-observability): Count a trace unit for a root that reconciliation finds (#2189) (5bcd6d4a8)
+- fix(api): Report a shared readiness dependency only when two probes in a row find it down (#2186) (63ab660ed)
+- fix(api-git-core): Refuse a push that moves a backed-up version to another entry (#2151) (ae7272fa3)
+
+### Performance
+
+- perf(revisions): Read cold-open pack ranges past the HTTP cache (#2261) (cfeb76969)
+- perf(ui): Load the RPC handler stack and semver on demand (LB4d) (#2237) (3d4520907)
+
+### Other changes
+
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+
 ## 0.12.0 (2026-11-14)
 
 ### Features

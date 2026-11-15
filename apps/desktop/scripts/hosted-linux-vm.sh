@@ -74,12 +74,14 @@ if [[ "$host" == gcp ]]; then
   [[ "${TAU_QUALIFICATION_GRAPHICS:-stock}" == stock ]] || { printf 'GCP hosts are for stock graphics only\n' >&2; exit 1; }
   guest_graphics=nvidia
   case "$TAU_VM_DISTRO" in ubuntu) template_distro=ubuntu2404 ;; ubuntu2604) template_distro=ubuntu2604 ;; debian) template_distro=debian13 ;; esac
-  # Templates are regional (tau-cloud stacks/gcp: the primary region and any fallback regions), so each zone uses the
-  # newest template of its own region; a zone whose region has none is skipped.
+  # Instance templates are global; each one's subnetwork fixes the region it can start in (tau-cloud stacks/gcp: the
+  # primary region and any fallback regions). Each zone uses the newest template whose subnetwork is in its region,
+  # and a zone whose region has none is skipped. Run 43756787468 showed the self link never names a region.
   region_template() {
     gcloud compute instance-templates list --project "$TAU_GCP_PROJECT" \
-      --filter="name~^ci-gpu-${template_distro}- AND selfLink~/regions/${1}/instanceTemplates/" \
-      --sort-by=~creationTimestamp --limit=1 --format='value(selfLink)'
+      --filter="name~^ci-gpu-${template_distro}-" --sort-by=~creationTimestamp \
+      --format='value(selfLink,properties.networkInterfaces[0].subnetwork)' |
+      awk -F '\t' -v region="regions/${1}/subnetworks/" 'index($2, region) { print $1; exit }' || true
   }
   route_slug="${TAU_QUALIFICATION_ROUTE:-proof}"; route_slug="${route_slug#linux-}"
   instance="tau-q-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}-${template_distro}-${route_slug}"

@@ -452,20 +452,17 @@ function useHomeBackendFailure(): string | undefined {
  * not start.
  *
  * @param properties - The root mount's machine, for the failure check and the
- *   retry, what to show while the worker is still on its way, and whether the
- *   notice stands in for the whole shell.
+ *   retry, and what to show while the worker is still on its way.
  * @returns The notice, or the placeholder.
  */
 function SharedWorkerFallback({
   fileManagerRef,
   placeholder,
-  withShellFrame,
   isInline = false,
 }: {
   readonly isInline?: boolean;
   readonly fileManagerRef: FileManagerRef;
   readonly placeholder: ReactNode;
-  readonly withShellFrame: boolean;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
   const isBackendPending = useSelector(fileManagerRef, (state) => state.context.backendType === undefined);
@@ -506,7 +503,7 @@ function SharedWorkerFallback({
     );
   }
   return (
-    <div role='alert' className={withShellFrame ? 'h-dvh w-full' : 'size-full'}>
+    <div role='alert' className='size-full'>
       <PanelEmptyState
         icon={OctagonAlert}
         iconClassName='text-feature'
@@ -529,20 +526,18 @@ function SharedWorkerFallback({
  * @param properties - The gated subtree, and the `placeholder` to show while
  *   the worker connects. A route that knows what it is opening passes its own
  *   loading state; without one the gate waits invisibly, as it always did.
- *   `withShellFrame` marks a gate above the app shell, whose failure notice
- *   then takes the window.
+ *   The failure notice fills the gate's own region: the app shell is never
+ *   below a gate (D24).
  * @returns The children, the placeholder, or the failure notice.
  */
 export function SharedWorkerGate({
   children,
   placeholder,
-  withShellFrame = false,
   shouldReportFailure = true,
 }: {
   readonly shouldReportFailure?: boolean;
   readonly children: ReactNode;
   readonly placeholder?: ReactNode;
-  readonly withShellFrame?: boolean;
 }): React.ReactNode {
   const isWorkerPresent = useSharedWorkerPresent();
   const fileManager = useOptionalFileManager();
@@ -555,11 +550,7 @@ export function SharedWorkerGate({
   return fileManager === undefined || !shouldReportFailure ? (
     placeholder
   ) : (
-    <SharedWorkerFallback
-      fileManagerRef={fileManager.fileManagerRef}
-      placeholder={placeholder}
-      withShellFrame={withShellFrame}
-    />
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={placeholder} />
   );
 }
 
@@ -567,12 +558,7 @@ export function SharedWorkerGate({
 export function HomeFileManagerNotice(): React.ReactNode {
   const fileManager = useOptionalFileManager();
   return fileManager ? (
-    <SharedWorkerFallback
-      fileManagerRef={fileManager.fileManagerRef}
-      placeholder={undefined}
-      withShellFrame={false}
-      isInline
-    />
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
   ) : undefined;
 }
 
@@ -711,12 +697,19 @@ export function SessionFileManagerProvider({
   fileManagerRef,
   rootDirectory,
   projectId,
+  isView = false,
 }: {
   readonly children: ReactNode;
   /** The session's file manager (`selectProjectSessionFileManager`). */
   readonly fileManagerRef: FileManagerRef | undefined;
   readonly rootDirectory: string;
   readonly projectId: string;
+  /**
+   * A second view over a file manager whose session subtree already provides it (the focused project's view, A11).
+   * It serves its subtree the same way but leaves the file manager's own reports (workspace telemetry, Home's save
+   * observer) to the session's scope, which outlives it, so each fires once.
+   */
+  readonly isView?: boolean;
 }): React.ReactNode {
   if (fileManagerRef === undefined) {
     return null;
@@ -729,6 +722,7 @@ export function SessionFileManagerProvider({
       rootDirectory={rootDirectory}
       projectId={projectId}
       owner={opened?.owner}
+      isOwnerReporter={!isView}
     >
       {children}
     </FileManagerScope>
@@ -774,6 +768,7 @@ function FileManagerScope({
   isRoot = false,
   owner,
   rootFacade,
+  isOwnerReporter = true,
 }: {
   readonly children: ReactNode;
   readonly fileManagerRef: FileManagerRef;
@@ -788,6 +783,8 @@ function FileManagerScope({
   readonly owner?: FileManagerOwner | undefined;
   /** The runtime's root facade, for the root layout's scope only: the scope reads it instead of building its own. */
   readonly rootFacade?: RootFileFacade;
+  /** Whether this scope sends the file manager's own reports; false for a second view over a session's (A11). */
+  readonly isOwnerReporter?: boolean;
 }): React.JSX.Element {
   const files = selectRuntimeFiles(useAppRuntime());
   /* A scope over an owner that ends, before or during a wait (a lease's late-commit case, a session's close), ends the
@@ -805,11 +802,11 @@ function FileManagerScope({
   const unavailableReason = useSelector(fileManagerRef, (state) => state.context.unavailableReason);
 
   useEffect(() => {
-    if (!contentService || !workerChangeChannel || backendType === undefined) {
+    if (!isOwnerReporter || !contentService || !workerChangeChannel || backendType === undefined) {
       return;
     }
     return observeHomeProjectSaves({ projectId, backend: backendType, contentService, channel: workerChangeChannel });
-  }, [projectId, backendType, contentService, workerChangeChannel]);
+  }, [isOwnerReporter, projectId, backendType, contentService, workerChangeChannel]);
 
   const bindProjectToWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
@@ -865,6 +862,9 @@ function FileManagerScope({
   );
 
   useEffect(() => {
+    if (!isOwnerReporter) {
+      return;
+    }
     if (unavailableReason === 'permission' && activeWorkspaceId) {
       workspaceTelemetry.workspacePermissionRevoked({
         workspaceId: activeWorkspaceId,
@@ -876,7 +876,7 @@ function FileManagerScope({
         reason: unavailableReason,
       });
     }
-  }, [activeWorkspaceId, unavailableReason, workspaceTelemetry]);
+  }, [isOwnerReporter, activeWorkspaceId, unavailableReason, workspaceTelemetry]);
 
   /**
    * Wait for the FM machine to enter `ready` and return the typed

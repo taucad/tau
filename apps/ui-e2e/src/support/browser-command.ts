@@ -2239,11 +2239,21 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
 const delayedTargetRequests = new WeakMap<object, string[]>();
 
 /**
- * Holds every request of the target context whose URL matches `pattern` for `milliseconds` before it goes on
- * (A0.10: a slow chunk). Routing turns the context's HTTP cache off, so a reload fetches the chunk again and is held.
- * The delay stays for the rest of the session.
+ * Each target context's open gate, shared by its holds until release: the requests held until
+ * `uiReleaseTargetRequests`, and whether it was released.
  */
-export const uiDelayTargetRequests: BrowserCommand<[pattern: string, milliseconds: number]> = async (
+const targetRequestGates = new WeakMap<object, { released: boolean; readonly waiting: Array<() => void> }>();
+
+/** A gate holds no request longer than this, so a row that fails before its release cannot leave the page hanging. */
+const gateCeilingMilliseconds = 30_000;
+
+/**
+ * Holds every request of the target context whose URL matches `pattern` before it goes on (A0.10: a slow chunk): for
+ * `milliseconds`, or with `'until-released'` until `uiReleaseTargetRequests` (at most 30 s), so a row's acts can be
+ * ordered before what the request starts rather than raced against a fixed time. Routing turns the context's HTTP
+ * cache off, so a reload fetches the chunk again and is held. The delay stays for the rest of the session.
+ */
+export const uiDelayTargetRequests: BrowserCommand<[pattern: string, milliseconds: number | 'until-released']> = async (
   commandContext,
   pattern,
   milliseconds,
@@ -2251,13 +2261,41 @@ export const uiDelayTargetRequests: BrowserCommand<[pattern: string, millisecond
   const session = sessionFor(commandContext);
   const held = delayedTargetRequests.get(session.context) ?? [];
   delayedTargetRequests.set(session.context, held);
+  /* Holds until release share the context's open gate, so one release lets them all go on; after a release, a new
+     hold opens a new gate. */
+  const open = targetRequestGates.get(session.context);
+  const gate = open?.released === false ? open : { released: false, waiting: [] as Array<() => void> };
+  if (milliseconds === 'until-released') {
+    targetRequestGates.set(session.context, gate);
+  }
   await session.context.route(new RegExp(pattern, 'u'), async (route) => {
     held.push(route.request().url());
-    await new Promise((resolve) => {
-      setTimeout(resolve, milliseconds);
+    await new Promise<void>((resolve) => {
+      if (milliseconds !== 'until-released') {
+        setTimeout(resolve, milliseconds);
+        return;
+      }
+      if (gate.released) {
+        resolve();
+        return;
+      }
+      gate.waiting.push(resolve);
+      setTimeout(resolve, gateCeilingMilliseconds);
     });
     await route.fallback();
   });
+};
+
+/** Lets every request `uiDelayTargetRequests(pattern, 'until-released')` holds go on, and the later ones through. */
+export const uiReleaseTargetRequests: BrowserCommand = async (commandContext) => {
+  const gate = targetRequestGates.get(sessionFor(commandContext).context);
+  if (gate === undefined) {
+    return;
+  }
+  gate.released = true;
+  for (const resolve of gate.waiting.splice(0)) {
+    resolve();
+  }
 };
 
 /** The URLs `uiDelayTargetRequests` held in the target context so far. */
@@ -3932,6 +3970,7 @@ export const uiBrowserCommands = {
   uiReadAgentHostGatewayRequests,
   uiReadTauVertexOperations,
   uiDelayTargetRequests,
+  uiReleaseTargetRequests,
   uiReadDelayedTargetRequests,
   uiOpenBeforeHydration,
   uiReleaseAgentHostGatewayFixture,

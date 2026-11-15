@@ -5,6 +5,7 @@ import * as target from '#support/external-target.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
+  ShownSpan,
   ProjectLoadFrame,
   ProjectLoadBox,
   ProjectLoadRecord,
@@ -23,12 +24,20 @@ import {
   projectRowMoves,
   projectLoadProbe,
   readDelayedRequests,
+  requireFrameTimes,
+  readLongTasks,
+  untilHidden,
+  holdRequestsUntilReleased,
+  releaseHeldRequests,
   readProjectLoad,
   firstDelayedRead,
   readLaneBordersNow,
   readWorkerDeliveries,
   readWorkerReads,
   openBeforeHydration,
+  markProjectLoadOnClick,
+  minimumBreaches,
+  regionShownOnFrames,
 } from '#support/home-load-recorder.js';
 
 /**
@@ -1123,7 +1132,7 @@ knownDefect(
 );
 
 knownDefect(
-  'F7 (A15d): text typed at first paint on a project URL, with the entry chunk 2 s late, is in the composer after hydration with its caret and focus, and the composer never moved',
+  'F7 (A15d): text typed at first paint on a project URL, with the entry chunk held until the typing is done, is in the composer after hydration with its caret and focus, and the composer never moved',
   {
     artifact: 'f7-wide',
     expectedFailure: true,
@@ -1132,7 +1141,8 @@ knownDefect(
       const { path } = await seedProjects('wide');
       await target.navigate('/');
       await target.expectVisible(composer, 60_000);
-      await delayRequests(entryChunk, 2000);
+      /* Hydration waits for the typing, not for a fixed time a loaded runner can outlast. */
+      await holdRequestsUntilReleased(entryChunk);
       const early = await openBeforeHydration({
         path,
         input: anyComposerInput,
@@ -1141,6 +1151,7 @@ knownDefect(
         wait: 1500,
         settle: 0,
       });
+      await releaseHeldRequests();
       await settleProject();
       const held = await readDelayedRequests();
       precondition(
@@ -1334,14 +1345,14 @@ knownDefect(
 );
 
 /*
- * F9's clause past the mount: on `main` the editor's first line moves 14 px about 2 s after the editor mounts, as
- * CodeMirror lays out its gutters. The code pane is A15f's; an A15f follow-up lane flips this row.
+ * F9's clause past the mount: the editor's first line moved 14 px one to six seconds after the editor mounted, when the
+ * language service's first diagnostic gave the lint gutter its width. A15f2 keeps that gutter 1em wide from the mount.
  */
 knownDefect(
   "F9 (A15f follow-up): with the editor runtime 3 s late, the pane and its first line hold the mounted editor's place for the rest of the load",
   {
     artifact: 'f9-after-mount-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureSourcePaneLoad,
     assert: ({ record, mounted }) => {
@@ -1414,6 +1425,72 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
   },
 });
 
+/*
+ * A15f2: the 500 ms minimum (UI Policy § 5) on History's "Loading history", seen at 164 ms in a local F10 record,
+ * where the load's long tasks painted the reveal 222 ms late. The forcing: a long task from the first frame the reveal
+ * is timed in to 500 ms past its due time (read off its `wait-reveal` animation), so the frame that draws it runs that
+ * late, and History's read answered in the frame after the first that shows the words. A span is measured on screen,
+ * from the first frame with the words to the first without.
+ */
+/** A15f2's assertion for both minimums (`minimumBreaches`). */
+type MinimumMeasure = { shown: readonly ShownSpan[]; answeredAt: number; stamps: readonly number[] };
+const expectMinimum = (label: string, { shown, answeredAt, stamps }: MinimumMeasure): void => {
+  expectMeasured(
+    minimumBreaches(shown, answeredAt, stamps),
+    `${label} showed ${shown.map((span) => `${Math.round(span.from)}-${Math.round(span.to)}`).join(', ')}; the read was answered at ${answeredAt} ms`,
+    { short: [], lingering: [], unended: [], unstamped: [] },
+  );
+};
+
+const historyHold: WorkerReadDelay = {
+  ...historyRead(0),
+  afterShown: historyRegions.historyIndicator,
+  longTask: { selector: historyRegions.historyIndicator, milliseconds: 500, acrossReveal: true },
+};
+
+knownDefect(
+  'History minimum (A15f2): with History open, a long task across its reveal and its read answered as "Loading history" shows, the words stay at least 500 ms',
+  {
+    artifact: 'history-minimum-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => {
+      await seedProjects('wide', { regions: historyRegions, frameTimes: true });
+      await target.click(historyChip);
+      await target.expectVisible(selectors.getByCss('[data-slot="revisions-panel-body"]'), 60_000);
+      /* History stays open across the measured load. */
+      await target.delay(settleWindow);
+      await armWorkerReadDelay([historyHold]);
+      await target.reload();
+      await settleProject();
+      /* The answer waits on the words, which the long task and the load put late: wait for it, then the minimum. */
+      await target.waitFor(
+        () =>
+          (
+            globalThis as typeof globalThis & { __TAU_WORKER_READS__: { delivered: ReadonlyArray<{ method: string }> } }
+          ).__TAU_WORKER_READS__.delivered.some((delivery) => delivery.method === 'revision:log'),
+        undefined,
+        { timeout: 60_000 },
+      );
+      await untilHidden(historyRegions.historyIndicator);
+      await target.delay(1500);
+      const record = await keepRecord('history-minimum-wide');
+      requireFrameTimes('History minimum', record);
+      const longTasks = await readLongTasks();
+      precondition(longTasks.length > 0, 'History minimum: the reveal was due before the long task could hold it late');
+      await requireReadDelayed('History minimum', historyHold);
+      const shown = regionShownOnFrames(record, 'historyIndicator');
+      precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
+      const deliveries = await readWorkerDeliveries();
+      const answeredAt = deliveries.find((delivery) => delivery.method === 'revision:log')!.t;
+      return { shown, answeredAt, stamps: record.frameStamps };
+    },
+    assert: (measured) => {
+      expectMinimum('History minimum: "Loading history"', measured);
+    },
+  },
+);
+
 /**
  * F12 on a wait a person starts: opening a file from the Files tree with its read held, so the clock starts at the
  * click. The blueprint's F12 names no surface; the "skeleton at 300 ms" it cites is the code pane's placeholder
@@ -1428,8 +1505,15 @@ const openedFileRegions = {
 const measureSourceOpen = async (
   label: string,
   milliseconds: number,
-): Promise<{ readonly record: ProjectLoadRecord; readonly click: ProjectLoadFrame; readonly answeredAt: number }> => {
-  const read: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^notes\.ts$`, milliseconds };
+  hold: Pick<WorkerReadDelay, 'afterShown' | 'busyMilliseconds' | 'fromClick'> = {},
+): Promise<{
+  readonly record: ProjectLoadRecord;
+  /** The page's own click, when the wait starts: not the driver's, which comes before its actionability checks. */
+  readonly clicked: ProjectLoadFrame;
+  readonly sentAt: number;
+  readonly answeredAt: number;
+}> => {
+  const read: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^notes\.ts$`, milliseconds, ...hold };
   await seedProjects('wide', { regions: openedFileRegions, frameTimes: true });
   await writeWorkbenchFile(openedFile, 'export const note = "A file no pane has read yet.";\n');
   await armWorkerReadDelay([read]);
@@ -1444,36 +1528,50 @@ const measureSourceOpen = async (
   }
   const entry = treeItem(openedFile);
   await target.expectVisible(entry, 60_000);
-  await markProjectLoad('click');
+  await markProjectLoadOnClick('clicked');
   await target.click(entry);
   await target.expectVisible(selectors.getByCss(openedFileRegions.text), 60_000);
   await target.delay(milliseconds + settleWindow);
   const record = await keepRecord(label);
-  const click = record.marks.find((mark) => mark.name === 'click');
-  precondition(click !== undefined, `${label}: the click was not marked`);
+  requireFrameTimes(label, record);
+  /* The page's own click, and how long the app took from it to send the read: a product delay there would push the
+     answer past the reveal, and the indicator would then be right to show. */
+  const clicked = record.marks.find((mark) => mark.name === 'clicked');
+  precondition(clicked !== undefined, `${label}: the page saw no click`);
   const deliveries = await readWorkerDeliveries();
   const late = deliveries.filter(
     (delivery) =>
       delivery.method === read.method &&
       delivery.path === openedFile &&
-      delivery.sentAt >= click!.t &&
-      delivery.t - delivery.sentAt >= milliseconds - 20,
+      delivery.sentAt >= clicked!.t &&
+      delivery.t - (hold.fromClick === true ? clicked!.t : delivery.sentAt) >= milliseconds - 20,
   );
   precondition(late.length > 0, `${label}: no read of ${openedFile} sent after the click was answered late`);
-  return { record, click: click!, answeredAt: Math.min(...late.map((delivery) => delivery.t)) };
+  const [first] = late.toSorted((left, right) => left.t - right.t);
+  await target.writeArtifact(
+    `project-load-frames/${label}-timing.json`,
+    `${JSON.stringify({ clicked: clicked!.t, sentAt: first!.sentAt, answeredAt: first!.t }, null, 2)}\n`,
+  );
+  return { record, clicked: clicked!, sentAt: first!.sentAt, answeredAt: first!.t };
 };
 
+/* The read is answered 600 ms after the page's click (`fromClick`), so every sample answers inside the reveal; a send
+   300 ms or more after the click is a product delay before the read, and fails the row (A15f2). */
 knownDefect('F12 source pane (A15f): a file opened from the tree with its read 600 ms late shows no wait indicator', {
   artifact: 'f12-600-wide',
   expectedFailure: false,
   budget: loadBudget,
-  measure: async () => measureSourceOpen('f12-600-wide', 600),
-  assert: ({ record, click }) => {
-    const shown = shownSpans(regionsOf(record, 'fileIndicator')).filter((span) => span.from >= click.t);
+  measure: async () => measureSourceOpen('f12-600-wide', 600, { fromClick: true }),
+  assert: ({ record, clicked, sentAt, answeredAt }) => {
+    const shown = shownSpans(regionsOf(record, 'fileIndicator')).filter((span) => span.from >= clicked.t);
     expectMeasured(
-      shown.map((span) => `from ${span.from - click.t} ms after the click`),
-      'F12: a 600 ms wait drew its indicator',
-      [],
+      {
+        sentPromptly: sentAt - clicked.t < 300,
+        answeredBeforeReveal: answeredAt - clicked.t < 1000,
+        drawn: shown.map((span) => `from ${span.from - clicked.t} ms`),
+      },
+      `F12: the read was sent ${sentAt - clicked.t} ms and answered ${answeredAt - clicked.t} ms after the page's click; the indicator showed ${shown.map((span) => `from ${span.from - clicked.t} ms`).join(', ') || 'never'}`,
+      { sentPromptly: true, answeredBeforeReveal: true, drawn: [] },
     );
   },
 });
@@ -1485,12 +1583,15 @@ knownDefect(
     expectedFailure: false,
     budget: loadBudget,
     measure: async () => measureSourceOpen('f12-1100-wide', 1100),
-    assert: ({ record, click, answeredAt }) => {
+    assert: ({ record, clicked: click, answeredAt }) => {
       const shown = shownSpans(regionsOf(record, 'fileIndicator'), record.frameTimes).filter(
         (span) => span.from >= click.t,
       );
       const [first] = shown;
       const text = regionsOf(record, 'text').find((entry) => entry.present && entry.text !== '' && entry.t >= click.t);
+      const afterAnswer = record.frameTimes.filter((t) => t > answeredAt && (text === undefined || t < text.t));
+      const stamps = [answeredAt, ...afterAnswer, ...(text === undefined ? [] : [text.t])];
+      const longestFrame = Math.round(Math.max(0, ...stamps.slice(1).map((t, index) => t - stamps[index]!)));
       expectMeasured(
         {
           spans: shown.length,
@@ -1498,11 +1599,41 @@ knownDefect(
           revealBeforeAnswer: first === undefined ? undefined : first.from <= answeredAt + 20,
           /* The blueprint's row: visible from 1,000 ms to 1,500 ms after the wait starts. `to` is the first frame without it. */
           heldTo1500: first === undefined ? undefined : first.to - click.t >= 1500,
-          textAtAnswer: text === undefined ? undefined : text.t - answeredAt < 200,
+          /* In frames: a frame painted after the answer without the text is a late render, a frame a loaded runner paints
+             late is not; the reply renders in the next task, so at most two go by. 500 ms bounds a long task that holds
+             the text back with no frame at all (a loaded runner was seen at 334 ms). */
+          textAtAnswer: text === undefined ? undefined : afterAnswer.length <= 2 && text.t - answeredAt < 500,
         },
-        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms`,
+        `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms, ${afterAnswer.length} frames after the answer without it (the longest ${longestFrame} ms)`,
         { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
       );
+    },
+  },
+);
+
+/*
+ * A15f2: the 500 ms minimum on the code pane's "Opening file", seen at 468 and 481 ms in 2 of about 10 local F12 runs.
+ * The forcing: the file's read answers in the frame after the first that shows the words, at the end of a 300 ms long
+ * task in that frame.
+ */
+knownDefect(
+  'Opening file minimum (A15f2): a file opened from the tree, its read answered at the end of a long task as "Opening file" shows, keeps the words at least 500 ms',
+  {
+    artifact: 'opening-file-minimum-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => {
+      const measured = await measureSourceOpen('opening-file-minimum-wide', 0, {
+        afterShown: openedFileRegions.fileIndicator,
+        busyMilliseconds: 300,
+      });
+      const clickedAt = measured.record.frameStamps[measured.clicked.frame - 1]!;
+      const shown = regionShownOnFrames(measured.record, 'fileIndicator', clickedAt);
+      precondition(shown.length > 0, 'Opening file minimum: "Opening file" never showed');
+      return { shown, answeredAt: measured.answeredAt, stamps: measured.record.frameStamps };
+    },
+    assert: (measured) => {
+      expectMinimum('Opening file minimum: "Opening file"', measured);
     },
   },
 );

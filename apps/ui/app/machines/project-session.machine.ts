@@ -35,6 +35,10 @@ import { sessionFileCheckMachine } from '#machines/session-file-check.machine.js
  * provider, and reports that the chat session is ready (`chatReady`, M2) and each chat the editor focused
  * (`chatFocused`), which the session passes to the registry for focus.
  *
+ * A6e: a change of the device's choices that selects another kernel is the session event `replaceRuntime` (D8, B4). The
+ * `project` child reports it and the session hands it back while it opens, is live, has failed or asks to close: the
+ * child flushes the runtime's producers, then builds the next runtime and stops the old one.
+ *
  * A7b: the session wires its own facts, with nothing mounted (I5). Each file manager the `fileManager` child reports
  * gets a `revisions` child, which owns the project's revision-client lifecycle for the workspace of the session's own
  * open request (B7) and registers the close cut at the session stage of `environment`'s sequencer (D26), and a
@@ -243,7 +247,13 @@ export type ProjectSessionMachineEvent =
    * Focus's request moved to another chat of this project (R3-F1). It sets both chat fields, so an `undefined`
    * clears one. A session opened without a request has no request to update, and keeps none.
    */
-  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string };
+  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string }
+  /**
+   * The device's choices select another kernel than the runtime's (A6e; D8, B4). The `project` child reports it; the
+   * session hands it back to that child while it opens, is live, has failed or asks to close, and the child flushes what
+   * the runtime owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
+   */
+  | { readonly type: 'replaceRuntime' };
 
 /**
  * The project session machine's public alphabet: every {@link ProjectSessionMachineEvent} type, in the union's order.
@@ -270,6 +280,7 @@ export const projectSessionEventTypes = [
   'fileCheckChanged',
   'fileCheckSlow',
   'chatRequested',
+  'replaceRuntime',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
 /** What a session tells its watchers. @public */
@@ -514,14 +525,26 @@ const startFileCheck = (
   return { availability, fileCheckId, fileCheckRunning: true };
 };
 
-/* A close step that failed leaves the session failed with the reason recorded. */
-const closeFailed = ({
-  context,
-  event,
-}: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>) => ({
-  target: '#project-session.failed',
-  context: recordCloseFailure(context, event.error),
-});
+/* A6e: the `project` child flushes what its runtime owes, then builds the next one and stops it (D8, B4). */
+const handRuntimeReplacement = (
+  { context }: Readonly<{ context: ProjectSessionMachineContext }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  if (context.projectRef !== undefined) {
+    enq.sendTo(context.projectRef, { type: 'replaceRuntime' });
+  }
+  return {};
+};
+
+/* A close step that failed leaves the session failed with the reason recorded. Its children still run, so a kernel change
+ * the close ignored while it ran is handed back to the `project` child (A6e). */
+const closeFailed = (
+  { context, event }: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  handRuntimeReplacement({ context }, enq);
+  return { target: '#project-session.failed', context: recordCloseFailure(context, event.error) } as const;
+};
 
 /** One startup region: up, failed at the bound, or failed by its child. */
 const startupRegion = (region: ProjectSessionRegion) =>
@@ -574,6 +597,8 @@ const closingSteps = [
  * - `confirmClose` and `cancelClose` outside `closing.asking`: the dialog answered a question no longer asked.
  * - `activity` outside `live.idle`: it only re-arms the idle window, which runs there alone (and has no production
  *   sender, V1-6).
+ * - `replaceRuntime` once the close has started cancelling runs, and when closed: a close that goes on stops the
+ *   `project` child, and a close step that fails hands the replacement back as the session goes live or failed (A6e).
  *
  * @public
  */
@@ -583,6 +608,7 @@ export const projectSessionIgnoredEvents: ReadonlyArray<readonly [state: string,
     [state, 'cancelClose'] as const,
   ]),
   ...['opening', 'live.busy', 'closing', 'closed', 'failed'].map((state) => [state, 'activity'] as const),
+  ...[...closingSteps, 'closed'].map((state) => [state, 'replaceRuntime'] as const),
 ];
 
 /**
@@ -618,7 +644,7 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '6',
+  version: '8',
   /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
    * later ones are usually its consequences (MC-R12, D23; B2). */
   onError: ({ context, event }, enq) => {
@@ -824,6 +850,7 @@ export const projectSessionMachine = setup({
   states: {
     opening: {
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'opening') }),
+      on: { replaceRuntime: handRuntimeReplacement },
       initial: 'starting',
       states: {
         starting: {
@@ -864,6 +891,7 @@ export const projectSessionMachine = setup({
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'live') }),
       initial: 'idle',
       on: {
+        replaceRuntime: handRuntimeReplacement,
         projectedRunsChanged: ({ context, event }, enq) => {
           const { runs } = event;
           reportFacts({ ...context, runs }, enq);
@@ -948,13 +976,30 @@ export const projectSessionMachine = setup({
       initial: 'asking',
       states: {
         asking: {
+          /* A6e: a close asked again after it started lifts the hold on a replacement it ignored or held. */
+          entry: ({ context }, enq) => {
+            handRuntimeReplacement({ context }, enq);
+          },
           always: ({ context, guards }) => (guards.shouldAsk(context) ? undefined : { target: 'cancellingRuns' }),
           on: {
+            /* Nothing is flushed or stopped yet, and a cancel keeps the session live with this runtime. */
+            replaceRuntime: handRuntimeReplacement,
             confirmClose: { target: 'cancellingRuns' },
-            cancelClose: { target: '#project-session.live', context: { closeReason: undefined } },
+            /* A6e: a close asked again after it had started holds a replacement; cancelling it hands that back. */
+            cancelClose: ({ context }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return { target: '#project-session.live', context: { closeReason: undefined } };
+            },
           },
         },
         cancellingRuns: {
+          /* A6e: a replacement handed on before the close builds nothing once its flush settles; the close stops the
+           * child, and a close step that fails hands `replaceRuntime` back, which lifts the hold. */
+          entry: ({ context }, enq) => {
+            if (context.projectRef !== undefined) {
+              enq.sendTo(context.projectRef, { type: 'holdReplacement' });
+            }
+          },
           invoke: {
             src: 'cancelRuns',
             input: ({ context }) => ({ projectId: context.projectId, runs: context.stoppableRuns }),
@@ -969,12 +1014,14 @@ export const projectSessionMachine = setup({
             src: 'flushProducers',
             input: ({ context }) => ({ projectId: context.projectId }),
             onDone: { target: 'flushing' },
-            onError: {
-              target: '#project-session.live',
-              context: ({ context, event }) => ({
-                ...recordCloseFailure(context, event.error),
-                closeReason: undefined,
-              }),
+            /* A6e: a kernel change the close ignored while it ran is handed back with the session, which is live again;
+             * the child replaces only a runtime whose kernel is no longer selected. */
+            onError: ({ context, event }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: { ...recordCloseFailure(context, event.error), closeReason: undefined },
+              };
             },
           },
         },
@@ -1026,7 +1073,12 @@ export const projectSessionMachine = setup({
         return { context: patch };
       },
     },
-    failed: { entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }) },
+    /* A failed session keeps its children until it is closed or the registry lets it go: a kernel change still replaces
+     * its runtime, which may be the remedy (a kernel refused on this device, compute moved to another, A6e). */
+    failed: {
+      entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }),
+      on: { replaceRuntime: handRuntimeReplacement },
+    },
   },
   exit: ({ context }, enq) => stopChildren(context, enq),
 });

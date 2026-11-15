@@ -9,14 +9,28 @@
  * report the runtime region, `chatReady` was a constant `true`, and nothing was built: every row below fails there.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flush } from '@taucad/xstate-testing/clock';
-import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
+import { StepClock, flush } from '@taucad/xstate-testing/clock';
+import {
+  createSessionsActor,
+  registerProjectSessionServices,
+  selectProjectSessionRuntime,
+} from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeFacts } from '#services/sessions-store.js';
+import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
+import type * as AppRuntimeFaultsModule from '#runtime/app-runtime-faults.js';
+
+type AppRuntimeFaults = typeof AppRuntimeFaultsModule;
+
+const reportFault = vi.hoisted(() => vi.fn());
+vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
+  ...(await importOriginal<AppRuntimeFaults>()),
+  reportAppRuntimeFault: reportFault,
+}));
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -34,7 +48,7 @@ type Harness = Readonly<{
 
 let current: Harness | undefined;
 
-const harness = (facts: Partial<SessionRuntimeFacts> = {}): Harness => {
+const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock): Harness => {
   const files: SessionFileManagerStandIn[] = [];
   const closes: string[] = [];
   const opener = sessionRuntimeOpenerStandIn(facts);
@@ -59,6 +73,10 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}): Harness => {
         closes.push(`open:${opener.built.length - 1}`);
         return {
           ...runtime,
+          flush: async (gone) => {
+            closes.push(`flush:${opener.built.indexOf(runtime)}`);
+            await runtime.flush(gone);
+          },
           close: () => {
             if (!runtime.isClosed()) {
               closes.push(`runtime:${opener.built.indexOf(runtime)}`);
@@ -68,6 +86,7 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}): Harness => {
         };
       },
     },
+    ...(clock === undefined ? {} : { clock }),
   }).start();
   current = { registry, files, opener, closes };
   return current;
@@ -232,7 +251,7 @@ describe('the session builds its project runtime as a child (A6d)', () => {
     ]);
   });
 
-  it('should build the next runtime and then stop this one when the choices select another kernel, with no flush (D14)', async () => {
+  it('should build the next runtime and then stop this one when the choices select another kernel (A6e flushes first)', async () => {
     const { registry, opener, closes } = harness();
     await open(registry, { workspace: 'ws', chatId: 'chat-1' });
 
@@ -247,8 +266,8 @@ describe('the session builds its project runtime as a child (A6d)', () => {
 
     expect(opener.built).toHaveLength(2);
     expect(opener.built[1]?.input.request).toMatchObject({ chatId: 'chat-1' });
-    /* Built before the one it replaces stops, so the entries record session yields with a flush (I13). */
-    expect(closes).toEqual(['open:0', 'open:1', 'runtime:0']);
+    /* Flushed first (B4), then built before the one it replaces stops, so the entries record session yields (I13). */
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0']);
     expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
     expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
   });
@@ -265,3 +284,431 @@ describe('the session builds its project runtime as a child (A6d)', () => {
     expect(closes).toEqual(['open:0', 'runtime:0', 'fileManager']);
   });
 });
+
+/**
+ * A6e: a change of kernel selection is the session event `replaceRuntime` (plan § 4 A6e; charter D8, B4; R1-F7). The
+ * superseded runtime writes what it owes before it stops, which A6d's risk "writes dropped on a kernel change" names: on
+ * `main` the old runtime stops with no flush, so a layout or editor-state edit owed at the moment of the change is lost
+ * (main's 5 s lease grace used to let the debounced write land).
+ */
+describe('a change of kernel selection replaces the runtime through the session (A6e)', () => {
+  /** A flush a row settles itself. */
+  const held = () => {
+    let settle: (error?: Error) => void = () => undefined;
+    const flush = async (): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        settle = (error) => {
+          if (error === undefined) {
+            resolve();
+          } else {
+            reject(error);
+          }
+        };
+      });
+    return {
+      flush,
+      settle: (error?: Error) => {
+        settle(error);
+      },
+    };
+  };
+
+  it('B4: should land what the superseded runtime owes before it stops, with nothing mounted', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry, { workspace: 'ws', chatId: 'chat-1' });
+    /* A layout edit inside its 500 ms debounce, owed by runtime 0 when the person moves compute. */
+    opener.built[0]?.owed.push('layout edit');
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+
+    expect(opener.built[0]?.landed).toEqual(['layout edit']);
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0']);
+    expect(opener.built[1]?.input.request).toMatchObject({ chatId: 'chat-1' });
+    expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it('should replace once when the choices change again during the flush, for the chat asked meanwhile', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry, { workspace: 'ws', chatId: 'chat-1' });
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    opener.changeChoices();
+    registry.send({ type: 'chatRequested', projectId, chatId: 'chat-2' });
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
+
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0']);
+    expect(opener.built[1]?.input.request).toMatchObject({ chatId: 'chat-2' });
+  });
+
+  it('should build nothing when the session closes during the flush, and stop the runtime it had (I23)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
+
+    expect(opener.built).toHaveLength(1);
+    expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0', 'fileManager']);
+  });
+
+  it('should build once, on the new file manager, when the file manager changes during the flush', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    /* The shared worker is replaced: the child closes the runtime on the old file manager and builds on the new one. */
+    const next = openSessionFileManagerStandIn(projectId);
+    sessionOf(registry)?.send({ type: 'fileManagerChanged', fileManagerRef: next.fileManagerRef });
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
+
+    expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0', 'open:1']);
+    expect(opener.built).toHaveLength(2);
+    expect(opener.built[1]?.input.fileManagerRef).toBe(next.fileManagerRef);
+    next.close();
+  });
+
+  it('should replace the runtime a new file manager built during the flush when its kernel changes before the flush settles', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    const next = openSessionFileManagerStandIn(projectId);
+    sessionOf(registry)?.send({ type: 'fileManagerChanged', fileManagerRef: next.fileManagerRef });
+    await flush();
+    /* The runtime built on the new file manager is superseded while runtime 0's flush is still under way. */
+    opener.built[1]?.supersede();
+    opener.changeChoices();
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0', 'open:1', 'flush:1', 'open:2', 'runtime:1']);
+    expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[2]?.runtimeRef);
+    next.close();
+  });
+
+  it('should replace the runtime of a session that failed to open on a refused kernel (D21 round 2)', async () => {
+    const { registry, opener } = harness({ kernelRefusal: 'Kernel budget reached' });
+    await open(registry);
+    expect(sessionOf(registry)?.getSnapshot().matches('failed')).toBe(true);
+
+    /* Moving compute to another device is the remedy. */
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+
+    expect(opener.built).toHaveLength(2);
+    expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+  });
+
+  it('should replace the runtime once a close whose run cancel was under way during the change fails (D21 round 2)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    let refuse: (error: Error) => void = () => undefined;
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () => undefined,
+      flushSync: async () => undefined,
+      cancelRuns: async () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        }),
+      closeRuntime: async () => undefined,
+    });
+    try {
+      registry.send({ type: 'close', projectId, reason: 'idle' });
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'cancellingRuns' })).toBe(true);
+
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      refuse(new Error('A run changed holder'));
+      await flush();
+      await flush();
+
+      expect(sessionOf(registry)?.getSnapshot().matches('failed')).toBe(true);
+      expect(opener.built).toHaveLength(2);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('should still replace the runtime when the flush is refused, and report the refusal (D23 hook)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const reported: unknown[] = [];
+    reportFault.mockImplementation((error: unknown) => {
+      reported.push(error);
+    });
+    const refusal = new Error('Pane layout is not confirmed saved.');
+    opener.built[0]?.flushWith(async () => {
+      throw refusal;
+    });
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+
+    expect(reported).toEqual([refusal]);
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0']);
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it('should keep the runtime, still usable, when the choices come back to its kernel during the flush', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+    const runtime = opener.built[0]!;
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+
+    /* The flush closes nothing, so the runtime the choices came back to is kept as it is. */
+    runtime.restore();
+    flushing.settle();
+    await flush();
+    await flush();
+
+    expect(opener.built).toHaveLength(1);
+    expect(runtime.isClosed()).toBe(false);
+    expect(closes).toEqual(['open:0', 'flush:0']);
+  });
+
+  it('should replace the runtime once a close that was under way during the change is refused (D21 round 1)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    let refuse: (error: Error) => void = () => undefined;
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        }),
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      refuse(new Error('Unsaved parameter drafts'));
+      await flush();
+      await flush();
+
+      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+      expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('A6 exit: should open, park, replace the runtime of and close a project in order, with no React', async () => {
+    const clock = new StepClock();
+    const { registry, opener, closes } = harness({}, clock);
+    await open(registry, { workspace: 'ws' });
+    const session = sessionOf(registry)!;
+    const parking: boolean[] = [];
+    session.on('runtimeParking', (event) => parking.push(event.parked));
+
+    session.send({ type: 'visibilityChanged', visible: false, focused: false });
+    clock.advance(projectSessionParkWindowMilliseconds);
+    await flush();
+    expect(parking).toEqual([true]);
+
+    opener.built[0]?.owed.push('editor state');
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+    expect(opener.built[0]?.landed).toEqual(['editor state']);
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0']);
+
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
+    expect(sessionOf(registry)).toBeUndefined();
+    expect(closes).toEqual(['open:0', 'flush:0', 'open:1', 'runtime:0', 'runtime:1', 'fileManager']);
+  });
+
+  it('should build nothing mid-close when a replacement handed on before the close settles its flush (D21 round 3)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+    const closing = held();
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: closing.flush,
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+      const before = [...closes];
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      flushing.settle();
+      await flush();
+      await flush();
+      expect(closes).toEqual(before);
+
+      /* The close is refused: the session is live again and the replacement goes ahead, flushed afresh. */
+      closing.settle(new Error('Unsaved parameter drafts'));
+      await flush();
+      await flush();
+      flushing.settle();
+      await flush();
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+      expect(closes).toEqual([...before, 'flush:0', 'open:1', 'runtime:0']);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('should not report a flush the close cut short as a fault (D21 round 3)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    reportFault.mockClear();
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
+    flushing.settle(new Error('Actor terminated without satisfying predicate'));
+    await flush();
+    await flush();
+
+    expect(reportFault).not.toHaveBeenCalled();
+  });
+
+  it('should replace the runtime when a close asked again during a held replacement is cancelled (D21 round 4)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+    const closing = held();
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: closing.flush,
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      const session = sessionOf(registry)!;
+      session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      session.send({ type: 'confirmClose' });
+      await flush();
+      expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+      flushing.settle();
+      await flush();
+      session.send({ type: 'cancelClose' });
+      await flush();
+      flushing.settle();
+      await flush();
+      await flush();
+
+      expect(session.getSnapshot().matches('live')).toBe(true);
+      expect(opener.built).toHaveLength(2);
+      expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('should replace the runtime when a close is asked again after a kernel change it ignored (D21 round 6)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () => pendingForever(),
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      const session = sessionOf(registry)!;
+      session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      session.send({ type: 'confirmClose' });
+      await flush();
+      expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      await flush();
+
+      expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+      expect(opener.built).toHaveLength(2);
+      expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    } finally {
+      unregister();
+    }
+  });
+});
+
+/** A promise that never settles. */
+const pendingForever = async (): Promise<void> =>
+  new Promise<void>(() => {
+    /* Never settles. */
+  });

@@ -55,8 +55,16 @@ const harness = (options?: {
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
+  /* What the session handed each child, in order. */
+  const received: string[] = [];
   const child = (name: string, region?: ProjectSessionRegion) =>
-    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
+      receive((event) => {
+        /* A6e's rows read the replacement traffic only. */
+        if (event.type === 'replaceRuntime' || event.type === 'holdReplacement') {
+          received.push(`${name}:${event.type}`);
+        }
+      });
       order.push(`start:${name}`);
       live.add(name);
       if (region !== undefined && (options?.readyRegions ?? regions).includes(region)) {
@@ -119,7 +127,7 @@ const harness = (options?: {
   const parking: boolean[] = [];
   actor.on('runtimeParking', (event) => parking.push(event.parked));
   actor.start();
-  return { actor, order, live, parking };
+  return { actor, order, live, parking, received };
 };
 
 const settle = async (): Promise<void> => {
@@ -417,6 +425,45 @@ describe('projectSessionMachine', () => {
 
     actor.send({ type: 'cancelClose' });
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
+    actor.stop();
+  });
+
+  it('A6e: should hand replaceRuntime to its project child while opening, live or asking, and not once the close runs', async () => {
+    const opening = harness({ readyRegions: [] });
+    opening.actor.send({ type: 'replaceRuntime' });
+    expect(opening.received).toEqual(['project:replaceRuntime']);
+    opening.actor.stop();
+
+    let releaseFlush: () => void = () => undefined;
+    const { actor, received } = harness({
+      flushProducers: async () =>
+        new Promise<void>((resolve) => {
+          releaseFlush = resolve;
+        }),
+    });
+    await settle();
+    actor.send({ type: 'replaceRuntime' });
+    expect(received).toEqual(['project:replaceRuntime']);
+
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+    actor.send({ type: 'close', reason: 'user' });
+    expect(actor.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+    /* Entering `asking` hands any held replacement back; a change while it asks is handed on too. */
+    actor.send({ type: 'replaceRuntime' });
+    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime', 'project:replaceRuntime']);
+
+    actor.send({ type: 'confirmClose' });
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    actor.send({ type: 'replaceRuntime' });
+    /* The close holds any replacement already handed on, and hands on no other. */
+    expect(received).toEqual([
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:holdReplacement',
+    ]);
+    releaseFlush();
     actor.stop();
   });
 

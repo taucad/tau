@@ -656,12 +656,16 @@
   animation: wait-reveal var(--wait-entrance, 150ms) ease-out var(--wait-reveal-delay, 1000ms) both;
 }
 
+/* `wait-held` changes nothing: it starts in the hold's first frame, so a hold that draws words no reveal drew reports
+   the frame they show in. */
 @utility wait-hold {
-  animation: wait-conceal 0.01ms linear var(--wait-hide-delay, 0ms) both;
+  animation:
+    wait-conceal 0.01ms linear var(--wait-hide-delay, 0ms) forwards,
+    wait-held 0.01ms linear both;
 }
 
 @utility wait-until-slow {
-  animation: wait-conceal 0.01ms linear var(--wait-slow-delay, 10000ms) both;
+  animation: wait-conceal 0.01ms linear var(--wait-slow-delay, 10000ms) forwards;
 }
 
 @utility wait-after-slow {
@@ -681,10 +685,18 @@
 }
 
 /* One-sided keyframes: the open end is the element's own value, so a label nested in a still-hidden indicator stays
-   hidden instead of declaring itself visible. */
+   hidden instead of declaring itself visible. `wait-conceal` is hidden at both ends and fills forwards only: a step from
+   visible stays visible until progress 1, and a frame can finish it a hair short of 1. */
 @keyframes wait-conceal {
+  from,
   to {
     visibility: hidden;
+  }
+}
+
+@keyframes wait-held {
+  to {
+    --wait-held: 1;
   }
 }
 

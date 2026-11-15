@@ -145,6 +145,12 @@ export type SessionRuntime = Readonly<{
   requestChat: (chat: SessionRuntimeChat) => void;
   /** Whether the device's choices still select the kernel this runtime was built with. */
   kernelIsCurrent: () => boolean;
+  /**
+   * Write what the runtime owes before a replacement stops it (A6e, B4): its producers and its project and editor
+   * stores. It closes nothing, asks nothing and keeps no timer. Rejects with every write it could not confirm, and
+   * stops waiting when `gone` aborts.
+   */
+  flush: (gone: AbortSignal) => Promise<void>;
   /** Park or resume the runtime's kernel processes, as the session decides (R3, row S5). */
   park: (parked: boolean) => void;
   /** Ask the editor to ensure the focused chat it deferred again, now that the chats have arrived (row S1). */
@@ -185,10 +191,13 @@ type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefine
  * M2), and each chat the editor focused (`chatFocused`).
  *
  * The session forwards it each file manager its `fileManager` child reports and each `chatRequested`. A new file manager
- * (a rebuilt shared worker) builds a new runtime; none closes the runtime, which reads the closed one. A change of the
- * device's choices that selects another kernel builds the next runtime and then stops this one, with no flush, as the
- * React key on the provider did before A6d (A6e makes it `replaceRuntime`). Building the next first lets the entries
- * record session yield, flushing what it owes (I13).
+ * (a rebuilt shared worker) builds a new runtime; none closes the runtime, which reads the closed one.
+ *
+ * A change of the device's choices that selects another kernel is the session event `replaceRuntime` (A6e; D8, B4): the
+ * child reports it, and when the session hands it back the child flushes what this runtime owes (its producers and its
+ * project and editor stores, never the close's refusals), then builds the next runtime and stops this one. Building the next first lets the entries record session
+ * yield (I13), and keeps the session's readers on a runtime throughout. A build that finds the choices moved on while it
+ * ran builds again at once: nothing has written through a runtime that has just been built.
  *
  * A7b: the session sends it parking (`runtimeParking`), which it hands the runtime's cad units (row S5), and whether the
  * project's chats have arrived (`revisionChatsChanged`): while they have and the editor deferred its focused chat, the
@@ -222,6 +231,13 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       /* Each build's identity: a build a newer one or the stop overtook closes what it made. */
       let generation = 0;
       let stopped = false;
+      /* A replacement's flush is under way (A6e): another report waits for it, and the build after it reads the choices. */
+      let replacing = false;
+      /* The session's close is under way (A6e): a flush that settles now builds nothing, and the close stops the child.
+       * A close step that fails hands `replaceRuntime` back, which lifts the hold. */
+      let held = false;
+      /* Aborted when the child stops, so a replacement's flush stops waiting on the runtime it no longer owns. */
+      const gone = new AbortController();
 
       const observe = (runtime: SessionRuntime): void => {
         const facts = runtime.facts();
@@ -329,13 +345,65 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
         void settle();
       };
 
+      /* A6e: the change is the session's event; the session hands it back while it opens, is live or asks to close. */
       const unsubscribeChoices = opener.onChoicesChanged(() => {
-        if (current !== undefined && !current.runtime.kernelIsCurrent()) {
-          build();
+        if (current !== undefined && !replacing && !current.runtime.kernelIsCurrent()) {
+          sendBack({ type: 'replaceRuntime' });
         }
       });
 
+      /* Flush what the superseded runtime owes, then build the next and stop it (B4). A refusal is reported and the
+       * replacement goes on: the kernel the runtime was built with is no longer selected, and before A6e nothing was
+       * flushed at all. The flush closes nothing, so a runtime the choices came back to stays usable. */
+      const replace = (): void => {
+        const superseded = current;
+        if (superseded === undefined || replacing || superseded.runtime.kernelIsCurrent()) {
+          return;
+        }
+        replacing = true;
+        const settle = async (): Promise<void> => {
+          const overtaken = (): boolean => stopped || held || current !== superseded;
+          try {
+            await superseded.runtime.flush(gone.signal);
+          } catch (error) {
+            /* A flush cut short by a stop, a close or a newer runtime is a cancellation, not a fault (D23). */
+            if (!overtaken()) {
+              reportAppRuntimeFault(error);
+            }
+          } finally {
+            replacing = false;
+          }
+          /* A stop, the close or a new file manager overtook the flush, or the choices came back to this kernel. */
+          if (overtaken() || superseded.runtime.kernelIsCurrent()) {
+            /* A runtime a new file manager built meanwhile may have had its kernel change while this flush made the
+             * child ignore it: report that change now, so the session decides on it as on any other. */
+            if (
+              !stopped &&
+              !held &&
+              current !== undefined &&
+              current !== superseded &&
+              !current.runtime.kernelIsCurrent()
+            ) {
+              sendBack({ type: 'replaceRuntime' });
+            }
+            return;
+          }
+          build();
+        };
+        // async-iife: bootstrap -- `receive` is synchronous; the replacement settles through `build`.
+        void settle();
+      };
+
       receive((event) => {
+        if (event.type === 'replaceRuntime') {
+          held = false;
+          replace();
+          return;
+        }
+        if (event.type === 'holdReplacement') {
+          held = true;
+          return;
+        }
         if (event.type === 'fileManagerChanged') {
           const next = (event as Extract<ProjectSessionMachineEvent, { type: 'fileManagerChanged' }>).fileManagerRef;
           if (next === fileManagerRef) {
@@ -382,6 +450,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
 
       return () => {
         stopped = true;
+        gone.abort();
         unsubscribeChoices();
         closeCurrent();
       };

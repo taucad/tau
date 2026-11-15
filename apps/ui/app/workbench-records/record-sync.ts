@@ -20,13 +20,18 @@ import type { RecordBytes } from '#workbench-records/record-sync-policy.js';
 import { followOwedWrite } from '#workbench-records/owed-writes.js';
 
 /**
- * Whether the store owes its file a write (A7c): a write on the wire, or, until the store is closed, an edit, a
- * command or a deferred patch no write has taken. A closed store's deferred patch has no writer left.
+ * Whether the store owes its file a write that a flush can still make (A7c): a write on the wire, or, until the store
+ * is closed, a command, or an edit or deferred patch no write has taken. A closed store's deferred patch has no writer
+ * left, a faulted store answers nothing again (MC-R12), and the edits over a refused record wait for its reset, so none
+ * of them holds the page's `beforeunload` stage for a write it cannot make.
  */
 const owesWrite = <T, P>(context: RecordSyncContext<T, P>): boolean =>
-  context.inFlight !== undefined ||
-  (!context.closeFenced &&
-    (context.pending !== undefined || context.deferred !== undefined || context.commands.length > 0));
+  context.faults === 0 &&
+  (context.inFlight !== undefined ||
+    (!context.closeFenced &&
+      (context.commands.length > 0 ||
+        (context.published.refusal === undefined &&
+          (context.pending !== undefined || context.deferred !== undefined)))));
 
 /** The two effects of a record file. Both answer with a typed outcome; a rejection is a defect in the port. */
 export type RecordSyncPorts = Readonly<{

@@ -26,11 +26,13 @@ import type {
   Actor,
   ActorOptions,
   ActorRefFrom,
+  AnyActorRef,
   AnyActorLogic,
   CallbackActorLogic,
   EventObject,
   InputFrom,
   SnapshotFrom,
+  StateValue,
 } from 'xstate';
 import { toast } from 'sonner';
 import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
@@ -76,6 +78,7 @@ import { startViewRecordSession } from '#workbench-records/view-record-session.j
 import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
+import { followOwedWrite } from '#workbench-records/owed-writes.js';
 import { flushWorkbenchLayout, workbenchLayoutMachine } from '#workbench-records/workbench-layout.machine.js';
 import type { WorkbenchLayoutInput } from '#workbench-records/workbench-layout.machine.js';
 import {
@@ -438,6 +441,26 @@ export type ProjectRuntime = Readonly<{
    */
   replacePreviewParameterService: (service: ParameterSetService) => void;
 }>;
+
+/** Whether a project or editor store owes its file a write: one waits for its debounce or is on the wire (A7c). */
+/**
+ * Owe the page a write while a project or editor store waits for its debounce or writes (A7c, D26 as amended), until
+ * the store stops.
+ */
+const oweWhileStoring = (store: Pick<AnyActorRef, 'subscribe'>): void => {
+  const owes = followOwedWrite();
+  store.subscribe({
+    next: (snapshot: Readonly<{ matches: (value: StateValue) => boolean }>) => {
+      owes(snapshot.matches({ ready: { storing: 'pending' } }) || snapshot.matches({ ready: { storing: 'writing' } }));
+    },
+    complete: () => {
+      owes(false);
+    },
+    error: () => {
+      owes(false);
+    },
+  });
+};
 
 /**
  * Build a project's producer set. It is a host object of the runtime, beside its root and never in its context (D4).
@@ -1098,6 +1121,11 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
   if (viewRecordPorts !== undefined) {
     producers.register(async () => viewRecordPorts.flush());
   }
+  /* A7c (D26 as amended): the project and editor stores debounce their writes too, so the page owes one while either
+   * waits to write or writes, which holds `beforeunload`'s producer stage; the unload flush writes both stores. */
+  const { projectRef, editorRef } = actor.getSnapshot().context;
+  oweWhileStoring(projectRef);
+  oweWhileStoring(editorRef);
   return {
     actor,
     layout: layoutHost,

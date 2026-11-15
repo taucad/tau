@@ -816,6 +816,19 @@ for (const row of ports) {
             before,
           });
         expect(await readFile(join(held.workspaceRoot, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
+        /* The toast can precede the capture of the merged files; an Undo sent before the host settles on the merge loses
+         * its ref race to that capture (CAS_LOST), as a second click would in the page. */
+        await expect
+          .poll(
+            () => {
+              const status = frames.findLast((frame) => frame.kind === 'status')?.value as
+                | Readonly<{ headRevisionId?: string; dirty?: boolean; minting?: boolean }>
+                | undefined;
+              return { head: status?.headRevisionId, dirty: status?.dirty, minting: status?.minting };
+            },
+            { timeout: 10_000 },
+          )
+          .toEqual({ head: feature.commitId, dirty: false, minting: false });
 
         await held.revisions.channel.request({ command: 'undoMerge', revisionId: feature.commitId, before });
 

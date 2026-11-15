@@ -422,14 +422,14 @@ describe('bridge conformance: long calls outlive the ordinary deadline (W10, I10
     expect(text(await pending)).toBe('alpha');
   });
 
-  it('fails a readFile of a path that is not pending at the ordinary 30 s deadline', async () => {
+  it('fails a readFile of a path that is not pending at the ordinary 30 s deadline, after a short grace', async () => {
     const proxy = await slowRead(300_000, []);
     const pending = proxy.readFile('a.ts');
     const failure = expect(pending).rejects.toMatchObject({ code: 'BRIDGE_CALL_TIMEOUT' });
     const outcome = track(pending);
     await advance(29_000);
     expect(outcome.settled()).toBe(false);
-    await advance(2000);
+    await advance(7000);
     await failure;
   });
 });

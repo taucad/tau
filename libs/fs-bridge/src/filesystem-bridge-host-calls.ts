@@ -492,6 +492,12 @@ export type HostContentCallOptions = {
  */
 export const readFileDeadline = 30_000;
 
+/**
+ * How long a read past {@link readFileDeadline} that is not pending may still answer, in milliseconds: an object that
+ * has just landed leaves the pending set while the read-through is still handing back its bytes.
+ */
+export const readFileGrace = 5000;
+
 type PendingPaths = (paths: readonly string[]) => Promise<readonly string[]>;
 
 const deadlinePassed = Symbol('deadline');
@@ -499,7 +505,8 @@ const deadlinePassed = Symbol('deadline');
 /**
  * `readFile` under the authority's own bound: a long call on the wire, so a read of a pending entry waits for its
  * large object under the authority's no-progress stall bound (D9, I10); any other read that has not answered by
- * {@link readFileDeadline} fails as it did on the wire, with `BRIDGE_CALL_TIMEOUT`. Which reads are pending is
+ * {@link readFileDeadline} and a {@link readFileGrace} after it fails as it did on the wire, with
+ * `BRIDGE_CALL_TIMEOUT`. Which reads are pending is
  * asked of the view's index once the deadline passes; a view without one, or one that cannot answer, bounds every read.
  *
  * @param readFile - The handlers' own `readFile`.
@@ -512,28 +519,41 @@ const hostBoundedReadFile =
     const reading = readFile(path, ...rest);
     // oxlint-disable-next-line promise/prefer-await-to-then -- marks a late rejection handled; the race awaits it.
     reading.catch(() => undefined);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<typeof deadlinePassed>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(deadlinePassed);
-      }, readFileDeadline);
-    });
-    try {
-      const first = await Promise.race([reading, deadline]);
-      if (first !== deadlinePassed) {
-        return first;
+    /* The read's answer, or the sentinel once `milliseconds` have passed without one. */
+    const within = async (milliseconds: number): Promise<unknown> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const passed = new Promise<typeof deadlinePassed>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(deadlinePassed);
+        }, milliseconds);
+      });
+      try {
+        return await Promise.race([reading, passed]);
+      } finally {
+        clearTimeout(timer);
       }
-    } finally {
-      clearTimeout(timer);
+    };
+    /* Unknown is not pending: a read the index cannot speak for keeps the ordinary bound. */
+    const isPending = async (): Promise<boolean> => {
+      try {
+        const answered = await pendingPaths?.([path]);
+        return answered?.includes(path) === true;
+      } catch {
+        return false;
+      }
+    };
+    const first = await within(readFileDeadline);
+    if (first !== deadlinePassed) {
+      return first;
     }
-    let pending = false;
-    try {
-      const answered = await pendingPaths?.([path]);
-      pending = answered?.includes(path) === true;
-    } catch {
-      /* Unknown is not pending: the read keeps the ordinary bound. */
+    if (await isPending()) {
+      return reading;
     }
-    if (pending) {
+    const late = await within(readFileGrace);
+    if (late !== deadlinePassed) {
+      return late;
+    }
+    if (await isPending()) {
       return reading;
     }
     throw Object.assign(new Error(`Bridge call 'readFile' timed out after ${String(readFileDeadline)}ms`), {

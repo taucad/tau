@@ -8,7 +8,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChangesetReceipt } from '@taucad/filesystem';
 import type { BridgeServerLongCall, StringKeyedObject } from '@taucad/rpc/bridge';
 import type { FileStatEntry } from '@taucad/types';
-import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
+import {
+  bindFileSystemLongCall,
+  readFileDeadline,
+  readFileGrace,
+  withBoundedReadFile,
+  withHostContentCalls,
+} from '#filesystem-bridge-host-calls.js';
 import { prepareApplyCall, rangeStream, receiptFromWire } from '#filesystem-bridge-client-calls.js';
 import { fileSystemBridgeSchemas, maxReadManyBytes } from '#filesystem-bridge-protocol.js';
 import type { GrepResult, IndexStats, ReadManyWireRows } from '#filesystem-bridge-protocol.js';
@@ -387,5 +393,104 @@ describe('caller-side calls', () => {
     const reader = rangeStream(readRange, { length: 0 }).getReader();
     await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
     expect(readRange).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * `readFile` is a long call on the wire (T6): the authority holds the old 30 s bound itself, for every read that does
+ * not wait on a pending large object, whichever handler set serves it (`withBoundedReadFile` for an unrooted
+ * connection, `withHostContentCalls` for rooted and runtime ones).
+ */
+describe('the authority bound on readFile', () => {
+  const part = new TextEncoder().encode('solid part\n');
+  type BoundedHandlers = StringKeyedObject & {
+    readonly owner: string;
+    whoAmI(): string;
+    readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  };
+  /* A read that answers after `milliseconds`, beside a `pendingPaths` when one is given. */
+  const handlersOf = (
+    milliseconds: number,
+    pendingPaths?: (paths: readonly string[]) => Promise<readonly string[]>,
+  ): BoundedHandlers => ({
+    owner: 'authority',
+    whoAmI(this: { owner: string }): string {
+      return this.owner;
+    },
+    readFile: async (): Promise<Uint8Array<ArrayBuffer>> =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(part);
+        }, milliseconds);
+      }),
+    ...(pendingPaths === undefined ? {} : { pendingPaths }),
+  });
+  /* A bounded read's outcome under fake timers, `milliseconds` after it starts. */
+  const settle = async (
+    handlers: BoundedHandlers,
+    milliseconds: number,
+  ): Promise<{ value?: unknown; error?: unknown; settled: boolean }> => {
+    vi.useFakeTimers();
+    try {
+      const outcome: { value?: unknown; error?: unknown; settled: boolean } = { settled: false };
+      const observe = async (): Promise<void> => {
+        try {
+          outcome.value = await withBoundedReadFile(handlers).readFile('a.ts');
+        } catch (error) {
+          outcome.error = error;
+        } finally {
+          outcome.settled = true;
+        }
+      };
+      void observe();
+      await vi.advanceTimersByTimeAsync(milliseconds);
+      return outcome;
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+  const timedOut = { code: 'BRIDGE_CALL_TIMEOUT' };
+  const beyond = readFileDeadline + readFileGrace + 1000;
+
+  it('fails a read that waits on no large object, past the deadline and its grace', async () => {
+    const outcome = await settle(
+      handlersOf(10 * readFileDeadline, async () => []),
+      beyond,
+    );
+    expect(outcome.error).toMatchObject(timedOut);
+  });
+
+  it('keeps a pending read waiting past the deadline, for the read-through’s own bound', async () => {
+    const outcome = await settle(
+      handlersOf(2 * readFileDeadline, async (paths) => paths),
+      2 * readFileDeadline + 1,
+    );
+    expect(outcome.value).toStrictEqual(part);
+  });
+
+  /* The object just landed: the index no longer says pending while the read-through is still copying it. */
+  it('answers a read that settles within the grace after the deadline', async () => {
+    const outcome = await settle(
+      handlersOf(readFileDeadline + readFileGrace / 2, async () => []),
+      beyond,
+    );
+    expect(outcome.value).toStrictEqual(part);
+  });
+
+  it('bounds every read where the index cannot answer or there is none', async () => {
+    const rejecting = await settle(
+      handlersOf(10 * readFileDeadline, async () => {
+        throw new Error('index closed');
+      }),
+      beyond,
+    );
+    expect(rejecting.error).toMatchObject(timedOut);
+    const without = await settle(handlersOf(10 * readFileDeadline), beyond);
+    expect(without.error).toMatchObject(timedOut);
+  });
+
+  it('keeps every other member bound to the handler set', () => {
+    const { whoAmI } = withBoundedReadFile(handlersOf(0));
+    expect(whoAmI()).toBe('authority');
   });
 });

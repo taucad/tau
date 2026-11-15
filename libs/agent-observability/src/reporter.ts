@@ -180,7 +180,14 @@ const sameScope = (left: DeliveryScope | undefined, right: DeliveryScope | undef
 /** How many settled runs a reporter remembers; one it forgot is projected again and the API counts it once. */
 const settledLimit = 4096;
 
-const settledKey = (run: ProjectedRun): string => `${run.chatId}\u0000${run.runId}`;
+/*
+ * A run is settled at its ending row, not for good: a resumed run keeps its id, and the later attempt's ending row
+ * (the highest attempt's terminal) makes it a new report, so its outcome and tools are sent too (LU14).
+ */
+const settledKey = (run: ProjectedRun): string =>
+  [run.chatId, run.runId, run.ending?.source.leaderEpoch ?? '', String(run.ending?.source.sequence ?? '')].join(
+    '\u0000',
+  );
 
 const defaultSchedule = (callback: () => void, milliseconds: number): (() => void) => {
   const handle = setTimeout(callback, milliseconds);

@@ -1,4 +1,5 @@
 import type { TypeScriptWorkerCommand } from '@taucad/lsp/typescript-worker/protocol';
+import { TypeScriptProjectService } from '@taucad/lsp/typescript-worker/typescript-service';
 import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorDocument } from '#lib/editor-document.js';
@@ -512,6 +513,171 @@ describe('TypeAcquisitionController network shape', () => {
       expect(fetch.mock.calls.filter(([input]) => input === shared)).toHaveLength(1);
     } finally {
       controller.dispose();
+    }
+  });
+});
+
+/**
+ * Packages whose index re-exports each module from its own declaration file. The fake CDN reproduces the
+ * esm.sh 4.x shapes recorded on 2026-11-14: the module response names an absolute declaration URL in
+ * `X-TypeScript-Types`, and declarations import siblings and other packages by `.d.ts` URL. The `@~4.17.12`
+ * range redirects (302) on esm.sh; `fetch` follows it, so the fake answers the requested URL directly.
+ */
+describe('TypeAcquisitionController wide declaration packages', () => {
+  function workerFixture(files: ReadonlyMap<string, string>, types: ReadonlyMap<string, string>) {
+    const service = new TypeScriptProjectService({
+      syncFs: {
+        readFileText: () => undefined,
+        fileExists: () => false,
+        directoryExists: () => false,
+        getDirectories: () => [],
+        getScriptVersionForPath: () => '0',
+      },
+      standardLibraries: {},
+    });
+    let inFlight = 0;
+    let peak = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1);
+        });
+        inFlight -= 1;
+        const header = types.get(input);
+        if (header) {
+          return new Response('', { headers: { 'X-TypeScript-Types': header } });
+        }
+        const text = files.get(input);
+        return text === undefined ? new Response('', { status: 404 }) : new Response(text);
+      }),
+    );
+    const errors: Error[] = [];
+    const controller = new TypeAcquisitionController({
+      client: {
+        setExtraLib: async (uri, text) => {
+          service.setExtraLib(uri, text);
+        },
+        request: async <T>(command: TypeScriptWorkerCommand): Promise<T> => {
+          if (command.kind === 'declarationImports') {
+            return service.declarationImports(command.text) as T;
+          }
+          if (command.kind === 'setModuleAlias') {
+            service.setModuleAlias(command.specifier, command.uri);
+            return undefined as T;
+          }
+          throw new Error(`Unexpected acquisition command ${command.kind}`);
+        },
+      },
+      staticTypes: [],
+      dynamicTypes: true,
+      onError: (error) => {
+        errors.push(error);
+      },
+    });
+    const diagnose = async (text: string): Promise<number[]> => {
+      const document = new EditorDocument('main.ts', text);
+      service.open(document.uri, document.text, document.version);
+      controller.watch(document);
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(5000);
+      return service.getDiagnostics(document.uri).map((row) => row.code);
+    };
+    return {
+      diagnose,
+      errors,
+      peak: () => peak,
+      dispose: () => {
+        controller.dispose();
+        service.dispose();
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('should type lodash-es through its 304 re-exports of @types/lodash with at most six requests in flight', async () => {
+    const esModule = 'https://esm.sh/@types/lodash-es@~4.17.12/';
+    const lodash = 'https://esm.sh/@types/lodash@4.17.14/';
+    const names = ['add', ...Array.from({ length: 303 }, (_, index) => `fn${index}`)];
+    const files = new Map<string, string>([
+      [`${esModule}index.d.ts`, names.map((name) => `export { default as ${name} } from "./${name}.d.ts";`).join('\n')],
+      ...names.map((name): [string, string] => [
+        `${esModule}${name}.d.ts`,
+        `import { ${name} } from "${lodash}index.d.ts";\nexport default ${name};`,
+      ]),
+      [
+        `${lodash}index.d.ts`,
+        [
+          '/// <reference path="./common/common.d.ts" />',
+          'export = _;',
+          'export as namespace _;',
+          'declare const _: _.LoDashStatic;',
+          'declare namespace _ {',
+          '    interface LoDashStatic {}',
+          '}',
+        ].join('\n'),
+      ],
+      [
+        `${lodash}common/common.d.ts`,
+        [
+          'import _ = require("../index.d.ts");',
+          'declare module "../index.d.ts" {',
+          '    interface LoDashStatic {',
+          ...names.map((name) => `        ${name}(augend: number, addend: number): number;`),
+          '    }',
+          '}',
+        ].join('\n'),
+      ],
+    ]);
+    const { diagnose, errors, peak, dispose } = workerFixture(
+      files,
+      new Map([['https://esm.sh/lodash-es', `${esModule}index.d.ts`]]),
+    );
+    try {
+      const codes = await diagnose(
+        "import { add } from 'https://esm.sh/lodash-es'; export const bad: string = add(1, 2);",
+      );
+      expect(errors).toEqual([]);
+      expect(codes).toEqual([2322]);
+      expect(peak()).toBeLessThanOrEqual(6);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('should type date-fns through its 246 sibling re-exports', async () => {
+    const base = 'https://esm.sh/date-fns@4.4.0/';
+    const names = ['addDays', ...Array.from({ length: 245 }, (_, index) => `fn${index}`)];
+    const files = new Map<string, string>([
+      [`${base}index.d.ts`, names.map((name) => `export * from "./${name}.d.ts";`).join('\n')],
+      // The worker here has no standard library, so a structural stand-in plays `Date`.
+      [`${base}types.d.ts`, 'export type DateArg = number | string;\nexport interface Day { readonly epoch: number }'],
+      ...names.map((name): [string, string] => [
+        `${base}${name}.d.ts`,
+        `import type { DateArg, Day } from "./types.d.ts";\nexport declare function ${name}(date: DateArg, amount: number): Day;`,
+      ]),
+    ]);
+    const { diagnose, errors, dispose } = workerFixture(
+      files,
+      new Map([['https://esm.sh/date-fns', `${base}index.d.ts`]]),
+    );
+    try {
+      const codes = await diagnose(
+        "import { addDays } from 'https://esm.sh/date-fns'; export const bad: string = addDays(0, 1);",
+      );
+      expect(errors).toEqual([]);
+      expect(codes).toEqual([2322]);
+    } finally {
+      dispose();
     }
   });
 });

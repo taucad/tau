@@ -269,7 +269,6 @@ export const sessionRevisionsCallback =
     /* The project focus is on, as the route's focused session reads it; the client hears each change of `focused`. */
     let focused = ports.focusedProject.get() === projectId;
     let recording = ports.recording.get(projectId);
-    let cloudOpen = ports.cloudOpen.get(projectId);
     /* The inputs the last `setActor` was sent for, compared as React compares effect dependencies. */
     let actorSentFor: Readonly<{ user: unknown; anonymous: boolean; salt: unknown }> | undefined;
 
@@ -368,7 +367,8 @@ export const sessionRevisionsCallback =
      * check as pending; the first word always goes out, so a word the session got from before cannot stand. */
     let fileCheckSettled: boolean | undefined;
     const relayFileCheck = (status: RevisionStatusProjection | undefined): void => {
-      const settled = isFileCheckSettled(status, cloudOpen);
+      /* Read on each word, as the view's hook reads it on each render: another tab can end the open with no signal here. */
+      const settled = isFileCheckSettled(status, ports.cloudOpen.get(projectId));
       if (settled !== fileCheckSettled) {
         fileCheckSettled = settled;
         sendBack({ type: 'fileCheckChanged', settled });
@@ -612,7 +612,6 @@ export const sessionRevisionsCallback =
         relayFacts();
       });
       unsubscribeCloudOpen = ports.cloudOpen.subscribe(() => {
-        cloudOpen = ports.cloudOpen.get(projectId);
         relayFileCheck(client?.status());
       });
     } catch (error) {

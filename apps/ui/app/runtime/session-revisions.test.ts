@@ -266,6 +266,10 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
       cloudOpen = next;
       cloudOpenSignal.emit();
     },
+    /** Another tab ends the open: the stored intent changes and this document hears nothing. */
+    setCloudOpenElsewhere: (next: boolean) => {
+      cloudOpen = next;
+    },
     chatFacts,
     faults,
     saltRequests,
@@ -935,6 +939,20 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: true }]);
     session.stop();
     expect(guard.take()).toEqual([]);
+  });
+
+  it('A14: should read the Tau Cloud open on each publication, so an open another tab ends leaves no settled behind', async () => {
+    const { client, fake, received, session } = await startSession();
+    fake.setCloudOpen(true);
+    client.setStatus({ readiness: 'connected' });
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: true });
+
+    /* Another tab performs the open and clears the stored intent; this document hears no signal. */
+    fake.setCloudOpenElsewhere(false);
+    client.setStatus({ readiness: 'materialized' });
+
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false });
+    session.stop();
   });
 
   it('A14: should not hold a Tau Cloud open behind the file check, whose own placeholder speaks as it does today', async () => {

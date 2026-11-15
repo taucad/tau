@@ -175,9 +175,9 @@ type KernelClients = Readonly<{
  * Catalog kernels that mirror the whole workspace before they run (`createPythonWorkspaceMirror`,
  * `createDotnetWorkspaceMirror`, the PicoGK browser snapshot). A mirror lists each file's size raw and then reads it
  * through, so a pending pointer reads as a file that changed while mirroring: every pending path is in their closure.
- * The catalog declares no such capability yet, so the set is named here.
+ * The catalog declares no such capability yet, so the set is named here, and a test holds it to the plugins.
  */
-const workspaceMirrorKernels: ReadonlySet<KernelId> = new Set<KernelId>(['picogk', 'build123d', 'smlibpy']);
+export const workspaceMirrorKernels: ReadonlySet<KernelId> = new Set<KernelId>(['picogk', 'build123d', 'smlibpy']);
 
 const extensionOf = (path: string): string => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
 

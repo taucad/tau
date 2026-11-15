@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClient } from '@taucad/chat/rpc';
@@ -11,6 +14,7 @@ import {
   guardLargeObjectKernel,
   isLargeObjectPlaceholder,
   kernelClosure,
+  workspaceMirrorKernels,
 } from '#lib/large-object-guard.js';
 
 const encoder = new TextEncoder();
@@ -253,5 +257,31 @@ describe('kernel closure', () => {
     expect(closureHasPending(['tau.json', 'main.ts'], ['main.ts'])).toBe(true);
     expect(closureHasPending('workspace', ['assets/a.png'])).toBe(true);
     expect(closureHasPending('workspace', [])).toBe(false);
+  });
+});
+
+/*
+ * The mirror set is named by hand (the catalog has no capability for it), so it is checked against the plugins
+ * themselves: a kernel plugin mirrors the workspace when it builds on a core that does (`createPythonWorkspaceMirror`,
+ * `createDotnetWorkspaceMirror`, the native-process `createWorkspaceMirror`). A new one cannot fail open unnoticed.
+ */
+describe('workspace-mirroring kernels', () => {
+  const mirrorCores = ['@taucad/python-kernel-core', '@taucad/dotnet-kernel-core', '@taucad/native-process-core'];
+  const pluginsDirectory = fileURLToPath(new URL('../../../../../packages/plugins/', import.meta.url));
+
+  it('are exactly the kernel plugins built on a workspace-mirroring core', async () => {
+    const plugins = await readdir(pluginsDirectory, { withFileTypes: true });
+    const mirroring: string[] = [];
+    for (const plugin of plugins.filter((entry) => entry.isDirectory())) {
+      // oxlint-disable-next-line no-await-in-loop -- a handful of manifests, read in order.
+      const manifest = JSON.parse(await readFile(join(pluginsDirectory, plugin.name, 'package.json'), 'utf8')) as {
+        dependencies?: Record<string, string>;
+      };
+      if (mirrorCores.some((core) => Object.hasOwn(manifest.dependencies ?? {}, core))) {
+        mirroring.push(plugin.name);
+      }
+    }
+    expect(mirroring.length).toBeGreaterThan(0);
+    expect(new Set(mirroring)).toStrictEqual(new Set(workspaceMirrorKernels));
   });
 });

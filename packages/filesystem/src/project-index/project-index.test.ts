@@ -1654,4 +1654,31 @@ describe('ProjectIndexes declared placeholders (D9)', () => {
     expect(indexes.get('/p')?.pendingFor('sub/x.step')).toBeUndefined();
     expect(indexes.get('/p/sub')?.pendingFor('x.step')).toBeUndefined();
   });
+
+  /* Each index counts its own generations: the one a read took is the covering index's, never another's. */
+  it('should keep a mark a read makes in every index, comparing another index by size alone', async () => {
+    const { provider } = await durableRoot();
+    await provider.mkdir('project/sub', { recursive: true });
+    for (let file = 0; file < 20; file += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- setup, in order.
+      await provider.writeFile(`project/f${String(file)}.txt`, 'text');
+    }
+    await provider.writeFile('project/sub/x.step', 'p'.repeat(131));
+    const indexes = new ProjectIndexes({
+      resolve: (root) => ({ provider, path: root === '/p' ? 'project' : 'project/sub' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/p/sub');
+    await indexes.ready('/p');
+    const generation = indexes.generationAt('/p/sub/x.step');
+    expect(indexes.get('/p')!.entry('sub/x.step')!.generation).toBeGreaterThan(generation!);
+    const object = { oid: 'e'.repeat(64), size: 9 };
+    indexes.markPending('/p/sub/x.step', object, { size: 131, generation });
+    expect(indexes.get('/p/sub')?.pendingFor('x.step')).toStrictEqual(object);
+    expect(indexes.get('/p')?.pendingFor('sub/x.step')).toStrictEqual(object);
+    /* And a read that finds it no placeholder ends it in both. */
+    indexes.endPending('/p/sub/x.step');
+    expect(indexes.get('/p/sub')?.pendingFor('x.step')).toBeUndefined();
+    expect(indexes.get('/p')?.pendingFor('sub/x.step')).toBeUndefined();
+  });
 });

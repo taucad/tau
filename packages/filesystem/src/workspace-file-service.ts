@@ -61,7 +61,7 @@ import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPa
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
 import { archive } from '#content-ops/archive.js';
-import { pendingObjectOf, readThroughPending } from '#pending-content.js';
+import { readAsMarked } from '#pending-content.js';
 import type { PendingObjectSource } from '#pending-content.js';
 import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
@@ -1326,8 +1326,8 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Read one file's bytes, through to its object when it is a pending entry (D9). The pointer is marked pending
-   * unless a write landed after the read began (I7).
+   * Read one file's bytes, through to its object when it is a pending entry (D9), as a rooted view reads it (see
+   * `readAsMarked`).
    *
    * @param canonicalPath - Absolute authority path.
    * @param resolved - The provider and path it resolves to.
@@ -1340,25 +1340,19 @@ export class WorkspaceFileService {
     options?: Readonly<{ signal?: AbortSignal | undefined; scope?: WorkspaceScope | undefined }>,
   ): Promise<Uint8Array<ArrayBuffer>> {
     const generation = this._projectIndexes.generationAt(canonicalPath);
-    const read = await resolved.provider.readFile(resolved.path);
-    const object = pendingObjectOf(read);
-    if (object === undefined) {
-      return read;
-    }
-    this._projectIndexes.markPending(canonicalPath, object, { size: read.byteLength, generation });
+    const bytes = await resolved.provider.readFile(resolved.path);
     /* The source answers by mount, as a rooted view's read asks it. */
     const root = options?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
     const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
-    const signal = options?.signal;
-    return readThroughPending(
-      this._pendingSource,
-      { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
-      {
-        pointer: read,
-        ...(signal === undefined ? {} : { signal }),
-        stallMilliseconds: this._pendingStallMilliseconds,
-      },
-    );
+    return readAsMarked(this._projectIndexes, this._pendingSource, {
+      authorityPath: canonicalPath,
+      root: root ?? canonicalPath,
+      path: local,
+      bytes,
+      generation,
+      signal: options?.signal,
+      stallMilliseconds: this._pendingStallMilliseconds,
+    });
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {

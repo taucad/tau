@@ -55,6 +55,14 @@ const createService = async (pendingStallMilliseconds?: number): Promise<Workspa
   return created;
 };
 
+/* What the revision layer, the placeholders' only writer, declares of the checkout. */
+const declarePart = async (on: WorkspaceFileService): Promise<void> => {
+  const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
+  await on.createRootedFileSystem(route, undefined, { placeholders: 'raw' }).declarePending!(
+    new Map([['models/part.step', placeholder]]),
+  );
+};
+
 beforeEach(async () => {
   service = await createService();
 });
@@ -120,6 +128,7 @@ describe('pending entries (D9)', () => {
   });
 
   it('should refuse with PENDING when no object can be had within the stall bound, and never answer the pointer', async () => {
+    await declarePart(service);
     const view = service.createRootedFileSystem(route);
     /* No source: nothing can fetch it. */
     await expect(view.readFile('models/part.step')).rejects.toMatchObject({
@@ -139,6 +148,7 @@ describe('pending entries (D9)', () => {
           /* Never settles. */
         }),
     );
+    await declarePart(stalling);
     const stalled = stalling.createRootedFileSystem(route);
     await expect(stalled.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
     await expect(new Response(stalled.readFileStream!('models/part.step')).arrayBuffer()).rejects.toMatchObject({
@@ -235,75 +245,96 @@ describe('pending entries (D9)', () => {
   });
 });
 
-describe('pending paths', () => {
+describe('marked placeholders (D9)', () => {
+  const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
+
   /* The revision layer, the placeholders' only writer, says which they are: the index keeps it, and reads nothing. */
-  it('should keep what the raw view declares, answering it without a read', async () => {
+  it('should stat a declared placeholder as its object wherever a view lists it, reading no bytes', async () => {
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = service.createRootedFileSystem(route);
-    const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
     await raw.declarePending!(new Map([['models/part.step', placeholder]]));
     const read = vi.spyOn(memory, 'readFile');
-    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+    const asObject = { size: part.byteLength, pending: true };
+    expect(await view.stat('models/part.step')).toMatchObject(asObject);
+    expect(await view.lstat('models/part.step')).toMatchObject(asObject);
+    const listed = await view.readdirWithStats!('models');
+    expect(listed.find((row) => row.name === 'part.step')).toMatchObject(asObject);
+    const tree = await view.statTree!('models');
+    expect(tree.find((row) => row.path === 'part.step')).toMatchObject(asObject);
+    const found = await view.search!('part');
+    expect(found.find((row) => row.path === 'models/part.step')).toMatchObject(asObject);
+    const changed = await view.changedSince!(0);
+    expect(changed.entries.find((entry) => entry.path === 'models/part.step')).toMatchObject({
+      size: part.byteLength,
+      pending: { oid, size: part.byteLength },
+    });
+    /* A pointer's facts describe the pointer, not the object: none are answered. */
+    expect(await view.facts!(['models/part.step'])).toStrictEqual(new Map());
+    /* A git-lfs oid is its object's SHA-256: the digest is answered without the bytes. */
+    expect(await view.hashFiles!(['models/part.step'])).toStrictEqual({ 'models/part.step': oid });
+    expect(await view.pendingPaths!(['models/part.step', 'main.scad'])).toStrictEqual(['models/part.step']);
     expect(read).not.toHaveBeenCalled();
-    /* A declaration that speaks for other paths leaves this one as it is. */
-    await raw.declarePending!(new Map(), ['main.scad']);
-    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
-    expect(read).not.toHaveBeenCalled();
+    /* The revision layer sees the pointer it wrote. */
+    const pointerStat = await raw.stat('models/part.step');
+    expect(pointerStat).toMatchObject({ size: pointer.byteLength });
+    expect(pointerStat).not.toHaveProperty('pending');
+    /* And a read agrees with the stat: the object. */
+    service.setPendingObjectSource(async () => part);
+    expect(await view.readFile('models/part.step')).toStrictEqual(part);
   });
 
-  /* A reload whose index snapshot was lost or marked for rescan rebuilt it from metadata (I3): no read, no tree write. */
-  it('should know a placeholder the index was never told of, from its own bytes, starting no download', async () => {
-    const source = vi.fn<PendingObjectSource>(async () => part);
-    service.setPendingObjectSource(source);
+  it('should answer a pointer nobody declared as the text it is, in a stat and a read alike', async () => {
     const view = service.createRootedFileSystem(route);
-    expect(await view.pendingPaths!(['models/part.step', 'main.scad', 'models/absent.step'])).toStrictEqual([
-      'models/part.step',
-    ]);
-    expect(source).not.toHaveBeenCalled();
-    /* A write replaces the pointer: the path is not pending after it. */
-    await view.writeFile('models/part.step', part);
+    const stat = await view.stat('models/part.step');
+    expect(stat).toMatchObject({ size: pointer.byteLength });
+    expect(stat).not.toHaveProperty('pending');
+    expect(await view.readFile('models/part.step')).toStrictEqual(pointer);
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
   });
 
-  /* Fail closed: a guard told "not pending" would let a write replace the pointer. */
-  it('should reject when a stat or read fails for a reason other than absence', async () => {
-    const view = service.createRootedFileSystem(route);
-    const failure = Object.assign(new Error('The storage is busy.'), { code: 'EIO' });
-    const stat = vi.spyOn(memory, 'stat').mockRejectedValueOnce(failure);
-    await expect(view.pendingPaths!(['models/part.step'])).rejects.toBe(failure);
-    stat.mockRestore();
-    const read = vi.spyOn(memory, 'readFile').mockRejectedValueOnce(failure);
-    await expect(view.pendingPaths!(['models/part.step'])).rejects.toBe(failure);
-    read.mockRestore();
-    /* Gone between its stat and its read: absent, so not pending. */
-    vi.spyOn(memory, 'readFile').mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
-    expect(await view.pendingPaths!(['models/part.step', 'models/absent.step'])).toStrictEqual([]);
-    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+  it('should refuse a declared placeholder whose object cannot be had, never answering the pointer (I7)', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]));
+    await expect(service.createRootedFileSystem(route).readFile('models/part.step')).rejects.toMatchObject({
+      code: 'PENDING',
+    });
   });
 
-  it('should ask at most the stat bound at once, keeping the input order', async () => {
+  /* A checkout edited from outside between the revision layer's looks: the read asks once, and the mark follows. */
+  it('should mark an undeclared pointer a read finds to be a placeholder, so the next stat agrees', async () => {
+    const source = vi.fn<PendingObjectSource>(async () => part);
+    service.setPendingObjectSource(source);
     const view = service.createRootedFileSystem(route);
-    const names = Array.from({ length: 40 }, (_, index) => `notes/n${String(index).padStart(2, '0')}.txt`);
-    for (const name of names) {
-      // oxlint-disable-next-line no-await-in-loop -- setup, in order.
-      await service.writeFile(`${route}/${name}`, name.endsWith('7.txt') ? pointer : 'text');
-    }
-    await view.pendingPaths!(['main.scad']);
-    const original = memory.stat.bind(memory);
-    let inFlight = 0;
-    let most = 0;
-    vi.spyOn(memory, 'stat').mockImplementation(async (path) => {
-      inFlight += 1;
-      most = Math.max(most, inFlight);
-      await new Promise((resolve) => {
-        setTimeout(resolve, 1);
-      });
-      inFlight -= 1;
-      return original(path);
-    });
-    expect(await view.pendingPaths!(names)).toStrictEqual(names.filter((name) => name.endsWith('7.txt')));
-    expect(most).toBeLessThanOrEqual(16);
-    expect(most).toBeGreaterThan(1);
+    await view.statTree!('');
+    expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
+    expect(await view.readFile('models/part.step')).toStrictEqual(part);
+    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+    /* A write replaces the pointer and ends the mark. */
+    await view.writeFile('models/part.step', 'mine');
+    const written = await view.stat('models/part.step');
+    expect(written).toMatchObject({ size: 4 });
+    expect(written).not.toHaveProperty('pending');
+  });
+
+  it('should end a mark the source says is no placeholder, so the next stat is the pointer', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]));
+    service.setPendingObjectSource(async () => undefined);
+    expect(await view.readFile('models/part.step')).toStrictEqual(pointer);
+    const stat = await view.stat('models/part.step');
+    expect(stat).toMatchObject({ size: pointer.byteLength });
+    expect(stat).not.toHaveProperty('pending');
+  });
+
+  it('should keep a scoped declaration to the paths it speaks for', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]));
+    await raw.declarePending!(new Map(), ['main.scad']);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+    await raw.declarePending!(new Map(), ['models/part.step']);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
   });
 });
 

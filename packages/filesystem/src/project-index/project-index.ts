@@ -160,6 +160,8 @@ export type IndexSearchOptions = {
   readonly admits?: IndexAdmits;
   /** Stops a query still waiting for its root's index to open. */
   readonly signal?: AbortSignal;
+  /** Answer a pending entry as its object: its size, `pending`, and none of the pointer's facts (D9). */
+  readonly asObjects?: boolean;
 };
 
 /** What one head-metadata compare found (D5). @public */
@@ -573,10 +575,13 @@ export class ProjectIndex {
    * `statTree` answers, with content facts only where known (I3).
    *
    * @param prefix - Root-relative directory.
-   * @param options - Optional mask, asked before a descent.
+   * @param options - Optional mask, asked before a descent, and whether a pending entry is answered as its object.
    * @returns File rows relative to `prefix`.
    */
-  public statTree(prefix: string, options?: { readonly admits?: IndexAdmits }): FileStatEntry[] {
+  public statTree(
+    prefix: string,
+    options?: { readonly admits?: IndexAdmits; readonly asObjects?: boolean },
+  ): FileStatEntry[] {
     const strip = prefix === '' ? 0 : prefix.length + 1;
     const admits = options?.admits;
     const relativeAdmits =
@@ -584,14 +589,7 @@ export class ProjectIndex {
     const rows: FileStatEntry[] = [];
     for (const entry of this.walk(prefix, { admits: relativeAdmits, kinds: ['file'] })) {
       const path = entry.path.slice(strip);
-      rows.push({
-        path,
-        name: path.split('/').at(-1) ?? path,
-        type: 'file',
-        size: entry.size,
-        mtimeMs: entry.mtimeMs,
-        ...statFields(this._validFacts(entry)),
-      });
+      rows.push(this._fileRow(entry, path, options?.asObjects === true));
     }
     return rows;
   }
@@ -618,14 +616,7 @@ export class ProjectIndex {
         continue;
       }
       if (entry.kind === 'file') {
-        results.push({
-          path: entry.path,
-          name,
-          type: 'file',
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-          ...statFields(this._validFacts(entry)),
-        });
+        results.push(this._fileRow(entry, entry.path, options?.asObjects === true));
       } else if (options?.includeDirectories === true) {
         results.push({ path: entry.path, name, type: 'dir', size: 0, mtimeMs: entry.mtimeMs });
       }
@@ -1187,6 +1178,14 @@ export class ProjectIndex {
       return undefined;
     }
     return facts;
+  }
+
+  /* One file's stat row; a pending entry as its object when asked, whose facts are unknown until its bytes land (I7). */
+  private _fileRow(entry: IndexEntry, path: string, asObjects: boolean): FileStatEntry {
+    const row = { path, name: path.split('/').at(-1) ?? path, type: 'file', mtimeMs: entry.mtimeMs } as const;
+    return asObjects && entry.pending !== undefined
+      ? { ...row, size: entry.pending.size, pending: true }
+      : { ...row, size: entry.size, ...statFields(this._validFacts(entry)) };
   }
 
   /* A node a write recorded before the provider reported its mtime takes the provider's; its facts are re-measured. */

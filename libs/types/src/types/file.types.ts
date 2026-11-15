@@ -109,10 +109,16 @@ export type FileStat =
     }
   | ({
       readonly type: 'file';
+      /** The file's size; for a pending entry, the size of the large object it stands for. */
       readonly size: number;
       readonly mtimeMs: number;
       /** What a composed view says about this path; absent on a raw provider stat. */
       readonly provenance?: FileProvenance;
+      /**
+       * Present on a pending entry (`@taucad/filesystem` D9): the path holds a large object's pointer, not yet its
+       * bytes. `size` is the object's and a read of it waits for them; absent on a raw stat, which is the pointer's.
+       */
+      readonly pending?: true;
     } & StatContentMetadata);
 
 /**

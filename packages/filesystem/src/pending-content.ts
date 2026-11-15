@@ -14,7 +14,11 @@
  *
  * The revision layer reads and writes checkouts raw
  * (`createRootedFileSystem(root, context, { placeholders: 'raw' })`): it owns
- * the pointers.
+ * the pointers, and it alone says which files are placeholders: it declares
+ * them to the index (`declarePending`), which keeps one mark per path. Every
+ * other view answers a path by that mark alone: a marked file stats as its
+ * object and reads through to it; an unmarked one is the bytes it holds.
+ * Nothing below the revision layer guesses from a file's shape.
  *
  * @module
  */
@@ -97,6 +101,71 @@ export const pendingObjectOf = (bytes: Uint8Array<ArrayBuffer>): PendingObject |
   } catch {
     return undefined;
   }
+};
+
+/** The index's marks, as a read keeps them (see {@link readAsMarked}). @internal */
+export type PendingMarks = Readonly<{
+  pendingAt: (authorityPath: string) => PendingObject | undefined;
+  markPending: (
+    authorityPath: string,
+    object: PendingObject,
+    observed: Readonly<{ size: number; generation?: number | undefined }>,
+  ) => void;
+  endPending: (authorityPath: string) => void;
+}>;
+
+/**
+ * What a non-raw view's read of one file answers (D9). A marked file reads
+ * through to its object. The read also keeps the mark true to what it met, so
+ * the next stat answers as it did: bytes that are no pointer, or a pointer the
+ * source says is no placeholder, end a mark; an unmarked pointer is asked
+ * about once, and marked when the source answers its object (a checkout edited
+ * from outside between the revision layer's looks). Without a source an
+ * unmarked pointer is the text it is.
+ *
+ * @param marks - The index's marks.
+ * @param source - The host's source.
+ * @param read - The authority path read, its mount and its path under it, the bytes on disk, the entry's generation
+ *   before the read, the caller's cancellation and the bound.
+ * @returns The bytes the path stands for.
+ * @throws {PendingContentError} When a placeholder's object could not be had within the bound.
+ * @internal
+ */
+export const readAsMarked = async (
+  marks: PendingMarks,
+  source: PendingObjectSource | undefined,
+  read: Readonly<{
+    authorityPath: string;
+    root: string;
+    path: string;
+    bytes: Uint8Array<ArrayBuffer>;
+    generation?: number | undefined;
+    signal?: AbortSignal | undefined;
+    stallMilliseconds?: number | undefined;
+  }>,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const { bytes, generation, signal, stallMilliseconds, ...at } = read;
+  const object = pendingObjectOf(bytes);
+  const marked = marks.pendingAt(at.authorityPath);
+  if (object === undefined || (marked === undefined && source === undefined)) {
+    if (marked !== undefined) {
+      marks.endPending(at.authorityPath);
+    }
+    return bytes;
+  }
+  const answered = await readThroughPending(
+    source,
+    { ...at, object },
+    { pointer: bytes, ...(signal === undefined ? {} : { signal }), stallMilliseconds },
+  );
+  if (answered === bytes) {
+    if (marked !== undefined) {
+      marks.endPending(at.authorityPath);
+    }
+  } else if (marked?.oid !== object.oid || marked.size !== object.size) {
+    marks.markPending(at.authorityPath, object, { size: bytes.byteLength, generation });
+  }
+  return answered;
 };
 
 /**

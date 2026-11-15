@@ -564,7 +564,8 @@ export class ProjectIndexes {
 
   /**
    * Make one file a pending entry in every index that holds it (see
-   * {@link ProjectIndex.markPending}).
+   * {@link ProjectIndex.markPending}). The generation is the covering index's, taken by
+   * {@link ProjectIndexes.generationAt}: each index counts its own, so every other one compares only the size.
    *
    * @param absolutePath - Absolute file path.
    * @param object - The large object its pointer names.
@@ -575,8 +576,24 @@ export class ProjectIndexes {
     object: PendingObject,
     observed?: Readonly<{ size: number; generation?: number | undefined }>,
   ): void {
+    const covering = this._covering(absolutePath)?.index;
     this._apply(absolutePath, (index, relative) => {
-      index.markPending(relative, object, observed);
+      index.markPending(
+        relative,
+        object,
+        observed === undefined || index === covering ? observed : { size: observed.size },
+      );
+    });
+  }
+
+  /**
+   * End one file's pending entry in every index that holds it: a read found it no placeholder.
+   *
+   * @param absolutePath - Absolute file path.
+   */
+  public endPending(absolutePath: string): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.declarePending(new Map(), { paths: [relative] });
     });
   }
 
@@ -596,11 +613,14 @@ export class ProjectIndexes {
    * The large object a warm index records for one pending entry.
    *
    * @param absolutePath - Absolute file path.
+   * @param size - The file's size as a stat found it: a file of another size is not the pointer the index marked (it
+   *   was written since, and the index has not observed it yet).
    * @returns The object, or `undefined` when no index has it pending.
    */
-  public pendingAt(absolutePath: string): PendingObject | undefined {
+  public pendingAt(absolutePath: string, size?: number): PendingObject | undefined {
     const covering = this._covering(absolutePath);
-    return covering?.index.pendingFor(covering.relative);
+    const entry = covering?.index.entry(covering.relative);
+    return entry === undefined || (size !== undefined && entry.size !== size) ? undefined : entry.pending;
   }
 
   /**

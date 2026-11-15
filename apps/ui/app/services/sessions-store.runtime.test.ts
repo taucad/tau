@@ -604,4 +604,46 @@ describe('a change of kernel selection replaces the runtime through the session 
 
     expect(reportFault).not.toHaveBeenCalled();
   });
+
+  it('should replace the runtime when a close asked again during a held replacement is cancelled (D21 round 4)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+    const closing = held();
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: closing.flush,
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      const session = sessionOf(registry)!;
+      session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      session.send({ type: 'confirmClose' });
+      await flush();
+      expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+      flushing.settle();
+      await flush();
+      session.send({ type: 'cancelClose' });
+      await flush();
+      flushing.settle();
+      await flush();
+      await flush();
+
+      expect(session.getSnapshot().matches('live')).toBe(true);
+      expect(opener.built).toHaveLength(2);
+      expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    } finally {
+      unregister();
+    }
+  });
 });

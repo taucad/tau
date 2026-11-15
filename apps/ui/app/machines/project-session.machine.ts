@@ -805,7 +805,11 @@ export const projectSessionMachine = setup({
             /* Nothing is flushed or stopped yet, and a cancel keeps the session live with this runtime. */
             replaceRuntime: handRuntimeReplacement,
             confirmClose: { target: 'cancellingRuns' },
-            cancelClose: { target: '#project-session.live', context: { closeReason: undefined } },
+            /* A6e: a close asked again after it had started holds a replacement; cancelling it hands that back. */
+            cancelClose: ({ context }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return { target: '#project-session.live', context: { closeReason: undefined } };
+            },
           },
         },
         cancellingRuns: {

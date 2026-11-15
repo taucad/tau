@@ -34,6 +34,7 @@ import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types'
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
+import type { AcpAdapterRefusal } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
 import type {
@@ -131,6 +132,13 @@ export type HostDaemonEvent =
        * instead of vanishing.
        */
       readonly externalAgents?: readonly ExternalAgentDescriptor[];
+      /**
+       * Why each refused external agent was refused, with the message the
+       * descriptor leaves out because it holds local paths. In-process only,
+       * for the terminal that launched this daemon (`tau serve`); never a wire
+       * field.
+       */
+      readonly externalAgentRefusals?: readonly AcpAdapterRefusal[];
     }
   | {
       readonly type: 'warning';
@@ -1172,7 +1180,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * outlives every relay reconnect, and `sendControl` is a no-op while the
      * socket is down. */
     agentRunReporter = startRunReporter({ read: project.launcher.read, send: sendControlOrThrow });
-    emit({ type: 'agent', state: 'ready', url: server.url().href, externalAgents });
+    emit({
+      type: 'agent',
+      state: 'ready',
+      url: server.url().href,
+      externalAgents,
+      externalAgentRefusals: discovery.refused,
+    });
     /* A daemon with the agent capability is *useful* the moment this channel
      * answers: pairing, the relay, and the compute child are all downstream of
      * it, and `tau serve --ui` must not block on any of them. */

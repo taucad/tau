@@ -650,7 +650,10 @@ export const probeAcpAgents = async (
       const executable = adapter.executablePath ?? location?.executablePath ?? adapter.cli;
       const started = performance.now();
       try {
-        const { stdout } = await execFileAsync(executable, ['--version'], { timeout: budget, env: environment });
+        const { stdout } = await execFileAsync(executable, ['--version'], {
+          timeout: options.probeTimeout ?? acpCliProbeTimeout,
+          env: environment,
+        });
         const line = String(stdout).trim().split('\n')[0] ?? '';
         const installed = /\d+\.\d+\.\d+/u.exec(line)?.[0];
         if (installed === undefined) {

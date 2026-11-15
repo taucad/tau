@@ -3845,7 +3845,7 @@ groups:
           component: r2
         isPaused: true
       - uid: storage-audit-degraded
-        title: "R2 Audit Worker Degraded"
+        title: 'R2 Audit Worker Degraded'
         condition: audit_degraded_threshold
         data:
           - refId: audit_degraded_logs
@@ -3894,13 +3894,13 @@ groups:
         for: 0s
         annotations:
           runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
-          summary: "More than one scheduled heartbeat of the tau-r2-audit Worker in 15 minutes reported a degraded pass: poll skipped (no query token) or failed (pollDetail says why), truncated=true (the Data Access Log page was full, so events past it were not checked), or expectedWritersValid=false or foreignBucketsValid=false (AUDIT_EXPECTED_WRITERS or AUDIT_FOREIGN_BUCKETS did not parse). Heartbeats still arrive, so storage-audit-silent stays green while storage-unexpected-writer and storage-dependency-bulk-delete are blind or wrong. One failed poll does not fire."
+          summary: 'More than one scheduled heartbeat of the tau-r2-audit Worker in 15 minutes reported a degraded pass: poll skipped (no query token) or failed (pollDetail says why), truncated=true (the Data Access Log page was full, so events past it were not checked), or expectedWritersValid=false or foreignBucketsValid=false (AUDIT_EXPECTED_WRITERS or AUDIT_FOREIGN_BUCKETS did not parse). Heartbeats still arrive, so storage-audit-silent stays green while storage-unexpected-writer and storage-dependency-bulk-delete are blind or wrong. One failed poll does not fire.'
         labels:
           severity: warning
           service: tau-r2-audit
           component: r2
       - uid: storage-audit-no-events
-        title: "R2 Audit Logs Deliver Nothing"
+        title: 'R2 Audit Logs Deliver Nothing'
         condition: audit_no_events_threshold
         data:
           - refId: audit_no_events_logs

@@ -22,6 +22,7 @@ import type { AcpAcquire, AcpSlot } from '#acp/acp-sessions.machine.js';
 import type { AcpAgentFacts, AcpLimitReset, AcpSessionPresentation, AcpSessionFailure } from '#acp/session.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { GrokNotification } from '#acp/grok-notifications.js';
+import type { GrokModels } from '#acp/grok-models.js';
 import type { JsonObject } from '@taucad/agent-host';
 import type { GrokPromptUsage } from '#acp/grok-usage.js';
 
@@ -46,6 +47,7 @@ export const childEventSchemas = {
   sessionUpdate: z.object({ sessionId: z.string(), update: json<SessionUpdate>() }),
   grokNotification: z.object({ notification: json<GrokNotification>() }),
   grokSettings: z.object({ params: json<JsonObject>() }),
+  grokModels: z.object({ models: json<GrokModels>() }),
   vendorRequest: z.object({ id: z.string(), request: json<AcpVendorRequest>() }),
   elicitationComplete: z.object({ elicitationId: z.string() }),
   adapterExited: z.object({ stderr: z.string() }),
@@ -94,6 +96,8 @@ export const childContextSchema = z.object({
   /* The first lend after the open still owes the opening record. */
   fresh: z.boolean(),
   configOptions: json<readonly SessionConfigOption[] | undefined>(),
+  /* The model list the agent last pushed (`_x.ai/models/update`); it outranks an open's answer that arrives later. */
+  grokModels: json<GrokModels | undefined>().optional(),
   presentation: json<AcpSessionPresentation>(),
   priorUsage: json<AcpUsage | undefined>(),
   limit: json<AcpLimitReset | undefined>(),

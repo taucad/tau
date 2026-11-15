@@ -124,7 +124,8 @@
 \* A11: the app shell renders at one tree position beside the keyed live sessions, never inside the focused
 \* one, and the focused project's providers are re-homed in the shell's outlet (`focused-project-view.tsx`),
 \* keyed by the project the route shows in the editor. The gate's worker wait moves into the outlet. Focus,
-\* the route state and the mounted live set are unchanged, so no action or verdict changes.
+\* the route state and the mounted live set are unchanged, so no action or verdict changes. The route and
+\* live-session sources name the re-homing in their comments.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

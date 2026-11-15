@@ -46,8 +46,8 @@ import {
  * animation frame, so a state painted once is caught.
  *
  * Every row that pins a known defect shows it on every run. Most force it: the workspace chunk or the agent host's
- * script held, or a file-manager worker reply delivered late. U2, U3 and U22 need no forcing: their defect is built
- * into the load on every run. Its title names the defect; its defect assertion (a removed
+ * script held, or a file-manager worker reply delivered late. U2, U3 and U22 needed no forcing: their defect was
+ * built into the load on every run until A11 fixed it. Its title names the defect; its defect assertion (a removed
  * node, a mount count, a frame) names the frame. Each is a plain test that stands as an expected failure until the
  * fixing lane sets `expectedFailure: false`; it is never deleted. A row measures first (seeding, the load, the check
  * that the forcing happened, its preconditions) and asserts after: an error while measuring, in setup or teardown,
@@ -359,6 +359,7 @@ knownDefect(
       while (sidebarAbsent.has(sidebarShown)) {
         sidebarShown += 1;
       }
+      precondition(sidebarShown <= record.frames, 'U3: no sampled frame showed the sidebar');
       const wrapperGone = record.wrapperAbsentFrames.filter((entry) => entry.frame > wrapperShown);
       const sidebarGone = record.sidebarAbsentFrames.filter((entry) => entry.frame > sidebarShown);
       expect(
@@ -389,7 +390,6 @@ test(
   /* A report keeps every sample: a retry would replace a run's samples with another run's. */
   { timeout: loadBudget * (firstPaintLoads + 1), retry: 0 },
   async () => {
-    await seedProjects('wide');
     const samples: Array<{
       readonly sample: number;
       /** Frames before the wrapper first showed, with their times: the shell was not yet in the document. */
@@ -398,12 +398,39 @@ test(
       readonly firstContentfulPaint?: number;
       readonly error?: string;
     }> = [];
+    /* Written after every sample, so a run that times out still reports the samples it took. */
+    const writeReport = async (): Promise<void> => {
+      const k = samples.filter((entry) => (entry.blankFrames?.length ?? 0) > 0).length;
+      const report = {
+        defect: 'U3 first paint',
+        k,
+        n: samples.length,
+        statement: `U3 first paint: ${k} of ${samples.length} direct loads sampled a frame before the shell was in the document`,
+        samples,
+      };
+      await target.writeArtifact(
+        'project-load-frames/u3-first-paint-report.json',
+        `${JSON.stringify(report, null, 2)}\n`,
+      );
+    };
+    try {
+      await seedProjects('wide');
+    } catch (error) {
+      samples.push({ sample: 0, error: `seeding: ${error instanceof Error ? error.message : String(error)}` });
+      await writeReport();
+      return;
+    }
     for (let sample = 1; sample <= firstPaintLoads; sample += 1) {
       try {
         await target.reload();
         await settleProject();
         const record = await keepRecord(`u3-first-paint-${String(sample)}`);
-        const shown = record.wrapperFirstFrame?.frame ?? Number.POSITIVE_INFINITY;
+        if (record.wrapperFirstFrame === undefined || Object.keys(record.dropped).length > 0) {
+          throw new Error(
+            record.wrapperFirstFrame === undefined ? 'the wrapper never painted' : 'the recorder dropped frames',
+          );
+        }
+        const shown = record.wrapperFirstFrame.frame;
         samples.push({
           sample,
           blankFrames: record.wrapperAbsentFrames.filter((entry) => entry.frame < shown),
@@ -413,19 +440,8 @@ test(
       } catch (error) {
         samples.push({ sample, error: error instanceof Error ? error.message : String(error) });
       }
+      await writeReport();
     }
-    const k = samples.filter((entry) => (entry.blankFrames?.length ?? 0) > 0).length;
-    const report = {
-      defect: 'U3 first paint',
-      k,
-      n: samples.length,
-      statement: `U3 first paint: ${k} of ${samples.length} direct loads sampled a frame before the shell was in the document`,
-      samples,
-    };
-    await target.writeArtifact(
-      'project-load-frames/u3-first-paint-report.json',
-      `${JSON.stringify(report, null, 2)}\n`,
-    );
   },
 );
 
@@ -1042,7 +1058,7 @@ knownDefect(
 
 /** The sidebar's resting-width stand-in: a slab with the sidebar's background that is not the sidebar itself. */
 const findSidebarStandIns = (html: Document): string[] =>
-  /* The slab's signature: the sidebar's background with its border, as `workspace-skeleton.tsx` draws it. */
+  /* The slab's signature: the sidebar's background with its border, as `workspace-skeleton.tsx` drew it before A11. */
   [...html.querySelectorAll('[class~="bg-sidebar"][class~="border-sidebar-border"]')]
     /* Not the sidebar, and not a bar fixed to the window's edge (the phone's), which no sidebar width can stand for. */
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))

@@ -335,6 +335,40 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
     expect(treeId).toBe(answered);
   });
 
+  it('should write no record once the actors have settled, even for a comparison in flight at the close', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    await writeFile(join(root, 'dir3/f3.txt'), 'edited before the close\n');
+    await utimes(join(root, 'dir3/f3.txt'), settledTime, new Date(Date.now() - 30_000));
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reading: () => void = () => undefined;
+    const read = new Promise<void>((resolve) => {
+      reading = resolve;
+    });
+    first.hooks.afterRead = async () => {
+      reading();
+      await held;
+    };
+    const comparing = compare(first.actors);
+    await read;
+    const settling = first.actors.settled();
+    setTimeout(release, 100);
+    await comparing;
+    await settling;
+    /* Past the keep's own delay: whatever the close left scheduled has run by now. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 2500);
+    });
+
+    await expect(readFile(join(root, '.git/tau-compare-live.json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('should keep the newest comparison of a session, taken from the index, for the next one', async () => {
     const { root, session } = await fixture(files(20));
     const first = await session();

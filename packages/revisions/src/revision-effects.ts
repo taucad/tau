@@ -1356,8 +1356,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * A comparison's record is written off its path (Tau #2013): the newest
    * comparison of each checkout is kept once comparisons pause, and any still
    * waiting when the actors settle is kept then. One keep runs at a time, so an
-   * older answer never lands over a newer one.
+   * older answer never lands over a newer one. Once the actors begin to settle
+   * no keep is scheduled: a comparison still in flight then leaves none, so
+   * nothing is written into a store its host has closed or removed.
    */
+  let keepsClosed = false;
   const pendingKeeps = new Map<
     string,
     Readonly<{ place: Checkout; compared: Parameters<typeof keepComparison>[2]; timer: ReturnType<typeof setTimeout> }>
@@ -1382,7 +1385,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     })();
   };
   const keepSoon = (place: Checkout, compared: Parameters<typeof keepComparison>[2]): void => {
-    if (compareRecordPath(place.id) === undefined || !readings.has(compared.tree)) {
+    if (keepsClosed || compareRecordPath(place.id) === undefined || !readings.has(compared.tree)) {
       return;
     }
     const previous = pendingKeeps.get(place.id);
@@ -1392,6 +1395,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const timer = setTimeout(() => {
       runKeep(place.id);
     }, keepComparisonDelayMilliseconds); // Bound: keepComparisonDelayMilliseconds.
+    /* A pending keep never holds a Node process open: the settle that closes it writes it. */
+    if (typeof timer === 'object' && 'unref' in timer) {
+      timer.unref();
+    }
     pendingKeeps.set(place.id, { place, compared, timer });
   };
   const flushKeeps = async (): Promise<void> => {
@@ -1582,12 +1589,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* A store that could not be created is reported where it was asked for,
        * never from the close that waits for it. */
     }
+    keepsClosed = true;
     await stopFills();
-    await flushKeeps();
     while (activeOperations.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- operations may admit another tracked authority operation before settling.
       await Promise.allSettled(activeOperations);
     }
+    await flushKeeps();
     await loggedOperation;
   };
 

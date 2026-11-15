@@ -21,6 +21,15 @@ import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fi
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeFacts } from '#services/sessions-store.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
+import type * as AppRuntimeFaultsModule from '#runtime/app-runtime-faults.js';
+
+type AppRuntimeFaults = typeof AppRuntimeFaultsModule;
+
+const reportFault = vi.hoisted(() => vi.fn());
+vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
+  ...(await importOriginal<AppRuntimeFaults>()),
+  reportAppRuntimeFault: reportFault,
+}));
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -236,7 +245,7 @@ describe('the session builds its project runtime as a child (A6d)', () => {
     ]);
   });
 
-  it('should build the next runtime and then stop this one when the choices select another kernel, with no flush (D14)', async () => {
+  it('should build the next runtime and then stop this one when the choices select another kernel (A6e flushes first)', async () => {
     const { registry, opener, closes } = harness();
     await open(registry, { workspace: 'ws', chatId: 'chat-1' });
 
@@ -251,7 +260,7 @@ describe('the session builds its project runtime as a child (A6d)', () => {
 
     expect(opener.built).toHaveLength(2);
     expect(opener.built[1]?.input.request).toMatchObject({ chatId: 'chat-1' });
-    /* Built before the one it replaces stops, so the entries record session yields with a flush (I13). */
+    /* Built before the one it replaces stops, so the entries record session yields (I13). */
     expect(closes).toEqual(['open:0', 'open:1', 'runtime:0']);
     expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
     expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
@@ -312,6 +321,121 @@ describe('a change of kernel selection replaces the runtime through the session 
       expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
     } finally {
       project.unregister();
+    }
+  });
+
+  it('should replace the runtime once the flush settles, in order, and keep the session live (B4)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry, { workspace: 'ws', chatId: 'chat-1' });
+    const project = producers(closes);
+    try {
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+
+      expect(closes).toEqual(['open:0', 'flush', 'open:1', 'runtime:0']);
+      expect(opener.built[1]?.input.request).toMatchObject({ chatId: 'chat-1' });
+      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+    } finally {
+      project.unregister();
+    }
+  });
+
+  it('should replace once when the choices change again during the flush', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry, { workspace: 'ws', chatId: 'chat-1' });
+    let settle: () => void = () => undefined;
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () =>
+        new Promise<void>((resolve) => {
+          closes.push('flush');
+          settle = resolve;
+        }),
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      opener.changeChoices();
+      registry.send({ type: 'chatRequested', projectId, chatId: 'chat-2' });
+      await flush();
+      settle();
+      await flush();
+      await flush();
+
+      expect(closes).toEqual(['open:0', 'flush', 'open:1', 'runtime:0']);
+      /* The next runtime is built for the chat asked for while the flush ran. */
+      expect(opener.built[1]?.input.request).toMatchObject({ chatId: 'chat-2' });
+    } finally {
+      unregister();
+    }
+  });
+
+  it('should build nothing when the session closes during the flush, and stop the runtime it had (I23)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    let settle: () => void = () => undefined;
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () =>
+        new Promise<void>((resolve) => {
+          closes.push('flush');
+          settle = resolve;
+        }),
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      /* The close's own producer flush settles with the replacement's. */
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      settle();
+      await flush();
+      await flush();
+      await flush();
+
+      expect(opener.built).toHaveLength(1);
+      expect(closes).toEqual(['open:0', 'flush', 'flush', 'runtime:0', 'fileManager']);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('should still replace the runtime when the flush is refused, and report the refusal (D23 hook)', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const reported: unknown[] = [];
+    reportFault.mockImplementation((error: unknown) => {
+      reported.push(error);
+    });
+    const refusal = new Error('Pane layout is not confirmed saved.');
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () => {
+        closes.push('flush');
+        throw refusal;
+      },
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+
+      expect(reported).toEqual([refusal]);
+      expect(closes).toEqual(['open:0', 'flush', 'open:1', 'runtime:0']);
+      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+    } finally {
+      unregister();
     }
   });
 });

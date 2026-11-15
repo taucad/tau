@@ -33,6 +33,10 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  * runtime's facts, tells the session the runtime's root (`runtimeChanged`), which the session keeps for the subtree's
  * provider, and reports that the chat session is ready (`chatReady`, M2) and each chat the editor focused
  * (`chatFocused`), which the session passes to the registry for focus.
+ *
+ * A6e: a change of the device's choices that selects another kernel is the session event `replaceRuntime` (D8, B4). The
+ * `project` child reports it and the session hands it back while it opens, is live or asks to close: the child flushes the
+ * runtime's producers, then builds the next runtime and stops the old one.
  */
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
@@ -195,7 +199,13 @@ export type ProjectSessionMachineEvent =
    * Focus's request moved to another chat of this project (R3-F1). It sets both chat fields, so an `undefined`
    * clears one. A session opened without a request has no request to update, and keeps none.
    */
-  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string };
+  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string }
+  /**
+   * The device's choices select another kernel than the runtime's (A6e; D8, B4). The `project` child reports it; the
+   * session hands it back to that child while it opens, is live or asks to close, and the child flushes what the runtime
+   * owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
+   */
+  | { readonly type: 'replaceRuntime' };
 
 /**
  * The project session machine's public alphabet: every {@link ProjectSessionMachineEvent} type, in the union's order.
@@ -219,6 +229,7 @@ export const projectSessionEventTypes = [
   'attention',
   'revisionState',
   'chatRequested',
+  'replaceRuntime',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
 /** What a session tells its watchers. @public */
@@ -408,6 +419,17 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
   };
 };
 
+/* A6e: the `project` child flushes what its runtime owes, then builds the next one and stops it (D8, B4). */
+const handRuntimeReplacement = (
+  { context }: Readonly<{ context: ProjectSessionMachineContext }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  if (context.projectRef !== undefined) {
+    enq.sendTo(context.projectRef, { type: 'replaceRuntime' });
+  }
+  return {};
+};
+
 /* A close step that failed leaves the session failed with the reason recorded. */
 const closeFailed = ({
   context,
@@ -468,6 +490,8 @@ const closingSteps = [
  * - `confirmClose` and `cancelClose` outside `closing.asking`: the dialog answered a question no longer asked.
  * - `activity` outside `live.idle`: it only re-arms the idle window, which runs there alone (and has no production
  *   sender, V1-6).
+ * - `replaceRuntime` once the close has started cancelling runs, and when closed or failed: the close flushes and stops
+ *   the `project` child itself, and a closed or failed session has no runtime to replace (A6e).
  *
  * @public
  */
@@ -477,6 +501,7 @@ export const projectSessionIgnoredEvents: ReadonlyArray<readonly [state: string,
     [state, 'cancelClose'] as const,
   ]),
   ...['opening', 'live.busy', 'closing', 'closed', 'failed'].map((state) => [state, 'activity'] as const),
+  ...[...closingSteps, 'closed', 'failed'].map((state) => [state, 'replaceRuntime'] as const),
 ];
 
 /**
@@ -512,7 +537,7 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '4',
+  version: '5',
   /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
    * later ones are usually its consequences (MC-R12, D23; B2). */
   onError: ({ context, event }, enq) => {
@@ -652,6 +677,7 @@ export const projectSessionMachine = setup({
   states: {
     opening: {
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'opening') }),
+      on: { replaceRuntime: handRuntimeReplacement },
       initial: 'starting',
       states: {
         starting: {
@@ -688,6 +714,7 @@ export const projectSessionMachine = setup({
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'live') }),
       initial: 'idle',
       on: {
+        replaceRuntime: handRuntimeReplacement,
         projectedRunsChanged: ({ context, event }, enq) => {
           const { runs } = event;
           reportFacts({ ...context, runs }, enq);
@@ -774,6 +801,8 @@ export const projectSessionMachine = setup({
         asking: {
           always: ({ context, guards }) => (guards.shouldAsk(context) ? undefined : { target: 'cancellingRuns' }),
           on: {
+            /* Nothing is flushed or stopped yet, and a cancel keeps the session live with this runtime. */
+            replaceRuntime: handRuntimeReplacement,
             confirmClose: { target: 'cancellingRuns' },
             cancelClose: { target: '#project-session.live', context: { closeReason: undefined } },
           },

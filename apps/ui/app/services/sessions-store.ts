@@ -36,6 +36,7 @@ import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
 
 /**
@@ -159,12 +160,15 @@ type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefine
  * M2), and each chat the editor focused (`chatFocused`).
  *
  * The session forwards it each file manager its `fileManager` child reports and each `chatRequested`. A new file manager
- * (a rebuilt shared worker) builds a new runtime; none closes the runtime, which reads the closed one. A change of the
- * device's choices that selects another kernel builds the next runtime and then stops this one, with no flush, as the
- * React key on the provider did before A6d (A6e makes it `replaceRuntime`). Building the next first lets the entries
- * record session yield, flushing what it owes (I13).
+ * (a rebuilt shared worker) builds a new runtime; none closes the runtime, which reads the closed one.
+ *
+ * A change of the device's choices that selects another kernel is the session event `replaceRuntime` (A6e; D8, B4): the
+ * child reports it, and when the session hands it back the child flushes the project's producers, the same flush the
+ * close runs, then builds the next runtime and stops this one. Building the next first lets the entries record session
+ * yield (I13), and keeps the session's readers on a runtime throughout. A build that finds the choices moved on while it
+ * ran builds again at once: nothing has written through a runtime that has just been built.
  */
-const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
+const runtimeRegionOn = (opener: SessionRuntimeOpener, flushProducers: (projectId: string) => Promise<void>) =>
   createCallbackLogic<EventObject, { projectId: string; request?: ProjectSessionOpenRequest }>(
     ({ input, sendBack, receive }) => {
       const { projectId } = input;
@@ -177,6 +181,8 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       /* Each build's identity: a build a newer one or the stop overtook closes what it made. */
       let generation = 0;
       let stopped = false;
+      /* A replacement's flush is under way (A6e): another report waits for it, and the build after it reads the choices. */
+      let replacing = false;
 
       const observe = (runtime: SessionRuntime): void => {
         const facts = runtime.facts();
@@ -279,13 +285,45 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
         void settle();
       };
 
+      /* A6e: the change is the session's event; the session hands it back while it opens, is live or asks to close. */
       const unsubscribeChoices = opener.onChoicesChanged(() => {
-        if (current !== undefined && !current.runtime.kernelIsCurrent()) {
-          build();
+        if (current !== undefined && !replacing && !current.runtime.kernelIsCurrent()) {
+          sendBack({ type: 'replaceRuntime' });
         }
       });
 
+      /* Flush what the superseded runtime owes, then build the next and stop it (B4). A refusal is reported and the
+       * replacement goes on: the kernel the runtime was built with is no longer selected, and before A6e nothing was
+       * flushed at all. */
+      const replace = (): void => {
+        const superseded = current;
+        if (superseded === undefined || replacing || superseded.runtime.kernelIsCurrent()) {
+          return;
+        }
+        replacing = true;
+        const settle = async (): Promise<void> => {
+          try {
+            await flushProducers(projectId);
+          } catch (error) {
+            reportAppRuntimeFault(error);
+          } finally {
+            replacing = false;
+          }
+          /* A stop or a new file manager overtook the flush, or the choices came back to this kernel. */
+          if (stopped || current !== superseded || superseded.runtime.kernelIsCurrent()) {
+            return;
+          }
+          build();
+        };
+        // async-iife: bootstrap -- `receive` is synchronous; the replacement settles through `build`.
+        void settle();
+      };
+
       receive((event) => {
+        if (event.type === 'replaceRuntime') {
+          replace();
+          return;
+        }
         if (event.type === 'fileManagerChanged') {
           const next = (event as Extract<ProjectSessionMachineEvent, { type: 'fileManagerChanged' }>).fileManagerRef;
           if (next === fileManagerRef) {
@@ -575,7 +613,10 @@ const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker, op
       }),
       fileManager:
         openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager, fileManagerWorker),
-      project: openRuntime === undefined ? withoutRuntime : runtimeRegionOn(openRuntime),
+      project:
+        openRuntime === undefined
+          ? withoutRuntime
+          : runtimeRegionOn(openRuntime, async (projectId) => servicesFor(projectId).flushProducers()),
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
     },

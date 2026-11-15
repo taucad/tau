@@ -19,9 +19,9 @@ const localPlacement: RemoteComputePlacement = { state: 'local' };
 /**
  * Select the current host placement for a standalone runtime (preview, CAD preview) that is keyed in React.
  *
- * A live project's session reads the same selection from `choices` and replaces its runtime with `replaceRuntime`
- * (app state orchestration A6e). Both derive it with {@link selectProjectKernelSelection} (row S35), so the two can
- * never disagree on when a runtime must be rebuilt. The selection keeps its identity while only the remote connection's
+ * A live project's session reads the same selection from `choices` and replaces its runtime with the session event
+ * `replaceRuntime`. Both derive it with {@link selectProjectKernelSelection}, so the two can never disagree on when a
+ * runtime must be rebuilt. The selection keeps its identity while only the remote connection's
  * phase moves, because the selection reads the device and not the phase.
  */
 export const useProjectKernelOptions = ({

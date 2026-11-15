@@ -256,7 +256,26 @@ export function openSessionProjectRuntime(
           );
         }
       }
-      const outcomes = await Promise.allSettled(owed);
+      /* A producer has no signal of its own: once `gone` aborts the flush stops waiting on it, and rejects with the
+       * abort, which confirms no write. */
+      let leave: () => void = () => undefined;
+      const abandoned = new Promise<never>((_resolve, reject) => {
+        leave = () => {
+          reject(
+            gone.reason instanceof Error ? gone.reason : new Error('The flush was abandoned.', { cause: gone.reason }),
+          );
+        };
+      });
+      if (gone.aborted) {
+        leave();
+      }
+      gone.addEventListener('abort', leave, { once: true });
+      let outcomes: Array<PromiseSettledResult<void>>;
+      try {
+        outcomes = await Promise.race([Promise.allSettled(owed), abandoned]);
+      } finally {
+        gone.removeEventListener('abort', leave);
+      }
       const refusals = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
       if (refusals.length > 0) {
         throw new AggregateError(

@@ -76,10 +76,12 @@ if [[ "$host" == gcp ]]; then
   case "$TAU_VM_DISTRO" in ubuntu) template_distro=ubuntu2404 ;; ubuntu2604) template_distro=ubuntu2604 ;; debian) template_distro=debian13 ;; esac
   # Templates are regional (tau-cloud stacks/gcp: the primary region and any fallback regions), so each zone uses the
   # newest template of its own region; a zone whose region has none is skipped.
+  # The list filter keeps its proven name-only form (run 42535930158); the region match is a plain substring check on
+  # the self link, since a gcloud filter on selfLink matched nothing (run 43749666547).
   region_template() {
     gcloud compute instance-templates list --project "$TAU_GCP_PROJECT" \
-      --filter="name~^ci-gpu-${template_distro}- AND selfLink~/regions/${1}/instanceTemplates/" \
-      --sort-by=~creationTimestamp --limit=1 --format='value(selfLink)'
+      --filter="name~^ci-gpu-${template_distro}-" --sort-by=~creationTimestamp --format='value(selfLink)' |
+      grep -F -m 1 "/regions/${1}/instanceTemplates/" || true
   }
   route_slug="${TAU_QUALIFICATION_ROUTE:-proof}"; route_slug="${route_slug#linux-}"
   instance="tau-q-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}-${template_distro}-${route_slug}"

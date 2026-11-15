@@ -206,8 +206,8 @@ export type SessionRuntimeWorkInput = Readonly<{
  *   producers and both stores, whose write errors refuse it. It closes nothing, so a session whose close ran past its
  *   bound is live with every resource intact; the parameter service closes in the next step (`closeParameters`).
  * - `leave` (focus's leave flush, I3): the producers, then the editor store.
- * - `unload` (the producer stage of `environment`'s sequencer, I6, D26): the producers and both stores together; only a
- *   producer's refusal refuses it.
+ * - `unload` (the producer stage of `environment`'s sequencer, I6, D26): the producers, then both stores, even after a
+ *   producer's refusal; only a producer's refusal refuses it.
  * - `replace` (a replacement, A6e, B4): the producers and both stores together; any write it could not confirm refuses it.
  *
  * @param input - The project, and the runtime's producer set, parameter service and project and editor stores.
@@ -231,14 +231,11 @@ export const sessionRuntimeWork = ({
         refuseCloseWhileRecording(projectId);
       }
       if (kind === 'unload') {
-        /* The unload asks the stores alongside the producers (A7c review round 4): its `beforeunload` pass has only the
-         * navigation's head start, so no store write waits on a producer's, and a producer's refusal skips none. The
-         * unload waits for the writes and refuses only on a producer's refusal, as the persistence guard did. */
-        const [records] = await Promise.allSettled([
-          producers.flushAll(),
-          flushStore(projectRef, gone),
-          flushStore(editorRef, gone),
-        ]);
+        /* The unload asks the stores once every producer settles (A0.2 item 10, S40), as the close does, and a
+         * producer's refusal skips none of them (A7c review round 4). It refuses only on a producer's refusal, as the
+         * persistence guard did. */
+        const [records] = await Promise.allSettled([producers.flushAll()]);
+        await Promise.all([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
         if (records.status === 'rejected') {
           throw records.reason instanceof Error
             ? records.reason

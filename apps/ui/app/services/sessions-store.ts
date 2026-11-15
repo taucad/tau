@@ -108,7 +108,7 @@ export type SessionRuntime = Readonly<{
    * - `close`: refused while an editor's conflict is being recorded; the producers, then both stores. It closes
    *   nothing: the parameter service closes in the session's next step (`closeParameters`).
    * - `leave`: the producers, then the editor store (I3).
-   * - `unload`: the producers, then both stores (I6, D26).
+   * - `unload`: the producers, then both stores; only a producer's refusal refuses it (I6, D26).
    * - `replace`: before a replacement stops it (A6e, B4), the producers and both stores together; it closes nothing and
    *   asks nothing.
    */
@@ -858,9 +858,10 @@ const presenceOn = (wiring: SessionWiring) =>
 
 /**
  * The `unload` child (A7c, D26; the flush-ownership table of plan § 4 A7): registered once at the producer stage of
- * `environment`'s sequencer for the session's life, with nothing mounted. On `hidden` it asks the session to flush what
- * its runtime owes and settles on the session's answer, so every producer of a live project settles before any
- * session's close cut (I6). `pagehide` can only offer what `hidden` prepared, so it asks nothing.
+ * `environment`'s sequencer for the session's life, with nothing mounted. On `hidden`, and on the producer stage
+ * `beforeunload` runs while a write is owed (D26 as amended), it asks the session to flush what its runtime owes and
+ * settles on the session's answer, so every producer of a live project settles before any session's close cut (I6).
+ * `pagehide` can only offer what `hidden` prepared, so it asks nothing.
  */
 const unloadOn = (wiring: SessionWiring) =>
   createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack, receive }) => {

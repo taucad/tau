@@ -2699,6 +2699,18 @@ importers:
       '@taucad/api-core':
         specifier: workspace:*
         version: link:../api-core
+      '@taucad/api-database':
+        specifier: workspace:*
+        version: link:../api-database
+      '@taucad/api-observability':
+        specifier: workspace:*
+        version: link:../api-observability
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9)
+      fastify:
+        specifier: ^5.12.5
+        version: 5.12.5
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -2715,6 +2727,9 @@ importers:
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2

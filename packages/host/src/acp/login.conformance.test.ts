@@ -31,8 +31,8 @@ const posixHost: AcpLoginHost = { platform: 'darwin', execPath: process.execPath
 /** An adapter as resolution produces it, with a module path when the profile has a package. */
 const adapterOf = (
   profile: AcpAgentProfile,
-  extra: { readonly executablePath?: string; readonly executableSource?: 'path' | 'fallback' } = {},
-): AcpAdapter & { readonly executableSource?: 'path' | 'fallback' } =>
+  extra: Pick<AcpAdapter, 'executablePath' | 'executableSource'> = {},
+): AcpAdapter =>
   profile.package === undefined
     ? { ...profile, ...extra }
     : { ...profile, ...extra, modulePath: modulePathOf(profile) };
@@ -75,7 +75,7 @@ const claudeShape = (execPath: string, modulePath: string): AuthMethod[] => [
 const profilesWithModule = acpAgentProfiles.filter((profile) => profile.package !== undefined);
 
 describe.each(acpAgentProfiles)('sign-in for $id', (profile) => {
-  const loginCommand = profile.loginCommand ?? '';
+  const { loginCommand } = profile;
 
   it('should declare a login command that starts with its CLI', () => {
     expect(loginCommand.split(' ')[0]).toBe(profile.cli);
@@ -151,7 +151,7 @@ describe.each(acpAgentProfiles)('sign-in for $id', (profile) => {
   });
 
   it('should name a CLI found outside PATH by its quoted absolute path (L6)', () => {
-    const executablePath = `/Users/A User/Library/Application Support/${profile.cli ?? profile.id}`;
+    const executablePath = `/Users/A User/Library/Application Support/${profile.cli}`;
     const adapter = adapterOf(profile, { executablePath, executableSource: 'fallback' });
 
     const login = loginOf(adapter, [], posixHost);
@@ -160,25 +160,25 @@ describe.each(acpAgentProfiles)('sign-in for $id', (profile) => {
       {
         id: 'cli-login',
         name: `Sign in to ${profile.displayName}`,
-        terminalCommand: `'${executablePath}'${loginCommand.slice((profile.cli ?? '').length)}`,
+        terminalCommand: `'${executablePath}'${loginCommand.slice(profile.cli.length)}`,
       },
     ]);
   });
 
   it('should name a CLI found outside PATH on Windows with the PowerShell call operator (L6)', () => {
-    const executablePath = win32.join(String.raw`C:\Users\A User\.local\bin`, `${profile.cli ?? profile.id}.exe`);
+    const executablePath = win32.join(String.raw`C:\Users\A User\.local\bin`, `${profile.cli}.exe`);
     const adapter = adapterOf(profile, { executablePath, executableSource: 'fallback' });
 
     const login = loginOf(adapter, [], { platform: 'win32', execPath: String.raw`C:\Program Files\Tau\Tau.exe` });
 
     expect(login.authMethods[0]?.terminalCommand).toBe(
-      `& "${executablePath}"${loginCommand.slice((profile.cli ?? '').length)}`,
+      `& "${executablePath}"${loginCommand.slice(profile.cli.length)}`,
     );
   });
 
   it('should keep the bare command for a CLI on PATH (L7)', () => {
     const adapter = adapterOf(profile, {
-      executablePath: `/usr/local/bin/${profile.cli ?? ''}`,
+      executablePath: `/usr/local/bin/${profile.cli}`,
       executableSource: 'path',
     });
 

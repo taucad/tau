@@ -51,10 +51,10 @@ CORRECT:
 
 ```typescript
 fallbackExecutables: {
-  // x.ai/cli/install.sh:206 (BIN_DIR), read 2026-11-15.
+  // From x.ai/cli/install.sh:206 (BIN_DIR), read 2026-11-15.
   darwin: ['~/.grok/bin/grok', '~/.local/bin/grok'],
   linux: ['~/.grok/bin/grok', '~/.local/bin/grok'],
-  // x.ai/cli/install.ps1:374, read 2026-11-15.
+  // From x.ai/cli/install.ps1:374, read 2026-11-15.
   win32: ['~/.grok/bin/grok.exe'],
 },
 ```
@@ -131,7 +131,7 @@ Resolve one `fixCommand` on the host for the host's own platform and send it on 
 
 ### 10. Show a Sign-In Command That Works
 
-List Tau's `cli-login` method first on every sign-in surface. Name the CLI by its bare name when it was found on PATH and by its quoted absolute path otherwise. Drop an advertised terminal command that runs the host's own runtime or names the adapter's module path. Quote every surfaced command for the host's shell. Never run a sign-in command.
+List Tau's `cli-login` method first on every sign-in surface. Name the CLI by its bare name when it was found on PATH and by its quoted absolute path otherwise. Drop an advertised terminal command that runs the host's own runtime or names the adapter's module path. Quote every surfaced command for the host's shell. On POSIX, single-quote an argument that is empty or holds anything outside `[A-Za-z0-9_@%+=:,./-]`, writing each `'` inside it as `'\''`. On Windows, double-quote an argument that is empty or holds whitespace, `"`, `'`, `` ` `` or `$`, escape each `` ` ``, `"` and `$` inside it with a backtick, and write a quoted program as `& "..."` so PowerShell runs it. Never run a sign-in command.
 
 **Why**: An adapter describes sign-in as its own process invocation, which is Tau's binary when Tau hosts the adapter.
 

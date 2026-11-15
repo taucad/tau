@@ -10,7 +10,11 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flush } from '@taucad/xstate-testing/clock';
-import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
+import {
+  createSessionsActor,
+  registerProjectSessionServices,
+  selectProjectSessionRuntime,
+} from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
@@ -263,5 +267,51 @@ describe('the session builds its project runtime as a child (A6d)', () => {
 
     expect(sessionOf(registry)).toBeUndefined();
     expect(closes).toEqual(['open:0', 'runtime:0', 'fileManager']);
+  });
+});
+
+/**
+ * A6e: a change of kernel selection is the session event `replaceRuntime` (plan § 4 A6e; charter D8, B4; R1-F7). The
+ * superseded runtime's producers are flushed before it stops, which A6d's risk "writes dropped on a kernel change"
+ * names: on `main` the old runtime stops with no flush, so a layout or editor-state edit owed at the moment of the change
+ * is lost (main's 5 s lease grace used to let the debounced write land).
+ */
+describe('a change of kernel selection replaces the runtime through the session (A6e)', () => {
+  /** The project's producers as the session flushes them: what the superseded runtime still owes, and what landed. */
+  const producers = (closes: string[]) => {
+    const owed: string[] = [];
+    const landed: string[] = [];
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () => {
+        landed.push(...owed.splice(0));
+        closes.push('flush');
+      },
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    return { owed, landed, unregister };
+  };
+
+  it('B4: should flush what the superseded runtime owes before it stops, with nothing mounted', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry, { workspace: 'ws', chatId: 'chat-1' });
+    const project = producers(closes);
+    try {
+      /* A layout edit inside its 500 ms debounce, owed by runtime 0 when the person moves compute. */
+      project.owed.push('layout edit');
+
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+
+      expect(project.landed).toEqual(['layout edit']);
+      expect(closes.indexOf('flush')).toBeGreaterThan(-1);
+      expect(closes.indexOf('flush')).toBeLessThan(closes.indexOf('runtime:0'));
+      expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    } finally {
+      project.unregister();
+    }
   });
 });

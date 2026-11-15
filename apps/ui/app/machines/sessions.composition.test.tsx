@@ -41,8 +41,10 @@ import { SessionsProvider } from '#hooks/use-sessions.js';
 import { startFocusHost, startRuntimeSlice } from '#runtime/app-runtime-focus.fixture.js';
 import type { FocusHostFixture, RuntimeSliceFixture } from '#runtime/app-runtime-focus.fixture.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import type { SessionWiring } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
@@ -71,6 +73,13 @@ const {
 } = vi.hoisted(() => {
   const frames: Array<{ type: string; projectId?: string }> = [];
   const calls: string[] = [];
+  const revisionClientLifecycleLog: string[] = [];
+  const projected: { of: unknown; selection: unknown; value: unknown } = {
+    of: undefined,
+    selection: undefined,
+    value: undefined,
+  };
+  const revisionProjectionRef: { current: Record<string, unknown> | undefined } = { current: undefined };
   const live: string[] = [];
   /*
    * The editor, as far as the route's flush gate reads it: a `flushNow` and a
@@ -128,10 +137,10 @@ const {
     /** Every `setRoot` the workbench's file manager was asked for (S48(14)). */
     rootCalls: [] as Array<{ type: string; path?: string; projectId?: string }>,
     /** The revision projection the workbench follows; a test moves it. */
-    revisionProjection: { current: undefined as unknown },
+    revisionProjection: revisionProjectionRef,
     /** What the checkout route table currently holds. */
     installedCheckoutRoutes: { current: '' },
-    revisionClientLifecycle: [] as string[],
+    revisionClientLifecycle: revisionClientLifecycleLog,
     projectProviderInputs: [] as Array<{
       projectId: string;
       requestedChatId: string | undefined;
@@ -157,7 +166,6 @@ const {
       cancelProjectedRun: vi.fn(async () => 'stopped'),
       publishProjectHostConnector: vi.fn(() => () => undefined),
       setProjectSession: vi.fn(),
-      setFocusedProject: vi.fn(),
       setRevisionFacts: vi.fn(),
       /* The store owns each chat's root (PV-S5); a row adds one with `openChatRoot`. */
       roots: new Map<string, Map<string, unknown>>(),
@@ -193,9 +201,42 @@ const {
           listener();
         }
       },
+      /** Tell the client's listeners the projection moved (S48(14)). */
+      publish: () => {
+        for (const listener of revisionListeners) {
+          listener();
+        }
+      },
     },
+    /* The project's one revision client, as the session's `revisions` child drives it (A7b): opening it is the
+     * lifecycle's mount, closing it the lifecycle's close. */
     revisionClient: {
-      status: () => revisionStatus,
+      /* One projection object per change, as the client publishes it. */
+      status: () => {
+        if (projected.of !== revisionStatus || projected.selection !== revisionProjectionRef.current) {
+          projected.of = revisionStatus;
+          projected.selection = revisionProjectionRef.current;
+          projected.value = {
+            ...revisionStatus,
+            projectDirty: revisionStatus.dirty,
+            checkoutRoot: undefined,
+            branches: [],
+            ...revisionProjectionRef.current,
+          };
+        }
+        return projected.value;
+      },
+      send: () => undefined,
+      setUser: async () => undefined,
+      setCredential: async () => true,
+      open: () => {
+        revisionClientLifecycleLog.push('mount');
+      },
+      close: () => {
+        revisionClientLifecycleLog.push('close');
+      },
+      focus: () => undefined,
+      saveRevision: async () => undefined,
       subscribe: (listener: () => void) => {
         revisionListeners.add(listener);
         return () => {
@@ -400,15 +441,7 @@ vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: ()
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useRevisionClient: () => revisionClient,
-  useRevisionClientLifecycle: () => {
-    useEffect(() => {
-      revisionClientLifecycle.push('mount');
-      return () => {
-        revisionClientLifecycle.push('close');
-      };
-    }, []);
-    return revisionClient;
-  },
+  getRevisionClient: () => revisionClient,
   useRevisionStatus: () => revisionProjection.current,
   useRevisionCommands: () => ({ connectRemote: async () => undefined }),
 }));
@@ -479,9 +512,6 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
   };
 });
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
-/* Not mocked away for the route's own rows either: with no projection the real
- * component does nothing, and S48(14) below renders it against one. */
-const { WorkbenchCheckoutRoot } = await import('#routes/w.$workspace.$project/workbench-checkout-root.js');
 vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   ChatWorkspaceAuthorityProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -521,10 +551,28 @@ const openChatRoot = (projectId: string, chatId: string) => {
   return root;
 };
 
+/* A7b: each session starts its revision client on its file manager through the real `revisions` module; the client is
+ * this suite's one, and nothing here is focused, so no checkout is followed. The connector is not this suite's. */
+const sessionWiring: SessionWiring = {
+  loadRevisions: async () => import('#runtime/session-revisions.js'),
+  loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
+  registerCloseCut: () => () => undefined,
+  focusedProject: { get: () => undefined, subscribe: () => () => undefined },
+  documentVisible: { get: () => true, subscribe: () => () => undefined },
+  chatSessions: chatStore as unknown as SessionWiring['chatSessions'],
+  choices: () => {
+    throw new Error('no chat attaches in these rows, so nothing reads the choices');
+  },
+  rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+};
+const openFileManagerWithWorker = (projectId: string) =>
+  openSessionFileManagerStandIn(projectId, workerRef.current === undefined ? {} : { worker: workerRef.current });
+
 /** The registry the rows share, composed as the app's root composes its own (MC-R4). */
 const sessionsActor = createSessionsActor({
   sharedWorker: () => workerRef.current,
-  openFileManager: (projectId) => openSessionFileManagerStandIn(projectId),
+  wiring: sessionWiring,
+  openFileManager: openFileManagerWithWorker,
   /* A6d: each session's runtime is a stand-in; what the session asks its editor for is what these rows read. */
   openRuntime: {
     open: async (input) => {
@@ -1586,13 +1634,13 @@ describe('sessions composition — the idle window (S48(6))', () => {
 /**
  * S48(14), seam-unit workbench half — *Switch* re-roots, it does not reload.
  *
- * The real selection actor is composed and asserted at the package owner. This
- * jsdom row deliberately substitutes only the host file-manager and handle
- * store seams, then proves `WorkbenchCheckoutRoot` issues one `setRoot` and
- * never remounts the workbench.
+ * The real selection actor is composed and asserted at the package owner. Since A7b the focused session's `revisions`
+ * child follows the selection with nothing mounted (row S23): this row runs the real child over this suite's revision
+ * client, a recording file manager and the handle store seam, and proves it installs the route once and issues one
+ * `setRoot` per move. Nothing is mounted, so nothing can remount.
  */
 describe('sessions composition — the workbench follows the selection (S48(14))', () => {
-  const projection = (checkoutId: string, checkoutRoot: string): unknown => ({
+  const projection = (checkoutId: string, checkoutRoot: string): Record<string, unknown> => ({
     projectId: 'unused',
     checkoutId,
     checkoutRoot,
@@ -1608,50 +1656,57 @@ describe('sessions composition — the workbench follows the selection (S48(14))
     ],
   });
 
+  /** The file manager as the child reads it: its worker, and every event it is sent. */
+  const recordingFileManager = () =>
+    ({
+      send: (event: { type: string; path?: string; projectId?: string }) => {
+        rootCalls.push(event);
+      },
+      getSnapshot: () => ({ context: { worker: workerRef.current, rootDirectory: '/projects/unused' } }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    }) as unknown as Parameters<typeof startSessionRevisionsStandIn>[0]['fileManagerRef'];
+
+  afterEach(() => {
+    revisionProjection.current = undefined;
+  });
+
   it('follows the selection to a new root without remounting the workbench', async () => {
     revisionProjection.current = projection('live', '/projects/unused');
-    let mounts = 0;
-
-    function Workbench(): React.JSX.Element {
-      useEffect(() => {
-        mounts += 1;
-      }, []);
-      return (
-        <>
-          <WorkbenchCheckoutRoot />
-          <span>workbench</span>
-        </>
-      );
-    }
-
-    const view = render(<Workbench />);
+    const stop = startSessionRevisionsStandIn({
+      projectId: 'unused',
+      fileManagerRef: recordingFileManager(),
+      focused: true,
+      syncProjectRoots: async () => {
+        rootCalls.push({ type: 'syncProjectRoots' });
+      },
+    });
     await settle();
     /* The branch's route is installed before the workbench moves at all (W2
      * review R4): a `setRoot` at a route nothing mounted answers ESTALE. */
-    expect(rootCalls).toEqual([
-      { type: 'checkoutRoutes', path: 'checkout-fillet' },
-      { type: 'syncProjectRoots' },
-      { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
-    ]);
+    await vi.waitFor(() => {
+      expect(rootCalls).toEqual([
+        { type: 'checkoutRoutes', path: 'checkout-fillet' },
+        { type: 'syncProjectRoots' },
+        { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
+      ]);
+    });
 
     /* The selection moves to the branch's own checkout. */
     revisionProjection.current = projection('checkout-fillet', '/checkouts/checkout-fillet');
-    await act(async () => {
-      view.rerender(<Workbench />);
-      await Promise.resolve();
-    });
+    revision.publish();
     await settle();
 
     /* The move is one `setRoot`, with no second route installation (the set did
-     * not change) and no remount: no reload, for a person with a file open. */
-    expect(rootCalls).toEqual([
-      { type: 'checkoutRoutes', path: 'checkout-fillet' },
-      { type: 'syncProjectRoots' },
-      { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
-      { type: 'setRoot', path: '/checkouts/checkout-fillet', projectId: 'unused' },
-    ]);
-    expect(mounts).toBe(1);
-    view.unmount();
+     * not change): no reload, for a person with a file open. */
+    await vi.waitFor(() => {
+      expect(rootCalls).toEqual([
+        { type: 'checkoutRoutes', path: 'checkout-fillet' },
+        { type: 'syncProjectRoots' },
+        { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
+        { type: 'setRoot', path: '/checkouts/checkout-fillet', projectId: 'unused' },
+      ]);
+    });
+    stop();
   });
 });
 
@@ -1682,6 +1737,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     /* A child never sends `close` to the registry, so a `close` the root processes came from the app. */
     const slice = startRuntimeSlice({
       sharedWorker: () => workerRef.current,
+      registry: { openFileManager: openFileManagerWithWorker, wiring: sessionWiring },
       library: {
         routeAccess: async (projectId) => getProjectRouteAccess(projectId) as Promise<ProjectRouteAccess>,
         epoch: () => 0,

@@ -12,16 +12,15 @@ import { render } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
 import { createActor, setup, types } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { useEffect } from 'react';
+import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
+import type { fileManagerMachine as realFileManagerMachine } from '#machines/file-manager.machine.js';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { Topic } from '@taucad/events';
 import type { GitRemoteCredential, RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
-import {
-  githubCredentialRenewDelay,
-  revisionClientTestApi,
-  useRevisionClientLifecycle,
-  useRevisionCommands,
-} from '#hooks/use-revision-status.js';
+import { githubCredentialRenewDelay, revisionClientTestApi, useRevisionCommands } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { GithubRequestError } from '#lib/github-connections.js';
@@ -107,8 +106,16 @@ const scriptedClient = (): Readonly<{
 
 let commands: ReturnType<typeof useRevisionCommands> | undefined;
 
+/* A7b: the session's `revisions` child owns the lifecycle; this starts it for as long as the row mounts it. */
 function Owner(): React.JSX.Element {
-  useRevisionClientLifecycle();
+  useEffect(
+    () =>
+      startSessionRevisionsStandIn({
+        projectId,
+        fileManagerRef: fileManagerRef as unknown as ActorRefFrom<typeof realFileManagerMachine>,
+      }),
+    [],
+  );
   commands = useRevisionCommands();
   return <div data-testid='owner' />;
 }

@@ -13,11 +13,17 @@
  * project's resources iff the registry says it is live, its providers are views
  * of the session's children, and `closing` completes — flush, release — before
  * the registry drops it.
+ *
+ * A7b: the session's facts are wired here too, with nothing mounted (I5). With a {@link SessionWiring} each file
+ * manager gets a `revisions` child (the revision-client lifecycle, its close cut and the revision facts) and a
+ * `hostConnector` child (the read connector), each loaded lazily (D5), and each session a `presence` child that reports
+ * visibility from `environment` and focus.
  */
 
 import { randomUuid } from '@taucad/utils/id';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, EventObject } from 'xstate';
+import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
@@ -29,14 +35,27 @@ import type {
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type {
   ProjectSessionActorRef,
+  ProjectSessionFileManagerInput,
   ProjectSessionMachineEvent,
   ProjectSessionOpenRequest,
 } from '#machines/project-session.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
+import type { FlushPhase } from '#runtime/environment.js';
+import type { ProjectChoices } from '#runtime/choices.js';
+import { createWorkspaceFacade, readied, servicesBound, servicesOf } from '#runtime/file-manager-facade.js';
+import type { FacadeFiles } from '#runtime/file-manager-facade.js';
+import type {
+  SessionRevisionsCallback,
+  SessionRevisionsPorts,
+  SessionRevisionsWiring,
+} from '#runtime/session-revisions.js';
+import type { HostConnectorCallback, HostConnectorChatStore, HostConnectorPorts } from '#runtime/host-connector.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
+import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
-import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
 
 /**
@@ -103,6 +122,8 @@ export type SessionRuntimeFacts = Readonly<{
   kernelRefusal: string | undefined;
   /** The editor has left `ensuringFocusedChat`: a chat is focused, the focus failed, or the chats are still arriving. */
   chatReady: boolean;
+  /** The editor deferred its focused chat until the chats arrive (`ready.operation.focusedChatDeferred`, row S1). */
+  chatDeferred: boolean;
   /** The chat the editor focused, and the chat it was asked for, once its operation settled. */
   focusedChat: Readonly<{ requestedChatId: string | undefined; chatId: string }> | undefined;
 }>;
@@ -130,6 +151,10 @@ export type SessionRuntime = Readonly<{
    * stops waiting when `gone` aborts.
    */
   flush: (gone: AbortSignal) => Promise<void>;
+  /** Park or resume the runtime's kernel processes, as the session decides (R3, row S5). */
+  park: (parked: boolean) => void;
+  /** Ask the editor to ensure the focused chat it deferred again, now that the chats have arrived (row S1). */
+  retryFocusedChat: () => void;
   /** Stop the runtime and release what it holds. Calling it twice closes once. */
   close: () => void;
 }>;
@@ -173,6 +198,10 @@ type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefine
  * project and editor stores, never the close's refusals), then builds the next runtime and stops this one. Building the next first lets the entries record session
  * yield (I13), and keeps the session's readers on a runtime throughout. A build that finds the choices moved on while it
  * ran builds again at once: nothing has written through a runtime that has just been built.
+ *
+ * A7b: the session sends it parking (`runtimeParking`), which it hands the runtime's cad units (row S5), and whether the
+ * project's chats have arrived (`revisionChatsChanged`): while they have and the editor deferred its focused chat, the
+ * editor is asked to ensure it again, each time either changes, as the binding's effect re-ran on both (row S1).
  */
 const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
   createCallbackLogic<EventObject, { projectId: string; request?: ProjectSessionOpenRequest }>(
@@ -184,6 +213,21 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       let reported: RegionReport = { loaded: false, kernelRefusal: undefined };
       let chatReady = false;
       let focused: SessionRuntimeFacts['focusedChat'];
+      /* S1: the chats have arrived, and the last pair the retry was decided on. */
+      let chatsReady = false;
+      let retryDecidedOn: Readonly<{ deferred: boolean; chatsReady: boolean }> | undefined;
+      /* S5: the session's last parking, which a runtime built while it holds comes up under. */
+      let parked = false;
+      const retryDeferredChat = (runtime: SessionRuntime): void => {
+        const { chatDeferred } = runtime.facts();
+        if (retryDecidedOn?.deferred === chatDeferred && retryDecidedOn.chatsReady === chatsReady) {
+          return;
+        }
+        retryDecidedOn = { deferred: chatDeferred, chatsReady };
+        if (chatDeferred && chatsReady) {
+          runtime.retryFocusedChat();
+        }
+      };
       /* Each build's identity: a build a newer one or the stop overtook closes what it made. */
       let generation = 0;
       let stopped = false;
@@ -209,6 +253,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
           chatReady = true;
           sendBack({ type: 'chatReady' });
         }
+        retryDeferredChat(runtime);
         const next = facts.focusedChat;
         if (next?.chatId !== focused?.chatId || next?.requestedChatId !== focused?.requestedChatId) {
           focused = next;
@@ -280,7 +325,11 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
           };
           reported = { loaded: false, kernelRefusal: undefined };
           focused = undefined;
+          retryDecidedOn = undefined;
           sendBack({ type: 'runtimeChanged', runtimeRef: runtime.runtimeRef });
+          if (parked) {
+            runtime.park(true);
+          }
           runtime.requestChat(chat);
           if (previous !== undefined) {
             previous.unsubscribe();
@@ -350,12 +399,26 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
             return;
           }
           fileManagerRef = next;
+          /* S1: the chats were the old revision client's; the one started on the new file manager reports its own. */
+          chatsReady = false;
           /* The runtime reads the file manager it was built on, which its child has closed. */
           if (current !== undefined) {
             closeCurrent();
             sendBack({ type: 'runtimeChanged', runtimeRef: undefined });
           }
           build();
+          return;
+        }
+        if (event.type === 'runtimeParking') {
+          ({ parked } = event as Readonly<{ type: 'runtimeParking'; parked: boolean }>);
+          current?.runtime.park(parked);
+          return;
+        }
+        if (event.type === 'revisionChatsChanged') {
+          chatsReady = (event as Extract<ProjectSessionMachineEvent, { type: 'revisionChatsChanged' }>).ready;
+          if (current !== undefined) {
+            retryDeferredChat(current.runtime);
+          }
           return;
         }
         if (event.type === 'chatRequested') {
@@ -426,7 +489,11 @@ export type SessionFileManagerWorker = Readonly<{
  * built on the old one and builds a fresh one on the new one. A nested file manager never restarts its parent's
  * worker, so the one built on a dead worker would otherwise stay down for the session's life.
  */
-const fileManagerRegionOn = (open: SessionFileManagerOpener, worker: SessionFileManagerWorker | undefined) =>
+const fileManagerRegionOn = (
+  open: SessionFileManagerOpener,
+  worker: SessionFileManagerWorker | undefined,
+  rootSync: SessionWiring['rootSync'] | undefined,
+) =>
   createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
     let current: Readonly<{ opened: SessionFileManager; release: () => void }> | undefined;
 
@@ -454,7 +521,13 @@ const fileManagerRegionOn = (open: SessionFileManagerOpener, worker: SessionFile
       }
       const fileManager: FileManagerRef = opened.fileManagerRef;
       const untrack = trackSessionFileManager(opened);
-      sendBack({ type: 'fileManagerChanged', fileManagerRef: fileManager });
+      /* A7b: the file manager's own root synchronisation, for the children the session starts on it. */
+      const sync = rootSync?.(fileManager, opened.owner.dropped);
+      sendBack({
+        type: 'fileManagerChanged',
+        fileManagerRef: fileManager,
+        ...(sync === undefined ? {} : { syncProjectRoots: sync.syncProjectRoots }),
+      });
       /* Edge-triggered, as the binding's effect was: one report each time the file manager enters `ready`. An `error`
        * reports nothing, as the binding reported nothing: a nested file manager errs when the shared worker dies, often
        * before `rootFiles` sees it, and the rebuild on the root's new worker is what recovers it. The start bound
@@ -473,6 +546,7 @@ const fileManagerRegionOn = (open: SessionFileManagerOpener, worker: SessionFile
         release: () => {
           subscription.unsubscribe();
           untrack();
+          sync?.close();
           opened.close();
         },
       };
@@ -523,6 +597,211 @@ export const sessionFileManagerOpener =
   (ports: SessionFileManagerPorts): SessionFileManagerOpener =>
   (projectId) =>
     openSessionFileManager(projectId, ports);
+
+// ---------------------------------------------------------------------------
+// The session's facts (A7b)
+// ---------------------------------------------------------------------------
+
+/** A value that can change: the value now, and a listener called after each change. @public */
+export type SessionsObservable<T> = Readonly<{ get: () => T; subscribe: (listener: () => void) => () => void }>;
+
+/** One session file manager's root synchronisation, open for the file manager's life. @public */
+export type SessionRootSync = Readonly<{ syncProjectRoots: () => Promise<void>; close: () => void }>;
+
+/** The `revisions` module as the session loads it (D5). @public */
+export type SessionRevisionsModule = Readonly<{
+  sessionRevisionsCallback: (ports: SessionRevisionsPorts) => SessionRevisionsCallback;
+  createSessionRevisionsPorts: (
+    wiring: SessionRevisionsWiring & Pick<SessionRevisionsPorts, 'reportFault'>,
+  ) => SessionRevisionsPorts;
+}>;
+
+/** The `hostConnector` module as the session loads it (D5). @public */
+export type HostConnectorModule = Readonly<{
+  hostConnectorCallback: (ports: HostConnectorPorts) => HostConnectorCallback;
+}>;
+
+/**
+ * What the session's facts are wired to (A7b): the app runtime composes it from its unload sequencer, focus,
+ * `environment`, the chat store and `choices`; a registry composed alone has none, and its sessions wire nothing.
+ *
+ * @public
+ */
+export type SessionWiring = Readonly<{
+  /** Load the `revisions` module (a dynamic import: the entry graph never reaches it, D5). */
+  loadRevisions: () => Promise<SessionRevisionsModule>;
+  /** Load the `hostConnector` module, likewise. */
+  loadHostConnector: () => Promise<HostConnectorModule>;
+  /** Register a close cut at the session stage of `environment`'s sequencer (D26). @returns Its removal. */
+  registerCloseCut: (cut: (phase: FlushPhase) => Promise<void>) => () => void;
+  /** The project focus has the person on: the route's focused session (`selectFocusTarget`). */
+  focusedProject: SessionsObservable<string | undefined>;
+  /** The page is on screen, as `environment` reports it; its listener runs on every report. */
+  documentVisible: SessionsObservable<boolean>;
+  /** The chat store: the connector's calls and the chats' revision facts. */
+  chatSessions: HostConnectorChatStore & Pick<ChatSessionStore, 'setRevisionFacts'>;
+  /** The device's choices now, read when a chat attaches. */
+  choices: () => ProjectChoices;
+  /** Open a session file manager's root synchronisation; `gone` aborts when its owner ends. */
+  rootSync: (fileManagerRef: FileManagerRef, gone: AbortSignal) => SessionRootSync;
+}>;
+
+/**
+ * A child whose callback is in a module loaded on its first start (D5). A failure to load or to start, and a teardown
+ * that throws, is reported through the app runtime's one fault hook rather than faulting the session (D23).
+ */
+const lazyChildOn = <Input>(
+  load: () => Promise<(params: Readonly<{ input: Input; sendBack: (event: EventObject) => void }>) => () => void>,
+) =>
+  createCallbackLogic<EventObject, Input>(({ input, sendBack }) => {
+    const stopped = new AbortController();
+    let cleanup: (() => void) | undefined;
+    // async-iife: bootstrap -- `createCallbackLogic` is synchronous; the module loads behind it.
+    void (async (): Promise<void> => {
+      try {
+        const start = await load();
+        if (!stopped.signal.aborted) {
+          cleanup = start({ input, sendBack });
+        }
+      } catch (error) {
+        if (!stopped.signal.aborted) {
+          reportAppRuntimeFault(error);
+        }
+      }
+    })();
+    return () => {
+      stopped.abort();
+      const pending = cleanup;
+      cleanup = undefined;
+      try {
+        pending?.();
+      } catch (error) {
+        reportAppRuntimeFault(error);
+      }
+    };
+  });
+
+/** Load a module once; a failed load is asked again by the next child that starts. */
+const loadOnce = <T>(load: () => Promise<T>): (() => Promise<T>) => {
+  let loading: Promise<T> | undefined;
+  return async () => {
+    loading ??= (async (): Promise<T> => {
+      try {
+        return await load();
+      } catch (error) {
+        loading = undefined;
+        throw error;
+      }
+    })();
+    return loading;
+  };
+};
+
+/**
+ * The `revisions` child (rows S3, S27, B7): the project's revision-client lifecycle for one file manager, over the real
+ * module stores and the wiring's close cut, focus and chat store.
+ */
+const revisionsOn = (wiring: SessionWiring) =>
+  lazyChildOn<ProjectSessionFileManagerInput>(
+    loadOnce(async () => {
+      const module = await wiring.loadRevisions();
+      const callback = module.sessionRevisionsCallback(
+        module.createSessionRevisionsPorts({
+          closeCut: { register: wiring.registerCloseCut },
+          focusedProject: wiring.focusedProject,
+          chatFacts: (projectId, facts) => {
+            wiring.chatSessions.setRevisionFacts(projectId, facts);
+          },
+          reportFault: reportAppRuntimeFault,
+        }),
+      );
+      return ({ input, sendBack }) => callback({ input, sendBack });
+    }),
+  );
+
+/** The `hostConnector` child (rows S2, S32): one file manager's read connector, published to the chat store. */
+const hostConnectorOn = (wiring: SessionWiring) =>
+  lazyChildOn<ProjectSessionFileManagerInput>(
+    loadOnce(async () => {
+      const module = await wiring.loadHostConnector();
+      const callback = module.hostConnectorCallback({
+        chatSessions: wiring.chatSessions,
+        choices: wiring.choices,
+        reportFault: reportAppRuntimeFault,
+      });
+      return ({ input }) => callback({ input });
+    }),
+  );
+
+/**
+ * The `presence` child (row S4): the session's visibility from `environment` and focus, with nothing mounted (I5).
+ * Each report of the page reaches the session, as each `visibilitychange` reached it from the binding's listener, and
+ * so does each change of whether this is the focused project.
+ */
+const presenceOn = (wiring: SessionWiring) =>
+  createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack }) => {
+    let focused = wiring.focusedProject.get() === input.projectId;
+    const report = (): void => {
+      /* R3/V1-7: the two facts differ while the window is minimised; only a project nobody is on parks. */
+      sendBack({ type: 'visibilityChanged', visible: focused && wiring.documentVisible.get(), focused });
+    };
+    report();
+    const unsubscribeFocus = wiring.focusedProject.subscribe(() => {
+      const next = wiring.focusedProject.get() === input.projectId;
+      if (next !== focused) {
+        focused = next;
+        report();
+      }
+    });
+    const unsubscribeVisibility = wiring.documentVisible.subscribe(report);
+    return () => {
+      unsubscribeFocus();
+      unsubscribeVisibility();
+    };
+  });
+
+/* A registry composed without wiring (rows that run the registry alone) starts none of the three. */
+const unwiredFileManagerChild = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
+const unwiredPresence = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+
+/**
+ * Open one session file manager's root synchronisation, as the provider's scope opens its own (`ownWorkspace`): one
+ * pass at a time, over the file manager's waits on the runtime's clock, until it is closed.
+ *
+ * @param input - The file manager, the signal its owner ends with, the runtime's wait and the workspace telemetry.
+ * @returns The synchronisation and its close.
+ * @public
+ */
+export const createSessionRootSync = ({
+  fileManagerRef,
+  gone,
+  files,
+  telemetry,
+}: Readonly<{
+  fileManagerRef: FileManagerRef;
+  gone: AbortSignal;
+  files: FacadeFiles;
+  telemetry: Pick<WorkspaceTelemetry, 'workspaceUnmountFailed'>;
+}>): SessionRootSync => {
+  const proxyAt = async (readiness: 'ready' | 'proxy') => {
+    const snapshot = await readied(files, fileManagerRef, { readiness, gone });
+    const { proxy } = snapshot.context;
+    if (!proxy) {
+      throw new FileManagerNotReadyError('proxy-timeout');
+    }
+    return proxy;
+  };
+  const { workspace, activateRootSync } = createWorkspaceFacade({
+    fileManagerRef,
+    getReadiedProxy: async () => proxyAt('ready'),
+    getConnectedProxy: async () => proxyAt('proxy'),
+    whenServicesReady: async () =>
+      servicesBound(fileManagerRef) ??
+      servicesOf(await files.awaitFileManager(fileManagerRef, 'services', { reason: 'services-timeout', gone })),
+    telemetry,
+  });
+  return { syncProjectRoots: workspace.syncProjectRoots, close: activateRootSync() };
+};
 
 // ---------------------------------------------------------------------------
 // Cross-process identity
@@ -603,7 +882,13 @@ const agentHostRegion = createCallbackLogic<EventObject, { projectId: string }>(
 // The registry actor
 // ---------------------------------------------------------------------------
 
-const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker, openRuntime }: SessionsRegistryFiles) =>
+const projectSessionOn = ({
+  sharedWorker,
+  openFileManager,
+  fileManagerWorker,
+  openRuntime,
+  wiring,
+}: SessionsRegistryFiles) =>
   projectSessionMachine.provide({
     actors: {
       cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
@@ -633,10 +918,16 @@ const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker, op
         },
       }),
       fileManager:
-        openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager, fileManagerWorker),
+        openFileManager === undefined
+          ? withoutFileManager
+          : fileManagerRegionOn(openFileManager, fileManagerWorker, wiring?.rootSync),
       project: openRuntime === undefined ? withoutRuntime : runtimeRegionOn(openRuntime),
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
+      /* A7b: without wiring no revision client, connector or presence is started. */
+      revisions: wiring === undefined ? unwiredFileManagerChild : revisionsOn(wiring),
+      hostConnector: wiring === undefined ? unwiredFileManagerChild : hostConnectorOn(wiring),
+      presence: wiring === undefined ? unwiredPresence : presenceOn(wiring),
     },
   });
 
@@ -658,6 +949,8 @@ export type SessionsRegistryFiles = Readonly<{
   fileManagerWorker?: SessionFileManagerWorker;
   /** Builds each session's project runtime (A6d). Without it the runtime region and the chat session are up at once. */
   openRuntime?: SessionRuntimeOpener;
+  /** What each session's facts are wired to (A7b). Without it no session starts a revision client or a connector. */
+  wiring?: SessionWiring;
 }>;
 
 /**
@@ -708,6 +1001,7 @@ export const createSessionsActor = ({
   openFileManager,
   fileManagerWorker,
   openRuntime,
+  wiring,
   ...options
 }: SessionsActorOptions & Partial<SessionsRegistryFiles> = {}): Actor<typeof sessionsMachine> =>
   createActor(
@@ -716,6 +1010,7 @@ export const createSessionsActor = ({
       ...(openFileManager === undefined ? {} : { openFileManager }),
       ...(fileManagerWorker === undefined ? {} : { fileManagerWorker }),
       ...(openRuntime === undefined ? {} : { openRuntime }),
+      ...(wiring === undefined ? {} : { wiring }),
     }),
     { ...options, input: sessionsRegistryInput() },
   );

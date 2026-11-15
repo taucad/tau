@@ -42,6 +42,8 @@ export type SessionRuntimeStandIn = SessionRuntime &
     landed: readonly string[];
     /** Run `next` as the flush from now on, after the owed writes land: a row holds or refuses the flush with it. */
     flushWith: (next: () => Promise<void>) => void;
+    /** Every parking signal and focused-chat retry the child sent, in order (A7b). */
+    signals: readonly string[];
   }>;
 
 /** The facts of a runtime whose project loaded and whose editor focused its chat. @public */
@@ -49,6 +51,7 @@ export const loadedSessionRuntimeFacts: SessionRuntimeFacts = {
   loaded: true,
   kernelRefusal: undefined,
   chatReady: true,
+  chatDeferred: false,
   focusedChat: undefined,
 };
 
@@ -73,6 +76,7 @@ export function openSessionRuntimeStandIn(
   const owed: string[] = [];
   const landed: string[] = [];
   let flushRest: () => Promise<void> = async () => undefined;
+  const signals: string[] = [];
   return {
     input,
     runtimeRef: root,
@@ -85,6 +89,12 @@ export function openSessionRuntimeStandIn(
     flush: async () => {
       landed.push(...owed.splice(0));
       await flushRest();
+    },
+    park: (parked) => {
+      signals.push(parked ? 'parkRuntime' : 'resumeRuntime');
+    },
+    retryFocusedChat: () => {
+      signals.push('retryEnsureFocusedChat');
     },
     close: () => {
       if (closed) {
@@ -111,6 +121,7 @@ export function openSessionRuntimeStandIn(
     flushWith: (next) => {
       flushRest = next;
     },
+    signals,
   };
 }
 

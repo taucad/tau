@@ -11,15 +11,28 @@ import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { SessionFileManager, SessionFilesPort } from '#runtime/session-file-manager.js';
 import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
 
-type StandInContext = { openFileSystemBridge: undefined; error: Error | undefined };
+type StandInContext = Record<string, unknown> & {
+  openFileSystemBridge: unknown;
+  error: Error | undefined;
+  worker: Worker | undefined;
+};
 type StandInEvent = { type: 'ready' } | { type: 'lost' } | { type: 'fail'; error: Error };
 
 const standInMachine = setup({
-  schemas: { context: types<StandInContext>(), events: eventSchemas<StandInEvent>() },
+  schemas: {
+    context: types<StandInContext>(),
+    events: eventSchemas<StandInEvent>(),
+    input: types<{ worker: Worker | undefined; context: Record<string, unknown> }>(),
+  },
 }).createMachine({
   id: 'fileManager',
   initial: 'starting',
-  context: { openFileSystemBridge: undefined, error: undefined },
+  context: ({ input }) => ({
+    openFileSystemBridge: undefined,
+    ...input.context,
+    error: undefined,
+    worker: input.worker,
+  }),
   states: {
     starting: {
       on: {
@@ -52,15 +65,20 @@ export type SessionFileManagerStandIn = SessionFileManager &
  * Open a stand-in for one project.
  *
  * @param projectId - The session's project.
- * @param options - Whether it starts `ready` (the default).
+ * @param options - Whether it starts `ready` (the default), the worker its context names (none by default), which
+ *   the session's `revisions` and `hostConnector` children start on (A7b), and any other context they read.
  * @returns The stand-in, started.
  * @public
  */
 export function openSessionFileManagerStandIn(
   projectId: string,
-  { ready = true }: Readonly<{ ready?: boolean }> = {},
+  {
+    ready = true,
+    worker,
+    context = {},
+  }: Readonly<{ ready?: boolean; worker?: Worker; context?: Record<string, unknown> }> = {},
 ): SessionFileManagerStandIn {
-  const actor = createActor(standInMachine).start();
+  const actor = createActor(standInMachine, { input: { worker, context } }).start();
   if (ready) {
     actor.send({ type: 'ready' });
   }

@@ -60,7 +60,10 @@ const harness = (options?: {
   const child = (name: string, region?: ProjectSessionRegion) =>
     createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
       receive((event) => {
-        received.push(`${name}:${event.type}`);
+        /* A6e's rows read the replacement traffic only. */
+        if (event.type === 'replaceRuntime' || event.type === 'holdReplacement') {
+          received.push(`${name}:${event.type}`);
+        }
       });
       order.push(`start:${name}`);
       live.add(name);
@@ -469,8 +472,8 @@ describe('projectSessionMachine', () => {
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
-    /* Four regions and no chat: the store owns each chat's root (PV-S5). */
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(4);
+    /* Four regions and the session's presence, and no chat: the store owns each chat's root (PV-S5). */
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(5);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });

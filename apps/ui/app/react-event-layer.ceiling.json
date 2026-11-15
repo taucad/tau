@@ -47,7 +47,6 @@
   "apps/ui/app/hooks/use-machine-control.ts": 2,
   "apps/ui/app/hooks/use-machines-selection.ts": 1,
   "apps/ui/app/hooks/use-project-availability.ts": 1,
-  "apps/ui/app/hooks/use-revision-status.ts": 2,
   "apps/ui/app/hooks/use-sidebar-status.ts": 2,
   "apps/ui/app/hooks/use-thumbnail-generator.ts": 3,
   "apps/ui/app/routes/auth.$/route.tsx": 1,
@@ -73,7 +72,7 @@
   "apps/ui/app/routes/w.$workspace.$project/chat-print-program.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/chat-viewer.tsx": 6,
   "apps/ui/app/routes/w.$workspace.$project/project-command-items.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": 8,
+  "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-route-notices.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-share-action.tsx": 1,
@@ -81,6 +80,5 @@
   "apps/ui/app/routes/w.$workspace.$project/record-issues-action.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/revision-save-shortcut.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/use-chat-interface-state.ts": 1,
-  "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/workbench-toggle.tsx": 1
 }

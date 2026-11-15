@@ -33,6 +33,8 @@ import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machin
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
+import { focusedProjectStandIn } from '#services/focused-project.fixture.js';
+import type { FocusedProjectStandIn } from '#services/focused-project.fixture.js';
 import {
   chatTurnAdmission,
   publishChatTurnAdmission,
@@ -336,8 +338,8 @@ const chatSession = chatSessionMachine.provide({
   actors: { admitTurn: chatTurnAdmission },
 });
 
-function createStore(): StoreType {
-  const store = new ChatSessionStore({ chatSession });
+function createStore(focus?: FocusedProjectStandIn): StoreType {
+  const store = new ChatSessionStore({ chatSession, ...(focus === undefined ? {} : { focusedProject: focus }) });
   store.setDependencies(createStubDeps());
   return store;
 }
@@ -359,7 +361,6 @@ function startTurnOwner(store: StoreType, projectId: string): void {
   const session = createActor(projectSessionMachine, { input: { projectId } });
   session.start();
   turnOwners.push(session);
-  store.setFocusedProject(projectId);
   store.setProjectSession(projectId, session);
 }
 
@@ -2341,12 +2342,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   };
 
   it('projects a run to the chat’s own project, not the focused one', async () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
 
     store.setProjectSession('proj_a', projectA.ref);
-    store.setFocusedProject('proj_a');
+    focus.set('proj_a');
     store.acquire('chat-a', 'proj_a');
     const stopObserving = store.observe('chat-a', 'proj_a');
     publishLogRows(store, 'chat-a', runningRows());
@@ -2354,7 +2356,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     /* The person navigates to B while A's run is still going. */
     store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    focus.set('proj_b');
     publishLogRows(store, 'chat-a', [lifecycleRow(2, 'completed')], 2);
 
     expect(projectA.heard.at(-1)).toEqual({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
@@ -2365,13 +2367,37 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setProjectSession('proj_b', undefined);
   });
 
+  it('should bind the focused project to its live session each time focus arrives there, and only then (A7b)', () => {
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
+    const projectA = fakeSession('proj_a');
+    store.setProjectSession('proj_a', projectA.ref);
+    /* The session holds runs the store's projection no longer has: arriving there tells it again. */
+    const drift = (): void => {
+      projectA.ref?.send({ type: 'projectedRunsChanged', runs: ['stale'], stoppableRuns: [] });
+      projectA.heard.length = 0;
+    };
+    drift();
+
+    focus.set('proj_a');
+    expect(projectA.heard).toEqual([{ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] }]);
+
+    drift();
+    focus.set('proj_a');
+    focus.set(undefined);
+    focus.set('proj_b');
+    expect(projectA.heard).toEqual([]);
+    store.setProjectSession('proj_a', undefined);
+  });
+
   it('binds a retained project chat to its known owner while another project is focused', () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    focus.set('proj_b');
 
     store.acquire('chat-a', 'proj_a');
     store.acquire('chat-a', 'proj_a');
@@ -2385,7 +2411,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('binds a chat acquired during a focus switch to its caller’s project before its row loads', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -2398,10 +2425,10 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    focus.set('proj_b');
 
-    /* React renders A's new chat before ProjectSessionBinding's focus effect
-     * runs, so focus still says B. The caller names A (PV-S4). */
+    /* React renders A's new chat before focus moves, so focus still says B.
+     * The caller names A (PV-S4). */
     const session = store.acquire('chat_a', 'proj_a');
     const stopObserving = store.observe('chat_a', 'proj_a');
     expect(store.chatRootsOf('proj_a').get('chat_a')).toBe(session.stateActorRef);
@@ -2409,7 +2436,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     await vi.waitFor(() => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a', 'proj_a');
     });
-    store.setFocusedProject('proj_a');
+    focus.set('proj_a');
     resolveLoadedChat({
       id: 'chat_a',
       resourceId: 'proj_a',
@@ -2485,7 +2512,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('should ignore a delayed hydration after the session is released', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -2497,7 +2525,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    focus.set('proj_b');
 
     try {
       const root = store.acquire('chat_delayed_release', 'proj_b').stateActorRef;
@@ -2529,7 +2557,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('should not let a released hydration close a reacquired replacement', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveFirstLoad!: (chat: ChatEntity) => void;
     const firstLoad = new Promise<ChatEntity>((resolve) => {
@@ -2545,7 +2574,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    focus.set('proj_b');
 
     try {
       const released = store.acquire('chat_reacquired', 'proj_b');
@@ -3119,7 +3148,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('keeps an early projected run with its owner through hydration', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -3132,7 +3162,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const projectB = fakeSession('proj_b');
     store.setProjectSession('proj_a', projectA.ref);
     store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    focus.set('proj_b');
     const stopObserving = store.observe('chat_early_settlement', 'proj_a');
 
     try {
@@ -3265,7 +3295,8 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
   /* A chat-wide record error remains available to the card while attachment
    * is unknown, but it never manufactures a host run for the sidebar. */
   it('leaves a hydrated refusal diagnostic out of the chat run machine', async () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const heard: Array<Record<string, unknown>> = [];
     const projectHeard: Array<{ type: string }> = [];
     const projectRef = {
@@ -3275,7 +3306,7 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
       getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
-    store.setFocusedProject('proj_reload');
+    focus.set('proj_reload');
     store.setProjectSession('proj_reload', projectRef);
     const session = store.acquire('chat_reloaded', 'proj_reload');
     spyOnSend(session.stateActorRef, (event) => {
@@ -3299,14 +3330,15 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
   });
 
   it('leaves a live run alone, replaying nothing over it', async () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const heard: Array<Record<string, unknown>> = [];
     const projectRef = {
       send: () => undefined,
       getSnapshot: () => ({ context: { runs: [] } }),
     } as unknown as Parameters<StoreType['setProjectSession']>[1];
 
-    store.setFocusedProject('proj_live');
+    focus.set('proj_live');
     store.setProjectSession('proj_live', projectRef);
     const session = store.acquire('chat_streaming', 'proj_live');
     spyOnSend(session.stateActorRef, (event) => {

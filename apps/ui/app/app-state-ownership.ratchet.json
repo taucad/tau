@@ -77,6 +77,7 @@
       "apps/ui/app/runtime/runtime.worker.ts",
       "apps/ui/app/runtime/session-file-manager.fixture.ts",
       "apps/ui/app/runtime/session-file-manager.ts",
+      "apps/ui/app/runtime/session-revisions.fixture.ts",
       "apps/ui/app/runtime/session-revisions.ts",
       "apps/ui/app/runtime/ui-runtime.config.ts",
       "apps/ui/app/runtime/ui-runtime.definition.ts",
@@ -94,7 +95,6 @@
   "counts": {
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
-    "apps/ui/app/hooks/use-revision-status.ts#useFlushOnClose": 1,
     "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx#useFlushOnClose": 1,
     "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx#waitFor timeout": 5,
     "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx#setTimeout": 1,

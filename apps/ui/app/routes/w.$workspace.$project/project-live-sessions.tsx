@@ -8,7 +8,7 @@
  */
 import { ProjectSyncAnnouncement } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-preview.js';
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -20,38 +20,12 @@ import { ProjectPrintRouteIntent } from '#routes/w.$workspace.$project/project-p
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { SessionFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
-import { useModels } from '#hooks/use-models.js';
-import { useKernel } from '#hooks/use-kernel.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
-import { isKernelId, isKernelPreference } from '@taucad/types/constants';
-import type { KernelId } from '@taucad/types/constants';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
 import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
 import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
 import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import {
-  ChatWorkspaceAuthorityProvider,
-  readRootedBridgeCapabilities,
-} from '#providers/chat-workspace-authority-provider.js';
-import {
-  createBrowserAgentHostClient,
-  createAgentHostClient,
-  noteBrowserRunPresented,
-  noteBrowserRunRated,
-  readBrowserRunStoppability,
-  retainBrowserAgentHostProject,
-} from '#services/agent-host-client.js';
-import { createDaemonAgentHostTransport } from '@taucad/chat-ui/services/daemon-agent-host-client';
-import { daemonPlacementOf } from '#lib/agent-host-placement.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
-import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import { useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
-import { ENV } from '#environment.config.js';
-import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
+import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
@@ -67,16 +41,16 @@ import {
   selectProjectSessionFileManager,
   selectProjectSessionRuntime,
 } from '#services/sessions-store.js';
-import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import { useTauCloudIntent, useTauCloudIntentConnection } from '#hooks/use-cloud-projects.js';
 import type { TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import {
-  useRevisionClientLifecycle,
+  useRevisionClient,
   useRevisionClientStatus,
   useRevisionCommands,
   useProjectRole,
 } from '#hooks/use-revision-status.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
 import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
@@ -84,11 +58,7 @@ import { closeProjectRuntime } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
-import {
-  isRecordingEditorConflict,
-  refuseCloseWhileRecording,
-  subscribeEditorConflictRecords,
-} from '#lib/editor-document-session.js';
+import { refuseCloseWhileRecording } from '#lib/editor-document-session.js';
 
 export type ProjectSessionFlushRegistration = {
   projectId: string;
@@ -151,33 +121,14 @@ export async function flushProjectSessionPersistence({
 const noFlushRegistration = (): void => undefined;
 
 /**
- * The concrete kernel a live session runs: a stored manual preference wins; a row without one keeps its concrete
- * kernel, which behaves as Auto with that owner would, since this connector carries no snapshot facts to route on
- * (blueprint D2).
- */
-const liveSessionKernel = ({
-  stored,
-  fallback,
-}: Readonly<{
-  stored: Readonly<{ activeKernel?: string; kernelPreference?: string }> | undefined;
-  fallback: KernelId;
-}>): KernelId => {
-  const preference = stored?.kernelPreference;
-  if (isKernelPreference(preference) && preference !== 'auto' && isKernelAvailable(preference)) {
-    return preference;
-  }
-  const legacy = stored?.activeKernel;
-  return legacy !== undefined && isKernelId(legacy) && isKernelAvailable(legacy) ? legacy : fallback;
-};
-
-/**
  * The session's half of a project subtree (S44).
  *
  * The registry decides *whether* a project is live, and the session's children
- * report whether its resources came up (A6c, A6d); this hands the session the
- * four things `closing` has to do and relays what only the subtree holds yet.
- * It is mounted inside the project's providers, which is the only place that
- * can reach them.
+ * report whether its resources came up and wire its facts (A6c, A6d, A7b): the
+ * revision client, the host connector, the revision facts, visibility and
+ * parking need nothing mounted. This hands the session the four things
+ * `closing` has to do and relays what only the subtree holds yet. It is mounted
+ * inside the project's providers, which is the only place that can reach them.
  */
 function ProjectSessionBinding({
   projectId,
@@ -186,24 +137,15 @@ function ProjectSessionBinding({
   readonly projectId: string;
   readonly isFocused: boolean;
 }): React.JSX.Element {
-  const { fileManagerRef, workerChangeChannel, workspace } = useFileManager();
-  const { defaultExecution, resolveModel } = useModels();
-  const { kernel: defaultKernel } = useKernel();
-  const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
-  const computeMode = useComputeReuseMode();
-  const browserHostRelease = useRef<{ projectId: string; release: () => void } | undefined>(undefined);
-  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
-  useEffect(() => {
-    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
-  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel]);
+  const { workerChangeChannel } = useFileManager();
   const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers, retryManifestObservation } =
     useProject();
-  const client = useRevisionClientLifecycle();
+  /* A passive reader: the session's `revisions` child owns the client's lifecycle (A7b). */
+  const client = useRevisionClient();
   const revisionCommands = useRevisionCommands();
   const cloudIntent = useTauCloudIntent(projectId);
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
-  const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
   const status = useRevisionClientStatus(client);
   useEffect(() => {
     if (cloudIntent === 'open' && status?.sync.hasAppliedRemote === true) {
@@ -211,9 +153,6 @@ function ProjectSessionBinding({
     }
   }, [cloudIntent, retryManifestObservation, status?.sync.hasAppliedRemote]);
   const role = useProjectRole();
-  const isChatDeferred = useSelector(editorRef, (snapshot) =>
-    snapshot.matches({ ready: { operation: 'focusedChatDeferred' } }),
-  );
   usePublishCloudProjectPreview({
     projectId,
     enabled:
@@ -224,165 +163,6 @@ function ProjectSessionBinding({
       status.sync.state === 'backedUp' &&
       (role === 'owner' || role === 'write'),
   });
-  useEffect(() => {
-    if (status?.sync.chats === 'ready' && isChatDeferred) {
-      editorRef.send({ type: 'retryEnsureFocusedChat' });
-    }
-  }, [editorRef, isChatDeferred, status?.sync.chats]);
-  /* Every live project publishes one read connector, even without a focused chat. Each chat's placement on this
-   * device — its stored execution and this device's own choice for it — decides which owner log to read; opening an
-   * observer never issues Start or acquires an SDK session. */
-  useEffect(() => {
-    if (client === undefined || !viewsReady) {
-      return;
-    }
-    let connectorActive = true;
-    const connect = async (chatId: string) => {
-      const stored = await chatSessions.getChatHostSettings(chatId);
-      const {
-        defaultExecution: fallback,
-        defaultKernel: kernelFallback,
-        testingEnabled: tests,
-        computeMode: reuse,
-        resolveModel: resolve,
-      } = choices.current;
-      const execution = stored?.activeExecution ?? fallback;
-      const daemonHostId = daemonPlacementOf(execution);
-      if (daemonHostId !== undefined) {
-        return {
-          ...createAgentHostClient(createDaemonAgentHostTransport(async () => dialExecutionHost(execution, projectId))),
-          placement: { hostId: daemonHostId },
-        };
-      }
-      if (execution.kind !== 'tau') {
-        throw new Error(`Chat ${chatId} has no readable host placement.`);
-      }
-      const kernel = liveSessionKernel({ stored, fallback: kernelFallback });
-      const config = await getProjectFileSystemConfig(projectId);
-      if (config === undefined) {
-        throw new Error(`Project ${projectId} has no filesystem configuration.`);
-      }
-      const projectStorage =
-        config.backend === 'memory'
-          ? {
-              projectId: config.projectId,
-              backend: config.backend,
-              storageRootKey: config.storageRootKey,
-              providerBasePath: config.providerBasePath,
-            }
-          : config.backend === 'webaccess'
-            ? {
-                projectId: config.projectId,
-                backend: config.backend,
-                workspaceId: config.workspaceId,
-                providerBasePath: config.providerBasePath,
-              }
-            : { projectId: config.projectId, backend: config.backend, providerBasePath: config.providerBasePath };
-      await workspace.syncProjectRoots();
-      const openProjectRootBridge = () => {
-        const { openFileSystemBridge, rootDirectory } = fileManagerRef.getSnapshot().context;
-        if (openFileSystemBridge === undefined) {
-          throw new Error('The project filesystem bridge is unavailable.');
-        }
-        return openFileSystemBridge(rootDirectory, 'working-copy');
-      };
-      const capabilities = await readRootedBridgeCapabilities(openProjectRootBridge);
-      if (!capabilities.writable || !capabilities.durability) {
-        throw new Error('The project filesystem cannot hold a readable host log.');
-      }
-      const openRevisionSession = (kind: 'placement' | 'reader') => () =>
-        fileManagerRef.getSnapshot().context.openRevisionSessionPort?.(kind, projectId);
-      if (!connectorActive) {
-        throw new Error(`Project ${projectId}'s host connector closed before chat ${chatId} attached.`);
-      }
-      const options = {
-        openFileSystemBridge: openProjectRootBridge,
-        openProjectRootBridge,
-        openRevisionsPort: openRevisionSession('reader'),
-        openPlacementPort: openRevisionSession('placement'),
-        computeMode: reuse,
-        openComputeStorePort: () => {
-          const opener = fileManagerRef.getSnapshot().context.openComputeStorePort;
-          if (opener === undefined) {
-            throw new Error('The project compute authority is unavailable.');
-          }
-          return opener(projectId);
-        },
-        projectStorage,
-        durability: capabilities.durability,
-        authority: { projectId, workspaceId: 'live' },
-        gatewayBaseUrl: ENV.TAU_API_URL,
-        ...agentHostClientConfig({
-          agent: { profile: 'cad', execution, kernel, mode: 'agent', toolChoice: 'auto', testingEnabled: tests },
-          chatId,
-          resolvedModel: resolve(execution.model),
-        }),
-        runtimeConfig: createUiRuntimeConfig(ENV),
-      } as const;
-      const hostClient = createBrowserAgentHostClient(options);
-      browserHostRelease.current ??= { projectId, release: retainBrowserAgentHostProject(options) };
-      return { ...hostClient, placement: { hostId: daemonHostId } };
-    };
-    const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, {
-      stoppability: async (chatId) => {
-        const stored = await chatSessions.getChatHostSettings(chatId);
-        const execution = stored?.activeExecution ?? choices.current.defaultExecution;
-        const daemonHostId = daemonPlacementOf(execution);
-        if (daemonHostId !== undefined) {
-          try {
-            const channel = await dialExecutionHost(execution, projectId);
-            channel.close();
-            return 'stoppable';
-          } catch {
-            return 'background-window';
-          }
-        }
-        return readBrowserRunStoppability(projectId, chatId);
-      },
-      /* Only a browser host hears what this page showed (T10); a run on a daemon is not timed. */
-      presented: async (chatId, runId, at) => {
-        try {
-          const stored = await chatSessions.getChatHostSettings(chatId);
-          if (daemonPlacementOf(stored?.activeExecution ?? choices.current.defaultExecution) === undefined) {
-            await noteBrowserRunPresented({ projectId, chatId, runId, at });
-          }
-        } catch {
-          /* A lost time is only a missing presentation fact. */
-        }
-      },
-      /*
-       * Every rating goes to the browser host and, in the desktop app, to the desktop host (LW8). Each reports one
-       * only for a run it observed in its own rows: the chat's current execution may have changed since the rated run
-       * ended, and a paired daemon's run is never reported.
-       */
-      rated: async (rating) => {
-        const note = async (deliver: () => Promise<void> | undefined): Promise<void> => {
-          try {
-            await deliver();
-          } catch {
-            /* A lost rating is only a missing feedback fact. */
-          }
-        };
-        await Promise.all([
-          note(async () => noteBrowserRunRated({ projectId, ...rating })),
-          note(async () => desktopBridge()?.agentHost.rated({ projectId, ...rating })),
-        ]);
-      },
-    });
-    return () => {
-      connectorActive = false;
-      unpublish();
-    };
-  }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
-  useEffect(
-    () => () => {
-      if (browserHostRelease.current?.projectId === projectId) {
-        browserHostRelease.current.release();
-        browserHostRelease.current = undefined;
-      }
-    },
-    [projectId],
-  );
   /* Fetch writes name only a foreign segment path. The projection owns the bytes and transcript; a local host
    * log is still followed exclusively through its cursor. */
   useEffect(() => {
@@ -408,45 +188,6 @@ function ProjectSessionBinding({
       },
     });
   }, [chatSessions, projectId, workerChangeChannel]);
-  /* RV-W5b2 R2-1: an editor's conflict still being recorded keeps the project open, like a dirty tree. */
-  const recording = useSyncExternalStore(
-    subscribeEditorConflictRecords,
-    useCallback(() => isRecordingEditorConflict(projectId), [projectId]),
-  );
-
-  /* What a policy close is allowed to touch (I24, I25), from the one place that
-   * knows: the project's own revision projection. The *session* owns these
-   * facts and tells the registry; the route never reports over its head. */
-  useEffect(() => {
-    if (status === undefined || session === undefined) {
-      return;
-    }
-    const { sync } = status;
-    /* R11: the sync facet is the sync facet. `pending`/`queued`/`failed` are
-     * all "this device has something the remote has not acknowledged" — a
-     * clean tree with a queued push is NOT synced, which is what deriving this
-     * from dirtiness used to claim. */
-    const syncState: ChatSyncState =
-      sync.state === 'conflicted'
-        ? 'conflicted'
-        : sync.state === 'pending' || sync.state === 'queued' || sync.state === 'failed'
-          ? 'pending'
-          : 'synced';
-    session.send({
-      type: 'revisionState',
-      dirty: status.projectDirty,
-      recording,
-      pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
-      pendingCount: sync.pendingCount,
-    });
-    /* The chats' `revision` region. R11: the branch the checkout is on gives `revision.line` its producer, so the
-     * `⎇ <branch>` chip has data instead of a permanent `onMain`. */
-    chatSessions.setRevisionFacts(projectId, {
-      dirty: status.projectDirty,
-      sync: syncState,
-      ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
-    });
-  }, [chatSessions, projectId, recording, session, status]);
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
@@ -460,10 +201,10 @@ function ProjectSessionBinding({
           flushWorkbenchRecords: flushWorkbenchRecordProducers,
           closeFlushMilliseconds: editorFlushTimeoutMilliseconds,
         }),
-      /* W13's seam, called: the worker's `release()` takes the close cut and
-       * awaits `awaitSyncSettled` before it answers this. */
+      /* W13's seam, called: the worker's `release()` takes the close cut and awaits `awaitSyncSettled` before it
+       * answers this. The client is the one the session's `revisions` child opened, from the module's table (A7b). */
       flushSync: async () => {
-        await client?.quiesce();
+        await peekRevisionClient(projectId)?.quiesce();
       },
       cancelRuns: async (chatIds) => {
         const outcomes = await Promise.all(chatIds.map(async (chatId) => chatSessions.cancelProjectedRun(chatId)));
@@ -472,7 +213,7 @@ function ProjectSessionBinding({
         }
       },
     });
-  }, [chatSessions, client, editorRef, flushWorkbenchRecordProducers, parameterService, projectId, projectRef]);
+  }, [chatSessions, editorRef, flushWorkbenchRecordProducers, parameterService, projectId, projectRef]);
 
   /* Every live project registers its session, not only the focused one (R2):
    * a run that settles after the person navigates away must reach the project
@@ -486,60 +227,6 @@ function ProjectSessionBinding({
       chatSessions.setProjectSession(projectId, undefined);
     };
   }, [chatSessions, projectId, session]);
-
-  useEffect(() => {
-    if (session === undefined) {
-      return;
-    }
-    const reportVisibility = (): void => {
-      session.send({
-        type: 'visibilityChanged',
-        visible: isFocused && document.visibilityState === 'visible',
-        /* R3/V1-7: the two facts differ while the window is minimised. EQ15 reads
-         * `visible`; the park reads both, so minimising never parks the project
-         * the person is on. */
-        focused: isFocused,
-      });
-    };
-    reportVisibility();
-    document.addEventListener('visibilitychange', reportVisibility);
-    return () => {
-      document.removeEventListener('visibilitychange', reportVisibility);
-    };
-  }, [isFocused, session]);
-
-  /* RV-W5b F12: only the focused project holds its revision long poll; one
-   * that gains focus pulls once its stream is open. */
-  useEffect(() => {
-    client?.focus?.(isFocused);
-  }, [client, isFocused]);
-
-  /* R3: the session owns "hidden and idle", the project machine owns the cad
-   * units, and no actor ref joins them — the session's `project` child is the
-   * registry's region relay, not this machine. This binding is where both are in
-   * hand, so it is where the signal crosses. */
-  useEffect(() => {
-    if (session === undefined) {
-      return;
-    }
-    const subscription = session.on('runtimeParking', (event) => {
-      projectRef.send({ type: event.parked ? 'parkRuntime' : 'resumeRuntime' });
-    });
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [projectRef, session]);
-
-  /* A chat is acquired from inside its own project's route. */
-  useEffect(() => {
-    if (!isFocused) {
-      return;
-    }
-    chatSessions.setFocusedProject(projectId);
-    return () => {
-      chatSessions.setFocusedProject(undefined);
-    };
-  }, [chatSessions, isFocused, projectId]);
 
   return (
     <>

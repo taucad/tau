@@ -73,6 +73,7 @@ import {
   withCommitAuthor,
 } from '@taucad/revisions';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
@@ -248,6 +249,12 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
    * bearer; absent, nothing is reported.
    */
   readonly syncTelemetryPlacement?: 'desktop' | 'daemon' | undefined;
+  /**
+   * The host's resolved telemetry consent, read per settled attempt (runtime observability PR-7, AR-W6-02): on a Node
+   * host its runtime telemetry composition's `status().consent`, the same rule its runtime reporter applies, so
+   * `tau telemetry off` stops it. Only `granted` reports; absent, nothing is reported.
+   */
+  readonly syncTelemetryConsent?: (() => ReportingConsent) | undefined;
   /** Read per third-party Git request; the renderer may replace it in memory. */
   readonly remoteCredential?: (() => NativeGitRemoteCredential | undefined) | undefined;
   /** Called once per host revision fact. Reporting only; never fails a turn. */
@@ -768,12 +775,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   });
   const { actor, settled, recordEditorConflict } = tree;
 
-  /* W36 D1: one bounded entry per settled push or pull, on the API's existing ingest. */
+  /* W36 D1: one bounded entry per settled push or pull, on the API's existing ingest. PR-7 (AR-W6-02): only under the
+   * host's resolved consent, read per attempt; `unknown` and a host that names none send nothing. */
   const placement = options.syncTelemetryPlacement;
-  if (placement !== undefined && apiBaseUrl !== undefined) {
+  const { syncTelemetryConsent } = options;
+  if (placement !== undefined && apiBaseUrl !== undefined && syncTelemetryConsent !== undefined) {
     actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
       const credential = options.tauCredential?.();
-      if (credential === undefined) {
+      if (credential === undefined || syncTelemetryConsent() !== 'granted') {
         return;
       }
       const { direction, outcome, durationMilliseconds, lagMilliseconds, lagSince, pending } = attempt;

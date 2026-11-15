@@ -42,6 +42,10 @@ import { ChatSessionStore } from '#services/chat-session-store.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import { createEnvironmentLogic } from '#runtime/environment.js';
 import { sessionsRegistryLogic } from '#services/sessions-store.js';
+import { store as preferences } from '#hooks/use-cookie.js';
+import { metaConfig } from '#constants/meta.constants.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { modelsQueryKey } from '#lib/model-catalog.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -51,7 +55,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 const idleRootFiles = { rootDirectory: '/', shouldInitializeOnStart: false, backendResolution: 'pending' } as const;
 
 describe('app runtime root', () => {
-  it('should list the nine static children once, and attach the seven A1a, A1b and A2 compose', () => {
+  it('should list the nine static children once, and attach all nine (A5b attached focus)', () => {
     expect(appRuntimeChildren).toEqual([
       'environment',
       'choices',
@@ -65,12 +69,14 @@ describe('app runtime root', () => {
     ]);
     expect(appRuntimeAttachedChildren).toEqual([
       'environment',
+      'choices',
       'fileManagerHost',
       'rootFiles',
       'leases',
       'projectLibrary',
       'chatSessions',
       'sessions',
+      'focus',
     ]);
   });
 
@@ -96,6 +102,7 @@ describe('app runtime root', () => {
       'document:visibilitychange',
       'window:blur',
       'window:focus',
+      'window:pagehide',
     ]);
     expect(selectSessionsRegistry(runtime.getSnapshot())).toBe(registry);
     registry.send({ type: 'open', projectId: 'p1' });
@@ -108,12 +115,15 @@ describe('app runtime root', () => {
     expect(registry.getSnapshot().status).toBe('stopped');
   });
 
-  it('should never listen for an unload phase (D26: UnloadProvider stays the one sequencer)', () => {
+  it('should be the one listener of both unload phases, and of no other unload event (D26)', () => {
     const host = createFakeEnvironmentHost();
     const runtime = createAppRuntime({ environment: () => host }).start();
 
     const types = host.everAdded().map((listener) => listener.split(':')[1]);
-    expect(types).not.toContain('pagehide');
+    expect(types.filter((type) => type === 'visibilitychange' || type === 'pagehide').toSorted()).toEqual([
+      'pagehide',
+      'visibilitychange',
+    ]);
     expect(types).not.toContain('beforeunload');
     expect(types).not.toContain('unload');
     expect(types).not.toContain('freeze');
@@ -149,6 +159,29 @@ describe('app runtime root', () => {
       { type: 'focusChanged', focused: false },
       { type: 'memoryClassChanged', constrained: true },
     ]);
+    runtime.stop();
+  });
+
+  it('should tell focus the window came back, only on a return from blur (R16)', () => {
+    const host = createFakeEnvironmentHost({ focused: true });
+    const focusEvents: string[] = [];
+    /* Focus is the only actor that takes `windowFocused`; the root's own transition sends it on. */
+    const runtime = createAppRuntime({
+      environment: () => host,
+      inspect: (inspection) => {
+        if (inspection.type === '@xstate.transition' && inspection.event.type === 'windowFocused') {
+          focusEvents.push(inspection.actorRef.sessionId === runtime.sessionId ? 'root' : 'focus');
+        }
+      },
+    }).start();
+
+    /* The first reading is focused: nothing came back. */
+    host.focus();
+    expect(focusEvents).toEqual([]);
+
+    host.blur();
+    host.focus();
+    expect(focusEvents).toEqual(['focus']);
     runtime.stop();
   });
 
@@ -262,6 +295,36 @@ describe('app runtime root', () => {
     runtime.stop();
   });
 
+  /* A6b: `choices` is attached with its real ports (plan § 4 A6b): the preference store, the runtime's query cache, the
+   * flag store and this tab's loopback admissions. It reads the catalog from the cache and never fetches it. */
+  it('A6b: attaches choices with its real ports, reads the stored preferences and the cached catalog, and follows a change', () => {
+    const queryClient = new QueryClient();
+    const runtime = createAppRuntime({
+      environment: () => createFakeEnvironmentHost(),
+      idleFileManagers: true,
+      queryClient,
+    });
+    const read = (): Record<string, unknown> | undefined =>
+      (runtime.getSnapshot().context as { choices?: Record<string, unknown> }).choices;
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`, false);
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.cadKernel}`, 'openscad');
+    runtime.start();
+    expect(read()).toMatchObject({
+      testingEnabled: false,
+      defaultKernel: 'openscad',
+      modelCatalog: { status: 'loading' },
+    });
+    // The catalog comes from the cache, so attaching `choices` asks the API for nothing.
+    expect(queryClient.getQueryState(modelsQueryKey)?.fetchStatus ?? 'idle').toBe('idle');
+
+    preferences.update(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`, true);
+    queryClient.setQueryData(modelsQueryKey, [{ id: 'model-a', default: true }]);
+    expect(read()).toMatchObject({ testingEnabled: true, modelCatalog: { status: 'loaded' } });
+    runtime.stop();
+    preferences.remove(`${metaConfig.cookiePrefix}${cookieName.chatTestingEnabled}`);
+    preferences.remove(`${metaConfig.cookiePrefix}${cookieName.cadKernel}`);
+  });
+
   it('should keep the first fault and keep answering (D23)', async () => {
     const first = createCallbackLogic<EventObject>(() => {
       throw new Error('environment failed first');
@@ -315,6 +378,28 @@ describe('app runtime root totality', () => {
     memoryClassChanged: [
       { type: 'memoryClassChanged', constrained: true },
       { type: 'memoryClassChanged', constrained: false },
+    ],
+    quitHoldChanged: [
+      { type: 'quitHoldChanged', held: true },
+      { type: 'quitHoldChanged', held: true, error: 'Pane layout is not confirmed saved.' },
+      { type: 'quitHoldChanged', held: false },
+    ],
+    quitRetried: [{ type: 'quitRetried' }],
+    choicesChanged: [
+      {
+        type: 'choicesChanged',
+        choices: {
+          computePlacement: { state: 'local' },
+          computeSelectionRevision: 0,
+          computeReuseMode: 'durable',
+          computeReuseRevision: 0,
+          defaultExecution: { kind: 'tau', model: '' },
+          modelCatalog: { status: 'loading' },
+          modelPinning: false,
+          defaultKernel: 'openscad',
+          testingEnabled: true,
+        },
+      },
     ],
   };
 

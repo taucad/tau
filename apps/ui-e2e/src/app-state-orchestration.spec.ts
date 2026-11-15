@@ -253,17 +253,14 @@ test('A0.1 row 1 (I10): project A keeps its arrangement across a round trip that
 });
 
 /*
- * Report-only (I11, `LayoutApply` `IntentAccounted`; owner A8b). On a cold load the intent is consumed but
- * the pane mostly never opens: before the layout record's first read, `openPanel` defers it through
- * `layoutController.personWorkbenchChanged`, whose callback drops it when the route key moved
- * (`project-workspace-context.tsx`), and the intent's own parameter cleanup and the `?chat=` correction
- * both move it. It is a race, not a rule: Print opened in 2 of the 20 runs at `279a3a30` (3 of 20 at
- * `4ff549a9`), so as `test.fails` it could not be red every run (D25), and it cannot be forced from here:
- * the record's first read and the route corrections are both local, with no network request to hold. So
- * the row records whether Print opened and never fails on it. The fix direction is to keep the intent across those route-key moves; A8b turns
- * this row into an asserting `test` once the pane always opens.
+ * I11 (`LayoutApply` `IntentAccounted`; flipped by A8b). On a cold load the pane a project link asks for opens
+ * once the workbench is ready. Until A8b this row was report-only: before the layout record's first read,
+ * `openPanel` deferred the intent through a callback that dropped it when the route key moved, and the intent's
+ * own parameter cleanup and the `?chat=` correction both move it, so Print opened in only 2 of 20 runs at
+ * `279a3a30` (3 of 20 at `4ff549a9`). The runtime's layout now queues the intent until the first read and an
+ * attached workbench, and a replace navigation keeps the route key it is queued under, so the row asserts.
  */
-test('A0.1 row 2 (I11 report-only, A8b): the Print pane intent of a cold project link, opened or lost once the workbench is ready', async ({
+test('A0.1 row 2 (I11, A8b): the Print pane intent of a cold project link opens once the workbench is ready', async ({
   annotate,
 }) => {
   /* The intent is read only where machines are enabled; the page's own environment opts in before
@@ -295,7 +292,7 @@ test('A0.1 row 2 (I11 report-only, A8b): the Print pane intent of a cold project
   const reading = { opened: isOpened, visible: print.visible, waited: Math.round(performance.now() - startedAt) };
   await annotate(`I11 Print opened: ${String(isOpened)} (waited ${String(reading.waited)} ms)`);
   await target.writeArtifact(`a01-i11-report-${String(Date.now())}.json`, JSON.stringify(reading));
-  expect(typeof isOpened).toBe('boolean');
+  expect(reading).toMatchObject({ opened: true, visible: true });
 });
 
 test('A0.1 row 3 (I8): a reload during a pending library operation recovers or reports it, and the project opens', async ({
@@ -732,18 +729,15 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revisi
 });
 
 /*
- * Report-only (I2, `ProjectFocus` `FocusFollowsLatestRequest`; owner A5c). Going back to A as soon as B's
- * path commits sometimes settles on B: B's `?chat=` correction (`project-route.tsx`
- * `handleFocusedChatResolved`, a `navigate(replace)`) fires once B's editor reaches
- * `ready.operation.idle` (`use-project.tsx`), and can land after the person's click to A. Each trip is
- * read only once it has settled (`readSettledProject`), so a navigation still in the route gate's pending
- * state is not counted as B. Forcing was tried: holding every `Worker` and `MessagePort` message from the click on B
- * until A's path committed did not delay the correction past the click (5 of 5 trips settled on A), and no
- * network request gates it. So the row records k of n and never fails on it; every attempt counts.
+ * I2 (`ProjectFocus` `FocusFollowsLatestRequest`; fixed by A5b). Going back to A as soon as B's path commits used to
+ * settle on B sometimes (6 of 10 trips in A5c's run): B's `?chat=` correction was the route's own
+ * `navigate(replace)`, fired once B's editor reached `ready.operation.idle` (`use-project.tsx`), and could land after
+ * the person's click to A. Focus now owns the correction: the editor reports `focusedChatResolved`, focus answers it
+ * with `chatShown` only for the project it is on, and the route sink drops a command about a project the route has
+ * left (MC-R18). Each trip is read only once it has settled (`readSettledProject`), so a navigation still in the route
+ * gate's pending state is not counted as B. The race cannot be forced, so every attempt counts and none may end on B.
  */
-test('A0.1 I2 report-only (A5c): a fast round trip through B and the late B correction that overrides it', async ({
-  annotate,
-}) => {
+test('A0.1 I2 (A5b): a fast round trip through B ends on A, never on a late B correction', async ({ annotate }) => {
   await openSeed();
   const routes = { a: await routeOf(projectNames.a), b: await routeOf(projectNames.b) };
   const attempts = 10;
@@ -777,4 +771,5 @@ test('A0.1 I2 report-only (A5c): a fast round trip through B and the late B corr
     JSON.stringify({ overridden, unsettled, attempts, outcomes }),
   );
   expect(outcomes).toHaveLength(attempts);
+  expect(overridden, 'I2: a late B correction took the route back to B').toBe(0);
 });

@@ -644,6 +644,42 @@ it("should parse a tool fact's name, absent from an older host, and refuse a nam
   expect(parse(tool({ toolName: 'edit_file' }))).toEqual({ ok: false, code: 'EVIDENCE_INVALID' });
 });
 
+it("should parse a tool fact's run labels, absent from an older host, and refuse a host outside the vocabulary", () => {
+  const tool = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
+    ...fixture(),
+    source: { kind: 'row', chat: 'chat-1', leaderEpoch: 'device-a', sequence: 7, digest },
+    semantic: { kind: 'tool', id: 'call-1' },
+    payload: {
+      plane: 'summary',
+      fact: {
+        kind: 'tool',
+        call: 'call-1',
+        dispatch: 'dispatch-1',
+        toolClass: 'write',
+        toolVersion: null,
+        schemaVersion: null,
+        modelCall: null,
+        outcome: 'completed',
+        revisionBefore: null,
+        revisionAfter: null,
+        ...extra,
+      },
+    },
+  });
+  expect(parse(tool({ labels: { host: 'browser', kernel: 'replicad', model: 'google-gemini-3.8-flash' } })).ok).toBe(
+    true,
+  );
+  expect(parse(tool({ labels: { host: null, kernel: null, model: null } })).ok).toBe(true);
+  expect(parse(tool({ labels: { host: 'phone', kernel: null, model: null } }))).toEqual({
+    ok: false,
+    code: 'EVIDENCE_INVALID',
+  });
+  expect(parse(tool({ labels: { host: 'cli', kernel: null, model: null, build: 'abc1234' } }))).toEqual({
+    ok: false,
+    code: 'EVIDENCE_INVALID',
+  });
+});
+
 /** A run's root content: the user's message in; the reply, the changed design source and a check line out (LW6). */
 const rootContent = (extra: Readonly<Record<string, unknown>> = {}): Readonly<Record<string, unknown>> => ({
   ...fixture(),

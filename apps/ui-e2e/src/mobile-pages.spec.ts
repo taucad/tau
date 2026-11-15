@@ -119,7 +119,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
     expect(first?.x).not.toBeCloseTo(second?.x ?? Number.NaN, 0);
   });
 
-  test('PG-PROJ-2: the library shows skeleton cards at their final size while it loads', async () => {
+  test('PG-PROJ-2: the library loading grid holds its cards at their final size while it loads', async () => {
     await openTouchPhone(viewport);
     await seedProjects();
     // From the first byte of the document: the loading grid's first card, re-measured while it is shown.
@@ -127,7 +127,7 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
       const record: { seen: boolean; width?: number; columns?: number } = { seen: false };
       Object.defineProperty(globalThis, '__tauLoadingGrid', { value: record });
       new MutationObserver(() => {
-        const grid = document.querySelector('main [role="status"][aria-label="Loading projects"]');
+        const grid = document.querySelector('main ul[aria-label="Projects"][aria-busy="true"]');
         const cards = grid ? [...grid.children] : [];
         const firstCard = cards[0];
         if (firstCard) {
@@ -153,8 +153,8 @@ describe.each(phoneViewports)('phone pages at $width×$height', (viewport) => {
       `${JSON.stringify({ loading, loaded }, null, 2)}\n`,
     );
     expect(loading?.seen, 'the loading grid was shown before the projects').toBe(true);
-    expect(loading?.width, 'skeleton card width matches a loaded card').toBeCloseTo(loaded, 0);
-    expect(loading?.columns, 'two skeleton columns, as the loaded grid').toBe(2);
+    expect(loading?.width, 'a loading card width matches a loaded card').toBeCloseTo(loaded, 0);
+    expect(loading?.columns, 'two loading columns, as the loaded grid').toBe(2);
     await expectShellBar('Projects', viewport.width);
   });
 

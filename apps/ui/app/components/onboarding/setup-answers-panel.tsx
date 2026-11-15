@@ -26,7 +26,7 @@ export function SetupAnswersPanel({
       aria-labelledby='setup-answers-title'
       data-testid='setup-answers-panel'
     >
-      <Heading id='setup-answers-title' level={3} variant='overline' className='text-muted-foreground'>
+      <Heading id='setup-answers-title' level={2} variant='overline' className='text-muted-foreground'>
         {answersPanelCopy.title}
       </Heading>
       <ul className='flex flex-col gap-3'>

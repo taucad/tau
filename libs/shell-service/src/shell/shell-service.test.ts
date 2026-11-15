@@ -213,6 +213,28 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(project, '.tau', 'AGENTS.md'));
   });
 
+  it("should hand the provider the same agent launch, byte for byte, whether or not the provider's store guard starts", async () => {
+    /* Everything but the per-launch ids, the abort signal and the per-launch session folders' names. */
+    const launchOf = async (storeGuard: boolean): Promise<string> => {
+      const { service, provider } = harness();
+      Object.assign(provider, { storeGuard: vi.fn(async () => storeGuard) });
+      await service.run(call({ command: 'git status' }));
+      const { executionId, commandId, signal: _signal, ...launch } = provider.launches[0]!;
+      const sessionNames = new Set(
+        JSON.stringify(launch).match(new RegExp(`${sessions.replaceAll('/', String.raw`\/`)}/[^/"]+`, 'gu')) ?? [],
+      );
+      let text = JSON.stringify(launch).replaceAll(executionId, '<execution>').replaceAll(commandId, '<command>');
+      for (const [index, name] of [...sessionNames].entries()) {
+        text = text.replaceAll(name, `<session ${String(index)}>`);
+      }
+      return text;
+    };
+    const guarded = await launchOf(true);
+    expect(guarded).not.toContain('guardedStores');
+    expect(guarded).toContain('<session 0>');
+    expect(guarded).toBe(await launchOf(false));
+  });
+
   it('should run without git when the host cannot write the git view', async () => {
     vi.mocked(createShellGitView).mockRejectedValueOnce(
       Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }),
@@ -462,6 +484,82 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     const outputs = await Promise.all(runs);
     expect(outputs.map((output) => output.status)).toEqual(['cancelled', 'cancelled', 'cancelled', 'cancelled']);
     expect(provider.launches).toHaveLength(2);
+  });
+  it('a call whose signal aborted before it reached a full admission limit leaves at once and is never staged (E09)', async () => {
+    const { service, provider } = harness(() => ({ status: 'started' }), { maxExecutions: 1 });
+    const prepare = provider.prepare.bind(provider);
+    let prepared = 0;
+    vi.spyOn(provider, 'prepare').mockImplementation(async (request) => {
+      prepared += 1;
+      return prepare(request);
+    });
+    const holding = new AbortController();
+    const holder = service.run({
+      ...call({ command: 'sleep 300' }, { signal: holding.signal }),
+      toolCallId: 'call-holder',
+    });
+    await vi.waitFor(() => {
+      expect(provider.launches).toHaveLength(1);
+    });
+    const late = new AbortController();
+    late.abort();
+    const queued = service.run({
+      ...call({ command: 'echo queued' }, { signal: late.signal }),
+      toolCallId: 'call-late',
+    });
+    /* It settles while the holder still has the slot: it never waits for a slot it would refuse to use. */
+    const settled = await Promise.race([
+      queued,
+      new Promise<'still waiting'>((resolve) => {
+        setTimeout(() => {
+          resolve('still waiting');
+        }, 1000);
+      }),
+    ]);
+    expect(settled).toMatchObject({ status: 'cancelled' });
+    holding.abort();
+    await expect(holder).resolves.toMatchObject({ status: 'cancelled' });
+    expect(prepared).toBe(1);
+    expect(provider.launches).toHaveLength(1);
+  });
+  it('a call already withdrawn when a slot is free is never staged (E09)', async () => {
+    const { service, provider } = harness(() => ({ status: 'started' }), { maxExecutions: 1 });
+    const prepare = vi.spyOn(provider, 'prepare');
+    const withdrawn = new AbortController();
+    withdrawn.abort();
+    await expect(service.run(call({ command: 'echo late' }, { signal: withdrawn.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(provider.launches).toHaveLength(0);
+  });
+
+  it('a call withdrawn while its custody is recorded is never launched, and its hold is released (E09)', async () => {
+    const { service, provider, checkouts } = harness(() => ({ status: 'started' }));
+    const controller = new AbortController();
+    const log: string[] = [];
+    checkouts.set('run-1', {
+      cwd: project,
+      admission: 'admission-1',
+      executions: {
+        hold: async (executionId) => {
+          log.push(`hold:${executionId}`);
+          controller.abort();
+          return { status: 'applied' };
+        },
+        release: async (executionId) => {
+          log.push(`release:${executionId}`);
+          return { status: 'applied' };
+        },
+      },
+    });
+    const launch = vi.spyOn(provider, 'launch');
+    await expect(service.run(call({ command: 'echo late' }, { signal: controller.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(launch).not.toHaveBeenCalled();
+    expect(provider.launches).toHaveLength(0);
+    expect(log.map((entry) => entry.split(':')[0])).toEqual(['hold', 'release']);
   });
 });
 
@@ -909,6 +1007,29 @@ describe('human Terminal sessions (D6, D21)', () => {
     ).resolves.toMatchObject({ status: 'refused', code: 'sandbox-unavailable' });
     expect(twice.provider.launches).toHaveLength(2);
     expect(twice.provider.released).toHaveLength(2);
+  });
+
+  it('opens the stores read-only when a guarded Terminal could not be set up and the guard no longer starts (OD2)', async () => {
+    const { service, provider } = harness((launch) =>
+      launch.filesystem.guardedStores === undefined
+        ? { status: 'started', stdout: '$ ' }
+        : {
+            status: 'sandbox-unavailable',
+            message: 'the sandbox could not be set up, so nothing ran.',
+            retryable: true,
+          },
+    );
+    const checks = [true, false];
+    Object.assign(provider, { storeGuard: vi.fn(async () => checks.shift() ?? false) });
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    expect(provider.launches).toHaveLength(2);
+    expect(provider.launches[0]!.filesystem.guardedStores?.stores).toContain(join(project, '.git'));
+    expect(provider.launches[1]!.filesystem.guardedStores).toBeUndefined();
+    expect(provider.launches[1]!.filesystem.readOnly).toContain(join(project, '.git'));
+    await opened.session[Symbol.asyncDispose]();
   });
 
   it('maps a provider that cannot give a terminal to pty-unavailable', async () => {

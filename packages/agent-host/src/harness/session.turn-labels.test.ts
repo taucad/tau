@@ -460,3 +460,37 @@ describe('turnLabelsOf', () => {
     expect(turnLabelsOf({ rows: [unreadable], runId: 'run-1', now: origin })).toEqual({ step: 'first' });
   });
 });
+
+/*
+ * LW17 (LU6): every generation and compaction of a run names the kernel it targets, read from the snapshot frozen with
+ * the turn (D2): the chat's chosen kernel, else under `auto` the kernel bound to the project's main entry. An entry-less
+ * `auto` project and a caller that sends no snapshot name none, and the gateway then records no kernel label.
+ */
+describe('LW17 kernel label on every model call', () => {
+  const kernelsOf = async (snapshot: CreateAgentSessionOptions['snapshot']): Promise<Array<string | undefined>> => {
+    const requests: ModelStreamRequest[] = [];
+    const session = await sessionOn(await createMemoryEventLog(), {
+      runId: 'run-1',
+      requests,
+      clock: { now: origin },
+      overrides: snapshot === undefined ? {} : { snapshot },
+    });
+    await session.prompt({ id: 'u-1', role: 'user', content: 'make a nut' });
+    await session.close();
+    return requests.map((request) => request.kernel);
+  };
+  const owner = { kernel: 'openscad', entryPath: 'main.scad' };
+
+  it.each([
+    ['a chosen kernel', { kernel: { preference: 'replicad', owner, available: [] } }, 'replicad'],
+    ['auto with a bound entry', { kernel: { preference: 'auto', owner, available: [] } }, 'openscad'],
+    ['auto with no entry', { kernel: { preference: 'auto', available: [] } }, undefined],
+    ['no kernel object', { other: true }, undefined],
+    ['no snapshot', undefined, undefined],
+  ] as const)('should name the kernel for %s', async (_case, snapshot, kernel) => {
+    const kernels = await kernelsOf(snapshot);
+
+    expect(kernels.length).toBeGreaterThan(0);
+    expect(new Set(kernels)).toEqual(new Set([kernel]));
+  });
+});

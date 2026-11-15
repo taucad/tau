@@ -51,14 +51,15 @@ describe('setup model', () => {
     expect(presetReason(undefined)).toBe('Tau’s default. Pick another if it is closer to what you know');
     expect(presetReason('solidworks')).toBe('Suggested because you use SolidWorks');
     expect(presetReason('slicer')).toBe('Tau’s default. Pick another if it is closer to what you know');
-    expect(presetReason('game-engine')).toBe('Suggested because you use Maya, Unity or Unreal');
+    expect(presetReason('game-engine')).toBe('Suggested because you use Maya or Unity');
     expect(presetReason('nx-creo')).toBe('Suggested because you use Creo');
+    expect(presetReason('tinkercad')).toBe('Suggested from your answer. Pick another if it is closer to what you know');
     expect(presetReason('kicad')).toBe('Tau’s default. Pick another if it is closer to what you know');
   });
 
   it('says where each preset is familiar from, from the documented products', () => {
     expect(familiarFromText(familiarProducts('middle-shift'))).toBe('Familiar from Blender and Creo');
-    expect(familiarFromText(familiarProducts('alt'))).toBe('Familiar from Maya, Unity and Unreal');
+    expect(familiarFromText(familiarProducts('alt'))).toBe('Familiar from Maya and Unity');
     expect(familiarFromText(familiarProducts('middle-ctrl'))).toBe('Familiar from SolidWorks');
     expect(familiarFromText([])).toBeUndefined();
   });

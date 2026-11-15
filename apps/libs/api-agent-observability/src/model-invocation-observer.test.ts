@@ -103,6 +103,42 @@ describe('ObservedModelInvocationService', () => {
     ]);
   });
 
+  it("should count a Vertex call's thinking as output, as the ledger does (LA3)", async () => {
+    const route = 'google-gemini-3.8-flash';
+    const completions = new TextEncoder().encode(
+      [
+        { id: 'cmpl_1', model: 'gemini-test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+        {
+          id: 'cmpl_1',
+          model: 'gemini-test',
+          choices: [],
+          usage: { prompt_tokens: 1935, completion_tokens: 205, completion_tokens_details: { reasoning_tokens: 127 } },
+        },
+      ]
+        .map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+        .join(''),
+    );
+    const { observed, recorded } = setup(async () => ({
+      state: 'streaming',
+      operationId: 'op-1',
+      response: new Response(new Blob([completions]).stream(), { status: 200 }),
+      completion: Promise.resolve(),
+    }));
+
+    const result = await observed.invoke(
+      intent({
+        providerWire: 'openai-completions',
+        body: { model: route, messages: [{ role: 'user', content: secret }] },
+      }),
+    );
+    if (result.state === 'streaming') {
+      await result.response.arrayBuffer();
+    }
+
+    expect(resolveGatewayModelRoute(route, 'openai-completions').providerId).toBe('vertexai');
+    expect(recorded).toMatchObject([{ provider: 'vertexai', stream: { usage: { output: 332, reasoning: 127 } } }]);
+  });
+
   it('should record the host labels the caller asserted, and none for a call that sent none', async () => {
     const { observed, recorded } = setup(async () => streaming());
     const hostLabels = { host: 'browser', build: '0123456789ab', kernel: 'replicad', model: 'unknown' } as const;

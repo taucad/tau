@@ -92,7 +92,29 @@ describe('S3HealthIndicator', () => {
     await vi.advanceTimersByTimeAsync(1500);
     const result = await pending;
 
-    expect(result['s3']).toMatchObject({ status: 'down', message: 'Storage readiness timed out after 1500 ms' });
+    expect(result['s3']).toMatchObject({
+      status: 'down',
+      message: 'Storage readiness timed out after 1500 ms',
+      waitingOn: ['privateBucket'],
+    });
+  });
+
+  it('should name both heads when neither answers before the deadline', async () => {
+    vi.useFakeTimers();
+    const never = async (signal: AbortSignal): Promise<never> =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(new Error('aborted', { cause: signal.reason }));
+        });
+      });
+    mockHeadProbe.mockImplementation(never);
+    mockHeadPrivateBucket.mockImplementation(never);
+
+    const pending = indicator.isHealthy();
+    await vi.advanceTimersByTimeAsync(1500);
+    const result = await pending;
+
+    expect(result['s3']).toMatchObject({ status: 'down', waitingOn: ['probeObject', 'privateBucket'] });
   });
 
   it('should bound SDK retry backoff and abort the transport at the shared deadline', async () => {

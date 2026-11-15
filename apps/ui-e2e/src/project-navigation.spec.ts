@@ -159,7 +159,18 @@ const setFieldOfView = async (degrees: number): Promise<void> => {
   }
   await target.keyboardPress('Enter');
   await target.expectAttribute(row, 'aria-label', `Field of view, 0° is orthographic, ${degrees}°`);
-  await target.keyboardPress('Escape');
+  /* The focused row shows its tooltip, and Escape dismisses that tooltip before it closes the menu (the topmost
+   * dismissable layer takes it). A menu left open hides the rest of the page from the accessibility tree, so the
+   * next role query (a sidebar link) never finds it: press Escape until the menu is gone. */
+  const menu = selectors.getByRole('menu');
+  await expect
+    .poll(async () => {
+      if (await target.isVisible(menu)) {
+        await target.keyboardPress('Escape');
+      }
+      return target.isVisible(menu);
+    })
+    .toBe(false);
   await expect
     .poll(async () => {
       const camera = await readCamera();
@@ -673,7 +684,8 @@ test('project and chat rows reveal their actions over a dissolving name', async 
    * The row could not read this until `2cfd558fd` repaired the lookups above. */
   expect(closeMetrics.background).toBe(closeMetrics.tabBackground);
   expect(closeMetrics.background).not.toBe('rgba(0, 0, 0, 0)');
-  expect(closeMetrics.flex).toEqual(['1', '1', '112px', '160px']);
+  /* The 112 px floor is capped at the strip's width, so a lone tab at large text sizes still fits (#1144). */
+  expect(closeMetrics.flex).toEqual(['1', '1', 'min(112px, 100%)', '160px']);
   expect(Math.max(...closeMetrics.inset) - Math.min(...closeMetrics.inset)).toBeLessThanOrEqual(1);
   await target.hover(closeButton);
   expect(await target.evaluateLocator(closeButton, (element) => getComputedStyle(element).backgroundColor)).not.toBe(

@@ -1,6 +1,8 @@
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegistry } from 'xstate';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
+import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 /**
  * One live project (S44, A35).
@@ -15,6 +17,37 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
  * The children are **injected**: the store module provides the real logics and
  * a test provides fakes, so this file imports no worker, no DOM and no React
  * (I27 — browser and desktop share the machine with different actors).
+ *
+ * A6c: the `fileManager` child is real. It builds the project's file manager through the file-manager host for
+ * `/projects/<id>` once `rootFiles` holds the shared worker, owns it for the session's life and reports the views
+ * region from its snapshot, with nothing mounted (I5). It tells the session the file manager's ref
+ * (`fileManagerChanged`), which the session keeps so the subtree's provider and later children read it, and tells it
+ * again when the shared worker is lost or replaced and it rebuilds the file manager; the child, never the session,
+ * stops it. A root fault is recorded
+ * once, the first kept, and reported through the app runtime's one hook (D23, B2).
+ *
+ * A6d: the `project` child is real too. Once the session has a file manager it builds the project runtime behind a
+ * dynamic import (D5, D8), from the file manager, the library, `choices` and the open request (rows S12, S34, S38): the
+ * request's native kernel id selects the kernel, and its chat reaches the editor, as does every later `chatRequested`,
+ * which the session forwards to it beside each `fileManagerChanged`. The child reports the runtime region from the
+ * runtime's facts, tells the session the runtime's root (`runtimeChanged`), which the session keeps for the subtree's
+ * provider, and reports that the chat session is ready (`chatReady`, M2) and each chat the editor focused
+ * (`chatFocused`), which the session passes to the registry for focus.
+ *
+ * A6e: a change of the device's choices that selects another kernel is the session event `replaceRuntime` (D8, B4). The
+ * `project` child reports it and the session hands it back while it opens, is live, has failed or asks to close: the
+ * child flushes the runtime's producers, then builds the next runtime and stops the old one.
+ *
+ * A7b: the session wires its own facts, with nothing mounted (I5). Each file manager the `fileManager` child reports
+ * gets a `revisions` child, which owns the project's revision-client lifecycle for the workspace of the session's own
+ * open request (B7) and registers the close cut at the session stage of `environment`'s sequencer (D26), and a
+ * `hostConnector` child, which publishes the project's read connector to the chat store. Both are loaded lazily where
+ * the session is composed (D5), take the file manager and its root synchronisation in their invoke input, never in this
+ * context (D4), and stop when the file manager goes. `revisions` reports the revision facts a policy close reads
+ * (`revisionState`) and whether the chats arrived (`revisionChatsChanged`, which the `project` child turns into a retry
+ * of a deferred focused chat). The `presence` child reports visibility from `environment` and focus
+ * (`visibilityChanged`), and the session sends parking to its own `project` child (`runtimeParking`) instead of
+ * emitting it for a React binding to relay.
  */
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
@@ -77,8 +110,8 @@ export type ProjectSessionMachineContext = Readonly<{
   /** The request this session was opened with; `chatRequested` moves its chat fields. */
   request: ProjectSessionOpenRequest | undefined;
   /**
-   * The chat session is ready, for focus's `opening` join (D25, I20). A constant `true` until A6d makes it real,
-   * which is today's behaviour: nothing waits for it.
+   * The chat session is ready, for focus's `opening` join (D25, I20; M2): the editor has left `ensuringFocusedChat`, as
+   * the `project` child reports it. It stays ready once it is.
    */
   chatReady: boolean;
   /** The first file check, for the same join. A constant `settled` until A14 makes it real. */
@@ -111,11 +144,29 @@ export type ProjectSessionMachineContext = Readonly<{
   closeReason: ProjectSessionCloseReason | undefined;
   /** The last state this session told the registry it was in. */
   reportedState: ProjectSessionState;
-  fileManagerRef: AnyActorRef | undefined;
+  /** The `fileManager` child, which owns the project's file manager. */
+  fileManagerChildRef: AnyActorRef | undefined;
+  /**
+   * The project's file manager, as the `fileManager` child reported it (A6c). The child built it and stops it; the
+   * session only hands it to its readers. `undefined` until the child reports it.
+   */
+  fileManagerRef: FileManagerRef | undefined;
+  /** The `project` child, which owns the project runtime (A6d). */
   projectRef: AnyActorRef | undefined;
+  /** The `revisions` child for the current file manager, which owns the revision-client lifecycle (A7b). */
+  revisionsRef: AnyActorRef | undefined;
+  /** The `hostConnector` child for the current file manager, which publishes the read connector (A7b). */
+  hostConnectorRef: AnyActorRef | undefined;
+  /** The `presence` child, which reports visibility from `environment` and focus (A7b). */
+  presenceRef: AnyActorRef | undefined;
+  /**
+   * The project runtime's root, as the `project` child reported it (A6d). The child built it and stops it; the session
+   * only hands it to its readers. `undefined` until the child reports it and while it rebuilds it.
+   */
+  runtimeRef: AnyActorRef | undefined;
   agentHostRef: AnyActorRef | undefined;
   computeRef: AnyActorRef | undefined;
-  /** An effect or child failure no transition modelled; the session keeps answering (MC-R12). */
+  /** The first effect or child failure no transition modelled; the session keeps answering (MC-R12, D23). */
   fault: string | undefined;
 }>;
 
@@ -125,7 +176,26 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'confirmClose' }
   | { readonly type: 'cancelClose' }
   | { readonly type: 'childReady'; readonly region: ProjectSessionRegion }
+  /**
+   * The `fileManager` child built and started the project's file manager, or closed it because the shared worker was
+   * lost or replaced or the child is stopping (A6c).
+   */
+  | {
+      readonly type: 'fileManagerChanged';
+      readonly fileManagerRef: FileManagerRef | undefined;
+      /**
+       * The file manager's own root synchronisation, which the `revisions` and `hostConnector` children are invoked
+       * with (A7b). It travels in the event and their input, never in this context (D4).
+       */
+      readonly syncProjectRoots?: () => Promise<void>;
+    }
   | { readonly type: 'childFailed'; readonly region: ProjectSessionRegion; readonly reason: string }
+  /** The `project` child built and started the project runtime, or stopped it to build another (A6d). */
+  | { readonly type: 'runtimeChanged'; readonly runtimeRef: AnyActorRef | undefined }
+  /** The editor left `ensuringFocusedChat`: the chat session is ready (M2). */
+  | { readonly type: 'chatReady' }
+  /** The editor focused `chatId` for the chat this session was asked for (`requestedChatId`). */
+  | { readonly type: 'chatFocused'; readonly requestedChatId?: string; readonly chatId: string }
   | {
       readonly type: 'projectedRunsChanged';
       readonly runs: readonly string[];
@@ -150,11 +220,19 @@ export type ProjectSessionMachineEvent =
       /** `sync.pendingCount`, for the quit overlay's `Backing up n`. */
       readonly pendingCount?: number;
     }
+  /** The `revisions` child: whether the project's chats have arrived, which a deferred focused chat waits for (S1). */
+  | { readonly type: 'revisionChatsChanged'; readonly ready: boolean }
   /**
    * Focus's request moved to another chat of this project (R3-F1). It sets both chat fields, so an `undefined`
    * clears one. A session opened without a request has no request to update, and keeps none.
    */
-  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string };
+  | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string }
+  /**
+   * The device's choices select another kernel than the runtime's (A6e; D8, B4). The `project` child reports it; the
+   * session hands it back to that child while it opens, is live, has failed or asks to close, and the child flushes what
+   * the runtime owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
+   */
+  | { readonly type: 'replaceRuntime' };
 
 /**
  * The project session machine's public alphabet: every {@link ProjectSessionMachineEvent} type, in the union's order.
@@ -167,22 +245,27 @@ export const projectSessionEventTypes = [
   'confirmClose',
   'cancelClose',
   'childReady',
+  'fileManagerChanged',
   'childFailed',
+  'runtimeChanged',
+  'chatReady',
+  'chatFocused',
   'projectedRunsChanged',
   'activity',
   'visibilityChanged',
   'attention',
   'revisionState',
+  'revisionChatsChanged',
   'chatRequested',
+  'replaceRuntime',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
 /** What a session tells its watchers. @public */
 export type ProjectSessionMachineEmitted =
   | { readonly type: 'sessionState'; readonly projectId: string; readonly state: ProjectSessionState }
   | { readonly type: 'attention'; readonly projectId: string; readonly count: number }
-  /* R3: whether this project's runtime should hold its kernel processes. The
-   * session owns the fact (hidden and idle); the project's own route binding is
-   * what reaches the cad units, because no actor ref links the two. */
+  /* R3: whether this project's runtime should hold its kernel processes. The session owns the fact (hidden and idle)
+   * and sends it to its own `project` child, which reaches the cad units (A7b); the emit stays for watchers. */
   | { readonly type: 'runtimeParking'; readonly projectId: string; readonly parked: boolean };
 
 /** A live project session actor. @public */
@@ -248,18 +331,34 @@ const releaseAgentHost = createAsyncLogic<void, { projectId: string }>({ run: un
  * The browser gets a file-manager actor over the shared worker and a worker
  * agent-host registration; the desktop gets the same session with a Node-served
  * file manager and the always-on launcher. Same machine, different actors. Each
- * reports `childReady` or `childFailed` to this parent; the defaults here do
- * neither, so an unprovided child fails its region at the start bound rather
- * than pretending to be up.
+ * reports `childReady` or `childFailed` to this parent, and the `fileManager` child
+ * also `fileManagerChanged`; the defaults here do neither, so an unprovided child
+ * fails its region at the start bound rather than pretending to be up.
  */
 const fileManager = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
-/* R14: no separate `editor` child. The editor actor lives inside the runtime
- * region's subtree and comes up with it; a second child relaying the same
+/* R14: no separate `editor` child. The editor actor lives inside the project
+ * runtime and comes up with it; a second child relaying the same
  * region key made one report mark two children ready and told nobody anything.
  * Add it back when the editor can fail on its own. */
-const project = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+const project = createCallbackLogic<EventObject, { projectId: string; request?: ProjectSessionOpenRequest }>(
+  () => undefined,
+);
 const agentHost = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
 const compute = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+
+/** What the session invokes each file manager's `revisions` and `hostConnector` children with (A7b). @public */
+export type ProjectSessionFileManagerInput = Readonly<{
+  projectId: string;
+  /** The slug of the session's own open request (B7). */
+  workspace: string;
+  fileManagerRef: FileManagerRef;
+  syncProjectRoots: () => Promise<void>;
+}>;
+
+/* A7b: the defaults do nothing; the store module provides the lazy logic. */
+const revisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
+const hostConnector = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
+const presence = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
 
 const projectSessionActors = {
   cancelRuns,
@@ -270,6 +369,9 @@ const projectSessionActors = {
   project,
   agentHost,
   compute,
+  revisions,
+  hostConnector,
+  presence,
 };
 
 type ProjectSessionEnqueue = EnqueueObject<
@@ -326,6 +428,10 @@ const reportFacts = (context: ProjectSessionMachineContext, enq: ProjectSessionE
  * the reverse side never has to know whether the grace elapsed. */
 const signalRuntime = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue, parked: boolean): void => {
   enq.emit({ type: 'runtimeParking', projectId: context.projectId, parked });
+  /* S5: the session's own `project` child holds the runtime whose cad units park (A7b). */
+  if (context.projectRef !== undefined) {
+    enq.sendTo(context.projectRef, { type: 'runtimeParking', parked });
+  }
 };
 
 /* The event names its own region (the startup regions check it), so this
@@ -341,31 +447,57 @@ const recordCloseFailure = (context: ProjectSessionMachineContext, error: unknow
   failures: { ...context.failures, close: error instanceof Error ? error.message : 'failed' },
 });
 
-/* I23: every project-scoped resource dies with the session. */
+/* I23: every project-scoped resource dies with the session. Stopping the `fileManager` child stops its file manager. */
 const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue) => {
-  for (const ref of [context.fileManagerRef, context.projectRef, context.agentHostRef, context.computeRef]) {
+  /* The runtime, the revision client and the connector read the file manager, so they stop first. */
+  for (const ref of [
+    context.projectRef,
+    context.revisionsRef,
+    context.hostConnectorRef,
+    context.fileManagerChildRef,
+    context.agentHostRef,
+    context.computeRef,
+    context.presenceRef,
+  ]) {
     if (ref !== undefined) {
       enq.stop(ref);
     }
   }
   return {
     context: {
+      fileManagerChildRef: undefined,
       fileManagerRef: undefined,
       projectRef: undefined,
+      runtimeRef: undefined,
+      revisionsRef: undefined,
+      hostConnectorRef: undefined,
+      presenceRef: undefined,
       agentHostRef: undefined,
       computeRef: undefined,
     },
   };
 };
 
-/* A close step that failed leaves the session failed with the reason recorded. */
-const closeFailed = ({
-  context,
-  event,
-}: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>) => ({
-  target: '#project-session.failed',
-  context: recordCloseFailure(context, event.error),
-});
+/* A6e: the `project` child flushes what its runtime owes, then builds the next one and stops it (D8, B4). */
+const handRuntimeReplacement = (
+  { context }: Readonly<{ context: ProjectSessionMachineContext }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  if (context.projectRef !== undefined) {
+    enq.sendTo(context.projectRef, { type: 'replaceRuntime' });
+  }
+  return {};
+};
+
+/* A close step that failed leaves the session failed with the reason recorded. Its children still run, so a kernel change
+ * the close ignored while it ran is handed back to the `project` child (A6e). */
+const closeFailed = (
+  { context, event }: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  handRuntimeReplacement({ context }, enq);
+  return { target: '#project-session.failed', context: recordCloseFailure(context, event.error) } as const;
+};
 
 /** One startup region: up, failed at the bound, or failed by its child. */
 const startupRegion = (region: ProjectSessionRegion) =>
@@ -418,6 +550,8 @@ const closingSteps = [
  * - `confirmClose` and `cancelClose` outside `closing.asking`: the dialog answered a question no longer asked.
  * - `activity` outside `live.idle`: it only re-arms the idle window, which runs there alone (and has no production
  *   sender, V1-6).
+ * - `replaceRuntime` once the close has started cancelling runs, and when closed: a close that goes on stops the
+ *   `project` child, and a close step that fails hands the replacement back as the session goes live or failed (A6e).
  *
  * @public
  */
@@ -427,6 +561,7 @@ export const projectSessionIgnoredEvents: ReadonlyArray<readonly [state: string,
     [state, 'cancelClose'] as const,
   ]),
   ...['opening', 'live.busy', 'closing', 'closed', 'failed'].map((state) => [state, 'activity'] as const),
+  ...[...closingSteps, 'closed'].map((state) => [state, 'replaceRuntime'] as const),
 ];
 
 /**
@@ -462,15 +597,20 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '2',
-  /* A fault no transition modelled is recorded and the session keeps answering (MC-R12). */
-  onError: ({ event }) => ({
-    context: { fault: event.error instanceof Error ? event.error.message : 'project-session fault' },
-  }),
+  version: '6',
+  /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
+   * later ones are usually its consequences (MC-R12, D23; B2). */
+  onError: ({ context, event }, enq) => {
+    if (context.fault !== undefined) {
+      return {};
+    }
+    enq(reportAppRuntimeFault, event.error);
+    return { context: { fault: faultMessage(event.error, 'project-session fault') } };
+  },
   context: ({ input }) => ({
     projectId: input.projectId,
     request: input.request,
-    chatReady: true,
+    chatReady: false,
     availability: 'settled',
     parentRef: input.parentRef,
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? projectSessionIdleWindowMilliseconds,
@@ -489,8 +629,13 @@ export const projectSessionMachine = setup({
     openFailed: false,
     closeReason: undefined,
     reportedState: 'opening',
+    fileManagerChildRef: undefined,
     fileManagerRef: undefined,
     projectRef: undefined,
+    runtimeRef: undefined,
+    revisionsRef: undefined,
+    hostConnectorRef: undefined,
+    presenceRef: undefined,
     agentHostRef: undefined,
     computeRef: undefined,
     fault: undefined,
@@ -506,11 +651,78 @@ export const projectSessionMachine = setup({
       reportFacts({ ...context, ...patch }, enq);
       return { context: patch };
     },
-    /* Answered in every state: the request is a fact the session keeps, whatever it is doing (MC-R16). */
-    chatRequested: ({ context, event }) =>
-      context.request === undefined
+    /* The child reports each file manager it builds, and `undefined` when it closes one because the shared worker was
+     * lost or replaced or the child is stopping (A6c). A stopped child tells nothing more, and `stopChildren` clears
+     * the ref itself, so a report reaches only a session whose child runs. */
+    fileManagerChanged: ({ context, event, actors }, enq) => {
+      /* The `project` child builds the runtime on the session's file manager (A6d). */
+      if (context.projectRef !== undefined) {
+        enq.sendTo(context.projectRef, { type: 'fileManagerChanged', fileManagerRef: event.fileManagerRef });
+      }
+      /* A7b: the revision client and the connector follow the file manager: the old one's go, the new one's start. */
+      for (const ref of [context.revisionsRef, context.hostConnectorRef]) {
+        if (ref !== undefined) {
+          enq.stop(ref);
+        }
+      }
+      if (event.fileManagerRef === undefined) {
+        return { context: { fileManagerRef: undefined, revisionsRef: undefined, hostConnectorRef: undefined } };
+      }
+      const input: ProjectSessionFileManagerInput = {
+        projectId: context.projectId,
+        workspace: context.request?.workspace ?? '',
+        fileManagerRef: event.fileManagerRef,
+        syncProjectRoots: event.syncProjectRoots ?? (async () => undefined),
+      };
+      return {
+        context: {
+          fileManagerRef: event.fileManagerRef,
+          /* No fixed id: the next file manager's children start while the previous ones are being stopped. */
+          revisionsRef: enq.spawn(actors.revisions, { input }),
+          hostConnectorRef: enq.spawn(actors.hostConnector, { input }),
+        },
+      };
+    },
+    /* S1: the `project` child retries a deferred focused chat once the chats have arrived. */
+    revisionChatsChanged: ({ context, event }, enq) => {
+      if (context.projectRef !== undefined) {
+        enq.sendTo(context.projectRef, event);
+      }
+      return {};
+    },
+    /* The `project` child reports each runtime it builds, and `undefined` while it rebuilds one (A6d); as for the file
+     * manager, a stopped child tells nothing more and `stopChildren` clears the ref. */
+    runtimeChanged: ({ event }) => ({ context: { runtimeRef: event.runtimeRef } }),
+    /* M2: once ready, the chat session stays ready for focus's join; the registry hears it with the other facts. */
+    chatReady: ({ context }, enq) => {
+      if (context.chatReady) {
+        return {};
+      }
+      reportFacts({ ...context, chatReady: true }, enq);
+      return { context: { chatReady: true } };
+    },
+    /* Focus shows the chat the editor focused (I18); the registry carries it to focus. */
+    chatFocused: ({ context, event }, enq) => {
+      if (context.parentRef !== undefined) {
+        enq.sendTo(context.parentRef, {
+          type: 'sessionChatFocused',
+          projectId: context.projectId,
+          chatId: event.chatId,
+          ...(event.requestedChatId === undefined ? {} : { requestedChatId: event.requestedChatId }),
+        });
+      }
+      return {};
+    },
+    /* Answered in every state: the request is a fact the session keeps, whatever it is doing (MC-R16). The editor hears
+     * it through the `project` child, whether or not the session was opened with a request. */
+    chatRequested: ({ context, event }, enq) => {
+      if (context.projectRef !== undefined) {
+        enq.sendTo(context.projectRef, event);
+      }
+      return context.request === undefined
         ? {}
-        : { context: { request: { ...context.request, chatId: event.chatId, createdChatId: event.createdChatId } } },
+        : { context: { request: { ...context.request, chatId: event.chatId, createdChatId: event.createdChatId } } };
+    },
     attention: ({ context, event }, enq) => {
       enq.emit({ type: 'attention', projectId: context.projectId, count: event.count });
       return { context: { attention: event.count } };
@@ -557,18 +769,27 @@ export const projectSessionMachine = setup({
   states: {
     opening: {
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'opening') }),
+      on: { replaceRuntime: handRuntimeReplacement },
       initial: 'starting',
       states: {
         starting: {
           entry: ({ context, actors }, enq) => ({
             context: {
-              fileManagerRef: enq.spawn(actors.fileManager, {
+              fileManagerChildRef: enq.spawn(actors.fileManager, {
                 id: 'fileManager',
                 input: { projectId: context.projectId },
               }),
-              projectRef: enq.spawn(actors.project, { id: 'project', input: { projectId: context.projectId } }),
+              projectRef: enq.spawn(actors.project, {
+                id: 'project',
+                input: {
+                  projectId: context.projectId,
+                  ...(context.request === undefined ? {} : { request: context.request }),
+                },
+              }),
               agentHostRef: enq.spawn(actors.agentHost, { id: 'agentHost', input: { projectId: context.projectId } }),
               computeRef: enq.spawn(actors.compute, { id: 'compute', input: { projectId: context.projectId } }),
+              /* S4: visibility from `environment` and focus, with nothing mounted (A7b). */
+              presenceRef: enq.spawn(actors.presence, { id: 'presence', input: { projectId: context.projectId } }),
             },
           }),
           type: 'parallel',
@@ -587,6 +808,7 @@ export const projectSessionMachine = setup({
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'live') }),
       initial: 'idle',
       on: {
+        replaceRuntime: handRuntimeReplacement,
         projectedRunsChanged: ({ context, event }, enq) => {
           const { runs } = event;
           reportFacts({ ...context, runs }, enq);
@@ -671,13 +893,30 @@ export const projectSessionMachine = setup({
       initial: 'asking',
       states: {
         asking: {
+          /* A6e: a close asked again after it started lifts the hold on a replacement it ignored or held. */
+          entry: ({ context }, enq) => {
+            handRuntimeReplacement({ context }, enq);
+          },
           always: ({ context, guards }) => (guards.shouldAsk(context) ? undefined : { target: 'cancellingRuns' }),
           on: {
+            /* Nothing is flushed or stopped yet, and a cancel keeps the session live with this runtime. */
+            replaceRuntime: handRuntimeReplacement,
             confirmClose: { target: 'cancellingRuns' },
-            cancelClose: { target: '#project-session.live', context: { closeReason: undefined } },
+            /* A6e: a close asked again after it had started holds a replacement; cancelling it hands that back. */
+            cancelClose: ({ context }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return { target: '#project-session.live', context: { closeReason: undefined } };
+            },
           },
         },
         cancellingRuns: {
+          /* A6e: a replacement handed on before the close builds nothing once its flush settles; the close stops the
+           * child, and a close step that fails hands `replaceRuntime` back, which lifts the hold. */
+          entry: ({ context }, enq) => {
+            if (context.projectRef !== undefined) {
+              enq.sendTo(context.projectRef, { type: 'holdReplacement' });
+            }
+          },
           invoke: {
             src: 'cancelRuns',
             input: ({ context }) => ({ projectId: context.projectId, runs: context.stoppableRuns }),
@@ -692,12 +931,14 @@ export const projectSessionMachine = setup({
             src: 'flushProducers',
             input: ({ context }) => ({ projectId: context.projectId }),
             onDone: { target: 'flushing' },
-            onError: {
-              target: '#project-session.live',
-              context: ({ context, event }) => ({
-                ...recordCloseFailure(context, event.error),
-                closeReason: undefined,
-              }),
+            /* A6e: a kernel change the close ignored while it ran is handed back with the session, which is live again;
+             * the child replaces only a runtime whose kernel is no longer selected. */
+            onError: ({ context, event }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: { ...recordCloseFailure(context, event.error), closeReason: undefined },
+              };
             },
           },
         },
@@ -749,7 +990,12 @@ export const projectSessionMachine = setup({
         return { context: patch };
       },
     },
-    failed: { entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }) },
+    /* A failed session keeps its children until it is closed or the registry lets it go: a kernel change still replaces
+     * its runtime, which may be the remedy (a kernel refused on this device, compute moved to another, A6e). */
+    failed: {
+      entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }),
+      on: { replaceRuntime: handRuntimeReplacement },
+    },
   },
   exit: ({ context }, enq) => stopChildren(context, enq),
 });

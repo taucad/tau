@@ -458,13 +458,23 @@ export const resolveSectionFootprint = ({
 // ---------------------------------------------------------------------------
 
 /**
+ * The largest component of a unit view direction along a plane's axis that still counts as level with the plane in
+ * {@link resolveSectionPlaneFlip}, the same bound the view cube uses to name an axis-aligned face.
+ */
+const sectionPlaneLevelTolerance = 1e-5;
+
+/**
  * Whether a cut newly on `plane` is flipped, so that it removes the side facing the camera: an unflipped plane
  * removes its +axis side. `viewDirection` points from the view's target toward the camera; a camera level with the
  * plane, or no view, leaves it unflipped. Every new plane takes it: an added cut and a cut moved to another plane.
+ *
+ * A camera counts as level when the direction's component along the plane's axis is within
+ * {@link sectionPlaneLevelTolerance}: a pose straight down onto an XY plane can carry a
+ * rounding-sized sideways component, whose sign must not pick the side of a vertical plane.
  * @public
  */
 export const resolveSectionPlaneFlip = (plane: SectionPlane, viewDirection: SectionVector | undefined): boolean =>
-  (viewDirection?.[sectionAxisIndices[sectionPlaneAxes[plane]]] ?? 0) < 0;
+  (viewDirection?.[sectionAxisIndices[sectionPlaneAxes[plane]]] ?? 0) < -sectionPlaneLevelTolerance;
 
 type CreateDefaultPlaneCutOptions = Readonly<{
   id: string;

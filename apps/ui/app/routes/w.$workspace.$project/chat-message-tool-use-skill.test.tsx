@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import type React from 'react';
 import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
@@ -81,7 +81,7 @@ describe('ChatMessageToolUseSkill', () => {
    * (`skill:<slug>@<version>#<fingerprint>`), the shape `composeView` mints and
    * the shape an override records as `overrides`. A bare fingerprint is not it.
    */
-  it('mints the overlay unit identity the composed view uses', () => {
+  it('mints the overlay unit identity the composed view uses', async () => {
     const bundle = systemSkillBundles[0]!;
     linked.length = 0;
     render(
@@ -104,11 +104,14 @@ describe('ChatMessageToolUseSkill', () => {
       />,
     );
 
-    expect(linked.at(-1)?.provenance).toEqual({
-      source: 'system-skills',
-      versioned: false,
-      agentAccess: 'read-only',
-      identity: `skill:${bundle.slug}@${bundle.version}#${bundle.fingerprint}`,
+    // The bundles load on demand (LB4c), so the identity arrives with them; the row's text does not change.
+    await waitFor(() => {
+      expect(linked.at(-1)?.provenance).toEqual({
+        source: 'system-skills',
+        versioned: false,
+        agentAccess: 'read-only',
+        identity: `skill:${bundle.slug}@${bundle.version}#${bundle.fingerprint}`,
+      });
     });
   });
 

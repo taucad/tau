@@ -4,9 +4,11 @@
  *
  * 1. `running`: initial; the child owns the lifecycle until the parent stops it
  *
- * The rows keep what `useRevisionClientLifecycle` (`hooks/use-revision-status.ts` 1531 to 1657) does today.
+ * The first rows keep what `useRevisionClientLifecycle` did before A7b deleted it. The A7b rows add what the session
+ * binding and `WorkbenchCheckoutRoot` did from React: the revision facts (S3), the chats' arrival (S1), the focused
+ * project (F12) and the checkout the workbench follows (S23).
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, setup, types } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
@@ -14,13 +16,32 @@ import { guardActors } from '@taucad/xstate-testing/inspect';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { revisionClientTestApi } from '#hooks/use-revision-status.js';
-import type { FlushPhase } from '#hooks/use-flush-on-close.js';
+import type { FlushPhase } from '#runtime/environment.js';
 import { revisionUserActor } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
-import { createSessionRevisionsLogic } from '#runtime/session-revisions.js';
-import type { SessionRevisionsCloseCut, SessionRevisionsPorts } from '#runtime/session-revisions.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import { createSessionRevisionsLogic, sessionRevisionsCallback } from '#runtime/session-revisions.js';
+import type {
+  SessionRevisionsCloseCut,
+  SessionRevisionsEmitted,
+  SessionRevisionsPorts,
+} from '#runtime/session-revisions.js';
+import type { ChatRevisionFacts } from '#services/chat-session-store.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
+
+const handleStore = vi.hoisted(() => ({
+  setCheckoutRootConfigs: vi.fn((_routes: unknown) => false),
+  getProjectRootConfigs: vi.fn(async () => ({
+    projects: [{ projectId: 'prj_revisions', backend: 'opfs', providerBasePath: 'prj_revisions' }],
+    roots: [{ backend: 'opfs' }],
+  })),
+}));
+vi.mock('#filesystem/handle-store.js', () => ({
+  getProjectRootConfigs: async () => handleStore.getProjectRootConfigs(),
+  setCheckoutRootConfigs: (routes: unknown) => handleStore.setCheckoutRootConfigs(routes),
+}));
 
 const projectId = 'prj_revisions';
 const workspace = 'acme';
@@ -61,9 +82,20 @@ const createFakeClient = (
     setApplying: (roots: readonly string[]) => void;
     userAnswer: PromiseWithResolvers<void>;
     holdSave: () => PromiseWithResolvers<void>;
+    setStatus: (patch: Partial<RevisionStatusProjection>) => void;
+    republish: () => void;
+    focused: boolean[];
   }> => {
   const listeners = createSignal();
-  let applyingRoots: readonly string[] = [];
+  /* A new projection object on each change, as the client publishes one. */
+  let status: RevisionStatusProjection & { applyingRoots: readonly string[] } = {
+    ...revisionStatusHarness.status,
+    projectId,
+    checkoutRoot: `/projects/${projectId}`,
+    branches: [],
+    applyingRoots: [],
+  };
+  const focused: boolean[] = [];
   const userAnswer = Promise.withResolvers<void>();
   let saveGate: PromiseWithResolvers<void> | undefined;
   const client = {
@@ -92,10 +124,22 @@ const createFakeClient = (
       saveGate = Promise.withResolvers<void>();
       return saveGate;
     },
-    status: () => ({ applyingRoots }),
+    status: () => status,
     subscribe: listeners.subscribe,
+    focus: (on: boolean) => {
+      focused.push(on);
+    },
+    focused,
     setApplying: (roots: readonly string[]) => {
-      applyingRoots = roots;
+      status = { ...status, applyingRoots: roots };
+      listeners.emit();
+    },
+    setStatus: (patch: Partial<RevisionStatusProjection>) => {
+      status = { ...status, ...patch };
+      listeners.emit();
+    },
+    /* Tell the listeners again with the same projection. */
+    republish: () => {
       listeners.emit();
     },
     userAnswer,
@@ -109,7 +153,11 @@ type FileManagerContext = Readonly<{ worker?: Worker; treeService?: unknown; roo
 const createFileManager = (initial: FileManagerContext) => {
   let context = initial;
   const signal = createSignal();
+  const sent: unknown[] = [];
   const ref = {
+    send: (event: unknown) => {
+      sent.push(event);
+    },
     getSnapshot: () => ({ context, matches: () => true }),
     subscribe: (observer: { next: () => void }) => ({
       unsubscribe: signal.subscribe(() => {
@@ -126,6 +174,7 @@ const createFileManager = (initial: FileManagerContext) => {
     get listeners() {
       return signal.size;
     },
+    sent,
   };
 };
 
@@ -139,8 +188,13 @@ const createTree = (log: ClientLog, name = 'tree') => ({
   },
 });
 
-const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser }> = {}) => {
-  let { user } = initial;
+const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused?: string }> = {}) => {
+  let { user, focused } = initial;
+  const focusSignal = createSignal();
+  let recording = false;
+  const recordingSignal = createSignal();
+  const chatFacts: Array<Readonly<{ projectId: string; facts: ChatRevisionFacts }>> = [];
+  const faults: unknown[] = [];
   const userSignal = createSignal();
   const anonymousBy = new Map<string, boolean>();
   const anonymitySignal = createSignal();
@@ -168,6 +222,14 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser }> = {})
         };
       },
     },
+    focusedProject: { get: () => focused, subscribe: focusSignal.subscribe },
+    chatFacts: (id, facts) => {
+      chatFacts.push({ projectId: id, facts });
+    },
+    recording: { get: () => recording, subscribe: recordingSignal.subscribe },
+    reportFault: (error) => {
+      faults.push(error);
+    },
   };
   return {
     ports,
@@ -189,12 +251,22 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser }> = {})
     emitSalt: () => {
       saltSignal.emit();
     },
+    setFocused: (next: string | undefined) => {
+      focused = next;
+      focusSignal.emit();
+    },
+    setRecording: (next: boolean) => {
+      recording = next;
+      recordingSignal.emit();
+    },
+    chatFacts,
+    faults,
     saltRequests,
     cuts,
     get unregistered() {
       return unregistered;
     },
-    listeners: () => userSignal.size + anonymitySignal.size + saltSignal.size,
+    listeners: () => userSignal.size + anonymitySignal.size + saltSignal.size + focusSignal.size + recordingSignal.size,
   };
 };
 
@@ -202,22 +274,45 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser }> = {})
 const createSession = (
   ports: SessionRevisionsPorts,
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>,
-  options: Readonly<{ guard: ReturnType<typeof guardActors>; workspace?: string }>,
+  options: Readonly<{
+    guard: ReturnType<typeof guardActors>;
+    workspace?: string;
+    received?: SessionRevisionsEmitted[];
+    syncProjectRoots?: () => Promise<void>;
+  }>,
 ) => {
-  const { guard, workspace: sessionWorkspace = workspace } = options;
+  const {
+    guard,
+    workspace: sessionWorkspace = workspace,
+    received = [],
+    syncProjectRoots = async () => undefined,
+  } = options;
   const session = setup({
-    schemas: { context: types<Record<string, never>>(), events: eventSchemas<{ type: 'noop' }>() },
+    schemas: { context: types<Record<string, never>>(), events: eventSchemas<SessionRevisionsEmitted>() },
     actors: { revisions: createSessionRevisionsLogic(ports) },
   }).createMachine({
     id: 'revisions-session',
     context: {},
     initial: 'running',
+    /* What the child tells its session: the facts a policy close relies on (S3) and the chats' arrival (S1). */
+    on: {
+      revisionState: ({ event }, enq) => {
+        enq(() => {
+          received.push(event);
+        });
+      },
+      revisionChatsChanged: ({ event }, enq) => {
+        enq(() => {
+          received.push(event);
+        });
+      },
+    },
     states: {
       running: {
         invoke: {
           id: 'revisions',
           src: 'revisions',
-          input: { projectId, workspace: sessionWorkspace, fileManagerRef },
+          input: { projectId, workspace: sessionWorkspace, fileManagerRef, syncProjectRoots },
         },
       },
     },
@@ -481,7 +576,7 @@ describe('session revisions', () => {
     expect(guard.take()).toEqual([]);
   });
 
-  it("should author the actor with the project's GitHub no-reply identity once it is linked (D33)", () => {
+  it("should send the project's GitHub no-reply identity beside the actor once it is linked (D33, I3)", () => {
     const guard = guardActors();
     const log: ClientLog = [];
     const client = createFakeClient('a', log);
@@ -501,7 +596,8 @@ describe('session revisions', () => {
 
     expect(sent(log, 'a', 'setActor').at(-1)).toEqual({
       command: 'setActor',
-      actor: { kind: 'user', id: 'usr_1', name: 'ada', email: '1+ada@users.noreply.github.com' },
+      actor: { kind: 'user', id: 'usr_1', name: 'Ada' },
+      commitAuthor: { name: 'ada', email: '1+ada@users.noreply.github.com' },
     });
     session.stop();
     expect(guard.take()).toEqual([]);
@@ -652,6 +748,302 @@ describe('session revisions', () => {
     expect(log.every((line) => line.startsWith('b:'))).toBe(true);
     expect(log).toContain('b:setUser:usr_9');
     session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+});
+
+describe('session revisions relay the facts and follow the checkout (A7b)', () => {
+  beforeEach(() => {
+    revisionStatusHarness.reset();
+    handleStore.setCheckoutRootConfigs.mockClear();
+    handleStore.setCheckoutRootConfigs.mockReturnValue(false);
+    handleStore.getProjectRootConfigs.mockClear();
+  });
+
+  afterEach(() => {
+    revisionClientTestApi.reset();
+    githubProjectBinding.remove(projectId);
+  });
+
+  /** A started session on one open client, with what it told its session. */
+  const startSession = async (options: Readonly<{ focused?: string; syncProjectRoots?: () => Promise<void> }> = {}) => {
+    const guard = guardActors();
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts(options.focused === undefined ? {} : { focused: options.focused });
+    const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
+    const received: SessionRevisionsEmitted[] = [];
+    const session = createSession(fake.ports, fileManager.ref, {
+      guard,
+      received,
+      ...(options.syncProjectRoots === undefined ? {} : { syncProjectRoots: options.syncProjectRoots }),
+    });
+    session.start();
+    await settle();
+    return { guard, log, client, fake, fileManager, received, session };
+  };
+
+  const setRoot = (path: string) => ({ type: 'setRoot', path, projectId });
+
+  const onBranch = (checkoutId: string): Partial<RevisionStatusProjection> => ({
+    checkoutId,
+    checkoutRoot: `/checkouts/${checkoutId}`,
+    line: { kind: 'branch', name: checkoutId },
+    branches: [
+      { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: `/projects/${projectId}`, leaseChatIds: [] },
+      { name: checkoutId, head: undefined, checkoutId, checkoutRoot: `/checkouts/${checkoutId}`, leaseChatIds: [] },
+    ],
+  });
+
+  it('S3: should tell the session and its chats each projection, and the recording, with nothing mounted', async () => {
+    const { client, fake, received, session, guard } = await startSession();
+    expect(received.at(-1)).toEqual({
+      type: 'revisionState',
+      dirty: false,
+      recording: false,
+      pushed: true,
+      pendingCount: 0,
+    });
+
+    client.setStatus({
+      projectDirty: true,
+      line: { kind: 'branch', name: 'fillet' },
+      sync: { ...revisionStatusHarness.status.sync, state: 'pending', pendingCount: 3 },
+    });
+    expect(received.at(-1)).toEqual({
+      type: 'revisionState',
+      dirty: true,
+      recording: false,
+      pushed: false,
+      pendingCount: 3,
+    });
+    expect(fake.chatFacts.at(-1)).toEqual({
+      projectId,
+      facts: { dirty: true, sync: 'pending', branch: 'fillet' },
+    });
+
+    fake.setRecording(true);
+    expect(received.at(-1)).toMatchObject({ type: 'revisionState', recording: true });
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('should relay a projection once, however often the client publishes it', async () => {
+    const { client, received, session } = await startSession();
+    const before = received.length;
+
+    client.republish();
+    client.republish();
+    expect(received.length).toBe(before);
+
+    client.setStatus({});
+    expect(received.slice(before)).toEqual([
+      { type: 'revisionState', dirty: false, recording: false, pushed: true, pendingCount: 0 },
+    ]);
+    session.stop();
+  });
+
+  it('S1: should tell the session once when the chats arrive', async () => {
+    const { client, received, session } = await startSession();
+    expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([]);
+
+    const sync: RevisionStatusProjection['sync'] = { ...revisionStatusHarness.status.sync, chats: 'ready' };
+    client.setStatus({ sync });
+    client.setStatus({ projectDirty: true });
+    expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([
+      { type: 'revisionChatsChanged', ready: true },
+    ]);
+    session.stop();
+  });
+
+  it('F12: should tell the client whether its project is focused, on connect and on each flip', async () => {
+    const { client, fake, session } = await startSession();
+    expect(client.focused).toEqual([false]);
+
+    fake.setFocused(projectId);
+    fake.setFocused(projectId);
+    fake.setFocused('prj_other');
+
+    expect(client.focused).toEqual([false, true, false]);
+    session.stop();
+  });
+
+  it('S23: should serve the project directory while the focused project is on the live checkout', async () => {
+    const { fileManager, session } = await startSession({ focused: projectId });
+
+    expect(fileManager.sent).toEqual([setRoot(`/projects/${projectId}`)]);
+    session.stop();
+  });
+
+  it('S23: should install nothing for a project focus is not on, and follow once it is', async () => {
+    const { client, fake, fileManager, session } = await startSession();
+    client.setStatus({ checkoutRoot: `/projects/${projectId}` });
+    expect(fileManager.sent).toEqual([]);
+    expect(handleStore.setCheckoutRootConfigs).not.toHaveBeenCalled();
+
+    fake.setFocused(projectId);
+
+    expect(fileManager.sent).toEqual([setRoot(`/projects/${projectId}`)]);
+    session.stop();
+  });
+
+  it('S23: should re-root at the checkout the switch selected only once its route is installed', async () => {
+    const pending: Array<() => void> = [];
+    const syncProjectRoots = vi.fn(
+      async () =>
+        new Promise<void>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const { client, fileManager, session } = await startSession({ focused: projectId, syncProjectRoots });
+    fileManager.sent.length = 0;
+    handleStore.setCheckoutRootConfigs.mockReturnValue(true);
+
+    client.setStatus(onBranch('co-2'));
+    await settle();
+
+    expect(syncProjectRoots).toHaveBeenCalledTimes(1);
+    expect(handleStore.setCheckoutRootConfigs).toHaveBeenCalledWith([
+      { projectId, backend: 'opfs', providerBasePath: `.tau/checkouts/${projectId}/co-2`, checkoutId: 'co-2' },
+    ]);
+    expect(fileManager.sent).toEqual([]);
+
+    for (const resolve of pending.splice(0)) {
+      resolve();
+    }
+    await settle();
+    expect(fileManager.sent).toEqual([setRoot('/checkouts/co-2')]);
+    session.stop();
+  });
+
+  it('D23: should report nothing when a checkout route still installing is cut short by the session stopping', async () => {
+    const pending: Array<(error: Error) => void> = [];
+    const syncProjectRoots = vi.fn(
+      async () =>
+        new Promise<void>((_resolve, reject) => {
+          pending.push(reject);
+        }),
+    );
+    const { client, fake, fileManager, session } = await startSession({ focused: projectId, syncProjectRoots });
+    fileManager.sent.length = 0;
+    handleStore.setCheckoutRootConfigs.mockReturnValue(true);
+    client.setStatus(onBranch('co-2'));
+    await settle();
+    expect(syncProjectRoots).toHaveBeenCalledTimes(1);
+
+    session.stop();
+    for (const reject of pending.splice(0)) {
+      reject(new Error('Workspace root synchronization owner is disposed'));
+    }
+    await settle();
+
+    expect(fake.faults).toEqual([]);
+    expect(fileManager.sent).toEqual([]);
+  });
+
+  it('S23: should let the newest selection win when two switches land together', async () => {
+    const pending: Array<() => void> = [];
+    const syncProjectRoots = vi.fn(
+      async () =>
+        new Promise<void>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const { client, fileManager, session } = await startSession({ focused: projectId, syncProjectRoots });
+    fileManager.sent.length = 0;
+    handleStore.setCheckoutRootConfigs.mockReturnValue(true);
+
+    client.setStatus(onBranch('co-2'));
+    await settle();
+    client.setStatus(onBranch('co-3'));
+    await settle();
+    expect(syncProjectRoots).toHaveBeenCalledTimes(2);
+
+    for (const resolve of pending.splice(0)) {
+      resolve();
+    }
+    await settle();
+    expect(fileManager.sent).toEqual([setRoot('/checkouts/co-3')]);
+    session.stop();
+  });
+
+  it('S23: should take the route back when the branch that owned it is gone', async () => {
+    const syncProjectRoots = vi.fn(async () => undefined);
+    handleStore.setCheckoutRootConfigs.mockReturnValue(true);
+
+    const { session } = await startSession({ focused: projectId, syncProjectRoots });
+
+    expect(handleStore.setCheckoutRootConfigs).toHaveBeenCalledWith([]);
+    expect(syncProjectRoots).toHaveBeenCalledTimes(1);
+    session.stop();
+  });
+
+  it('S23: should send nothing before the root has answered', async () => {
+    const guard = guardActors();
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    client.setStatus({ checkoutRoot: undefined });
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts({ focused: projectId });
+    const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
+    const session = createSession(fake.ports, fileManager.ref, { guard });
+    session.start();
+    await settle();
+
+    expect(fileManager.sent).toEqual([]);
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('D23: should release what a start that throws partway had already taken', async () => {
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts({});
+    const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
+    const failure = new Error('subscribe threw');
+    const ports: SessionRevisionsPorts = {
+      ...fake.ports,
+      recording: {
+        ...fake.ports.recording,
+        subscribe: () => {
+          throw failure;
+        },
+      },
+    };
+
+    expect(() =>
+      sessionRevisionsCallback(ports)({
+        input: { projectId, workspace, fileManagerRef: fileManager.ref, syncProjectRoots: async () => undefined },
+        sendBack: () => undefined,
+      }),
+    ).toThrow(failure);
+    await settle();
+
+    expect(log).toContain('a:close');
+    expect(fake.cuts).toEqual([]);
+    expect(fake.listeners()).toBe(0);
+    expect(fileManager.listeners).toBe(0);
+  });
+
+  it('D23: should report a teardown that throws rather than fault the session, and still release the rest', async () => {
+    const { client, fake, fileManager, session, guard } = await startSession();
+    const failure = new Error('close threw');
+    Object.assign(client, {
+      close: () => {
+        throw failure;
+      },
+    });
+
+    session.stop();
+
+    expect(fake.faults).toEqual([failure]);
+    expect(fake.listeners()).toBe(0);
+    expect(fileManager.listeners).toBe(0);
     expect(guard.take()).toEqual([]);
   });
 });

@@ -165,6 +165,12 @@ export type ModelStreamRequest = {
    * track turns; the gateway then records no turn labels for the call.
    */
   readonly turn?: GatewayTurnLabels | undefined;
+  /**
+   * The kernel the run targets, for the gateway's `x-tau-kernel` label (LW17): read from the turn's snapshot, so it is
+   * per run while the composition's other labels are per host. An observability label only, sent as a header and only
+   * when the composition names its host. Absent when the snapshot names no kernel.
+   */
+  readonly kernel?: string | undefined;
   /** Called after the response header is validated and before its stream is consumed. */
   readonly onInvocationBound?: ((binding: ModelInvocationBinding) => Promise<void>) | undefined;
   /** Gateway or local-provider model identity. */

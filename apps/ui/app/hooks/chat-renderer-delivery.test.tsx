@@ -145,7 +145,6 @@ it('should render first held reasoning through production ChatMessage before dur
   const session = current.get('mounted')!;
   const owner = createActor(projectSessionMachine, { input: { projectId: 'project' } });
   owner.start();
-  current.setFocusedProject('project');
   current.setProjectSession('project', owner);
   let rows: unknown[] = [];
   let deliver: (() => void) | undefined;

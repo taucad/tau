@@ -1452,7 +1452,15 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       // compaction is a kind of its own and says so.
       ...(request.invocationPurpose === 'compaction' ? { activity: 'compaction' } : {}),
       ...(request.turn === undefined ? {} : { turn: request.turn }),
-      ...(options.hostLabels === undefined ? {} : { host: { ...options.hostLabels, model: request.modelId } }),
+      ...(options.hostLabels === undefined
+        ? {}
+        : {
+            host: {
+              ...options.hostLabels,
+              ...(request.kernel === undefined ? {} : { kernel: request.kernel }),
+              model: request.modelId,
+            },
+          }),
       fundedOperations: options.fundedOperations,
       ...(options.fundedOperations && request.onInvocationBound
         ? { onInvocationBound: request.onInvocationBound }

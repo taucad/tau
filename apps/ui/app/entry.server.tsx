@@ -14,6 +14,7 @@ import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
 import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
+import { startDocumentTiming } from '#lib/server-timing.server.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
@@ -43,8 +44,11 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  _loadContext: AppLoadContext,
+  loadContext: AppLoadContext,
 ): Promise<Response> | Response {
+  /* LB0a: the cold-instance mark, the loader's catalog entry and the render time to the headers go out as
+   * `Server-Timing`. A streamed document's headers leave at shell ready, so all-ready and bytes are not in them. */
+  const timing = startDocumentTiming(loadContext);
   const routeId = leafRouteId(routerContext);
   // Errors `handleError` took for this document go out with its route and status (SB10).
   claimSsrErrors(request, routeId, responseStatusCode);
@@ -93,6 +97,7 @@ export default function handleRequest(
   }
 
   if (request.method.toUpperCase() === 'HEAD') {
+    responseHeaders.append('Server-Timing', timing.withoutRender());
     return new Response(null, {
       status: responseStatusCode,
       headers: responseHeaders,
@@ -130,6 +135,7 @@ export default function handleRequest(
         const stream = createReadableStreamFromReadable(body);
 
         responseHeaders.set('Content-Type', 'text/html');
+        responseHeaders.append('Server-Timing', timing.atReady(readyOption));
 
         rendered.pipe(body);
         pipe(rendered);

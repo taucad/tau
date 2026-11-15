@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type {
   DockviewApi,
@@ -11,21 +11,19 @@ import type {
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
 import { withViewField } from '@taucad/workbench';
-import type { ViewerNode, ViewFieldPath, WorkbenchView } from '@taucad/workbench';
+import type { ViewFieldPath, WorkbenchView } from '@taucad/workbench';
 import { Box } from 'lucide-react';
-import type { CapabilitiesManifest, Evaluation } from '@taucad/runtime';
+import type { CapabilitiesManifest } from '@taucad/runtime';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
 import type { FileEntry } from '@taucad/types';
 import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
+import { mintViewRecordId } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
-import { readViewLevels } from '#workbench-records/view-levels.js';
-import { resolvedViewFields } from '#workbench-records/view-record-binding-changes.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
-import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
@@ -33,7 +31,6 @@ import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
-import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';
@@ -50,95 +47,25 @@ import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
-
-/**
- * Params passed to each viewer panel via Dockview.
- */
-type ViewerPanelParameters = {
-  viewId: string;
-  entryPath: string | undefined;
-};
+import {
+  createViewerAdapterFactsPort,
+  ensureViewerGroup,
+  isViewerPanelParameters,
+  selectViewerDockAdapter,
+  viewSourceOf,
+} from '#workbench-records/viewer-adapter.js';
+import type {
+  ViewerAdapterFacts,
+  ViewerAdapterFactsPort,
+  ViewerAdapterPorts,
+  ViewerDockReady,
+  ViewerDockReleased,
+  ViewerPanelParameters,
+  ViewSource,
+} from '#workbench-records/viewer-adapter.js';
 
 type ViewerNewTabParameters = { mode: 'launcher' };
 type ViewerProfile = 'editor' | 'shared';
-
-const isViewerPanelParameters = (parameters: unknown): parameters is ViewerPanelParameters =>
-  typeof (parameters as Partial<ViewerPanelParameters> | undefined)?.viewId === 'string';
-
-/** Projection suffixes distinguish panels for one file only when a build offers a choice. */
-export function viewerPanelTitle(
-  record: WorkbenchView,
-  siblingCount: number,
-  evaluation: Evaluation | undefined,
-): string {
-  const title = viewTabTitle(record);
-  if (siblingCount < 2 || !evaluation?.success || evaluation.views.length < 2) {
-    return title;
-  }
-  const id = record.selectedKernelView ?? evaluation.views[0]?.id;
-  const offer = evaluation.views.find((view) => view.id === id);
-  return id ? `${title} · ${offer?.title ?? id}` : title;
-}
-
-/** Adopt the record and return only view IDs genuinely removed from the arrangement. */
-export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): string[] {
-  const ids = (current: ViewerNode): string[] =>
-    current.kind === 'group' ? current.tabs.map((tab) => tab.view) : current.children.flatMap(ids);
-  const desired = new Set(ids(node));
-  const existing = api.panels.flatMap((panel) =>
-    isViewerPanelParameters(panel.params) ? [{ id: panel.id, title: panel.title, params: panel.params }] : [],
-  );
-  const dimensions = { width: Math.max(1, api.width), height: Math.max(1, api.height) };
-  const projection = toDockview('viewer', node, { dimensions });
-  // Dockview reuses panel instances but replaces their metadata from the serialized projection.
-  for (const prior of existing) {
-    if (!desired.has(prior.id)) {
-      continue;
-    }
-    const panel = projection.panels[prior.id];
-    if (panel) {
-      projection.panels[prior.id] = { ...panel, title: prior.title, params: prior.params };
-    }
-  }
-  api.fromJSON(projection, { reuseExistingPanels: true });
-  return existing.filter(({ id }) => !desired.has(id)).map(({ id }) => id);
-}
-
-/** A restored view whose record has not loaded yet keeps the entry its durable record names. */
-const keepDurableEntry =
-  (entryPath: string) =>
-  (current: WorkbenchView | undefined): WorkbenchView =>
-    current?.entryPath ? current : { ...(current ?? newViewRecord(entryPath)), entryPath };
-
-/**
- * Bind a panel that has no entry path. A panel adopted from the layout record carries only its
- * view id, so its loaded record wins; a panel seeded before the project loaded takes the main entry.
- */
-function bindViewerPanelEntry(
-  panel: DockviewApi['panels'][number],
-  {
-    record,
-    mainEntryPath,
-    persistMainEntry,
-  }: Readonly<{
-    record: WorkbenchView | undefined;
-    mainEntryPath: string | undefined;
-    persistMainEntry: ((entryPath: string) => void) | undefined;
-  }>,
-): string | undefined {
-  if (record?.entryPath) {
-    panel.api.setTitle(viewTabTitle(record));
-    panel.api.updateParameters({ entryPath: record.entryPath });
-    return record.entryPath;
-  }
-  if (!mainEntryPath) {
-    return undefined;
-  }
-  panel.api.setTitle(mainEntryPath.split('/').pop() ?? mainEntryPath);
-  panel.api.updateParameters({ entryPath: mainEntryPath });
-  persistMainEntry?.(mainEntryPath);
-  return mainEntryPath;
-}
 
 function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | undefined {
   return 'dataTransfer' in event ? (event.dataTransfer ?? undefined) : undefined;
@@ -225,12 +152,6 @@ export function replaceViewerNewTabWithFile({
   });
   onViewCreated(viewId, path);
   placeholder.api.close();
-}
-
-export function ensureViewerGroup(api: DockviewApi): void {
-  if (api.groups.length === 0) {
-    api.addGroup();
-  }
 }
 
 export function handleViewerDrop<Source>({
@@ -500,7 +421,30 @@ function ViewerEmptyState({
   );
 }
 
-function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element {
+/** Whether the layout record's first read has settled; without a project layout there is nothing to wait for. */
+function useLayoutReadSettled(): boolean {
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
+  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
+  return useSyncExternalStore(
+    useCallback(
+      (listener: () => void) => layoutController?.subscribe(listener) ?? (() => undefined),
+      [layoutController],
+    ),
+    () => layoutController?.ready() ?? true,
+    () => layoutController?.ready() ?? true,
+  );
+}
+
+/**
+ * The dock's empty state. Before the layout record's first read settles the dock is empty only because the record has
+ * not arranged it yet, so it shows nothing in place rather than offering a file choice the record is about to make
+ * (A8d, staging M2). Once the read settles, an empty group is really empty.
+ */
+function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element | undefined {
+  const isSettled = useLayoutReadSettled();
+  if (!isSettled) {
+    return undefined;
+  }
   return (
     <ViewerEmptyState
       containerApi={containerApi}
@@ -529,9 +473,6 @@ function ViewerNewTabPanel(properties: IDockviewPanelProps<ViewerNewTabParameter
     />
   );
 }
-
-/** The view a new view is made from: the active viewer's id and record. */
-export type ViewSource = Readonly<{ viewId: string; record: WorkbenchView }>;
 
 /**
  * The record of a view made from another (onboarding blueprint, V8). With a source, the source's own file values for
@@ -601,25 +542,6 @@ export const recordNewView = async ({
   }
 };
 
-/**
- * The view a new view is made from: the active viewer panel's record. With no viewer panel tracked as active yet, the
- * dock's active panel counts when it is a viewer, as it does for the active viewer's settings.
- *
- * @param panel - The active viewer panel, or the dock's active panel.
- * @param viewRecords - The project's view records.
- * @returns The source, when the panel is a viewer with a record.
- */
-export const viewSourceOf = (
-  panel: Readonly<{ id: string; params?: unknown }> | undefined,
-  viewRecords: ReadonlyMap<string, WorkbenchView>,
-): ViewSource | undefined => {
-  if (panel === undefined || !isViewerPanelParameters(panel.params)) {
-    return undefined;
-  }
-  const record = viewRecords.get(panel.id);
-  return record ? { viewId: panel.id, record } : undefined;
-};
-
 function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
   const fileSelectorDataSource = useViewerFileDataSource();
 
@@ -679,6 +601,98 @@ export type ViewerFileActions = Readonly<{
   dataSource: FileSelectorDataSource;
 }>;
 
+/** What a viewer dock hands itself to: the project's layout, or on a page without one, its editor. */
+type ViewerDockHost = Readonly<{
+  send: (event: ViewerDockReady | ViewerDockReleased) => void;
+  getSnapshot: () => { children: Readonly<Record<string, unknown>> };
+}>;
+
+/**
+ * Hand the viewer's Dockview to its adapter (D11): the dock's ref callback sends `dockReady` once Dockview's `onReady`
+ * gave it an api, then `attach` to the adapter the host spawned, once that step has returned and the layout is idle
+ * (A8c's handover); its cleanup sends `dockReleased`. The host spawns and stops the adapter, so the component starts
+ * and stops nothing (I1). A new host, api or port hands the dock over again; a release names its mount.
+ *
+ * @param host - The project's layout, or its editor on a page without one.
+ * @param handover - The Dockview api, once `onReady` gave it, with the adapter's ports.
+ * @returns The ref callback for the dock's box.
+ */
+function useViewerDockRef(
+  host: ViewerDockHost,
+  handover: Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts }> | undefined,
+  // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
+): (element: HTMLDivElement | null) => (() => void) | undefined {
+  const dockId = useId();
+  return useCallback(
+    // oxlint-disable-next-line typescript/no-restricted-types -- React passes a ref callback `null` on detach.
+    (element: HTMLDivElement | null): (() => void) | undefined => {
+      if (element === null || handover === undefined) {
+        return undefined;
+      }
+      const { api, ports } = handover;
+      host.send({ type: 'dockReady', adapter: 'viewer', dockId, api, ports });
+      selectViewerDockAdapter(host, dockId)?.send({ type: 'attach' });
+      return () => {
+        host.send({ type: 'dockReleased', adapter: 'viewer', dockId });
+      };
+    },
+    [dockId, handover, host],
+  );
+}
+
+/**
+ * The layout port the viewer adapter speaks to: the page's controller, on the editor profile of a page whose controller
+ * offers viewer intents.
+ *
+ * @param controller - The page's layout controller, if the viewer speaks to one.
+ * @returns The port, stable while the controller is.
+ */
+function useViewerLayoutPort(controller: WorkbenchLayoutController | undefined): ViewerAdapterPorts['layout'] {
+  return useMemo(() => {
+    const connectViewerIntents = controller?.connectViewerIntents;
+    const requestViewerFile = controller?.requestViewerFile;
+    if (controller === undefined || connectViewerIntents === undefined || requestViewerFile === undefined) {
+      return undefined;
+    }
+    return {
+      registerViewer: controller.registerViewer,
+      personViewerChanged: controller.personViewerChanged,
+      connectViewerIntents,
+      requestViewerFile,
+    };
+  }, [controller]);
+}
+
+/**
+ * The handover a viewer dock makes once Dockview gave it an api: the api and the adapter's ports. Each handover gets
+ * its own facts port, made from this render's facts: the dock's ref hands the adapter over and attaches it before the
+ * component's layout effects run, so a port fed only from them would attach a re-handed adapter on the previous
+ * commit's facts. A layout effect then keeps it current.
+ *
+ * @param api - The Dockview api, once `onReady` gave it.
+ * @param facts - What the page's tree owns, this render.
+ * @param ports - The adapter's other ports.
+ * @returns The handover, or `undefined` before Dockview is ready.
+ */
+function useViewerHandover(
+  api: DockviewApi | undefined,
+  facts: ViewerAdapterFacts,
+  { profile, projectId, project, layout }: Omit<ViewerAdapterPorts, 'facts'>,
+): Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts; facts: ViewerAdapterFactsPort }> | undefined {
+  const handover = useMemo(() => {
+    if (api === undefined) {
+      return undefined;
+    }
+    const port = createViewerAdapterFactsPort(facts);
+    return { api, ports: { profile, projectId, project, layout, facts: port }, facts: port };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- New facts feed the port; only a new handover makes one.
+  }, [api, layout, profile, project, projectId]);
+  useLayoutEffect(() => {
+    handover?.facts.set(facts);
+  }, [facts, handover]);
+  return handover;
+}
+
 /**
  * ViewerDockview
  *
@@ -700,11 +714,21 @@ export const ViewerDockview = memo(function ({
   /** Registers the same fresh-view action used by the desktop file picker; clears it on teardown. */
   readonly onFileActionsChange?: (actions: ViewerFileActions | undefined) => void;
 } = {}): React.JSX.Element {
-  const { projectId, projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } =
-    useProject();
+  const {
+    projectId,
+    projectRef,
+    editorRef,
+    mainEntryPath,
+    viewRecords,
+    entriesRecord,
+    geometryUnits,
+    setViewEntryPath,
+  } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
-  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
+  const workspace = useProjectWorkspace({ enableNoContext: true });
+  // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
+  const layoutController = workspace?.layoutController;
   const components = useMemo(
     () => ({
       viewer: (properties: IDockviewPanelProps<ViewerPanelParameters>) => (
@@ -722,8 +746,6 @@ export const ViewerDockview = memo(function ({
       onApiChange?.(undefined);
     };
   }, [api, onApiChange]);
-  const isRestoringLayout = useRef(false);
-  const adoptedProjectionRef = useRef<string | undefined>(undefined);
   // Track the active (focused) viewer panel for settings inheritance
   const [activeViewerPanelId, setActiveViewerPanelId] = useState<string | undefined>();
   const activeViewerPanel = activeViewerPanelId
@@ -733,9 +755,6 @@ export const ViewerDockview = memo(function ({
     activeViewerPanel && isViewerPanelParameters(activeViewerPanel.params) ? activeViewerPanel.params : undefined;
   const activeViewerEntryPath = activeViewerParams?.entryPath;
   const activeViewerCadActor = activeViewerEntryPath ? geometryUnits.get(activeViewerEntryPath) : undefined;
-
-  /* The entry's CAD actor owns its render timeout; a unit is seeded with the durable value at spawn
-   * rather than pushed from a mount (Finding 4, E1). */
 
   /**
    * Get the graphics settings to use for a new panel.
@@ -760,53 +779,43 @@ export const ViewerDockview = memo(function ({
     [profile, projectId, viewCommands],
   );
 
-  // A person-edited semantic lane is the only layout write from Dockview.
-  useEffect(() => {
-    if (!api || !layoutController || profile === 'shared') {
-      return;
-    }
-
-    const disposable = api.onDidLayoutChange(() => {
-      if (isRestoringLayout.current) {
-        return;
-      }
-      try {
-        const node = fromDockview('viewer', api.toJSON());
-        if (JSON.stringify(node) === adoptedProjectionRef.current) {
-          return;
-        }
-        adoptedProjectionRef.current = undefined;
-        layoutController.personViewerChanged(node);
-      } catch {
-        // Dockview can emit while a drag has a temporary unsupported intermediate group.
-      }
-    });
-
-    return () => {
-      disposable.dispose();
-    };
-  }, [api, layoutController, profile]);
-
-  useEffect(() => {
-    if (!api || !layoutController || profile === 'shared') {
-      return;
-    }
-    return layoutController.registerViewer((node, applied) => {
-      const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-      isRestoringLayout.current = true;
-      try {
-        const removed = adoptViewerRecordNode(api, node);
-        adoptedProjectionRef.current = JSON.stringify(fromDockview('viewer', api.toJSON()));
-        for (const viewId of removed) {
-          void viewCommands.remove(viewId);
-        }
-        applied();
-      } finally {
-        isRestoringLayout.current = false;
-        active?.focus({ preventScroll: true });
-      }
-    });
-  }, [api, layoutController, profile, viewCommands]);
+  /* What the viewer adapter reads from this tree (A8d): fed as a value before any passive effect of the commit runs.
+   * The adapter, a child of the project's layout, holds the Dockview and does everything over time. */
+  const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
+  const availability = useModelAvailability();
+  const adapterLayout = useViewerLayoutPort(profile === 'editor' ? layoutController : undefined);
+  const adapterFacts = useMemo(
+    (): ViewerAdapterFacts => ({
+      admitsDemand: projectIsReady && availability === 'ready',
+      mainEntryPath,
+      viewRecords,
+      entriesRecord,
+      geometryUnits,
+      viewCommands,
+      setViewEntryPath,
+      createViewRecord,
+    }),
+    [
+      projectIsReady,
+      availability,
+      mainEntryPath,
+      viewRecords,
+      entriesRecord,
+      geometryUnits,
+      viewCommands,
+      setViewEntryPath,
+      createViewRecord,
+    ],
+  );
+  const handover = useViewerHandover(api, adapterFacts, {
+    profile,
+    projectId,
+    project: projectRef,
+    layout: adapterLayout,
+  });
+  // The layout runs the adapter on a page with one; elsewhere (a shared embed, a project without a layout) the editor
+  // does (programme control, 2026-11-14).
+  const dockRef = useViewerDockRef(workspace?.layout ?? editorRef, handover);
 
   // Track active viewer panel for settings inheritance
   useEffect(() => {
@@ -823,69 +832,6 @@ export const ViewerDockview = memo(function ({
       disposable.dispose();
     };
   }, [api]);
-
-  // Handle actor lifecycle for panels
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-
-    const removeDisposable = api.onDidRemovePanel((event) => {
-      if (isViewerPanelParameters(event.params)) {
-        const viewId = event.id;
-        setLocalInstanceChoice(viewId, undefined);
-        setViewEntryPath(viewId, undefined);
-        projectRef.send({ type: 'destroyViewGraphics', viewId });
-        if (!isRestoringLayout.current && profile === 'editor') {
-          void viewCommands.remove(viewId);
-        }
-      }
-      if (api.panels.length === 0) {
-        queueMicrotask(() => {
-          ensureViewerGroup(api);
-        });
-      }
-    });
-
-    return () => {
-      removeDisposable.dispose();
-    };
-  }, [api, projectRef, profile, setViewEntryPath, viewCommands]);
-
-  useEffect(() => {
-    if (!api || profile === 'shared') {
-      return;
-    }
-    const counts = new Map<string, number>();
-    for (const panel of api.panels) {
-      const record = viewRecords.get(panel.id);
-      if (!record) {
-        continue;
-      }
-      if (record.entryPath !== null) {
-        counts.set(record.entryPath, (counts.get(record.entryPath) ?? 0) + 1);
-      }
-    }
-    for (const panel of api.panels) {
-      if (!isViewerPanelParameters(panel.params)) {
-        continue;
-      }
-      const record = viewRecords.get(panel.id);
-      if (!record) {
-        continue;
-      }
-      const nextPath = record.entryPath ?? undefined;
-      if (panel.params.entryPath !== nextPath) {
-        panel.api.updateParameters({ entryPath: nextPath });
-      }
-      setViewEntryPath(panel.id, record.entryPath);
-      const evaluation = geometryUnits.get(record.entryPath ?? '')?.getSnapshot().context.evaluation;
-      const title = viewerPanelTitle(record, counts.get(record.entryPath ?? '') ?? 0, evaluation);
-      if (panel.title !== title) {
-        panel.api.setTitle(title);
-      }
-    }
-  }, [api, geometryUnits, profile, setViewEntryPath, viewRecords]);
 
   // Tag outgoing tab drags with the viewer MIME so the editor can identify them
   useEffect(() => {
@@ -931,194 +877,12 @@ export const ViewerDockview = memo(function ({
     };
   }, [api]);
 
-  // Reconcile visible panels once the project machine reaches 'ready'.
-  // Dockview retains hidden restored panels, but they have no render demand.
-  //
-  // It also assigns `mainEntryPath` to any panel that was seeded without an
-  // entryPath (happens when onReady fires before the project loads and the
-  // main file is unknown).
-  const projectIsReady = useSelector(projectRef, (state) => state.matches('ready'));
-  const availability = useModelAvailability();
-  const admittedGraphics = useRef(new Set<string>());
-  const admittedGeometry = useRef(new Map<string, string>());
-  const visibleGeometryDemand = useRef(new Map<string, string>());
-
-  useEffect(() => {
-    admittedGraphics.current.clear();
-    admittedGeometry.current.clear();
-    visibleGeometryDemand.current.clear();
-    return () => {
-      for (const viewId of visibleGeometryDemand.current.keys()) {
-        projectRef.send({ type: 'setViewerGeometryDemand', viewId });
-      }
-      visibleGeometryDemand.current.clear();
-    };
-  }, [projectRef]);
-
-  useEffect(() => {
-    if (!api || !projectIsReady || availability !== 'ready') {
-      return;
-    }
-
-    const admit = (panel: (typeof api.panels)[number]): void => {
-      if (!isViewerPanelParameters(panel.params)) {
-        return;
-      }
-      const panelViewId = panel.id;
-      const visible = panel.api.isVisible;
-      // Editor tabs need their record owner even when graphics rendering is hidden.
-      if (profile === 'editor' || visible) {
-        const settings = viewRecords.get(panelViewId);
-        // The live owner starts from what the view resolves to on this device, never from the file alone.
-        const validatedSettings = settings
-          ? graphicsSettingsForView(settings, resolvedViewFields(settings, readViewLevels(projectId, panelViewId)))
-          : defaultGraphicsSettings;
-        if (!admittedGraphics.current.has(panelViewId)) {
-          admittedGraphics.current.add(panelViewId);
-          projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
-        }
-      }
-      if (!visible) {
-        if (visibleGeometryDemand.current.delete(panelViewId)) {
-          projectRef.send({ type: 'setViewerGeometryDemand', viewId: panelViewId });
-        }
-        return;
-      }
-
-      let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
-      panelEntryPath ??= bindViewerPanelEntry(panel, {
-        record: viewRecords.get(panelViewId),
-        mainEntryPath,
-        persistMainEntry:
-          profile === 'editor'
-            ? (entryPath) => {
-                void viewCommands.edit(panelViewId, keepDurableEntry(entryPath));
-              }
-            : undefined,
-      });
-
-      setViewEntryPath(panelViewId, panelEntryPath ?? null);
-
-      if (panelEntryPath && admittedGeometry.current.get(panelViewId) !== panelEntryPath) {
-        admittedGeometry.current.set(panelViewId, panelEntryPath);
-        projectRef.send({
-          type: 'createGeometryUnit',
-          entryPath: panelEntryPath,
-          operationTimeout: entriesRecord?.entries[panelEntryPath]?.renderTimeout,
-        });
-      }
-      if (panelEntryPath && visibleGeometryDemand.current.get(panelViewId) !== panelEntryPath) {
-        visibleGeometryDemand.current.set(panelViewId, panelEntryPath);
-        projectRef.send({ type: 'setViewerGeometryDemand', viewId: panelViewId, entryPath: panelEntryPath });
-      }
-    };
-
-    const subscriptions = new Map<string, ReturnType<(typeof api.panels)[number]['api']['onDidVisibilityChange']>>();
-    const watch = (panel: (typeof api.panels)[number]): void => {
-      if (!isViewerPanelParameters(panel.params) || subscriptions.has(panel.id)) {
-        return;
-      }
-      subscriptions.set(
-        panel.id,
-        panel.api.onDidVisibilityChange(() => {
-          admit(panel);
-        }),
-      );
-      admit(panel);
-    };
-    for (const panel of api.panels) {
-      watch(panel);
-    }
-    const addSubscription = api.onDidAddPanel(watch);
-    const removeSubscription = api.onDidRemovePanel((panel) => {
-      subscriptions.get(panel.id)?.dispose();
-      subscriptions.delete(panel.id);
-      admittedGraphics.current.delete(panel.id);
-      admittedGeometry.current.delete(panel.id);
-      if (visibleGeometryDemand.current.delete(panel.id)) {
-        projectRef.send({ type: 'setViewerGeometryDemand', viewId: panel.id });
-      }
-    });
-    return () => {
-      addSubscription.dispose();
-      removeSubscription.dispose();
-      for (const subscription of subscriptions.values()) {
-        subscription.dispose();
-      }
-    };
-  }, [
-    api,
-    projectIsReady,
-    availability,
-    projectId,
-    projectRef,
-    mainEntryPath,
-    viewRecords,
-    entriesRecord,
-    setViewEntryPath,
-    profile,
-    viewCommands,
-  ]);
-
-  // Listen for "open in viewer" requests from file tree or editor tab context menus.
-  // Creates a new viewer panel for the requested file if one doesn't already exist.
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-
-    const subscription = projectRef.on('viewerFileRequested', (event) => {
-      const { entryPath } = event;
-
-      // If a panel already exists for this file, activate it instead of creating a duplicate
-      const existingPanel = api.panels.find(
-        (panel) => (panel.params as ViewerPanelParameters | undefined)?.entryPath === entryPath,
-      );
-      if (existingPanel) {
-        existingPanel.api.setActive();
-        return;
-      }
-
-      // Create a new viewer panel
-      const viewId = mintViewRecordId();
-      const fileName = entryPath.split('/').pop() ?? entryPath;
-
-      api.addPanel({
-        id: viewId,
-        component: 'viewer',
-        title: fileName,
-        params: { viewId, entryPath },
-      });
-
-      createViewRecord(viewId, entryPath, getViewSource());
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [api, createViewRecord, getViewSource, projectRef]);
-
-  // Handle ready event: restore layout or seed default
+  // Handle ready event: seed a shared page's one viewer; the dock's ref then hands the Dockview to its adapter (D11).
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       const dockApi = event.api;
       setApi(dockApi);
-
-      isRestoringLayout.current = true;
-
-      try {
-        if (profile === 'shared') {
-          const viewId = mintViewRecordId();
-          dockApi.addPanel({
-            id: viewId,
-            component: 'viewer',
-            title: mainEntryPath || 'Viewer',
-            params: { viewId, entryPath: mainEntryPath || undefined },
-          });
-        }
-      } catch {
-        // Corrupt layout -- re-seed defaults
-        dockApi.clear();
+      if (profile === 'shared') {
         const viewId = mintViewRecordId();
         dockApi.addPanel({
           id: viewId,
@@ -1126,16 +890,10 @@ export const ViewerDockview = memo(function ({
           title: mainEntryPath || 'Viewer',
           params: { viewId, entryPath: mainEntryPath || undefined },
         });
-
-        if (profile === 'editor') {
-          void viewCommands.edit(viewId, (current) => current ?? newViewRecord(mainEntryPath || null));
-        }
-      } finally {
-        isRestoringLayout.current = false;
       }
       ensureViewerGroup(dockApi);
     },
-    [mainEntryPath, profile, viewCommands],
+    [mainEntryPath, profile],
   );
 
   // Handle external file drops and cross-dockview editor panel drops
@@ -1207,7 +965,7 @@ export const ViewerDockview = memo(function ({
           entryPath={activeViewerEntryPath}
         />
       ) : null}
-      <div className='@container/viewer relative size-full'>
+      <div ref={dockRef} className='@container/viewer relative size-full'>
         {/* D1: phones keep the mounted viewer and its file state without desktop tabs or split/close actions.
           Dockview observes the hidden header's zero height and gives that space back to the canvas. */}
         <Dockview

@@ -603,7 +603,6 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     publishLogRows(store, 'chat_1', [lifecycleRow(2, 'failed')], 2);
     const owner = createActor(projectSessionMachine, { input: { projectId: 'project_1' } });
     owner.start();
-    store.setFocusedProject('project_1');
     store.setProjectSession('project_1', owner);
     const command: HostCommand = {
       type: 'resume',

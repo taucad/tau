@@ -33,12 +33,18 @@ import type { ActorRefFrom, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 import { SessionsProvider } from '#hooks/use-sessions.js';
+import { startFocusHost, startRuntimeSlice } from '#runtime/app-runtime-focus.fixture.js';
+import type { FocusHostFixture, RuntimeSliceFixture } from '#runtime/app-runtime-focus.fixture.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import type { SessionWiring } from '#services/sessions-store.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
@@ -67,6 +73,13 @@ const {
 } = vi.hoisted(() => {
   const frames: Array<{ type: string; projectId?: string }> = [];
   const calls: string[] = [];
+  const revisionClientLifecycleLog: string[] = [];
+  const projected: { of: unknown; selection: unknown; value: unknown } = {
+    of: undefined,
+    selection: undefined,
+    value: undefined,
+  };
+  const revisionProjectionRef: { current: Record<string, unknown> | undefined } = { current: undefined };
   const live: string[] = [];
   /*
    * The editor, as far as the route's flush gate reads it: a `flushNow` and a
@@ -124,10 +137,10 @@ const {
     /** Every `setRoot` the workbench's file manager was asked for (S48(14)). */
     rootCalls: [] as Array<{ type: string; path?: string; projectId?: string }>,
     /** The revision projection the workbench follows; a test moves it. */
-    revisionProjection: { current: undefined as unknown },
+    revisionProjection: revisionProjectionRef,
     /** What the checkout route table currently holds. */
     installedCheckoutRoutes: { current: '' },
-    revisionClientLifecycle: [] as string[],
+    revisionClientLifecycle: revisionClientLifecycleLog,
     projectProviderInputs: [] as Array<{
       projectId: string;
       requestedChatId: string | undefined;
@@ -153,7 +166,6 @@ const {
       cancelProjectedRun: vi.fn(async () => 'stopped'),
       publishProjectHostConnector: vi.fn(() => () => undefined),
       setProjectSession: vi.fn(),
-      setFocusedProject: vi.fn(),
       setRevisionFacts: vi.fn(),
       /* The store owns each chat's root (PV-S5); a row adds one with `openChatRoot`. */
       roots: new Map<string, Map<string, unknown>>(),
@@ -189,9 +201,42 @@ const {
           listener();
         }
       },
+      /** Tell the client's listeners the projection moved (S48(14)). */
+      publish: () => {
+        for (const listener of revisionListeners) {
+          listener();
+        }
+      },
     },
+    /* The project's one revision client, as the session's `revisions` child drives it (A7b): opening it is the
+     * lifecycle's mount, closing it the lifecycle's close. */
     revisionClient: {
-      status: () => revisionStatus,
+      /* One projection object per change, as the client publishes it. */
+      status: () => {
+        if (projected.of !== revisionStatus || projected.selection !== revisionProjectionRef.current) {
+          projected.of = revisionStatus;
+          projected.selection = revisionProjectionRef.current;
+          projected.value = {
+            ...revisionStatus,
+            projectDirty: revisionStatus.dirty,
+            checkoutRoot: undefined,
+            branches: [],
+            ...revisionProjectionRef.current,
+          };
+        }
+        return projected.value;
+      },
+      send: () => undefined,
+      setUser: async () => undefined,
+      setCredential: async () => true,
+      open: () => {
+        revisionClientLifecycleLog.push('mount');
+      },
+      close: () => {
+        revisionClientLifecycleLog.push('close');
+      },
+      focus: () => undefined,
+      saveRevision: async () => undefined,
       subscribe: (listener: () => void) => {
         revisionListeners.add(listener);
         return () => {
@@ -225,7 +270,7 @@ vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudP
 vi.mock('#hooks/use-file-manager.js', () => ({
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   /* This subtree *is* the project's resources: mounted means they exist. */
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  SessionFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     useEffect(() => {
       mounted.push(`mount:${projectId}`);
       return () => {
@@ -263,6 +308,20 @@ const parameterService = {
  * every render. A test that needs a live view puts it in `viewGraphicsOf(projectId)`. */
 const projectContexts = new Map<string, unknown>();
 const viewGraphicsByProject = new Map<string, Map<string, ActorRefFrom<typeof graphicsMachine>>>();
+/* Every close callback a live project's persistence guard registered, and each project's runtime producer flush. */
+const { closeFlushes, producerFlushes } = vi.hoisted(() => ({
+  closeFlushes: new Set<(phase: 'hidden' | 'pagehide') => Promise<void>>(),
+  producerFlushes: new Map<string, () => Promise<void>>(),
+}));
+const producerFlushOf = (projectId: string): (() => Promise<void>) => {
+  const existing = producerFlushes.get(projectId);
+  if (existing) {
+    return existing;
+  }
+  const created = vi.fn(async () => undefined);
+  producerFlushes.set(projectId, created);
+  return created;
+};
 const viewGraphicsOf = (projectId: string): Map<string, ActorRefFrom<typeof graphicsMachine>> => {
   const existing = viewGraphicsByProject.get(projectId);
   if (existing) {
@@ -300,7 +359,7 @@ const projectContextOf = (projectId: string): unknown => {
     projectId: 'unused',
     parameterService,
     viewGraphics: viewGraphicsOf(projectId),
-    flushWorkbenchRecordProducers: async () => undefined,
+    flushWorkbenchRecordProducers: producerFlushOf(projectId),
     projectRef: {
       send: (event: { type: string }) => {
         if (event.type === 'closeRuntime') {
@@ -345,13 +404,7 @@ const projectContextOf = (projectId: string): unknown => {
   return created;
 };
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({
-    children,
-    projectId,
-    requestedChatId,
-    createdChatId,
-  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
-    projectProviderInputs.push({ projectId, requestedChatId, createdChatId });
+  SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     return (
       <StubProjectContext.Provider value={projectId}>
         <div>{children}</div>
@@ -367,7 +420,6 @@ vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({
     return <span data-testid='view-settings-host' data-project-id={projectId} />;
   },
 }));
-vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
@@ -389,15 +441,7 @@ vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: ()
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useRevisionClient: () => revisionClient,
-  useRevisionClientLifecycle: () => {
-    useEffect(() => {
-      revisionClientLifecycle.push('mount');
-      return () => {
-        revisionClientLifecycle.push('close');
-      };
-    }, []);
-    return revisionClient;
-  },
+  getRevisionClient: () => revisionClient,
   useRevisionStatus: () => revisionProjection.current,
   useRevisionCommands: () => ({ connectRemote: async () => undefined }),
 }));
@@ -424,10 +468,21 @@ vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
   },
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatStore }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({
-  useFlushOnClose: () => undefined,
-  useFlushProducers: () => flushProducers,
-}));
+vi.mock('#hooks/use-flush-on-close.js', async () => {
+  const { useEffect } = await import('react');
+  return {
+    // A guard's flush is registered while it is mounted and removed when it unmounts, as the real hook does.
+    useFlushOnClose: (callback: (phase: 'hidden' | 'pagehide') => Promise<void>) => {
+      useEffect(() => {
+        closeFlushes.add(callback);
+        return () => {
+          closeFlushes.delete(callback);
+        };
+      }, [callback]);
+    },
+    useFlushProducers: () => flushProducers,
+  };
+});
 vi.mock('#hooks/use-editor-document-session.js', () => ({
   EditorDocumentSessionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -457,9 +512,6 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
   };
 });
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
-/* Not mocked away for the route's own rows either: with no projection the real
- * component does nothing, and S48(14) below renders it against one. */
-const { WorkbenchCheckoutRoot } = await import('#routes/w.$workspace.$project/workbench-checkout-root.js');
 vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   ChatWorkspaceAuthorityProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -499,8 +551,71 @@ const openChatRoot = (projectId: string, chatId: string) => {
   return root;
 };
 
+/* A7b: each session starts its revision client on its file manager through the real `revisions` module; the client is
+ * this suite's one, and nothing here is focused, so no checkout is followed. The connector is not this suite's. */
+const sessionWiring: SessionWiring = {
+  loadRevisions: async () => import('#runtime/session-revisions.js'),
+  loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
+  registerCloseCut: () => () => undefined,
+  focusedProject: { get: () => undefined, subscribe: () => () => undefined },
+  documentVisible: { get: () => true, subscribe: () => () => undefined },
+  chatSessions: chatStore as unknown as SessionWiring['chatSessions'],
+  choices: () => {
+    throw new Error('no chat attaches in these rows, so nothing reads the choices');
+  },
+  rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+};
+const openFileManagerWithWorker = (projectId: string) =>
+  openSessionFileManagerStandIn(projectId, workerRef.current === undefined ? {} : { worker: workerRef.current });
+
 /** The registry the rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor({ sharedWorker: () => workerRef.current }).start();
+const sessionsActor = createSessionsActor({
+  sharedWorker: () => workerRef.current,
+  wiring: sessionWiring,
+  openFileManager: openFileManagerWithWorker,
+  /* A6d: each session's runtime is a stand-in; what the session asks its editor for is what these rows read. */
+  openRuntime: {
+    open: async (input) => {
+      const standIn = openSessionRuntimeStandIn(input);
+      return {
+        ...standIn,
+        requestChat: (chat) => {
+          projectProviderInputs.push({
+            projectId: input.projectId,
+            requestedChatId: chat.chatId,
+            createdChatId: chat.createdChatId,
+          });
+          standIn.requestChat(chat);
+        },
+      };
+    },
+    onChoicesChanged: () => () => undefined,
+  },
+}).start();
+
+/* Focus and its ports over a registry, as the runtime root composes them (A5b); a fresh one per row, as each row
+ * mounted a fresh gate before. */
+const focusHosts: FocusHostFixture[] = [];
+const focusOver = (registry: ActorRefFrom<typeof sessionsMachine>): FocusHostFixture => {
+  const host = startFocusHost({
+    sessions: registry,
+    library: {
+      routeAccess: async (projectId) => getProjectRouteAccess(projectId) as Promise<ProjectRouteAccess>,
+      epoch: () => 0,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+  focusHosts.push(host);
+  return host;
+};
+let focusHost = focusOver(sessionsActor);
+beforeEach(() => {
+  for (const host of focusHosts.splice(0)) {
+    host.stop();
+  }
+  focusHost = focusOver(sessionsActor);
+});
 
 const emitted: SessionsMachineEmitted[] = [];
 
@@ -548,7 +663,7 @@ const renderRoute = async (
    * composition needs one too. */
   const at = (id: string): React.JSX.Element => (
     <QueryClientProvider client={queryClient}>
-      <SessionsProvider actor={sessionsActor}>
+      <SessionsProvider actor={sessionsActor} focus={focusHost}>
         <routeModule.ProjectRouteProviders projectId={id} />
       </SessionsProvider>
     </QueryClientProvider>
@@ -601,7 +716,7 @@ const renderRouteFamily = async (
     <MemoryRouter initialEntries={[initialEntry]}>
       <NavigationProbe />
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={sessionsActor}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <routeModule.ProjectSessionsHost>
             <Routes>
               <Route path='/' element={<div>Home</div>} />
@@ -634,6 +749,7 @@ const renderRouteFamily = async (
 };
 
 beforeEach(() => {
+  closeFlushes.clear();
   runtimeShutdown.mockReset();
   runtimeShutdown.mockResolvedValue(undefined);
   workerFrames.length = 0;
@@ -878,7 +994,7 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
 
     const sidebar = render(
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={sessionsActor}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <ul>
             {projectIds.map((projectId) => (
               <li key={projectId}>
@@ -922,7 +1038,7 @@ describe('sessions composition — a finished run reads Done at its terminal row
 
     const row = render(
       <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={sessionsActor}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <ChatRow />
         </SessionsProvider>
       </QueryClientProvider>,
@@ -983,6 +1099,22 @@ describe('sessions composition', () => {
       screen.getAllByTestId('view-settings-host').some((element) => element.dataset['projectId'] === 'pin-unfocused-1'),
     ).toBe(true);
     graphicsRef.stop();
+    view.unmount();
+  });
+
+  /* A8b exit: a live project that is not focused keeps its persistence guard, whose `hidden` flush walks its
+   * runtime's producers, the layout child's among them (the runtime registers it; `project-runtime.test.ts` shows
+   * the layout's write). */
+  it("flushes a live project's runtime producers on hidden while it is not focused", async () => {
+    const view = await renderRoute('pin-hidden-1');
+    await view.rerender('pin-hidden-2');
+    expect(liveProjectIds()).toEqual(['pin-hidden-1', 'pin-hidden-2']);
+    const unfocused = producerFlushOf('pin-hidden-1');
+    vi.mocked(unfocused).mockClear();
+    for (const flushAtClose of closeFlushes) {
+      void flushAtClose('hidden');
+    }
+    expect(unfocused).toHaveBeenCalled();
     view.unmount();
   });
 
@@ -1502,13 +1634,13 @@ describe('sessions composition — the idle window (S48(6))', () => {
 /**
  * S48(14), seam-unit workbench half — *Switch* re-roots, it does not reload.
  *
- * The real selection actor is composed and asserted at the package owner. This
- * jsdom row deliberately substitutes only the host file-manager and handle
- * store seams, then proves `WorkbenchCheckoutRoot` issues one `setRoot` and
- * never remounts the workbench.
+ * The real selection actor is composed and asserted at the package owner. Since A7b the focused session's `revisions`
+ * child follows the selection with nothing mounted (row S23): this row runs the real child over this suite's revision
+ * client, a recording file manager and the handle store seam, and proves it installs the route once and issues one
+ * `setRoot` per move. Nothing is mounted, so nothing can remount.
  */
 describe('sessions composition — the workbench follows the selection (S48(14))', () => {
-  const projection = (checkoutId: string, checkoutRoot: string): unknown => ({
+  const projection = (checkoutId: string, checkoutRoot: string): Record<string, unknown> => ({
     projectId: 'unused',
     checkoutId,
     checkoutRoot,
@@ -1524,50 +1656,57 @@ describe('sessions composition — the workbench follows the selection (S48(14))
     ],
   });
 
+  /** The file manager as the child reads it: its worker, and every event it is sent. */
+  const recordingFileManager = () =>
+    ({
+      send: (event: { type: string; path?: string; projectId?: string }) => {
+        rootCalls.push(event);
+      },
+      getSnapshot: () => ({ context: { worker: workerRef.current, rootDirectory: '/projects/unused' } }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    }) as unknown as Parameters<typeof startSessionRevisionsStandIn>[0]['fileManagerRef'];
+
+  afterEach(() => {
+    revisionProjection.current = undefined;
+  });
+
   it('follows the selection to a new root without remounting the workbench', async () => {
     revisionProjection.current = projection('live', '/projects/unused');
-    let mounts = 0;
-
-    function Workbench(): React.JSX.Element {
-      useEffect(() => {
-        mounts += 1;
-      }, []);
-      return (
-        <>
-          <WorkbenchCheckoutRoot />
-          <span>workbench</span>
-        </>
-      );
-    }
-
-    const view = render(<Workbench />);
+    const stop = startSessionRevisionsStandIn({
+      projectId: 'unused',
+      fileManagerRef: recordingFileManager(),
+      focused: true,
+      syncProjectRoots: async () => {
+        rootCalls.push({ type: 'syncProjectRoots' });
+      },
+    });
     await settle();
     /* The branch's route is installed before the workbench moves at all (W2
      * review R4): a `setRoot` at a route nothing mounted answers ESTALE. */
-    expect(rootCalls).toEqual([
-      { type: 'checkoutRoutes', path: 'checkout-fillet' },
-      { type: 'syncProjectRoots' },
-      { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
-    ]);
+    await vi.waitFor(() => {
+      expect(rootCalls).toEqual([
+        { type: 'checkoutRoutes', path: 'checkout-fillet' },
+        { type: 'syncProjectRoots' },
+        { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
+      ]);
+    });
 
     /* The selection moves to the branch's own checkout. */
     revisionProjection.current = projection('checkout-fillet', '/checkouts/checkout-fillet');
-    await act(async () => {
-      view.rerender(<Workbench />);
-      await Promise.resolve();
-    });
+    revision.publish();
     await settle();
 
     /* The move is one `setRoot`, with no second route installation (the set did
-     * not change) and no remount: no reload, for a person with a file open. */
-    expect(rootCalls).toEqual([
-      { type: 'checkoutRoutes', path: 'checkout-fillet' },
-      { type: 'syncProjectRoots' },
-      { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
-      { type: 'setRoot', path: '/checkouts/checkout-fillet', projectId: 'unused' },
-    ]);
-    expect(mounts).toBe(1);
-    view.unmount();
+     * not change): no reload, for a person with a file open. */
+    await vi.waitFor(() => {
+      expect(rootCalls).toEqual([
+        { type: 'checkoutRoutes', path: 'checkout-fillet' },
+        { type: 'syncProjectRoots' },
+        { type: 'setRoot', path: '/projects/unused', projectId: 'unused' },
+        { type: 'setRoot', path: '/checkouts/checkout-fillet', projectId: 'unused' },
+      ]);
+    });
+    stop();
   });
 });
 
@@ -1580,7 +1719,9 @@ describe('sessions composition — the workbench follows the selection (S48(14))
  */
 describe('sessions composition — a one-project device (A0.2 item 6, B-08)', () => {
   type OneProjectRegistry = Readonly<{
-    actor: ReturnType<typeof createSessionsActor>;
+    actor: ActorRefFrom<typeof sessionsMachine>;
+    /** Focus and `environment` beside it, in its system: the memory release is `environment`'s (A5b). */
+    slice: RuntimeSliceFixture;
     /** Every event the registry root processed, by type. */
     received: string[];
     /** Every live set the registry announced. */
@@ -1592,10 +1733,17 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     const received: string[] = [];
     const liveSets: Array<readonly string[]> = [];
     const budgetRefusals: string[] = [];
-    const root: { current: ReturnType<typeof createSessionsActor> | undefined } = { current: undefined };
+    const root: { current: unknown } = { current: undefined };
     /* A child never sends `close` to the registry, so a `close` the root processes came from the app. */
-    const actor = createSessionsActor({
+    const slice = startRuntimeSlice({
       sharedWorker: () => workerRef.current,
+      registry: { openFileManager: openFileManagerWithWorker, wiring: sessionWiring },
+      library: {
+        routeAccess: async (projectId) => getProjectRouteAccess(projectId) as Promise<ProjectRouteAccess>,
+        epoch: () => 0,
+        onEpochChanged: () => () => undefined,
+      },
+      loadModule: async () => undefined,
       inspect: (inspection) => {
         if (
           inspection.type === '@xstate.transition' &&
@@ -1606,12 +1754,12 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
         }
       },
     });
+    const actor = slice.sessions;
     root.current = actor;
     actor.on('liveSetChanged', (event) => liveSets.push(event.projectIds));
     actor.on('budgetRefused', (event) => budgetRefusals.push(event.projectId));
-    actor.start();
-    started.push(actor);
-    return { actor, received, liveSets, budgetRefusals };
+    started.push(slice);
+    return { actor, slice, received, liveSets, budgetRefusals };
   };
 
   const renderOn = async (
@@ -1627,7 +1775,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
       <MemoryRouter initialEntries={[initialEntry]}>
         <NavigationProbe />
         <QueryClientProvider client={queryClient}>
-          <SessionsProvider actor={registry.actor}>
+          <SessionsProvider actor={registry.actor} focus={registry.slice}>
             <routeModule.ProjectSessionsHost>
               <Routes>
                 <Route path='/w/:workspace/:project' element={<RouteStateProbe />} />
@@ -1655,7 +1803,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     Object.keys(registry.actor.getSnapshot().context.refs);
 
   /* Torn down whether or not a row's assertions pass. */
-  const started: Array<ReturnType<typeof createSessionsActor>> = [];
+  const started: RuntimeSliceFixture[] = [];
   const unmounts: Array<() => void> = [];
   let restoreSpies: (() => void) | undefined;
 
@@ -1669,8 +1817,8 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     for (const unmount of unmounts.splice(0)) {
       unmount();
     }
-    for (const actor of started.splice(0)) {
-      actor.stop();
+    for (const slice of started.splice(0)) {
+      slice.stop();
     }
     deviceMemory.constrained = false;
   });
@@ -1753,6 +1901,30 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
     expect(registry.actor.getSnapshot().context.refusals['one-running-a']).toBe('running');
     expect(registry.received).not.toContain('close');
   });
+  it("should show the project closed with Reopen, as on main, after the budget dialog's Not now (round 15, D14)", async () => {
+    const registry = createOneProjectRegistry();
+    const view = await renderOn(registry, '/w/workspace/one-running-a');
+    await act(async () => {
+      registry.actor.getSnapshot().context.refs['one-running-a']?.send({
+        type: 'projectedRunsChanged',
+        runs: ['chat-run'],
+        stoppableRuns: ['chat-run'],
+      });
+      await Promise.resolve();
+    });
+    await view.navigate('/w/workspace/one-running-b');
+    expect(registry.actor.getSnapshot().context.pendingOpen?.projectId).toBe('one-running-b');
+    /* `BudgetRefusedDialog`'s Not now: straight to the registry. The person chose not to open, so nothing failed. */
+    await act(async () => {
+      registry.actor.send({ type: 'cancelPendingOpen' });
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+    expect(screen.getByTestId('route-state').textContent).toMatch(/^closed/u);
+    expect(document.body.textContent).not.toContain('could not open');
+    expect(registry.actor.getSnapshot().context.refs['one-running-b']).toBeUndefined();
+  });
 });
 
 /**
@@ -1774,7 +1946,42 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.unstubAllEnvs();
     delete (globalThis as { tau?: unknown }).tau;
     flushProducers.mockReset();
+    for (const stop of stops.splice(0)) {
+      stop();
+    }
   });
+
+  const stops: Array<() => void> = [];
+
+  /**
+   * The app runtime over fresh modules (the desktop bridge reads `TAU_TARGET` when it loads), with no page: the quit
+   * hold is `environment`'s (D31, A5b), and the producers it awaits are the runtime sequencer's, where this row's
+   * `flushProducers` registers as one producer.
+   */
+  const renderQuitRuntime = async () => {
+    vi.resetModules();
+    const freshSessions = await import('#hooks/use-sessions.js');
+    const freshStore = await import('#services/sessions-store.js');
+    const freshRuntime = await import('#runtime/app-runtime.js');
+    const freshRuntimeProvider = await import('#runtime/app-runtime-provider.js');
+    const runtime = freshRuntime.createAppRuntime({ environment: () => undefined });
+    const unregister = freshRuntime.selectRuntimeUnload(runtime).register('producer', async () => flushProducers());
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <freshRuntimeProvider.AppRuntimeProvider runtime={runtime}>
+          <freshSessions.SessionsProvider>
+            <span>app</span>
+          </freshSessions.SessionsProvider>
+        </freshRuntimeProvider.AppRuntimeProvider>
+      </QueryClientProvider>,
+    );
+    stops.push(() => {
+      unregister();
+      runtime.stop();
+    });
+    await settle();
+    return { view, freshStore, freshActor: freshRuntime.selectSessionsRegistry(runtime.getSnapshot()) };
+  };
 
   it('should refuse quit for blocked workbench intent and wait for its repaired checked write', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
@@ -1826,18 +2033,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
           throw new Error('Workbench records could not be saved.');
         }
       });
-      vi.resetModules();
-      const freshSessions = await import('#hooks/use-sessions.js');
-      const freshStore = await import('#services/sessions-store.js');
-      const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-      const view = render(
-        <QueryClientProvider client={queryClient}>
-          <freshSessions.SessionsProvider actor={freshActor}>
-            <span>app</span>
-          </freshSessions.SessionsProvider>
-        </QueryClientProvider>,
-      );
-      await settle();
+      const { view, freshActor } = await renderQuitRuntime();
       await act(async () => {
         asks[0]?.();
         await Promise.resolve();
@@ -1899,19 +2095,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
       await producers.promise;
     });
 
-    vi.resetModules();
-    const freshSessions = await import('#hooks/use-sessions.js');
-    const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider actor={freshActor}>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
-      </QueryClientProvider>,
-    );
-    await settle();
+    const { view, freshActor } = await renderQuitRuntime();
 
     await act(async () => {
       asks[0]?.();
@@ -1974,9 +2158,11 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     expect(ready).toBe(true);
     expect(answers).toEqual(['quiesced']);
+    /* The runtime's `environment` holds the quit seam, not the tree: unmounting leaves it in, stopping removes it. */
     view.unmount();
-    expect(ready).toBe(false);
+    expect(ready).toBe(true);
     runtime.stop();
+    expect(ready).toBe(false);
   });
 
   it('paints what is being waited for, and Quit anyway answers main', async () => {
@@ -1997,19 +2183,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     /* A registry of this row's own: the module singleton the rows above share
      * is quiesced by pin e, and a quiesced registry never opens again. */
-    vi.resetModules();
-    const freshSessions = await import('#hooks/use-sessions.js');
-    const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider actor={freshActor}>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
-      </QueryClientProvider>,
-    );
-    await settle();
+    const { view, freshStore, freshActor } = await renderQuitRuntime();
     expect(asks).toHaveLength(1);
 
     /* One session whose flush never answers — the only reason a quit is ever
@@ -2078,18 +2252,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     flushProducers
       .mockRejectedValueOnce(new Error('checked workbench write unavailable'))
       .mockResolvedValueOnce(undefined);
-    vi.resetModules();
-    const freshSessions = await import('#hooks/use-sessions.js');
-    const freshStore = await import('#services/sessions-store.js');
-    const freshActor = freshStore.createSessionsActor({ sharedWorker: () => workerRef.current }).start();
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        <freshSessions.SessionsProvider actor={freshActor}>
-          <span>app</span>
-        </freshSessions.SessionsProvider>
-      </QueryClientProvider>,
-    );
-    await settle();
+    const { view, freshActor } = await renderQuitRuntime();
     await act(async () => {
       asks[0]?.();
       await Promise.resolve();

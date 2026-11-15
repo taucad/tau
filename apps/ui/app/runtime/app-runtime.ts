@@ -15,15 +15,21 @@ import type {
   EventRejection,
   SnapshotFrom,
 } from 'xstate';
+import { hashKey } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
+import { Topic } from '@taucad/events';
 import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
-import type { AppRuntimeEnvironment } from '#runtime/app-runtime.machine.js';
-import { createEnvironmentLogic } from '#runtime/environment.js';
-import type { EnvironmentHost } from '#runtime/environment.js';
+import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
+import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
+import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
+import { createFocusComposition } from '#runtime/app-runtime-focus.js';
+import type { FocusHandle } from '#runtime/app-runtime-focus.js';
+import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
   FileManagerActor,
@@ -37,14 +43,34 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
-import { ProjectLibrary } from '#runtime/project-library.js';
+import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.js';
+import { createRootFileFacade } from '#runtime/file-manager-facade.js';
+import type { RootFileFacade } from '#runtime/file-manager-facade.js';
+import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
-import { createSessionsRegistryLogic, sessionsRegistryInput } from '#services/sessions-store.js';
+import {
+  createSessionRootSync,
+  createSessionsRegistryLogic,
+  sessionFileManagerOpener,
+  sessionsRegistryInput,
+} from '#services/sessions-store.js';
+import { selectFocusTarget } from '#machines/focus.route-state.js';
 import {
   isPlacementOnThisDevice,
   isPlacementOnThisDeviceNow,
+  namesUnhandedLoopbackHost,
+  onLoopbackAgentHostsChanged,
   onPlacementReachabilityChanged,
 } from '#lib/agent-host-placement.js';
+import { createChoicesLogic, readChoices } from '#runtime/choices.js';
+import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime/choices.js';
+import type { SessionRuntimeOpener, SessionWiring, SessionsObservable } from '#services/sessions-store.js';
+import { store as preferenceStore } from '#hooks/use-cookie.js';
+import { metaConfig } from '#constants/meta.constants.js';
+import { getAllFlags } from '#flags/feature-flags.js';
+import { subscribeFeatureFlags } from '#flags/use-feature.js';
+import { modelsQueryKey } from '#lib/model-catalog.js';
+import type { Model } from '#lib/model-catalog.js';
 
 /** The app runtime root actor. @public */
 export type AppRuntime = Actor<typeof appRuntimeMachine>;
@@ -54,6 +80,10 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
   Readonly<{
     /** The page `environment` listens to, read when the runtime starts; the browser's by default. */
     environment?: () => EnvironmentHost | undefined;
+    /** The desktop quit seam `environment` listens to; the desktop bridge's by default. */
+    desktopQuit?: EnvironmentDesktopQuit;
+    /** The session module's import focus waits for; `loadProjectWorkspace` by default. */
+    loadSessionModule?: () => Promise<unknown>;
     /**
      * The product analytics client the file manager's workspace telemetry captures through (D15). The client entry
      * passes the admitted one; the server and tests get the no-op client.
@@ -107,15 +137,31 @@ export type AppRuntimeFiles = Readonly<{
 /* Each runtime's file closures, by runtime; the composition writes one per runtime it creates. */
 const runtimeFiles = new WeakMap<AppRuntime, AppRuntimeFiles>();
 
-/** The services the runtime's `projectLibrary` and `chatSessions` children hold (A2, D9). */
+/** The services the runtime's `projectLibrary` and `chatSessions` children hold (A2, D9), and what React fills. */
 type AppRuntimeServices = Readonly<{
   queryClient: QueryClient;
   projectLibrary: ProjectLibrary;
   chatSessions: ChatSessionStore;
+  /** The unload registrations `environment` sequences (D26). */
+  unload: UnloadSequencer;
+  /** Focus and the bindings its ports read (A5b). */
+  focus: FocusHandle;
+  rootFileFacade: RootFileFacade;
 }>;
+
+/** The desktop bridge's quit seam: a no-op outside the desktop build. Read when `environment` starts, not on import. */
+const desktopBridgeQuit: EnvironmentDesktopQuit = {
+  onQuitRequested: (listener) => onDesktopQuitRequested(listener),
+  reportQuiesced: (attemptId, forced) => {
+    reportDesktopQuiesced(attemptId, forced);
+  },
+};
 
 /* Each runtime's services, by runtime; the composition writes one per runtime it creates. */
 const runtimeServices = new WeakMap<AppRuntime, AppRuntimeServices>();
+
+/* Each runtime's lease store, by runtime; the composition writes one per runtime it creates. */
+const runtimeLeases = new WeakMap<AppRuntime, LeaseStore>();
 
 /* Development only: a rejected event is a machine that did not expect it (MC-R4). */
 const warnRejectedChatEvent = (rejection: EventRejection): void => {
@@ -129,8 +175,11 @@ const warnRejectedChatEvent = (rejection: EventRejection): void => {
 const createChatSessions = (
   library: ProjectLibrary,
   options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
+  focusedProject: SessionsObservable<string | undefined>,
 ): ChatSessionStore =>
   new ChatSessionStore({
+    /* A7b: the store reads the focused project from focus, not from a setter React calls. */
+    focusedProject,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined
@@ -157,14 +206,156 @@ const createChatSessions = (
   });
 
 /**
+ * The catalog as the runtime's query cache holds it, as `useModels` reads its query: rows once they arrived, else
+ * unavailable after a failed fetch, else loading.
+ */
+const modelsQueryHash = hashKey(modelsQueryKey);
+
+const readCachedCatalog = (queryClient: QueryClient): ChoicesModelCatalog => {
+  const state = queryClient.getQueryState<Model[]>(modelsQueryKey);
+  if (state?.data !== undefined) {
+    return { status: 'loaded', models: state.data };
+  }
+  return { status: state?.status === 'error' ? 'unavailable' : 'loading' };
+};
+
+/**
+ * The four real ports of `choices` (plan § 4 A6b, D15), each a module store outside React:
+ * - `cookies`: the preference store `useCookie` reads, by its storage name;
+ * - `catalog`: the model catalog in the runtime's query cache, followed through the cache. It never fetches: the
+ *   chat's `useModels` owns the fetch and its five-minute refetch, so attaching `choices` adds no request;
+ * - `flags`: the flag store `useFeature` reads;
+ * - `reachability`: this tab's loopback admissions, as `usePlaceableExecution` reads them.
+ *
+ * @param queryClient - The runtime's query client.
+ * @returns The ports.
+ */
+const createChoicesPorts = (queryClient: QueryClient): ChoicesPorts => ({
+  cookies: {
+    read: (name) => preferenceStore.get(`${metaConfig.cookiePrefix}${name}`),
+    subscribe: (name, listener) => preferenceStore.subscribe(`${metaConfig.cookiePrefix}${name}`, listener),
+  },
+  catalog: {
+    read: () => readCachedCatalog(queryClient),
+    subscribe: (listener) =>
+      queryClient.getQueryCache().subscribe((event) => {
+        /* Only what changes the catalog's data or status: an observer joining or leaving changes neither. */
+        if (
+          event.query.queryHash === modelsQueryHash &&
+          (event.type === 'added' || event.type === 'removed' || event.type === 'updated')
+        ) {
+          listener();
+        }
+      }),
+  },
+  flags: {
+    read: (flag) => getAllFlags()[flag],
+    subscribe: (_flag, listener) => subscribeFeatureFlags(listener),
+  },
+  reachability: {
+    isPlaceable: (execution) => !namesUnhandedLoopbackHost(execution),
+    subscribe: onLoopbackAgentHostsChanged,
+  },
+});
+
+/** A value the composition fills once the root exists: its value now, and its listeners. */
+type LateObservable<T> = SessionsObservable<T> & Readonly<{ set: (value: T) => void; notify: () => void }>;
+
+const lateObservable = <T>(initial: T): LateObservable<T> => {
+  let value = initial;
+  const changes = new Topic<void>({ name: 'appRuntime.lateObservable' });
+  const notify = (): void => {
+    changes.emit(undefined);
+  };
+  return {
+    get: () => value,
+    subscribe: (listener) => changes.subscribe(listener),
+    set: (next) => {
+      value = next;
+    },
+    notify,
+  };
+};
+
+/**
+ * The module a session builds its project runtime with, by dynamic import (D5): the entry graph never reaches it.
+ */
+const loadSessionRuntimeModule = async () => import('#runtime/project-runtime.session.js');
+
+/**
+ * How each session builds its project runtime (A6d): the lazy module, over the library, the chat store, the query
+ * cache, the device's choices and the services wait on this runtime's clock. Each is a closure, never machine context
+ * (D4). The choices are the root's, as `choices` last reported them, or read now before it first reports.
+ *
+ * @param ports - What the composition holds.
+ * @returns The opener the registry gives each session's `project` child.
+ */
+const createSessionRuntimeOpener = (
+  ports: Readonly<{
+    projectLibrary: ProjectLibrary;
+    chatSessions: ChatSessionStore;
+    queryClient: QueryClient;
+    choicesPorts: ChoicesPorts;
+    runtime: () => AppRuntime | undefined;
+    options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'onRejectedEvent'>;
+  }>,
+): SessionRuntimeOpener => {
+  const choicesNow = (): ProjectChoices => {
+    const runtime = ports.runtime();
+    return (
+      (runtime === undefined ? undefined : selectAppChoices(runtime.getSnapshot())) ?? readChoices(ports.choicesPorts)
+    );
+  };
+  return {
+    open: async (input) => {
+      const { openSessionProjectRuntime } = await loadSessionRuntimeModule();
+      return openSessionProjectRuntime(input, {
+        library: ports.projectLibrary,
+        chatSessions: ports.chatSessions,
+        queryClient: ports.queryClient,
+        choices: choicesNow,
+        awaitServices: async (fileManager, gone) =>
+          awaitFileManager(fileManager, 'services', {
+            reason: 'services-timeout',
+            gone,
+            ...(ports.options.clock === undefined ? {} : { clock: ports.options.clock }),
+          }),
+        ...(ports.options.clock === undefined ? {} : { clock: ports.options.clock }),
+        ...(ports.options.onRejectedEvent === undefined ? {} : { onRejectedEvent: ports.options.onRejectedEvent }),
+      });
+    },
+    onChoicesChanged: (listener) => {
+      const runtime = ports.runtime();
+      if (runtime === undefined) {
+        return () => undefined;
+      }
+      let last = selectAppChoices(runtime.getSnapshot());
+      const subscription = runtime.subscribe((snapshot) => {
+        const next = selectAppChoices(snapshot);
+        if (next !== last) {
+          last = next;
+          listener();
+        }
+      });
+      return () => {
+        subscription.unsubscribe();
+      };
+    },
+  };
+};
+
+/**
  * Create the app runtime, unstarted (MC-R4).
  *
  * @param options - The clock, inspector and rejected-event hook for the whole tree, and the page to listen to.
  * @returns The root actor; its one start is `AppRuntimeProvider`'s.
  * @public
  */
+// oxlint-disable-next-line max-lines-per-function -- The one composition root: every child's closure is built here.
 export const createAppRuntime = ({
   environment,
+  desktopQuit = desktopBridgeQuit,
+  loadSessionModule = loadProjectWorkspace,
   analytics = noAnalytics,
   loadHomeBackend,
   idleFileManagers = false,
@@ -174,33 +365,129 @@ export const createAppRuntime = ({
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
   const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
   const table = createLeaseTable();
+  /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
+  const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore; rootFiles?: RootFileFacade } = {};
+  const workspaceTelemetry = buildWorkspaceTelemetry(analytics);
   const projectLibrary = new ProjectLibrary({
     queryClient,
+    /* A4b: the root file facade over `rootFiles`, which exists once the root is created below. */
+    rootFiles: () => composed.rootFiles,
+    workspaceTelemetry,
+    sessions: () => (composed.runtime === undefined ? undefined : selectRuntimeSessions(composed.runtime)),
+    chatSessions: () => composed.chatSessions,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
   });
-  const chatSessions = createChatSessions(projectLibrary, options);
+  /* A7b: the project focus has the person on, and whether the page is on screen, as the root's focus and `environment`
+   * report them once the root exists. The sessions' `presence` and `revisions` children and the chat store read them. */
+  const focusedProject = lateObservable<string | undefined>(undefined);
+  const documentVisible = lateObservable(false);
+  const chatSessions = createChatSessions(projectLibrary, options, focusedProject);
+  composed.chatSessions = chatSessions;
+  const unload = createUnloadSequencer();
+  /* Focus's five ports (A5b): the library's route access at its epoch, the registry, the leave flush React registers,
+   * the session module and the route boundary. */
+  const focusComposition = createFocusComposition({
+    library: {
+      routeAccess: projectLibrary.routeAccess,
+      epoch: () => selectLibraryRevision(projectLibrary.getSnapshot()),
+      onEpochChanged: (listener) =>
+        projectLibrary.onLibraryChanged((event) => {
+          listener(event.revision);
+        }),
+    },
+    loadModule: loadSessionModule,
+  });
+  /* The host the sessions build their file managers through: the root spawns it with itself, so it is read once the
+   * root exists, before any session can open. */
+  const builtHost: { current: FileManagerHostRef | undefined } = { current: undefined };
+  const choicesPorts = createChoicesPorts(queryClient);
+  /* A7b: what each session's facts are wired to. Each port is a closure over the composition, never machine context. */
+  const sessionWiring: SessionWiring = {
+    loadRevisions: async () => import('#runtime/session-revisions.js'),
+    loadHostConnector: async () => import('#runtime/host-connector.js'),
+    registerCloseCut: (cut) => unload.register('session', cut),
+    focusedProject,
+    documentVisible,
+    chatSessions,
+    choices: () => {
+      const { runtime } = composed;
+      return (runtime === undefined ? undefined : selectAppChoices(runtime.getSnapshot())) ?? readChoices(choicesPorts);
+    },
+    rootSync: (fileManagerRef, gone) =>
+      createSessionRootSync({
+        fileManagerRef,
+        gone,
+        files: {
+          awaitFileManager: async (fileManager, readiness, wait) =>
+            awaitFileManager(fileManager, readiness, {
+              ...(options.clock === undefined ? {} : { clock: options.clock }),
+              ...wait,
+            }),
+        },
+        telemetry: workspaceTelemetry,
+      }),
+  };
   const runtime = createActor(
     appRuntimeMachine.provide({
       actors: {
-        environment: createEnvironmentLogic(environment),
+        environment: createEnvironmentLogic(environment, { sequencer: unload, desktopQuit }),
+        focusLibrary: focusComposition.logics.library,
+        focusRegistry: focusComposition.logics.registry,
+        focusFlush: focusComposition.logics.flush,
+        focusModule: focusComposition.logics.module,
+        focusRoute: focusComposition.logics.route,
+        /* A6b: the device's choices over their real ports. The server never starts the runtime, so it reads none. */
+        choices: createChoicesLogic(choicesPorts),
         /* Row L3: the library's actors and worker start with the root. An idle runtime (the remote-host harness,
          * which mounts no `ProjectManagerProvider`) starts no worker. */
         projectLibrary: createCallbackLogic<EventObject>(() => {
           if (idleFileManagers) {
-            return undefined;
+            /* Idle: nothing starts, but the root facade still follows `rootFiles` until the runtime stops. */
+            return () => {
+              composed.rootFiles?.close();
+            };
           }
           projectLibrary.start();
           return () => {
             projectLibrary.stop();
+            composed.rootFiles?.close();
           };
         }),
 
         fileManagerHost: host.logic,
         leases: table.logic,
-        /* S28: the registry admits and releases compute on the host's shared worker. */
-        sessions: createSessionsRegistryLogic(host.sharedWorker),
+        /* S28: the registry admits and releases compute on the host's shared worker. A6c: each session builds its
+         * file manager through the host, and waits for it on this runtime's clock. */
+        sessions: createSessionsRegistryLogic({
+          sharedWorker: host.sharedWorker,
+          fileManagerWorker: { current: host.sharedWorker, subscribe: host.onSharedWorker },
+          openFileManager: sessionFileManagerOpener({
+            build: (spec) => {
+              if (builtHost.current === undefined) {
+                throw new Error('A session opened its file manager before the app runtime was created');
+              }
+              return host.build(builtHost.current, spec, options);
+            },
+            awaitServices: async (fileManager, gone) =>
+              awaitFileManager(fileManager, 'services', {
+                reason: 'services-timeout',
+                gone,
+                ...(options.clock === undefined ? {} : { clock: options.clock }),
+              }),
+          }),
+          /* A6d: each session builds its project runtime behind a dynamic import, once it has its file manager. */
+          openRuntime: createSessionRuntimeOpener({
+            projectLibrary,
+            chatSessions,
+            queryClient,
+            choicesPorts,
+            runtime: () => composed.runtime,
+            options,
+          }),
+          wiring: sessionWiring,
+        }),
       },
     }),
     {
@@ -208,10 +495,25 @@ export const createAppRuntime = ({
       input: {
         sessions: sessionsRegistryInput(),
         rootFiles: host.rootFilesInput({ idle: idleFileManagers }),
+        focusEpoch: focusComposition.epoch(),
       },
     },
   );
-  const { fileManagerHost, leases } = runtime.getSnapshot().context;
+  const { fileManagerHost, leases, focus } = runtime.getSnapshot().context;
+  focus.subscribe((snapshot) => {
+    const next = selectFocusTarget(snapshot).target;
+    if (next !== focusedProject.get()) {
+      focusedProject.set(next);
+      focusedProject.notify();
+    }
+  });
+  /* Every report of the page reaches the sessions, as every `visibilitychange` reached the binding's listener. */
+  documentVisible.set(selectAppEnvironment(runtime.getSnapshot()).visible === true);
+  runtime.on('visibilityChanged', (event) => {
+    documentVisible.set(event.visible);
+    documentVisible.notify();
+  });
+  builtHost.current = fileManagerHost;
   const store: LeaseStore = table.storeFor(leases);
   const buildOptions: FileManagerBuildOptions = options;
   runtimeFiles.set(runtime, {
@@ -224,7 +526,23 @@ export const createAppRuntime = ({
     sharedWorker: host.sharedWorker,
     idleFileManagers,
   });
-  runtimeServices.set(runtime, { queryClient, projectLibrary, chatSessions });
+  const rootFileFacade = createRootFileFacade({
+    fileManagerRef: selectRootFiles(runtime.getSnapshot()),
+    files: runtimeFiles.get(runtime)!,
+    telemetry: workspaceTelemetry,
+  });
+  composed.rootFiles = rootFileFacade;
+  projectLibrary.followRootFiles();
+  runtimeServices.set(runtime, {
+    queryClient,
+    projectLibrary,
+    chatSessions,
+    unload,
+    rootFileFacade,
+    focus: { focus: runtime.getSnapshot().context.focus, bindings: focusComposition.bindings },
+  });
+  composed.runtime = runtime;
+  runtimeLeases.set(runtime, store);
   return runtime;
 };
 
@@ -255,6 +573,16 @@ export const selectRuntimeQueryClient = (runtime: AppRuntime): QueryClient => se
 export const selectRuntimeProjectLibrary = (runtime: AppRuntime): ProjectLibrary => servicesOf(runtime).projectLibrary;
 
 /**
+ * The runtime's root file facade over `rootFiles` (A4b): the one the project library reads and the root layout's scope
+ * views.
+ *
+ * @param runtime - The app runtime.
+ * @returns The facade.
+ * @public
+ */
+export const selectRuntimeRootFileFacade = (runtime: AppRuntime): RootFileFacade => servicesOf(runtime).rootFileFacade;
+
+/**
  * The runtime's chat store, built with its dependencies (A2), which `ChatSessionStoreProvider` hands down.
  *
  * @param runtime - An app runtime {@link createAppRuntime} made.
@@ -262,6 +590,29 @@ export const selectRuntimeProjectLibrary = (runtime: AppRuntime): ProjectLibrary
  * @public
  */
 export const selectRuntimeChatSessions = (runtime: AppRuntime): ChatSessionStore => servicesOf(runtime).chatSessions;
+
+/**
+ * The runtime's unload sequencer (D26): what `UnloadProvider` hands `useFlushOnClose` and `useFlushProducers`.
+ *
+ * @param runtime - An app runtime {@link createAppRuntime} made.
+ * @returns Its sequencer, fixed for its life.
+ * @public
+ */
+export const selectRuntimeUnload = (runtime: AppRuntime): UnloadSequencer => servicesOf(runtime).unload;
+
+/**
+ * The runtime's focus and the bindings its ports read (A5b): the route boundary binds its sink, and each live
+ * project's guard registers its leave flush.
+ *
+ * @param runtime - An app runtime {@link createAppRuntime} made.
+ * @returns Its focus handle, fixed for its life.
+ * @public
+ */
+export const selectRuntimeFocus = (runtime: AppRuntime): FocusHandle => servicesOf(runtime).focus;
+
+/** The desktop quit hold, as `environment` last reported it. @public */
+export const selectQuitHold = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): AppRuntimeQuitHold =>
+  snapshot.context.quitHold;
 
 /**
  * The runtime's file closures: the lease builder, the ready wait and the shared worker.
@@ -276,6 +627,23 @@ export const selectRuntimeFiles = (runtime: AppRuntime): AppRuntimeFiles => {
     throw new Error('selectRuntimeFiles takes a runtime createAppRuntime made');
   }
   return files;
+};
+
+/**
+ * The runtime's lease store (D6): what a host without a session leases its actors from, in render, idempotent per key
+ * and unstarted until retained. `ProjectProvider` leases its project runtime here (A6b); the file-manager leases go
+ * through {@link selectRuntimeFiles}, which builds them with the host.
+ *
+ * @param runtime - An app runtime {@link createAppRuntime} made.
+ * @returns Its lease store, fixed for its life.
+ * @public
+ */
+export const selectRuntimeLeases = (runtime: AppRuntime): LeaseStore => {
+  const leases = runtimeLeases.get(runtime);
+  if (leases === undefined) {
+    throw new Error('selectRuntimeLeases takes a runtime createAppRuntime made');
+  }
+  return leases;
 };
 
 /**
@@ -333,6 +701,14 @@ export const selectRuntimeSessions = (runtime: AppRuntime): ActorRefFrom<typeof 
 /** The page as `environment` last reported it. @public */
 export const selectAppEnvironment = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): AppRuntimeEnvironment =>
   snapshot.context.environment;
+
+/**
+ * The device's standing choices, as `choices` last reported them; `undefined` before the runtime starts (A6b).
+ *
+ * @public
+ */
+export const selectAppChoices = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): ProjectChoices | undefined =>
+  snapshot.context.choices;
 
 /** The runtime root's first fault, if any (D23). @public */
 export const selectAppRuntimeFault = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): string | undefined =>

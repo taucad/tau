@@ -143,7 +143,8 @@ const poleTilt = 1e-3;
 /**
  * Reads the pose the cube turned its camera to, in the view's physical frame. The cube orbits its target at a fixed
  * distance, so the camera's span is kept. A view along the up axis (a top or bottom face) is tilted off it by
- * {@link poleTilt}, toward the camera's screen up, so the camera does not refuse it.
+ * {@link poleTilt}, away from the camera's screen up above the target and toward it below, so the camera does not
+ * refuse it and presents the roll the cube turned to.
  *
  * @param options - The cube's camera and target (render units), the view's render frame and the presented span.
  * @returns The pose, or `undefined` when the camera sits on its target.
@@ -166,7 +167,8 @@ export const readViewportGizmoPose = ({
   const up = camera.up.clone().normalize();
   if (direction.clone().cross(up).lengthSq() < poleTilt * poleTilt) {
     const screenUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-    direction.addScaledVector(screenUp, -poleTilt).normalize();
+    // An upright camera's screen up points toward the axis above the target and away from it below.
+    direction.addScaledVector(screenUp, -Math.sign(direction.dot(up)) * poleTilt).normalize();
   }
   return {
     target: fromThreeRenderPoint({ renderFrame, point: target }),

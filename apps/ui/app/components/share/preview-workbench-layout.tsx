@@ -51,6 +51,10 @@ export function PreviewWorkbenchLayout({
                     '[--drawer-handle-reach:calc(var(--spacing)*9)]',
                     '[&_.dv-tabs-and-actions-container]:pointer-events-none',
                     '[&_.dv-tabs-and-actions-container_:is(button,a,[role=button],[role=tab],[tabindex])]:pointer-events-auto',
+                    /* Dockview's root is `isolate` so its sashes and overlays stay under body-level menus. Inside the
+                     * sheet that would trap the strip's z-6 under the grabber's z-1 target, so the root stacks in the
+                     * sheet's own context instead; menus still portal above the sheet. */
+                    '[&_[data-resize-owner]]:isolation-auto',
                   )}
                 >
                   <DrawerTitle className='sr-only'>Project workbench</DrawerTitle>

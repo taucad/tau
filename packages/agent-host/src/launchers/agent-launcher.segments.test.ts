@@ -1425,9 +1425,8 @@ describe('a chat continued on a second device', () => {
         commandId: key(),
         payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
       });
-      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
-      await sleep(200);
-      const rows = rowsOf(await readFile(ownLog(root), 'utf8'));
+      /* Waits on the rows and the asks themselves, not a wall-clock window that a loaded runner may not fill. */
+      const rows = await rowsUntil(root, (found) => heartbeatsAfter(found, 'running').length >= 2 && asked > 2);
       gate.resolve();
 
       expect(heartbeatsAfter(rows, 'running').length).toBeGreaterThanOrEqual(2);

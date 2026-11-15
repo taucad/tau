@@ -28,6 +28,9 @@ const writeCollapsed = (chatId: string, collapsed: boolean): void => {
   }
 };
 
+/** The slot of the height a remembered task list reserves before its reads answer (U10). */
+export const composerTrayReserveSlot = 'composer-tray-reserve';
+
 /** Status glyphs shared by the list above the composer and the transcript card. */
 export const todoStatusIcons: Record<
   TodoItemStatus,
@@ -77,7 +80,14 @@ function TodoRow({ item }: { readonly item: TodoItem }): React.JSX.Element {
  * and nothing renders until a list exists. Only the fold is remembered, per
  * chat and per device.
  */
-export function ChatTodoList(): React.JSX.Element | undefined {
+export function ChatTodoList({
+  reserveHeight = false,
+  isTranscriptLoading = false,
+}: {
+  /** The chat showed this tray when last open (U10): hold its folded height until the reads that show it answer. */
+  readonly reserveHeight?: boolean;
+  readonly isTranscriptLoading?: boolean;
+} = {}): React.JSX.Element | undefined {
   const { activeChatId } = useChatContext();
   const content = useFileContent(todoListPath(activeChatId));
   const items = useMemo(() => {
@@ -97,7 +107,10 @@ export function ChatTodoList(): React.JSX.Element | undefined {
   );
 
   if (items === undefined) {
-    return undefined;
+    // Reserved, it draws nothing: the folded header's height, held while the transcript or the file is still loading.
+    return reserveHeight && (isTranscriptLoading || content.kind === 'loading') ? (
+      <div aria-hidden='true' data-slot={composerTrayReserveSlot} className='min-h-8' />
+    ) : undefined;
   }
 
   const done = items.filter((item) => item.status === 'done').length;

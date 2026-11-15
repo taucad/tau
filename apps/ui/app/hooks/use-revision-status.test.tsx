@@ -9,9 +9,11 @@
  * actor, not the client's own bookkeeping.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import { createActor, setup, types } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { useEffect } from 'react';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
@@ -24,14 +26,17 @@ import type {
   WorkerRevisionResponse,
 } from '#machines/file-manager.worker.revisions.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
+import { startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import {
   createHostRevisionClient,
   getRevisionClient,
   revisionClientTestApi,
   useRevisionClient,
-  useRevisionClientLifecycle,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
+import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
+import type { fileManagerMachine as realFileManagerMachine } from '#machines/file-manager.machine.js';
 import type { GitRemoteCredential } from '@taucad/revisions';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 
@@ -268,6 +273,16 @@ const harness = (
 
 const live: Array<{ dispose: () => void }> = [];
 
+/* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
+let environment: EnvironmentHostFixture | undefined;
+beforeEach(() => {
+  environment = startEnvironmentHost();
+});
+afterEach(() => {
+  environment?.stop();
+  environment = undefined;
+});
+
 afterEach(async () => {
   visibility = 'visible';
   revisionClientTestApi.reset();
@@ -282,8 +297,17 @@ function Consumer(): React.JSX.Element {
   return <div data-testid='consumer' />;
 }
 
+/* A7b: the session's `revisions` child owns the lifecycle; this starts it for as long as the row mounts it. */
 function Owner(): React.JSX.Element {
-  useRevisionClientLifecycle();
+  useEffect(
+    () =>
+      startSessionRevisionsStandIn({
+        projectId,
+        fileManagerRef: fileManagerRef as unknown as ActorRefFrom<typeof realFileManagerMachine>,
+        ...(environment === undefined ? {} : { sequencer: environment.sequencer }),
+      }),
+    [],
+  );
   return <div data-testid='owner' />;
 }
 
@@ -299,7 +323,7 @@ function CommandConsumer(): React.JSX.Element {
 
 const mount = (): ReturnType<typeof render> =>
   render(
-    <UnloadProvider>
+    <UnloadProvider sequencer={environment?.sequencer}>
       <Owner />
       <Consumer />
     </UnloadProvider>,
@@ -924,7 +948,7 @@ describe('the page client of the worker revision root', () => {
     fileManagerRef.send({ type: 'worker', worker });
 
     const tree = (showSecondConsumer: boolean): React.JSX.Element => (
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment?.sequencer}>
         <Owner />
         <Consumer />
         {showSecondConsumer ? <Consumer /> : null}
@@ -1103,7 +1127,7 @@ describe('the page client of the worker revision root', () => {
     fileManagerRef.send({ type: 'worker', worker });
 
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment?.sequencer}>
         <Owner />
         <CommandConsumer />
       </UnloadProvider>,
@@ -1211,7 +1235,7 @@ describe('the page client of the worker revision root', () => {
     fileManagerRef.send({ type: 'worker', worker });
 
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment?.sequencer}>
         <Owner />
         <CommandConsumer />
       </UnloadProvider>,

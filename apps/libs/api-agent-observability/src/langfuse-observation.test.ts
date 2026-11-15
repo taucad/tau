@@ -27,6 +27,8 @@ import { generationSettlementKey, settledGenerationKey, settlementEvidence, sett
 
 const pseudonym = pseudonymKey(Uint8Array.from(randomBytes(32)));
 const context = { environment: 'staging', protection: 'pro' } as const;
+type ToolLabels = NonNullable<Extract<ReturnType<typeof toolFact>, { kind: 'tool' }>['labels']>;
+
 const at = Date.parse('2026-11-10T09:00:00.000Z');
 
 const attribute = (span: OtlpSpan, key: string): unknown => {
@@ -580,6 +582,32 @@ describe('langfuseObservation v5: host labels on every row (LW17, LI10)', () => 
     for (const key of ['host', 'kernel', 'model']) {
       expect(traceMetadata(helper, key)).toBeUndefined();
     }
+  });
+
+  it("should tag a tool with its run's host, kernel and model, and an older host's tool with the plan only", async () => {
+    const labelled = async (labels?: ToolLabels): Promise<OtlpSpan> => {
+      const fact = toolFact();
+      if (fact.kind !== 'tool') {
+        throw new Error('toolFact builds a tool fact');
+      }
+      return only(
+        await evidenceFixture({ semantic: 'call-1', fact: { ...fact, ...(labels === undefined ? {} : { labels }) } }),
+      );
+    };
+
+    const tool = await labelled({ host: 'cli', kernel: 'replicad', model: 'google-gemini-3.8-flash' });
+    expect(attribute(tool, 'langfuse.trace.tags')).toEqual([
+      'plan:pro',
+      'host:daemon',
+      'kernel:replicad',
+      'model:google-gemini-3.8-flash',
+    ]);
+    expect(traceMetadata(tool, 'kernel')).toBe('replicad');
+    expect(attribute(await labelled({ host: 'browser', kernel: null, model: null }), 'langfuse.trace.tags')).toEqual([
+      'plan:pro',
+      'host:browser',
+    ]);
+    expect(attribute(await labelled(), 'langfuse.trace.tags')).toEqual(['plan:pro']);
   });
 
   it('should name a CLI host as the gateway names it, so a host fact and an API fact read the same', async () => {

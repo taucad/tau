@@ -7,10 +7,12 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 
 const mocks = vi.hoisted(() => {
   const executeRpcCall = vi.fn();
+  const createRpcHandlers = vi.fn((_deps: unknown) => ({ executeRpcCall }));
   return {
     files: new Map<string, string>(),
     executeRpcCall,
-    createRpcHandlers: vi.fn((_deps: unknown) => ({ executeRpcCall })),
+    createRpcHandlers,
+    handlersModule: () => ({ createRpcHandlers }),
   };
 });
 
@@ -24,9 +26,8 @@ vi.mock('#hooks/use-file-content.js', () => ({
   },
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({}) }));
-vi.mock('#hooks/rpc-handlers.js', () => ({
-  createRpcHandlers: mocks.createRpcHandlers,
-}));
+// Install imports the handler stack on demand.
+vi.mock('#hooks/rpc-handlers.js', () => mocks.handlersModule());
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_ACQUISITION: 'locked' } }));
 
@@ -131,6 +132,28 @@ describe('PackagesPanel', () => {
 
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled();
+  });
+
+  it('should show the load failure and re-enable Install when the handler stack does not load', async () => {
+    vi.doMock('#hooks/rpc-handlers.js', () => {
+      throw new Error('Failed to fetch dynamically imported module');
+    });
+    vi.resetModules();
+    try {
+      renderPanel();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Install' }));
+
+      // The panel's result row is the install tool's error card, with the load failure as its detail.
+      await userEvent.click(await screen.findByText('Attempted'));
+      // Vitest wraps the factory's error in its own message, so only the panel's prefix is asserted.
+      expect(await screen.findByText(/^The installer did not load: /u)).toBeInTheDocument();
+      expect(mocks.executeRpcCall).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled();
+    } finally {
+      vi.doMock('#hooks/rpc-handlers.js', mocks.handlersModule);
+      vi.resetModules();
+    }
   });
 
   it('should offer the npm command as copyable text and never run it', () => {

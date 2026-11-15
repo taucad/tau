@@ -335,6 +335,9 @@ export const versionNumberRefusals = {
   /** The ref is a version's, but what it names is not a version: not an annotated tag with a valid Tau-Tag record. */
   GIT_PUSH_VERSION_TAG_INVALID:
     'a version tag must be an annotated tag with its Tau-Tag record. Only Tau writes version tags at refs/tags/v<number>.',
+  /** The push re-points a backed-up version at another entry; a version keeps its entry (I6, Q13). */
+  GIT_PUSH_VERSION_MOVED:
+    'a backed-up version always names the entry it was made on. Renaming it keeps that entry; make a new version for another entry.',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
 
@@ -365,6 +368,10 @@ export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
  *   `id`, or anything over a tag that is not a version. A rename keeps the id
  *   and passes, so a backed-up number never changes (I6).
  *
+ * A rename that names another object than the held tag does is
+ * `GIT_PUSH_VERSION_MOVED`: a version keeps its entry (I6, Q13). Git's own
+ * fast-forward rule would let it move to any later entry.
+ *
  * An object that cannot be read is `GIT_PUSH_RECORD_UNREADABLE`. A tag under
  * any other name is not a version and passes. Written without template
  * literals so it embeds in the hook's quoted heredoc unchanged.
@@ -391,6 +398,12 @@ try {
   }
   const trailerPrefix = 'Tau-Tag: ';
   const versionId = /^[0-9a-f]{32}$/;
+  /* The object a tag names: its first header line. */
+  const objectOf = (body) => {
+    const line = body.slice(0, body.indexOf('\n'));
+    return line.startsWith('object ') ? line.slice('object '.length) : null;
+  };
+  const objects = new Map();
   /* A version's id, or null for an object that is not a version. */
   const versionOf = (type, body) => {
     if (type !== 'tag') {
@@ -437,6 +450,7 @@ try {
       const body = batch.toString('utf8', end + 1, end + 1 + size);
       offset = end + 2 + size;
       versions.set(header[0], versionOf(header[1], body));
+      objects.set(header[0], header[1] === 'tag' ? objectOf(body) : null);
     }
   }
   const refused = [];
@@ -457,6 +471,8 @@ try {
       (zero.test(old) ? held.has(ref) : versions.get(old) === null || versions.get(old) !== versions.get(now))
     ) {
       refused.push(marker + ' — ' + ref + ' names V' + match[1] + ': ' + refusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    } else if (!zero.test(old) && objects.get(old) !== objects.get(now)) {
+      refused.push('Tau: refused ' + ref + ' — ' + refusals.GIT_PUSH_VERSION_MOVED);
     }
   }
   if (refused.length > 0) {

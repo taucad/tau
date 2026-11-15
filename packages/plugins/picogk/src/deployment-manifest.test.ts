@@ -56,8 +56,9 @@ describe('tau-plugin.json', () => {
 
     expect(dotnet).toMatchObject({ format: 'tar.gz', destination: 'dotnet' });
     expect(dotnet.stripComponents).toBeUndefined();
-    expect(dotnet.integrity.startsWith('sha512-')).toBe(true);
-    expect(hex(dotnet.integrity)).toHaveLength(128);
+    // By sha256, so a locked prepare resolves the dependency hosts' blobs/sha256/<hex> copy of the same bytes.
+    expect(dotnet.integrity.startsWith('sha256-')).toBe(true);
+    expect(hex(dotnet.integrity)).toHaveLength(64);
     expect(dotnet.origin).toEqual({
       kind: 'url',
       urls: [

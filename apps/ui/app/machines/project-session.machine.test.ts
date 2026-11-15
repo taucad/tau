@@ -55,8 +55,16 @@ const harness = (options?: {
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
+  /* What the session handed each child, in order. */
+  const received: string[] = [];
   const child = (name: string, region?: ProjectSessionRegion) =>
-    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
+      receive((event) => {
+        /* A6e's rows read the replacement traffic only. */
+        if (event.type === 'replaceRuntime' || event.type === 'holdReplacement') {
+          received.push(`${name}:${event.type}`);
+        }
+      });
       order.push(`start:${name}`);
       live.add(name);
       if (region !== undefined && (options?.readyRegions ?? regions).includes(region)) {
@@ -119,7 +127,7 @@ const harness = (options?: {
   const parking: boolean[] = [];
   actor.on('runtimeParking', (event) => parking.push(event.parked));
   actor.start();
-  return { actor, order, live, parking };
+  return { actor, order, live, parking, received };
 };
 
 const settle = async (): Promise<void> => {
@@ -420,13 +428,52 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
+  it('A6e: should hand replaceRuntime to its project child while opening, live or asking, and not once the close runs', async () => {
+    const opening = harness({ readyRegions: [] });
+    opening.actor.send({ type: 'replaceRuntime' });
+    expect(opening.received).toEqual(['project:replaceRuntime']);
+    opening.actor.stop();
+
+    let releaseFlush: () => void = () => undefined;
+    const { actor, received } = harness({
+      flushProducers: async () =>
+        new Promise<void>((resolve) => {
+          releaseFlush = resolve;
+        }),
+    });
+    await settle();
+    actor.send({ type: 'replaceRuntime' });
+    expect(received).toEqual(['project:replaceRuntime']);
+
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+    actor.send({ type: 'close', reason: 'user' });
+    expect(actor.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+    /* Entering `asking` hands any held replacement back; a change while it asks is handed on too. */
+    actor.send({ type: 'replaceRuntime' });
+    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime', 'project:replaceRuntime']);
+
+    actor.send({ type: 'confirmClose' });
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    actor.send({ type: 'replaceRuntime' });
+    /* The close holds any replacement already handed on, and hands on no other. */
+    expect(received).toEqual([
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:holdReplacement',
+    ]);
+    releaseFlush();
+    actor.stop();
+  });
+
   it('cancels, flushes and stops every child without a second lease relay (pin d)', async () => {
     const parent = recordingParent();
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
-    /* Four regions and no chat: the store owns each chat's root (PV-S5). */
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(4);
+    /* Four regions and the session's presence, and no chat: the store owns each chat's root (PV-S5). */
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(5);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });
@@ -439,8 +486,8 @@ describe('projectSessionMachine', () => {
       'flushProducers',
       'flushSync',
       'releaseAgentHost',
-      'stop:fileManager',
       'stop:project',
+      'stop:fileManager',
       'stop:agentHost',
       'stop:compute',
     ]);
@@ -647,18 +694,26 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it('should report its open facts to the registry with every state: chat ready and the first check settled', async () => {
+  it('should report its open facts to the registry with every state: chat ready once its runtime says so (M2), the first check settled', async () => {
     const parent = recordingParent();
     const { actor } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'revisionState', dirty: true, pushed: false });
     await settle();
 
-    const reports = parent.received.filter((event) => event.type === 'sessionState');
-    expect(reports.length).toBeGreaterThanOrEqual(3);
-    for (const report of reports) {
-      expect(report).toMatchObject({ chatReady: true, availability: 'settled' });
+    const before = parent.received.filter((event) => event.type === 'sessionState');
+    expect(before.length).toBeGreaterThanOrEqual(3);
+    for (const report of before) {
+      expect(report).toMatchObject({ chatReady: false, availability: 'settled' });
     }
+
+    actor.send({ type: 'chatReady' });
+    await settle();
+    expect(parent.received.findLast((event) => event.type === 'sessionState')).toMatchObject({
+      state: 'live',
+      chatReady: true,
+      availability: 'settled',
+    });
     actor.stop();
   });
 

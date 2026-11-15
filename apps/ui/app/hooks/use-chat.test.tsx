@@ -378,7 +378,6 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
     }),
   );
   publishLogRows(store, chatId, []);
-  store.setFocusedProject(testProjectId);
   store.setProjectSession(testProjectId, session);
   return () => {
     unpublish();

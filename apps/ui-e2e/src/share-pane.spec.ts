@@ -136,7 +136,8 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
   await target.hover(selectors.getByRole('link', { name: 'Project Navigation B', exact: true }));
   await target.click(selectors.getByRole('button', { name: 'More actions for Project Navigation B' }));
   await target.click(selectors.getByRole('menuitem', { name: 'Share project' }));
-  await target.expectVisible(selectors.getByText('Project Navigation B', { exact: true }).first(), 60_000);
+  /* The first "Project Navigation B" text in the document is not always a visible one, so follow the route itself. */
+  await target.expectUrl(/\/w\/[^/]+\/project-navigation-b(?:[?#]|$)/u, 60_000);
   await target.expectVisible(shareRegion(), 60_000);
   const next = new URL(await target.currentUrl());
   expect(next.pathname).toMatch(/\/w\/[^/]+\/project-navigation-b$/u);

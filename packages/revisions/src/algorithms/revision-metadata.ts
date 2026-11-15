@@ -3,15 +3,19 @@ import { z } from 'zod';
 /**
  * The person half of a recorded identity (S37, A26).
  *
+ * Strict: a record whose person carries any other field, an address among
+ * them, does not parse (I3, I7: there is no reader for that shape).
+ *
  * @public
  */
-export const revisionUserIdentitySchema = z.object({
-  kind: z.literal('user'),
-  id: z.string().min(1),
-  name: z.string().optional(),
-  email: z.string().optional(),
-  anonymous: z.boolean().optional(),
-});
+export const revisionUserIdentitySchema = z
+  .object({
+    kind: z.literal('user'),
+    id: z.string().min(1),
+    name: z.string().optional(),
+    anonymous: z.boolean().optional(),
+  })
+  .strict();
 
 /**
  * Who one capture is by, as version 2 of the record carries it (blueprint B1):
@@ -22,12 +26,14 @@ export const revisionUserIdentitySchema = z.object({
  */
 export const revisionIdentitySchema = z.discriminatedUnion('kind', [
   revisionUserIdentitySchema,
-  z.object({
-    kind: z.literal('agent'),
-    id: z.string().min(1),
-    runId: z.string().min(1),
-    onBehalfOf: revisionUserIdentitySchema,
-  }),
+  z
+    .object({
+      kind: z.literal('agent'),
+      id: z.string().min(1),
+      runId: z.string().min(1),
+      onBehalfOf: revisionUserIdentitySchema,
+    })
+    .strict(),
 ]);
 
 /**

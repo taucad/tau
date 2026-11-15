@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.12.0 (2026-11-14)
+
+### Features
+
+- feat(api): Record runtime telemetry in production (Runtime Observability PR-9) (#2090) (5667d397a)
+- feat(api): Enable the session cookie cache on prod-us at 60 s (WP6) (#2083) (5cb07ba32)
+- feat(revisions): keep the person's staging and wait out their Git operations (TG4, TG7b) (#2058) (fe7b4dfa8)
+- feat(api-git-core): back up commits you make with git (TG3) (#2053) (9b2f1aa2a)
+- feat(api): Enable the session cookie cache on staging at 60 s (WP6) (#2051) (ed12973b0)
+- feat(api-auth): Strip the session snapshot at the request boundary and gate the cookie cache (#2043) (d87455e33)
+- feat(api-auth): Resolve sessions once per request through a single-flight resolver (#2027) (5617b2054)
+- feat(ui): Offer Undo on the Merged and Closed toasts (#2025) (56d89e740)
+- feat(api-llm-gateway): Add Gemini 4 Carbon to the model catalog (#1981) (cc9a966bf)
+
+### Fixes
+
+- fix(revisions): pin the engine's common dir, refuse planted commondir, warn on rebase exec (LP4, LP7) (#2148) (1abaf069d)
+- fix(revisions): Refuse a merge built on history an undo took back (#2111) (82fc8f4b5)
+- fix(revisions): Back up past a v<n> tag that is not a version (#2107) (2c5a458e0)
+- fix(agent-observability): Let a host claim the protection the API reads for the account (#2052) (475b2f403)
+- fix(agent-tools): Keep test statuses and source revisions in a reduced test_model result (#2017) (7fe168ed2)
+- fix(agent-observability): Do not let a todo update after the last check hide task success (#2023) (89fa095c4)
+- fix(api): Remove only conflict lines through the audited ref verb (#2021) (d83a5354e)
+- fix(api-agent-observability): Ask again at admission when the early purpose lookup refused (#2006) (b8dc4cfe0)
+
+### Other changes
+
+- ci(formal): Run each TLA+ family in a parallel target of its own (#2092) (2cdaf1520)
+- chore(api): Restore the staging files service after the STO-26 drill (#2044) (b03d4898c)
+- chore(api): Roll staging LFS downloads back to presigned URLs for the STO-26 drill (#2026) (00b36e44c)
+
 ## 0.11.0 (2026-11-13)
 
 ### Features

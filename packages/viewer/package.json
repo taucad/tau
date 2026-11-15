@@ -621,7 +621,7 @@
     "pluralize": "^8.0.0",
     "postprocessing": "catalog:",
     "three-mesh-bvh": "^0.9.10",
-    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@2.2.4"
+    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@2.3.0"
   },
   "peerDependencies": {
     "@react-three/fiber": "^9.0.0",

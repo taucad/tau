@@ -39,7 +39,7 @@ import { sessionsCloseSuggestions } from '#machines/sessions.machine.js';
 import { selectProjectLiveness } from '#services/sessions-store.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
-import { useSessions } from '#hooks/use-sessions.js';
+import { useFocus, useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 import { actorSessionIdOf } from '@taucad/ui-core/lib/xstate.lib';
@@ -847,7 +847,7 @@ export type SidebarCommands = Readonly<{
  * The sidebar's verbs, so a row's controls hold no actor plumbing.
  *
  * Every one of them is an event on a machine that already owns the decision:
- * the chat's own `close`, the registry's `close` and `open`. Nothing here
+ * the chat's own `close`, the registry's `close` and focus's `openRequested`. Nothing here
  * decides anything.
  *
  * @returns The verbs.
@@ -855,6 +855,7 @@ export type SidebarCommands = Readonly<{
  */
 export const useSidebarCommands = (): SidebarCommands => {
   const sessions = useSessions();
+  const { focus } = useFocus();
   const chatSessions = useChatSessionStore();
   return useMemo(
     () => ({
@@ -873,10 +874,11 @@ export const useSidebarCommands = (): SidebarCommands => {
          * asked about running agents; idle sessions ignore the confirmation. */
         session?.send({ type: 'confirmClose' });
       },
+      /* A person's open goes through focus, which sends the request it kept for the project (D7, S39). */
       openProject: (projectId) => {
-        sessions.send({ type: 'open', projectId });
+        focus.send({ type: 'openRequested', projectId });
       },
     }),
-    [chatSessions, sessions],
+    [chatSessions, focus, sessions],
   );
 };

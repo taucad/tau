@@ -12,6 +12,7 @@ export type {
   ShellResource,
   ShellExit,
   ShellFilesystem,
+  ShellGuardedStores,
   ShellLaunch,
   ShellLaunchOutcome,
   ShellNetwork,

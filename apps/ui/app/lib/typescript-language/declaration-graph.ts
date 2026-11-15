@@ -1,5 +1,12 @@
 export type DeclarationImport = { name: string; from: number; to: number; reference?: 'path' | 'types' };
 
+/**
+ * Most files in one graph, and most references from one file. A package whose index re-exports each
+ * module from its own file needs hundreds: on esm.sh, `lodash-es` with `@types/lodash` is 318 files from
+ * a 304-reference index, `date-fns` 258 from 246, `@types/three` 416. The size limits bound memory.
+ */
+const maxDeclarationFiles = 1024;
+
 /** Load a bounded declaration graph before publishing any of its files. */
 export async function loadDeclarationGraph({
   entry,
@@ -19,8 +26,8 @@ export async function loadDeclarationGraph({
     if (visiting.has(url)) {
       return;
     }
-    if (visiting.size >= 128) {
-      throw new Error('Declaration graph exceeds 128 files');
+    if (visiting.size >= maxDeclarationFiles) {
+      throw new Error(`Declaration graph exceeds ${maxDeclarationFiles} files`);
     }
     visiting.add(url);
     let text = await read(url);
@@ -29,8 +36,8 @@ export async function loadDeclarationGraph({
       throw new Error('Declaration file exceeds size limit');
     }
     const references = await imports(text);
-    if (references.length > 128) {
-      throw new Error('Declaration file exceeds 128 references');
+    if (references.length > maxDeclarationFiles) {
+      throw new Error(`Declaration file exceeds ${maxDeclarationFiles} references`);
     }
     const edits = await Promise.all(
       references.map(async (item) => {
@@ -38,13 +45,9 @@ export async function loadDeclarationGraph({
         return { ...item, target };
       }),
     );
-    // Discover siblings in order: a shared visiting set terminates cyclic declaration imports.
-    for (const item of edits) {
-      if (item.target) {
-        // oxlint-disable-next-line no-await-in-loop -- graph cycle detection and admission bounds are shared.
-        await visit(item.target);
-      }
-    }
+    // Siblings load together; the caller's `read` bounds the network. A URL joins the shared visiting set
+    // before its first await, so cyclic declaration imports still terminate.
+    await Promise.all(edits.map(async (item) => (item.target ? visit(item.target) : undefined)));
     for (const item of edits.toSorted((a, b) => b.from - a.from)) {
       if (!item.target) {
         continue;

@@ -178,9 +178,13 @@ describe('Viewer controls on phones in Chromium', () => {
     renderStage({ height: 360, mobileAction: <ArControl onActivate={() => undefined} /> });
 
     const ar = screen.getByRole('button', { name: 'View in your space' });
-    // Icon only: no text beside the glyph, whose own "AR" mark sits inside the hidden SVG.
-    expect(ar.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expect(ar.textContent).toBe('AR');
+    // Icon only: the glyph's "AR" mark is drawn, not typeset (#2137), inside the hidden SVG, so the button has no text
+    // and its name is the label.
+    const glyph = ar.querySelector('svg');
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+    expect(glyph?.querySelector('[data-slot=ar-letters]')).not.toBeNull();
+    expect(ar.textContent).toBe('');
+    expect(ar).toHaveAccessibleName('View in your space');
     await userEvent.hover(ar);
     expect(await screen.findByRole('tooltip', { name: 'View in your space' })).toBeInTheDocument();
   });

@@ -925,7 +925,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       providerKind: 'tau-hosted',
       name: 'Gemini 4 Carbon',
       slug: 'gemini-4-carbon',
-      recommended: false,
+      recommended: true,
       description: 'Deep reasoning for long CAD sessions, complex part code, and large multi-file project edits.',
       provider: {
         id: 'vertexai',

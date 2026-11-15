@@ -17,6 +17,8 @@ const harness = vi.hoisted(() => ({
     closed: Promise.withResolvers<void>().promise,
     dispose: () => undefined,
   })),
+  /** The root file facade the runtime built last: the test's double, which a row may replace. */
+  root: undefined as { replace: (fileManager: unknown) => void } | undefined,
   client: {
     readFile: vi.fn(async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
       throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
@@ -67,31 +69,64 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-const { ChatSessionStore } = await import('#services/chat-session-store.js');
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
-const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
-const { createAppRuntime, selectRuntimeChatSessions, selectRuntimeProjectLibrary } =
-  await import('#runtime/app-runtime.js');
-
-type Runtime = ReturnType<typeof createAppRuntime>;
-type Binding = Parameters<ReturnType<typeof selectRuntimeProjectLibrary>['bind']>[0];
-
-const notCalled = async (): Promise<never> => {
-  throw new Error('not called in this test');
-};
-
-/** The provider's binding as `ProjectManagerProvider` supplies it, over the harness's doubles. */
-const bindingOf = (client: Binding['files']['client'] = harness.client): Binding => ({
-  files: { client, watchRecordFile: harness.watchRecordFile },
-  chats: {
+/* Since A3b the library builds its chat store over the root facade's record client: here it is the harness's double. */
+vi.mock('#db/chat-file-storage.js', () => ({
+  createChatFileStore: () => ({
     ...harness.projectManager,
     adoptLegacyChatPlacement: async () => undefined,
     getChatRecordsForResource: async () => [],
-    createNavigationRepairChat: notCalled,
-  },
-  touchProject: async () => undefined,
-  connection: { registerWorkspace: notCalled, mountWorkspace: notCalled, prepareWorkspaceCatalog: notCalled },
+  }),
+}));
+
+/* The runtime's root file facade, over the harness's doubles: its record client, watch and workspace (A4b). */
+vi.mock('#runtime/file-manager-facade.js', async (importOriginal) => {
+  const { testRootFiles } = await import('#runtime/project-library.fixture.js');
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    createRootFileFacade: () => {
+      const root = testRootFiles(fileManagerOf(harness.client));
+      harness.root = root;
+      return {
+        ...root,
+        workingCopyFiles: { get: () => undefined, subscribe: () => () => undefined },
+        close: () => undefined,
+      };
+    },
+  };
 });
+
+/* A read owner that admits every read at once: no observation runs while the file managers are idle. */
+vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createMetadataReadOwner: (source: unknown) => ({
+    connect: () => () => undefined,
+    hold: () => undefined,
+    ready: () => undefined,
+    fail: () => undefined,
+    read: async <Value,>(operation: (store: unknown) => Promise<Value>) => operation(source),
+    settle: async () => undefined,
+  }),
+}));
+
+/** The root file facade's value over a record client: the parts these rows reach. */
+function fileManagerOf(client: Record<string, unknown>): Record<string, unknown> {
+  return {
+    recordFiles: client,
+    watchRecordFile: harness.watchRecordFile,
+    workspace: {
+      syncProjectRoots: async (): Promise<never> => {
+        throw new Error('not called in this test');
+      },
+    },
+  };
+}
+
+const { ChatSessionStore } = await import('#services/chat-session-store.js');
+const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
+const { createAppRuntime, selectRuntimeChatSessions } = await import('#runtime/app-runtime.js');
+
+type Runtime = ReturnType<typeof createAppRuntime>;
 
 let runtime: Runtime;
 
@@ -191,7 +226,6 @@ describe('ChatSessionStoreProvider', () => {
       createdAt: 0,
       updatedAt: 0,
     });
-    selectRuntimeProjectLibrary(runtime).bind(bindingOf());
     const { result } = renderHook(() => useChatSessionStore(), { wrapper: createWrapper() });
     const store = result.current;
 
@@ -210,20 +244,15 @@ describe('ChatSessionStoreProvider', () => {
     expect(harness.projectManager.touchChatRecency).toHaveBeenCalledWith('chat_a', 123);
   });
 
-  it('holds a call the store makes before the library is bound, and delivers it once a binding arrives', async () => {
+  it("delivers a call the store makes with no provider mounted, through the runtime's root facade (A4b)", async () => {
     const store = selectRuntimeChatSessions(runtime);
 
-    const touched = store.touchChatRecency('chat_a', 7);
-    await settle();
-    expect(harness.projectManager.touchChatRecency).not.toHaveBeenCalled();
-
-    selectRuntimeProjectLibrary(runtime).bind(bindingOf());
-    await touched;
+    await store.touchChatRecency('chat_a', 7);
 
     expect(harness.projectManager.touchChatRecency).toHaveBeenCalledExactlyOnceWith('chat_a', 7);
   });
 
-  it('takes a new record client when the binding replaces the file facade, as a worker replacement does', async () => {
+  it('takes a new record client when the root facade publishes one, as a worker replacement does', async () => {
     harness.projectManager.getChat.mockResolvedValue({
       id: 'chat_a',
       resourceId: 'proj_a',
@@ -232,8 +261,6 @@ describe('ChatSessionStoreProvider', () => {
       createdAt: 0,
       updatedAt: 0,
     });
-    const library = selectRuntimeProjectLibrary(runtime);
-    library.bind(bindingOf());
     const store = selectRuntimeChatSessions(runtime);
     store.acquire('chat_a', 'proj_a');
     await vi.waitFor(() => {
@@ -241,7 +268,7 @@ describe('ChatSessionStoreProvider', () => {
     });
 
     const replaced = { ...harness.client, readFile: vi.fn(harness.client.readFile) };
-    library.bind(bindingOf(replaced));
+    harness.root!.replace(fileManagerOf(replaced));
     store.release('chat_a');
     store.acquire('chat_a', 'proj_a');
 

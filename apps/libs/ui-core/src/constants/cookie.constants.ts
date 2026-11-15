@@ -24,6 +24,8 @@ export const cookieName = {
   /* Layout */
   // Whether the sidebar is open.
   sidebarOp: 'sidebar-op',
+  // The settled values of the flags that decide first-paint geometry (`affectsLayout`), for the server render.
+  layoutFlags: 'layout-flags',
 
   /* CAD */
   // The last selected kernel.

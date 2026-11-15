@@ -150,8 +150,9 @@ const editorTheme = EditorView.theme({
   '.cm-conflict-mine': { backgroundColor: 'color-mix(in oklch, var(--success) 20%, transparent)' },
   '.cm-conflict-theirs': { backgroundColor: 'color-mix(in oklch, var(--feature) 20%, transparent)' },
   '.cm-lineNumbers .cm-gutterElement': { minWidth: '4ch', padding: '0 var(--spacing)' },
-  '.cm-gutter-lint': { width: '0' },
-  '.cm-gutter-lint:has(.cm-lint-marker)': { width: '1em' },
+  /* The lint gutter keeps its width with no marker in it, so a diagnostic that arrives after the mount (the language
+     service's, seconds later) moves no line of text (A15f2, F9). */
+  '.cm-gutter-lint': { width: '1em' },
   '.cm-gutter-lint .cm-gutterElement': { padding: '0' },
 });
 

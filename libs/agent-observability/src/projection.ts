@@ -89,6 +89,8 @@ export type ProjectedRun = Readonly<{
   finalRevision?: string | undefined;
   filesChanged?: number | undefined;
   priorTurns?: number | undefined;
+  /** The kernel the run targeted, from the snapshot its turn committed (LW17). */
+  kernel?: string | undefined;
   /** The model calls the run prepared. */
   invocations?: ReadonlyArray<Readonly<{ purpose: string; modelId: string }>> | undefined;
   /** This turn's message, the final reply and the changed paths, when the host read content (LW6). */
@@ -447,7 +449,7 @@ const turnMeasures = async (run: ProjectedRun, context: ProjectionContext): Prom
     modelCalls: generations.length,
     toolCalls: run.tools.length,
     host: context.host ?? null,
-    kernel: null,
+    kernel: run.kernel === undefined ? null : await contractId('kernel', run.kernel),
     model: model === undefined ? null : await contractId('model', model),
   };
 };

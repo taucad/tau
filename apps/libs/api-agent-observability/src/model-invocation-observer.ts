@@ -141,6 +141,9 @@ export class ObservedModelInvocationService implements ModelInvocationService {
     operation ??= result.operationId;
 
     const facts = new ProviderStreamFacts(intent.providerWire, started, this.clock);
+    if (route.provider !== undefined) {
+      facts.routedTo(route.provider);
+    }
     let decided = false;
     const decide = (): void => {
       decided = true;

@@ -344,7 +344,7 @@ test('replays physical nonwriter replacement in order and rewinds the admitted c
     sequence: lastRow.sequence + 1,
     recordedAt: new Date().toISOString(),
     runId: middleAssistant.runId,
-    ...(middleAssistant.epoch === undefined ? {} : { epoch: middleAssistant.epoch }),
+    ...(lastRow.epoch === undefined ? {} : { epoch: lastRow.epoch }),
     ...(middleAssistant.commandId === undefined ? {} : { commandId: middleAssistant.commandId }),
     ...(middleAssistant.attempt === undefined ? {} : { attempt: middleAssistant.attempt }),
     type: 'message.envelope-replaced',

@@ -16,6 +16,8 @@ import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/pro
 import type { SessionProjectRuntimePorts } from '#runtime/project-runtime.session.js';
 import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
+import { selectEditorRef } from '#runtime/project-runtime.js';
+import { waitFor } from 'xstate';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
 
@@ -29,13 +31,14 @@ const pending = async <T>(): Promise<T> =>
 
 let opened: Array<{ files: SessionFileManagerStandIn; untrack: () => void; runtime: SessionRuntime }> = [];
 
-const build = (): SessionRuntime => {
+const build = (configure?: (library: ReturnType<typeof mock<ProjectRuntimeLibrary>>) => void): SessionRuntime => {
   const files = openSessionFileManagerStandIn(projectId);
   const untrack = trackSessionFileManager(files);
   const library = mock<ProjectRuntimeLibrary>();
   /* The project never loads in these rows: its store is not `ready`, so it owes nothing. */
   library.touchProject.mockReturnValue(pending());
   library.getEditorState.mockReturnValue(pending());
+  configure?.(library);
   const ports: SessionProjectRuntimePorts = {
     library,
     chatSessions: { noteCreatedEmpty: vi.fn() },
@@ -120,5 +123,43 @@ describe("a session runtime's replacement flush (A6e)", () => {
 
     expect(sessionProjectRuntimeOf(runtime.runtimeRef)).toBeDefined();
     expect(runtime.runtimeRef.getSnapshot().status).toBe('active');
+  });
+
+  /** A runtime whose editor store loaded, with an edit inside its debounce. */
+  const withOwedEditorEdit = async (save: () => Promise<unknown>) => {
+    const runtime = build((library) => {
+      library.getEditorState.mockResolvedValue(undefined);
+      library.updateEditorState.mockImplementation(save);
+    });
+    const editorRef = selectEditorRef(sessionProjectRuntimeOf(runtime.runtimeRef)!.runtime.actor.getSnapshot());
+    await waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }));
+    editorRef.send({ type: 'setPanelState', panelState: { desktopLayout: { chatOpen: false } } });
+    expect(editorRef.getSnapshot().matches({ ready: { storing: 'pending' } })).toBe(true);
+    return runtime;
+  };
+
+  it('B4: should write the editor state an edit inside its debounce still owes, before it settles', async () => {
+    const saved: string[] = [];
+    const runtime = await withOwedEditorEdit(async () => {
+      saved.push('editor state');
+    });
+
+    await runtime.flush(new AbortController().signal);
+
+    expect(saved).toEqual(['editor state']);
+  });
+
+  it("should reject with the editor store's refusal when its write fails", async () => {
+    const refusal = new Error('Editor state is not saved.');
+    const runtime = await withOwedEditorEdit(async () => {
+      throw refusal;
+    });
+
+    const flushed = runtime.flush(new AbortController().signal);
+
+    await expect(flushed).rejects.toThrow(AggregateError);
+    await flushed.catch((error: unknown) => {
+      expect((error as AggregateError).errors).toHaveLength(1);
+    });
   });
 });

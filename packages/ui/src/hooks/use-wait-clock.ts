@@ -213,16 +213,15 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
     };
   } else {
     const elapsed = now - tracked.startedAt;
-    /* Where frames report the reveal, a reveal due but not reported has not been drawn: the hold draws it in the next
-       frame and serves the minimum from now. Only while the minimum is still owed: after it, the words never show. A
-       reveal that ran before hydration was drawn but not reported; it holds from now too, past its minimum at most. */
-    const isUndrawn =
-      framesReportReveals(clock) &&
-      !tracked.isRevealSeen &&
-      elapsed >= tracked.shownAt &&
-      elapsed < tracked.shownAt + indicatorMinimumMilliseconds;
-    /* The timeline holds still through the task; the words paint after it, no earlier than the performance clock. */
-    const shownAt = isUndrawn ? Math.max(elapsed, clock.now() - tracked.startedAt) : tracked.shownAt;
+    /* Where frames report the reveal, a reveal due but not reported has not been drawn. A visible page draws it in the
+       hold's next frame, which serves the minimum from then, but only while that minimum is still owed; a hidden page,
+       or one past the minimum, never shows the words. The timeline holds still through the task, and the words paint
+       after it, no earlier than the performance clock. A reveal that ran before hydration was drawn but not reported;
+       it holds from now too, past its minimum at most. */
+    const isUnreported = reportsReveals(clock) && !tracked.isRevealSeen && elapsed >= tracked.shownAt;
+    const paintElapsed = Math.max(elapsed, clock.now() - tracked.startedAt);
+    const isUndrawn = isUnreported && isVisible() && paintElapsed < tracked.shownAt + indicatorMinimumMilliseconds;
+    const shownAt = isUndrawn ? paintElapsed : tracked.shownAt;
     next = {
       ...tracked,
       active,
@@ -230,13 +229,16 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       /* The hold draws the words; its first frame reports itself through `revealed`, and moves `shownAt` to it. */
       isHoldPending: isUndrawn,
       /* A seen reveal is on screen, even where the timeline still reads before the paint the reveal recorded. */
-      timing: heldWords(
-        settledTiming({
-          settledAt: Math.max(elapsed, tracked.isRevealSeen || isUndrawn ? shownAt : Number.NEGATIVE_INFINITY),
-          shownAt,
-        }),
-        elapsed,
-      ),
+      timing:
+        isUnreported && !isUndrawn
+          ? idleWaitTiming()
+          : heldWords(
+              settledTiming({
+                settledAt: Math.max(elapsed, tracked.isRevealSeen || isUndrawn ? shownAt : Number.NEGATIVE_INFINITY),
+                shownAt,
+              }),
+              elapsed,
+            ),
     };
   }
   setTracked(next);
@@ -245,19 +247,22 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
 
 /**
  * Whether the frames that draw a reveal report it to `revealed`: on the page's own clock, where the document runs
- * animations and is visible. Injected clocks, documents without a timeline (jsdom) and hidden documents see no frames,
- * and keep the predicted reveal.
+ * animations. Injected clocks and documents without a timeline (jsdom) see no frames, and keep the predicted reveal.
  *
  * @param clock - The clock the wait is measured on.
  * @returns True when an unreported reveal has not been drawn.
  */
-function framesReportReveals(clock: WaitClock): boolean {
-  return (
-    clock === performanceClock &&
-    typeof document !== 'undefined' &&
-    'timeline' in document &&
-    document.visibilityState === 'visible'
-  );
+function reportsReveals(clock: WaitClock): boolean {
+  return clock === performanceClock && typeof document !== 'undefined' && 'timeline' in document;
+}
+
+/**
+ * Whether the page draws frames now. A hidden page draws none until it shows again.
+ *
+ * @returns True when the document is visible.
+ */
+function isVisible(): boolean {
+  return document.visibilityState === 'visible';
 }
 
 /**

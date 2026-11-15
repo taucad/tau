@@ -542,12 +542,17 @@ it('should hold a wait that restarted over an undrawn hold 500 ms from the frame
 });
 
 /** A page with two waiting regions, whose second settles in one task with `milliseconds` of rendering before or after. */
-function twoRegions(
-  phase: number,
-  first: number,
-  second: { active: boolean; startedAt: number },
-  busy: { milliseconds: number; where: 'before' | 'after' },
-): React.JSX.Element {
+function twoRegions({
+  phase,
+  first,
+  second,
+  busy,
+}: {
+  readonly phase: number;
+  readonly first: number;
+  readonly second: { active: boolean; startedAt: number };
+  readonly busy: { milliseconds: number; where: 'before' | 'after' };
+}): React.JSX.Element {
   const isBusy = phase === 1;
   return (
     <>
@@ -564,14 +569,15 @@ function twoRegions(
 const secondStatus = (container: HTMLElement): HTMLElement =>
   within(container.querySelector<HTMLElement>('[data-region=second]')!).getByRole('status');
 
-it('should not show words no frame drew once a render longer than their minimum has passed', () => {
+it('should not show words no frame drew once a render longer than their minimum has passed', async () => {
   /* The settle reads the timeline its task read first, 1,100 ms into the wait; the render before it runs 700 ms, so by
      the time any frame could draw the words their minimum is long over. */
+  await nextFrame();
   const startedAt = Number(document.timeline.currentTime) - 1100;
   const busy = { milliseconds: 700, where: 'before' } as const;
-  const view = render(twoRegions(0, startedAt, { active: true, startedAt }, busy));
+  const view = render(twoRegions({ phase: 0, first: startedAt, second: { active: true, startedAt }, busy }));
   act(() => {
-    view.rerender(twoRegions(1, startedAt + 1, { active: false, startedAt }, busy));
+    view.rerender(twoRegions({ phase: 1, first: startedAt + 1, second: { active: false, startedAt }, busy }));
   });
 
   expect(secondStatus(view.container).dataset['state'], 'the words showed after their content arrived').toBe('idle');
@@ -579,12 +585,14 @@ it('should not show words no frame drew once a render longer than their minimum 
 
 it('should hold words a hold drew after the rest of its task for the minimum from their paint through a restart', async () => {
   /* The second region settles with its reveal due and undrawn, and 300 ms of rendering follow it in the task: the hold
-     draws the words only after that. A restart 250 ms after the paint still owes the minimum. */
+     draws the words only after that. A restart 250 ms after the paint still owes the minimum. The row starts in a
+     frame, so the timeline it reads is the time now. */
+  await nextFrame();
   const startedAt = Number(document.timeline.currentTime) - 1100;
   const busy = { milliseconds: 300, where: 'after' } as const;
-  const view = render(twoRegions(0, startedAt, { active: true, startedAt }, busy));
+  const view = render(twoRegions({ phase: 0, first: startedAt, second: { active: true, startedAt }, busy }));
   act(() => {
-    view.rerender(twoRegions(1, startedAt + 1, { active: false, startedAt }, busy));
+    view.rerender(twoRegions({ phase: 1, first: startedAt + 1, second: { active: false, startedAt }, busy }));
   });
   let shownAt = Number.NaN;
   requestAnimationFrame(() => {
@@ -598,10 +606,14 @@ it('should hold words a hold drew after the rest of its task for the minimum fro
   });
   const restartedAt = Number(document.timeline.currentTime);
   act(() => {
-    view.rerender(twoRegions(2, startedAt + 1, { active: true, startedAt: restartedAt }, busy));
+    view.rerender(
+      twoRegions({ phase: 2, first: startedAt + 1, second: { active: true, startedAt: restartedAt }, busy }),
+    );
   });
   act(() => {
-    view.rerender(twoRegions(2, startedAt + 1, { active: false, startedAt: restartedAt }, busy));
+    view.rerender(
+      twoRegions({ phase: 2, first: startedAt + 1, second: { active: false, startedAt: restartedAt }, busy }),
+    );
   });
 
   expect(secondStatus(view.container).dataset['state'], 'the restart hid words that still owed their minimum').toBe(

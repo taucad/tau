@@ -650,8 +650,8 @@ describe('viewer adapter (A8d)', () => {
     });
     expect(api.groups[0]?.panels.map((panel) => panel.id)).toEqual(['front', 'iso', 'top']);
     expect(api.activePanel?.id).toBe('iso');
-    expect(
-      project.sent.filter((event) => event.type === 'createGeometryUnit').map((event) => event.entryPath),
-    ).toEqual(['iso.ts']);
+    expect(project.sent.filter((event) => event.type === 'createGeometryUnit').map((event) => event.entryPath)).toEqual(
+      ['iso.ts'],
+    );
   });
 });

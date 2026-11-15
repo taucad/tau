@@ -647,8 +647,11 @@ export const sessionRevisionsCallback =
        */
       const owedToken = owe();
       if (phase === 'hidden') {
+        /* A root whose registry has not answered has no checkout to cut, so its answer records nothing: the debt
+         * stays for the next open. */
+        const canRecord = current.status()?.registrySettled === true;
         await current.saveRevision('close');
-        if (owedToken !== undefined) {
+        if (owedToken !== undefined && canRecord) {
           ports.closeDebt.clear(owedToken.key, owedToken.token);
         }
         return;

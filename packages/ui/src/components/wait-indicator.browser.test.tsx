@@ -503,3 +503,40 @@ it('should hold words a settle drew after a long render for the minimum from the
     (await effectTime('wait-conceal', second.querySelector<HTMLElement>('[data-slot=wait-indicator-body]')!)) - shownAt,
   ).toBeGreaterThanOrEqual(500 - oneFrame);
 });
+
+it('should hold a wait that restarted over an undrawn hold 500 ms from the frame its words showed in', async () => {
+  /* The region mounts with its reveal due and settles, so a hold will draw the words; a refetch restarts the wait in
+     the same task, and a long task holds the first frame. The minimum runs from that frame. */
+  const startedAt = Number(document.timeline.currentTime) - 1100;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  act(() => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  });
+  const restartedAt = Number(document.timeline.currentTime);
+  act(() => {
+    view.rerender(<WaitIndicator active label='Loading chat' startedAt={restartedAt} />);
+  });
+  let shownAt = Number.NaN;
+  const onFrame = (): void => {
+    if (Number.isNaN(shownAt)) {
+      shownAt = performance.now();
+    }
+  };
+  document.addEventListener('animationstart', onFrame, { capture: true });
+  requestAnimationFrame(onFrame);
+  holdMainThread(400);
+  await act(async () => {
+    await nextFrame();
+    await nextFrame();
+  });
+  document.removeEventListener('animationstart', onFrame, { capture: true });
+  act(() => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={restartedAt} />);
+  });
+
+  expect(view.getByRole('status').dataset['state']).toBe('holding');
+  expect(
+    (await effectTime('wait-conceal')) - shownAt,
+    'the restart held the words from a hold no frame had drawn',
+  ).toBeGreaterThanOrEqual(500 - oneFrame);
+});

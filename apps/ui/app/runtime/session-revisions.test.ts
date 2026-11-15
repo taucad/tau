@@ -193,6 +193,8 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
   const focusSignal = createSignal();
   let recording = false;
   const recordingSignal = createSignal();
+  let cloudOpen = false;
+  const cloudOpenSignal = createSignal();
   const chatFacts: Array<Readonly<{ projectId: string; facts: ChatRevisionFacts }>> = [];
   const faults: unknown[] = [];
   const userSignal = createSignal();
@@ -227,6 +229,7 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
       chatFacts.push({ projectId: id, facts });
     },
     recording: { get: () => recording, subscribe: recordingSignal.subscribe },
+    cloudOpen: { get: () => cloudOpen, subscribe: cloudOpenSignal.subscribe },
     reportFault: (error) => {
       faults.push(error);
     },
@@ -259,6 +262,10 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
       recording = next;
       recordingSignal.emit();
     },
+    setCloudOpen: (next: boolean) => {
+      cloudOpen = next;
+      cloudOpenSignal.emit();
+    },
     chatFacts,
     faults,
     saltRequests,
@@ -266,7 +273,13 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
     get unregistered() {
       return unregistered;
     },
-    listeners: () => userSignal.size + anonymitySignal.size + saltSignal.size + focusSignal.size + recordingSignal.size,
+    listeners: () =>
+      userSignal.size +
+      anonymitySignal.size +
+      saltSignal.size +
+      focusSignal.size +
+      recordingSignal.size +
+      cloudOpenSignal.size,
   };
 };
 
@@ -302,6 +315,11 @@ const createSession = (
         });
       },
       revisionChatsChanged: ({ event }, enq) => {
+        enq(() => {
+          received.push(event);
+        });
+      },
+      fileCheckChanged: ({ event }, enq) => {
         enq(() => {
           received.push(event);
         });
@@ -856,6 +874,61 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
       { type: 'revisionChatsChanged', ready: true },
     ]);
     session.stop();
+  });
+
+  /* A14: the session's file check, which focus's open waits for (U13, U20). */
+  const fileChecks = (received: readonly SessionRevisionsEmitted[]) =>
+    received.filter((event) => event.type === 'fileCheckChanged');
+
+  it('A14: should tell the session the file check settles only once a status is published and the model is not checking files', async () => {
+    const guard = guardActors();
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts();
+    const fileManager = createFileManager({ rootDirectory: `/projects/${projectId}` });
+    const received: SessionRevisionsEmitted[] = [];
+    const session = createSession(fake.ports, fileManager.ref, { guard, received });
+    session.start();
+    await settle();
+
+    /* No worker, so no client and nothing published: the session's pending stands. */
+    expect(fileChecks(received)).toEqual([]);
+
+    client.setStatus({ readiness: 'materialized' });
+    fileManager.set({ worker: workerA });
+    await settle();
+    /* Published, but the fill has not answered for this tree: the model is checking its files. */
+    expect(fileChecks(received)).toEqual([]);
+
+    client.setStatus({ readiness: 'filled' });
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: true }]);
+
+    /* A later check returns it to pending; a repeat says nothing. */
+    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ projectDirty: true });
+    expect(fileChecks(received)).toEqual([
+      { type: 'fileCheckChanged', settled: true },
+      { type: 'fileCheckChanged', settled: false },
+    ]);
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('A14: should not hold a Tau Cloud open behind the file check, whose own placeholder speaks as it does today', async () => {
+    const { client, fake, received, session } = await startSession();
+    client.setStatus({ readiness: 'connected' });
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false });
+
+    fake.setCloudOpen(true);
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: true });
+
+    /* The open is done and the fill has still to answer: that is a file check again. */
+    fake.setCloudOpen(false);
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false });
+    session.stop();
+    expect(fake.listeners()).toBe(0);
   });
 
   it('F12: should tell the client whether its project is focused, on connect and on each flip', async () => {

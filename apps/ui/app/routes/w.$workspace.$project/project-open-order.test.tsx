@@ -8,6 +8,11 @@
  * order, so a row that rendered one pane could never go green: `ChatViewer`
  * keeps its swap (`chat-viewer.tsx`, the `ChatViewer` wrapper). The viewer
  * dock is a stand-in that renders the real `ChatViewer` for one view.
+ *
+ * A14: the session owns the file check. The registry is composed with a
+ * file-manager stand-in and a `revisions` stand-in that reports the check from
+ * the scripted status through the real derivation (`isFileCheckSettled`), as
+ * `session-revisions.ts` does from its client's projections.
  */
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
@@ -22,6 +27,10 @@ import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisio
 import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import type { SessionWiring } from '#services/sessions-store.js';
+import type { SessionRevisionsCallback, SessionRevisionsPorts } from '#runtime/session-revisions.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { isFileCheckSettled } from '#hooks/use-project-availability.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -35,9 +44,6 @@ import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
 import type { ViewerDockReady } from '#workbench-records/viewer-adapter.js';
-
-/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor().start();
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const mainEntryPath = 'main.ts';
@@ -75,6 +81,45 @@ const facts = vi.hoisted(() => ({
 
 /** What the revision client has published: `undefined` until its first projection. */
 const revisionStatus = createFact<RevisionStatusProjection | undefined>(undefined);
+
+/**
+ * The session's `revisions` child (A14), as `session-revisions.ts` reports the file check: from each projection the
+ * scripted client publishes, through the real derivation, once on start and then on each change.
+ */
+const revisionsStandIn: SessionRevisionsCallback = ({ sendBack }) => {
+  let settled: boolean | undefined;
+  const report = (): void => {
+    const next = isFileCheckSettled(revisionStatus.get(), false);
+    if (next !== settled) {
+      settled = next;
+      sendBack({ type: 'fileCheckChanged', settled: next });
+    }
+  };
+  report();
+  return revisionStatus.subscribe(report);
+};
+
+const sessionWiring: SessionWiring = {
+  loadRevisions: async () => ({
+    sessionRevisionsCallback: () => revisionsStandIn,
+    createSessionRevisionsPorts: (ports) => ports as SessionRevisionsPorts,
+  }),
+  loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
+  registerCloseCut: () => () => undefined,
+  focusedProject: { get: () => undefined, subscribe: () => () => undefined },
+  documentVisible: { get: () => true, subscribe: () => () => undefined },
+  chatSessions: { setRevisionFacts: () => undefined } as unknown as SessionWiring['chatSessions'],
+  choices: () => {
+    throw new Error('no chat attaches in these rows');
+  },
+  rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+};
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor({
+  openFileManager: (projectId) => openSessionFileManagerStandIn(projectId),
+  wiring: sessionWiring,
+}).start();
 
 /** The shared harness's clean local checkout; the fact the rows move is its readiness (D10). */
 const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection => ({
@@ -671,7 +716,7 @@ afterEach(async () => {
 });
 
 describe('project open order (A0.7)', () => {
-  it.fails('U13: should mount the viewer once and never remove it when the files check follows live', async () => {
+  it('U13: should mount the viewer once and never remove it when the files check follows live', async () => {
     render(<OpenRoute />);
     await settle();
     expect(isSessionLive()).toBe(true);
@@ -698,7 +743,7 @@ describe('project open order (A0.7)', () => {
     );
   });
 
-  it.fails('U20: should never render "Preparing model" when local files settle 200 ms after live', async () => {
+  it('U20: should never render "Preparing model" when local files settle 200 ms after live', async () => {
     const preparing = recordAdditions('[role="region"][aria-label="Preparing model"]');
     /* Local files: no Tau Cloud open is owed, and the fill's word on this tree is still out. */
     revisionStatus.set(statusAt('materialized'));

@@ -704,6 +704,11 @@ const presenceOn = (wiring: SessionWiring) =>
 
 /* A registry composed without wiring (rows that run the registry alone) starts none of the three. */
 const unwiredFileManagerChild = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
+/* A14: with no revision client there is no file check to wait for, so it is settled at once. */
+const unwiredRevisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack }) => {
+  sendBack({ type: 'fileCheckChanged', settled: true });
+  return undefined;
+});
 const unwiredPresence = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
 
 /**
@@ -867,7 +872,7 @@ const projectSessionOn = ({
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
       /* A7b: without wiring no revision client, connector or presence is started. */
-      revisions: wiring === undefined ? unwiredFileManagerChild : revisionsOn(wiring),
+      revisions: wiring === undefined ? unwiredRevisions : revisionsOn(wiring),
       hostConnector: wiring === undefined ? unwiredFileManagerChild : hostConnectorOn(wiring),
       presence: wiring === undefined ? unwiredPresence : presenceOn(wiring),
     },

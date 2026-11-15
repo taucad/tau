@@ -19,6 +19,8 @@
  * - the facts a policy close relies on go to the session (`revisionState`) and to the chat store (row S3);
  * - whether the chats have arrived goes to the session (`revisionChatsChanged`), whose `project` child retries a
  *   deferred focused chat (row S1);
+ * - whether the file check has settled goes to the session (`fileCheckChanged`, A14): a status is published and the model
+ *   is not checking its files, or a Tau Cloud open is still owed, whose own placeholder speaks;
  * - while the project is focused, the workbench follows the selected checkout's route (row S23).
  *
  * The client is the project's one client (`getRevisionClient`), looked up again only when the file manager's worker
@@ -54,6 +56,8 @@ import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { isRecordingEditorConflict, subscribeEditorConflictRecords } from '#lib/editor-document-session.js';
 import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
+import { isFileCheckSettled } from '#hooks/use-project-availability.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
@@ -100,6 +104,12 @@ export type SessionRevisionsRecordingPort = Readonly<{
   subscribe: (listener: () => void) => () => void;
 }>;
 
+/** Whether a Tau Cloud open is still owed for a project (its intent is `open`): its value, and its changes. */
+export type SessionRevisionsCloudOpenPort = Readonly<{
+  get: (projectId: string) => boolean;
+  subscribe: (listener: () => void) => () => void;
+}>;
+
 /** What the session's composition supplies: the parts of the ports that are not module stores. */
 export type SessionRevisionsWiring = Readonly<{
   closeCut: SessionRevisionsCloseCutPort;
@@ -116,6 +126,8 @@ export type SessionRevisionsPorts = SessionRevisionsWiring &
     anonymity: SessionRevisionsAnonymityPort;
     salt: SessionRevisionsSaltPort;
     recording: SessionRevisionsRecordingPort;
+    /** Whether a Tau Cloud open is still owed (A14): the file check then defers to the open's own placeholder. */
+    cloudOpen: SessionRevisionsCloudOpenPort;
     /** Where a failure in a teardown goes, so the session is not faulted by a cleanup (D23). */
     reportFault: (error: unknown) => void;
   }>;
@@ -139,7 +151,8 @@ export type SessionRevisionsEvent = Readonly<{ type: 'never' }>;
  */
 export type SessionRevisionsEmitted =
   | Readonly<{ type: 'revisionState'; dirty: boolean; pushed: boolean; recording: boolean; pendingCount: number }>
-  | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>;
+  | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>
+  | Readonly<{ type: 'fileCheckChanged'; settled: boolean }>;
 
 export type SessionRevisionsLogic = CallbackActorLogic<SessionRevisionsEvent, SessionRevisionsInput>;
 
@@ -177,6 +190,7 @@ export const createSessionRevisionsPorts = (
   anonymity: { get: getAnonymousRevisions, subscribe: subscribeAnonymousRevisions },
   salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
   recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
+  cloudOpen: { get: (projectId) => tauCloudIntent.get(projectId) === 'open', subscribe: tauCloudIntent.subscribe },
 });
 
 /**
@@ -255,6 +269,7 @@ export const sessionRevisionsCallback =
     /* The project focus is on, as the route's focused session reads it; the client hears each change of `focused`. */
     let focused = ports.focusedProject.get() === projectId;
     let recording = ports.recording.get(projectId);
+    let cloudOpen = ports.cloudOpen.get(projectId);
     /* The inputs the last `setActor` was sent for, compared as React compares effect dependencies. */
     let actorSentFor: Readonly<{ user: unknown; anonymous: boolean; salt: unknown }> | undefined;
 
@@ -349,8 +364,18 @@ export const sessionRevisionsCallback =
      */
     let relayedFor: Readonly<{ status: RevisionStatusProjection; recording: boolean }> | undefined;
     let chatsReady = false;
+    /* A14: the file check, told on each change; the session starts this client's check as pending. */
+    let fileCheckSettled = false;
+    const relayFileCheck = (status: RevisionStatusProjection | undefined): void => {
+      const settled = isFileCheckSettled(status, cloudOpen);
+      if (settled !== fileCheckSettled) {
+        fileCheckSettled = settled;
+        sendBack({ type: 'fileCheckChanged', settled });
+      }
+    };
     const relayFacts = (): void => {
       const status = client?.status();
+      relayFileCheck(status);
       const ready = status?.sync.chats === 'ready';
       /* S1: the session's `project` child retries a deferred focused chat once the chats arrive. */
       if (ready !== chatsReady) {
@@ -509,6 +534,7 @@ export const sessionRevisionsCallback =
     let unsubscribeSalt: (() => void) | undefined;
     let unsubscribeFocus: (() => void) | undefined;
     let unsubscribeRecording: (() => void) | undefined;
+    let unsubscribeCloudOpen: (() => void) | undefined;
     const stop = (): void => {
       if (checkoutLive !== undefined) {
         checkoutLive.current = false;
@@ -521,6 +547,7 @@ export const sessionRevisionsCallback =
           unsubscribeSalt,
           unsubscribeFocus,
           unsubscribeRecording,
+          unsubscribeCloudOpen,
           unregisterCut,
           releaseClient,
         ],
@@ -580,6 +607,10 @@ export const sessionRevisionsCallback =
         }
         recording = next;
         relayFacts();
+      });
+      unsubscribeCloudOpen = ports.cloudOpen.subscribe(() => {
+        cloudOpen = ports.cloudOpen.get(projectId);
+        relayFileCheck(client?.status());
       });
     } catch (error) {
       stop();

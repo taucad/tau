@@ -3,6 +3,7 @@ import type { ActorRefFrom, AnyActorRef, EnqueueObject, EventObject, SystemRegis
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
+import { sessionFileCheckMachine } from '#machines/session-file-check.machine.js';
 
 /**
  * One live project (S44, A35).
@@ -44,6 +45,13 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  * of a deferred focused chat). The `presence` child reports visibility from `environment` and focus
  * (`visibilityChanged`), and the session sends parking to its own `project` child (`runtimeParking`) instead of
  * emitting it for a React binding to relay.
+ *
+ * A14: the session owns its first file check (`availability`, U13 and the race part of U20). It is `pending` from the
+ * moment it starts a `revisions` child, whose revision client has published nothing yet, until that child reports the
+ * check settled (`fileCheckChanged`): a status is published and the model is not checking its files. A later check
+ * returns it to `pending`. The `fileCheck` child counts each check's patience on the clock and reports `fileCheckSlow`,
+ * which makes it `slow`, for the "Preparing model" view's "Try again". Focus's `opening` waits for `settled` up to its
+ * open bound. A session with no `revisions` child has no file check, and its availability stays `settled`.
  */
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
@@ -74,10 +82,10 @@ export type ProjectSessionOpenRequest = Readonly<{
 }>;
 
 /**
- * How far the session's first file check has come (A14 makes it real).
+ * How far the session's file check has come (A14).
  *
  * `pending` until the revision client has published a status and the model is not checking files; `slow` once the
- * open bound passed while still pending; `settled` after.
+ * check has run for `modelCheckPatienceMilliseconds` while still pending; `settled` after.
  *
  * @public
  */
@@ -110,8 +118,10 @@ export type ProjectSessionMachineContext = Readonly<{
    * the `project` child reports it. It stays ready once it is.
    */
   chatReady: boolean;
-  /** The first file check, for the same join. A constant `settled` until A14 makes it real. */
+  /** The file check, for the same join and for the "Preparing model" view's "Try again" (A14). */
   availability: ProjectSessionAvailability;
+  /** The id of the last check the `fileCheck` child was told started, which its report echoes (MC-R18). */
+  fileCheckId: number;
   parentRef: AnyActorRef | undefined;
   idleWindowMilliseconds: number;
   parkWindowMilliseconds: number;
@@ -155,6 +165,8 @@ export type ProjectSessionMachineContext = Readonly<{
   hostConnectorRef: AnyActorRef | undefined;
   /** The `presence` child, which reports visibility from `environment` and focus (A7b). */
   presenceRef: AnyActorRef | undefined;
+  /** The `fileCheck` child, which counts a file check's patience on the clock (A14). */
+  fileCheckRef: AnyActorRef | undefined;
   /**
    * The project runtime's root, as the `project` child reported it (A6d). The child built it and stops it; the session
    * only hands it to its readers. `undefined` until the child reports it and while it rebuilds it.
@@ -218,6 +230,10 @@ export type ProjectSessionMachineEvent =
     }
   /** The `revisions` child: whether the project's chats have arrived, which a deferred focused chat waits for (S1). */
   | { readonly type: 'revisionChatsChanged'; readonly ready: boolean }
+  /** The `revisions` child (A14): whether its client has published a status and the model is not checking files. */
+  | { readonly type: 'fileCheckChanged'; readonly settled: boolean }
+  /** The `fileCheck` child (A14): check `check` has run for its patience. */
+  | { readonly type: 'fileCheckSlow'; readonly check: number }
   /**
    * Focus's request moved to another chat of this project (R3-F1). It sets both chat fields, so an `undefined`
    * clears one. A session opened without a request has no request to update, and keeps none.
@@ -246,6 +262,8 @@ export const projectSessionEventTypes = [
   'attention',
   'revisionState',
   'revisionChatsChanged',
+  'fileCheckChanged',
+  'fileCheckSlow',
   'chatRequested',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
@@ -361,6 +379,7 @@ const projectSessionActors = {
   revisions,
   hostConnector,
   presence,
+  fileCheck: sessionFileCheckMachine,
 };
 
 type ProjectSessionEnqueue = EnqueueObject<
@@ -447,6 +466,7 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
     context.agentHostRef,
     context.computeRef,
     context.presenceRef,
+    context.fileCheckRef,
   ]) {
     if (ref !== undefined) {
       enq.stop(ref);
@@ -461,10 +481,26 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
       revisionsRef: undefined,
       hostConnectorRef: undefined,
       presenceRef: undefined,
+      fileCheckRef: undefined,
       agentHostRef: undefined,
       computeRef: undefined,
     },
   };
+};
+
+/*
+ * A14: a check starts. The session is `pending` at once, in the same step, so focus never reads a `settled` from before
+ * it; the `fileCheck` child counts its patience under a new id, so a report about an earlier check is dropped.
+ */
+const startFileCheck = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue): ProjectSessionPatch => {
+  const fileCheckId = context.fileCheckId + 1;
+  if (context.fileCheckRef !== undefined) {
+    enq.sendTo(context.fileCheckRef, { type: 'checkStarted', check: fileCheckId });
+  }
+  if (context.availability !== 'pending') {
+    reportFacts({ ...context, availability: 'pending' }, enq);
+  }
+  return { availability: 'pending', fileCheckId };
 };
 
 /* A close step that failed leaves the session failed with the reason recorded. */
@@ -571,7 +607,7 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '5',
+  version: '6',
   /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
    * later ones are usually its consequences (MC-R12, D23; B2). */
   onError: ({ context, event }, enq) => {
@@ -585,7 +621,9 @@ export const projectSessionMachine = setup({
     projectId: input.projectId,
     request: input.request,
     chatReady: false,
+    /* No `revisions` child yet, so no check runs; the first one makes it `pending`. */
     availability: 'settled',
+    fileCheckId: 0,
     parentRef: input.parentRef,
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? projectSessionIdleWindowMilliseconds,
     parkWindowMilliseconds: input.parkWindowMilliseconds ?? projectSessionParkWindowMilliseconds,
@@ -610,6 +648,7 @@ export const projectSessionMachine = setup({
     revisionsRef: undefined,
     hostConnectorRef: undefined,
     presenceRef: undefined,
+    fileCheckRef: undefined,
     agentHostRef: undefined,
     computeRef: undefined,
     fault: undefined,
@@ -650,12 +689,38 @@ export const projectSessionMachine = setup({
       };
       return {
         context: {
+          /* A14: the new revision client has published nothing, so its file check is pending from here. */
+          ...startFileCheck(context, enq),
           fileManagerRef: event.fileManagerRef,
           /* No fixed id: the next file manager's children start while the previous ones are being stopped. */
           revisionsRef: enq.spawn(actors.revisions, { input }),
           hostConnectorRef: enq.spawn(actors.hostConnector, { input }),
         },
       };
+    },
+    /* A14: the `revisions` child's word on the file check. A check that is still pending or slow goes on as it is: a
+     * later `filesChecking` is the same wait. */
+    fileCheckChanged: ({ context, event }, enq) => {
+      if (!event.settled) {
+        return context.availability === 'settled' ? { context: startFileCheck(context, enq) } : {};
+      }
+      if (context.availability === 'settled') {
+        /* A repeat of the settled report. */
+        return {};
+      }
+      if (context.fileCheckRef !== undefined) {
+        enq.sendTo(context.fileCheckRef, { type: 'checkSettled' });
+      }
+      reportFacts({ ...context, availability: 'settled' }, enq);
+      return { context: { availability: 'settled' } };
+    },
+    /* A14: the check has outlasted its patience. A report about a check that settled or was replaced is stale (MC-R18). */
+    fileCheckSlow: ({ context, event }, enq) => {
+      if (event.check !== context.fileCheckId || context.availability !== 'pending') {
+        return {};
+      }
+      reportFacts({ ...context, availability: 'slow' }, enq);
+      return { context: { availability: 'slow' } };
     },
     /* S1: the `project` child retries a deferred focused chat once the chats have arrived. */
     revisionChatsChanged: ({ context, event }, enq) => {
@@ -746,8 +811,10 @@ export const projectSessionMachine = setup({
       initial: 'starting',
       states: {
         starting: {
-          entry: ({ context, actors }, enq) => ({
+          entry: ({ context, actors, self }, enq) => ({
             context: {
+              /* A14: first, so it runs before the `fileManager` child reports the file manager a check starts on. */
+              fileCheckRef: enq.spawn(actors.fileCheck, { id: 'fileCheck', input: { parentRef: self } }),
               fileManagerChildRef: enq.spawn(actors.fileManager, {
                 id: 'fileManager',
                 input: { projectId: context.projectId },

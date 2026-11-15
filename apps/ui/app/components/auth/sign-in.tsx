@@ -2,6 +2,7 @@ import { authMutationKeys } from '@better-auth-ui/core';
 import { useAuth, useFetchOptions, useSignInEmail } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { CircleCheck } from 'lucide-react';
 import { useLocation } from 'react-router';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
@@ -33,6 +34,18 @@ export const socialSignInErrorMessages: Readonly<Record<string, string>> = {
 
 export const socialSignInErrorMessage = (code: string): string =>
   socialSignInErrorMessages[code] ?? "We couldn't sign you in with that provider. Please try again.";
+
+/** Router state the reset-password view hands to sign-in after a successful reset. Never put in the URL. */
+export type SignInLocationState = {
+  readonly passwordReset?: boolean;
+};
+
+export const passwordResetSignInState: SignInLocationState = { passwordReset: true };
+
+export const passwordResetNotice = 'Password updated. Sign in with your new password.';
+
+const isPasswordResetState = (state: unknown): boolean =>
+  state instanceof Object && (state as SignInLocationState).passwordReset === true;
 
 export type SignInProps = {
   className?: string;
@@ -71,6 +84,7 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
   // A social sign-in that failed comes back here with `?error=` (the provider buttons' `errorCallbackURL`).
   const location = useLocation();
   const socialError = new URLSearchParams(location.search).get('error');
+  const isAfterPasswordReset = isPasswordResetState(location.state);
   useEffect(() => {
     if (socialError) {
       toast.error(socialSignInErrorMessage(socialError), {
@@ -150,6 +164,13 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
 
       <CardContent>
         <div className='flex flex-col gap-6'>
+          {isAfterPasswordReset && (
+            <p role='status' className='flex items-start gap-2 rounded-md border px-3 py-2 text-sm'>
+              <CircleCheck aria-hidden='true' className='mt-0.5 size-4 shrink-0 text-success' />
+              {passwordResetNotice}
+            </p>
+          )}
+
           {socialPosition === 'top' && (
             <>
               {socialProviders && socialProviders.length > 0 && <ProviderButtons socialLayout={socialLayout} />}

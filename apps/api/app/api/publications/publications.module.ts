@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@taucad/api-database';
-import { EmailModule } from '@taucad/api-email';
+import { EmailDeliverabilityModule, EmailModule } from '@taucad/api-email';
 import { GitModule } from '#api/git/git.module.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { ProjectShareController } from '@taucad/api-projects/publications/project-share.controller';
@@ -19,7 +19,7 @@ import { ViewerIdentityService } from '@taucad/api-projects/publications/viewer-
    * The library's `PublicationsService` asks for the leases by port, which this
    * module binds to the git service, so `api-projects` never imports the app.
    */
-  imports: [DatabaseModule, EmailModule, GitModule],
+  imports: [DatabaseModule, EmailModule, EmailDeliverabilityModule, GitModule],
   controllers: [PublicationsController, ProjectShareController],
   providers: [
     PublicationsService,

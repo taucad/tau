@@ -114,7 +114,7 @@ describe('image transcoder', () => {
       expect(targets).toEqual(['png', 'webp', 'jpeg']);
       for (const edge of imageDefinition.edges) {
         expect(edge.from).toBe('glb');
-        expect(edge.fidelity).toBe('mesh');
+        expect(edge).not.toHaveProperty('fidelity');
         expect(edge.optionsSchema).toBeDefined();
         expect(edge.sourceOptions).toBeUndefined();
       }

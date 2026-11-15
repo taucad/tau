@@ -63,7 +63,14 @@ import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { PendingContentError, pendingObjectOf, readAsMarked, readThroughPending } from '#pending-content.js';
+import {
+  PendingContentError,
+  mayBePointerSize,
+  pendingObjectOf,
+  readAsMarked,
+  readThroughPending,
+  untilDeclared,
+} from '#pending-content.js';
 import type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 
 /* A provider's own utf8 read keeps a byte-order mark; so does this one. */
@@ -226,6 +233,12 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      * root. Optional: only the authority's own view keeps an index.
      */
     declarePending?(declared: ReadonlyMap<string, DeclaredPlaceholder>, paths?: readonly string[]): Promise<void>;
+    /**
+     * Say, as the revision layer starts, that it will declare this root (D9): until its first whole declaration,
+     * every other view holds a file under it the size of a pointer and not yet marked, bounded by the read's stall
+     * bound, so a placeholder is never shown as a small present file (I7). Heard only from a raw view.
+     */
+    awaitDeclaration?(): void;
     /**
      * Which of these files the root's index holds as pending entries: the
      * placeholders the revision layer declared, as a non-raw view's stat
@@ -401,6 +414,34 @@ export class RootedViews {
       delete copy['lineCount'];
       return copy as Row;
     };
+    /*
+     * Before the revision layer's first word on a root it announced, a file the size of a pointer that no mark names
+     * may be a placeholder: it is held until the word (I7). `rows` are tried lazily, so a listing resolves only the
+     * rows it must. Answers whether anything was held, so a listing answers again from what the word said.
+     */
+    const heldUntilDeclared = async (
+      rows: Iterable<Readonly<{ size: number; type: string; at: () => string; path: string }>>,
+    ): Promise<boolean> => {
+      if (raw || projectIndexes.declarationAt(root) === undefined) {
+        return false;
+      }
+      for (const row of rows) {
+        if (row.type === 'file' && mayBePointerSize(row.size)) {
+          const authorityPath = row.at();
+          const declared = projectIndexes.declarationAt(authorityPath);
+          if (declared !== undefined && markedAt(authorityPath, row.size) === undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- one word answers every row.
+            await untilDeclared(declared, row.path, stallMilliseconds);
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    const heldStat = async <Row extends FileStat>(authorityPath: string, localPath: string, row: Row): Promise<Row> => {
+      await heldUntilDeclared([{ size: row.size, type: row.type, at: () => authorityPath, path: localPath }]);
+      return statOf(authorityPath, row);
+    };
     /* One file's bytes on disk, and what the path answers: through to its object when it is a placeholder. */
     const readAnswered = async (
       at: ReturnType<typeof resolveLocal>,
@@ -539,15 +580,23 @@ export class RootedViews {
     };
     const readdirWithStats = captured.provider.readdirWithStats
       ? async (path: string): Promise<DirectoryStatRow[]> => {
-          const { authorityPath, resolution } = resolveLocal(path);
+          const { authorityPath, resolution, localPath } = resolveLocal(path);
           const rows = await resolution.provider.readdirWithStats!(resolution.path);
           const parent = authorityPath === '/' ? '' : authorityPath;
+          await heldUntilDeclared(
+            rows.map((row) => ({
+              size: row.size,
+              type: row.type,
+              at: () => `${parent}/${row.name}`,
+              path: joinRelativePath(localPath, row.name),
+            })),
+          );
           return raw ? rows : rows.map((row) => statOf(`${parent}/${row.name}`, row));
         }
       : undefined;
     const stat = async (path: string): Promise<FileStat> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      return statOf(authorityPath, await resolution.provider.stat(resolution.path));
+      const { authorityPath, resolution, localPath } = resolveLocal(path);
+      return heldStat(authorityPath, localPath, await resolution.provider.stat(resolution.path));
     };
     const readdirEntries = captured.provider.readdirEntries
       ? async (path: string): Promise<DirectoryEntry[]> => {
@@ -938,15 +987,20 @@ export class RootedViews {
       },
     };
     const lstat = async (path: string): Promise<FileStat> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      return statOf(authorityPath, await resolution.provider.lstat(resolution.path));
+      const { authorityPath, resolution, localPath } = resolveLocal(path);
+      return heldStat(authorityPath, localPath, await resolution.provider.lstat(resolution.path));
     };
     const search = async (query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]> => {
       assertCurrent();
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return index.search(query, { ...options, asObjects: !raw });
+      const answer = (): FileStatEntry[] => index.search(query, { ...options, asObjects: !raw });
+      const rows = answer();
+      const held = await heldUntilDeclared(
+        rows.map((row) => ({ ...row, at: () => resolveLocal(row.path).authorityPath, path: row.path })),
+      );
+      return held ? answer() : rows;
     };
     const statTree = async (
       path: string,
@@ -956,7 +1010,15 @@ export class RootedViews {
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return index.statTree(localPath, { ...options, asObjects: !raw });
+      const answer = (): FileStatEntry[] => index.statTree(localPath, { ...options, asObjects: !raw });
+      const rows = answer();
+      const held = await heldUntilDeclared(
+        rows.map((row) => {
+          const rowPath = joinRelativePath(localPath, row.path);
+          return { ...row, at: () => resolveLocal(rowPath).authorityPath, path: rowPath };
+        }),
+      );
+      return held ? answer() : rows;
     };
     const facts = async (
       paths: readonly string[],
@@ -991,10 +1053,19 @@ export class RootedViews {
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      const changes = index.changes(since, options);
       if (raw) {
-        return changes;
+        return index.changes(since, options);
       }
+      const unheld = index.changes(since, options);
+      const held = await heldUntilDeclared(
+        unheld.entries.map((entry) => ({
+          size: entry.size,
+          type: entry.kind,
+          at: () => resolveLocal(entry.path).authorityPath,
+          path: entry.path,
+        })),
+      );
+      const changes = held ? index.changes(since, options) : unheld;
       /* A pending entry as its object, as a stat answers it, the pointer's own facts dropped. */
       return {
         ...changes,
@@ -1230,6 +1301,13 @@ export class RootedViews {
           new Map([...declared].map(([path, placeholder]) => [local(path), placeholder])),
           paths?.map((path) => local(path)),
         );
+      },
+      awaitDeclaration: (): void => {
+        assertCurrent();
+        /* Only the revision layer's own view, which is never held, may say so: a view that is would wait on itself. */
+        if (raw) {
+          this._projectIndexes.awaitDeclaration(root);
+        }
       },
       expectEntries: async (entries: readonly ExpectedEntry[]): Promise<void> => {
         assertCurrent();

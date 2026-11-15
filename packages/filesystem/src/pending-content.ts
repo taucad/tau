@@ -62,13 +62,23 @@ export type PendingObjectSource = (
 /** How long one read waits on a pending entry with no progress before it refuses (I10). Milliseconds. @public */
 export const pendingStallMilliseconds = 60_000;
 
-/** A read of a pending entry whose object could not be had in time. @public */
+/**
+ * A read of a pending entry whose object could not be had in time; or, with no object, a path that may be one, asked
+ * about before the revision layer's first word on its root came (see {@link untilDeclared}).
+ *
+ * @public
+ */
 export class PendingContentError extends Error {
   public readonly path: string;
-  public readonly object: PendingObject;
+  public readonly object: PendingObject | undefined;
 
-  public constructor(path: string, object: PendingObject, options?: { cause?: unknown }) {
-    super(`The large object of ${path} is not on this device yet.`, options);
+  public constructor(path: string, object: PendingObject | undefined, options?: { cause?: unknown }) {
+    super(
+      object === undefined
+        ? `Whether ${path} is a large object still on its way is not known yet.`
+        : `The large object of ${path} is not on this device yet.`,
+      options,
+    );
     this.name = 'PendingContentError';
     this.path = path;
     this.object = object;
@@ -79,6 +89,47 @@ export class PendingContentError extends Error {
     return 'PENDING';
   }
 }
+
+/**
+ * Whether a file of this size may be a git-lfs pointer: its spec line, its sha256 line and a size line of 1 to 19
+ * digits. Asked only of a root awaiting the revision layer's first word (see {@link untilDeclared}); after it, the
+ * marks alone answer.
+ *
+ * @param size - A file's size.
+ * @returns Whether a pointer can be that long.
+ * @internal
+ */
+export const mayBePointerSize = (size: number): boolean => size >= 126 && size <= 144;
+
+/**
+ * Wait for the revision layer's first word on a root it announced, under the read's stall bound: what a path that
+ * may be a placeholder answers only after (I7). Refuses with `PENDING` when the word does not come in time.
+ *
+ * @param declared - The root's first declaration.
+ * @param path - The path that waits.
+ * @param stallMilliseconds - The bound; {@link pendingStallMilliseconds} when omitted.
+ * @throws {PendingContentError} When the word does not come within the bound.
+ * @internal
+ */
+export const untilDeclared = async (
+  declared: Promise<void>,
+  path: string,
+  stallMilliseconds?: number,
+): Promise<void> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<'late'>((resolve) => {
+    timer = setTimeout(() => {
+      resolve('late');
+    }, stallMilliseconds ?? pendingStallMilliseconds);
+  });
+  try {
+    if ((await Promise.race([declared, late])) === 'late') {
+      throw new PendingContentError(path, undefined);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 const pointerPattern =
   /^version https:\/\/git-lfs\.github\.com\/spec\/v1\noid sha256:([\da-f]{64})\nsize (\d{1,19})\n$/u;
@@ -112,6 +163,8 @@ export type PendingMarks = Readonly<{
     observed: Readonly<{ size: number; generation?: number | undefined }>,
   ) => void;
   endPending: (authorityPath: string) => void;
+  /** The first declaration of a root awaiting one that holds this path (see {@link untilDeclared}). */
+  declarationAt: (authorityPath: string) => Promise<void> | undefined;
 }>;
 
 /**
@@ -146,6 +199,10 @@ export const readAsMarked = async (
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const { bytes, generation, signal, stallMilliseconds, ...at } = read;
   const object = pendingObjectOf(bytes);
+  const awaiting = object === undefined ? undefined : marks.declarationAt(at.authorityPath);
+  if (awaiting !== undefined && marks.pendingAt(at.authorityPath) === undefined) {
+    await untilDeclared(awaiting, at.path, stallMilliseconds);
+  }
   const marked = marks.pendingAt(at.authorityPath);
   if (object === undefined || (marked === undefined && source === undefined)) {
     if (marked !== undefined) {

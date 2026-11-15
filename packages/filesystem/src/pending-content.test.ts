@@ -338,6 +338,50 @@ describe('marked placeholders (D9)', () => {
   });
 });
 
+/*
+ * A root the revision layer owns, before its first word (a reload whose index forgot its marks, or a stat before the
+ * index opened): a file the size of a pointer may be a placeholder, so it is neither a small file nor a pointer yet.
+ */
+describe('a root awaiting its first declaration (D9, I7)', () => {
+  const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
+  const waiting = async (): Promise<'waiting'> =>
+    new Promise((resolve) => {
+      setTimeout(() => {
+        resolve('waiting');
+      }, 20);
+    });
+
+  it('should hold a file the size of a pointer until the revision layer declares the root, and no other', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    raw.awaitDeclaration!();
+    expect(await view.stat('main.scad')).toMatchObject({ size: 27 });
+    const statting = view.stat('models/part.step');
+    const listing = view.statTree!('models');
+    expect(await Promise.race([statting, waiting()])).toBe('waiting');
+    expect(await Promise.race([listing, waiting()])).toBe('waiting');
+    /* The raw view, the revision layer's own, is never held. */
+    expect(await raw.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]));
+    expect(await statting).toMatchObject({ size: part.byteLength, pending: true });
+    const listed = await listing;
+    expect(listed.find((row) => row.path === 'part.step')).toMatchObject({ size: part.byteLength });
+    /* Declared once, the marks alone answer. */
+    await raw.writeFile('notes/pointer.txt', pointer);
+    expect(await view.stat('notes/pointer.txt')).toMatchObject({ size: pointer.byteLength });
+  });
+
+  it('should refuse with PENDING, never answering a small file, when the word does not come within the bound', async () => {
+    const bounded = await createService(30);
+    const raw = bounded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = bounded.createRootedFileSystem(route);
+    raw.awaitDeclaration!();
+    await expect(view.stat('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+    await expect(view.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+    bounded.dispose();
+  });
+});
+
 describe('expected entries (D10)', () => {
   it('should know a tree write’s entries in a cold root’s index and answer when they have landed', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);

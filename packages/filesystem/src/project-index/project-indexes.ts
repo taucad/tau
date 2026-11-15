@@ -160,6 +160,8 @@ type RootState = {
  */
 export class ProjectIndexes {
   private readonly _states = new Map<string, RootState>();
+  /** Roots the revision layer said it will declare, until it first does (see `awaitDeclaration`). */
+  private readonly _awaitingDeclaration = new Map<string, Readonly<{ declared: Promise<void>; resolve: () => void }>>();
   private readonly _opening = new Map<string, Promise<ProjectIndex>>();
   private readonly _options: ProjectIndexesOptions;
   /** Notices from sibling tabs, joined into every root's vector. */
@@ -624,6 +626,44 @@ export class ProjectIndexes {
   }
 
   /**
+   * Hold every path under one root that may be a placeholder until the revision layer first declares the root: it
+   * owns the root's placeholders, and until its word a file the size of a pointer is unknown (I7). Called by the
+   * revision layer as it starts; a whole declaration of the root, or of a root above it, ends the wait.
+   *
+   * @param root - Absolute root the revision layer will declare.
+   */
+  public awaitDeclaration(root: string): void {
+    const key = normalizePath(root);
+    if (this._awaitingDeclaration.has(key)) {
+      return;
+    }
+    let settle: () => void = () => undefined;
+    const declared = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    this._awaitingDeclaration.set(key, { declared, resolve: settle });
+  }
+
+  /**
+   * The first declaration of a root awaiting one that holds this path (see {@link ProjectIndexes.awaitDeclaration}).
+   *
+   * @param absolutePath - Absolute path.
+   * @returns The declaration, or `undefined` when no root holding the path awaits one.
+   */
+  public declarationAt(absolutePath: string): Promise<void> | undefined {
+    if (this._awaitingDeclaration.size === 0) {
+      return undefined;
+    }
+    const normalized = normalizePath(absolutePath);
+    for (const [root, { declared }] of this._awaitingDeclaration) {
+      if (relativeTo(root, normalized) !== undefined) {
+        return declared;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Keep what the revision layer declares the placeholders under one root are (see
    * {@link ProjectIndex.declarePending}), in every warm index that holds them, each by its own entries; the root's own
    * index is opened first when it is cold, so the declaration is never lost to a cold open.
@@ -661,6 +701,14 @@ export class ProjectIndexes {
         paths === undefined ? { under: prefix } : { paths: paths.flatMap((path) => inIndex(path) ?? []) },
       );
       this._schedulePersist(indexRoot);
+    }
+    if (paths === undefined) {
+      for (const [awaiting, { resolve }] of this._awaitingDeclaration) {
+        if (relativeTo(key, awaiting) !== undefined) {
+          this._awaitingDeclaration.delete(awaiting);
+          resolve();
+        }
+      }
     }
   }
 
@@ -807,6 +855,11 @@ export class ProjectIndexes {
       clearTimeout(state.persistTimer);
     }
     this._states.clear();
+    /* Nothing will declare a root now: what waited answers from the marks it finds. */
+    for (const { resolve } of this._awaitingDeclaration.values()) {
+      resolve();
+    }
+    this._awaitingDeclaration.clear();
   }
 
   /**

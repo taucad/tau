@@ -33,8 +33,11 @@ import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcome
 import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
 
-/** The palette registration of the focused project's items: one view is mounted at a time. */
-const focusedProjectPaletteId = 'focused-project';
+/**
+ * The palette registration of the focused project's items: one view is mounted at a time. The palette lists deeper
+ * ids first, so the id keeps the project route's depth and its items stay above the shell's global groups.
+ */
+const focusedProjectPaletteId = 'routes/w.$workspace.$project';
 
 /**
  * The focused project's providers and its focused-only siblings, over the route's content.

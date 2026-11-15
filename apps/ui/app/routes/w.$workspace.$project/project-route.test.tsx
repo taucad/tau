@@ -2686,14 +2686,14 @@ describe('the palette reads the focused project (A11)', () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const view = render(<PaletteRoute projectId={projectA} />);
     await screen.findByTestId('focused-project');
-    expect([...palette.entries()]).toEqual([['focused-project', projectA]]);
+    expect([...palette.entries()]).toEqual([['routes/w.$workspace.$project', projectA]]);
 
     view.rerender(<PaletteRoute projectId={projectB} />);
     await waitFor(() => {
       expect(focusedViewId()).toBe(projectB);
     });
     await flushTasks();
-    expect([...palette.entries()]).toEqual([['focused-project', projectB]]);
+    expect([...palette.entries()]).toEqual([['routes/w.$workspace.$project', projectB]]);
   });
 
   it('should hold no project items while the route resolves, as main does', async () => {
@@ -2708,7 +2708,7 @@ describe('the palette reads the focused project (A11)', () => {
       await pending.promise;
     });
     await screen.findByTestId('focused-project');
-    expect([...palette.entries()]).toEqual([['focused-project', projectA]]);
+    expect([...palette.entries()]).toEqual([['routes/w.$workspace.$project', projectA]]);
   });
 });
 

@@ -707,11 +707,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               onScroll={enableOverflowY ? handlePageScroll : undefined}
             >
               <PhoneTopBarContext.Provider value={phoneTopBar}>
+                {/* Outside the route's providers, so a route waiting on the file-manager worker still opens
+                    it: its project sections read the focused session (A11). */}
+                <SettingsDialog />
                 <Compose components={Providers}>
                   <RouteCommandPaletteItems />
-                  {/* Its compute section reads the active project; the dialog is a
-                      portal, so only its place in the React tree matters. */}
-                  <SettingsDialog />
                   <HomeFileManagerNotice />
                   <SectionContent error={error} />
                 </Compose>

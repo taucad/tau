@@ -244,7 +244,7 @@ const requireReadDelayed = async (row: string, rule: WorkerReadDelay): Promise<n
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(`U1: the sidebar wrapper is never removed on a ${viewport} reload with the workspace chunk 3 s late`, {
     artifact: `u1-${viewport}`,
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -272,7 +272,7 @@ for (const viewport of ['wide', 'phone'] as const) {
 
   knownDefect(`U2: the sidebar wrapper is not removed after its first mount on a ${viewport} reload`, {
     artifact: `u2-${viewport}`,
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -292,7 +292,7 @@ for (const viewport of ['wide', 'phone'] as const) {
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(`U22: a click on a project row from Home removes the sidebar wrapper zero times at ${viewport} size`, {
     artifact: `u22-${viewport}`,
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -324,7 +324,7 @@ knownDefect(
   'U3: a direct load with the sidebar open has the wrapper and sidebar in the server HTML and in every frame',
   {
     artifact: 'u3-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       const { path } = await seedProjects('wide');
@@ -975,7 +975,7 @@ const findSidebarStandIns = (html: Document): string[] =>
 
 knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a project draws no sidebar stand-in', {
   artifact: 'f4-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');

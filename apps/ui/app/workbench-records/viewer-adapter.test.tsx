@@ -601,6 +601,7 @@ describe('viewer adapter (A8d)', () => {
       harness.publish(group('front', 'iso'));
     });
     expect(viewIds(api)).toEqual(['front', 'iso']);
+    expect(api.groups[0]?.panels.map((panel) => panel.id)).toEqual(['front', 'iso']);
     expect(api.activePanel?.id).toBe('iso');
     expect(api.groups).toHaveLength(1);
     expect(api.groups[0]).toBe(seededGroup);
@@ -608,5 +609,49 @@ describe('viewer adapter (A8d)', () => {
     expect([...headers].every((header) => header.isConnected)).toBe(true);
     // The landing is the record's apply, not the person's edit.
     expect(personViewerChanged).not.toHaveBeenCalled();
+  });
+
+  // #2240 review: Dockview makes the first panel of an empty group active whatever `inactive` says, so a hidden tab
+  // landed first would be shown, and its model demanded, before the record's active tab took over.
+  it('should demand only the active tab of a one-group record landed in the seeded group', async () => {
+    const harness = mountLayout('desktop');
+    let seeded: DockviewApi | undefined;
+    const rendered = render(
+      <DockviewReact
+        components={{ viewer: () => <div>Model</div> }}
+        onReady={(event) => {
+          seeded = event.api;
+          ensureViewerGroup(event.api);
+        }}
+      />,
+    );
+    stops.push(() => {
+      rendered.unmount();
+    });
+    const api = seeded!;
+    api.layout(900, 600);
+    const project = mountProject();
+    const records = new Map([
+      ['front', newViewRecord('front.ts')],
+      ['iso', newViewRecord('iso.ts')],
+      ['top', newViewRecord('top.ts')],
+    ]);
+    const facts = createViewerAdapterFactsPort(baseFacts({ admitsDemand: true, viewRecords: records }));
+    await act(async () => {
+      harness.layout.send({
+        type: 'dockReady',
+        adapter: 'viewer',
+        dockId: 'dock-1',
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
+      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({ type: 'attach' });
+      harness.publish({ ...group('front', 'iso', 'top'), active: 1 });
+    });
+    expect(api.groups[0]?.panels.map((panel) => panel.id)).toEqual(['front', 'iso', 'top']);
+    expect(api.activePanel?.id).toBe('iso');
+    expect(
+      project.sent.filter((event) => event.type === 'createGeometryUnit').map((event) => event.entryPath),
+    ).toEqual(['iso.ts']);
   });
 });

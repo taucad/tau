@@ -103,7 +103,11 @@ function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): bo
     return false;
   }
   const { views, activeView } = leaf.data as { readonly views: readonly string[]; readonly activeView?: string };
-  for (const id of views) {
+  const active = activeView !== undefined && views.includes(activeView) ? activeView : views[0];
+  // Dockview makes the first panel of an empty group active whatever `inactive` says, so the active view goes first
+  // and the rest take their places beside it without being shown.
+  const order = active === undefined ? [] : [active, ...views.filter((id) => id !== active)];
+  for (const id of order) {
     const panel = projection.panels[id];
     if (panel === undefined) {
       continue;
@@ -114,11 +118,10 @@ function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): bo
       ...(panel.tabComponent === undefined ? {} : { tabComponent: panel.tabComponent }),
       title: panel.title,
       params: panel.params,
-      position: { referenceGroup: seed, direction: 'within' },
-      inactive: true,
+      position: { referenceGroup: seed, direction: 'within', index: views.indexOf(id) },
+      inactive: id !== active,
     });
   }
-  api.getPanel(activeView ?? views[0] ?? '')?.api.setActive();
   return true;
 }
 

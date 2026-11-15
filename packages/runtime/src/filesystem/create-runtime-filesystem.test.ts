@@ -120,6 +120,30 @@ describe('createRuntimeFileSystem', () => {
       expect(types).toContain('file');
       expect(types).toContain('dir');
     });
+
+    /*
+     * A kernel's listing feeds its workspace mirror, which deletes what is not listed: it stats each entry on its own
+     * and fails closed, never through a batch listing that may leave out a row it cannot tell (D9, I7).
+     */
+    it('should stat each entry and reject on one it cannot stat, never answering a batch listing', async () => {
+      const base = makeFs({ 'dir/a.txt': 'hello', 'dir/b.txt': 'world' });
+      const readdirWithStats = vi.fn(async () => [{ name: 'a.txt', type: 'file', size: 5, mtimeMs: 0 }]);
+      const original = base.stat.bind(base);
+      const fs = createRuntimeFileSystem(
+        Object.assign(base, {
+          readdirWithStats,
+          stat: async (path: string) => {
+            if (path === 'dir/b.txt') {
+              throw Object.assign(new Error('The storage is busy.'), { code: 'EIO' });
+            }
+            return original(path);
+          },
+        }),
+      );
+
+      await expect(fs.readdirStat('dir')).rejects.toMatchObject({ code: 'EIO' });
+      expect(readdirWithStats).not.toHaveBeenCalled();
+    });
   });
 
   describe('ensureDir', () => {

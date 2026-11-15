@@ -184,7 +184,7 @@ const sessionWiring: SessionWiring = {
     sessionRevisionsCallback:
       () =>
       ({ sendBack }) => {
-        sendBack({ type: 'fileCheckChanged', settled: true, published: true });
+        sendBack({ type: 'fileCheckChanged', settled: true, judged: true });
         return () => undefined;
       },
   }),

@@ -236,7 +236,7 @@ export type ProjectSessionMachineEvent =
   /** The `revisions` child: whether the project's chats have arrived, which a deferred focused chat waits for (S1). */
   | { readonly type: 'revisionChatsChanged'; readonly ready: boolean }
   /** The `revisions` child (A14): whether its client has published a status and the model is not checking files. */
-  | { readonly type: 'fileCheckChanged'; readonly settled: boolean; readonly published: boolean }
+  | { readonly type: 'fileCheckChanged'; readonly settled: boolean; readonly judged: boolean }
   /** The `fileCheck` child (A14): check `check` has run for its patience. */
   | { readonly type: 'fileCheckSlow'; readonly check: number }
   /**
@@ -714,9 +714,9 @@ export const projectSessionMachine = setup({
      * `filesChecking` is the same wait. */
     fileCheckChanged: ({ context, event }, enq) => {
       if (!event.settled) {
-        /* A check is a later one only once this client has published a status: one that starts before it (a Tau Cloud
-         * open that ended first) is still the client's first, which the open waits for (I20). */
-        return context.fileCheckRunning ? {} : { context: startFileCheck(context, enq, !event.published) };
+        /* A check is a later one only once the check has judged one of this client's statuses (`judged`): one that
+         * starts before that, as after a Tau Cloud open, is still the client's first, which the open waits for (I20). */
+        return context.fileCheckRunning ? {} : { context: startFileCheck(context, enq, !event.judged) };
       }
       if (!context.fileCheckRunning) {
         /* A repeat of the settled report. */

@@ -93,7 +93,7 @@ const revisionsStandIn: SessionRevisionsCallback = ({ sendBack }) => {
     const next = isFileCheckSettled(status, false);
     if (next !== settled) {
       settled = next;
-      sendBack({ type: 'fileCheckChanged', settled: next, published: status !== undefined });
+      sendBack({ type: 'fileCheckChanged', settled: next, judged: status !== undefined });
     }
   };
   report();

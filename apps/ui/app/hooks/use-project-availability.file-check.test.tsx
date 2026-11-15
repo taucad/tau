@@ -82,7 +82,7 @@ const compose = () => {
     registry,
     clock,
     report: (settled: boolean) => {
-      children.at(-1)?.({ type: 'fileCheckChanged', settled, published: true });
+      children.at(-1)?.({ type: 'fileCheckChanged', settled, judged: true });
     },
   };
 };

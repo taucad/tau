@@ -152,7 +152,7 @@ export type SessionRevisionsEvent = Readonly<{ type: 'never' }>;
 export type SessionRevisionsEmitted =
   | Readonly<{ type: 'revisionState'; dirty: boolean; pushed: boolean; recording: boolean; pendingCount: number }>
   | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>
-  | Readonly<{ type: 'fileCheckChanged'; settled: boolean; published: boolean }>;
+  | Readonly<{ type: 'fileCheckChanged'; settled: boolean; judged: boolean }>;
 
 export type SessionRevisionsLogic = CallbackActorLogic<SessionRevisionsEvent, SessionRevisionsInput>;
 
@@ -366,12 +366,19 @@ export const sessionRevisionsCallback =
     /* A14: the file check, told on its first word and on each change after it. The session starts this client's
      * check as pending; the first word always goes out, so a word the session got from before cannot stand. */
     let fileCheckSettled: boolean | undefined;
+    /* Whether the check has judged one of this client's statuses: one published while no Tau Cloud open was owed. Until
+     * then a check that starts is still the client's first, which the open waits for (I20); after it, a later one. */
+    let hasJudged = false;
     const relayFileCheck = (status: RevisionStatusProjection | undefined): void => {
       /* Read on each word, as the view's hook reads it on each render: another tab can end the open with no signal here. */
-      const settled = isFileCheckSettled(status, ports.cloudOpen.get(projectId));
+      const isCloudOpen = ports.cloudOpen.get(projectId);
+      const settled = isFileCheckSettled(status, isCloudOpen);
       if (settled !== fileCheckSettled) {
         fileCheckSettled = settled;
-        sendBack({ type: 'fileCheckChanged', settled, published: status !== undefined });
+        sendBack({ type: 'fileCheckChanged', settled, judged: hasJudged });
+      }
+      if (status !== undefined && !isCloudOpen) {
+        hasJudged = true;
       }
     };
     const relayFacts = (): void => {

@@ -48,10 +48,12 @@ import { sessionFileCheckMachine } from '#machines/session-file-check.machine.js
  *
  * A14: the session owns its first file check (`availability`, U13 and the race part of U20). It is `pending` from the
  * moment it starts a `revisions` child, whose revision client has published nothing yet, until that child reports the
- * check settled (`fileCheckChanged`): a status is published and the model is not checking its files. A later check
- * returns it to `pending`. The `fileCheck` child counts each check's patience on the clock and reports `fileCheckSlow`,
- * which makes it `slow`, for the "Preparing model" view's "Try again". Focus's `opening` waits for `settled` up to its
- * open bound. A session with no `revisions` child has no file check, and its availability stays `settled`.
+ * check settled (`fileCheckChanged`): a status is published and the model is not checking its files. The `fileCheck`
+ * child counts each check's patience on the clock and reports `fileCheckSlow`, which makes it `slow`, for the
+ * "Preparing model" view's "Try again". Focus's `opening` waits for `settled` up to its open bound, and that wait is
+ * for the first check of a revision client only (I20, B6): a later check leaves the session `settled` until it turns
+ * `slow`, so a return to a live project mid-check shows its editor at once. A session with no `revisions` child has no
+ * file check, and its availability stays `settled`.
  */
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
@@ -122,6 +124,8 @@ export type ProjectSessionMachineContext = Readonly<{
   availability: ProjectSessionAvailability;
   /** The id of the last check the `fileCheck` child was told started, which its report echoes (MC-R18). */
   fileCheckId: number;
+  /** A check runs: told started and not yet settled. */
+  fileCheckRunning: boolean;
   parentRef: AnyActorRef | undefined;
   idleWindowMilliseconds: number;
   parkWindowMilliseconds: number;
@@ -489,18 +493,24 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
 };
 
 /*
- * A14: a check starts. The session is `pending` at once, in the same step, so focus never reads a `settled` from before
- * it; the `fileCheck` child counts its patience under a new id, so a report about an earlier check is dropped.
+ * A14: a check starts, and the `fileCheck` child counts its patience under a new id, so a report about an earlier check
+ * is dropped. A new revision client's first check makes the session `pending` at once, in the same step, so focus never
+ * reads a `settled` from before it. A later check of the same client leaves availability as it is until it turns slow.
  */
-const startFileCheck = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue): ProjectSessionPatch => {
+const startFileCheck = (
+  context: ProjectSessionMachineContext,
+  enq: ProjectSessionEnqueue,
+  isFirst: boolean,
+): ProjectSessionPatch => {
   const fileCheckId = context.fileCheckId + 1;
   if (context.fileCheckRef !== undefined) {
     enq.sendTo(context.fileCheckRef, { type: 'checkStarted', check: fileCheckId });
   }
-  if (context.availability !== 'pending') {
-    reportFacts({ ...context, availability: 'pending' }, enq);
+  const availability = isFirst ? 'pending' : 'settled';
+  if (context.availability !== availability) {
+    reportFacts({ ...context, availability }, enq);
   }
-  return { availability: 'pending', fileCheckId };
+  return { availability, fileCheckId, fileCheckRunning: true };
 };
 
 /* A close step that failed leaves the session failed with the reason recorded. */
@@ -624,6 +634,7 @@ export const projectSessionMachine = setup({
     /* No `revisions` child yet, so no check runs; the first one makes it `pending`. */
     availability: 'settled',
     fileCheckId: 0,
+    fileCheckRunning: false,
     parentRef: input.parentRef,
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? projectSessionIdleWindowMilliseconds,
     parkWindowMilliseconds: input.parkWindowMilliseconds ?? projectSessionParkWindowMilliseconds,
@@ -690,7 +701,7 @@ export const projectSessionMachine = setup({
       return {
         context: {
           /* A14: the new revision client has published nothing, so its file check is pending from here. */
-          ...startFileCheck(context, enq),
+          ...startFileCheck(context, enq, true),
           fileManagerRef: event.fileManagerRef,
           /* No fixed id: the next file manager's children start while the previous ones are being stopped. */
           revisionsRef: enq.spawn(actors.revisions, { input }),
@@ -698,25 +709,27 @@ export const projectSessionMachine = setup({
         },
       };
     },
-    /* A14: the `revisions` child's word on the file check. A check that is still pending or slow goes on as it is: a
-     * later `filesChecking` is the same wait. */
+    /* A14: the `revisions` child's word on the file check. A check that still runs goes on as it is: a later
+     * `filesChecking` is the same wait. */
     fileCheckChanged: ({ context, event }, enq) => {
       if (!event.settled) {
-        return context.availability === 'settled' ? { context: startFileCheck(context, enq) } : {};
+        return context.fileCheckRunning ? {} : { context: startFileCheck(context, enq, false) };
       }
-      if (context.availability === 'settled') {
+      if (!context.fileCheckRunning) {
         /* A repeat of the settled report. */
         return {};
       }
       if (context.fileCheckRef !== undefined) {
         enq.sendTo(context.fileCheckRef, { type: 'checkSettled' });
       }
-      reportFacts({ ...context, availability: 'settled' }, enq);
-      return { context: { availability: 'settled' } };
+      if (context.availability !== 'settled') {
+        reportFacts({ ...context, availability: 'settled' }, enq);
+      }
+      return { context: { availability: 'settled', fileCheckRunning: false } };
     },
     /* A14: the check has outlasted its patience. A report about a check that settled or was replaced is stale (MC-R18). */
     fileCheckSlow: ({ context, event }, enq) => {
-      if (event.check !== context.fileCheckId || context.availability !== 'pending') {
+      if (event.check !== context.fileCheckId || !context.fileCheckRunning || context.availability === 'slow') {
         return {};
       }
       reportFacts({ ...context, availability: 'slow' }, enq);

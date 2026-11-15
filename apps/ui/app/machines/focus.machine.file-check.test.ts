@@ -51,8 +51,10 @@ const ready = (id: string): FocusAccessAnswer => ({
 const createRevisionsStandIn = () => {
   const module = Promise.withResolvers<void>();
   const children: Array<(event: ProjectSessionMachineEvent) => void> = [];
-  const callback: SessionRevisionsCallback = ({ sendBack }) => {
+  const byProject = new Map<string, (event: ProjectSessionMachineEvent) => void>();
+  const callback: SessionRevisionsCallback = ({ input, sendBack }) => {
     children.push(sendBack as (event: ProjectSessionMachineEvent) => void);
+    byProject.set(input.projectId, sendBack as (event: ProjectSessionMachineEvent) => void);
     return () => undefined;
   };
   return {
@@ -62,6 +64,10 @@ const createRevisionsStandIn = () => {
     /** Report the file check from the newest child, as `session-revisions.ts` does on each projection. */
     report: (settled: boolean) => {
       children.at(-1)?.({ type: 'fileCheckChanged', settled });
+    },
+    /** Report the file check from one project's newest child. */
+    reportFor: (id: string, settled: boolean) => {
+      byProject.get(id)?.({ type: 'fileCheckChanged', settled });
     },
     children,
     loadRevisions: async () => {
@@ -130,19 +136,22 @@ const compose = () => {
     host.stop();
     registry.stop();
   });
-  const committed = { slugs: { workspaceSlug: 'ws', projectSlug: projectId }, projectId, chatId: undefined };
+  let committed = { slugs: { workspaceSlug: 'ws', projectSlug: projectId }, projectId, chatId: undefined };
+  let requests = 0;
   return {
     registry,
     host,
     revisions,
     registryClock,
     focusClock,
-    route: () => {
+    route: (id: string = projectId) => {
+      requests += 1;
+      committed = { slugs: { workspaceSlug: 'ws', projectSlug: id }, projectId: id, chatId: undefined };
       host.focus.send({
         type: 'routeRequested',
-        requestId: 'route:1',
+        requestId: `route:${requests}`,
         slugs: committed.slugs,
-        projectId,
+        projectId: id,
       });
     },
     routeState: () =>
@@ -217,7 +226,54 @@ describe('the open waits for the first file check (A14)', () => {
     revisions.report(false);
     await flushTasks();
 
-    expect(status()?.availability).toBe('pending');
+    expect(status()?.availability).toBe('settled');
+    expect(host.focus.getSnapshot().hasTag('focused')).toBe(true);
+    expect(routeState()).toBe('editor');
+  });
+
+  /* Opens A, settles it, starts a later check on A, and moves to B, which settles. */
+  const leaveWhileChecking = async () => {
+    const composed = compose();
+    const { revisions, route, routeState } = composed;
+    route(projectId);
+    revisions.load();
+    await flushTasks();
+    revisions.reportFor(projectId, true);
+    await flushTasks();
+    revisions.reportFor(projectId, false);
+    route('p2');
+    await flushTasks();
+    revisions.reportFor('p2', true);
+    await flushTasks();
+    expect(routeState()).toBe('editor');
+    expect(composed.host.focus.getSnapshot().hasTag('focused')).toBe(true);
+    return composed;
+  };
+
+  it('should show the editor at once on a return to a live project whose later check still runs (I20, B6)', async () => {
+    const { host, route, routeState, status } = await leaveWhileChecking();
+
+    route(projectId);
+    await flushTasks();
+
+    expect(status()?.availability).toBe('settled');
+    expect(host.focus.getSnapshot().hasTag('focused')).toBe(true);
+    expect(routeState()).toBe('editor');
+  });
+
+  /* D14: a later check stuck past its patience is `slow`, which focus reads as pending, so a return waits the bound. */
+  it('should wait at most the open bound on a return to a live project whose later check has turned slow', async () => {
+    const { focusClock, host, registryClock, route, routeState, status } = await leaveWhileChecking();
+    registryClock.advance(modelCheckPatienceMilliseconds);
+    await flushTasks();
+    expect(status()?.availability).toBe('slow');
+
+    route(projectId);
+    await flushTasks();
+    expect(routeState()).toBe('resolving');
+
+    focusClock.advance(openPatienceMilliseconds);
+    await flushTasks();
     expect(host.focus.getSnapshot().hasTag('focused')).toBe(true);
     expect(routeState()).toBe('editor');
   });

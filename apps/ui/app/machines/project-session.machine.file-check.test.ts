@@ -100,18 +100,30 @@ describe('the session file check (A14)', () => {
     expect(guard.take()).toEqual([]);
   });
 
-  it('should settle, return to pending on a later check, and say nothing for a repeat', () => {
-    const { actor, guard, report, reports } = harness();
+  it('should settle, stay settled through a later check of the same client until it turns slow, and say nothing for a repeat', () => {
+    const { actor, clock, guard, report, reports } = harness();
     report(true);
     report(true);
 
     expect(reports().at(-1)).toEqual({ state: 'live', availability: 'settled' });
     const settledReports = reports().length;
 
+    /* A later check: the open's wait is for a client's first check only (I20, B6), so focus would not wait on it. */
     report(false);
     report(false);
+    clock.advance(modelCheckPatienceMilliseconds - 1);
 
-    expect(reports().slice(settledReports)).toEqual([{ state: 'live', availability: 'pending' }]);
+    expect(reports().slice(settledReports)).toEqual([]);
+    expect(actor.getSnapshot().context.availability).toBe('settled');
+
+    /* It still turns slow at its patience, for "Try again", and settles from there. */
+    clock.advance(1);
+    report(true);
+
+    expect(reports().slice(settledReports)).toEqual([
+      { state: 'live', availability: 'slow' },
+      { state: 'live', availability: 'settled' },
+    ]);
     actor.stop();
     expect(guard.take()).toEqual([]);
   });

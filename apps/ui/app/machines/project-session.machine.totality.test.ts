@@ -91,6 +91,8 @@ const samples: Samples = {
     { type: 'revisionState', dirty: true, pushed: false, pendingCount: 1 },
     { type: 'revisionState', dirty: false, pushed: true, recording: true },
   ],
+  /* A6e: the `project` child's report that the choices select another kernel; the session hands it back. */
+  replaceRuntime: [{ type: 'replaceRuntime' }],
 };
 
 /** Children that never report and close steps that never settle: the traversal delivers their answers. */

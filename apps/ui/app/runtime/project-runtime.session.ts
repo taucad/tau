@@ -16,6 +16,7 @@
  *
  * @module
  */
+import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic, AnyActorRef } from 'xstate';
 import type { QueryClient } from '@tanstack/react-query';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
@@ -233,6 +234,56 @@ export function openSessionProjectRuntime(
       );
     },
     kernelIsCurrent: () => selectionFor().key === selection.key,
+    /* A6e (B4): what a replacement flushes. The producer set (the layout, the entries and view records) and the project
+     * and editor stores write what they owe. Unlike the close flush it neither closes the parameter service nor refuses
+     * on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person. It
+     * keeps no timer (I15): a store's wait ends when it settles, when it stops, or when `gone` aborts. */
+    flush: async (gone) => {
+      const owed = [runtime.producers.flushAll()];
+      for (const ref of [projectRef, editorRef] as const) {
+        /* A store that has not loaded owes nothing; one that has writes now and settles in `storing.idle`. */
+        if (ref.getSnapshot().matches('ready')) {
+          ref.send({ type: 'flushNow' });
+          owed.push(
+            (async () => {
+              const settled = await waitFor(ref, (state) => state.matches({ ready: { storing: 'idle' } }), {
+                signal: gone,
+              });
+              if (settled.context.error !== undefined) {
+                throw settled.context.error;
+              }
+            })(),
+          );
+        }
+      }
+      /* A producer has no signal of its own: once `gone` aborts the flush stops waiting on it, and rejects with the
+       * abort, which confirms no write. */
+      let leave: () => void = () => undefined;
+      const abandoned = new Promise<never>((_resolve, reject) => {
+        leave = () => {
+          reject(
+            gone.reason instanceof Error ? gone.reason : new Error('The flush was abandoned.', { cause: gone.reason }),
+          );
+        };
+      });
+      if (gone.aborted) {
+        leave();
+      }
+      gone.addEventListener('abort', leave, { once: true });
+      let outcomes: Array<PromiseSettledResult<void>>;
+      try {
+        outcomes = await Promise.race([Promise.allSettled(owed), abandoned]);
+      } finally {
+        gone.removeEventListener('abort', leave);
+      }
+      const refusals = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+      if (refusals.length > 0) {
+        throw new AggregateError(
+          refusals.map((refusal) => refusal.reason as unknown),
+          'The superseded runtime did not confirm every write.',
+        );
+      }
+    },
     /* R3: the session decides; the project machine owns the cad units (A7b, row S5). */
     park: (parked) => {
       projectRef.send({ type: parked ? 'parkRuntime' : 'resumeRuntime' });

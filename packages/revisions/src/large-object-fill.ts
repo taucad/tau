@@ -16,12 +16,14 @@
  * where it now is.
  */
 import { workerTimings } from '@taucad/filesystem';
+import type { DeclaredPlaceholder } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
 import type { LargeObjectsFacet, LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
+import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 
 /** One placeholder: the pointer bytes on disk and the object they name. */
@@ -129,6 +131,29 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
       return pointer === undefined ? [] : [[path, { oid: pointer.oid, size: pointer.size, pointer: content }] as const];
     }),
   );
+
+/**
+ * The placeholders the revision layer declares to a checkout's index (D9): each pointer in the tree that the tree's
+ * own attributes track, as a read of the checkout decides it. A pointer anywhere else is a person's text.
+ *
+ * @param tree - The checkout's tree: a capture, or the tree a write lands.
+ * @param except - Paths whose pointer lands as its object (a write's sourced paths).
+ * @returns The declared placeholders by path, with the size of the pointer each one is.
+ */
+export const declaredPlaceholders = (
+  tree: ImmutableRevisionTree,
+  except?: ReadonlyMap<string, unknown>,
+): Map<string, DeclaredPlaceholder> => {
+  const attributes = tree.get(generatedGitattributesPath);
+  const text = attributes === undefined ? undefined : new TextDecoder().decode(attributes);
+  return new Map(
+    [...largeObjectPlaceholders(tree)].flatMap(([path, { oid, size, pointer }]) =>
+      path === generatedGitattributesPath || except?.has(path) === true || !isTrackedLargeObjectPath(path, text)
+        ? []
+        : [[path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const],
+    ),
+  );
+};
 
 /**
  * Build the fill over one project's checkout seams.

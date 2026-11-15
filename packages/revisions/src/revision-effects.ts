@@ -39,7 +39,7 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import type { MaterializeTarget } from '#apply-tree.js';
-import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { createLargeObjectFill, declaredPlaceholders, largeObjectPlaceholders } from '#large-object-fill.js';
 import { readEntryClosure } from '#open/entry-closure.js';
 import type { EntryClosure } from '#open/entry-closure.js';
 import { createContentReads } from '#open/content-reads.js';
@@ -1944,7 +1944,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
               },
             };
-      return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
+      const tree = await captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
         memos,
         bypassMemo,
         signal,
@@ -1952,6 +1952,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         ...(changed === undefined ? {} : { changed }),
         ...(ignores === undefined ? {} : { ignores }),
       });
+      /*
+       * D9: the placeholders' only writer says which they are, from the attributes it reads, every time it looks:
+       * after its own writes (an apply verifies by capturing), on open, at a pull and at each cut, which also
+       * catches a checkout edited from outside. Every other view answers a path by this mark alone.
+       */
+      try {
+        await rooted.declarePending?.(declaredPlaceholders(tree));
+      } catch (error) {
+        /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
+        console.warn('[revisions] the checkout index could not learn its placeholders', error);
+      }
+      return tree;
     });
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>

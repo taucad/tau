@@ -20,6 +20,7 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
@@ -59,6 +60,8 @@ const fixture = async (
      * `bare`: a listing from a port that reports no ignore context, so it is listed whole at every capture;
      * `failing`: the port's own rules, but a question about named paths fails. */
     ignoreRules?: 'listing' | 'bare' | 'port' | 'failing';
+    /* The checkout as the revision layer opens it in a host: raw, its pointers as they are. */
+    raw?: boolean;
   }>,
 ) => {
   const backend = options?.backend ?? 'node';
@@ -87,7 +90,7 @@ const fixture = async (
     cleanups.push(() => {
       service.dispose();
     });
-    return service.createRootedFileSystem('/');
+    return service.createRootedFileSystem('/', undefined, options?.raw === true ? { placeholders: 'raw' } : undefined);
   };
   const memory = new MemoryProvider();
   let rooted = open();
@@ -880,5 +883,25 @@ describe("a cut under the checkout's own Git ignore rules (S10)", () => {
     expect(at.walked()).toBe(false);
     expect(dropped.treeId).toBe(await walkedTreeId(at.walking));
     expect(dropped.treeId).not.toBe(adopted.treeId);
+  });
+});
+
+/* The revision layer is the placeholders' only writer and reads the attributes that make a pointer one (D9). */
+describe("a capture declares the checkout's placeholders to its index (D9)", () => {
+  it('should mark each pointer the attributes track, and no other, and follow the attributes when they change', async () => {
+    const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+    const text = new TextDecoder().decode(pointer);
+    const at = await fixture(
+      { ...files(5), 'models/part.step': text, 'notes/pointer.txt': text },
+      { backend: 'memory', raw: true },
+    );
+    await cut(at.actors);
+    expect(await at.rooted.pendingPaths!(['models/part.step', 'notes/pointer.txt', 'dir1/f1.txt'])).toStrictEqual([
+      'models/part.step',
+    ]);
+    /* The attributes stop tracking the family: the next capture says so, and the mark ends. */
+    await at.rooted.writeFile(generatedGitattributesPath, '');
+    await cut(at.actors);
+    expect(await at.rooted.pendingPaths!(['models/part.step'])).toStrictEqual([]);
   });
 });

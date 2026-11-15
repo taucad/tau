@@ -15,7 +15,7 @@ import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js'
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
-import { largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
+import { declaredPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { entryClosurePaths } from '#open/entry-closure.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -507,15 +507,15 @@ export const createApplyTreeEffects = (
         });
         if (closure !== undefined) {
           const arriving = new Set(writtenPaths);
-          const placeholders = largeObjectPlaceholders(target);
+          const placeholders = declaredPlaceholders(target, sourced);
           try {
             await live.expectEntries?.(
               target.entries().map(({ path, content }) => {
-                const pending = placeholders.get(path);
+                const pending = placeholders.get(path)?.object;
                 return {
                   path,
                   size: sourced.get(path)?.size ?? content.byteLength,
-                  ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
+                  ...(pending === undefined ? {} : { pending }),
                   arriving: arriving.has(path),
                 };
               }),

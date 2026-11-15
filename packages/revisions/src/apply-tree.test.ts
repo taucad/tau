@@ -863,7 +863,9 @@ describe('the entry closure of a tree write (D10)', () => {
         'cube(1);\n',
       ]),
       ['old.scad', 'old\n'],
+      ['.gitattributes', '*.step filter=lfs diff=lfs merge=lfs -text\n'],
       ['models/part.step', pointerBytes],
+      ['notes/pointer.txt', pointerBytes],
       ['tau.json', manifest],
       ['zz/main.scad', 'cube(2);\n'],
     ]);
@@ -898,11 +900,17 @@ describe('the entry closure of a tree write (D10)', () => {
     /* The index learns the whole tree as the bracket opens, before any byte lands. */
     expect(events.slice(0, 2)).toEqual(['bracket', 'expect']);
     expect(outcomes).toEqual([{ failed: false }]);
-    expect(expected).toHaveLength(604);
+    expect(expected).toHaveLength(606);
     expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
       path: 'models/part.step',
       size: pointerBytes.byteLength,
       pending: { oid: pointer.oid, size: pointer.size },
+      arriving: true,
+    });
+    /* A pointer the attributes do not track is a person's text, never a placeholder. */
+    expect(expected.find((entry) => entry.path === 'notes/pointer.txt')).toEqual({
+      path: 'notes/pointer.txt',
+      size: pointerBytes.byteLength,
       arriving: true,
     });
     expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);

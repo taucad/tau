@@ -279,7 +279,7 @@ describe('sessionRuntimeWork — the leave and unload flushes (A7c, I3, I6)', ()
     expect(parameters.close).not.toHaveBeenCalled();
   });
 
-  it('should flush the producers and then both stores for an unload, and not refuse on a write error', async () => {
+  it('should flush the producers and then both stores for an unload, and not refuse on a store write error', async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
@@ -305,7 +305,7 @@ describe('sessionRuntimeWork — the leave and unload flushes (A7c, I3, I6)', ()
     expect(parameters.close).not.toHaveBeenCalled();
   });
 
-  it("should ask both stores to write on an unload while a producer's write is still on the wire (A7c review round 4)", async () => {
+  it("should hold both stores on an unload until the producers' writes settle (A0.2 item 10, S40)", async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();
     const { project, editor } = idleStores(order);
@@ -319,10 +319,11 @@ describe('sessionRuntimeWork — the leave and unload flushes (A7c, I3, I6)', ()
     });
     await Promise.resolve();
 
-    expect(order).toEqual(['project', 'editor']);
+    expect(order).toEqual([]);
 
     producer.resolve();
     await flushed;
+    expect(order).toEqual(['project', 'editor']);
   });
 
   it("should still ask both stores to write on an unload a producer refuses, and reject with the producer's refusal", async () => {

@@ -49,6 +49,11 @@ import {
   runningRows,
   writerOwnedCatchUp,
 } from '#machines/chat-projection.fixture.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+import type { LiveProjectSessions } from '#services/chat-session-store.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -339,7 +344,11 @@ const chatSession = chatSessionMachine.provide({
 });
 
 function createStore(focus?: FocusedProjectStandIn): StoreType {
-  const store = new ChatSessionStore({ chatSession, ...(focus === undefined ? {} : { focusedProject: focus }) });
+  const store = new ChatSessionStore({
+    projectSessions: liveSessions,
+    chatSession,
+    ...(focus === undefined ? {} : { focusedProject: focus }),
+  });
   store.setDependencies(createStubDeps());
   return store;
 }
@@ -354,14 +363,14 @@ const turnOwners: Array<{ stop: () => void }> = [];
  * row that drives a verb — or a seeded first turn — has to give the chat the
  * owner the app gives it.
  *
- * @param store - The store under test.
+ * @param _store - The store under test.
  * @param projectId - The project whose session owns the chat.
  */
-function startTurnOwner(store: StoreType, projectId: string): void {
+function startTurnOwner(_store: StoreType, projectId: string): void {
   const session = createActor(projectSessionMachine, { input: { projectId } });
   session.start();
   turnOwners.push(session);
-  store.setProjectSession(projectId, session);
+  liveSessions.set(projectId, session);
 }
 
 /**
@@ -815,7 +824,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           dispose: vi.fn(),
         };
       };
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies({ ...createStubDeps(client), watchRecordFile: watch });
       const capture = Promise.withResolvers<void>();
       let captures = 0;
@@ -909,7 +918,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     );
     const client = createMemoryClient();
     await client.writeFile(path, new TextEncoder().encode(rows));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const hostCommand = vi.fn();
     const unpublish = store.publishProjectHostConnector(
@@ -975,7 +984,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       .split('\n')
       .map((line: string) => JSON.parse(line) as unknown);
     const client = createMemoryClient();
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe(chatId, projectId);
     const session = store.acquire(chatId, projectId);
@@ -1033,7 +1042,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           })
         : undefined,
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1084,7 +1093,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         },
       }),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const unobserve = store.observe(chatId, projectId);
     await store.refreshRemoteSegments(chatId, projectId);
@@ -1176,7 +1185,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           },
         }),
       );
-      const first = new ChatSessionStore({ chatSession });
+      const first = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       first.setDependencies(deps);
       first.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
       await vi.waitFor(() => {
@@ -1190,7 +1199,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           new Uint8Array(),
         );
       }
-      const reloaded = new ChatSessionStore({ chatSession });
+      const reloaded = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       reloaded.setDependencies(deps);
       // A sidebar read before this session exists is not a fresh seed-admission read.
       publishLogRows(reloaded, 'chat_seed_waiting_ack', []);
@@ -1293,7 +1302,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           },
         }),
       );
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies(deps);
       const originalRead = deps.client.readFile.bind(deps.client);
       deps.client.readFile = async (path) => {
@@ -1375,7 +1384,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     let stored = chatRow(chatId, projectId);
     const deps = createStubDeps();
     deps.getChat.mockImplementation(async () => stored);
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1449,7 +1458,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         },
       }),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1492,7 +1501,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await client.writeFile(segmentPath, new TextEncoder().encode(rows));
     const deps = createStubDeps(client);
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1533,7 +1542,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await client.writeFile(segmentPath, new TextEncoder().encode(rows));
     const deps = createStubDeps(client);
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1615,7 +1624,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
             }
           : manualAnswer.promise,
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1711,7 +1720,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
       new TextEncoder().encode(manualRows.map((row) => JSON.stringify(row)).join('\n')),
     );
-    const reloaded = new ChatSessionStore({ chatSession });
+    const reloaded = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     reloaded.setDependencies(deps);
     const reloadedSession = reloaded.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -2106,7 +2115,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
 
     const open = async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies(deps);
       const session = store.acquire(chatId, projectId);
       await vi.waitFor(() => {
@@ -2150,7 +2159,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         error: { category: errorCategory.generic, title: 'Old fault', message: 'Old channel closed' },
       }),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -2337,7 +2346,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           }
         },
         getSnapshot: () => ({ context: { runs, stoppableRuns } }),
-      } as unknown as Parameters<StoreType['setProjectSession']>[1],
+      } as unknown as LiveProjectSessions[string],
     };
   };
 
@@ -2347,7 +2356,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
 
-    store.setProjectSession('proj_a', projectA.ref);
+    liveSessions.set('proj_a', projectA.ref);
     focus.set('proj_a');
     store.acquire('chat-a', 'proj_a');
     const stopObserving = store.observe('chat-a', 'proj_a');
@@ -2355,7 +2364,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat-a'], stoppableRuns: [] });
 
     /* The person navigates to B while A's run is still going. */
-    store.setProjectSession('proj_b', projectB.ref);
+    liveSessions.set('proj_b', projectB.ref);
     focus.set('proj_b');
     publishLogRows(store, 'chat-a', [lifecycleRow(2, 'completed')], 2);
 
@@ -2363,18 +2372,18 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect(projectB.heard).toEqual([]);
     stopObserving();
     store.release('chat-a');
-    store.setProjectSession('proj_a', undefined);
-    store.setProjectSession('proj_b', undefined);
+    liveSessions.set('proj_a', undefined);
+    liveSessions.set('proj_b', undefined);
   });
 
   it('should bind the focused project to its live session each time focus arrives there, and only then (A7b)', () => {
     const focus = focusedProjectStandIn();
-    const store = createStore(focus);
+    createStore(focus);
     const projectA = fakeSession('proj_a');
-    store.setProjectSession('proj_a', projectA.ref);
+    liveSessions.set('proj_a', projectA.ref);
     /* The session holds runs the store's projection no longer has: arriving there tells it again. */
     const drift = (): void => {
-      projectA.ref?.send({ type: 'projectedRunsChanged', runs: ['stale'], stoppableRuns: [] });
+      projectA.ref.send({ type: 'projectedRunsChanged', runs: ['stale'], stoppableRuns: [] });
       projectA.heard.length = 0;
     };
     drift();
@@ -2387,7 +2396,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     focus.set(undefined);
     focus.set('proj_b');
     expect(projectA.heard).toEqual([]);
-    store.setProjectSession('proj_a', undefined);
+    liveSessions.set('proj_a', undefined);
   });
 
   it('binds a retained project chat to its known owner while another project is focused', () => {
@@ -2395,8 +2404,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const store = createStore(focus);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
     focus.set('proj_b');
 
     store.acquire('chat-a', 'proj_a');
@@ -2406,13 +2415,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect([...store.chatRootsOf('proj_a').keys()]).toEqual(['chat-a']);
     expect(store.chatRootsOf('proj_b').size).toBe(0);
     store.release('chat-a');
-    store.setProjectSession('proj_a', undefined);
-    store.setProjectSession('proj_b', undefined);
+    liveSessions.set('proj_a', undefined);
+    liveSessions.set('proj_b', undefined);
   });
 
   it('binds a chat acquired during a focus switch to its caller’s project before its row loads', async () => {
     const focus = focusedProjectStandIn();
-    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -2423,8 +2432,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
     focus.set('proj_b');
 
     /* React renders A's new chat before focus moves, so focus still says B.
@@ -2455,8 +2464,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat_a'], stoppableRuns: [] });
     stopObserving();
     store.release('chat_a');
-    store.setProjectSession('proj_a', undefined);
-    store.setProjectSession('proj_b', undefined);
+    liveSessions.set('proj_a', undefined);
+    liveSessions.set('proj_b', undefined);
   });
 
   it('takes a gesture made before any route effect registered its project, rather than parking it (PV-S5)', () => {
@@ -2472,20 +2481,20 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
   it('keeps the agents pane’s chat machine across a project session re-registration (PV-S5)', () => {
     const store = createStore();
-    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+    liveSessions.set('proj_pane', fakeSession('proj_pane').ref);
     const session = store.acquire('chat_pane', 'proj_pane');
     const machine = session.stateActorRef;
     expect(machine).toBeDefined();
 
     /* The project's route remounts: its binding unregisters and registers a new session. */
-    store.setProjectSession('proj_pane', undefined);
-    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+    liveSessions.set('proj_pane', undefined);
+    liveSessions.set('proj_pane', fakeSession('proj_pane').ref);
 
     /* The pane subscribed to `machine` when the chat joined; it must still be the chat's machine. */
     expect(session.stateActorRef).toBe(machine);
     expect(machine.getSnapshot().status).toBe('active');
     store.release('chat_pane');
-    store.setProjectSession('proj_pane', undefined);
+    liveSessions.set('proj_pane', undefined);
   });
 
   it('forwards its project’s revision facts to a chat, whether it joined before or after them (PV-S5)', () => {
@@ -2513,7 +2522,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
   it('should ignore a delayed hydration after the session is released', async () => {
     const focus = focusedProjectStandIn();
-    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -2523,8 +2532,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setDependencies(deps);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
     focus.set('proj_b');
 
     try {
@@ -2551,14 +2560,14 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       expect(projectA.heard).toEqual([]);
       expect(projectB.heard).toEqual([]);
     } finally {
-      store.setProjectSession('proj_a', undefined);
-      store.setProjectSession('proj_b', undefined);
+      liveSessions.set('proj_a', undefined);
+      liveSessions.set('proj_b', undefined);
     }
   });
 
   it('should not let a released hydration close a reacquired replacement', async () => {
     const focus = focusedProjectStandIn();
-    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveFirstLoad!: (chat: ChatEntity) => void;
     const firstLoad = new Promise<ChatEntity>((resolve) => {
@@ -2572,8 +2581,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setDependencies(deps);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
     focus.set('proj_b');
 
     try {
@@ -2615,8 +2624,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         createdAt: 0,
         updatedAt: 0,
       });
-      store.setProjectSession('proj_a', undefined);
-      store.setProjectSession('proj_b', undefined);
+      liveSessions.set('proj_a', undefined);
+      liveSessions.set('proj_b', undefined);
     }
   });
 
@@ -2673,7 +2682,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       },
     };
     const client = createAgentHostClient(transport);
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
     store.setDependencies(deps);
@@ -2725,7 +2734,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       const chatId = 'chat_mounted_reset_capture';
       const projectId = 'project_mounted_reset_capture';
       const runId = 'run_mounted_reset_capture';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -2871,7 +2880,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       const chatId = 'chat_zero_generation_reset';
       const projectId = 'project_zero_generation_reset';
       const runId = 'run_zero_generation_reset';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -3026,7 +3035,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const chatId = 'chat_validated_warm_hydration';
     const projectId = 'project_validated_warm_hydration';
     const runId = 'run_validated_warm_hydration';
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps();
     const metadata = Promise.withResolvers<ChatEntity>();
     const validation = Promise.withResolvers<void>();
@@ -3149,7 +3158,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
   it('keeps an early projected run with its owner through hydration', async () => {
     const focus = focusedProjectStandIn();
-    const store = new ChatSessionStore({ chatSession, focusedProject: focus });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -3160,8 +3169,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
     focus.set('proj_b');
     const stopObserving = store.observe('chat_early_settlement', 'proj_a');
 
@@ -3198,8 +3207,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     } finally {
       stopObserving();
       store.release('chat_early_settlement');
-      store.setProjectSession('proj_a', undefined);
-      store.setProjectSession('proj_b', undefined);
+      liveSessions.set('proj_a', undefined);
+      liveSessions.set('proj_b', undefined);
     }
   });
 });
@@ -3229,7 +3238,7 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
   it('shows an idle chat none of the history its log replays, and counts no run (W0.2)', () => {
     const store = createStore();
     const project = countingProject();
-    store.setProjectSession('proj_history', project.ref);
+    liveSessions.set('proj_history', project.ref);
     const actor = store.acquire('chat_history', 'proj_history').stateActorRef;
 
     publishLogRows(store, 'chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
@@ -3237,13 +3246,13 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
     expect(project.heard).toEqual([]);
     store.release('chat_history');
-    store.setProjectSession('proj_history', undefined);
+    liveSessions.set('proj_history', undefined);
   });
 
   it('reports a replayed run only once the replay holds the log to its end', () => {
     const store = createStore();
     const project = countingProject();
-    store.setProjectSession('proj_pages', project.ref);
+    liveSessions.set('proj_pages', project.ref);
     const actor = store.acquire('chat_pages', 'proj_pages').stateActorRef;
     const stopObserving = store.observe('chat_pages', 'proj_pages');
 
@@ -3262,7 +3271,7 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     expect(project.heard).toEqual([{ type: 'projectedRunsChanged', runs: ['chat_pages'], stoppableRuns: [] }]);
     stopObserving();
     store.release('chat_pages');
-    store.setProjectSession('proj_pages', undefined);
+    liveSessions.set('proj_pages', undefined);
   });
 });
 
@@ -3304,10 +3313,10 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
         projectHeard.push(event);
       },
       getSnapshot: () => ({ context: { runs: [] } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    } as unknown as LiveProjectSessions[string];
 
     focus.set('proj_reload');
-    store.setProjectSession('proj_reload', projectRef);
+    liveSessions.set('proj_reload', projectRef);
     const session = store.acquire('chat_reloaded', 'proj_reload');
     spyOnSend(session.stateActorRef, (event) => {
       heard.push(event);
@@ -3326,7 +3335,7 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
     /* A refused command has no projected run for the project to count. */
     expect(projectHeard).toEqual([]);
     store.release('chat_reloaded');
-    store.setProjectSession('proj_reload', undefined);
+    liveSessions.set('proj_reload', undefined);
   });
 
   it('leaves a live run alone, replaying nothing over it', async () => {
@@ -3336,10 +3345,10 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
     const projectRef = {
       send: () => undefined,
       getSnapshot: () => ({ context: { runs: [] } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    } as unknown as LiveProjectSessions[string];
 
     focus.set('proj_live');
-    store.setProjectSession('proj_live', projectRef);
+    liveSessions.set('proj_live', projectRef);
     const session = store.acquire('chat_streaming', 'proj_live');
     spyOnSend(session.stateActorRef, (event) => {
       heard.push(event);
@@ -3355,7 +3364,7 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
 
     expect(heard.filter((event) => event['phase'] === 'failed')).toEqual([]);
     store.release('chat_streaming');
-    store.setProjectSession('proj_live', undefined);
+    liveSessions.set('proj_live', undefined);
   });
 });
 
@@ -3881,7 +3890,7 @@ describe('ChatSessionStore', () => {
 
   it('derives funded operation IDs and tokens from a foreign accepted host log', async () => {
     const client = createMemoryClient();
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe('chat_usage', 'project_1');
     const rows = [
@@ -3941,7 +3950,7 @@ describe('ChatSessionStore', () => {
   });
 
   it('routes accepted user activity through the current dependency set', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps();
     store.setDependencies(deps);
 
@@ -3951,7 +3960,7 @@ describe('ChatSessionStore', () => {
   });
 
   it('acknowledges foreign watches before reading and fences a held read across a burst and final release', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const client = createMemoryClient();
     const path = '/projects/project/.tau/chats/chat_foreign/events/peer.jsonl';
     const bytes = (text: string): Uint8Array<ArrayBuffer> => {
@@ -4076,7 +4085,7 @@ describe('ChatSessionStore', () => {
     const projectId = 'proj_unread';
     const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
     const storeInProject = (): { store: StoreType; deps: StubDeps } => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (chatId) => chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -4661,7 +4670,7 @@ describe('ChatSessionStore', () => {
 
   describe('projected empty-cancel draft restore', () => {
     const open = async (chatId: string, projectId: string) => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -4904,7 +4913,7 @@ describe('ChatSessionStore', () => {
         await first.store.requestTurn(chatId, queuedGesture('after'));
         first.unpublish();
         first.store.release(chatId);
-        const reopened = new ChatSessionStore({ chatSession });
+        const reopened = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
         reopened.setDependencies(first.deps);
         const session = reopened.acquire(chatId, projectId);
         const unadmit = queueAdmission(chatId);
@@ -5159,7 +5168,7 @@ describe('ChatSessionStore', () => {
       expect(session.messageQueueRef.getSnapshot().context.items[0]?.command).toEqual(original);
       unpublish();
       store.release(chatId);
-      const reopened = new ChatSessionStore({ chatSession });
+      const reopened = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       reopened.setDependencies(deps);
       const restored = reopened.acquire(chatId, projectId);
       const unadmitReopened = queueAdmission(chatId);
@@ -5335,7 +5344,7 @@ describe('ChatSessionStore', () => {
       const chatId = 'queue_tabs';
       const projectId = 'queue_tabs_project';
       const first = await open(chatId, projectId);
-      const second = new ChatSessionStore({ chatSession });
+      const second = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       second.setDependencies(first.deps);
       second.acquire(chatId, projectId);
       const unadmit = queueAdmission(chatId);
@@ -5524,7 +5533,7 @@ describe('ChatSessionStore', () => {
 
   describe('hydration on acquire', () => {
     it('calls deps.getChat on first acquire so hydration kicks off', async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -5627,7 +5636,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('clears hydrated history only after an authoritative empty host answer', async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       const previous: MyUIMessage = {
         id: 'obsolete-user',
@@ -5651,7 +5660,7 @@ describe('ChatSessionStore', () => {
       const projectId = 'project_deferred_transcript';
       const runId = 'run_deferred_transcript';
       const emptyChatId = 'chat_deferred_transcript_empty';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -5734,7 +5743,7 @@ describe('ChatSessionStore', () => {
       });
       const chatId = 'chat_remembered_tray';
       memory.set(`tau:chat-composer-trays:${chatId}`, 'todo');
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, 'project_tray'));
       store.setDependencies(deps);
@@ -5760,7 +5769,7 @@ describe('ChatSessionStore', () => {
 
     it('does not go back to loading once a retried read answers, and latches a refused read as settled (I21)', async () => {
       const projectId = 'project_retried_read';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -5807,7 +5816,7 @@ describe('ChatSessionStore', () => {
 
     it('shows a chat this tab created empty as empty at once, and its turns once the log has them (I21)', async () => {
       const projectId = 'project_created_empty';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -5868,7 +5877,7 @@ describe('ChatSessionStore', () => {
       });
       memory.set('tau:chat-composer-trays:chat_foreign_pending', 'todo');
       memory.set('tau:chat-composer-trays:chat_foreign_unreadable', 'todo');
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -5938,7 +5947,7 @@ describe('ChatSessionStore', () => {
         setItem: (key: string, value: string) => memory.set(key, value),
         removeItem: (key: string) => memory.delete(key),
       });
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -6007,7 +6016,7 @@ describe('ChatSessionStore', () => {
         setItem: (key: string, value: string) => memory.set(key, value),
         removeItem: (key: string) => memory.delete(key),
       });
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies({ ...deps, watchRecordFile: watch });
@@ -6043,7 +6052,7 @@ describe('ChatSessionStore', () => {
 
     it('settles a chat whose read was refused before it was opened, or before it was opened again (I21)', async () => {
       const projectId = 'project_refused_earlier';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -6083,7 +6092,7 @@ describe('ChatSessionStore', () => {
         return { ready: Promise.resolve(), closed: closing.promise, dispose: vi.fn() };
       };
       const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies({ ...deps, watchRecordFile: watch });
@@ -6136,7 +6145,7 @@ describe('ChatSessionStore', () => {
         setItem: (key: string, value: string) => memory.set(key, value),
         removeItem: (key: string) => memory.delete(key),
       });
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies({ ...deps, watchRecordFile: watch });
@@ -6172,7 +6181,7 @@ describe('ChatSessionStore', () => {
         setItem: (key: string, value: string) => memory.set(key, value),
         removeItem: (key: string) => memory.delete(key),
       });
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -6215,7 +6224,7 @@ describe('ChatSessionStore', () => {
       vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
         path === events ? scan.promise : readDirectory(path),
       );
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -6267,7 +6276,7 @@ describe('ChatSessionStore', () => {
           dispose: vi.fn(),
         };
       };
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies({ ...deps, watchRecordFile: watch });
@@ -6329,7 +6338,7 @@ describe('ChatSessionStore', () => {
         setItem: (key: string, value: string) => memory.set(key, value),
         removeItem: (key: string) => memory.delete(key),
       });
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -6375,7 +6384,7 @@ describe('ChatSessionStore', () => {
         setItem: (key: string, value: string) => memory.set(key, value),
         removeItem: (key: string) => memory.delete(key),
       });
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps(client);
       deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
       store.setDependencies(deps);
@@ -6403,7 +6412,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -6471,7 +6480,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   });
 
   const openStore = (client: MemoryClient, row: ChatEntity = chatRow(chatId, projectId)) => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => (id === row.id ? row : undefined));
     store.setDependencies(deps);
@@ -6908,15 +6917,15 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
 
   /** A store over one device's disk, with a live project session; the store owns the chat's machine (PV-S5). */
   const openStore = (client: MemoryClient) => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
     store.setDependencies(deps);
     const projectRef = {
       send: () => undefined,
       getSnapshot: () => ({ context: { runs: [] } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
-    store.setProjectSession(projectId, projectRef);
+    } as unknown as LiveProjectSessions[string];
+    liveSessions.set(projectId, projectRef);
     return { store };
   };
 
@@ -7009,7 +7018,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   const placementsPath = `/.tau/composers/chats/${projectId}/placements.json`;
   /* This tab reaches every device-relative placement unless a test says otherwise. */
   const openLoaded = async (deps: ChatSessionDeps, chatId: string) => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -7393,7 +7402,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       let reachable: boolean = knownAtLoad ?? false;
       const probe = Promise.withResolvers<boolean>();
       const listeners = new Set<() => void>();
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies({
         ...deps,
         isPlacementOnThisDevice: async () => (knownAtLoad === undefined ? probe.promise : reachable),
@@ -7611,7 +7620,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const chatId = 'chat_placement_written_elsewhere';
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model });
 
@@ -7626,7 +7635,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const deps = createStubDeps();
     seedPlacement(deps, chatId, 'origin');
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     await store.getChatHostSettings(chatId);
     const reads = vi.spyOn(deps.client, 'readFile');
@@ -7795,7 +7804,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
       new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe(chatId, projectId);
     store.acquire(chatId, projectId);
@@ -7835,7 +7844,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       );
     await client.writeFile(`${events}/pulled-at`, record(60_000));
     const pulls: string[] = [];
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({
       ...createStubDeps(client),
       pullRemote: async (id) => {
@@ -7894,7 +7903,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
         new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
       );
       const asked: Array<readonly [string, string]> = [];
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies({
         ...createStubDeps(client),
         pullRemote: async (id, chat) => {
@@ -7938,7 +7947,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
       new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe(chatId, projectId);
     store.acquire(chatId, projectId);
@@ -7996,7 +8005,7 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
 
   const openOnClock = async (chatId: string) => {
     const clock = new StepClock();
-    const store = new ChatSessionStore({ chatSession: chatSessionOnRoute, clock });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession: chatSessionOnRoute, clock });
     store.setDependencies(createStubDeps());
     admitNothing(chatId);
     const session = store.acquire(chatId, `project_${chatId}`);
@@ -8231,7 +8240,7 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
 
   it('should offer the wait of a chat whose log was read before it opened', async () => {
     const clock = new StepClock();
-    const store = new ChatSessionStore({ chatSession: chatSessionOnRoute, clock });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession: chatSessionOnRoute, clock });
     store.setDependencies(createStubDeps());
     admitNothing('chat_r5_read');
     const releaseObservation = store.observe('chat_r5_read', 'project_r5_read');

@@ -190,11 +190,13 @@ describe('ProjectProvider over a leased project runtime (A6b)', () => {
     expect(producers).toBeDefined();
     const producer = vi.fn(async () => undefined);
     const unregister = producers.register(producer);
-    // The provider's function keeps its signature and walks the runtime's set.
-    await context.flushWorkbenchRecordProducers();
+    // A7c: the provider no longer carries the set's functions; the session's `project` child walks it.
+    expect(context).not.toHaveProperty('flushWorkbenchRecordProducers');
+    expect(context).not.toHaveProperty('registerWorkbenchRecordProducer');
+    await producers.flushAll();
     expect(producer).toHaveBeenCalledTimes(1);
     unregister();
-    await context.flushWorkbenchRecordProducers();
+    await producers.flushAll();
     expect(producer).toHaveBeenCalledTimes(1);
   });
 

@@ -12,6 +12,12 @@
  * sessions take their close cuts in their own `closing`. The registrations are held by the {@link UnloadSequencer} the
  * composition builds: actor-owned producers register into it directly, React-owned ones through `useFlushOnClose`.
  *
+ * D26 as amended by A7c: a reload or a navigation fires `pagehide` and then `hidden` only as the document goes, and a
+ * write first issued there does not reliably land before the page's workers do. So while a producer owes a write
+ * ({@link OwedWritesPort}), `beforeunload` runs the producer stage too, as the navigation starts, and no session stage.
+ * It never prompts. The listener is held only while a write is owed, so a settled page stays eligible for the
+ * back/forward cache, and `hidden`, `pagehide` and a quit still run the whole order.
+ *
  * Two reactions to the same DOM events are outside that order and are kept (D26, row S41): the editor document
  * session's synchronous save stays in React, and on a constrained device `hidden` and `pagehide` ask the registry to
  * release memory, whose closes each run a session's whole close sequence. The memory release also runs when focus's
@@ -163,10 +169,23 @@ export type EnvironmentDesktopQuit = Readonly<{
   reportQuiesced: (attemptId: string, forced: boolean) => void;
 }>;
 
+/**
+ * Whether a producer owes a write now, and when that changes (A7c, D26's `beforeunload` trigger). The listener reads
+ * {@link OwedWritesPort.owes} again on each change.
+ *
+ * @public
+ */
+export type OwedWritesPort = Readonly<{
+  owes: () => boolean;
+  subscribe: (listener: () => void) => () => void;
+}>;
+
 /** What `environment` is composed with besides the page. @public */
 export type EnvironmentOptions = Readonly<{
   /** The unload registrations it sequences (D26). */
   sequencer?: UnloadSequencer;
+  /** Whether a producer owes a write, which holds the `beforeunload` producer stage; none holds none. */
+  owedWrites?: OwedWritesPort;
   /** The desktop quit seam; none outside the desktop build. */
   desktopQuit?: EnvironmentDesktopQuit;
 }>;
@@ -276,14 +295,14 @@ const holdQuit = ({
  * (`EnvironmentInput`); a root composed without them (a test's) runs neither the memory release nor the quit hold.
  *
  * @param readHost - Returns the host when the actor starts; the default reads the browser's.
- * @param options - The unload sequencer and the desktop quit seam.
+ * @param options - The unload sequencer, the owed-writes port and the desktop quit seam.
  * @returns The callback logic. It reports the current reading on start and each change after it.
  * @public
  */
 // oxlint-disable-next-line max-lines-per-function -- One owner of the page's listeners: each reaction shares the host and the registry.
 export const createEnvironmentLogic = (
   readHost: () => EnvironmentHost | undefined = browserEnvironmentHost,
-  { sequencer, desktopQuit }: EnvironmentOptions = {},
+  { sequencer, owedWrites, desktopQuit }: EnvironmentOptions = {},
 ): CallbackActorLogic<EnvironmentCommand, EnvironmentInput> =>
   createCallbackLogic<EnvironmentCommand, EnvironmentInput>(({ input, sendBack, receive }) => {
     const registry = (): AnyActorRef | undefined => input?.registry;
@@ -331,6 +350,35 @@ export const createEnvironmentLogic = (
       sequencer?.pagehide();
       releaseMemory();
     };
+    /* D26 as amended (A7c): a navigation's `pagehide` and `hidden` come as the document goes, too late for a write first
+     * issued there to land. `beforeunload` comes as it starts: the producer stage runs then, and no session stage. No
+     * `preventDefault` and no `returnValue`, so the page never prompts; `hidden` still runs the whole order, and a
+     * producer with nothing left owed writes nothing again. */
+    const flushBeforeUnload = async (): Promise<void> => {
+      try {
+        await sequencer?.flushProducers();
+      } catch (error) {
+        console.error('Pending changes could not be saved before the page unloaded.', error);
+      }
+    };
+    const onBeforeUnload = (): void => {
+      // async-iife: bootstrap -- the navigation has no caller to await the producer stage.
+      void flushBeforeUnload();
+    };
+    /* The listener is held only while a producer owes a write, so a settled page stays eligible for the bfcache. */
+    let holdsBeforeUnload = false;
+    const followOwedWrites = (): void => {
+      const owes = owedWrites?.owes() ?? false;
+      if (owes === holdsBeforeUnload) {
+        return;
+      }
+      holdsBeforeUnload = owes;
+      if (owes) {
+        host.window.addEventListener('beforeunload', onBeforeUnload);
+      } else {
+        host.window.removeEventListener('beforeunload', onBeforeUnload);
+      }
+    };
     const onFocus = (): void => {
       report({ type: 'focusChanged', focused: true });
     };
@@ -360,12 +408,19 @@ export const createEnvironmentLogic = (
 
     host.document.addEventListener('visibilitychange', onVisibilityChange);
     host.window.addEventListener('pagehide', onPageHide);
+    const stopOwedWrites = owedWrites?.subscribe(followOwedWrites);
+    followOwedWrites();
     host.window.addEventListener('focus', onFocus);
     host.window.addEventListener('blur', onBlur);
     host.coarsePointer?.addEventListener('change', onMemoryClassChange);
     return () => {
       host.document.removeEventListener('visibilitychange', onVisibilityChange);
       host.window.removeEventListener('pagehide', onPageHide);
+      stopOwedWrites?.();
+      if (holdsBeforeUnload) {
+        holdsBeforeUnload = false;
+        host.window.removeEventListener('beforeunload', onBeforeUnload);
+      }
       host.window.removeEventListener('focus', onFocus);
       host.window.removeEventListener('blur', onBlur);
       host.coarsePointer?.removeEventListener('change', onMemoryClassChange);

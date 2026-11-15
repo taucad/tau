@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import type { EventRejection } from 'xstate';
 import { ChatSessionStore } from '#services/chat-session-store.js';
+import type { ChatSessionStoreOptions } from '#services/chat-session-store.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -25,19 +26,23 @@ const warnRejectedEvent = (rejection: EventRejection): void => {
 /**
  * A chat store provider over the mocked project manager and file manager.
  *
- * @param props - The tree.
+ * @param props - The tree, and the live project sessions the store follows.
  * @returns The provider element.
  */
 export function MirroredChatSessionStoreProvider({
   children,
+  projectSessions,
 }: {
   readonly children: React.ReactNode;
+  /** The live project sessions the store follows, as the runtime hands it the registry's (A7c). */
+  readonly projectSessions?: ChatSessionStoreOptions['projectSessions'];
 }): React.JSX.Element {
   const [store] = useState(
     () =>
       new ChatSessionStore({
         ...(inspect === undefined ? {} : { inspect }),
         ...(import.meta.env.DEV ? { onRejectedEvent: warnRejectedEvent } : {}),
+        ...(projectSessions === undefined ? {} : { projectSessions }),
       }),
   );
   const projectManager = useProjectManager();

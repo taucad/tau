@@ -28,6 +28,10 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 const harness = vi.hoisted(() => ({ errorStatuses: [] as ChatStatus[] }));
 // eslint-disable-next-line @typescript-eslint/naming-convention -- mirror the environment module's fixed exported names.
@@ -84,6 +88,7 @@ const acquire = (): Readonly<{ store: ChatSessionStore; chat: Chat<MyUIMessage>;
     }),
   });
   const store = new ChatSessionStore({
+    projectSessions: liveSessions,
     chatSession: chatSessionMachine.provide({ actors: { admitTurn: chatTurnAdmission } }),
   });
   store.setDependencies(deps);
@@ -603,7 +608,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     publishLogRows(store, 'chat_1', [lifecycleRow(2, 'failed')], 2);
     const owner = createActor(projectSessionMachine, { input: { projectId: 'project_1' } });
     owner.start();
-    store.setProjectSession('project_1', owner);
+    liveSessions.set('project_1', owner);
     const command: HostCommand = {
       type: 'resume',
       commandId: 'resume-explicit',

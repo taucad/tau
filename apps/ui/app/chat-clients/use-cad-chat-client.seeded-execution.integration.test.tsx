@@ -27,6 +27,10 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -209,7 +213,7 @@ const buildSeededRow = (activeExecution: CadAgentExecution | undefined): ChatEnt
 /** Mount the real provider + client over a row seeded with `activeExecution`. */
 const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined): Promise<HostCommand> => {
   const row = buildSeededRow(activeExecution);
-  const store = new ChatSessionStore();
+  const store = new ChatSessionStore({ projectSessions: liveSessions });
   const mutex = new KeyedMutex<string>();
   harness.store = store;
   store.setDependencies({
@@ -255,7 +259,7 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
   const projectSession = createActor(projectSessionMachine, { input: { projectId: row.resourceId } });
   projectSession.start();
   harness.projectSession = projectSession;
-  store.setProjectSession(row.resourceId, projectSession);
+  liveSessions.set(row.resourceId, projectSession);
 
   function Client(): React.JSX.Element {
     useCadChatClient();

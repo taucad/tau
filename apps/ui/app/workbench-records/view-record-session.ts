@@ -33,6 +33,7 @@ import type { PersistedSectionView, PinnedMeasurement } from '@taucad/viewer/gra
 import type { GraphicsContext, graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import type { ActorOptions, ActorRefFrom, AnyActorLogic, Subscription } from 'xstate';
+import { followOwedWrite } from '#workbench-records/owed-writes.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
@@ -484,8 +485,12 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
 
   // Graphics' pinned measurements and its section quiet gate.
   let owners = graphicsOwnersOf(selectGraphicsContext(graphics));
+  /* A7c (D26 as amended): a section inside the gate is the person's latest and not yet written, so the page owes it. */
+  const sectionOwes = followOwedWrite();
+  sectionOwes(selectSectionEditing(graphics));
   subscriptions.push(
     graphics.subscribe(({ context }) => {
+      sectionOwes(selectSectionEditing(graphics));
       const next = graphicsOwnersOf(context);
       const changed = changedOwners(owners, next);
       owners = next;
@@ -557,6 +562,7 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
 
   return () => {
     settleEditedSection();
+    sectionOwes(false);
     stopped = true;
     for (const subscription of subscriptions) {
       if (typeof subscription === 'function') {

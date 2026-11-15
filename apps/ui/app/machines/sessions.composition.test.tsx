@@ -29,7 +29,7 @@ import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
-import type { ActorRefFrom, EventObject } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -44,13 +44,14 @@ import { createSessionsActor } from '#services/sessions-store.js';
 import type { SessionWiring } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { sessionRuntimeWork } from '#runtime/project-runtime.session.js';
 import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
-import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const {
@@ -99,7 +100,8 @@ const {
   const editorSnapshot = (): unknown => ({
     context: { viewSettings: {} },
     status: 'active',
-    matches: () => editorState.idle,
+    /* A loaded store (A6e: a store that has not loaded owes nothing), idle once it has stored. */
+    matches: (value: unknown) => value === 'ready' || editorState.idle,
   });
   const editorActor = {
     send: (event: { type: string }) => {
@@ -165,7 +167,6 @@ const {
       stopRun: vi.fn(),
       cancelProjectedRun: vi.fn(async () => 'stopped'),
       publishProjectHostConnector: vi.fn(() => () => undefined),
-      setProjectSession: vi.fn(),
       setRevisionFacts: vi.fn(),
       /* The store owns each chat's root (PV-S5); a row adds one with `openChatRoot`. */
       roots: new Map<string, Map<string, unknown>>(),
@@ -332,6 +333,16 @@ const viewGraphicsOf = (projectId: string): Map<string, ActorRefFrom<typeof grap
   return created;
 };
 const StubProjectContext = createContext('');
+/** What a project's stand-in context holds, as the session's runtime work reads it (A7c). */
+type StubProjectContextValue = Readonly<{
+  parameterService: typeof parameterService;
+  flushWorkbenchRecordProducers: () => Promise<void>;
+  projectRef: AnyActorRef;
+  editorRef: AnyActorRef;
+}>;
+/* A project's runtime close refusal, cleared by a row that leaves it behind: its stores report the error too, so the
+ * session's next close flush (A7c) would refuse on it, as a real project in `runtimeCloseFailed` never stores again. */
+const runtimeRefusalResets = new Map<string, () => void>();
 const projectContextOf = (projectId: string): unknown => {
   const existing = projectContexts.get(projectId);
   if (existing) {
@@ -339,6 +350,9 @@ const projectContextOf = (projectId: string): unknown => {
   }
   let runtimeClosed = false;
   let runtimeError: Error | undefined;
+  runtimeRefusalResets.set(projectId, () => {
+    runtimeError = undefined;
+  });
   const runtimeListeners = new Set<() => void>();
   const projectSnapshot = () => ({
     status: 'active',
@@ -349,11 +363,13 @@ const projectContextOf = (projectId: string): unknown => {
       error: runtimeError,
     },
     matches: (value: unknown) =>
-      value === 'runtimeClosed'
-        ? runtimeClosed
-        : value === 'runtimeCloseFailed'
-          ? runtimeError !== undefined
-          : JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
+      value === 'ready'
+        ? true
+        : value === 'runtimeClosed'
+          ? runtimeClosed
+          : value === 'runtimeCloseFailed'
+            ? runtimeError !== undefined
+            : JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
   });
   const created = {
     projectId: 'unused',
@@ -414,14 +430,11 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => projectContextOf(useContext(StubProjectContext)),
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
-vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({
-  ViewSettingsSyncHost: () => {
-    const projectId = useContext(StubProjectContext);
-    return <span data-testid='view-settings-host' data-project-id={projectId} />;
-  },
-}));
+/* A row holds a session's close open by holding its agent host's release (A7c: the close's other steps run in the
+ * session's own children). */
+const { agentHostRelease } = vi.hoisted(() => ({ agentHostRelease: vi.fn(async (): Promise<void> => undefined) }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
-  registerProjectAgentHost: async () => ({ release: async () => undefined }),
+  registerProjectAgentHost: async () => ({ release: async () => agentHostRelease() }),
 }));
 
 /* One object for the life of the suite: a `useProjectManager()` that returns a
@@ -557,6 +570,13 @@ const sessionWiring: SessionWiring = {
   loadRevisions: async () => import('#runtime/session-revisions.js'),
   loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
   registerCloseCut: () => () => undefined,
+  /* A7c: each live session's producer-stage flush, recorded with the React registrations a row runs on hidden. */
+  registerProducer: (flush) => {
+    closeFlushes.add(flush);
+    return () => {
+      closeFlushes.delete(flush);
+    };
+  },
   focusedProject: { get: () => undefined, subscribe: () => () => undefined },
   documentVisible: { get: () => true, subscribe: () => () => undefined },
   chatSessions: chatStore as unknown as SessionWiring['chatSessions'],
@@ -577,8 +597,17 @@ const sessionsActor = createSessionsActor({
   openRuntime: {
     open: async (input) => {
       const standIn = openSessionRuntimeStandIn(input);
+      const parts = projectContextOf(input.projectId) as StubProjectContextValue;
       return {
         ...standIn,
+        /* A7c: the session's flushes and close run the real work over this project's stand-in stores and producers. */
+        ...sessionRuntimeWork({
+          projectId: input.projectId,
+          producers: { flushAll: async () => parts.flushWorkbenchRecordProducers() },
+          parameterService: () => parts.parameterService,
+          projectRef: parts.projectRef,
+          editorRef: parts.editorRef,
+        }),
         requestChat: (chat) => {
           projectProviderInputs.push({
             projectId: input.projectId,
@@ -630,8 +659,10 @@ const settle = async (
         !snapshot.matches('opening') &&
         !snapshot.matches({ closing: 'cancellingRuns' }) &&
         !snapshot.matches({ closing: 'flushingProducers' }) &&
+        !snapshot.matches({ closing: 'closingParameters' }) &&
         !snapshot.matches({ closing: 'flushing' }) &&
-        !snapshot.matches({ closing: 'releasing' })
+        !snapshot.matches({ closing: 'closingRuntime' }) &&
+        !snapshot.matches({ closing: 'releasingAgentHost' })
       );
     }),
 ): Promise<void> => {
@@ -910,6 +941,7 @@ describe('sessions composition — the quit flush order (S48(12))', () => {
       expect(sessionsActor.getSnapshot().context.closed['runtime-close-refusal']).toBeUndefined();
       expect(mounted).not.toContain('unmount:runtime-close-refusal');
     } finally {
+      runtimeRefusalResets.get('runtime-close-refusal')?.();
       view.unmount();
     }
   });
@@ -1083,28 +1115,12 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
-  /* R6: the write-side host remains mounted beside ProjectPersistenceGuard above the focus gate.
-   * Its field-level writing is exercised by the dedicated view-store and owner suites. */
-  it('keeps the view record owner mounted for a live project that is not focused', async () => {
-    const graphicsRef = createActor(
-      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
-      { input: {} },
-    ).start();
-    viewGraphicsOf('pin-unfocused-1').set('view-1', graphicsRef);
+  /* A7c: the view record owner is no longer a React host: the project runtime registers its sessions' flush in its
+   * producer set (`project-runtime.test.ts`), so it holds for a live project that is not focused with nothing mounted. */
 
-    const view = await renderRoute('pin-unfocused-1');
-    await view.rerender('pin-unfocused-2');
-    expect(liveProjectIds()).toEqual(['pin-unfocused-1', 'pin-unfocused-2']);
-    expect(
-      screen.getAllByTestId('view-settings-host').some((element) => element.dataset['projectId'] === 'pin-unfocused-1'),
-    ).toBe(true);
-    graphicsRef.stop();
-    view.unmount();
-  });
-
-  /* A8b exit: a live project that is not focused keeps its persistence guard, whose `hidden` flush walks its
-   * runtime's producers, the layout child's among them (the runtime registers it; `project-runtime.test.ts` shows
-   * the layout's write). */
+  /* A8b exit, A7c: a live project that is not focused keeps its session's producer-stage registration, whose `hidden`
+   * flush asks its runtime child to walk the runtime's producers, the layout child's among them (the runtime registers
+   * it; `project-runtime.test.ts` shows the layout's write). */
   it("flushes a live project's runtime producers on hidden while it is not focused", async () => {
     const view = await renderRoute('pin-hidden-1');
     await view.rerender('pin-hidden-2');
@@ -1114,7 +1130,9 @@ describe('sessions composition', () => {
     for (const flushAtClose of closeFlushes) {
       void flushAtClose('hidden');
     }
-    expect(unfocused).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(unfocused).toHaveBeenCalled();
+    });
     view.unmount();
   });
 
@@ -1508,6 +1526,32 @@ describe('sessions composition — the idle window (S48(6))', () => {
       return undefined;
     });
 
+  /* The runtime child reports its region up and answers the close's flush and runtime close at once (A7c). */
+  const runtimeChild = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
+    sendBack({ type: 'childReady', region: 'runtime' });
+    receive((event) => {
+      const { requestId } = event as EventObject & Readonly<{ requestId: string }>;
+      switch (event.type) {
+        case 'flushRuntime': {
+          sendBack({ type: 'runtimeFlushSettled', requestId });
+          break;
+        }
+        case 'closeParameters': {
+          sendBack({ type: 'parametersClosed', requestId });
+          break;
+        }
+        case 'closeRuntime': {
+          sendBack({ type: 'runtimeClosed', requestId });
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+    });
+    return undefined;
+  });
+
   const startRegistry = () => {
     const clock = manualClock();
     const actor = createActor(
@@ -1516,12 +1560,12 @@ describe('sessions composition — the idle window (S48(6))', () => {
           projectSession: projectSessionMachine.provide({
             actors: {
               fileManager: readyChild('views'),
-              project: readyChild('runtime'),
+              project: runtimeChild,
               agentHost: readyChild('agentHost'),
               compute: readyChild('compute'),
               /* An unprovided close effect fails the close (MC-R8); these rows are about the timer, not the close. */
               ...Object.fromEntries(
-                ['cancelRuns', 'flushProducers', 'flushSync', 'releaseAgentHost'].map((name) => [
+                ['cancelRuns', 'releaseAgentHost'].map((name) => [
                   name,
                   createAsyncLogic({ run: async () => undefined }),
                 ]),
@@ -1546,8 +1590,10 @@ describe('sessions composition — the idle window (S48(6))', () => {
             !snapshot.matches('opening') &&
             !snapshot.matches({ closing: 'cancellingRuns' }) &&
             !snapshot.matches({ closing: 'flushingProducers' }) &&
+            !snapshot.matches({ closing: 'closingParameters' }) &&
             !snapshot.matches({ closing: 'flushing' }) &&
-            !snapshot.matches({ closing: 'releasing' })
+            !snapshot.matches({ closing: 'closingRuntime' }) &&
+            !snapshot.matches({ closing: 'releasingAgentHost' })
           );
         }),
       ).toBe(true);
@@ -2183,21 +2229,17 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
     /* A registry of this row's own: the module singleton the rows above share
      * is quiesced by pin e, and a quiesced registry never opens again. */
-    const { view, freshStore, freshActor } = await renderQuitRuntime();
+    const { view, freshActor } = await renderQuitRuntime();
     expect(asks).toHaveLength(1);
 
-    /* One session whose flush never answers — the only reason a quit is ever
-     * held open. */
-    const unregister = freshStore.registerProjectSessionServices('quit-hold', {
-      closeRuntime: async () => undefined,
-      flushProducers: async () => undefined,
-      flushSync: async () => {
-        await new Promise<void>(() => {
+    /* One session whose close never finishes — the only reason a quit is ever held open. Since A7c a session's flushes
+     * run in its own children; here its agent host's release never answers. */
+    agentHostRelease.mockImplementationOnce(
+      async () =>
+        new Promise<void>(() => {
           /* Never answers: a flush that settles would not hold a quit open. */
-        });
-      },
-      cancelRuns: async () => undefined,
-    });
+        }),
+    );
     await act(async () => {
       freshActor.send({ type: 'open', projectId: 'quit-hold' });
       await Promise.resolve();
@@ -2230,7 +2272,6 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     expect(answers).toEqual(['quiesced']);
     expect(view.queryByRole('status')).toBeNull();
 
-    unregister();
     view.unmount();
   });
 

@@ -116,6 +116,17 @@ describe("a session runtime's replacement flush (A6e)", () => {
     expect(landed).toEqual(['entries']);
   });
 
+  it('should stop waiting on a producer that never settles once its owner is gone, without confirming the write', async () => {
+    const runtime = build();
+    producersOf(runtime).register(async () => pending());
+    const gone = new AbortController();
+
+    const flushed = runtime.flush(gone.signal);
+    gone.abort(new Error('The runtime child stopped.'));
+
+    await expect(flushed).rejects.toThrow('The runtime child stopped.');
+  });
+
   it('should close nothing, so a runtime the choices came back to stays usable', async () => {
     const runtime = build();
 

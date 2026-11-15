@@ -74,9 +74,13 @@ if [[ "$host" == gcp ]]; then
   [[ "${TAU_QUALIFICATION_GRAPHICS:-stock}" == stock ]] || { printf 'GCP hosts are for stock graphics only\n' >&2; exit 1; }
   guest_graphics=nvidia
   case "$TAU_VM_DISTRO" in ubuntu) template_distro=ubuntu2404 ;; ubuntu2604) template_distro=ubuntu2604 ;; debian) template_distro=debian13 ;; esac
-  template="$(gcloud compute instance-templates list --project "$TAU_GCP_PROJECT" \
-    --filter="name~^ci-gpu-${template_distro}-" --sort-by=~creationTimestamp --limit=1 --format='value(selfLink)')"
-  [[ -n "$template" ]] || { printf 'No GPU host template for %s\n' "$template_distro" >&2; exit 1; }
+  # Templates are regional (tau-cloud stacks/gcp: the primary region and any fallback regions), so each zone uses the
+  # newest template of its own region; a zone whose region has none is skipped.
+  region_template() {
+    gcloud compute instance-templates list --project "$TAU_GCP_PROJECT" \
+      --filter="name~^ci-gpu-${template_distro}- AND selfLink~/regions/${1}/instanceTemplates/" \
+      --sort-by=~creationTimestamp --limit=1 --format='value(selfLink)'
+  }
   route_slug="${TAU_QUALIFICATION_ROUTE:-proof}"; route_slug="${route_slug#linux-}"
   instance="tau-q-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}-${template_distro}-${route_slug}"
   instance="${instance:0:63}"
@@ -159,18 +163,22 @@ CONFIG
   qemu_pid=$!
 fi
 if [[ "$host" == gcp ]]; then
-  # Spot T4 capacity varies by zone; try each configured zone once. The client key is the only login path, and the
+  # T4 capacity varies by zone; try each configured zone once, in order (primary region first, then fallbacks). The client key is the only login path, and the
   # host keys are read back through the guest agent before the first SSH, so StrictHostKeyChecking stays on.
   printf 'tau:%s\n' "$(cat "$work/client.pub")" > "$work/ssh-keys"
+  template=''
   for zone in $TAU_GCP_ZONES; do
+    zone_template="$(region_template "${zone%-*}")"
+    [[ -n "$zone_template" ]] || { printf 'No GPU host template for %s in %s\n' "$template_distro" "${zone%-*}" >&2; continue; }
     if gcloud compute instances create "$instance" --project "$TAU_GCP_PROJECT" --zone "$zone" \
-      --source-instance-template "$template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
+      --source-instance-template "$zone_template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
       --metadata enable-guest-attributes=TRUE; then
+      template="$zone_template"
       instance_zone="$zone"
       break
     fi
   done
-  [[ -n "$instance_zone" ]] || { printf 'No zone had spot GPU capacity\n' >&2; exit 1; }
+  [[ -n "$instance_zone" ]] || { printf 'No zone had GPU capacity\n' >&2; exit 1; }
   # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
   # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
   # Only clean-host receipts carry host facts, so only that mode depends on the description; CI qualification keeps

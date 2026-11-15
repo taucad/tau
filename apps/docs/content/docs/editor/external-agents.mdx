@@ -3,7 +3,7 @@ title: External Agents
 description: Run Codex, Claude Code, or Grok Build inside a Tau project through its own CLI and login.
 docType: reference
 icon: 'lucide:terminal text-purple'
-wordBudgetOverride: 500
+wordBudgetOverride: 650
 ---
 
 An external agent is a coding CLI you already have installed. Tau starts it, gives it the project, and shows its work in the chat — it does not resell it.
@@ -16,11 +16,39 @@ An external agent is a coding CLI you already have installed. Tau starts it, giv
 | Claude Code | `@agentclientprotocol/claude-agent-acp` 0.70.0 | `claude` | 2.1.232     |
 | Grok Build  | Native ACP (no adapter package)                | `grok`   | 1.0.41      |
 
-An older CLI is refused before the turn starts, naming the version found. Codex and Claude Code are qualified with live turns; Grok Build's are not yet.
+An older CLI is refused before the turn starts, naming the version found.
 
-Tau runs your own `codex` or `claude` from `PATH`; sign Claude Code in with `claude auth login`.
+Only macOS is qualified: Codex and Claude Code with live turns, Grok Build not yet. Windows and Linux are unqualified for external agents until a device run is recorded.
 
-For Grok Build, follow the [official installation instructions](https://docs.x.ai/build/overview), then run `grok login` on the host machine. Tau starts `grok --no-auto-update agent stdio` using that local login. Its native ACP handshake is verified without credentials.
+## Install and sign in
+
+Install each CLI on the host with its vendor's script, in table order, then sign in. macOS and Linux:
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+curl -fsSL https://claude.ai/install.sh | bash
+curl -fsSL https://x.ai/cli/install.sh | bash
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+irm https://claude.ai/install.ps1 | iex
+irm https://x.ai/cli/install.ps1 | iex
+```
+
+| Agent       | Sign in             | Update          |
+| ----------- | ------------------- | --------------- |
+| Codex       | `codex login`       | `codex update`  |
+| Claude Code | `claude auth login` | `claude update` |
+| Grok Build  | `grok login`        | `grok update`   |
+
+`claude update` skips Homebrew and WinGet installs; use their package manager.
+
+Tau searches `PATH`, then each vendor's install directories, including ChatGPT.app and Claude.app on macOS, so Finder, the Start menu and a terminal find the same CLI. npm and version-manager installs are found on `PATH` only.
+
+A refused agent shows its reason and, when you can act, the install or update command. A CLI that does not answer is reported unavailable, not missing. Tau Desktop re-checks refused agents on its next listing; restart `tau serve` after installing.
 
 Agents run on a Tau Host: Tau Desktop, or `tau serve` paired with the browser. A browser tab with no host refuses the turn instead of answering with Tau.
 
@@ -43,4 +71,4 @@ The agent is the vendor's own client, so what it reads it may send. In direct mo
 
 The vendor bills the account you signed that CLI into. Tau charges no credits and quotes no price for an external turn: the chat footer names the agent, the model and the vendor's own usage report.
 
-Tau surfaces a login; it never brokers one. A logged-out agent refuses with the methods it offers — a terminal command such as `codex login`, or a verification page and code — and the chat shows exactly that.
+Tau never brokers or runs a login. A logged-out agent's card lists Tau's sign-in command first, with the CLI's full path when it is outside `PATH`.

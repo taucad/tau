@@ -11,7 +11,10 @@ import type { PendingProjectRecoveryReason } from '#types/pending-project-operat
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
-import { createSessionsActor, registerProjectSessionServices } from '#services/sessions-store.js';
+import { createSessionsActor } from '#services/sessions-store.js';
+import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
 const navigate = vi.fn();
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
@@ -352,11 +355,12 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
   const nativeProject: Project = { ...project, assets: { main: { entryPath: 'main.py' } } };
   let stop: (() => void) | undefined;
   /** Whether the session's runtime closes; a refusal leaves the session `failed`, holding its slot. */
-  let runtimeCloses = true;
   /** Whether the session's runs cancel; a refusal leaves the session `failed` with its runs still listed. */
-  let runsCancel = true;
-  let flushSyncCalls = 0;
-  let flushGate: PromiseWithResolvers<void> | undefined;
+  /* A7c: each session's runtime is a stand-in a row can hold or refuse; its close steps run over it. */
+  let opener: SessionRuntimeOpenerStandIn = sessionRuntimeOpenerStandIn();
+  /** How many times the project's latest runtime was asked to flush for a close. */
+  const closeFlushes = (): number =>
+    opener.latest(projectId)?.signals.filter((signal) => signal === 'flush:close').length ?? 0;
 
   /**
    * A real registry and focus, and the route's visit that opened the project: focus knows its slugs only from a route
@@ -365,7 +369,12 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
   const compose = async (
     opened: Project = project,
   ): Promise<Readonly<{ registry: ReturnType<typeof createSessionsActor>; host: FocusHostFixture }>> => {
-    const registry = createSessionsActor({ clock: new StepClock() }).start();
+    opener = sessionRuntimeOpenerStandIn();
+    const registry = createSessionsActor({
+      clock: new StepClock(),
+      openRuntime: opener,
+      openFileManager: (id) => openSessionFileManagerStandIn(id),
+    }).start();
     const host = startFocusHost({
       sessions: registry,
       library: {
@@ -377,28 +386,9 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     });
     composed.sessions = registry;
     composed.focus = host;
-    /* The services a mounted session subtree registers; the close reads them. */
-    const releaseServices = registerProjectSessionServices(projectId, {
-      cancelRuns: async () => {
-        if (!runsCancel) {
-          throw new Error('runs would not cancel');
-        }
-      },
-      flushProducers: async () => undefined,
-      flushSync: async () => {
-        flushSyncCalls += 1;
-        await flushGate?.promise;
-      },
-      closeRuntime: async () => {
-        if (!runtimeCloses) {
-          throw new Error('runtime would not close');
-        }
-      },
-    });
     stop = () => {
       host.stop();
       registry.stop();
-      releaseServices();
     };
     host.focus.send({
       type: 'routeRequested',
@@ -428,8 +418,6 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
   afterEach(() => {
     stop?.();
     stop = undefined;
-    runtimeCloses = true;
-    runsCancel = true;
     composed.sessions = undefined;
     composed.focus = undefined;
   });
@@ -452,13 +440,12 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
    */
   it('should neither restart nor re-flush a close still in flight when Reopen is pressed (round 10)', async () => {
     const { registry } = await compose();
-    flushSyncCalls = 0;
     const closing = registry.getSnapshot().context.refs[projectId];
-    flushGate = Promise.withResolvers<void>();
+    const release = opener.latest(projectId)!.hold((signal) => signal === 'flush:close');
     registry.send({ type: 'close', projectId, reason: 'memory' });
     closing?.send({ type: 'confirmClose' });
     await vi.waitFor(() => {
-      expect(flushSyncCalls).toBe(1);
+      expect(closeFlushes()).toBe(1);
     });
     expect(registry.getSnapshot().context.status[projectId]?.state).toBe('closing');
 
@@ -469,10 +456,9 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     });
 
     /* The close in flight is the memory policy's: the reopen waits behind it and does not take it over. */
-    expect(flushSyncCalls).toBe(1);
+    expect(closeFlushes()).toBe(1);
     expect(closing?.getSnapshot().context.closeReason).toBe('memory');
-    flushGate.resolve();
-    flushGate = undefined;
+    release();
     /* The reopen it waited behind then opens the project again. */
     await vi.waitFor(() => {
       const reopened = registry.getSnapshot().context.refs[projectId];
@@ -483,10 +469,10 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
 
   it('should close a failed session and open the project again as one reopen', async () => {
     const { registry } = await compose();
-    runtimeCloses = false;
+    opener.latest(projectId)!.refuse('runtime would not close', 'closeRuntime');
     const failed = registry.getSnapshot().context.refs[projectId];
     await closeTo(registry, 'failed');
-    runtimeCloses = true;
+    opener.latest(projectId)!.refuse(undefined, 'closeRuntime');
 
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
     await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));
@@ -503,10 +489,11 @@ describe('ProjectRouteNotice — the reopen and the reopened session (A0.2 S39)'
     const { registry } = await compose();
     const failed = registry.getSnapshot().context.refs[projectId];
     failed?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
-    runsCancel = false;
+    /* A7c: the run lists no stoppable run, so its cancel has nothing to refuse; the runtime's close refuses instead. */
+    opener.latest(projectId)!.refuse('runtime would not close', 'closeRuntime');
     await closeTo(registry, 'failed');
     expect(failed?.getSnapshot().context.runs).toEqual(['run']);
-    runsCancel = true;
+    opener.latest(projectId)!.refuse(undefined, 'closeRuntime');
 
     render(<ProjectRouteNotice state={{ kind: 'closed', projectId, project, reason: 'user' }} />);
     await userEvent.click(screen.getByRole('button', { name: 'Reopen project' }));

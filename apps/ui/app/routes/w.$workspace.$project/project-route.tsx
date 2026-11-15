@@ -66,7 +66,7 @@ export function ProjectRouteGate({
   readonly children?: React.ReactNode;
   readonly committed: CommittedProjectRoute | undefined;
 }): React.ReactNode {
-  const { focus, bindings } = useFocus();
+  const { focus } = useFocus();
   const sessions = useSessions();
   const focusSnapshot = useSelector(focus, (snapshot) => snapshot);
   const registry = useSelector(sessions, (snapshot) => selectFocusRegistryView(snapshot.context), sameRegistryView);
@@ -125,11 +125,7 @@ export function ProjectRouteGate({
             {liveProjectIds.length > 0 ? (
               <div className='contents' inert={retained || undefined}>
                 <Suspense fallback={isShellHostedByFocusedSession ? <WorkspaceSkeleton withShellFrame /> : null}>
-                  <LiveProjectSessions
-                    focused={focused}
-                    liveProjectIds={liveProjectIds}
-                    onFlushRegistration={bindings.registerLeaveFlush}
-                  />
+                  <LiveProjectSessions focused={focused} liveProjectIds={liveProjectIds} />
                 </Suspense>
               </div>
             ) : null}

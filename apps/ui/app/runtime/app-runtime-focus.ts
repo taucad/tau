@@ -13,8 +13,9 @@
  *   every change and again after every live answer, and each chat a live session's editor focused
  *   (`focusedChatResolved`, A6d). One actor forwards synchronously, so the registry's answers and
  *   facts reach focus in the order the registry produced them (the ordered-channel contract A5a's wiring rests on).
- * - `flush`: runs the leave flush of the session being left. Until A7c that is the registration React provides today
- *   (`ProjectSessionFlushRegistration`), kept per project while the project is live.
+ * - `flush`: runs the leave flush of the session being left: it asks the session (`flushAsked`, A7c), whose `project`
+ *   child writes what its runtime owes with nothing mounted, and answers with the session's `flushSettled` under the same
+ *   id. A session that leaves the live set first ran its own close flush, which covers the leave.
  * - `module`: loads the session module (`loadProjectWorkspace`) and answers `moduleLoaded`.
  * - `route`: hands focus's `chatShown` and `cloudOpenTaken` to the route boundary (`project-route-intent.tsx`), the
  *   only sink of `navigate` (D15 named boundary 1).
@@ -64,26 +65,16 @@ export type FocusLibrarySource = Readonly<{
   onEpochChanged: (listener: (epoch: number) => void) => () => void;
 }>;
 
-/** The leave flush React registers for one live project until A7c (`ProjectSessionFlushRegistration`). @public */
-export type FocusLeaveFlushRegistration = {
-  projectId: string;
-  flush: () => Promise<void>;
-  inFlight?: Promise<void>;
-};
-
 /** Where focus's route commands go: the route boundary's `navigate` and the `cloudOpen` latch. @public */
 export type FocusRouteSink = (command: FocusRouteCommand) => void;
 
 /**
- * What React fills: the leave flush each live project's guard registers, and the route boundary's sink. Plain
- * callbacks a port reads when focus asks, never machine context (D4).
+ * What React fills: the route boundary's sink. A plain callback a port reads when focus asks, never machine context
+ * (D4).
  *
  * @public
  */
 export type FocusBindings = Readonly<{
-  /** Keep the registration a project's guard provides; `undefined` is ignored, because the guard's cleanup cannot
-   * name its project, and a registration is dropped only when its project leaves the live set. */
-  registerLeaveFlush: (registration: FocusLeaveFlushRegistration | undefined) => void;
   /** Bind the route boundary. @returns The unbind. */
   bindRoute: (sink: FocusRouteSink) => () => void;
 }>;
@@ -192,14 +183,8 @@ const answerOf = (context: SessionsMachineContext, projectId: string): FocusOpen
  */
 // oxlint-disable-next-line max-lines-per-function -- One composition: the five ports share the bindings.
 export const createFocusComposition = ({ library, loadModule }: FocusCompositionOptions): FocusComposition => {
-  const leaveFlushes = new Map<string, FocusLeaveFlushRegistration>();
   let routeSink: FocusRouteSink | undefined;
   const bindings: FocusBindings = {
-    registerLeaveFlush: (registration) => {
-      if (registration !== undefined) {
-        leaveFlushes.set(registration.projectId, registration);
-      }
-    },
     bindRoute: (sink) => {
       routeSink = sink;
       return () => {
@@ -426,43 +411,54 @@ export const createFocusComposition = ({ library, loadModule }: FocusComposition
   });
 
   const flushLogic = createCallbackLogic<EventObject, FocusPortInput>(({ input, receive }) => {
-    /* A registration outlives its focus, never its session: a project that leaves the live set is forgotten. */
-    const snapshots = input.sessions.subscribe((snapshot) => {
-      for (const projectId of leaveFlushes.keys()) {
-        if (snapshot.context.refs[projectId] === undefined) {
-          leaveFlushes.delete(projectId);
-        }
-      }
-    });
+    /* Each flush in flight, by request id: the watches on its session's answer and on the live set that ends it early. */
+    const waiting = new Map<string, () => void>();
+    let stopped = false;
     receive((event) => {
       const { requestId, projectId } = event as FocusFlushCommand;
-      const registration = leaveFlushes.get(projectId);
-      const settle = (ok: boolean): void => {
-        tell(input, { type: 'leaveFlushSettled', requestId, ok });
+      const answer = Promise.withResolvers<boolean>();
+      /* Focus hears the answer once the session's own step is over: the answer is heard inside the session's emit, and
+       * the open focus sends on it must reach the registry after the step, so the facts the open produces come before
+       * its reply (rule 11). */
+      const deliver = async (): Promise<void> => {
+        const ok = await answer.promise;
+        waiting.get(requestId)?.();
+        waiting.delete(requestId);
+        if (!stopped) {
+          tell(input, { type: 'leaveFlushSettled', requestId, ok });
+        }
       };
-      if (registration === undefined) {
-        settle(true);
+      // async-iife: bootstrap -- `receive` is synchronous; focus waits for `leaveFlushSettled`.
+      void deliver();
+      const session = input.sessions.getSnapshot().context.refs[projectId];
+      if (session === undefined) {
+        answer.resolve(true);
         return;
       }
-      const pending = registration.inFlight ?? registration.flush();
-      registration.inFlight = pending;
-      const run = async (): Promise<void> => {
-        let ok = true;
-        try {
-          await pending;
-        } catch {
-          ok = false;
+      /* I18: the session's answer under this request's id. */
+      const answered = session.on('flushSettled', (settled) => {
+        if (settled.requestId === requestId) {
+          answer.resolve(settled.ok);
         }
-        if (registration.inFlight === pending) {
-          registration.inFlight = undefined;
+      });
+      /* A session that leaves the live set before it answers ran its own close flush, which covers the leave. */
+      const left = input.sessions.subscribe((snapshot) => {
+        if (snapshot.context.refs[projectId] !== session) {
+          answer.resolve(true);
         }
-        settle(ok);
-      };
-      // async-iife: bootstrap -- a callback actor cannot await; the settlement goes to focus, which owns the wait.
-      void run();
+      });
+      waiting.set(requestId, () => {
+        answered.unsubscribe();
+        left.unsubscribe();
+      });
+      session.send({ type: 'flushAsked', requestId, kind: 'leave' });
     });
     return () => {
-      snapshots.unsubscribe();
+      stopped = true;
+      for (const stop of waiting.values()) {
+        stop();
+      }
+      waiting.clear();
     };
   });
 

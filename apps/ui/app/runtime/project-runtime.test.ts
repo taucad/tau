@@ -569,6 +569,35 @@ describe('createProjectRuntime', () => {
     expect(selectProjectRuntimeFault(runtime.actor.getSnapshot())).toBeUndefined();
   });
 
+  /* A7c: the view record sessions' flush is the runtime's producer, so the session's flushes reach it with nothing
+   * mounted; `ViewSettingsSyncHost` registered it from React before. */
+  it('should flush its view record sessions through its producers, with nothing mounted (A7c, S26)', async () => {
+    const content = createContent();
+    const viewRecordPorts = mock<ViewRecordPortsHandle>();
+    viewRecordPorts.flush.mockResolvedValue(undefined);
+    const runtime = createProjectRuntime({
+      projectId: project.id,
+      fileManager: {
+        fileManagerRef: createFileManager(content.service),
+        parameterFiles: fixedPort(mock<ParameterFilesClient>()),
+      },
+      library: createLibrary(),
+      profile: 'editor',
+      viewRecordPorts,
+      entriesRecord: idleEntriesRecord(),
+      input: { shouldLoadModelOnStart: false },
+      clock: new StepClock(),
+    });
+    runtime.actor.start();
+    try {
+      await runtime.producers.flushAll();
+    } catch {
+      // The layout child's producer cannot confirm over mocked ports; only the view records' flush is this row's.
+    }
+    expect(viewRecordPorts.flush).toHaveBeenCalledOnce();
+    runtime.actor.stop();
+  });
+
   it("should release each geometry unit's kernel runtime when it stops", async () => {
     const guard = guardActors({ ignore });
     const content = createContent();

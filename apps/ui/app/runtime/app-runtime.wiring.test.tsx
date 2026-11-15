@@ -13,6 +13,7 @@ import {
   createAppRuntime,
   selectRuntimeFocus,
   selectRuntimeProjectLibrary,
+  selectRuntimeChatSessions,
   selectSessionsRegistry,
 } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
@@ -171,15 +172,34 @@ describe('round 13: the runtime hands focus its route and flush ports', () => {
     runtime.stop();
   });
 
-  it("should run a live project's registered leave flush when focus asks", async () => {
+  it("should ask a live project's session for its leave flush when focus asks, and answer with the session's (A7c)", async () => {
     const host = createFakeEnvironmentHost();
     const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
-    const { focus, bindings } = selectRuntimeFocus(runtime);
-    const flush = vi.fn(async () => undefined);
-    bindings.registerLeaveFlush({ projectId: 'proj_a', flush });
+    const { focus } = selectRuntimeFocus(runtime);
     const { ports } = focus.getSnapshot().context;
+    ports.registry.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a' });
+    const session = selectSessionsRegistry(runtime.getSnapshot()).getSnapshot().context.refs['proj_a'];
+    const settled: unknown[] = [];
+    session?.on('flushSettled', (event) => settled.push(event));
     ports.flush.send({ type: 'leaveFlushAsked', requestId: 'flush:1', projectId: 'proj_a' });
-    expect(flush).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(settled).toEqual([{ type: 'flushSettled', projectId: 'proj_a', requestId: 'flush:1', ok: true }]);
+    });
+    runtime.stop();
+  });
+
+  it("should bind each live project's session to the chat store with no binding mounted, and forget it on close (A7c, I5)", async () => {
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
+    const registry = selectSessionsRegistry(runtime.getSnapshot());
+    const chatSessions = selectRuntimeChatSessions(runtime);
+    registry.send({ type: 'open', projectId: 'proj_a' });
+    expect(Object.keys(chatSessions.getLivenessSnapshot().projects)).toEqual(['proj_a']);
+    registry.send({ type: 'close', projectId: 'proj_a', reason: 'user' });
+    await vi.waitFor(() => {
+      expect(registry.getSnapshot().context.refs['proj_a']).toBeUndefined();
+    });
+    expect(chatSessions.getLivenessSnapshot().projects).toEqual({});
     runtime.stop();
   });
 

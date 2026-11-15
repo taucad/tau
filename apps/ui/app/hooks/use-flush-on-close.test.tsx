@@ -10,7 +10,9 @@ import { UnloadProvider, useFlushOnClose, useFlushProducers } from '#hooks/use-f
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
-import { registerProjectSessionServices } from '#services/sessions-store.js';
+import { createSessionsRegistryLogic } from '#services/sessions-store.js';
+import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
 /* A0.2: the desktop quit seam `environment` is composed with, captured so a row can ask the renderer to quit. */
 const desktopQuit = {
@@ -234,15 +236,14 @@ describe('UnloadProvider', () => {
 });
 
 /*
- * A0.2 (row S26, D26): the `useFlushOnClose` registrations the app mounts today, with the stage each declares: five
+ * A0.2 (row S26, D26): the `useFlushOnClose` registrations the app mounts today, with the stage each declares: three
  * producers. The layout record's producer left `workbench-record-host.tsx` in A8b and the entries host's left with the
- * host in A9: the project runtime registers both, and the persistence guard's registration walks the runtime's
- * producers. The session stage's close cut left `useRevisionClientLifecycle` in A7b: each session's `revisions` child
- * registers it on the sequencer through the app runtime's wiring.
+ * host in A9: the project runtime registers both. The persistence guard's registration and the view settings host's
+ * left in A7c: each live session registers once at the producer stage through the app runtime's wiring, and its
+ * runtime's producer set holds the view record sessions' flush. The session stage's close cut left
+ * `useRevisionClientLifecycle` in A7b: each session's `revisions` child registers it through the same wiring.
  */
 const reactRegistrations = [
-  { site: 'routes/w.$workspace.$project/project-live-sessions.tsx', stage: 'producer' },
-  { site: 'routes/w.$workspace.$project/view-settings-sync-host.tsx', stage: 'producer' },
   { site: 'hooks/use-editor-document-session.tsx', stage: 'producer' },
   { site: 'hooks/active-chat-provider.tsx', stage: 'producer' },
   { site: 'components/global-chat-flush-guard.tsx', stage: 'producer' },
@@ -293,10 +294,13 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     });
   });
 
-  it('should name the five React registration sites with the stage each declares, and the session cut', async () => {
+  it('should name the three React registration sites with the stage each declares, the sessions and the session cut', async () => {
     const read = async (site: string): Promise<string> =>
       readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
     expect(await read('runtime/app-runtime.ts')).toContain("unload.register('session', cut)");
+    expect(await read('runtime/app-runtime.ts')).toContain("unload.register('producer', flush)");
+    expect(await read('services/sessions-store.ts')).toContain('wiring.registerProducer(');
+    expect(await read('routes/w.$workspace.$project/project-live-sessions.tsx')).not.toContain('useFlushOnClose(');
     expect(await read(sessionCut.site)).not.toContain('useFlushOnClose(');
     const declared = await Promise.all(
       reactRegistrations.map(async ({ site }) => {
@@ -342,7 +346,7 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     });
     const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
     const producerDone = sequence.filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done'));
-    expect(producerDone).toHaveLength(5);
+    expect(producerDone).toHaveLength(reactRegistrations.length);
     expect(sequence.slice(0, firstSession).filter((entry) => entry.endsWith(':done'))).toEqual(producerDone);
 
     sequence.length = 0;
@@ -396,9 +400,26 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
   });
 });
 
-describe('the quit guard — producers before the close cut (A0.2 item 9, D26)', () => {
+describe('the quit guard — producers before the session close (A0.2 item 9, D26, A7c)', () => {
   const projectId = 'proj_quit_aaaaaaaaaaaaaaa';
-  let releaseServices: (() => void) | undefined;
+  /* A7c: the registry's sessions build their runtime on a stand-in, whose close flush and runtime close the row hears
+   * in order with the producers. Without wiring the sync step has no client to quiesce and passes through. */
+  const startQuitEnvironment = (sequence: string[]) => {
+    const opener = sessionRuntimeOpenerStandIn();
+    opener.onBuilt(projectId, (standIn) => {
+      standIn.onSignal((signal) => sequence.push(`session-runtime:${signal}`));
+    });
+    return startEnvironment({
+      registry: true,
+      sessions: createSessionsRegistryLogic({
+        sharedWorker: () => undefined,
+        openRuntime: opener,
+        openFileManager: (id: string) => openSessionFileManagerStandIn(id),
+      }),
+      desktopQuit: desktopQuit.seam,
+      clock: new StepClock(),
+    });
+  };
 
   beforeEach(() => {
     /* The order rows above leave the page hidden. */
@@ -410,33 +431,17 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
   });
 
   afterEach(() => {
-    releaseServices?.();
-    releaseServices = undefined;
     desktopQuit.ask = undefined;
     desktopQuit.answers.length = 0;
   });
 
-  it("should settle every producer registration before the registry takes a session's close cut", async () => {
+  it("should settle every producer registration before the registry starts a session's close flush", async () => {
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
-    const { registry: started } = startEnvironment({
-      registry: true,
-      desktopQuit: desktopQuit.seam,
-      clock: new StepClock(),
-    });
+    const { registry: started } = startQuitEnvironment(sequence);
     if (started === undefined) {
       throw new Error('the environment host spawns a registry');
     }
-    releaseServices = registerProjectSessionServices(projectId, {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => {
-        sequence.push('session-service:flushProducers');
-      },
-      flushSync: async () => {
-        sequence.push('session-service:close-cut');
-      },
-      closeRuntime: async () => undefined,
-    });
     started.send({ type: 'open', projectId });
     render(
       <UnloadProvider sequencer={environment.sequencer}>
@@ -455,7 +460,7 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     });
     const producers = registrations.filter(({ stage }) => stage === 'producer');
     for (const producer of producers) {
-      expect(sequence).not.toContain('session-service:close-cut');
+      expect(sequence).not.toContain('session-runtime:flush:close');
       expect(started.getSnapshot().matches('ready')).toBe(true);
       // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
       await act(async () => {
@@ -467,36 +472,24 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
       expect(desktopQuit.answers).toEqual(['quit-attempt:false']);
     });
 
-    const cut = sequence.indexOf('session-service:close-cut');
-    expect(cut).toBeGreaterThan(-1);
+    const closeFlush = sequence.indexOf('session-runtime:flush:close');
+    expect(closeFlush).toBeGreaterThan(-1);
     expect(
-      sequence.slice(0, cut).filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done')),
-    ).toHaveLength(5);
+      sequence.slice(0, closeFlush).filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done')),
+    ).toHaveLength(reactRegistrations.length);
     /* Quit runs the producer stage itself; the session stage is the registry's close, not `hidden`'s. */
     expect(sequence.filter((entry) => entry.startsWith('session:'))).toEqual([]);
     expect(started.getSnapshot().matches('quiesced')).toBe(true);
   });
-  it('should settle an actor-registered producer with the React ones before the close cut on quit (round 15)', async () => {
+  it("should settle an actor-registered producer with the React ones before a session's close flush on quit (round 15)", async () => {
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
-    const { registry: started } = startEnvironment({
-      registry: true,
-      desktopQuit: desktopQuit.seam,
-      clock: new StepClock(),
-    });
+    const { registry: started } = startQuitEnvironment(sequence);
     if (started === undefined) {
       throw new Error('the environment host spawns a registry');
     }
     const actor = actorProducer(sequence);
     const unregister = environment.sequencer.register('producer', actor.callback);
-    releaseServices = registerProjectSessionServices(projectId, {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => undefined,
-      flushSync: async () => {
-        sequence.push('session-service:close-cut');
-      },
-      closeRuntime: async () => undefined,
-    });
     started.send({ type: 'open', projectId });
     render(
       <UnloadProvider sequencer={environment.sequencer}>
@@ -524,7 +517,7 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     await act(async () => {
       await Promise.resolve();
     });
-    expect(sequence).not.toContain('session-service:close-cut');
+    expect(sequence).not.toContain('session-runtime:flush:close');
     expect(started.getSnapshot().matches('ready')).toBe(true);
     await act(async () => {
       actor.release();
@@ -533,9 +526,9 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     await waitFor(() => {
       expect(desktopQuit.answers).toEqual(['quit-attempt:false']);
     });
-    const cut = sequence.indexOf('session-service:close-cut');
+    const closeFlush = sequence.indexOf('session-runtime:flush:close');
     expect(sequence.indexOf('producer:actor:hidden:done')).toBeGreaterThan(-1);
-    expect(sequence.indexOf('producer:actor:hidden:done')).toBeLessThan(cut);
+    expect(sequence.indexOf('producer:actor:hidden:done')).toBeLessThan(closeFlush);
     unregister();
   });
 });

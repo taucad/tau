@@ -94,8 +94,6 @@
   "counts": {
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx#useFlushOnClose": 1,
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx#waitFor timeout": 5,
     "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx#setTimeout": 1,
     "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1
   }

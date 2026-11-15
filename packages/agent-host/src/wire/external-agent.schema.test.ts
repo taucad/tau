@@ -43,6 +43,22 @@ describe('discovered external agent controls', () => {
   });
 });
 
+describe('refused external agent fix command', () => {
+  const refused = { ...descriptor, refusal: 'CLI_NOT_FOUND' };
+
+  it('should carry the host-resolved fix command a refused agent offers', () => {
+    const value = { ...refused, fixCommand: 'curl -fsSL https://x.ai/cli/install.sh | bash' };
+    expect(externalAgentDescriptorSchema.parse(value)).toEqual(value);
+  });
+  it('should accept a fix command of exactly 256 characters', () => {
+    expect(externalAgentDescriptorSchema.safeParse({ ...refused, fixCommand: 'x'.repeat(256) }).success).toBe(true);
+  });
+  it('should reject an empty or over-long fix command at the host boundary', () => {
+    expect(externalAgentDescriptorSchema.safeParse({ ...refused, fixCommand: '' }).success).toBe(false);
+    expect(externalAgentDescriptorSchema.safeParse({ ...refused, fixCommand: 'x'.repeat(257) }).success).toBe(false);
+  });
+});
+
 it('should preserve admitted host identity through the external-agent wire schema', async () => {
   const { agentChannelRunKindSchema } = await import('#wire/admission.schema.js');
   expect(

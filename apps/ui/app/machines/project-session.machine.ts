@@ -48,7 +48,21 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  * of a deferred focused chat). The `presence` child reports visibility from `environment` and focus
  * (`visibilityChanged`), and the session sends parking to its own `project` child (`runtimeParking`) instead of
  * emitting it for a React binding to relay.
+ *
+ * A7c: closing and the unload are steps over the session's own children, with nothing mounted (I5, I6; row S6). The
+ * `project` child flushes what its runtime owes and closes its runtime, the `revisions` child quiesces the project's
+ * sync, and each waits as a state with an `after` on the session's clock (I15) rather than a `waitFor` timeout. A leave
+ * flush (focus's port) and the unload's producer stage (the `unload` child, registered once at the producer stage of
+ * `environment`'s sequencer, D26) are asked of the session with `flushAsked` and answered with `flushSettled`.
  */
+
+/**
+ * What a flush asked of the session settles (A7c): the leave flush focus runs before it moves (I3), or the producer
+ * stage of the unload (I6, D26). The close flush is a step of `closing`, never asked.
+ *
+ * @public
+ */
+export type ProjectSessionFlushKind = 'leave' | 'unload';
 
 /** Why a session is closing. `user` is the verb; the rest are visible policy. @public */
 export type ProjectSessionCloseReason = 'user' | 'idle' | 'budget' | 'memory' | 'quit';
@@ -102,6 +116,8 @@ export type ProjectSessionMachineInput = Readonly<{
   startBoundMilliseconds?: number;
   /** The bound on the close flush, the rule W13's `awaitSyncSettled` uses. */
   closeFlushMilliseconds?: number;
+  /** How long the runtime's producers and stores may take to write what they owe, for every flush (A7c). */
+  producerFlushMilliseconds?: number;
 }>;
 
 /** State owned by projectSessionMachine, plus its child refs. @public */
@@ -121,6 +137,13 @@ export type ProjectSessionMachineContext = Readonly<{
   parkWindowMilliseconds: number;
   startBoundMilliseconds: number;
   closeFlushMilliseconds: number;
+  producerFlushMilliseconds: number;
+  /** Flushes asked of the session and not yet settled, by request id (A7c). */
+  flushes: Readonly<Record<string, ProjectSessionFlushKind>>;
+  /** The request id of the close step waiting on a child's answer (I18), or `undefined` (A7c). */
+  closeStep: string | undefined;
+  /** How many close steps have asked a child, for the next one's id. */
+  closeSteps: number;
   /** Chats with a run in flight. `busy` is `runs.length > 0`. */
   runs: readonly string[];
   /** Subset this window can stop, from the same projected close plan the dialog reads. */
@@ -159,6 +182,8 @@ export type ProjectSessionMachineContext = Readonly<{
   hostConnectorRef: AnyActorRef | undefined;
   /** The `presence` child, which reports visibility from `environment` and focus (A7b). */
   presenceRef: AnyActorRef | undefined;
+  /** The `unload` child, registered at the producer stage of `environment`'s sequencer (A7c, D26). */
+  unloadRef: AnyActorRef | undefined;
   /**
    * The project runtime's root, as the `project` child reported it (A6d). The child built it and stops it; the session
    * only hands it to its readers. `undefined` until the child reports it and while it rebuilds it.
@@ -228,6 +253,29 @@ export type ProjectSessionMachineEvent =
    */
   | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string }
   /**
+   * Flush what the runtime owes (A7c): focus's leave flush, or the unload's producer stage from the `unload` child. The
+   * session answers with `flushSettled` under the same id, in every state (I18).
+   */
+  | { readonly type: 'flushAsked'; readonly requestId: string; readonly kind: ProjectSessionFlushKind }
+  /** The `project` child's answer to a flush the session asked of it, with the refusal's message if it refused. */
+  | { readonly type: 'runtimeFlushSettled'; readonly requestId: string; readonly error?: string }
+  /** The `revisions` child's answer to `quiesce`: the project's sync settled through W13's seam, or refused. */
+  | { readonly type: 'syncQuiesced'; readonly requestId: string; readonly error?: string }
+  /** The `project` child's answer to `closeRuntime`: the runtime's kernels are shut down, or refused. */
+  | { readonly type: 'runtimeClosed'; readonly requestId: string; readonly error?: string }
+  /**
+   * The `project` child's answer to `closeParameters`: the parameter service closed, or refused (unsaved drafts, an
+   * incomplete sidecar cleanup) and stayed open.
+   */
+  | { readonly type: 'parametersClosed'; readonly requestId: string; readonly error?: string }
+  /**
+   * The session's own timer: an asked flush ran past its bound (A7c, I15). It is raised with a delay and cancelled by
+   * the flush's answer; any other delivery finds no flush under its id and is answered with nothing (MC-R18). It is in
+   * the public alphabet under D14 because `schemas.internalEvents` loses the emitted types of a spawned session in the
+   * registry's `refs` under the pinned XState alpha; A10 moves it back to internal once the pin allows.
+   */
+  | { readonly type: 'flushExpired'; readonly requestId: string }
+  /**
    * The device's choices select another kernel than the runtime's (A6e; D8, B4). The `project` child reports it; the
    * session hands it back to that child while it opens, is live, has failed or asks to close, and the child flushes what
    * the runtime owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
@@ -257,6 +305,12 @@ export const projectSessionEventTypes = [
   'revisionState',
   'revisionChatsChanged',
   'chatRequested',
+  'flushAsked',
+  'runtimeFlushSettled',
+  'syncQuiesced',
+  'runtimeClosed',
+  'parametersClosed',
+  'flushExpired',
   'replaceRuntime',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
@@ -266,7 +320,15 @@ export type ProjectSessionMachineEmitted =
   | { readonly type: 'attention'; readonly projectId: string; readonly count: number }
   /* R3: whether this project's runtime should hold its kernel processes. The session owns the fact (hidden and idle)
    * and sends it to its own `project` child, which reaches the cad units (A7b); the emit stays for watchers. */
-  | { readonly type: 'runtimeParking'; readonly projectId: string; readonly parked: boolean };
+  | { readonly type: 'runtimeParking'; readonly projectId: string; readonly parked: boolean }
+  /** A flush asked with `flushAsked` settled, or ran past its bound (A7c). */
+  | {
+      readonly type: 'flushSettled';
+      readonly projectId: string;
+      readonly requestId: string;
+      readonly ok: boolean;
+      readonly error?: string;
+    };
 
 /** A live project session actor. @public */
 export type ProjectSessionActorRef = ActorRefFrom<typeof projectSessionMachine>;
@@ -289,6 +351,16 @@ export const projectSessionStartBoundMilliseconds = 30_000;
 /** The close-flush bound, matching `packages/host`'s `closeFlushMilliseconds`. */
 export const projectSessionCloseFlushMilliseconds = 5000;
 
+/**
+ * How long the runtime's producers and stores may take to write what they owe (A7c), as one state on the session's
+ * clock: the producers' own confirmation bound (`slowWriteMilliseconds`, 10 s) followed by the 10 s each store wait
+ * had in the persistence guard and the binding, so a producer's own, more specific refusal lands first.
+ */
+export const projectSessionProducerFlushMilliseconds = 20_000;
+
+/** What a flush refusal says when the runtime's writes ran past their bound. */
+const producerFlushExpired = 'Project changes are not confirmed saved.';
+
 /*
  * P48: `opening` has no `pulling` state.
  *
@@ -308,21 +380,7 @@ const cancelRuns = createAsyncLogic<void, { projectId: string; runs: readonly st
   run: unprovided('cancelRuns'),
 });
 
-/** Flush editor and project producers before revision and record persistence. */
-const flushProducers = createAsyncLogic<void, { projectId: string }>({ run: unprovided('flushProducers') });
-
-/**
- * Flush this project's sync through W13's seam.
- *
- * The store module's implementation sends the port's `close` and waits for
- * `pushSettled` or the durable queue write — it never reimplements
- * `awaitSyncSettled`.
- */
-const flushSync = createAsyncLogic<void, { projectId: string; boundMilliseconds: number }>({
-  run: unprovided('flushSync'),
-});
-
-/** Release the project-scoped agent-host registration after its work drains. */
+/** Release the project-scoped agent-host registration after its work drains, once the runtime is closed. */
 const releaseAgentHost = createAsyncLogic<void, { projectId: string }>({ run: unprovided('releaseAgentHost') });
 
 /**
@@ -359,11 +417,11 @@ export type ProjectSessionFileManagerInput = Readonly<{
 const revisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
 const hostConnector = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
 const presence = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
+/* A7c: the default registers nothing; the store module registers it at the producer stage of `environment`. */
+const unload = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
 
 const projectSessionActors = {
   cancelRuns,
-  flushProducers,
-  flushSync,
   releaseAgentHost,
   fileManager,
   project,
@@ -372,6 +430,7 @@ const projectSessionActors = {
   revisions,
   hostConnector,
   presence,
+  unload,
 };
 
 type ProjectSessionEnqueue = EnqueueObject<
@@ -444,11 +503,52 @@ const recordFailure = (
 ): ProjectSessionPatch => ({ failures: { ...context.failures, [event.region]: event.reason } });
 
 const recordCloseFailure = (context: ProjectSessionMachineContext, error: unknown): ProjectSessionPatch => ({
-  failures: { ...context.failures, close: error instanceof Error ? error.message : 'failed' },
+  failures: {
+    ...context.failures,
+    close: error instanceof Error ? error.message : typeof error === 'string' ? error : 'failed',
+  },
+});
+
+/** One timer per asked flush, so its answer cancels only its own (A7c). */
+const flushTimerId = (requestId: string): string => `flush:${requestId}`;
+
+/*
+ * Answer one asked flush (A7c): emitted for focus's port, and sent to the `unload` child when it asked. `undefined`
+ * when the session did not ask it or it already settled (MC-R18): the caller answers `{}`.
+ */
+const settleAskedFlush = (
+  context: ProjectSessionMachineContext,
+  enq: ProjectSessionEnqueue,
+  { requestId, error }: Readonly<{ requestId: string; error: string | undefined }>,
+): ProjectSessionPatch | undefined => {
+  const kind = context.flushes[requestId];
+  if (kind === undefined) {
+    return undefined;
+  }
+  enq.cancel(flushTimerId(requestId));
+  const answer = { requestId, ok: error === undefined, ...(error === undefined ? {} : { error }) };
+  enq.emit({ type: 'flushSettled', projectId: context.projectId, ...answer });
+  if (kind === 'unload' && context.unloadRef !== undefined) {
+    enq.sendTo(context.unloadRef, { type: 'flushSettled', ...answer });
+  }
+  const { [requestId]: _settled, ...flushes } = context.flushes;
+  return { flushes };
+};
+
+/* The next close step's request id, matched against its child's answer (I18). */
+const nextCloseStep = (context: ProjectSessionMachineContext): ProjectSessionPatch & { closeStep: string } => ({
+  closeStep: `close:${String(context.closeSteps + 1)}`,
+  closeSteps: context.closeSteps + 1,
 });
 
 /* I23: every project-scoped resource dies with the session. Stopping the `fileManager` child stops its file manager. */
 const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSessionEnqueue) => {
+  /* A7c: a flush still asked is answered before its children go. The runtime that owed it is stopping: a close ran its
+   * own producer flush first, and a session the registry lets go has nothing left to write through. */
+  let pending: ProjectSessionMachineContext = context;
+  for (const requestId of Object.keys(context.flushes)) {
+    pending = { ...pending, ...settleAskedFlush(pending, enq, { requestId, error: undefined }) };
+  }
   /* The runtime, the revision client and the connector read the file manager, so they stop first. */
   for (const ref of [
     context.projectRef,
@@ -458,6 +558,7 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
     context.agentHostRef,
     context.computeRef,
     context.presenceRef,
+    context.unloadRef,
   ]) {
     if (ref !== undefined) {
       enq.stop(ref);
@@ -465,6 +566,9 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
   }
   return {
     context: {
+      flushes: {},
+      closeStep: undefined,
+      unloadRef: undefined,
       fileManagerChildRef: undefined,
       fileManagerRef: undefined,
       projectRef: undefined,
@@ -496,7 +600,56 @@ const closeFailed = (
   enq: ProjectSessionEnqueue,
 ) => {
   handRuntimeReplacement({ context }, enq);
-  return { target: '#project-session.failed', context: recordCloseFailure(context, event.error) } as const;
+  return {
+    target: '#project-session.failed',
+    context: { ...recordCloseFailure(context, event.error), closeStep: undefined },
+  } as const;
+};
+
+/*
+ * The child reports each file manager it builds, and `undefined` when it closes one because the shared worker was lost
+ * or replaced or the child is stopping (A6c). A stopped child tells nothing more, and `stopChildren` clears the ref
+ * itself, so a report reaches only a session whose child runs.
+ */
+const followFileManager = (
+  {
+    context,
+    event,
+    actors,
+  }: Readonly<{
+    context: ProjectSessionMachineContext;
+    event: Extract<ProjectSessionMachineEvent, { type: 'fileManagerChanged' }>;
+    actors: typeof projectSessionActors;
+  }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  /* The `project` child builds the runtime on the session's file manager (A6d). */
+  if (context.projectRef !== undefined) {
+    enq.sendTo(context.projectRef, { type: 'fileManagerChanged', fileManagerRef: event.fileManagerRef });
+  }
+  /* A7b: the revision client and the connector follow the file manager: the old one's go, the new one's start. */
+  for (const ref of [context.revisionsRef, context.hostConnectorRef]) {
+    if (ref !== undefined) {
+      enq.stop(ref);
+    }
+  }
+  if (event.fileManagerRef === undefined) {
+    return { context: { fileManagerRef: undefined, revisionsRef: undefined, hostConnectorRef: undefined } };
+  }
+  const input: ProjectSessionFileManagerInput = {
+    projectId: context.projectId,
+    workspace: context.request?.workspace ?? '',
+    fileManagerRef: event.fileManagerRef,
+    syncProjectRoots: event.syncProjectRoots ?? (async () => undefined),
+  };
+  return {
+    context: {
+      fileManagerRef: event.fileManagerRef,
+      /* No fixed id: the next file manager's children start while the previous ones are being stopped. */
+      revisionsRef: enq.spawn(actors.revisions, { input }),
+      hostConnectorRef: enq.spawn(actors.hostConnector, { input }),
+    },
+  };
 };
 
 /** One startup region: up, failed at the bound, or failed by its child. */
@@ -534,13 +687,22 @@ const startupRegion = (region: ProjectSessionRegion) =>
     },
   }) as const;
 
+/**
+ * A close asked again once the close is committed, from the parameter service's close on: the close under way answers
+ * it. Started over (quit closes every session), it would flush anew and could expire back to live while this close
+ * still lands, leaving a live session whose parameter service is closed (A7c review).
+ */
+const ignoreCommittedClose = (): Record<string, never> => ({});
+
 /* The close steps after `closing.asking` (which answers the dialog's `confirmClose` and `cancelClose`), where those
  * answers go unanswered. `closing.stopping` is transient (its `always` leaves at once), so no pair
  * names it: the totality test fails on a pair that names a state no event reaches. */
 const closingSteps = [
   'closing.cancellingRuns',
   'closing.flushingProducers',
+  'closing.closingParameters',
   'closing.flushing',
+  'closing.closingRuntime',
   'closing.releasingAgentHost',
 ] as const;
 
@@ -581,6 +743,7 @@ export const projectSessionMachine = setup({
     idleWindow: ({ context }) => context.idleWindowMilliseconds,
     parkWindow: ({ context }) => context.parkWindowMilliseconds,
     startBound: ({ context }) => context.startBoundMilliseconds,
+    producerFlush: ({ context }) => context.producerFlushMilliseconds,
   },
   guards: {
     /* Asking is a user verb only: a policy close never reaches a session with a
@@ -597,7 +760,7 @@ export const projectSessionMachine = setup({
   },
 }).createMachine({
   id: 'project-session',
-  version: '6',
+  version: '7',
   /* A fault no transition modelled is recorded and reported once, and the session keeps answering: the first is kept,
    * later ones are usually its consequences (MC-R12, D23; B2). */
   onError: ({ context, event }, enq) => {
@@ -617,6 +780,10 @@ export const projectSessionMachine = setup({
     parkWindowMilliseconds: input.parkWindowMilliseconds ?? projectSessionParkWindowMilliseconds,
     startBoundMilliseconds: input.startBoundMilliseconds ?? projectSessionStartBoundMilliseconds,
     closeFlushMilliseconds: input.closeFlushMilliseconds ?? projectSessionCloseFlushMilliseconds,
+    producerFlushMilliseconds: input.producerFlushMilliseconds ?? projectSessionProducerFlushMilliseconds,
+    flushes: {},
+    closeStep: undefined,
+    closeSteps: 0,
     runs: [],
     stoppableRuns: [],
     dirty: false,
@@ -636,6 +803,7 @@ export const projectSessionMachine = setup({
     revisionsRef: undefined,
     hostConnectorRef: undefined,
     presenceRef: undefined,
+    unloadRef: undefined,
     agentHostRef: undefined,
     computeRef: undefined,
     fault: undefined,
@@ -651,38 +819,42 @@ export const projectSessionMachine = setup({
       reportFacts({ ...context, ...patch }, enq);
       return { context: patch };
     },
-    /* The child reports each file manager it builds, and `undefined` when it closes one because the shared worker was
-     * lost or replaced or the child is stopping (A6c). A stopped child tells nothing more, and `stopChildren` clears
-     * the ref itself, so a report reaches only a session whose child runs. */
-    fileManagerChanged: ({ context, event, actors }, enq) => {
-      /* The `project` child builds the runtime on the session's file manager (A6d). */
-      if (context.projectRef !== undefined) {
-        enq.sendTo(context.projectRef, { type: 'fileManagerChanged', fileManagerRef: event.fileManagerRef });
+    fileManagerChanged: followFileManager,
+    /*
+     * A7c: a leave flush (focus's port, I3) or the unload's producer stage (the `unload` child, I6) asks the `project`
+     * child to write what its runtime owes, in every state. The answer is matched by id (I18) and bounded by a timer on
+     * the session's clock (I15); a session with no runtime child owes nothing and answers at once.
+     */
+    flushAsked: ({ context, event }, enq) => {
+      if (context.projectRef === undefined) {
+        const flushes = { ...context.flushes, [event.requestId]: event.kind };
+        return {
+          context:
+            settleAskedFlush({ ...context, flushes }, enq, { requestId: event.requestId, error: undefined }) ?? {},
+        };
       }
-      /* A7b: the revision client and the connector follow the file manager: the old one's go, the new one's start. */
-      for (const ref of [context.revisionsRef, context.hostConnectorRef]) {
-        if (ref !== undefined) {
-          enq.stop(ref);
-        }
+      if (context.flushes[event.requestId] !== undefined) {
+        return {}; // MC-R18: already asked under this id; its answer settles both.
       }
-      if (event.fileManagerRef === undefined) {
-        return { context: { fileManagerRef: undefined, revisionsRef: undefined, hostConnectorRef: undefined } };
-      }
-      const input: ProjectSessionFileManagerInput = {
-        projectId: context.projectId,
-        workspace: context.request?.workspace ?? '',
-        fileManagerRef: event.fileManagerRef,
-        syncProjectRoots: event.syncProjectRoots ?? (async () => undefined),
-      };
-      return {
-        context: {
-          fileManagerRef: event.fileManagerRef,
-          /* No fixed id: the next file manager's children start while the previous ones are being stopped. */
-          revisionsRef: enq.spawn(actors.revisions, { input }),
-          hostConnectorRef: enq.spawn(actors.hostConnector, { input }),
-        },
-      };
+      enq.sendTo(context.projectRef, { type: 'flushRuntime', requestId: event.requestId, kind: event.kind });
+      enq.raise(
+        { type: 'flushExpired', requestId: event.requestId },
+        { id: flushTimerId(event.requestId), delay: context.producerFlushMilliseconds },
+      );
+      return { context: { flushes: { ...context.flushes, [event.requestId]: event.kind } } };
     },
+    /* The `project` child's answer to an asked flush; `closing.flushingProducers` matches its own step first. */
+    runtimeFlushSettled: ({ context, event }, enq) => ({
+      context: settleAskedFlush(context, enq, { requestId: event.requestId, error: event.error }) ?? {},
+    }),
+    /* The writes ran past their bound: the flush is refused, and a later answer finds nothing to settle (MC-R18). */
+    flushExpired: ({ context, event }, enq) => ({
+      context: settleAskedFlush(context, enq, { requestId: event.requestId, error: producerFlushExpired }) ?? {},
+    }),
+    /* MC-R18: a close step's answer outside its step (the step failed, timed out or was left): nothing asks it now. */
+    syncQuiesced: () => ({}),
+    parametersClosed: () => ({}),
+    runtimeClosed: () => ({}),
     /* S1: the `project` child retries a deferred focused chat once the chats have arrived. */
     revisionChatsChanged: ({ context, event }, enq) => {
       if (context.projectRef !== undefined) {
@@ -790,6 +962,8 @@ export const projectSessionMachine = setup({
               computeRef: enq.spawn(actors.compute, { id: 'compute', input: { projectId: context.projectId } }),
               /* S4: visibility from `environment` and focus, with nothing mounted (A7b). */
               presenceRef: enq.spawn(actors.presence, { id: 'presence', input: { projectId: context.projectId } }),
+              /* A7c: registered once at the producer stage of `environment`'s sequencer (D26), with nothing mounted. */
+              unloadRef: enq.spawn(actors.unload, { id: 'unload', input: { projectId: context.projectId } }),
             },
           }),
           type: 'parallel',
@@ -924,41 +1098,156 @@ export const projectSessionMachine = setup({
             onError: closeFailed,
           },
         },
-        /* A producer refusal (unsaved parameter drafts, an uncertain write) leaves every resource
-         * intact, so the project stays live with the reason recorded and the close can be retried. */
+        /*
+         * S6: the `project` child flushes what its runtime owes (the producers and both stores), with nothing mounted. A
+         * refusal (an uncertain write, a conflict being recorded) or writes that run past their bound leave every
+         * resource intact, so the project stays live with the reason recorded and the close can be retried. Nothing
+         * here closes anything: the parameter service closes in the next step, which only a settled flush reaches.
+         */
         flushingProducers: {
-          invoke: {
-            src: 'flushProducers',
-            input: ({ context }) => ({ projectId: context.projectId }),
-            onDone: { target: 'flushing' },
+          entry: ({ context }, enq) => {
+            if (context.projectRef === undefined) {
+              return {};
+            }
+            const step = nextCloseStep(context);
+            enq.sendTo(context.projectRef, { type: 'flushRuntime', requestId: step.closeStep, kind: 'close' });
+            return { context: step };
+          },
+          /* A session whose runtime child is gone has nothing to flush. */
+          always: ({ context }) => (context.projectRef === undefined ? { target: 'closingParameters' } : undefined),
+          after: {
             /* A6e: a kernel change the close ignored while it ran is handed back with the session, which is live again;
              * the child replaces only a runtime whose kernel is no longer selected. */
-            onError: ({ context, event }, enq) => {
+            producerFlush: ({ context }, enq) => {
               handRuntimeReplacement({ context }, enq);
               return {
                 target: '#project-session.live',
-                context: { ...recordCloseFailure(context, event.error), closeReason: undefined },
+                context: {
+                  ...recordCloseFailure(context, producerFlushExpired),
+                  closeReason: undefined,
+                  closeStep: undefined,
+                },
+              };
+            },
+          },
+          on: {
+            runtimeFlushSettled: ({ context, event }, enq) => {
+              if (event.requestId !== context.closeStep) {
+                return {
+                  context: settleAskedFlush(context, enq, { requestId: event.requestId, error: event.error }) ?? {},
+                };
+              }
+              if (event.error === undefined) {
+                return { target: 'closingParameters', context: { closeStep: undefined } };
+              }
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: {
+                  ...recordCloseFailure(context, event.error),
+                  closeReason: undefined,
+                  closeStep: undefined,
+                },
               };
             },
           },
         },
-        /* W13's seam, called and never reimplemented: `close` → `pushSettled`
-         * or the durable queue write. R15: the bound that applies is W13's
-         * `syncQuiesceMilliseconds` inside the worker's `release()`; this
-         * passes `closeFlushMilliseconds` so a host whose flush has no bound of
-         * its own has one to honour, and imposes none itself. */
+        /*
+         * The parameter service closes (unsaved drafts refuse it), through the `project` child, once the writes it owes
+         * landed within their bound (round 1 of A7c's review). It has no bound of its own, as on main: an expired bound
+         * cannot leave a live session whose parameter service then closes under it. A refusal keeps the project live.
+         */
+        closingParameters: {
+          entry: ({ context }, enq) => {
+            if (context.projectRef === undefined) {
+              return {};
+            }
+            const step = nextCloseStep(context);
+            enq.sendTo(context.projectRef, { type: 'closeParameters', requestId: step.closeStep });
+            return { context: step };
+          },
+          always: ({ context }) => (context.projectRef === undefined ? { target: 'flushing' } : undefined),
+          on: {
+            close: ignoreCommittedClose,
+            parametersClosed: ({ context, event }, enq) => {
+              if (event.requestId !== context.closeStep) {
+                return {}; // MC-R18: not this step's answer.
+              }
+              if (event.error === undefined) {
+                return { target: 'flushing', context: { closeStep: undefined } };
+              }
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: {
+                  ...recordCloseFailure(context, event.error),
+                  closeReason: undefined,
+                  closeStep: undefined,
+                },
+              };
+            },
+          },
+        },
+        /* W13's seam, called and never reimplemented: the `revisions` child quiesces the client it opened, whose
+         * `close` waits for `pushSettled` or the durable queue write. R15: the bound that applies is W13's
+         * `syncQuiesceMilliseconds` inside the worker's `release()`, so this state imposes none of its own. */
         flushing: {
-          invoke: {
-            src: 'flushSync',
-            input: ({ context }) => ({
-              projectId: context.projectId,
-              boundMilliseconds: context.closeFlushMilliseconds,
+          entry: ({ context }, enq) => {
+            if (context.revisionsRef === undefined) {
+              return {};
+            }
+            const step = nextCloseStep(context);
+            enq.sendTo(context.revisionsRef, { type: 'quiesce', requestId: step.closeStep });
+            return { context: step };
+          },
+          /* No revision client was started (no file manager yet, or a registry composed without wiring). */
+          always: ({ context }) => (context.revisionsRef === undefined ? { target: 'closingRuntime' } : undefined),
+          on: {
+            close: ignoreCommittedClose,
+            syncQuiesced: ({ context, event }, enq) => {
+              if (event.requestId !== context.closeStep) {
+                return {}; // MC-R18: an earlier attempt's answer; this step asks under its own id.
+              }
+              return event.error === undefined
+                ? { target: 'closingRuntime', context: { closeStep: undefined } }
+                : closeFailed({ context, event: { error: event.error } }, enq);
+            },
+            /* A new file manager replaces the `revisions` child this step asked. The `fileManager` child reports the old
+             * one gone before the new one arrives, so the step re-enters with no client and the close goes on: the old
+             * child's teardown releases its client, and the worker's own release settles its sync (W13). A file manager
+             * swapped in one report re-asks the new child. */
+            fileManagerChanged: (args, enq) => ({
+              ...followFileManager(args, enq),
+              target: 'flushing',
+              reenter: true,
             }),
-            onDone: { target: 'releasingAgentHost' },
-            onError: closeFailed,
+          },
+        },
+        /* The runtime's kernels shut down before the agent host goes (`closeProjectRuntime`), through its child. */
+        closingRuntime: {
+          entry: ({ context }, enq) => {
+            if (context.projectRef === undefined) {
+              return {};
+            }
+            const step = nextCloseStep(context);
+            enq.sendTo(context.projectRef, { type: 'closeRuntime', requestId: step.closeStep });
+            return { context: step };
+          },
+          always: ({ context }) => (context.projectRef === undefined ? { target: 'releasingAgentHost' } : undefined),
+          on: {
+            close: ignoreCommittedClose,
+            runtimeClosed: ({ context, event }, enq) => {
+              if (event.requestId !== context.closeStep) {
+                return {}; // MC-R18: not this step's answer.
+              }
+              return event.error === undefined
+                ? { target: 'releasingAgentHost', context: { closeStep: undefined } }
+                : closeFailed({ context, event: { error: event.error } }, enq);
+            },
           },
         },
         releasingAgentHost: {
+          on: { close: ignoreCommittedClose },
           invoke: {
             src: 'releaseAgentHost',
             input: ({ context }) => ({ projectId: context.projectId }),

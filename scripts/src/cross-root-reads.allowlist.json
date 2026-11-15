@@ -75,6 +75,11 @@
     "reason": "reads another project's build output"
   },
   {
+    "file": "apps/desktop-e2e/src/desktop-acp-install.spec.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-arrange-workbench.spec.ts",
     "target": "packages/host/src/agent-tools.js",
     "reason": "imports another project's source by relative path instead of its package"
@@ -110,6 +115,11 @@
     "reason": "desktop e2e reuses a ui-e2e support module by relative path"
   },
   {
+    "file": "apps/desktop-e2e/src/desktop-kernel-skills.spec.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-native-payload.spec.ts",
     "target": "packages/plugins/gltf/src/fixtures/cube.glb",
     "reason": "test fixture read from another project"
@@ -133,6 +143,21 @@
     "file": "apps/desktop-e2e/src/filesystem-projection-retained.spec.ts",
     "target": "apps/ui/app/workbench-records/view-store.ts",
     "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/acp-install.test.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/acp-install.ts",
+    "target": "packages/host/src/acp/locate.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/acp-install.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
   },
   {
     "file": "apps/desktop-e2e/src/support/desktop-app.ts",

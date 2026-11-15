@@ -72,10 +72,6 @@ type ProjectContextType = {
   setViewEntryPath: (viewId: string, path: string | null | undefined) => void;
   entriesRecord: WorkbenchEntries | undefined;
   changeEntryPaths: (operation: EntryPathChange) => Promise<boolean>;
-  /** Add a producer to the runtime's producer set (`projectRuntime.producers`), which every flush walks (S40). */
-  registerWorkbenchRecordProducer: (flush: () => Promise<void>) => () => void;
-  /** Flush the runtime's producer set; rejects with every refusal. */
-  flushWorkbenchRecordProducers: () => Promise<void>;
   /** The project runtime this provider is a view of (A6b): its root, parameter service and producer set. */
   projectRuntime: ProjectRuntime;
   /** The ports every view's record session shares (charter G6b): the host flushes them on close. */
@@ -578,8 +574,6 @@ function ProjectRuntimeView({
       setViewEntryPath: viewRecords.setViewEntryPath,
       entriesRecord,
       changeEntryPaths,
-      registerWorkbenchRecordProducer: runtime.producers.register,
-      flushWorkbenchRecordProducers: runtime.producers.flushAll,
       projectRuntime: runtime,
       viewRecordPorts: viewRecords.ports,
       modelInteractionRef,

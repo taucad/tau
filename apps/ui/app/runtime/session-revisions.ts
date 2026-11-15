@@ -12,6 +12,7 @@
  * - the actor identity is sent on each change of the user, the workspace's anonymity, the account's salt or the
  *   project's GitHub binding;
  * - the close cut for the unload session stage is registered once, for the actor's whole life;
+ * - a close cut the unload could not finish is recorded as owed, and the next child for the project pays it (A7d);
  * - the client is told whether its project is the focused one, so only that one holds the long poll (RV-W5b F12).
  *
  * It gives the session its revision facts, which the session binding relayed from React before:
@@ -34,9 +35,10 @@
  * @module
  */
 import { createCallbackLogic } from 'xstate';
+import { randomUuid } from '@taucad/utils/id';
 import type { ActorRefFrom, CallbackActorLogic, EventObject } from 'xstate';
 import type { CheckoutRootConfig } from '@taucad/filesystem';
-import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { RevisionCommitAuthor, RevisionStatusProjection, RevisionUserActor } from '@taucad/revisions';
 import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh-hold';
@@ -100,6 +102,29 @@ export type SessionRevisionsRecordingPort = Readonly<{
   subscribe: (listener: () => void) => () => void;
 }>;
 
+/** Which project, in which workspace (B7), a close cut is owed for. */
+export type SessionRevisionsCloseDebtKey = Readonly<{ workspace: string; projectId: string }>;
+
+/**
+ * A close cut owed by a document that went before its cut answered (A7d, I6): who the closing document recorded as,
+ * so the next open cuts under the same person, and a token that says which record a payment settles.
+ */
+export type SessionRevisionsCloseDebt = Readonly<{
+  token: string;
+  actor: RevisionUserActor;
+  commitAuthor?: RevisionCommitAuthor;
+}>;
+
+/**
+ * Where owed close cuts are kept: storage that outlives the document and is written synchronously, because the
+ * unload's `pagehide` pass cannot await (D26). `clear` removes the record only while it still carries `token`.
+ */
+export type SessionRevisionsCloseDebtPort = Readonly<{
+  read: (key: SessionRevisionsCloseDebtKey) => SessionRevisionsCloseDebt | undefined;
+  write: (key: SessionRevisionsCloseDebtKey, debt: SessionRevisionsCloseDebt) => void;
+  clear: (key: SessionRevisionsCloseDebtKey, token: string) => void;
+}>;
+
 /** What the session's composition supplies: the parts of the ports that are not module stores. */
 export type SessionRevisionsWiring = Readonly<{
   closeCut: SessionRevisionsCloseCutPort;
@@ -116,6 +141,8 @@ export type SessionRevisionsPorts = SessionRevisionsWiring &
     anonymity: SessionRevisionsAnonymityPort;
     salt: SessionRevisionsSaltPort;
     recording: SessionRevisionsRecordingPort;
+    /** Close cuts owed across documents (A7d). */
+    closeDebt: SessionRevisionsCloseDebtPort;
     /** Where a failure in a teardown goes, so the session is not faulted by a cleanup (D23). */
     reportFault: (error: unknown) => void;
   }>;
@@ -168,9 +195,85 @@ const runIsolated = (steps: ReadonlyArray<(() => void) | undefined>, reportFault
   }
 };
 
+/** The `localStorage` key prefix of an owed close cut; the workspace and the project follow it. */
+export const closeDebtStorageKeyPrefix = 'tau-revision-close-owed:';
+
+const closeDebtStorageKey = ({ workspace, projectId }: SessionRevisionsCloseDebtKey): string =>
+  `${closeDebtStorageKeyPrefix}${workspace}:${projectId}`;
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null;
+
+/** A stored record read back, or `undefined` for anything that is not one (another build's shape, a hand edit). */
+const closeDebtOf = (stored: string | undefined): SessionRevisionsCloseDebt | undefined => {
+  if (stored === undefined) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || typeof parsed['token'] !== 'string' || !isRecord(parsed['actor'])) {
+    return undefined;
+  }
+  const { actor, commitAuthor } = parsed;
+  if (
+    actor['kind'] !== 'user' ||
+    typeof actor['id'] !== 'string' ||
+    (actor['name'] !== undefined && typeof actor['name'] !== 'string') ||
+    (actor['anonymous'] !== undefined && actor['anonymous'] !== true)
+  ) {
+    return undefined;
+  }
+  const author =
+    isRecord(commitAuthor) && typeof commitAuthor['name'] === 'string' && typeof commitAuthor['email'] === 'string'
+      ? { name: commitAuthor['name'], email: commitAuthor['email'] }
+      : undefined;
+  return {
+    token: parsed['token'],
+    actor: actor as RevisionUserActor,
+    ...(author === undefined ? {} : { commitAuthor: author }),
+  };
+};
+
+/**
+ * Owed close cuts in this browser's `localStorage` (A7d): it outlives the document, its writes are synchronous, and
+ * every tab of the origin reads the same records. Storage that refuses (a private window, a full quota) owes nothing.
+ *
+ * @public
+ */
+export const sessionRevisionsCloseDebt: SessionRevisionsCloseDebtPort = {
+  read: (key) => {
+    try {
+      return closeDebtOf(globalThis.localStorage.getItem(closeDebtStorageKey(key)) ?? undefined);
+    } catch {
+      return undefined;
+    }
+  },
+  write: (key, debt) => {
+    try {
+      globalThis.localStorage.setItem(closeDebtStorageKey(key), JSON.stringify(debt));
+    } catch {
+      /* Nothing to keep it in: the next cut still records what is on disk. */
+    }
+  },
+  clear: (key, token) => {
+    try {
+      const storageKey = closeDebtStorageKey(key);
+      if (closeDebtOf(globalThis.localStorage.getItem(storageKey) ?? undefined)?.token === token) {
+        globalThis.localStorage.removeItem(storageKey);
+      }
+    } catch {
+      /* See `write`. */
+    }
+  },
+};
+
 /**
  * Build the real ports over the module stores: the published session user, the workspace's anonymity, the account's
- * salt and the editor's conflict records. The composition supplies the rest.
+ * salt, the editor's conflict records and the owed close cuts. The composition supplies the rest.
  *
  * @param wiring - The close-cut registration, the focused project, the chat store's facts and the fault report.
  * @returns The ports.
@@ -184,6 +287,7 @@ export const createSessionRevisionsPorts = (
   anonymity: { get: getAnonymousRevisions, subscribe: subscribeAnonymousRevisions },
   salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
   recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
+  closeDebt: sessionRevisionsCloseDebt,
 });
 
 /**
@@ -241,6 +345,8 @@ export const sessionRevisionsCallback =
   (ports: SessionRevisionsPorts): SessionRevisionsCallback =>
   ({ input, sendBack, receive }) => {
     const { projectId, workspace, fileManagerRef, syncProjectRoots } = input;
+    /* The session's own workspace (B7): a debt is owed and paid there only. */
+    const debtKey: SessionRevisionsCloseDebtKey = { workspace, projectId };
 
     /* What the hook reads in render, kept current by the subscriptions below. */
     let user = ports.sessionUser.get();
@@ -283,15 +389,28 @@ export const sessionRevisionsCallback =
       ports.salt.request({ workspace, userId });
     };
 
+    /* Who the client records as now: what a close cut this document cannot finish is owed under (A7d). */
+    let recordsAs: Omit<SessionRevisionsCloseDebt, 'token'> | undefined;
+    /* While an owed close cut is paid, the client records as the closing document did, and the live actor waits. */
+    let paying = false;
+
+    const sendActorAs = (target: RevisionClient, as: Omit<SessionRevisionsCloseDebt, 'token'>): void => {
+      recordsAs = as;
+      target.send({
+        command: 'setActor',
+        actor: as.actor,
+        ...(as.commitAuthor === undefined ? {} : { commitAuthor: as.commitAuthor }),
+      });
+    };
+
     const sendActor = (): void => {
-      if (client === undefined) {
+      if (client === undefined || paying) {
         return;
       }
       actorSentFor = { user, anonymous, salt };
       /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
       const commitAuthor = githubProjectBinding.get(projectId)?.author;
-      client.send({
-        command: 'setActor',
+      sendActorAs(client, {
         actor: revisionUserActor({ workspace, user, anonymous, salt }),
         ...(commitAuthor === undefined ? {} : { commitAuthor }),
       });
@@ -439,9 +558,64 @@ export const sessionRevisionsCallback =
       })();
     };
 
+    /* The stop, set below; read by an owed cut's answer, which may come after it. */
+    let stopped = false;
+    /* A close cut an earlier document owed, read when this client connected and not yet asked for (A7d). */
+    let owedFor: Readonly<{ target: RevisionClient; owed: SessionRevisionsCloseDebt }> | undefined;
+
+    /*
+     * A7d (I6, S26): the close cut an earlier document owed, the client's first cut. It is asked for once the checkout
+     * registry has answered (`registrySettled`), since a cut asked of a root with no checkout yet records nothing. For
+     * the cut alone the client records as the closing document did, and the live actor waits for the answer. Only
+     * that answer settles the record, and only while it carries the token read: a client closed first leaves it to
+     * the next open, and a newer record written meanwhile is kept. The checkout's I5 gate mints nothing for a record
+     * that outlived a cut that landed.
+     */
+    const payDebt = (): void => {
+      const pending = owedFor;
+      if (pending === undefined || pending.target !== client || pending.target.status()?.registrySettled !== true) {
+        return;
+      }
+      owedFor = undefined;
+      const { target, owed } = pending;
+      paying = true;
+      actorSentFor = undefined;
+      sendActorAs(target, {
+        actor: owed.actor,
+        ...(owed.commitAuthor === undefined ? {} : { commitAuthor: owed.commitAuthor }),
+      });
+      // async-iife: bootstrap -- the cut's answer settles the record.
+      void (async (): Promise<void> => {
+        let paid = false;
+        try {
+          await target.saveRevision('close');
+          paid = true;
+        } catch {
+          /* The connection closed first: the debt stays for the next open. */
+        }
+        if (paid) {
+          runIsolated(
+            [
+              () => {
+                ports.closeDebt.clear(debtKey, owed.token);
+              },
+            ],
+            ports.reportFault,
+          );
+        }
+        if (client === target) {
+          paying = false;
+          if (!stopped) {
+            sendActor();
+          }
+        }
+      })();
+    };
+
     const followStatus = (): void => {
       relayFacts();
       followCheckout();
+      payDebt();
     };
 
     /* Tear down the current client in the hook's cleanup order: the hold, the connection, the actor's binding. */
@@ -456,6 +630,7 @@ export const sessionRevisionsCallback =
       unsubscribeBinding = undefined;
       unsubscribeStatus = undefined;
       actorSentFor = undefined;
+      recordsAs = undefined;
       runIsolated([hold, connection, binding, statusSubscription], ports.reportFault);
     };
 
@@ -473,6 +648,8 @@ export const sessionRevisionsCallback =
         return;
       }
       releaseClient();
+      paying = false;
+      owedFor = undefined;
       if (client === undefined) {
         followStatus();
         return;
@@ -483,6 +660,9 @@ export const sessionRevisionsCallback =
       current.send({ command: 'setDeviceId', deviceId: deviceId() });
       closeConnection = connect(current);
       sendActor();
+      /* A7d: a close cut an earlier document owed for this project is this client's first cut. */
+      const owed = ports.closeDebt.read(debtKey);
+      owedFor = owed === undefined ? undefined : { target: current, owed };
       /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
       unsubscribeBinding = githubProjectBinding.subscribe(sendActor);
       /* RV-W5b F12: only the focused project holds its revision long poll; one that gains focus pulls once open. */
@@ -501,11 +681,29 @@ export const sessionRevisionsCallback =
       if (current === undefined) {
         return;
       }
+      /*
+       * A7d: the cut is owed until it answers, and the record is written before anything is asked, synchronously: on a
+       * reload `pagehide` comes before `hidden`, and the worker goes with the document before the cut can land.
+       */
+      const owedToken = owe();
       if (phase === 'hidden') {
         await current.saveRevision('close');
+        if (owedToken !== undefined) {
+          ports.closeDebt.clear(debtKey, owedToken);
+        }
         return;
       }
       current.send({ command: 'flushKeepalive' });
+    };
+
+    /* Record the close cut as owed under who the client records as; nothing is owed before the actor is sent. */
+    const owe = (): string | undefined => {
+      if (recordsAs === undefined) {
+        return undefined;
+      }
+      const token = randomUuid();
+      ports.closeDebt.write(debtKey, { token, ...recordsAs });
+      return token;
     };
 
     /*
@@ -513,7 +711,6 @@ export const sessionRevisionsCallback =
      * quiesces (`close` → `pushSettled` or the durable queue write, bounded inside the worker); no client, nothing to
      * settle. A child stopped meanwhile answers nothing: the session has moved on.
      */
-    let stopped = false;
     receive((event) => {
       const current = client;
       const settle = async (): Promise<void> => {

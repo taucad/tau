@@ -1241,6 +1241,29 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     third.session.stop();
   });
 
+  it('should keep the debt through a hidden cut asked before the registry answered', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    log.length = 0;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: ada,
+      prepare: (client) => {
+        client.setStatus({ registrySettled: false });
+      },
+    });
+    const [cut] = next.fake.cuts;
+    await cut?.('hidden');
+    expect(debts.port.read(adaKey)).toBeDefined();
+    next.client.setStatus({ registrySettled: true });
+    await settle();
+    expect(cuts(log)).toEqual(['b:saveRevision:close', 'b:saveRevision:close']);
+    expect(debts.port.read(adaKey)).toBeUndefined();
+    next.session.stop();
+  });
+
   it('should owe nothing once the close cut has answered, so the next open takes no cut', async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();

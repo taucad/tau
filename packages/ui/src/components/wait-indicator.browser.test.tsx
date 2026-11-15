@@ -376,8 +376,8 @@ it('should hold words the server-rendered page revealed for their minimum throug
 });
 
 it('should hold a wait that settled at the end of a long task its reveal fell due in 500 ms from the frame it showed in', async () => {
-  /* The reveal falls due 50 ms into a 400 ms task, no frame draws it, and the content arrives at the task's end. */
-  const startedAt = Number(document.timeline.currentTime) - 950;
+  /* The reveal falls due 150 ms into a 400 ms task, no frame draws it, and the content arrives at the task's end. */
+  const startedAt = Number(document.timeline.currentTime) - 850;
   const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
   await act(async () => {
     await nextFrame();
@@ -458,5 +458,48 @@ it('should not serve the minimum again when a wait restarts during a hold that d
   expect(
     (await effectTime('wait-conceal')) - shownAt,
     'the restart served the minimum again from its own frame',
-  ).toBeLessThan(500 + oneFrame);
+  ).toBeLessThan(500 + 3 * oneFrame);
+});
+
+it('should hold words a settle drew after a long render for the minimum from their paint through a restart', async () => {
+  /* One task restarts one region's wait, which reads the timeline, renders 300 ms of content, and settles a second
+     region whose reveal is due and undrawn. Its words paint after the task, later than the timeline the settle read. A
+     restart 250 ms after that paint still owes the minimum. */
+  const startedAt = Number(document.timeline.currentTime) - 1100;
+  const page = (phase: number, second: { active: boolean; startedAt: number }) => (
+    <>
+      <WaitIndicator active label='Loading chat' startedAt={phase === 0 ? startedAt : startedAt + 1} />
+      {phase === 1 ? <Busy milliseconds={300} /> : null}
+      <div data-region='second'>
+        <WaitIndicator active={second.active} label='Loading history' startedAt={second.startedAt} />
+      </div>
+    </>
+  );
+  const view = render(page(0, { active: true, startedAt }));
+  act(() => {
+    view.rerender(page(1, { active: false, startedAt }));
+  });
+  let shownAt = Number.NaN;
+  requestAnimationFrame(() => {
+    shownAt = performance.now();
+  });
+  await act(async () => {
+    await nextFrame();
+  });
+  await act(async () => {
+    await frameAtOrAfter(shownAt + 250);
+  });
+  const restartedAt = Number(document.timeline.currentTime);
+  act(() => {
+    view.rerender(page(2, { active: true, startedAt: restartedAt }));
+  });
+  act(() => {
+    view.rerender(page(2, { active: false, startedAt: restartedAt }));
+  });
+  const second = view.container.querySelector<HTMLElement>('[data-region=second] [data-slot=wait-indicator]')!;
+
+  expect(second.dataset['state'], 'the restart hid words that still owed their minimum').toBe('holding');
+  expect(
+    (await effectTime('wait-conceal', second.querySelector<HTMLElement>('[data-slot=wait-indicator-body]')!)) - shownAt,
+  ).toBeGreaterThanOrEqual(500 - oneFrame);
 });

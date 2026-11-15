@@ -69,7 +69,7 @@ describe('session file check (A14)', () => {
   });
 
   it('should count a check that replaces a running one from zero, and report it under its own id', () => {
-    const { actor, clock, reports } = harness();
+    const { actor, clock, guard, reports } = harness();
     actor.send({ type: 'checkStarted', check: 1 });
     clock.advance(modelCheckPatienceMilliseconds - 1);
     actor.send({ type: 'checkStarted', check: 2 });
@@ -80,10 +80,11 @@ describe('session file check (A14)', () => {
     clock.advance(1);
 
     expect(reports).toEqual([{ type: 'fileCheckSlow', check: 2 }]);
+    expect(guard.take()).toEqual([]);
   });
 
   it('should count again for a check that starts after a slow one', () => {
-    const { actor, clock, reports } = harness();
+    const { actor, clock, guard, reports } = harness();
     actor.send({ type: 'checkStarted', check: 1 });
     clock.advance(modelCheckPatienceMilliseconds);
     actor.send({ type: 'checkStarted', check: 2 });
@@ -96,6 +97,7 @@ describe('session file check (A14)', () => {
       { type: 'fileCheckSlow', check: 1 },
       { type: 'fileCheckSlow', check: 2 },
     ]);
+    expect(guard.take()).toEqual([]);
   });
 });
 

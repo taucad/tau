@@ -364,8 +364,9 @@ export const sessionRevisionsCallback =
      */
     let relayedFor: Readonly<{ status: RevisionStatusProjection; recording: boolean }> | undefined;
     let chatsReady = false;
-    /* A14: the file check, told on each change; the session starts this client's check as pending. */
-    let fileCheckSettled = false;
+    /* A14: the file check, told on its first word and on each change after it. The session starts this client's
+     * check as pending; the first word always goes out, so a word the session got from before cannot stand. */
+    let fileCheckSettled: boolean | undefined;
     const relayFileCheck = (status: RevisionStatusProjection | undefined): void => {
       const settled = isFileCheckSettled(status, cloudOpen);
       if (settled !== fileCheckSettled) {

@@ -893,22 +893,27 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     session.start();
     await settle();
 
-    /* No worker, so no client and nothing published: the session's pending stands. */
-    expect(fileChecks(received)).toEqual([]);
+    /* No worker, so no client and nothing published: the first word is pending, as the session already holds, so a
+     * word it got from before cannot stand. */
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false }]);
 
     client.setStatus({ readiness: 'materialized' });
     fileManager.set({ worker: workerA });
     await settle();
-    /* Published, but the fill has not answered for this tree: the model is checking its files. */
-    expect(fileChecks(received)).toEqual([]);
+    /* Published, but the fill has not answered for this tree: the model is checking its files, a repeat. */
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false }]);
 
     client.setStatus({ readiness: 'filled' });
-    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: true }]);
+    expect(fileChecks(received)).toEqual([
+      { type: 'fileCheckChanged', settled: false },
+      { type: 'fileCheckChanged', settled: true },
+    ]);
 
     /* A later check returns it to pending; a repeat says nothing. */
     client.setStatus({ readiness: 'materialized' });
     client.setStatus({ projectDirty: true });
     expect(fileChecks(received)).toEqual([
+      { type: 'fileCheckChanged', settled: false },
       { type: 'fileCheckChanged', settled: true },
       { type: 'fileCheckChanged', settled: false },
     ]);

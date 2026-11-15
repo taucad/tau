@@ -87,7 +87,7 @@ const harness = () => {
 
 describe('the session file check (A14)', () => {
   it('should be pending in its live report when its revisions child has said nothing yet', () => {
-    const { actor, reports, revisions } = harness();
+    const { actor, guard, reports, revisions } = harness();
 
     expect(actor.getSnapshot().matches('live')).toBe(true);
     expect(revisions).toHaveLength(1);
@@ -97,10 +97,11 @@ describe('the session file check (A14)', () => {
     expect(reports().filter((report) => report.state === 'live' && report.availability === 'settled')).toEqual([]);
     expect(reports().at(-1)).toEqual({ state: 'live', availability: 'pending' });
     actor.stop();
+    expect(guard.take()).toEqual([]);
   });
 
   it('should settle, return to pending on a later check, and say nothing for a repeat', () => {
-    const { actor, report, reports } = harness();
+    const { actor, guard, report, reports } = harness();
     report(true);
     report(true);
 
@@ -112,6 +113,7 @@ describe('the session file check (A14)', () => {
 
     expect(reports().slice(settledReports)).toEqual([{ state: 'live', availability: 'pending' }]);
     actor.stop();
+    expect(guard.take()).toEqual([]);
   });
 
   it('should turn slow at the check patience on the clock, and settle from slow', () => {
@@ -132,7 +134,7 @@ describe('the session file check (A14)', () => {
   });
 
   it('should count a new revision client from zero, so the patience of the one it replaced never makes it slow', () => {
-    const { actor, clock, rebuild, reports } = harness();
+    const { actor, guard, clock, rebuild, reports } = harness();
     clock.advance(modelCheckPatienceMilliseconds - 1);
     rebuild();
     clock.advance(modelCheckPatienceMilliseconds - 1);
@@ -147,10 +149,11 @@ describe('the session file check (A14)', () => {
     rebuild();
     expect(reports().at(-1)).toEqual({ state: 'live', availability: 'pending' });
     actor.stop();
+    expect(guard.take()).toEqual([]);
   });
 
   it('should drop a slow report about a check it has moved past (MC-R18)', () => {
-    const { actor, report } = harness();
+    const { actor, guard, report } = harness();
     const { fileCheckId } = actor.getSnapshot().context;
 
     actor.send({ type: 'fileCheckSlow', check: fileCheckId - 1 });
@@ -160,14 +163,16 @@ describe('the session file check (A14)', () => {
     actor.send({ type: 'fileCheckSlow', check: actor.getSnapshot().context.fileCheckId });
     expect(actor.getSnapshot().context.availability).toBe('settled');
     actor.stop();
+    expect(guard.take()).toEqual([]);
   });
 
   it('should stop its patience child with its other children', () => {
-    const { actor } = harness();
+    const { actor, guard } = harness();
     const child = actor.getSnapshot().context.fileCheckRef;
     expect(child?.getSnapshot().status).toBe('active');
 
     actor.stop();
+    expect(guard.take()).toEqual([]);
 
     expect(child?.getSnapshot().status).toBe('stopped');
   });

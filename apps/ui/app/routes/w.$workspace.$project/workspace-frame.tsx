@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
-import { frameHintKey, frameHintVariables, readWideFrameHint } from '#lib/frame-hint.js';
+import { defaultWideFrameHint, frameHintKey, frameHintVariables, readWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 
 /** The value never changes on its own: the frame reads the hint when it renders, which a navigation causes. */
@@ -11,10 +11,14 @@ const subscribeToNothing = (): (() => void) => {
 /** The server has no hint: the pre-paint script's variables on `<html>` stand until the client renders. */
 const noHintOnServer = (): undefined => undefined;
 
-/** The hint for the document's current URL. A client navigation has pushed the URL before the frame renders for it. */
-const readDocumentFrameHint = (): WideFrameHint | undefined => {
+/**
+ * The hint for the document's current URL, or the default layout when this device has none. A client navigation has
+ * pushed the URL before the frame renders for it. The default is set explicitly on the client, so a project with no
+ * hint never inherits the variables the pre-paint script left on `<html>` for the project the document first loaded.
+ */
+const readDocumentFrameHint = (): WideFrameHint => {
   const key = frameHintKey(globalThis.location.pathname);
-  return key === undefined ? undefined : readWideFrameHint(key);
+  return (key === undefined ? undefined : readWideFrameHint(key)) ?? defaultWideFrameHint;
 };
 
 /**
@@ -70,6 +74,9 @@ export function WorkspaceFrame({
         '@container size-full bg-background md:relative md:isolate',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
+        /* A failure that stands in the content region in the workspace's place (the file service's, the route
+         * chunk's) shows alone, as it did before the frame: no lane or composer box under it. */
+        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
       )}
       style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
     >

@@ -48,8 +48,8 @@ const recordFirstPaint = (): void => {
         element.textContent.includes('Loading editor…') &&
         element.closest('[data-slot="editor-pane-placeholder"]') === null,
     );
-    /* From A15b the workspace frame stands where the skeleton stood. */
-    const skeleton = document.querySelector('[data-slot="workspace-frame"]') !== null;
+    /* From A15b the workspace frame's lanes stand where the skeleton stood, until the split view takes their boxes. */
+    const skeleton = document.querySelector('[data-slot="workspace-frame-lanes"]')?.checkVisibility() === true;
     const editor = document.querySelector('.cm-editor .cm-content') !== null;
     const next: FirstPaintSample = {
       path: location.pathname,

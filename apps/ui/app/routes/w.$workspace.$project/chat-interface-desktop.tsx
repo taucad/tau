@@ -117,6 +117,24 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     }
   }, []);
 
+  /* A composer focus asked for by the navigation (`focusChatComposer`) runs when the chat lane mounts, while the panes
+   * are still unrendered and cannot take focus. It is given again in the commit that reveals them. */
+  useLayoutEffect(() => {
+    const state = globalThis.history.state as { usr?: { focusChatComposer?: unknown } } | undefined;
+    if (!areLanesLaidOut || state?.usr?.focusChatComposer !== true) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) {
+      return;
+    }
+    containerRef.current
+      ?.querySelector<HTMLElement>(
+        '[aria-label="Ask Tau to build anything..."][contenteditable="true"], textarea[aria-label="Chat message"]',
+      )
+      ?.focus();
+  }, [areLanesLaidOut]);
+
   /* Allotment sizes the panes it adds at their preferred widths before it applies `visible`, so a
    * hidden workbench still takes its width on the first layout and squeezes the chat lane to its
    * minimum (280 px rather than 320 px at a 1056 px workspace). Once that first layout lands, the chat

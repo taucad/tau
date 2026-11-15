@@ -9,6 +9,8 @@ const send = vi.fn();
 const setWorkbenchOpen = vi.hoisted(() => vi.fn());
 const sidebar = vi.hoisted(() => ({ open: true }));
 const renderViewer = vi.hoisted(() => vi.fn());
+/* Whether the mocked split view reports its first layout, as the native one does once it has measured. */
+const splitView = vi.hoisted(() => ({ laysOut: false }));
 const desktopLayout = {
   chatOpen: true,
   workbenchOpen: true,
@@ -32,7 +34,9 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
 }));
 vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
   ChatHistory: ({ className }: { readonly className?: string }) => (
-    <div className={className} data-testid='chat-lane' />
+    <div className={className} data-testid='chat-lane'>
+      <textarea aria-label='Chat message' />
+    </div>
   ),
 }));
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
@@ -56,7 +60,8 @@ vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('allotment', () => {
+vi.mock('allotment', async () => {
+  const { useLayoutEffect } = await import('react');
   const Pane = ({
     children,
     visible = true,
@@ -67,11 +72,25 @@ vi.mock('allotment', () => {
     </div>
   );
   const Allotment = Object.assign(
-    ({ children, className }: React.PropsWithChildren<{ readonly className?: string }>) => (
-      <div data-testid='allotment' className={className}>
-        {children}
-      </div>
-    ),
+    ({
+      children,
+      className,
+      onChange,
+    }: React.PropsWithChildren<{
+      readonly className?: string;
+      readonly onChange?: (sizes: number[]) => void;
+    }>) => {
+      useLayoutEffect(() => {
+        if (splitView.laysOut) {
+          onChange?.([320, 500, 420]);
+        }
+      }, [onChange]);
+      return (
+        <div data-testid='allotment' className={className}>
+          {children}
+        </div>
+      );
+    },
     { Pane },
   );
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
@@ -144,6 +163,7 @@ describe('ChatInterfaceDesktop', () => {
     desktopLayout.workbenchOpen = true;
     desktopLayout.compactAuxiliary = 'chat';
     editorState.isReady = true;
+    splitView.laysOut = false;
     sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
@@ -275,6 +295,50 @@ describe('ChatInterfaceDesktop', () => {
     expect(workspace?.innerHTML).not.toMatch(/animate-in|fade-in/u);
     expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
     expect(lanes.className).not.toMatch(/animate-|fade-/u);
+  });
+
+  it('C4: the split view lays out under the same frame, which then marks the lanes ready and reveals the panes', async () => {
+    splitView.laysOut = true;
+    renderDesktop();
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
+    const lanes = await screen.findByTestId('allotment');
+
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-workspace-lanes', 'ready');
+    expect(lanes.className).not.toContain('content-visibility');
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
+    expect(frame?.className).toContain(
+      '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
+    );
+  });
+
+  it('holds the panes unrendered until the split view has laid them out', async () => {
+    renderDesktop();
+    const lanes = await screen.findByTestId('allotment');
+
+    expect(lanes.className).toContain('[&_.split-view-container]:[content-visibility:hidden]');
+  });
+
+  /* Review round 1: the chat lane's mount-time composer focus lands while the panes are unrendered, where nothing can
+   * take focus, so it is given again when they are revealed. */
+  it('gives a navigation-requested composer focus when the panes are revealed', async () => {
+    splitView.laysOut = true;
+    globalThis.history.replaceState({ usr: { focusChatComposer: true } }, '');
+    try {
+      renderDesktop();
+      await screen.findByTestId('allotment');
+
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
+    } finally {
+      globalThis.history.replaceState(null, '');
+    }
+  });
+
+  it('leaves focus alone when the navigation asked for none', async () => {
+    splitView.laysOut = true;
+    renderDesktop();
+    await screen.findByTestId('allotment');
+
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

@@ -93,12 +93,34 @@ describe('WorkspaceFrame', () => {
     expect(lane(frame, 'chat').className).toContain('w-(--frame-chat-width,320px)');
   });
 
-  it('falls back to the default layout in CSS for a project with no hint', () => {
+  it('falls back to the default layout for a project with no hint', () => {
     const frame = renderFrame('/w/home/unknown');
 
-    expect(frame.getAttribute('style')).toBeNull();
+    expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('flex');
+    expect(frame.style.getPropertyValue('--frame-chat-width')).toBe('320px');
     expect(lane(frame, 'workbench').className).toContain('[display:var(--frame-workbench-display,flex)]');
     expect(lane(frame, 'chat').className).toContain('[display:var(--frame-chat-display,flex)]');
+  });
+
+  /* Review round 1: the pre-paint script's variables stay on <html> for the document's life, so a client navigation to
+   * a project with no hint must set the defaults on the frame rather than inherit the first project's layout. */
+  it('does not inherit the variables the pre-paint script left for another project', () => {
+    document.documentElement.style.setProperty('--frame-workbench-display', 'none');
+    try {
+      const frame = renderFrame('/w/home/unknown');
+
+      expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('flex');
+    } finally {
+      document.documentElement.style.removeProperty('--frame-workbench-display');
+    }
+  });
+
+  it("draws no lanes under a failure that stands in the workspace's place, and keeps them under a live workspace alert", () => {
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.className).toContain(
+      '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+    );
   });
 
   it('renders no variables on the server, where the pre-paint script owns them', () => {

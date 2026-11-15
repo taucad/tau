@@ -25,7 +25,7 @@ const runScriptAt = (pathname: string): Record<string, string> => {
   globalThis.history.replaceState(null, '', pathname);
   const script = document.createElement('script');
   script.textContent = buildFrameHintScript();
-  /* jsdom runs an inline script as the document head would; the script is the unit under test. */
+  /* In jsdom an inline script runs as the document head would; the script is the unit under test. */
   document.head.append(script);
   script.remove();
   const { style } = document.documentElement;
@@ -114,6 +114,26 @@ describe('frame hint', () => {
     }
   });
 
+  it('writes over a version-1 record holding a malformed entry, dropping that entry', () => {
+    globalThis.localStorage.setItem(
+      frameHintStorageKey,
+      JSON.stringify({
+        v: 1,
+        projects: { 'home/x': null, 'home/y': { usedAt: 1, wide: workbenchClosed }, 'home/z': { usedAt: 'a' } },
+      }),
+    );
+
+    expect(() => {
+      writeWideFrameHint('home/one', workbenchClosed);
+    }).not.toThrow();
+    expect(readWideFrameHint('home/one')).toEqual(workbenchClosed);
+    expect(readWideFrameHint('home/y')).toEqual(workbenchClosed);
+    const stored = JSON.parse(globalThis.localStorage.getItem(frameHintStorageKey)!) as {
+      projects: Record<string, unknown>;
+    };
+    expect(Object.keys(stored.projects).toSorted()).toEqual(['home/one', 'home/y']);
+  });
+
   it('reads back what it wrote, as the same object until the record changes', () => {
     writeWideFrameHint('home/one', workbenchClosed);
     const first = readWideFrameHint('home/one');
@@ -129,7 +149,9 @@ describe('frame hint', () => {
 
     expect(readWideFrameHint('home/p0')).toBeUndefined();
     expect(readWideFrameHint(`home/p${frameHintProjectLimit}`)).toEqual(workbenchClosed);
-    const stored = JSON.parse(globalThis.localStorage.getItem(frameHintStorageKey)!) as { projects: object };
+    const stored = JSON.parse(globalThis.localStorage.getItem(frameHintStorageKey)!) as {
+      projects: Record<string, unknown>;
+    };
     expect(Object.keys(stored.projects)).toHaveLength(frameHintProjectLimit);
   });
 });

@@ -78,6 +78,13 @@ const isWideFrameHint = (value: unknown): value is WideFrameHint => {
   );
 };
 
+/** A stored entry the writer may keep: an object with a numeric `usedAt` and a valid wide layout. */
+const isFrameHintEntry = (value: unknown): value is FrameHintEntry =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as Record<string, unknown>)['usedAt'] === 'number' &&
+  isWideFrameHint((value as Record<string, unknown>)['wide']);
+
 /** The lane that keeps its place beside the viewer below the compact width (`resolveCompactAuxiliary`). */
 const compactLane = (wide: WideFrameHint): 'chat' | 'workbench' | undefined => {
   const preferred = wide.compactAuxiliary;
@@ -192,8 +199,9 @@ export const writeWideFrameHint = (key: string, wide: WideFrameHint, now: number
       compactAuxiliary: wide.compactAuxiliary,
     },
   };
-  const kept = Object.entries(record?.projects ?? {})
-    .filter(([other]) => other !== key)
+  /* A malformed entry is dropped here, as the readers ignore it, rather than failing the write. */
+  const kept = Object.entries((record?.projects ?? {}) as Record<string, unknown>)
+    .filter((entry): entry is [string, FrameHintEntry] => entry[0] !== key && isFrameHintEntry(entry[1]))
     .toSorted(([, left], [, right]) => right.usedAt - left.usedAt)
     .slice(0, frameHintProjectLimit - 1);
   const next: FrameHintRecord = { v: 1, projects: Object.fromEntries([[key, entry], ...kept]) };

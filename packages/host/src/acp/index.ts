@@ -9,7 +9,17 @@ export {
   probeAcpAgents,
   resolveAcpAdapters,
 } from '#acp/registry.js';
-export type { AcpAdapter, AcpAdapterRefusal, AcpAgentDiscovery, AcpAgentProfile } from '#acp/registry.js';
+export type {
+  AcpAdapter,
+  AcpAdapterRefusal,
+  AcpAgentDiscovery,
+  AcpAgentProfile,
+  AcpShellCommand,
+  AcpSupportedPlatform,
+  ReviewedAcpAgentProfile,
+} from '#acp/registry.js';
+export { resolveAcpAdapterExecutable } from '#acp/locate.js';
+export type { AcpExecutableFileSystem } from '#acp/locate.js';
 export {
   acpAdapterEnvironment,
   acpEnvironmentAllowlist,

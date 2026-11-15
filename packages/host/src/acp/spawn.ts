@@ -23,6 +23,9 @@ import { Readable, Writable } from 'node:stream';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import type { Stream } from '@agentclientprotocol/sdk';
 
+import { isRecord } from '@taucad/utils/schema';
+
+import { resolveAcpAdapterExecutable } from '#acp/locate.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
 /**
@@ -132,12 +135,48 @@ export type SpawnedAcpAdapter = {
 };
 
 /**
+ * The adapter with its CLI located again if a fallback it was found at is gone.
+ *
+ * @param adapter - The resolved adapter.
+ * @param environment - Environment whose `PATH` and home to search.
+ * @returns The adapter to spawn, or the vanished file and why, when its CLI is nowhere now.
+ */
+const locatedAgain = (
+  adapter: AcpAdapter,
+  environment: NodeJS.ProcessEnv,
+):
+  | { readonly adapter: AcpAdapter; readonly missing?: undefined }
+  | { readonly adapter: AcpAdapter; readonly missing: { readonly path: string; readonly reason: string } } => {
+  try {
+    return { adapter: resolveAcpAdapterExecutable(adapter, { environment }) };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      isRecord(error) &&
+      error['code'] === 'CLI_NOT_FOUND' &&
+      adapter.executablePath !== undefined
+    ) {
+      return { adapter, missing: { path: adapter.executablePath, reason: `CLI_NOT_FOUND: ${error.message}` } };
+    }
+    throw error;
+  }
+};
+
+/**
  * Spawn one resolved adapter over stdio.
  *
  * Run module adapters with **this process's own `node`** rather than the package's shebang: the
  * adapters ship plain ESM entry modules, and executing them through `node`
  * sidesteps exec bits, shebang resolution and Windows shims in one step.
  * Native ACP agents run their installed CLI directly, without a shell.
+ *
+ * A CLI found at a declared fallback is located again first when its file is
+ * gone, because a vendor app bundle keeps it under a version directory that
+ * moves when the app updates (ACP agent policy rule 4).
+ *
+ * When that CLI is no longer anywhere, the file it was found at is run
+ * anyway: the spawn fails the way a missing CLI always does, and the stderr
+ * tail says `CLI_NOT_FOUND` and what was searched.
  *
  * @param options - Adapter, working directory, and optional wire tap.
  * @returns The child, its ACP stream, and a stderr tail.
@@ -150,27 +189,31 @@ export const spawnAcpAdapter = (options: {
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
 }): SpawnedAcpAdapter => {
-  const { adapter } = options;
-  const environment = acpAdapterEnvironment(options.environment ?? process.env, adapter);
-  if (adapter.modulePath === undefined) {
+  const base = options.environment ?? process.env;
+  const { adapter, missing } = locatedAgain(options.adapter, base);
+  const environment = acpAdapterEnvironment(base, adapter);
+  /* A vanished CLI runs as the file it was found at, so the spawn fails as a missing CLI does. */
+  const [command, args] =
+    missing === undefined
+      ? adapter.modulePath === undefined
+        ? [adapter.executablePath ?? adapter.cli, [...adapter.args]]
+        : [process.execPath, [adapter.modulePath]]
+      : [missing.path, []];
+  if (command !== process.execPath) {
     delete environment['ELECTRON_RUN_AS_NODE'];
   }
-  const child = spawn(
-    adapter.modulePath === undefined ? (adapter.executablePath ?? adapter.cli) : process.execPath,
-    adapter.modulePath === undefined ? [...adapter.args] : [adapter.modulePath],
-    {
-      cwd: options.cwd,
-      env: environment,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      /* A group leader on POSIX, so one signal reaches every process it starts
-       * (EA-R7). It no longer shares the host's group, so a terminal's ^C no
-       * longer reaches it; it ends with its stdin instead (blueprint risk). */
-      detached: process.platform !== 'win32',
-    },
-  );
+  const child = spawn(command, args, {
+    cwd: options.cwd,
+    env: environment,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    /* A group leader on POSIX, so one signal reaches every process it starts
+     * (EA-R7). It no longer shares the host's group, so a terminal's ^C no
+     * longer reaches it; it ends with its stdin instead (blueprint risk). */
+    detached: process.platform !== 'win32',
+  });
   let stderr = '';
   child.on('error', (error) => {
-    stderr = error.message;
+    stderr = missing?.reason ?? error.message;
     child.stdout.destroy(error);
   });
   child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {

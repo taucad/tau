@@ -1,5 +1,5 @@
 import '#components/select.browser.css';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { afterEach, expect, it } from 'vitest';
@@ -293,7 +293,7 @@ it('should hold a wait that took over an indicator not yet painted 500 ms from t
     view.rerender(<WaitIndicator active={false} label='Loading history' startedAt={takenOverAt} />);
   });
 
-  expect(find('wait-indicator').dataset['state']).toBe('holding');
+  expect(screen.getByRole('status').dataset['state']).toBe('holding');
   expect(
     (await effectTime('wait-conceal')) - shownAt,
     'the takeover held the words from a reveal no frame had drawn',
@@ -326,7 +326,7 @@ it('should hold a wait that settled before any frame drew its reveal 500 ms from
   document.removeEventListener('animationstart', onFrame, { capture: true });
   expect(shownAt, 'the words paint after the long task').toBeGreaterThanOrEqual(heldUntil);
 
-  expect(find('wait-indicator').dataset['state']).toBe('holding');
+  expect(screen.getByRole('status').dataset['state']).toBe('holding');
   expect(
     (await effectTime('wait-conceal')) - shownAt,
     'the hold counted its minimum from a reveal no frame had drawn',
@@ -363,7 +363,7 @@ it('should hold words the server-rendered page revealed for their minimum throug
       root.render(<WaitIndicator active={false} label='Loading history' startedAt={takenOverAt} />);
     });
 
-    expect(find('wait-indicator').dataset['state'], 'the takeover kept the words').toBe('holding');
+    expect(screen.getByRole('status').dataset['state'], 'the takeover kept the words').toBe('holding');
     const concealedAt = await effectTime('wait-conceal');
     expect(concealedAt - shownAt, 'the words hold their minimum').toBeGreaterThanOrEqual(499);
     /* The takeover's entrance reports itself a few frames after the takeover commits. */
@@ -400,7 +400,7 @@ it('should hold a wait that settled at the end of a long task its reveal fell du
   });
   document.removeEventListener('animationstart', onFrame, { capture: true });
 
-  expect(find('wait-indicator').dataset['state'], 'the settled words hold').toBe('holding');
+  expect(screen.getByRole('status').dataset['state'], 'the settled words hold').toBe('holding');
   expect(
     (await effectTime('wait-conceal')) - shownAt,
     'the hold counted its minimum from a reveal no frame had drawn',
@@ -420,7 +420,7 @@ it('should not show the words once a wait that no frame revealed has outlasted i
     view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
   });
 
-  expect(find('wait-indicator').dataset['state'], 'the words showed after their content arrived').toBe('idle');
+  expect(screen.getByRole('status').dataset['state'], 'the words showed after their content arrived').toBe('idle');
 });
 
 it('should not serve the minimum again when a wait restarts during a hold that drew the words first', async () => {
@@ -454,7 +454,7 @@ it('should not serve the minimum again when a wait restarts during a hold that d
     view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={restartedAt} />);
   });
 
-  expect(find('wait-indicator').dataset['state']).toBe('holding');
+  expect(screen.getByRole('status').dataset['state']).toBe('holding');
   expect(
     (await effectTime('wait-conceal')) - shownAt,
     'the restart served the minimum again from its own frame',

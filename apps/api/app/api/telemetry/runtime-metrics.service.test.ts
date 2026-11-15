@@ -10,9 +10,9 @@ const attributes = {
   'tau.runtime.operation': 'describe',
   'tau.runtime.outcome': 'superseded',
   'tau.runtime.population': 'signed-out',
-  'tau.runtime.route': 'daemon',
+  'tau.runtime.cause': 'none',
   'kernel.id': 'none',
-} as const satisfies Partial<OperationAttributes> as unknown as OperationAttributes;
+} as const satisfies OperationAttributes;
 
 describe('RuntimeMetricsService counters (R07 restart visibility)', () => {
   const add = vi.fn();

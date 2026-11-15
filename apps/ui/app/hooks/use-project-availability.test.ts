@@ -8,6 +8,7 @@ import {
   pendingOpenReadiness,
   pendingPathSet,
   projectAvailability,
+  projectRenderClosure,
   readyFor,
   surfaceReadiness,
   useLargeObjectPending,
@@ -161,6 +162,29 @@ describe('render closure', () => {
     expect(
       modelAvailability('ready', { largeObjects: fetching(['tau.json']), readiness: 'materialized' }, entryless),
     ).toBe('files');
+  });
+  /* Every view's entry runs a kernel the gate admits, not only main's. */
+  it('is every viewed entry’s closure, the whole workspace when any of them mirrors it', () => {
+    expect(projectRenderClosure('main.ts', 'replicad', ['main.ts', 'part.py'])).toBe('workspace');
+    expect(projectRenderClosure('main.ts', 'replicad', ['main.ts', 'lib/gear.ts'])).toStrictEqual([
+      'tau.json',
+      'main.ts',
+      'lib/gear.ts',
+    ]);
+    const multi = projectRenderClosure('main.ts', 'replicad', ['lib/gear.ts']);
+    expect(
+      modelAvailability('ready', { largeObjects: fetching(['lib/gear.ts']), readiness: 'materialized' }, multi),
+    ).toBe('files');
+    const withMirror = projectRenderClosure('main.ts', 'replicad', ['part.py']);
+    expect(
+      modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'materialized' }, withMirror),
+    ).toBe('files');
+  });
+  it('mirrors for an entry-less project viewing a .py or .cs file, and not for one viewing a .scad file', () => {
+    expect(projectRenderClosure('', undefined, ['part.py'])).toBe('workspace');
+    expect(projectRenderClosure('', undefined, ['Part.cs'])).toBe('workspace');
+    expect(projectRenderClosure('', undefined, ['part.scad'])).toStrictEqual(['tau.json', 'part.scad']);
+    expect(projectRenderClosure('', undefined, [])).toStrictEqual(['tau.json']);
   });
 });
 

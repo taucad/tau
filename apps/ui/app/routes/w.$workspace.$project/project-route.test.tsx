@@ -365,6 +365,8 @@ vi.mock('#hooks/use-project.js', () => ({
     viewGraphics,
     flushWorkbenchRecordProducers: flushWorkbenchRecords,
     mainEntryPath: '',
+    viewRecords: new Map(),
+    geometryUnits: new Map(),
   }),
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({

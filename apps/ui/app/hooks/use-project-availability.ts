@@ -8,6 +8,7 @@ import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 import { awaitsFillReport, closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import type { KernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import type { KernelId } from '@taucad/types/constants';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
@@ -119,13 +120,46 @@ export function modelAvailability(
   return closureHasPending(closure, largeObjects.paths) ? 'files' : 'ready';
 }
 
+/**
+ * The render closure of every entry the project's views run (T6): the main entry under its owner kernel, and each other
+ * viewed entry under the kernel its extension names, the whole workspace when any of them mirrors it.
+ *
+ * @param mainEntryPath - The main entry; empty while the project names none.
+ * @param kernel - The owner kernel bound for it, when known.
+ * @param viewEntryPaths - The entries the views and geometry units run.
+ * @returns Their combined closure.
+ */
+export function projectRenderClosure(
+  mainEntryPath: string,
+  kernel: KernelId | undefined,
+  viewEntryPaths: Iterable<string>,
+): KernelClosure {
+  const paths = new Set<string>();
+  for (const closure of [
+    kernelClosure(mainEntryPath, kernel),
+    ...[...viewEntryPaths].filter((path) => path !== mainEntryPath).map((path) => kernelClosure(path)),
+  ]) {
+    if (closure === 'workspace') {
+      return 'workspace';
+    }
+    for (const path of closure) {
+      paths.add(path);
+    }
+  }
+  return [...paths];
+}
+
 /** Shared readiness for the viewer, export and the other kernel surfaces. */
 export function useModelAvailability(): ModelAvailability {
-  const { mainEntryPath } = useProject();
+  const { mainEntryPath, viewRecords, geometryUnits } = useProject();
   const kernel = useProjectKernelOwner()?.kernel;
   const project = useProjectAvailability();
   const status = useRevisionStatus();
-  return modelAvailability(project, status, kernelClosure(mainEntryPath, kernel));
+  const viewEntryPaths = [
+    ...[...viewRecords.values()].map(({ entryPath }) => entryPath),
+    ...geometryUnits.keys(),
+  ].filter((path): path is string => typeof path === 'string' && path !== '');
+  return modelAvailability(project, status, projectRenderClosure(mainEntryPath, kernel, viewEntryPaths));
 }
 
 /**

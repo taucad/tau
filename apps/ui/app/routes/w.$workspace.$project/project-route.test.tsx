@@ -364,6 +364,7 @@ vi.mock('#hooks/use-project.js', () => ({
     parameterService,
     viewGraphics,
     flushWorkbenchRecordProducers: flushWorkbenchRecords,
+    mainEntryPath: '',
   }),
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({

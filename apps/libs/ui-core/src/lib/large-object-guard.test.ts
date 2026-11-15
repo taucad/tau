@@ -5,7 +5,13 @@ import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClie
 import { toRpcError } from '@taucad/chat/rpc';
 import type { LargeObjectsFacet } from '@taucad/revisions';
 import { lfsPointerFor } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel, isLargeObjectPlaceholder } from '#lib/large-object-guard.js';
+import {
+  closureHasPending,
+  guardLargeObjectFiles,
+  guardLargeObjectKernel,
+  isLargeObjectPlaceholder,
+  kernelClosure,
+} from '#lib/large-object-guard.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -141,7 +147,7 @@ describe('the agent tools while large objects download', () => {
     expect(files.get('/models/part.step')).toStrictEqual(placeholder);
   });
 
-  it('answers kernel calls with a retryable wait until every object has landed', async () => {
+  it('answers kernel calls with a retryable wait until every object their closure reads has landed', async () => {
     let facet: LargeObjectsFacet | undefined = downloading;
     const kernelClient = mock<RpcRuntimeClient>();
     const graphics = mock<RpcGraphicsClient>();
@@ -150,9 +156,10 @@ describe('the agent tools while large objects download', () => {
     graphics.exportModel.mockResolvedValue(mock());
     geospec.runTests.mockResolvedValue(mock());
     const guarded = guardLargeObjectKernel({ kernelClient, graphics, geospec }, () => facet);
-    const evaluate = mock<Parameters<RpcRuntimeClient['evaluateModel']>[0]>();
-    const exported = mock<Parameters<RpcGraphicsClient['exportModel']>[0]>();
-    const tests = mock<Parameters<RpcGeoSpecClient['runTests']>[0]>();
+    /* A workspace-mirroring kernel (build123d) copies every file, the pending one among them. */
+    const evaluate: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.py' };
+    const exported: Parameters<RpcGraphicsClient['exportModel']>[0] = { targetFile: 'main.py', to: 'stl' };
+    const tests: Parameters<RpcGeoSpecClient['runTests']>[0] = {};
 
     const waiting = await guarded.kernelClient.evaluateModel(evaluate);
     expect(waiting).toMatchObject({ success: false, errorCode: 'OPERATION_TIMEOUT', retryable: true });
@@ -170,5 +177,27 @@ describe('the agent tools while large objects download', () => {
     expect(kernelClient.evaluateModel).toHaveBeenCalledWith(evaluate, undefined);
     expect(graphics.exportModel).toHaveBeenCalledTimes(1);
     expect(geospec.runTests).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('kernel closure', () => {
+  it('is the manifest and the entry for a kernel that reads only what it opens', () => {
+    expect(kernelClosure('main.scad')).toStrictEqual(['tau.json', 'main.scad']);
+    expect(kernelClosure('main.ts', 'replicad')).toStrictEqual(['tau.json', 'main.ts']);
+    expect(kernelClosure('')).toStrictEqual(['tau.json']);
+  });
+  /* A workspace mirror lists sizes raw and reads through, so a pending pointer reads as "changed while mirroring". */
+  it('is the whole workspace for a kernel that mirrors it, named or known only by its entry', () => {
+    expect(kernelClosure('main.py', 'build123d')).toBe('workspace');
+    expect(kernelClosure('main.cs', 'picogk')).toBe('workspace');
+    expect(kernelClosure('main.py')).toBe('workspace');
+    expect(kernelClosure('main.cs')).toBe('workspace');
+    expect(kernelClosure('main.ts', 'picovoxel')).toStrictEqual(['tau.json', 'main.ts']);
+  });
+  it('is pending when a closure path is, or for a workspace closure when anything is', () => {
+    expect(closureHasPending(['tau.json', 'main.ts'], ['assets/a.png'])).toBe(false);
+    expect(closureHasPending(['tau.json', 'main.ts'], ['main.ts'])).toBe(true);
+    expect(closureHasPending('workspace', ['assets/a.png'])).toBe(true);
+    expect(closureHasPending('workspace', [])).toBe(false);
   });
 });

@@ -16,6 +16,8 @@ import { rpcClientErrorCode } from '@taucad/chat';
 import { getErrno } from '@taucad/utils/error';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { LargeObjectsFacet } from '@taucad/revisions';
+import { kernelConfigurations } from '@taucad/types/constants';
+import type { KernelId } from '@taucad/types/constants';
 
 /* A pointer is at most this many bytes (`@taucad/revisions` lfs.ts), and starts with its spec line. */
 const maximumPointerBytes = 1024;
@@ -167,6 +169,51 @@ type KernelClients = Readonly<{
   images?: RpcImageClient | undefined;
   geospec?: RpcGeoSpecClient | undefined;
 }>;
+
+/**
+ * Catalog kernels that mirror the whole workspace before they run (`createPythonWorkspaceMirror`,
+ * `createDotnetWorkspaceMirror`, the PicoGK browser snapshot). A mirror lists each file's size raw and then reads it
+ * through, so a pending pointer reads as a file that changed while mirroring: every pending path is in their closure.
+ * The catalog declares no such capability yet, so the set is named here.
+ */
+const workspaceMirrorKernels: ReadonlySet<KernelId> = new Set<KernelId>(['picogk', 'build123d', 'smlibpy']);
+
+const extensionOf = (path: string): string => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+
+/* Entry extensions a mirroring kernel authors: an entry not yet bound to its kernel is read as one of them. */
+const mirrorEntryExtensions: ReadonlySet<string> = new Set(
+  kernelConfigurations.filter(({ id }) => workspaceMirrorKernels.has(id)).map(({ mainFile }) => extensionOf(mainFile)),
+);
+
+/** What a kernel run reads before anything else: named paths, or the whole workspace. */
+export type KernelClosure = readonly string[] | 'workspace';
+
+/**
+ * The closure of a kernel run over one entry (T6): `tau.json` and the entry, or the whole workspace for a kernel that
+ * mirrors it. Any other pending path the kernel opens is read through to its object and waits for it (D9).
+ *
+ * @param entryPath - The entry the kernel runs; empty while the project names none.
+ * @param kernel - The catalog kernel bound for it, when known; otherwise the entry's extension decides.
+ * @returns The closure.
+ */
+export const kernelClosure = (entryPath: string, kernel?: KernelId): KernelClosure => {
+  if (entryPath === '') {
+    return ['tau.json'];
+  }
+  const mirrors =
+    kernel === undefined ? mirrorEntryExtensions.has(extensionOf(entryPath)) : workspaceMirrorKernels.has(kernel);
+  return mirrors ? 'workspace' : ['tau.json', entryPath];
+};
+
+/**
+ * Whether a closure still holds a pending large object.
+ *
+ * @param closure - See {@link kernelClosure}.
+ * @param pendingPaths - The facet's pending paths.
+ * @returns `true` while a path the run reads holds its pointer.
+ */
+export const closureHasPending = (closure: KernelClosure, pendingPaths: readonly string[]): boolean =>
+  closure === 'workspace' ? pendingPaths.length > 0 : closure.some((path) => pendingPaths.includes(path));
 
 /**
  * The retryable answer a kernel call gets while any of the checkout's large objects is still to land.

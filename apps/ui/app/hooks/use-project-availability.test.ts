@@ -9,17 +9,18 @@ import {
   pendingPathSet,
   projectAvailability,
   readyFor,
-  renderClosure,
   surfaceReadiness,
   useLargeObjectPending,
   useOpenedLargeObjectPending,
 } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn() }));
 vi.mock('#lib/tau-cloud-intent.js', () => ({ canOpenCloudProject: vi.fn() }));
+vi.mock('#hooks/use-project-kernel-owner.js', () => ({ useProjectKernelOwner: vi.fn() }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
   mock<RevisionStatusProjection>({
@@ -132,9 +133,25 @@ describe('model availability', () => {
 });
 
 describe('render closure', () => {
-  it('is the manifest and the main entry the kernel opens', () => {
-    expect(renderClosure('main.ts')).toStrictEqual(['tau.json', 'main.ts']);
-    expect(renderClosure('')).toStrictEqual(['tau.json']);
+  const fetching = (paths: readonly string[]): Pick<LargeObjectsFacet, 'phase' | 'paths'> => ({
+    phase: 'fetching',
+    paths,
+  });
+  it('waits on every pending file for a kernel that mirrors the workspace', () => {
+    const mirror = kernelClosure('main.py', 'build123d');
+    expect(
+      modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'materialized' }, mirror),
+    ).toBe('files');
+    expect(modelAvailability('ready', { readiness: 'materialized' }, mirror)).toBe('ready');
+  });
+  it('waits on nothing but the manifest while the project names no main entry', () => {
+    const entryless = kernelClosure('');
+    expect(
+      modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'materialized' }, entryless),
+    ).toBe('ready');
+    expect(
+      modelAvailability('ready', { largeObjects: fetching(['tau.json']), readiness: 'materialized' }, entryless),
+    ).toBe('files');
   });
 });
 

@@ -6,6 +6,9 @@ import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
+import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import type { KernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 
 /** First-open readiness comes from the durable gesture and the worker's acknowledged checkout. */
 export type ProjectAvailability =
@@ -67,21 +70,12 @@ export function useProjectAvailability(): ProjectAvailability {
  * The operator's "open the UI, model waits": code, files and chats open once
  * the checkout is written. A render waits until every authored file is a file,
  * and for a large object only when its closure (the manifest and the entry the
- * kernel opens) still holds that object's pointer; media and assets it never
- * reads arrive in the background. A kernel read of any other pending path goes
+ * kernel opens, or the whole workspace for a kernel that mirrors it) still
+ * holds that object's pointer; media and assets it never reads arrive in the
+ * background. A kernel read of any other pending path goes
  * through to its object and waits for it (D9), never reading the pointer.
  */
 export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed' | 'filesChecking';
-
-/**
- * The paths a render reads before anything else: `tau.json` and the main entry (T6).
- *
- * @param mainEntryPath - The manifest's main entry path; empty while unknown.
- * @returns The render closure, manifest first.
- */
-export function renderClosure(mainEntryPath: string): readonly string[] {
-  return mainEntryPath === '' ? ['tau.json'] : ['tau.json', mainEntryPath];
-}
 
 /** What {@link modelAvailability} reads of the projection. */
 export type ModelStatus = Readonly<{
@@ -100,13 +94,13 @@ export type ModelStatus = Readonly<{
  *
  * @param project - The project's availability.
  * @param status - The large-object facet, and the published readiness when the host publishes one.
- * @param closure - The render closure, see {@link renderClosure}.
+ * @param closure - The render closure, see {@link kernelClosure}.
  * @returns What the model surface shows.
  */
 export function modelAvailability(
   project: ProjectAvailability,
   status: ModelStatus | undefined,
-  closure: readonly string[],
+  closure: KernelClosure,
 ): ModelAvailability {
   if (project !== 'ready') {
     return project;
@@ -121,16 +115,16 @@ export function modelAvailability(
   if (largeObjects.phase === 'failed') {
     return 'filesFailed';
   }
-  const pending = pendingPathSet(largeObjects.paths);
-  return closure.some((path) => pending.has(path)) ? 'files' : 'ready';
+  return closureHasPending(closure, largeObjects.paths) ? 'files' : 'ready';
 }
 
 /** Shared readiness for the viewer, export and the other kernel surfaces. */
 export function useModelAvailability(): ModelAvailability {
   const { mainEntryPath } = useProject();
+  const kernel = useProjectKernelOwner()?.kernel;
   const project = useProjectAvailability();
   const status = useRevisionStatus();
-  return modelAvailability(project, status, renderClosure(mainEntryPath));
+  return modelAvailability(project, status, kernelClosure(mainEntryPath, kernel));
 }
 
 /**

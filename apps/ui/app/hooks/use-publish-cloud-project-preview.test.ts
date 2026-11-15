@@ -157,6 +157,7 @@ describe('saved catalog preview producer', () => {
 
   it('should backfill a project the server already holds a preview for once per session, not on every open', async () => {
     // Tau #2012: each open re-sent the create-only backfill and the API answered 412 every time.
+    // The hook's saved-preview set lives for the module, so this test uses ids no other test uses.
     vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'owner-2012', name: 'Owner' });
     vi.mocked(useProjectThumbnail).mockReturnValue({
       url: 'blob:local-thumbnail',

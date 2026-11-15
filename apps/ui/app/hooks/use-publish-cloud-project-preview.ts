@@ -110,9 +110,11 @@ export const usePublishCloudProjectPreview = ({
   );
   const { mutate } = useMutation({
     mutationFn: publishCloudProjectPreview,
-    onSuccess: async (_result, input) => {
-      if (userId) {
-        savedPreviews.add(savedPreviewKey(userId, input.projectId));
+    // The user who started the upload, not whoever is signed in when it settles.
+    onMutate: () => ({ userId }),
+    onSuccess: async (_result, input, context) => {
+      if (context.userId) {
+        savedPreviews.add(savedPreviewKey(context.userId, input.projectId));
       }
       return queryClient.invalidateQueries({ queryKey: ['cloud-project-preview', userId ?? null, projectId] });
     },

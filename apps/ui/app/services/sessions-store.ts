@@ -126,9 +126,10 @@ export type SessionRuntime = Readonly<{
   kernelIsCurrent: () => boolean;
   /**
    * Write what the runtime owes before a replacement stops it (A6e, B4): its producers and its project and editor
-   * stores. It closes nothing and asks nothing. Rejects with every write it could not confirm.
+   * stores. It closes nothing, asks nothing and keeps no timer. Rejects with every write it could not confirm, and
+   * stops waiting when `gone` aborts.
    */
-  flush: () => Promise<void>;
+  flush: (gone: AbortSignal) => Promise<void>;
   /** Stop the runtime and release what it holds. Calling it twice closes once. */
   close: () => void;
 }>;
@@ -188,6 +189,8 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       let stopped = false;
       /* A replacement's flush is under way (A6e): another report waits for it, and the build after it reads the choices. */
       let replacing = false;
+      /* Aborted when the child stops, so a replacement's flush stops waiting on the runtime it no longer owns. */
+      const gone = new AbortController();
 
       const observe = (runtime: SessionRuntime): void => {
         const facts = runtime.facts();
@@ -308,7 +311,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
         replacing = true;
         const settle = async (): Promise<void> => {
           try {
-            await superseded.runtime.flush();
+            await superseded.runtime.flush(gone.signal);
           } catch (error) {
             reportAppRuntimeFault(error);
           } finally {
@@ -361,6 +364,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
 
       return () => {
         stopped = true;
+        gone.abort();
         unsubscribeChoices();
         closeCurrent();
       };

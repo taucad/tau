@@ -430,14 +430,15 @@ const handRuntimeReplacement = (
   return {};
 };
 
-/* A close step that failed leaves the session failed with the reason recorded. */
-const closeFailed = ({
-  context,
-  event,
-}: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>) => ({
-  target: '#project-session.failed',
-  context: recordCloseFailure(context, event.error),
-});
+/* A close step that failed leaves the session failed with the reason recorded. Its children still run, so a kernel change
+ * the close ignored while it ran is handed back to the `project` child (A6e). */
+const closeFailed = (
+  { context, event }: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  handRuntimeReplacement({ context }, enq);
+  return { target: '#project-session.failed', context: recordCloseFailure(context, event.error) } as const;
+};
 
 /** One startup region: up, failed at the bound, or failed by its child. */
 const startupRegion = (region: ProjectSessionRegion) =>
@@ -490,9 +491,8 @@ const closingSteps = [
  * - `confirmClose` and `cancelClose` outside `closing.asking`: the dialog answered a question no longer asked.
  * - `activity` outside `live.idle`: it only re-arms the idle window, which runs there alone (and has no production
  *   sender, V1-6).
- * - `replaceRuntime` once the close has started cancelling runs, and when closed or failed: a close that goes on stops
- *   the `project` child, a refused producer flush hands the replacement back as the session goes live again, and a
- *   closed or failed session has no runtime to replace (A6e).
+ * - `replaceRuntime` once the close has started cancelling runs, and when closed: a close that goes on stops the
+ *   `project` child, and a close step that fails hands the replacement back as the session goes live or failed (A6e).
  *
  * @public
  */
@@ -502,7 +502,7 @@ export const projectSessionIgnoredEvents: ReadonlyArray<readonly [state: string,
     [state, 'cancelClose'] as const,
   ]),
   ...['opening', 'live.busy', 'closing', 'closed', 'failed'].map((state) => [state, 'activity'] as const),
-  ...[...closingSteps, 'closed', 'failed'].map((state) => [state, 'replaceRuntime'] as const),
+  ...[...closingSteps, 'closed'].map((state) => [state, 'replaceRuntime'] as const),
 ];
 
 /**
@@ -882,7 +882,12 @@ export const projectSessionMachine = setup({
         return { context: patch };
       },
     },
-    failed: { entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }) },
+    /* A failed session keeps its children until it is closed or the registry lets it go: a kernel change still replaces
+     * its runtime, which may be the remedy (a kernel refused on this device, compute moved to another, A6e). */
+    failed: {
+      entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }),
+      on: { replaceRuntime: handRuntimeReplacement },
+    },
   },
   exit: ({ context }, enq) => stopChildren(context, enq),
 });

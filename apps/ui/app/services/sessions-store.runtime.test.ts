@@ -72,9 +72,9 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}): Harness => {
         closes.push(`open:${opener.built.length - 1}`);
         return {
           ...runtime,
-          flush: async () => {
+          flush: async (gone) => {
             closes.push(`flush:${opener.built.indexOf(runtime)}`);
-            await runtime.flush();
+            await runtime.flush(gone);
           },
           close: () => {
             if (!runtime.isClosed()) {
@@ -369,8 +369,8 @@ describe('a change of kernel selection replaces the runtime through the session 
     expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0', 'fileManager']);
   });
 
-  it('should build nothing on a file manager that changed during the flush beyond the rebuild it already made', async () => {
-    const { registry, opener, files, closes } = harness();
+  it('should build once, on the new file manager, when the file manager changes during the flush', async () => {
+    const { registry, opener, closes } = harness();
     await open(registry);
     const flushing = held();
     opener.built[0]?.flushWith(flushing.flush);
@@ -378,16 +378,65 @@ describe('a change of kernel selection replaces the runtime through the session 
     opener.built[0]?.supersede();
     opener.changeChoices();
     await flush();
-    /* The shared worker is replaced: the child rebuilds on the new file manager at once. */
-    sessionOf(registry)?.send({ type: 'fileManagerChanged', fileManagerRef: files[0]!.fileManagerRef });
-    sessionOf(registry)?.send({ type: 'fileManagerChanged', fileManagerRef: undefined });
+    /* The shared worker is replaced: the child closes the runtime on the old file manager and builds on the new one. */
+    const next = openSessionFileManagerStandIn(projectId);
+    sessionOf(registry)?.send({ type: 'fileManagerChanged', fileManagerRef: next.fileManagerRef });
     await flush();
     flushing.settle();
     await flush();
     await flush();
 
-    expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0']);
-    expect(opener.built).toHaveLength(1);
+    expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0', 'open:1']);
+    expect(opener.built).toHaveLength(2);
+    expect(opener.built[1]?.input.fileManagerRef).toBe(next.fileManagerRef);
+    next.close();
+  });
+
+  it('should replace the runtime of a session that failed to open on a refused kernel (D21 round 2)', async () => {
+    const { registry, opener } = harness({ kernelRefusal: 'Kernel budget reached' });
+    await open(registry);
+    expect(sessionOf(registry)?.getSnapshot().matches('failed')).toBe(true);
+
+    /* Moving compute to another device is the remedy. */
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+
+    expect(opener.built).toHaveLength(2);
+    expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+  });
+
+  it('should replace the runtime once a close whose run cancel was under way during the change fails (D21 round 2)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    let refuse: (error: Error) => void = () => undefined;
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () => undefined,
+      flushSync: async () => undefined,
+      cancelRuns: async () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        }),
+      closeRuntime: async () => undefined,
+    });
+    try {
+      registry.send({ type: 'close', projectId, reason: 'idle' });
+      await flush();
+      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'cancellingRuns' })).toBe(true);
+
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      refuse(new Error('A run changed holder'));
+      await flush();
+      await flush();
+
+      expect(sessionOf(registry)?.getSnapshot().matches('failed')).toBe(true);
+      expect(opener.built).toHaveLength(2);
+    } finally {
+      unregister();
+    }
   });
 
   it('should still replace the runtime when the flush is refused, and report the refusal (D23 hook)', async () => {

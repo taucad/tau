@@ -40,9 +40,6 @@ import { createEntriesRecordSession } from '#workbench-records/entries-record-se
 import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordHost } from '#workbench-records/view-record-session.js';
 
-/** The bound on a replacement's wait for the project and editor writes, the close flush's own bound. */
-const replacementFlushMilliseconds = 10_000;
-
 /** What a provider is a view of: the runtime, its view records and its entries record session. @public */
 export type ProjectRuntimeViewSource = Readonly<{
   runtime: ProjectRuntime;
@@ -238,8 +235,9 @@ export function openSessionProjectRuntime(
     kernelIsCurrent: () => selectionFor().key === selection.key,
     /* A6e (B4): what a replacement flushes. The producer set (the layout, the entries and view records) and the project
      * and editor stores write what they owe. Unlike the close flush it neither closes the parameter service nor refuses
-     * on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person. */
-    flush: async () => {
+     * on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person. It
+     * keeps no timer (I15): a store's wait ends when it settles, when it stops, or when `gone` aborts. */
+    flush: async (gone) => {
       const owed = [runtime.producers.flushAll()];
       for (const ref of [projectRef, editorRef] as const) {
         /* A store that has not loaded owes nothing; one that has writes now and settles in `storing.idle`. */
@@ -248,7 +246,7 @@ export function openSessionProjectRuntime(
           owed.push(
             (async () => {
               const settled = await waitFor(ref, (state) => state.matches({ ready: { storing: 'idle' } }), {
-                timeout: replacementFlushMilliseconds,
+                signal: gone,
               });
               if (settled.context.error !== undefined) {
                 throw settled.context.error;

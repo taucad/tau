@@ -358,6 +358,10 @@ const projectContextOf = (projectId: string): unknown => {
   const created = {
     projectId: 'unused',
     parameterService,
+    /* What the model gate reads of every project (T6): its main entry, its views and its geometry units. */
+    mainEntryPath: '',
+    viewRecords: new Map(),
+    geometryUnits: new Map(),
     viewGraphics: viewGraphicsOf(projectId),
     flushWorkbenchRecordProducers: producerFlushOf(projectId),
     projectRef: {

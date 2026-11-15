@@ -724,8 +724,8 @@ test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is 
   annotate,
 }) => {
   /* The at-once reload 5a measures: the edit is in the editor's state and owed, so the unload's producer stage writes
-   * it before the document goes, and the close cut has the edit's bytes to take. A reload inside the editor document
-   * session's 250 ms save with nothing else owed loses the edit itself, which is A10's handback, not this row's. */
+   * it before the document goes, and the close cut has the edit's bytes to take. Row 5d is the path where the edit
+   * itself is lost (its save still in flight), which is lane A7e's, not this row's. */
   const { marker } = await editViewArrangeAndReload(true);
   /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
   const configs = await configsByName();
@@ -915,13 +915,17 @@ test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in 
     (current) => current.includes(marker),
     15_000,
   );
-  const source = await openSource();
-  await target.expectContainingText(source, 'makeBaseBox(18', 60_000);
-  const shownText = await readWithin(
-    async () => (await target.textContent(source)) ?? '',
-    (current) => current.includes(marker),
-    15_000,
-  );
+  /* Read, not asserted: inside `test.fails` a failing wait here would pass the row, so a reload or an editor that
+   * never comes back reads as an empty text and fails only the row's own assertion. */
+  const source = await openSource().catch(() => undefined);
+  const shownText =
+    source === undefined
+      ? ''
+      : await readWithin(
+          async () => (await target.textContent(source).catch(() => '')) ?? '',
+          (current) => current.includes('makeBaseBox(18') && current.includes(marker),
+          60_000,
+        );
   const reading = { editStored: storedText.includes(marker), editKept: shownText.includes(marker) };
   await annotate(`S26 edit with a save in flight at reload: ${JSON.stringify(reading)}`);
   await target.writeArtifact(`a01-row5d-report-${String(Date.now())}.json`, JSON.stringify(reading));

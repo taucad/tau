@@ -199,7 +199,8 @@ const createTree = (log: ClientLog, name = 'tree') => ({
 /** Owed close cuts kept across documents, as `localStorage` keeps them: one store two sessions can share (A7d). */
 const createDebtStore = () => {
   const records = new Map<string, SessionRevisionsCloseDebt>();
-  const keyOf = ({ workspace: slug, projectId: id }: SessionRevisionsCloseDebtKey): string => `${slug}:${id}`;
+  const keyOf = ({ workspace: slug, projectId: id, actorId }: SessionRevisionsCloseDebtKey): string =>
+    `${slug}:${id}:${actorId}`;
   const port: SessionRevisionsCloseDebtPort = {
     read: (key) => records.get(keyOf(key)),
     write: (key, debt) => {
@@ -1083,8 +1084,8 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
 /*
  * A7d (I6, S26, D26): the close cut a reload cannot finish. On a reload `pagehide` runs the session stage before
  * `hidden`, and the revision worker goes with the document before `saveRevision('close')` answers, so History never
- * shows the close revision. The child records the cut as owed, synchronously, and the next child for the project in
- * this browser takes it as its first revision act.
+ * shows the close revision. The child records the cut as owed by the person it records as, synchronously, and the
+ * next child for the project in this browser takes it once it records as that same person.
  */
 describe('session revisions take a close cut owed by an earlier document (A7d)', () => {
   afterEach(() => {
@@ -1092,6 +1093,9 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     githubProjectBinding.remove(projectId);
     globalThis.localStorage.clear();
   });
+
+  const ada = { id: 'usr_1', name: 'Ada' } as const;
+  const adaKey = { workspace, projectId, actorId: 'usr_1' } as const;
 
   /** One document: a session whose `revisions` child has a client on `worker`, with its open answered. */
   const openDocument = async (
@@ -1137,16 +1141,18 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     revisionClientTestApi.reset();
   };
 
-  it('I6: should take the close cut a reloaded document owed as the next open’s first revision act, as the closing person', async () => {
+  const cuts = (log: ClientLog): string[] => log.filter((line) => line.includes('saveRevision'));
+
+  it('I6: should take the close cut a reloaded document owed once the next open records as the same person', async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();
-    const first = await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } });
+    const first = await openDocument('a', workerA, { log, debts, user: ada });
     await reload(first);
     expect(log).toContain('a:saveRevision:close');
+    expect(debts.port.read(adaKey)).toBeDefined();
     log.length = 0;
 
-    /* The next document has not heard who is signed in yet: the owed cut is still Ada's. As the real client, it has
-     * no settled registry until it opens. */
+    /* The next document has not heard who is signed in yet, and its registry has not answered: nothing is cut. */
     let save: PromiseWithResolvers<void> | undefined;
     const next = await openDocument('b', workerB, {
       log,
@@ -1156,35 +1162,29 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
         client.setStatus({ registrySettled: false });
       },
     });
-    expect(log.filter((line) => line.startsWith('b:'))).toEqual([
-      expect.stringMatching(/^b:send:setDeviceId:/u),
-      'b:setUser:none',
-      expect.stringMatching(/^b:send:setActor:/u),
-      'b:open',
-    ]);
     next.client.setStatus({ registrySettled: true });
     await settle();
-    expect(log.filter((line) => line.startsWith('b:')).slice(4)).toEqual([
-      expect.stringMatching(/^b:send:setActor:/u),
-      'b:saveRevision:close',
-    ]);
-    const live = { command: 'setActor', actor: revisionUserActor({ workspace, user: undefined, anonymous: false }) };
-    /* The record keeps no display name: the id alone says who the cut is by. */
-    const closing = { command: 'setActor', actor: { kind: 'user', id: 'usr_1' } };
-    expect(sent(log, 'b', 'setActor')).toEqual([live, closing]);
-    expect(debts.records.size).toBe(1);
+    expect(cuts(log)).toEqual([]);
 
-    /* The live actor waits for the cut's answer, and the answer settles the debt. */
+    /* Ada is signed in: the client records as her, and her owed cut is its next act. */
+    next.fake.setUser(ada);
+    await settle();
+    expect(cuts(log)).toEqual(['b:saveRevision:close']);
+    /* Only the live actor is ever sent: first the signed-out one, then Ada's. */
+    expect(sent(log, 'b', 'setActor')).toEqual([
+      { command: 'setActor', actor: revisionUserActor({ workspace, user: undefined, anonymous: false }) },
+      { command: 'setActor', actor: { kind: 'user', id: 'usr_1', name: 'Ada' } },
+    ]);
+    expect(debts.port.read(adaKey)).toBeDefined();
+
+    /* The answer settles the debt; paid once, a later document owes nothing. */
     save?.resolve();
     await settle();
-    expect(sent(log, 'b', 'setActor')).toEqual([live, closing, live]);
-    expect(debts.records.size).toBe(0);
-
-    /* Paid once: a later document owes nothing. */
+    expect(debts.port.read(adaKey)).toBeUndefined();
     next.session.stop();
     log.length = 0;
-    const third = await openDocument('c', workerA, { log, debts });
-    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    const third = await openDocument('c', workerA, { log, debts, user: ada });
+    expect(cuts(log)).toEqual([]);
     third.session.stop();
     expect([...first.guard.take(), ...next.guard.take(), ...third.guard.take()]).toEqual([]);
   });
@@ -1201,123 +1201,44 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
         client.setStatus({ registrySettled: false });
       },
     });
-    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    expect(cuts(log)).toEqual([]);
     next.client.setStatus({ registrySettled: true });
     await settle();
-    expect(log.filter((line) => line.includes('saveRevision'))).toEqual(['b:saveRevision:close']);
+    expect(cuts(log)).toEqual(['b:saveRevision:close']);
     expect(debts.records.size).toBe(0);
+    /* Asked once: later projections ask nothing again. */
+    next.client.republish();
+    await settle();
+    expect(cuts(log)).toEqual(['b:saveRevision:close']);
     next.session.stop();
   });
 
-  it('should keep the closing person on a debt read but not yet paid when the document goes again', async () => {
+  it("should never cut another person's owed cut, nor record as them", async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();
-    await reload(await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } }));
-    /* A second reload before the registry answers: the debt is still Ada's. */
-    const second = await openDocument('b', workerB, {
-      log,
-      debts,
-      prepare: (client) => {
-        client.setStatus({ registrySettled: false });
-      },
-    });
-    await reload(second);
-    expect(debts.port.read({ workspace, projectId })?.actor).toEqual({ kind: 'user', id: 'usr_1' });
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
     log.length = 0;
-    const third = await openDocument('c', workerA, { log, debts });
-    expect(sent(log, 'c', 'setActor')[1]).toEqual({ command: 'setActor', actor: { kind: 'user', id: 'usr_1' } });
+    const next = await openDocument('b', workerB, { log, debts, user: { id: 'usr_2', name: 'Bea' } });
+    next.fake.setAnonymous(workspace, true);
+    await settle();
+    expect(cuts(log)).toEqual([]);
+    expect(sent(log, 'b', 'setActor').map((command) => (command['actor'] as { id: string }).id)).not.toContain('usr_1');
+    expect(debts.port.read(adaKey)).toBeDefined();
+    next.session.stop();
+  });
+
+  it('should keep the closing person’s debt when a second document goes before paying it', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    const { token } = debts.port.read(adaKey) ?? { token: '' };
+    /* The second document goes before it knows who is signed in: what it owes is its own person's. */
+    await reload(await openDocument('b', workerB, { log, debts }));
+    expect(debts.port.read(adaKey)?.token).toBe(token);
+    log.length = 0;
+    const third = await openDocument('c', workerA, { log, debts, user: ada });
+    expect(cuts(log)).toEqual(['c:saveRevision:close']);
     third.session.stop();
-  });
-
-  it('should hold nothing back when the owed cut is by the person the next document records as', async () => {
-    const log: ClientLog = [];
-    const debts = createDebtStore();
-    await reload(await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } }));
-    log.length = 0;
-    let save: PromiseWithResolvers<void> | undefined;
-    const next = await openDocument('b', workerB, {
-      log,
-      debts,
-      user: { id: 'usr_1', name: 'Ada' },
-      prepare: (client) => {
-        save = client.holdSave();
-      },
-    });
-    expect(log).toContain('b:saveRevision:close');
-    /* One actor, the live one: no swap, so a change made during the cut goes at once. */
-    expect(sent(log, 'b', 'setActor')).toEqual([
-      { command: 'setActor', actor: { kind: 'user', id: 'usr_1', name: 'Ada' } },
-    ]);
-    next.fake.setAnonymous(workspace, true);
-    expect(sent(log, 'b', 'setActor').at(-1)?.['actor']).toMatchObject({ anonymous: true });
-    save?.resolve();
-    await settle();
-    next.session.stop();
-  });
-
-  it("should give another person's owed cut its author only until the cut's revision is minted", async () => {
-    const log: ClientLog = [];
-    const debts = createDebtStore();
-    debts.port.write({ workspace, projectId }, { token: 't', actor: { kind: 'user', id: 'usr_1' } });
-    let save: PromiseWithResolvers<void> | undefined;
-    const next = await openDocument('b', workerB, {
-      log,
-      debts,
-      user: { id: 'usr_2', name: 'Bea' },
-      prepare: (client) => {
-        save = client.holdSave();
-      },
-    });
-    expect(sent(log, 'b', 'setActor').at(-1)).toEqual({ command: 'setActor', actor: { kind: 'user', id: 'usr_1' } });
-    next.fake.setAnonymous(workspace, true);
-    expect(sent(log, 'b', 'setActor')).toHaveLength(2);
-    /* The close revision is minted: the head moves, and the live actor, anonymous now, goes at once. */
-    next.client.setStatus({ headRevisionId: 'rev_close' });
-    expect(sent(log, 'b', 'setActor').at(-1)?.['actor']).toMatchObject({ anonymous: true });
-    expect(debts.records.size).toBe(1);
-    save?.resolve();
-    await settle();
-    expect(debts.records.size).toBe(0);
-    expect(sent(log, 'b', 'setActor')).toHaveLength(3);
-    next.session.stop();
-  });
-
-  it('should keep no display name in storage for a named person', async () => {
-    const log: ClientLog = [];
-    const debts = createDebtStore();
-    await reload(await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } }));
-    expect(JSON.stringify([...debts.records.values()])).not.toContain('Ada');
-  });
-
-  it('should settle the debt by a cut that answers after its client stopped, and keep it through a worker swap', async () => {
-    const log: ClientLog = [];
-    const debts = createDebtStore();
-    await reload(await openDocument('a', workerA, { log, debts }));
-    let save: PromiseWithResolvers<void> | undefined;
-    const next = await openDocument('b', workerB, {
-      log,
-      debts,
-      prepare: (client) => {
-        save = client.holdSave();
-      },
-    });
-    /* A worker swap mid-payment: the new client reads the debt still owed and asks again. */
-    const swapped = createFakeClient('c', log);
-    swapped.userAnswer.resolve();
-    const swappedSave = swapped.holdSave();
-    revisionClientTestApi.adopt(projectId, workerA, swapped);
-    next.fileManager.set({ worker: workerA });
-    await settle();
-    expect(log).toContain('c:saveRevision:close');
-    expect(debts.records.size).toBe(1);
-    /* The first client's late answer still means its cut landed. */
-    save?.resolve();
-    await settle();
-    expect(debts.records.size).toBe(0);
-    next.session.stop();
-    swappedSave.resolve();
-    await settle();
-    expect(debts.records.size).toBe(0);
   });
 
   it('should owe nothing once the close cut has answered, so the next open takes no cut', async () => {
@@ -1337,7 +1258,7 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     log.length = 0;
 
     const next = await openDocument('b', workerB, { log, debts });
-    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    expect(cuts(log)).toEqual([]);
     next.session.stop();
   });
 
@@ -1367,6 +1288,27 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
   it('should keep a newer debt written while an older one was being paid', async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    let save: PromiseWithResolvers<void> | undefined;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: ada,
+      prepare: (client) => {
+        save = client.holdSave();
+      },
+    });
+    const newer: SessionRevisionsCloseDebt = { token: 'newer' };
+    debts.port.write(adaKey, newer);
+    save?.resolve();
+    await settle();
+    expect(debts.port.read(adaKey)).toEqual(newer);
+    next.session.stop();
+  });
+
+  it('should settle the debt by a late answer after a worker swap, which asks again', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
     await reload(await openDocument('a', workerA, { log, debts }));
     let save: PromiseWithResolvers<void> | undefined;
     const next = await openDocument('b', workerB, {
@@ -1376,41 +1318,56 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
         save = client.holdSave();
       },
     });
-    const newer: SessionRevisionsCloseDebt = { token: 'newer', actor: { kind: 'user', id: 'usr_2' } };
-    debts.port.write({ workspace, projectId }, newer);
+    const swapped = createFakeClient('c', log);
+    swapped.userAnswer.resolve();
+    const swappedSave = swapped.holdSave();
+    revisionClientTestApi.adopt(projectId, workerA, swapped);
+    next.fileManager.set({ worker: workerA });
+    await settle();
+    expect(log).toContain('c:saveRevision:close');
+    expect(debts.records.size).toBe(1);
     save?.resolve();
     await settle();
-    expect(debts.port.read({ workspace, projectId })).toEqual(newer);
+    expect(debts.records.size).toBe(0);
     next.session.stop();
+    swappedSave.resolve();
+    await settle();
+    expect(debts.records.size).toBe(0);
   });
 
   it("B7: should pay only its own workspace's debt", async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();
-    await reload(await openDocument('a', workerA, { log, debts, workspace: 'other' }));
+    await reload(await openDocument('a', workerA, { log, debts, user: ada, workspace: 'other' }));
     log.length = 0;
-    const next = await openDocument('b', workerB, { log, debts });
-    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    const next = await openDocument('b', workerB, { log, debts, user: ada });
+    expect(cuts(log)).toEqual([]);
     expect(debts.records.size).toBe(1);
     next.session.stop();
   });
 
+  it('should keep only a token in storage, under the workspace, project and person', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    const records = [...debts.records.values()];
+    expect(records).toHaveLength(1);
+    expect(Object.keys(records[0] ?? {})).toEqual(['token']);
+  });
+
   it('should keep the owed cut in localStorage, readable by a later document, cleared only by its own token', () => {
-    const key = { workspace, projectId };
-    const debt: SessionRevisionsCloseDebt = {
-      token: 't1',
-      actor: { kind: 'user', id: 'anon_1', name: 'Anonymous', anonymous: true },
-      commitAuthor: { name: 'ada', email: '1+ada@users.noreply.github.com' },
-    };
-    sessionRevisionsCloseDebt.write(key, debt);
-    expect(globalThis.localStorage.getItem(`${closeDebtStorageKeyPrefix}${workspace}:${projectId}`)).not.toBeNull();
-    expect(sessionRevisionsCloseDebt.read(key)).toEqual(debt);
-    expect(sessionRevisionsCloseDebt.read({ workspace: 'other', projectId })).toBeUndefined();
-    sessionRevisionsCloseDebt.clear(key, 't0');
-    expect(sessionRevisionsCloseDebt.read(key)).toEqual(debt);
-    sessionRevisionsCloseDebt.clear(key, 't1');
-    expect(sessionRevisionsCloseDebt.read(key)).toBeUndefined();
-    globalThis.localStorage.setItem(`${closeDebtStorageKeyPrefix}${workspace}:${projectId}`, '{"token":1}');
-    expect(sessionRevisionsCloseDebt.read(key)).toBeUndefined();
+    sessionRevisionsCloseDebt.write(adaKey, { token: 't1' });
+    const stored = Object.keys(globalThis.localStorage).filter((key) => key.startsWith(closeDebtStorageKeyPrefix));
+    expect(stored).toHaveLength(1);
+    expect(globalThis.localStorage.getItem(stored[0] ?? '')).toBe('{"token":"t1"}');
+    expect(sessionRevisionsCloseDebt.read(adaKey)).toEqual({ token: 't1' });
+    expect(sessionRevisionsCloseDebt.read({ ...adaKey, workspace: 'other' })).toBeUndefined();
+    expect(sessionRevisionsCloseDebt.read({ ...adaKey, actorId: 'usr_2' })).toBeUndefined();
+    sessionRevisionsCloseDebt.clear(adaKey, 't0');
+    expect(sessionRevisionsCloseDebt.read(adaKey)).toEqual({ token: 't1' });
+    sessionRevisionsCloseDebt.clear(adaKey, 't1');
+    expect(sessionRevisionsCloseDebt.read(adaKey)).toBeUndefined();
+    globalThis.localStorage.setItem(stored[0] ?? '', '{"token":1}');
+    expect(sessionRevisionsCloseDebt.read(adaKey)).toBeUndefined();
   });
 });

@@ -1,6 +1,10 @@
 import { metrics } from '@opentelemetry/api';
+import type { Meter } from '@opentelemetry/api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RuntimeMetricsService, runtimeCounterZeroHold } from '#api/telemetry/runtime-metrics.service.js';
+import type { RuntimeAttributesOf } from '#api/telemetry/runtime-metrics.service.js';
+
+type OperationAttributes = RuntimeAttributesOf<'runtimeOperations'>;
 
 const attributes = {
   'tau.runtime.operation': 'describe',
@@ -8,7 +12,7 @@ const attributes = {
   'tau.runtime.population': 'signed-out',
   'tau.runtime.route': 'daemon',
   'kernel.id': 'none',
-} as const;
+} as const satisfies Partial<OperationAttributes> as unknown as OperationAttributes;
 
 describe('RuntimeMetricsService counters (R07 restart visibility)', () => {
   const add = vi.fn();
@@ -20,7 +24,7 @@ describe('RuntimeMetricsService counters (R07 restart visibility)', () => {
       createCounter: () => ({ add }),
       createHistogram: () => ({ record: vi.fn() }),
       createObservableGauge: () => ({ addCallback: vi.fn() }),
-    } as never);
+    } as unknown as Meter);
   });
 
   afterEach(() => {
@@ -30,8 +34,8 @@ describe('RuntimeMetricsService counters (R07 restart visibility)', () => {
 
   it('exports a new series at 0 and adds its increments only after the hold', () => {
     const service = new RuntimeMetricsService();
-    service.count('runtimeOperations', 7, attributes as never);
-    service.count('runtimeOperations', 7, attributes as never);
+    service.count('runtimeOperations', 7, attributes);
+    service.count('runtimeOperations', 7, attributes);
     expect(add.mock.calls).toEqual([[0, attributes]]);
 
     vi.advanceTimersByTime(runtimeCounterZeroHold);
@@ -40,33 +44,33 @@ describe('RuntimeMetricsService counters (R07 restart visibility)', () => {
       [14, attributes],
     ]);
 
-    service.count('runtimeOperations', 7, attributes as never);
+    service.count('runtimeOperations', 7, attributes);
     expect(add.mock.calls.at(-1)).toEqual([7, attributes]);
   });
 
   it('holds each attribute set on its own, whatever the attribute order', () => {
     const service = new RuntimeMetricsService();
-    service.count('runtimeOperations', 1, attributes as never);
+    service.count('runtimeOperations', 1, attributes);
     vi.advanceTimersByTime(runtimeCounterZeroHold);
-    const reordered = Object.fromEntries(Object.entries(attributes).reverse());
-    service.count('runtimeOperations', 1, reordered as never);
+    const reordered = Object.fromEntries(Object.entries(attributes).reverse()) as OperationAttributes;
+    service.count('runtimeOperations', 1, reordered);
     expect(add.mock.calls.at(-1)).toEqual([1, reordered]);
 
-    const other = { ...attributes, 'tau.runtime.outcome': 'succeeded' };
-    service.count('runtimeOperations', 1, other as never);
+    const other: OperationAttributes = { ...attributes, 'tau.runtime.outcome': 'succeeded' };
+    service.count('runtimeOperations', 1, other);
     expect(add.mock.calls.at(-1)).toEqual([0, other]);
   });
 
   it('adds every held increment before shutdown and counts directly after it', () => {
     const service = new RuntimeMetricsService();
-    service.count('runtimeOperations', 7, attributes as never);
+    service.count('runtimeOperations', 7, attributes);
     service.beforeApplicationShutdown();
     expect(add.mock.calls).toEqual([
       [0, attributes],
       [7, attributes],
     ]);
-    const late = { ...attributes, 'tau.runtime.outcome': 'failed' };
-    service.count('runtimeOperations', 1, late as never);
+    const late: OperationAttributes = { ...attributes, 'tau.runtime.outcome': 'failed' };
+    service.count('runtimeOperations', 1, late);
     expect(add.mock.calls.at(-1)).toEqual([1, late]);
     vi.advanceTimersByTime(runtimeCounterZeroHold);
     expect(add).toHaveBeenCalledTimes(3);

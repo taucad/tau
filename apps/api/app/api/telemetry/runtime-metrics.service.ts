@@ -142,6 +142,26 @@ export class RuntimeMetricsService implements BeforeApplicationShutdown {
     this.releasers.clear();
   }
 
+  public record<K extends RuntimeHistogramKey>(key: K, value: number, attributes: RuntimeAttributesOf<K>): void {
+    this.histograms.get(key)?.record(value, attributes as Attributes);
+  }
+
+  /**
+   * Replace what a runtime gauge exports at the next collection.
+   *
+   * @param key - The registry key.
+   * @param observations - The values with their attributes.
+   */
+  public setGauge<K extends RuntimeGaugeKey>(key: K, observations: ReadonlyArray<RuntimeGaugeObservation<K>>): void {
+    this.gauges.set(
+      key,
+      observations.map((observation) => ({
+        value: observation.value,
+        attributes: observation.attributes as Attributes,
+      })),
+    );
+  }
+
   private release(counter: Counter, entry: PendingSeries, attributes: Attributes): void {
     if (entry.timer === undefined) {
       return;
@@ -162,25 +182,6 @@ export class RuntimeMetricsService implements BeforeApplicationShutdown {
    * @param value - The value, in the instrument's unit.
    * @param attributes - The closed attributes.
    */
-  public record<K extends RuntimeHistogramKey>(key: K, value: number, attributes: RuntimeAttributesOf<K>): void {
-    this.histograms.get(key)?.record(value, attributes as Attributes);
-  }
-
-  /**
-   * Replace what a runtime gauge exports at the next collection.
-   *
-   * @param key - The registry key.
-   * @param observations - The values with their attributes.
-   */
-  public setGauge<K extends RuntimeGaugeKey>(key: K, observations: ReadonlyArray<RuntimeGaugeObservation<K>>): void {
-    this.gauges.set(
-      key,
-      observations.map((observation) => ({
-        value: observation.value,
-        attributes: observation.attributes as Attributes,
-      })),
-    );
-  }
 }
 
 const stableAttributes = (attributes: Attributes): string =>

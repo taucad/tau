@@ -17,6 +17,7 @@ import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import type { LargeObjectsReport } from '#project-revisions.types.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
@@ -113,6 +114,8 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       }
     }
     const reads: string[] = [];
+    /* What a test does once a file's bytes were read, as another program writing at that moment would. */
+    const hooks: { afterRead?: (path: string) => Promise<void> } = {};
     /* While set, a write of the comparison record waits for it: the record is never a comparison's to wait on. */
     let recordWrites: Promise<void> | undefined;
     const holdRecordWrites = (): (() => void) => {
@@ -145,14 +148,26 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
         reads.push(path);
         // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
-        return (rooted.readFile as (...arguments_: any[]) => Promise<unknown>)(path, ...rest);
+        const content = await (rooted.readFile as (...arguments_: any[]) => Promise<unknown>)(path, ...rest);
+        await hooks.afterRead?.(path);
+        return content;
       }) as RevisionFileSystem['readFile'],
       readFileStream: ((path: string, ...rest: readonly unknown[]) => {
         reads.push(path);
         // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
-        return (rooted.readFileStream as (...arguments_: any[]) => unknown)(path, ...rest);
+        const stream = (rooted.readFileStream as (...arguments_: any[]) => ReadableStream<Uint8Array<ArrayBuffer>>)(
+          path,
+          ...rest,
+        );
+        /* The hook runs once every byte was read, before the reader sees the end. */
+        return stream.pipeThrough(
+          new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+            flush: async () => hooks.afterRead?.(path),
+          }),
+        );
       }) as RevisionFileSystem['readFileStream'],
     });
+    const reports: LargeObjectsReport[] = [];
     let answered: () => void = () => undefined;
     const fillChecked = new Promise<void>((resolve) => {
       answered = resolve;
@@ -162,7 +177,8 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       port,
       projectId: 'project-1',
       filesystem: async () => counted,
-      onLargeObjects: () => {
+      onLargeObjects: (report) => {
+        reports.push(report);
         answered();
       },
     });
@@ -188,6 +204,8 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       reads,
       fillChecked,
       holdRecordWrites,
+      hooks,
+      reports,
       statTrees: () => statTrees,
       close,
     };
@@ -432,6 +450,94 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
     expect(treeId).toBe(await compare(second.walking));
   });
 
+  it('should read an edit that kept the file size and moved only its timestamp', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+    await writeFile(join(root, 'dir2/f7.txt'), 'FILE 7\n');
+    await utimes(join(root, 'dir2/f7.txt'), settledTime, new Date(Date.now() - 30_000));
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toContain('dir2/f7.txt');
+    expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read the checkout when the store’s info/exclude changed between the sessions', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    /* Untracked, so a rule can leave it out: the head's own files are never ignored. */
+    await mkdir(join(root, 'extra'), { recursive: true });
+    await writeFile(join(root, 'extra/notes.txt'), 'not yet recorded\n');
+    await utimes(join(root, 'extra/notes.txt'), settledTime, settledTime);
+    const before = await compare(first.actors);
+    await first.close();
+    await mkdir(join(root, '.git/info'), { recursive: true });
+    await writeFile(join(root, '.git/info/exclude'), 'extra/\n');
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads.length).toBeGreaterThan(0);
+    expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read the checkout when a file the rules ignore appeared between the sessions', async () => {
+    const { root, session } = await fixture({ ...files(20), 'dir0/.gitignore': '*.log\n' });
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+    await writeFile(join(root, 'dir0/build.log'), 'ignored\n');
+    await utimes(join(root, 'dir0/build.log'), settledTime, settledTime);
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads.length).toBeGreaterThan(0);
+    expect(treeId).toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should keep no record that names bytes another program replaced while the capture read them', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+    let edited = false;
+    second.hooks.afterRead = async (path) => {
+      if (path === 'dir2/f7.txt' && !edited) {
+        edited = true;
+        /* Another size, under the timestamp the file had before: only the stats taken before the read tell. */
+        await writeFile(join(root, path), 'replaced while it was read\n');
+        await utimes(join(root, path), settledTime, settledTime);
+      }
+    };
+    await compare(second.actors);
+    await second.close();
+
+    expect(edited).toBe(true);
+
+    const third = await session();
+    await third.fillChecked;
+    const treeId = await compare(third.actors);
+
+    expect(third.reads).toContain('dir2/f7.txt');
+    expect(treeId).toBe(await compare(third.walking));
+  });
+
   it('should read the checkout again when the head moved between the sessions', async () => {
     const { session } = await fixture(files(20));
     const first = await session();
@@ -468,6 +574,20 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
     await second.fillChecked;
 
     expect(second.reads).toEqual([]);
+  });
+
+  it('should leave out a pointer-sized file the rules ignore, as a capture does', async () => {
+    const pointer = pointerOf('b'.repeat(64), 654_321);
+    const { session } = await fixture({ ...files(10), 'assets/.gitignore': 'part.stl\n', 'assets/part.stl': pointer });
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+
+    expect(second.reads).toEqual(['assets/part.stl']);
+    expect(second.reports.map(({ facet }) => facet)).toEqual([undefined]);
   });
 
   it('should still find a placeholder a pointer-sized file holds', async () => {

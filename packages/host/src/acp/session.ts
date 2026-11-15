@@ -542,7 +542,67 @@ export const recoverableSessionLoss = (error: unknown): boolean => {
 };
 
 /**
- * The command line a `terminal-auth` method wants the *user* to run.
+ * Where a sign-in command will be shown: the host's platform and its own runtime.
+ *
+ * @internal
+ */
+export type AcpLoginHost = {
+  /** Selects the quoting: POSIX shells, or PowerShell on `win32`. */
+  readonly platform: NodeJS.Platform;
+  /** The executable that runs module adapters on this host, which is never a user's sign-in command. */
+  readonly execPath: string;
+};
+
+/**
+ * The resolved adapter as sign-in reads it.
+ *
+ * `executableSource` is the field resolution sets to say whether `executablePath`
+ * came from PATH or from a declared fallback. It is read through this local
+ * widening until the registry declares it; unset means the bare command.
+ */
+type SignInAdapter = AcpAdapter & { readonly executableSource?: 'path' | 'fallback' | undefined };
+
+/** Characters a POSIX shell never splits or expands, so an argument of only these needs no quotes. */
+const posixPlainArgument = /^[\w@%+=:,./-]+$/u;
+
+/** Characters that make PowerShell split or expand an unquoted argument. */
+const powerShellSpecial = /[\s"'`$]/u;
+
+/**
+ * One argument, quoted for the shell of `platform`.
+ *
+ * @param argument - The argument as the program receives it.
+ * @param platform - Host platform; `win32` quotes for PowerShell.
+ * @returns The argument as the user types it.
+ */
+const shellArgument = (argument: string, platform: NodeJS.Platform): string => {
+  if (platform === 'win32') {
+    /* Inside double quotes PowerShell's escape character is the backtick. */
+    const escaped = argument.replaceAll(/[`"$]/gu, '`$&');
+    return argument !== '' && !powerShellSpecial.test(argument) ? argument : `"${escaped}"`;
+  }
+  return posixPlainArgument.test(argument) ? argument : `'${argument.replaceAll("'", String.raw`'\''`)}'`;
+};
+
+/**
+ * A whole invocation, as a line the user can paste into the host's shell.
+ *
+ * PowerShell treats a quoted first word as a string, not a command, so a
+ * quoted program is written with the call operator `&`.
+ *
+ * @param command - Program to run, as an absolute path or a bare name.
+ * @param args - Arguments exactly as the program receives them, before quoting.
+ * @param platform - Host platform, which picks POSIX or PowerShell quoting.
+ * @returns Every word quoted where needed, joined by spaces, ready to paste.
+ */
+const shellCommandLine = (command: string, args: readonly string[], platform: NodeJS.Platform): string => {
+  const program = shellArgument(command, platform);
+  const quoted = [program, ...args.map((argument) => shellArgument(argument, platform))].join(' ');
+  return platform === 'win32' && program.startsWith('"') ? `& ${quoted}` : quoted;
+};
+
+/**
+ * The invocation a `terminal-auth` method wants the *user* to run.
  *
  * Claude hands back `_meta['terminal-auth'] = {command, args, label}` when the
  * client advertised the `_meta` capability, which is a whole invocation Tau can
@@ -550,44 +610,120 @@ export const recoverableSessionLoss = (error: unknown): boolean => {
  * produces stays in the vendor's own store on the user's machine.
  *
  * @param method - One method from `InitializeResponse.authMethods`.
- * @returns The command line, or `undefined` when the method has none.
+ * @returns The program and its arguments, or `undefined` when the method has none.
  */
-const terminalCommandOf = (method: AuthMethod): string | undefined => {
+const terminalInvocationOf = (
+  method: AuthMethod,
+): { readonly command: string; readonly args: readonly string[] } | undefined => {
   const terminal = asRecord(asRecord(method._meta)?.['terminal-auth']);
   const command = terminal?.['command'];
   if (!terminal || typeof command !== 'string' || command === '') {
     return undefined;
   }
   const { args } = terminal;
-  return [command, ...(Array.isArray(args) ? args.filter((entry) => typeof entry === 'string') : [])].join(' ');
+  return {
+    command,
+    args: Array.isArray(args) ? args.filter((entry): entry is string => typeof entry === 'string') : [],
+  };
 };
+
+/**
+ * The sign-in command line an advertised method surfaces, if it is one a user can run.
+ *
+ * An adapter describes sign-in as its *own* process invocation (F1): Claude's
+ * adapter names `process.execPath` and its module path, which on a Tau host is
+ * Tau's runtime (the desktop's Electron helper) running a file inside the app.
+ * That command never works in the user's terminal, so it is dropped here and
+ * the method keeps only its name and description.
+ *
+ * @param method - One advertised method.
+ * @param adapter - Adapter that advertised it.
+ * @param host - Where the command will be shown.
+ * @returns The quoted command line, or `undefined`.
+ */
+const terminalCommandOf = (method: AuthMethod, adapter: SignInAdapter, host: AcpLoginHost): string | undefined => {
+  const invocation = terminalInvocationOf(method);
+  if (
+    invocation === undefined ||
+    invocation.command === host.execPath ||
+    (adapter.modulePath !== undefined && invocation.args.includes(adapter.modulePath))
+  ) {
+    return undefined;
+  }
+  return shellCommandLine(invocation.command, invocation.args, host.platform);
+};
+
+/**
+ * Tau's own sign-in command for an agent, from its profile.
+ *
+ * A CLI found on PATH (or with no recorded source) keeps the profile's bare
+ * command. A CLI found only at a declared fallback is not on the user's PATH
+ * either, so its leading word becomes the quoted absolute path Tau found
+ * (Finding 8).
+ *
+ * @param adapter - The resolved adapter.
+ * @param host - Where the command will be shown.
+ * @returns The command line, or `undefined` when the profile has none.
+ */
+const cliLoginCommandOf = (adapter: SignInAdapter, host: AcpLoginHost): string | undefined => {
+  const { loginCommand, cli, executablePath } = adapter;
+  if (
+    loginCommand === undefined ||
+    adapter.executableSource !== 'fallback' ||
+    executablePath === undefined ||
+    cli === undefined ||
+    (loginCommand !== cli && !loginCommand.startsWith(`${cli} `))
+  ) {
+    return loginCommand;
+  }
+  return `${shellCommandLine(executablePath, [], host.platform)}${loginCommand.slice(cli.length)}`;
+};
+
+/** This process, which is the host every surface of a running daemon shows commands for. */
+const thisHost: AcpLoginHost = { platform: process.platform, execPath: process.execPath };
 
 /**
  * The login facts a surface renders, from what the agent advertised (VSC4).
  *
+ * Tau's own `cli-login` method comes first, because it is the one command known
+ * to work in the user's terminal. An advertised method whose command is that
+ * same line serves as it and takes its place, so the command is never listed
+ * twice. Every other method follows in the agent's order, with any host-runtime
+ * command dropped and every surfaced command quoted for the host's shell.
+ *
  * @param adapter - Agent the user has to log in to, including its CLI login fallback.
  * @param authMethods - Methods `initialize` listed.
+ * @param host - Where the commands will be shown; this process by default.
  * @returns The payload of both the refusal and the durable login interrupt.
  * @internal
  */
-export const loginOf = (adapter: AcpAdapter, authMethods: readonly AuthMethod[]): ExternalAgentLogin => ({
-  kind: 'external-agent-login',
-  agentId: adapter.id,
-  authMethods: [
-    ...authMethods.map((method) => {
-      const terminalCommand = terminalCommandOf(method);
-      return {
-        id: method.id,
-        name: method.name,
-        ...(method.description ? { description: method.description } : {}),
-        ...(terminalCommand ? { terminalCommand } : {}),
-      };
-    }),
-    ...(adapter.loginCommand === undefined || authMethods.some((method) => terminalCommandOf(method) !== undefined)
-      ? []
-      : [{ id: 'cli-login', name: `Sign in to ${adapter.displayName}`, terminalCommand: adapter.loginCommand }]),
-  ],
-});
+export const loginOf = (
+  adapter: SignInAdapter,
+  authMethods: readonly AuthMethod[],
+  host: AcpLoginHost = thisHost,
+): ExternalAgentLogin => {
+  const cliLogin = cliLoginCommandOf(adapter, host);
+  const advertised = authMethods.map((method) => {
+    const terminalCommand = terminalCommandOf(method, adapter, host);
+    return {
+      id: method.id,
+      name: method.name,
+      ...(method.description ? { description: method.description } : {}),
+      ...(terminalCommand ? { terminalCommand } : {}),
+    };
+  });
+  const serving = advertised.find((method) => cliLogin !== undefined && method.terminalCommand === cliLogin);
+  const first =
+    serving ??
+    (cliLogin === undefined
+      ? undefined
+      : { id: 'cli-login', name: `Sign in to ${adapter.displayName}`, terminalCommand: cliLogin });
+  return {
+    kind: 'external-agent-login',
+    agentId: adapter.id,
+    authMethods: [...(first ? [first] : []), ...advertised.filter((method) => method !== serving)],
+  };
+};
 
 /**
  * The login a URL elicitation is asking the user to complete.
@@ -978,12 +1114,30 @@ const nativeToolName = (update: AcpToolUpdate, paths: readonly string[]): string
   return undefined;
 };
 
+/** Longest model name the descriptor carries (`externalAgentDescriptorSchema`). */
+const modelNameLimit = 128;
+
+/**
+ * A model's name with its id appended, so two rows of one name differ (F4).
+ *
+ * The name gives way first when the result would pass the descriptor's bound,
+ * because the id is the part that tells the rows apart.
+ *
+ * @param model - One listed model whose name another model shares.
+ * @returns `<name> (<id>)`, at most {@link modelNameLimit} characters.
+ */
+const distinctModelName = (model: { readonly id: string; readonly name: string }): string => {
+  const suffix = ` (${model.id})`;
+  return `${model.name.slice(0, Math.max(0, modelNameLimit - suffix.length))}${suffix}`.slice(0, modelNameLimit);
+};
+
 /**
  * The model choice one session offers, in the order the agent listed it.
  *
  * Both pinned adapters spell the choice the same way — one `select` config
  * option whose category is `model` — so this reads the protocol, not a vendor.
- * Groups are flattened, because Tau's picker is one list.
+ * Groups are flattened, because Tau's picker is one list. Models that share a
+ * display name each get their id appended (F4), so every row can be told apart.
  *
  * The turn's own model refusal and the discovery probe share this one reader
  * (V5): a second parser is how the offered set and the advertised set drift.
@@ -1006,8 +1160,12 @@ export const modelChoice = (
   if (option?.type !== 'select') {
     return undefined;
   }
-  const models = option.options.flatMap((entry) =>
+  const listed = option.options.flatMap((entry) =>
     ('options' in entry ? entry.options : [entry]).map((value) => ({ id: value.value, name: value.name })),
+  );
+  const counts = Map.groupBy(listed, (model) => model.name);
+  const models = listed.map((model) =>
+    (counts.get(model.name)?.length ?? 0) > 1 ? { id: model.id, name: distinctModelName(model) } : model,
   );
   return {
     configId: option.id,

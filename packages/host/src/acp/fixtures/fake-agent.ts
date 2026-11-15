@@ -47,7 +47,8 @@
  * | Mode | Behaviour |
  * | --- | --- |
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
- * | `auth-required` | `initialize` advertises a `terminal-auth` method and `session/new` errors `-32000` |
+ * | `auth-required` | `initialize` advertises codex-acp 1.7.0's own methods (`api-key`, `chat-gpt`, and `chat-gpt-device-code` to a client that advertised `elicitation.url`), none with a terminal command, and `session/new` errors `-32000` |
+ * | `claude-terminal-auth` | `initialize` advertises claude-agent-acp 0.70.0's two methods to a client that sent `_meta['terminal-auth']`, each naming *this* process (`process.execPath` and `process.argv.slice(1)`) as its command, exactly as the real adapter does |
  * | `restore-auth` | restoring an existing session errors `-32000` instead of silently starting fresh |
  * | `prompt-auth` | no auth method is advertised and `session/prompt` errors `-32000`, as claude-agent-acp does for a logged-out `claude` |
  * | `images` | `promptCapabilities.image` is advertised; withheld otherwise |
@@ -136,6 +137,9 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 let urlElicitation = false;
 /** Whether the client advertised `elicitation.form`, read at `initialize`. */
 let formElicitation = false;
+
+/** Whether the client advertised `_meta['terminal-auth']`, read at `initialize`. */
+let metaTerminalAuth = false;
 
 /** Whether the client advertised the AIR `sessionFailure` extension, read at `initialize`. */
 let airSessionFailures = false;
@@ -949,6 +953,81 @@ const openSession = (sessionId: string, params: Record<string, unknown>): Sessio
 };
 
 /**
+ * The methods `getCodexAuthMethods` in codex-acp 1.7.0 lists: none carries a terminal command, so
+ * the only paste-ready command a surface can show is the profile's own login.
+ *
+ * @returns The methods, in the adapter's order.
+ */
+const codexAuthMethods = (): Array<Record<string, unknown>> => [
+  {
+    id: 'api-key',
+    name: 'API Key',
+    description: 'Use an API key to authenticate',
+    _meta: { 'api-key': { provider: 'openai' } },
+  },
+  { id: 'chat-gpt', name: 'ChatGPT', description: 'Use ChatGPT to authenticate' },
+  ...(urlElicitation
+    ? [
+        {
+          id: 'chat-gpt-device-code',
+          name: 'ChatGPT (device code)',
+          description: 'Sign in to ChatGPT by opening a verification page and entering a one-time code',
+        },
+      ]
+    : []),
+];
+
+/**
+ * The local login methods of claude-agent-acp 0.70.0. Its `terminal-auth` command is
+ * the adapter's *own* invocation, so a host that runs it with its own runtime
+ * is handed that runtime and the adapter module as the "login command".
+ *
+ * @returns The methods, in the adapter's order.
+ */
+const claudeAuthMethods = (): Array<Record<string, unknown>> => {
+  const method = ({
+    id,
+    name,
+    description,
+    label,
+    flag,
+  }: Readonly<Record<'id' | 'name' | 'description' | 'label' | 'flag', string>>): Record<string, unknown> => ({
+    description,
+    name,
+    id,
+    type: 'terminal',
+    args: ['--cli', 'auth', 'login', flag],
+    ...(metaTerminalAuth
+      ? {
+          _meta: {
+            'terminal-auth': {
+              command: process.execPath,
+              args: [...process.argv.slice(1), '--cli', 'auth', 'login', flag],
+              label,
+            },
+          },
+        }
+      : {}),
+  });
+  return [
+    method({
+      id: 'claude-ai-login',
+      name: 'Claude Subscription',
+      description: 'Use Claude subscription ',
+      label: 'Claude Login',
+      flag: '--claudeai',
+    }),
+    method({
+      id: 'console-login',
+      name: 'Anthropic Console',
+      description: 'Use Anthropic Console (API usage billing)',
+      label: 'Anthropic Console Login',
+      flag: '--console',
+    }),
+  ];
+};
+
+/**
  * What `initialize` advertises, which the auth mode changes.
  *
  * @returns The `InitializeResponse` body.
@@ -971,19 +1050,12 @@ const initializeResult = (): Record<string, unknown> => ({
   },
   ...([...modes].some((entry) => entry.startsWith('grok')) ? { _meta: { 'x.ai/pluginDirs': true } } : {}),
   authMethods: inMode('auth-required')
-    ? [
-        {
-          id: 'codex-login',
-          name: 'Log in with Codex',
-          description: 'Sign in to the Codex CLI on the machine running this agent.',
-          /* What Claude sends back to a client that advertised
-           * `_meta['terminal-auth']`: a whole invocation the user can run. */
-          _meta: { 'terminal-auth': { command: 'codex', args: ['login'], label: 'Log in with Codex' } },
-        },
-      ]
-    : inMode('grok-auth')
-      ? [{ id: 'grok.com', name: 'Grok' }]
-      : [],
+    ? codexAuthMethods()
+    : inMode('claude-terminal-auth')
+      ? claudeAuthMethods()
+      : inMode('grok-auth')
+        ? [{ id: 'grok.com', name: 'Grok' }]
+        : [],
 });
 
 /**
@@ -1046,6 +1118,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
     case 'initialize': {
       urlElicitation = advertisesUrlElicitation(params);
       formElicitation = asRecord(asRecord(params['clientCapabilities'])?.['elicitation'])?.['form'] !== undefined;
+      metaTerminalAuth = asRecord(asRecord(params['clientCapabilities'])?.['_meta'])?.['terminal-auth'] === true;
       airSessionFailures = advertisesAirSessionFailures(params);
       if (inMode('silent')) {
         /* The adapter that never answers: the client's own timeout is the only

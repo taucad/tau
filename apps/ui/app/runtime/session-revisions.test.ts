@@ -22,9 +22,17 @@ import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { createSessionRevisionsLogic, sessionRevisionsCallback } from '#runtime/session-revisions.js';
+import {
+  closeDebtStorageKeyPrefix,
+  createSessionRevisionsLogic,
+  sessionRevisionsCallback,
+  sessionRevisionsCloseDebt,
+} from '#runtime/session-revisions.js';
 import type {
   SessionRevisionsCloseCut,
+  SessionRevisionsCloseDebt,
+  SessionRevisionsCloseDebtKey,
+  SessionRevisionsCloseDebtPort,
   SessionRevisionsEmitted,
   SessionRevisionsPorts,
 } from '#runtime/session-revisions.js';
@@ -188,8 +196,29 @@ const createTree = (log: ClientLog, name = 'tree') => ({
   },
 });
 
-const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused?: string }> = {}) => {
+/** Owed close cuts kept across documents, as `localStorage` keeps them: one store two sessions can share (A7d). */
+const createDebtStore = () => {
+  const records = new Map<string, SessionRevisionsCloseDebt>();
+  const keyOf = ({ workspace: slug, projectId: id }: SessionRevisionsCloseDebtKey): string => `${slug}:${id}`;
+  const port: SessionRevisionsCloseDebtPort = {
+    read: (key) => records.get(keyOf(key)),
+    write: (key, debt) => {
+      records.set(keyOf(key), debt);
+    },
+    clear: (key, token) => {
+      if (records.get(keyOf(key))?.token === token) {
+        records.delete(keyOf(key));
+      }
+    },
+  };
+  return { port, records };
+};
+
+const createFakePorts = (
+  initial: Readonly<{ user?: RevisionSessionUser; focused?: string; debts?: ReturnType<typeof createDebtStore> }> = {},
+) => {
   let { user, focused } = initial;
+  const debts = initial.debts ?? createDebtStore();
   const focusSignal = createSignal();
   let recording = false;
   const recordingSignal = createSignal();
@@ -227,6 +256,7 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
       chatFacts.push({ projectId: id, facts });
     },
     recording: { get: () => recording, subscribe: recordingSignal.subscribe },
+    closeDebt: debts.port,
     reportFault: (error) => {
       faults.push(error);
     },
@@ -261,6 +291,7 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
     },
     chatFacts,
     faults,
+    debts,
     saltRequests,
     cuts,
     get unregistered() {
@@ -1046,5 +1077,223 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     expect(fake.listeners()).toBe(0);
     expect(fileManager.listeners).toBe(0);
     expect(guard.take()).toEqual([]);
+  });
+});
+
+/*
+ * A7d (I6, S26, D26): the close cut a reload cannot finish. On a reload `pagehide` runs the session stage before
+ * `hidden`, and the revision worker goes with the document before `saveRevision('close')` answers, so History never
+ * shows the close revision. The child records the cut as owed, synchronously, and the next child for the project in
+ * this browser takes it as its first revision act.
+ */
+describe('session revisions take a close cut owed by an earlier document (A7d)', () => {
+  afterEach(() => {
+    revisionClientTestApi.reset();
+    githubProjectBinding.remove(projectId);
+    globalThis.localStorage.clear();
+  });
+
+  /** One document: a session whose `revisions` child has a client on `worker`, with its open answered. */
+  const openDocument = async (
+    name: string,
+    worker: Worker,
+    options: Readonly<{
+      log: ClientLog;
+      debts: ReturnType<typeof createDebtStore>;
+      user?: RevisionSessionUser;
+      workspace?: string;
+      /* Prepare the client before its open, e.g. hold or refuse its first cut. */
+      prepare?: (client: ReturnType<typeof createFakeClient>) => void;
+    }>,
+  ) => {
+    const guard = guardActors();
+    const client = createFakeClient(name, options.log);
+    options.prepare?.(client);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, worker, client);
+    const fake = createFakePorts({
+      debts: options.debts,
+      ...(options.user === undefined ? {} : { user: options.user }),
+    });
+    const fileManager = createFileManager({ worker, rootDirectory: `/projects/${projectId}` });
+    const session = createSession(fake.ports, fileManager.ref, {
+      guard,
+      ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
+    });
+    session.start();
+    await settle();
+    return { client, fake, session, guard, fileManager };
+  };
+
+  /** A reload: `pagehide` then `hidden` reach the cut, the cut never answers, and the document goes. */
+  const reload = async (document: Awaited<ReturnType<typeof openDocument>>): Promise<void> => {
+    document.client.holdSave();
+    const [cut] = document.fake.cuts;
+    await cut?.('pagehide');
+    // async-iife: bootstrap -- the cut is cut short by the document going, so nothing awaits it.
+    void cut?.('hidden');
+    await settle();
+    document.session.stop();
+    revisionClientTestApi.reset();
+  };
+
+  it('I6: should take the close cut a reloaded document owed as the next open’s first revision act, as the closing person', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    const first = await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } });
+    await reload(first);
+    expect(log).toContain('a:saveRevision:close');
+    log.length = 0;
+
+    /* The next document has not heard who is signed in yet: the owed cut is still Ada's. */
+    let save: PromiseWithResolvers<void> | undefined;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      prepare: (client) => {
+        save = client.holdSave();
+      },
+    });
+    const own = log.filter((line) => line.startsWith('b:'));
+    expect(own).toEqual([
+      expect.stringMatching(/^b:send:setDeviceId:/u),
+      'b:setUser:none',
+      expect.stringMatching(/^b:send:setActor:/u),
+      expect.stringMatching(/^b:send:setActor:/u),
+      'b:saveRevision:close',
+      'b:open',
+    ]);
+    const live = { command: 'setActor', actor: revisionUserActor({ workspace, user: undefined, anonymous: false }) };
+    const closing = { command: 'setActor', actor: { kind: 'user', id: 'usr_1', name: 'Ada' } };
+    expect(sent(log, 'b', 'setActor')).toEqual([live, closing]);
+    expect(debts.records.size).toBe(1);
+
+    /* The live actor waits for the cut's answer, and the answer settles the debt. */
+    save?.resolve();
+    await settle();
+    expect(sent(log, 'b', 'setActor')).toEqual([live, closing, live]);
+    expect(debts.records.size).toBe(0);
+
+    /* Paid once: a later document owes nothing. */
+    next.session.stop();
+    log.length = 0;
+    const third = await openDocument('c', workerA, { log, debts });
+    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    third.session.stop();
+    expect([...first.guard.take(), ...next.guard.take(), ...third.guard.take()]).toEqual([]);
+  });
+
+  it('should ask for the owed cut only once the checkout registry has answered', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts }));
+    log.length = 0;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      prepare: (client) => {
+        client.setStatus({ registrySettled: false });
+      },
+    });
+    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    next.client.setStatus({ registrySettled: true });
+    await settle();
+    expect(log.filter((line) => line.includes('saveRevision'))).toEqual(['b:saveRevision:close']);
+    expect(debts.records.size).toBe(0);
+    next.session.stop();
+  });
+
+  it('should owe nothing once the close cut has answered, so the next open takes no cut', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    const first = await openDocument('a', workerA, { log, debts });
+    const [cut] = first.fake.cuts;
+    const save = first.client.holdSave();
+    const hidden = cut?.('hidden');
+    await settle();
+    expect(debts.records.size).toBe(1);
+    save.resolve();
+    await hidden;
+    expect(debts.records.size).toBe(0);
+    first.session.stop();
+    revisionClientTestApi.reset();
+    log.length = 0;
+
+    const next = await openDocument('b', workerB, { log, debts });
+    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    next.session.stop();
+  });
+
+  it('should leave the debt for the next open when its client closes before the cut answers', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts }));
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      /* The connection's close rejects the cut still waiting for its answer. */
+      prepare: (client) => {
+        Object.assign(client, {
+          saveRevision: async () => {
+            log.push('b:saveRevision:close');
+            throw new DOMException('The revision connection closed before the request completed.', 'AbortError');
+          },
+        });
+      },
+    });
+    expect(log).toContain('b:saveRevision:close');
+    next.session.stop();
+    await settle();
+    expect(debts.records.size).toBe(1);
+  });
+
+  it('should keep a newer debt written while an older one was being paid', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts }));
+    let save: PromiseWithResolvers<void> | undefined;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      prepare: (client) => {
+        save = client.holdSave();
+      },
+    });
+    const newer: SessionRevisionsCloseDebt = { token: 'newer', actor: { kind: 'user', id: 'usr_2' } };
+    debts.port.write({ workspace, projectId }, newer);
+    save?.resolve();
+    await settle();
+    expect(debts.port.read({ workspace, projectId })).toEqual(newer);
+    next.session.stop();
+  });
+
+  it("B7: should pay only its own workspace's debt", async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, workspace: 'other' }));
+    log.length = 0;
+    const next = await openDocument('b', workerB, { log, debts });
+    expect(log.filter((line) => line.includes('saveRevision'))).toEqual([]);
+    expect(debts.records.size).toBe(1);
+    next.session.stop();
+  });
+
+  it('should keep the owed cut in localStorage, readable by a later document, cleared only by its own token', () => {
+    const key = { workspace, projectId };
+    const debt: SessionRevisionsCloseDebt = {
+      token: 't1',
+      actor: { kind: 'user', id: 'anon_1', name: 'Anonymous', anonymous: true },
+      commitAuthor: { name: 'ada', email: '1+ada@users.noreply.github.com' },
+    };
+    sessionRevisionsCloseDebt.write(key, debt);
+    expect(globalThis.localStorage.getItem(`${closeDebtStorageKeyPrefix}${workspace}:${projectId}`)).not.toBeNull();
+    expect(sessionRevisionsCloseDebt.read(key)).toEqual(debt);
+    expect(sessionRevisionsCloseDebt.read({ workspace: 'other', projectId })).toBeUndefined();
+    sessionRevisionsCloseDebt.clear(key, 't0');
+    expect(sessionRevisionsCloseDebt.read(key)).toEqual(debt);
+    sessionRevisionsCloseDebt.clear(key, 't1');
+    expect(sessionRevisionsCloseDebt.read(key)).toBeUndefined();
+    globalThis.localStorage.setItem(`${closeDebtStorageKeyPrefix}${workspace}:${projectId}`, '{"token":1}');
+    expect(sessionRevisionsCloseDebt.read(key)).toBeUndefined();
   });
 });

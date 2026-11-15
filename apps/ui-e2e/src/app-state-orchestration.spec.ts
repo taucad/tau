@@ -714,17 +714,19 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
 });
 
 /*
- * Expected failure (I6, S26, D26), carried from A7c to lane A7d, which takes the close cut on the next open and
- * flips this row. A7c registers each live session at the unload sequencer's producer stage, which writes what the
- * session owes on `hidden`, and the session stage then takes the close cut. On a reload the cut still never lands:
- * History, re-read for 30 s after the reload, holds only V1 Start. The cut is asynchronous through the revision
- * worker, which goes with the document. The row reads the edit's bytes from storage first, then History, with reads
- * that tolerate a row History re-renders.
+ * I6, S26, D26 (A7d). A7c registers each live session at the unload sequencer's producer stage, which writes what the
+ * session owes, and the session stage then takes the close cut. On a reload that cut cannot land: it is asynchronous
+ * through the revision worker, which goes with the document. So the session stage records the cut as owed, and the
+ * reloaded document's `revisions` child takes it as its first revision act. The row reads the edit's bytes from
+ * storage first, then History, with reads that tolerate a row History re-renders.
  */
-test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision holding the edit is cut on an immediate reload', async ({
+test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is cut after an immediate reload', async ({
   annotate,
 }) => {
-  const { marker } = await editViewArrangeAndReload(false);
+  /* The at-once reload 5a measures: the edit is in the editor's state and owed, so the unload's producer stage writes
+   * it before the document goes, and the close cut has the edit's bytes to take. A reload inside the editor document
+   * session's 250 ms save with nothing else owed loses the edit itself, which is A10's handback, not this row's. */
+  const { marker } = await editViewArrangeAndReload(true);
   /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
   const configs = await configsByName();
   const configA = configs[projectNames.a];
@@ -739,9 +741,9 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision ho
     (text) => text.includes(marker),
     15_000,
   );
-  /* Read, not asserted: inside `test.fails` a failing assertion here would pass the row. Row 5a asserts the stored edit
-   * (`editStored`); this reading says whether the cut had the edit's bytes to take. */
+  /* The cut has the edit's bytes to take: the producer stage wrote them before the document went (row 5a). */
   await annotate(`S26 stored edit before History: ${String(stored.includes(marker))}`);
+  expect(stored, 'S26: the edit is on disk before History is read').toContain(marker);
   await target.click(revisionChip());
   const panel = selectors.getByCss(visibleRevisionsPanel);
   const trailerOf = () => panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });

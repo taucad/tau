@@ -77,7 +77,9 @@ function mountDock(): DockviewApi {
 
 /** The layout actor with a scripted record child, as the runtime spawns it for `device`. */
 function mountLayout(device: WorkbenchLayoutDevice) {
-  const record = { send: undefined as ((event: WorkbenchLayoutEvent) => void) | undefined };
+  const record = {
+    send: undefined as ((event: WorkbenchLayoutEvent) => void) | undefined,
+  };
   const commands: LayoutRecordCommand[] = [];
   const layoutRecord = createCallbackLogic<LayoutRecordCommand>(({ sendBack, receive }) => {
     record.send = sendBack;
@@ -88,7 +90,12 @@ function mountLayout(device: WorkbenchLayoutDevice) {
   const layout: Actor<WorkbenchLayoutMachine> = createActor(
     workbenchLayoutMachine.provide({ actors: { layoutRecord } }),
     {
-      input: { device, adapters: ['workbench', 'viewer'], routeKey: 'route-1', workbenchOpen: true },
+      input: {
+        device,
+        adapters: ['workbench', 'viewer'],
+        routeKey: 'route-1',
+        workbenchOpen: true,
+      },
     },
   );
   layout.start();
@@ -105,7 +112,9 @@ function mountLayout(device: WorkbenchLayoutDevice) {
     }),
     subscribe: () => ({ unsubscribe: () => undefined }),
   };
-  const host = { facts: () => ({ routeKey: 'route-1', device }) } as unknown as ProjectLayoutHost;
+  const host = {
+    facts: () => ({ routeKey: 'route-1', device }),
+  } as unknown as ProjectLayoutHost;
   const controller = createWorkbenchLayoutControllerShim({
     layout,
     editor: editor as unknown as Parameters<typeof createWorkbenchLayoutControllerShim>[0]['editor'],
@@ -165,12 +174,16 @@ function mountProject() {
 
 function baseFacts(overrides: Partial<ViewerAdapterFacts> = {}): ViewerAdapterFacts {
   return {
-    admitsDemand: false,
+    admitsView: false,
+    admitsGeometry: false,
     mainEntryPath: 'main.ts',
     viewRecords: new Map<string, WorkbenchView>(),
     entriesRecord: undefined,
     geometryUnits: new Map(),
-    viewCommands: { edit: vi.fn(async () => true), remove: vi.fn(async () => true) },
+    viewCommands: {
+      edit: vi.fn(async () => true),
+      remove: vi.fn(async () => true),
+    },
     setViewEntryPath: vi.fn(),
     createViewRecord: vi.fn(),
     ...overrides,
@@ -199,10 +212,19 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
     });
-    expect(harness.layout.getSnapshot().value).toMatchObject({ viewer: 'attached', workbench: 'detached' });
+    expect(harness.layout.getSnapshot().value).toMatchObject({
+      viewer: 'attached',
+      workbench: 'detached',
+    });
     // The record has not been read: the phone's viewer dock is empty, so Dockview shows its watermark (M2).
     expect(viewIds(api)).toEqual([]);
     expect(harness.controller.ready()).toBe(false);
@@ -225,7 +247,13 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
       harness.publish(group('front'));
     });
@@ -237,7 +265,12 @@ describe('viewer adapter (A8d)', () => {
     expect(personViewerChanged).not.toHaveBeenCalled();
 
     await act(async () => {
-      api.addPanel({ id: 'iso', component: 'viewer', title: 'iso', params: { viewId: 'iso', entryPath: 'main.ts' } });
+      api.addPanel({
+        id: 'iso',
+        component: 'viewer',
+        title: 'iso',
+        params: { viewId: 'iso', entryPath: 'main.ts' },
+      });
       await new Promise((resolve) => {
         setTimeout(resolve, 0);
       });
@@ -255,7 +288,13 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
       harness.publish(group('front'));
     });
@@ -298,9 +337,18 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
-      harness.publish(group('front'), { code: 'NEWER_RECORD', message: 'newer' });
+      harness.publish(group('front'), {
+        code: 'NEWER_RECORD',
+        message: 'newer',
+      });
     });
     await act(async () => {
       project.request('parts/bracket.ts');
@@ -327,7 +375,13 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'shared', projectId: 'p', project: project.project, layout: undefined, facts },
+        ports: {
+          profile: 'shared',
+          projectId: 'p',
+          project: project.project,
+          layout: undefined,
+          facts,
+        },
       });
       api.addPanel({
         id: 'front',
@@ -335,7 +389,12 @@ describe('viewer adapter (A8d)', () => {
         title: 'front',
         params: { viewId: 'front', entryPath: 'main.ts' },
       });
-      api.addPanel({ id: 'launcher', component: 'viewer', title: 'New tab', params: { mode: 'launcher' } });
+      api.addPanel({
+        id: 'launcher',
+        component: 'viewer',
+        title: 'New tab',
+        params: { mode: 'launcher' },
+      });
     });
     expect(api.activePanel?.id).toBe('launcher');
     await act(async () => {
@@ -360,7 +419,8 @@ describe('viewer adapter (A8d)', () => {
     const createViewRecord = vi.fn();
     const facts = createViewerAdapterFactsPort(
       baseFacts({
-        admitsDemand: true,
+        admitsView: true,
+        admitsGeometry: true,
         viewRecords: new Map([
           ['view-a', newViewRecord('a.ts')],
           ['view-b', newViewRecord('b.ts')],
@@ -375,12 +435,21 @@ describe('viewer adapter (A8d)', () => {
         adapter: 'viewer',
         dockId,
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
       selectViewerDockAdapter(harness.layout, dockId)?.send({ type: 'attach' });
     });
     const viewA = api.panels.find((panel) => panel.id === 'view-a');
-    expect(viewA?.params).toMatchObject({ viewId: 'view-a', entryPath: 'a.ts' });
+    expect(viewA?.params).toMatchObject({
+      viewId: 'view-a',
+      entryPath: 'a.ts',
+    });
     expect(viewA?.title).toBe('a.ts');
 
     await act(async () => {
@@ -402,7 +471,13 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'shared', projectId: 'p', project: project.project, layout: undefined, facts },
+        ports: {
+          profile: 'shared',
+          projectId: 'p',
+          project: project.project,
+          layout: undefined,
+          facts,
+        },
       });
       api.addPanel({
         id: 'front',
@@ -449,9 +524,17 @@ describe('viewer adapter (A8d)', () => {
         adapter: 'viewer',
         dockId: 'dock-1',
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
-      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({ type: 'attach' });
+      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({
+        type: 'attach',
+      });
       harness.publish(group('front'));
     });
     expect(viewIds(api)).toEqual(['front']);
@@ -472,7 +555,13 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'shared', projectId: 'p', project: project.project, layout: undefined, facts },
+        ports: {
+          profile: 'shared',
+          projectId: 'p',
+          project: project.project,
+          layout: undefined,
+          facts,
+        },
       });
     });
     await act(async () => {
@@ -495,13 +584,19 @@ describe('viewer adapter (A8d)', () => {
       });
       return startAdapter({
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: undefined,
+          facts,
+        },
       });
     });
     expect(project.sent).toEqual([]);
 
     await act(async () => {
-      facts.set({ ...facts.get(), admitsDemand: true });
+      facts.set({ ...facts.get(), admitsView: true, admitsGeometry: true });
     });
     expect(project.sent.map((event) => [event.type, event.viewId ?? event.entryPath, event.entryPath])).toEqual([
       ['createViewGraphics', 'front', undefined],
@@ -517,14 +612,25 @@ describe('viewer adapter (A8d)', () => {
     expect(project.sent).toEqual([]);
 
     await act(async () => {
-      api.addPanel({ id: 'iso', component: 'viewer', title: 'iso', params: { viewId: 'iso', entryPath: 'main.ts' } });
+      api.addPanel({
+        id: 'iso',
+        component: 'viewer',
+        title: 'iso',
+        params: { viewId: 'iso', entryPath: 'main.ts' },
+      });
     });
     project.sent.length = 0;
     await act(async () => {
       api.getPanel('iso')!.api.close();
     });
-    expect(project.sent).toContainEqual({ type: 'destroyViewGraphics', viewId: 'iso' });
-    expect(project.sent).toContainEqual({ type: 'setViewerGeometryDemand', viewId: 'iso' });
+    expect(project.sent).toContainEqual({
+      type: 'destroyViewGraphics',
+      viewId: 'iso',
+    });
+    expect(project.sent).toContainEqual({
+      type: 'setViewerGeometryDemand',
+      viewId: 'iso',
+    });
     expect(facts.get().viewCommands.remove).toHaveBeenCalledWith('iso');
 
     project.sent.length = 0;
@@ -532,6 +638,61 @@ describe('viewer adapter (A8d)', () => {
       adapter.stop();
     });
     expect(project.sent).toEqual([{ type: 'setViewerGeometryDemand', viewId: 'front' }]);
+  });
+
+  /* A15e: the stage mounts once, through the first file check; the kernel still waits for the files (P-j). */
+  it('should create a view graphics owner and bind its entry while the files are checked, and its geometry unit and demand only once they settle', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const records = new Map([['front', newViewRecord('main.ts')]]);
+    const setViewEntryPath = vi.fn();
+    const facts = createViewerAdapterFactsPort(baseFacts({ viewRecords: records, setViewEntryPath }));
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: undefined,
+          facts,
+        },
+      });
+    });
+
+    /* The project is ready and its files are being checked. */
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsView: true });
+    });
+    expect(project.sent.map((event) => event.type)).toEqual(['createViewGraphics']);
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', 'main.ts');
+    expect((api.getPanel('front')!.params as { entryPath?: string }).entryPath).toBe('main.ts');
+
+    /* The files settle: the geometry unit and its demand follow, and the graphics owner is not made again. */
+    project.sent.length = 0;
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: true });
+    });
+    expect(project.sent.map((event) => [event.type, event.viewId ?? event.entryPath])).toEqual([
+      ['createGeometryUnit', 'main.ts'],
+      ['setViewerGeometryDemand', 'front'],
+    ]);
+
+    /* A later check holds new geometry back and keeps what is admitted: nothing is released or made again. */
+    project.sent.length = 0;
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: false });
+    });
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: true });
+    });
+    expect(project.sent).toEqual([]);
   });
 
   it('should delete the record of a view an apply removes once, not again as a person removal', async () => {
@@ -542,7 +703,13 @@ describe('viewer adapter (A8d)', () => {
     await act(async () => {
       startAdapter({
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
       harness.publish(group('front', 'iso'));
     });
@@ -595,9 +762,17 @@ describe('viewer adapter (A8d)', () => {
         adapter: 'viewer',
         dockId: 'dock-1',
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
-      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({ type: 'attach' });
+      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({
+        type: 'attach',
+      });
       harness.publish(group('front', 'iso'));
     });
     expect(viewIds(api)).toEqual(['front', 'iso']);
@@ -636,16 +811,30 @@ describe('viewer adapter (A8d)', () => {
       ['iso', newViewRecord('iso.ts')],
       ['top', newViewRecord('top.ts')],
     ]);
-    const facts = createViewerAdapterFactsPort(baseFacts({ admitsDemand: true, viewRecords: records }));
+    const facts = createViewerAdapterFactsPort(
+      baseFacts({
+        admitsView: true,
+        admitsGeometry: true,
+        viewRecords: records,
+      }),
+    );
     await act(async () => {
       harness.layout.send({
         type: 'dockReady',
         adapter: 'viewer',
         dockId: 'dock-1',
         api,
-        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: harness.controller,
+          facts,
+        },
       });
-      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({ type: 'attach' });
+      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({
+        type: 'attach',
+      });
       harness.publish({
         kind: 'group',
         tabs: ['front', 'iso', 'top'].map((view) => ({ kind: 'view', view })),

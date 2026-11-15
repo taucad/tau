@@ -1,10 +1,17 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
+import { useSelector } from '@xstate/react';
 import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { indicatorDelayMilliseconds } from '@taucad/ui/utils/wait-timing';
+import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
+import { useProject } from '#hooks/use-project.js';
+import { useSessions } from '#hooks/use-sessions.js';
 import {
   useFileCheckSlow,
   useLargeObjects,
@@ -90,39 +97,155 @@ function ModelFilesPlaceholder({ hasFailed: failed }: { readonly hasFailed: bool
 }
 
 /**
- * The viewer's wait while no download runs: the files are being checked, which
- * is quick. It never says "Downloading", and a check that outlasts its bound
- * offers Try again, which checks the files again (T5). The bound is the
- * session's (`slow`, A14), counted on its clock from when the check began.
+ * The waits for the model's own files: a check of files already here, a download of the model's large files, or that
+ * download's failure. The viewer shows these on its stage, which stays mounted through them (A15e; P-j): the canvas
+ * and the last render stay, and the kernel waits for the files. The other model surfaces still show
+ * {@link ProjectSyncPlaceholder}.
+ */
+export type ModelFilesWait = Extract<ModelAvailability, 'filesChecking' | 'files' | 'filesFailed'>;
+
+/**
+ * Whether the model's availability is one of its own files' waits, which the viewer shows on its stage.
+ *
+ * @param state - The model's availability.
+ * @returns `true` for a check, a download or a failed download of the model's files.
+ */
+export const isModelFilesWait = (state: ModelAvailability): state is ModelFilesWait =>
+  state === 'filesChecking' || state === 'files' || state === 'filesFailed';
+
+/** One wait for the model's files as the stage's indicator times it. */
+type TrackedFilesWait = Readonly<{ active: boolean; startedAt: number }>;
+
+/**
+ * When the stage's wait for the model's files started, on the wait clock, read in render when the wait starts (React's
+ * "information from previous renders" pattern; no effect, no timer).
+ *
+ * A wait the open itself waited for (the session still reports the first check `pending` or `slow`) began with the
+ * open, which has already waited the open bound for it (A14): the bound is the indicator delay, so its indicator shows
+ * as the stage mounts. Every other wait, such as a later check or a download that begins on screen, starts now.
+ *
+ * @param active - Whether the stage waits for the model's files now.
+ * @returns The current wait's start, in milliseconds on the wait clock.
+ */
+function useModelFilesWaitStart(active: boolean): number {
+  const clock = useWaitClockSource();
+  const { projectId } = useProject();
+  const isOpenWait = useSelector(useSessions(), (state) => {
+    const availability = state.context.status[projectId]?.availability;
+    return availability === 'pending' || availability === 'slow';
+  });
+  const startNow = (): number => clock.now() - (isOpenWait ? indicatorDelayMilliseconds : 0);
+  const [tracked, setTracked] = useState<TrackedFilesWait>(() => ({
+    active,
+    startedAt: startNow(),
+  }));
+  let current = tracked;
+  if (tracked.active !== active) {
+    current = active ? { active, startedAt: startNow() } : { ...tracked, active };
+    setTracked(current);
+  }
+  return current.startedAt;
+}
+
+/**
+ * The viewer stage's status for the model's files: the status pill, "Checking model files" or "Downloading model
+ * files" with its percent, from 1,000 ms (UI Policy § 6). A check that outlasts its patience reads "Still checking
+ * model files" with "Try again", which checks the files again (T5); the patience is the session's (`slow`, A14),
+ * counted on its clock from when the check began, so the pill adds no clock of its own. It is rendered for the stage's
+ * whole life, so a shown pill keeps its minimum after the files arrive. The open's route announcement speaks for it,
+ * so it is not live. Mount it once the stage has waited for its files: it reads the project's session.
+ *
+ * @param props - The wait the stage is in, or `undefined` once the files are here.
+ * @returns The status slot's wait content.
+ */
+export function ModelFilesStageStatus({ wait }: { readonly wait: ModelFilesWait | undefined }): React.JSX.Element {
+  const isSlow = useFileCheckSlow();
+  const facet = useLargeObjects();
+  const isActive = wait === 'filesChecking' || wait === 'files';
+  const startedAt = useModelFilesWaitStart(isActive);
+  /* A shown pill keeps its words while it holds its minimum after the wait. */
+  const [heldWait, setHeldWait] = useState(wait);
+  if (isActive && wait !== heldWait) {
+    setHeldWait(wait);
+  }
+  const shownWait = isActive ? wait : heldWait;
+  const isDownloading = shownWait === 'files';
+  const isSlowCheck = wait === 'filesChecking' && isSlow;
+  const progress =
+    isDownloading && facet !== undefined && facet.totalBytes > 0
+      ? Math.min(1, facet.bytes / facet.totalBytes)
+      : undefined;
+  const label = isDownloading
+    ? 'Downloading model files'
+    : isSlowCheck
+      ? 'Still checking model files'
+      : 'Checking model files';
+  return (
+    <div data-slot='model-files-status' className='flex items-center justify-center gap-1.5'>
+      <WaitIndicator
+        active={isActive}
+        variant='pill'
+        live={false}
+        startedAt={startedAt}
+        label={label}
+        progress={progress}
+      />
+      {isSlowCheck ? <ModelFilesRetry /> : null}
+    </div>
+  );
+}
+
+/** "Try again" for the model's files: checks them again and resumes their download (T5). */
+function ModelFilesRetry(): React.JSX.Element {
+  const client = useRevisionClient();
+  return (
+    <Button
+      variant='outline'
+      size='sm'
+      onClick={() => {
+        client?.send({ command: 'retryLargeObjects' });
+      }}
+    >
+      Try again
+    </Button>
+  );
+}
+
+/**
+ * The viewer stage's failure for a download of the model's files that did not finish: what failed, what it means and
+ * "Try again", over whatever the canvas still draws.
+ */
+export const modelFilesFailure: ViewerStageStatus = {
+  kind: 'failed',
+  summary: 'Couldn’t download model files',
+  message: 'Your files are open; the model needs the rest of them to render.',
+  action: <ModelFilesRetry />,
+};
+
+/**
+ * A model surface's wait while no download runs: the files are being checked, which is quick. The pane keeps its bare
+ * frame (P-j: no "Preparing model" block) and shows "Checking model files" in it only from 1,000 ms (UI Policy § 6).
+ * It never says "Downloading", and a check that outlasts its bound reads "Still checking model files" with Try again,
+ * which checks the files again (T5). The bound is the session's (`slow`, A14), counted on its clock from when the check
+ * began. The open's route announcement speaks for it, so it is not live.
  */
 function ModelCheckPlaceholder(): React.JSX.Element {
-  const client = useRevisionClient();
   const isSlow = useFileCheckSlow();
+  const startedAt = useModelFilesWaitStart(true);
   return (
     <div
-      className='flex size-full flex-col items-center justify-center gap-4 p-6 text-center'
+      className='flex size-full items-center justify-center gap-1.5 p-6'
       role='region'
-      aria-label='Preparing model'
+      aria-label='Checking model files'
       aria-busy='true'
     >
-      <Loader className='size-8 motion-reduce:animate-none' />
-      <div className='w-full max-w-64 space-y-2'>
-        <p className='text-sm font-medium'>Preparing model</p>
-        <p className='text-xs text-muted-foreground'>
-          {isSlow ? 'This is taking longer than it should.' : 'Checking your model files.'}
-        </p>
-      </div>
-      {isSlow ? (
-        <Button
-          variant='outline'
-          size='sm'
-          onClick={() => {
-            client?.send({ command: 'retryLargeObjects' });
-          }}
-        >
-          Try again
-        </Button>
-      ) : null}
+      <WaitIndicator
+        active
+        live={false}
+        startedAt={startedAt}
+        label={isSlow ? 'Still checking model files' : 'Checking model files'}
+      />
+      {isSlow ? <ModelFilesRetry /> : null}
     </div>
   );
 }

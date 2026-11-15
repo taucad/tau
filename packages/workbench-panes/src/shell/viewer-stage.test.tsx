@@ -69,7 +69,12 @@ const renderStage = (options: StageOptions = {}) => {
 
 const boxOf = (element: Element, box: { left: number; top: number; width: number; height: number }): void => {
   element.getBoundingClientRect = () =>
-    DOMRect.fromRect({ x: box.left, y: box.top, width: box.width, height: box.height });
+    DOMRect.fromRect({
+      x: box.left,
+      y: box.top,
+      width: box.width,
+      height: box.height,
+    });
 };
 
 describe('ViewerStage', () => {
@@ -96,11 +101,24 @@ describe('ViewerStage', () => {
       const { region } = renderStage();
       showViewerModel(graphics!, 'model-1');
 
-      firePointer(region, 'pointerdown', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
-      act(() => {
-        canvas.props?.onComponentSecondaryPointerCandidate?.({ unitId: viewerUnitId, componentId: gearComponentId });
+      firePointer(region, 'pointerdown', {
+        button: 2,
+        pointerId: 3,
+        clientX: 50,
+        clientY: 50,
       });
-      firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 51, clientY: 50 });
+      act(() => {
+        canvas.props?.onComponentSecondaryPointerCandidate?.({
+          unitId: viewerUnitId,
+          componentId: gearComponentId,
+        });
+      });
+      firePointer(region, 'pointerup', {
+        button: 2,
+        pointerId: 3,
+        clientX: 51,
+        clientY: 50,
+      });
 
       expect(screen.getByRole('menu')).toBeInTheDocument();
     });
@@ -123,7 +141,11 @@ describe('ViewerStage', () => {
         });
       };
       act(() => {
-        graphicsRef.send({ type: 'canvasAttached', canvasId: 'stage', kind: 'canvas' });
+        graphicsRef.send({
+          type: 'canvasAttached',
+          canvasId: 'stage',
+          kind: 'canvas',
+        });
       });
       expect(region).toHaveAttribute('aria-busy', 'true');
       act(hostCanvas);
@@ -135,7 +157,11 @@ describe('ViewerStage', () => {
 
       // A replacement canvas (a backend switch or a retry) is busy again until it presents.
       act(() => {
-        graphicsRef.send({ type: 'canvasAttached', canvasId: 'replacement', kind: 'canvas' });
+        graphicsRef.send({
+          type: 'canvasAttached',
+          canvasId: 'replacement',
+          kind: 'canvas',
+        });
         graphicsRef.send({ type: 'canvasDetached', canvasId: 'stage' });
       });
       expect(region).toHaveAttribute('aria-busy', 'true');
@@ -216,9 +242,16 @@ describe('ViewerStage', () => {
     });
 
     it('should flip the label above the pointer near the bottom controls', () => {
-      const { region, layout, container } = renderStage({ controls: <div>Controls</div> });
+      const { region, layout, container } = renderStage({
+        controls: <div>Controls</div>,
+      });
       boxOf(layout, { left: 0, top: 0, width: 800, height: 600 });
-      boxOf(container.querySelector('[data-slot="viewer-controls"]')!, { left: 0, top: 540, width: 800, height: 60 });
+      boxOf(container.querySelector('[data-slot="viewer-controls"]')!, {
+        left: 0,
+        top: 540,
+        width: 800,
+        height: 60,
+      });
       showViewerModel(graphics!, 'model-1');
       hoverViewerComponent(graphics!, gearComponentId);
 
@@ -234,11 +267,24 @@ describe('ViewerStage', () => {
       firePointer(region, 'pointermove', { clientX: 50, clientY: 50 });
       expect(screen.getByTestId('model-component-name-badge')).toBeInTheDocument();
 
-      firePointer(region, 'pointerdown', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
-      act(() => {
-        canvas.props?.onComponentSecondaryPointerCandidate?.({ unitId: viewerUnitId, componentId: gearComponentId });
+      firePointer(region, 'pointerdown', {
+        button: 2,
+        pointerId: 3,
+        clientX: 50,
+        clientY: 50,
       });
-      firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      act(() => {
+        canvas.props?.onComponentSecondaryPointerCandidate?.({
+          unitId: viewerUnitId,
+          componentId: gearComponentId,
+        });
+      });
+      firePointer(region, 'pointerup', {
+        button: 2,
+        pointerId: 3,
+        clientX: 50,
+        clientY: 50,
+      });
 
       expect(screen.getByRole('menu')).toBeInTheDocument();
       expect(screen.queryByTestId('model-component-name-badge')).not.toBeInTheDocument();
@@ -270,11 +316,24 @@ describe('ViewerStage', () => {
       const { region } = renderStage({ decoratePartMenu });
       showViewerModel(graphics!, 'model-1');
 
-      firePointer(region, 'pointerdown', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
-      act(() => {
-        canvas.props?.onComponentSecondaryPointerCandidate?.({ unitId: viewerUnitId, componentId: gearComponentId });
+      firePointer(region, 'pointerdown', {
+        button: 2,
+        pointerId: 3,
+        clientX: 50,
+        clientY: 50,
       });
-      firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      act(() => {
+        canvas.props?.onComponentSecondaryPointerCandidate?.({
+          unitId: viewerUnitId,
+          componentId: gearComponentId,
+        });
+      });
+      firePointer(region, 'pointerup', {
+        button: 2,
+        pointerId: 3,
+        clientX: 50,
+        clientY: 50,
+      });
 
       expect(decoratePartMenu).toHaveBeenCalledWith(expect.objectContaining({ unitId: viewerUnitId }));
     });
@@ -282,7 +341,9 @@ describe('ViewerStage', () => {
 
   describe('status', () => {
     it('should centre the loading pill while no model is drawn and raise it over a model', () => {
-      const { container } = renderStage({ status: { kind: 'loading', label: 'Loading gear.glb', progress: 0.42 } });
+      const { container } = renderStage({
+        status: { kind: 'loading', label: 'Loading gear.glb', progress: 0.42 },
+      });
 
       expect(screen.getByRole('status')).toHaveTextContent('Loading gear.glb…42%');
       const slot = container.querySelector('[data-slot="viewer-status"]');
@@ -295,12 +356,56 @@ describe('ViewerStage', () => {
     });
 
     it('should draw a failure as the runtime error overlay inside the region', () => {
-      const { region } = renderStage({ status: { kind: 'failed', message: 'Invalid GLB header' } });
+      const { region } = renderStage({
+        status: { kind: 'failed', message: 'Invalid GLB header' },
+      });
 
       const alert = screen.getByRole('alert', { name: 'CAD runtime error' });
       expect(alert).toHaveTextContent('Invalid GLB header');
       expect(region).toContainElement(alert);
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('should draw a failure with an action as one alert holding what failed, what it means and the action', () => {
+      const onRetry = vi.fn();
+      const { region } = renderStage({
+        status: {
+          kind: 'failed',
+          summary: 'Couldn’t download model files',
+          message: 'Your files are open; the model needs the rest of them to render.',
+          action: (
+            <button type='button' onClick={onRetry}>
+              Try again
+            </button>
+          ),
+        },
+      });
+
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent('Couldn’t download model files');
+      expect(alert).toHaveTextContent('Your files are open; the model needs the rest of them to render.');
+      expect(region).toContainElement(alert);
+      expect(region).toContainElement(screen.getByTestId('canvas'));
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(onRetry).toHaveBeenCalledOnce();
+    });
+
+    it('should keep the canvas region busy while the host waits for what it will draw (A15e)', () => {
+      const { region, rerender, graphicsRef } = renderStage({
+        isWaiting: true,
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+
+      rerender(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <Stage graphicsRef={graphicsRef} isWaiting={false} />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      expect(region).not.toHaveAttribute('aria-busy');
     });
 
     it('should draw the host status content in the status slot', () => {

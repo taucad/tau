@@ -74,11 +74,16 @@ const chunkDelay = 3000;
 const readDelay = 3000;
 /** How long a loaded page is watched for a late change. Milliseconds. */
 const settleWindow = 2000;
-const projectNames = { a: 'Project Navigation A', b: 'Project Navigation B' } as const;
+const projectNames = {
+  a: 'Project Navigation A',
+  b: 'Project Navigation B',
+} as const;
 const usage = { inputTokens: 12, outputTokens: 6 };
 const finalReply = 'The task list is up to date.';
 const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
-const traySummary = selectors.getByRole('button', { name: /^Tasks: 0 of 2 done/u });
+const traySummary = selectors.getByRole('button', {
+  name: /^Tasks: 0 of 2 done/u,
+});
 
 const cookieValue = (value: unknown): string => encodeURIComponent(JSON.stringify(value));
 const describeFrame = (frame: ProjectLoadFrame): string => `frame ${frame.frame} (${frame.t} ms)`;
@@ -140,7 +145,12 @@ const seedProjects = async (
   } = {},
 ): Promise<{ readonly path: string; readonly chatId: string }> => {
   await target.addCookies([
-    { domain: 'localhost', name: 'tau-cookie-consent', path: '/', value: cookieValue('declined') },
+    {
+      domain: 'localhost',
+      name: 'tau-cookie-consent',
+      path: '/',
+      value: cookieValue('declined'),
+    },
   ]);
   await target.setViewport(viewports.wide);
   await installProjectLoadRecorder(options);
@@ -154,7 +164,10 @@ const seedProjects = async (
   await target.expectVisible(composer, 60_000);
   const url = new URL(await target.currentUrl());
   await target.setViewport(viewports[viewport]);
-  return { path: `${url.pathname}${url.search}`, chatId: url.searchParams.get('chat') ?? '' };
+  return {
+    path: `${url.pathname}${url.search}`,
+    chatId: url.searchParams.get('chat') ?? '',
+  };
 };
 
 /**
@@ -173,7 +186,11 @@ const seedTranscriptWithTray = async (chatId: string): Promise<void> => {
           args: {
             chatId,
             items: [
-              { id: 'model', title: 'Model the bracket', status: 'in_progress' },
+              {
+                id: 'model',
+                title: 'Model the bracket',
+                status: 'in_progress',
+              },
               { id: 'print', title: 'Print the bracket', status: 'pending' },
             ],
           },
@@ -416,7 +433,10 @@ test(
     try {
       await seedProjects('wide');
     } catch (error) {
-      samples.push({ sample: 0, error: `seeding: ${error instanceof Error ? error.message : String(error)}` });
+      samples.push({
+        sample: 0,
+        error: `seeding: ${error instanceof Error ? error.message : String(error)}`,
+      });
       await writeReport();
       return;
     }
@@ -438,7 +458,10 @@ test(
           firstContentfulPaint: record.firstContentfulPaint,
         });
       } catch (error) {
-        samples.push({ sample, error: error instanceof Error ? error.message : String(error) });
+        samples.push({
+          sample,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       await writeReport();
     }
@@ -534,7 +557,10 @@ knownDefect(
       return { record, settled, contentLeft };
     },
     assert: ({ record, settled, contentLeft }) => {
-      const extra = extraLanes(record, settled, { contentLeft, windowWidth: viewports.wide.width });
+      const extra = extraLanes(record, settled, {
+        contentLeft,
+        windowWidth: viewports.wide.width,
+      });
       expect(
         extra.slice(0, 5),
         `U5: a workbench-closed project drew more lane borders right of the sidebar (x > ${contentLeft + laneSnapBand}) than the settled page (x ${settled.join(', ')})`,
@@ -741,7 +767,10 @@ test(
           frames: record.viewerDockHeaders.map((header) => header.frame),
         });
       } catch (error) {
-        samples.push({ sample, error: error instanceof Error ? error.message : String(error) });
+        samples.push({
+          sample,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       await writeReport();
     }
@@ -780,8 +809,18 @@ const describeEntry = (entry: ProjectLoadRegionEntry): string =>
 const shownSpans = (
   entries: readonly ProjectLoadRegionEntry[],
   frameTimes: readonly number[] = [],
-): Array<{ readonly from: number; readonly to: number; readonly frame: number; readonly longest: number }> => {
-  const spans: Array<{ from: number; to: number; frame: number; longest: number }> = [];
+): Array<{
+  readonly from: number;
+  readonly to: number;
+  readonly frame: number;
+  readonly longest: number;
+}> => {
+  const spans: Array<{
+    from: number;
+    to: number;
+    frame: number;
+    longest: number;
+  }> = [];
   let open: ProjectLoadRegionEntry | undefined;
   const close = (start: ProjectLoadRegionEntry, to: number): void => {
     const before = frameTimes[start.frame - 2] ?? start.t;
@@ -915,7 +954,10 @@ const sameLanes = (left: readonly ProjectLoadBox[], right: readonly ProjectLoadB
  */
 const lanesFromFirstPaint = (
   record: ProjectLoadRecord,
-): Array<{ readonly label: string; readonly boxes: readonly ProjectLoadBox[] }> => {
+): Array<{
+  readonly label: string;
+  readonly boxes: readonly ProjectLoadBox[];
+}> => {
   const entries = record.boxSets['lanes'] ?? [];
   const content = regionsOf(record, 'content').find(
     (entry) => entry.present && entry.visible && entry.width > 0 && entry.height > 0,
@@ -931,7 +973,10 @@ const lanesFromFirstPaint = (
       : { label: describeFrame(standing), boxes: uniqueLanes(standing.boxes) },
     ...entries
       .filter((entry) => entry.frame > start)
-      .map((entry) => ({ label: describeFrame(entry), boxes: uniqueLanes(entry.boxes) })),
+      .map((entry) => ({
+        label: describeFrame(entry),
+        boxes: uniqueLanes(entry.boxes),
+      })),
   ];
 };
 
@@ -953,7 +998,10 @@ type ClosedWorkbenchLoad = {
 let closedWorkbenchLoad: Promise<ClosedWorkbenchLoad> | undefined;
 const measureClosedWorkbenchLoad = async (): Promise<ClosedWorkbenchLoad> => {
   closedWorkbenchLoad ??= (async () => {
-    await seedProjects('wide', { regions: wideFrameRegions, boxSets: workspaceLanes });
+    await seedProjects('wide', {
+      regions: wideFrameRegions,
+      boxSets: workspaceLanes,
+    });
     const toggle = selectors.getByRole('button', { name: 'Toggle Workbench lane' }).first();
     await target.expectAttribute(toggle, 'aria-pressed', 'true', 60_000);
     await target.click(toggle);
@@ -975,7 +1023,11 @@ const measureClosedWorkbenchLoad = async (): Promise<ClosedWorkbenchLoad> => {
       (selector) => Math.round(document.querySelector(selector)?.getBoundingClientRect().width ?? 0),
       chatLane,
     );
-    const record = await keepRecord('f1-f3-wide', { settled, chatWidth, settledChatWidth });
+    const record = await keepRecord('f1-f3-wide', {
+      settled,
+      chatWidth,
+      settledChatWidth,
+    });
     precondition(settled.length === 2, `F1 to F3: the settled page drew ${describeBoxes(settled)}, not two lanes`);
     precondition(
       Math.abs(settledChatWidth - chatWidth) <= 1,
@@ -1022,7 +1074,11 @@ knownDefect(
       const mounts = record.regionMounts['workspaceFrame'] ?? [];
       const removals = record.regionRemovals['workspaceFrame'] ?? [];
       expectMeasured(
-        { mounts: mounts.length, removals: removals.length, placeholders: record.placeholders.length },
+        {
+          mounts: mounts.length,
+          removals: removals.length,
+          placeholders: record.placeholders.length,
+        },
         `F2: the workspace frame (${workspaceFrame}) was created in ${describeFrames(mounts)} and removed before ${describeFrames(removals) || 'no frame'}; [data-testid=workspace-skeleton] was created ${record.placeholders.length} times`,
         { mounts: 1, removals: 0, placeholders: 0 },
       );
@@ -1070,7 +1126,14 @@ knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a proj
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');
-    await target.addCookies([{ domain: 'localhost', name: 'tau-shell-op-sidebar', path: '/', value: '0' }]);
+    await target.addCookies([
+      {
+        domain: 'localhost',
+        name: 'tau-shell-op-sidebar',
+        path: '/',
+        value: '0',
+      },
+    ]);
     const server = await target.evaluate(async (url) => {
       const response = await fetch(url, { credentials: 'same-origin' });
       const text = await response.text();
@@ -1166,7 +1229,11 @@ const chatLaneRegions = {
 
 /** F6 and F13: a chat with a transcript, reloaded with the agent host's script held 3 s. */
 const measureHeldTranscript = async (label: string): Promise<ProjectLoadRecord> => {
-  const { chatId } = await seedProjects('wide', { watchText: finalReply, regions: chatLaneRegions, frameTimes: true });
+  const { chatId } = await seedProjects('wide', {
+    watchText: finalReply,
+    regions: chatLaneRegions,
+    frameTimes: true,
+  });
   await seedTranscriptWithTray(chatId);
   await delayRequests(agentHostWorker, readDelay);
   await target.reload();
@@ -1265,7 +1332,10 @@ knownDefect(
           focused: editor?.contains(document.activeElement) === true,
         };
       }, richComposer);
-      const record = await keepRecord('f7-wide', { early: { ...early, before: undefined, after: undefined }, after });
+      const record = await keepRecord('f7-wide', {
+        early: { ...early, before: undefined, after: undefined },
+        after,
+      });
       return { early, after, record };
     },
     assert: ({ early, after, record }) => {
@@ -1280,7 +1350,13 @@ knownDefect(
           composerMoves: moved.map((entry) => `${describeFrame(entry)}: y ${entry.y}, ${entry.height} px`),
         },
         'F7: the served page had no composer to type in before hydration, or the typing was not adopted in place',
-        { servedInput: true, text: 'abc', caret: 3, focused: true, composerMoves: [] },
+        {
+          servedInput: true,
+          text: 'abc',
+          caret: 3,
+          focused: true,
+          composerMoves: [],
+        },
       );
     },
   },
@@ -1289,46 +1365,145 @@ knownDefect(
 /** The viewer stage's parts F8 reads. */
 const viewerRegions = {
   preparing: '[aria-label="Preparing model"]',
+  stage: '[data-slot="viewer-stage"]',
   canvas: '[data-slot="viewer-canvas-region"] canvas',
   pill: '[data-slot="viewer-stage"] [data-slot="wait-indicator-body"]',
 } as const;
 
 /** The first file check: the revision status that reports the tree filled, delivered 3 s late. */
-const filledStatus: WorkerReadDelay = { method: 'revisionStatus', path: '^"filled"$', milliseconds: readDelay };
+const filledStatus: WorkerReadDelay = {
+  method: 'revisionStatus',
+  path: '^"filled"$',
+  milliseconds: readDelay,
+};
+
+/**
+ * Which backend the stage's last canvas draws on, and whether the page could have started WebGPU at all (an adapter
+ * answers). The canvas has its context by now, so asking for WebGL hands back the context it has, or nothing on WebGPU.
+ */
+const readCanvasBackend = async (): Promise<{
+  readonly backend: string;
+  readonly hasWebGpuAdapter: boolean;
+}> =>
+  target.evaluate(async (selector) => {
+    const canvases = [...document.querySelectorAll(selector)];
+    const canvas = canvases.at(-1);
+    const backend =
+      canvas instanceof HTMLCanvasElement
+        ? canvas.getContext('webgl2') === null && canvas.getContext('webgl') === null
+          ? 'webgpu'
+          : 'webgl'
+        : 'none';
+    const { gpu } = navigator as Navigator & {
+      readonly gpu?: { requestAdapter: () => Promise<unknown> };
+    };
+    const adapter = gpu === undefined ? undefined : await gpu.requestAdapter().catch(() => undefined);
+    return {
+      backend,
+      hasWebGpuAdapter: adapter !== undefined && adapter !== null,
+    };
+  }, viewerRegions.canvas);
+
+/** Make WebGPU unavailable to every document of this target, as on a browser without it: no adapter answers. */
+function withoutWebGpu(): void {
+  Object.defineProperty(Navigator.prototype, 'gpu', {
+    configurable: true,
+    get: () => undefined,
+  });
+}
+
+type ViewerStageLoad = Readonly<{
+  record: ProjectLoadRecord;
+  backend: Awaited<ReturnType<typeof readCanvasBackend>>;
+}>;
+
+/** F8's forced load: the first check held 3 s past a reload, then the stage read once its canvas shows. */
+const measureViewerStage = async (artifact: string): Promise<ViewerStageLoad> => {
+  await seedProjects('wide', { regions: viewerRegions });
+  await armWorkerReadDelay([filledStatus]);
+  await target.reload();
+  await settleProject();
+  await target.delay(readDelay);
+  await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
+  const backend = await readCanvasBackend();
+  const record = await keepRecord(artifact, { backend });
+  await requireReadDelayed('F8', filledStatus);
+  return { record, backend };
+};
+
+/**
+ * F8's assertion. The stage is created once and never removed. One canvas is created, except where the renderer starts
+ * on WebGPU and remounts once on WebGL because the adapter's renderer fails to start (`ThreeProvider`'s fallback, a
+ * viewer-owned remount ruled outside A15e by programme control on 2026-11-15T23:47Z): then two, the last on WebGL.
+ * `strict` is the variant with WebGPU unavailable, where that fallback cannot happen, so exactly one canvas counts.
+ */
+const assertViewerStage = ({ record, backend }: ViewerStageLoad, strict: boolean): void => {
+  const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
+  const stages = record.regionMounts['stage'] ?? [];
+  const stageRemovals = record.regionRemovals['stage'] ?? [];
+  const canvases = record.regionMounts['canvas'] ?? [];
+  const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
+  const pill = shownSpans(regionsOf(record, 'pill'));
+  const isRendererFallback = !strict && backend.hasWebGpuAdapter && backend.backend === 'webgl';
+  expectMeasured(
+    {
+      preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
+      stages: stages.length,
+      stageRemovals: stageRemovals.length,
+      canvases: canvases.length,
+      defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
+      pillShown: pill.length > 0,
+      pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
+    },
+    `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'}, last on ${backend.backend}; a WebGPU adapter ${backend.hasWebGpuAdapter ? 'answers' : 'does not answer'})`,
+    {
+      preparing: [],
+      stages: 1,
+      stageRemovals: 0,
+      canvases: isRendererFallback ? 2 : 1,
+      defaultSize: false,
+      pillShown: true,
+      pillEarly: [],
+    },
+  );
+};
 
 knownDefect(
-  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, one canvas is created at a real size, and the pill shows from 1,000 ms',
+  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, the stage mounts once with one canvas per renderer backend at a real size, and the pill shows from 1,000 ms',
   {
     artifact: 'f8-wide',
-    expectedFailure: true,
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => measureViewerStage('f8-wide'),
+    assert: (load) => {
+      assertViewerStage(load, false);
+    },
+  },
+);
+
+knownDefect(
+  'F8 strict (A15e): with WebGPU unavailable and the first file check 3 s late, exactly one canvas is created, on WebGL, and the stage mounts once',
+  {
+    artifact: 'f8-wide-no-webgpu',
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
-      await seedProjects('wide', { regions: viewerRegions });
-      await armWorkerReadDelay([filledStatus]);
-      await target.reload();
-      await settleProject();
-      await target.delay(readDelay);
-      await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
-      const record = await keepRecord('f8-wide');
-      await requireReadDelayed('F8', filledStatus);
-      return record;
+      /* A fresh target, so the stub reaches no other row: the next row opens its own again below. */
+      await target.commands.uiOpenTarget();
+      try {
+        await target.addInitScript(withoutWebGpu);
+        const load = await measureViewerStage('f8-wide-no-webgpu');
+        if (load.backend.hasWebGpuAdapter) {
+          throw new Error('F8 strict: a WebGPU adapter still answered, so the variant did not run without WebGPU');
+        }
+        return load;
+      } finally {
+        await target.commands.uiOpenTarget();
+      }
     },
-    assert: (record) => {
-      const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
-      const canvases = record.regionMounts['canvas'] ?? [];
-      const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
-      const pill = shownSpans(regionsOf(record, 'pill'));
-      expectMeasured(
-        {
-          preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
-          canvases: canvases.length,
-          defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
-          pillShown: pill.length > 0,
-          pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
-        },
-        `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'})`,
-        { preparing: [], canvases: 1, defaultSize: false, pillShown: true, pillEarly: [] },
-      );
+    assert: (load) => {
+      expect(load.backend.backend, 'F8 strict: the last canvas draws on WebGL').toBe('webgl');
+      assertViewerStage(load, true);
     },
   },
 );
@@ -1340,7 +1515,11 @@ const sourcePaneRegions = {
 } as const;
 
 /** F9: the entry file's read, delivered 500 ms late so its arrival has a time. */
-const entryRead: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^alpha\.ts$`, milliseconds: 500 };
+const entryRead: WorkerReadDelay = {
+  method: 'readFileWithDigest',
+  path: String.raw`^alpha\.ts$`,
+  milliseconds: 500,
+};
 
 /** How long F9's record runs on after the editor shows: past the late move its follow-up row catches. */
 const editorLayoutWindow = 12_000;
@@ -1355,7 +1534,11 @@ type SourcePaneLoad = {
 let sourcePaneLoad: Promise<SourcePaneLoad> | undefined;
 const measureSourcePaneLoad = async (): Promise<SourcePaneLoad> => {
   sourcePaneLoad ??= (async () => {
-    await seedProjects('wide', { openEntry: true, regions: sourcePaneRegions, frameTimes: true });
+    await seedProjects('wide', {
+      openEntry: true,
+      regions: sourcePaneRegions,
+      frameTimes: true,
+    });
     /* The Editor's tab for the entry file is the workbench's; the first `alpha.ts` tab is the viewer's. */
     await target.click(selectors.getByRole('tab', { name: 'alpha.ts', exact: true }).last());
     await target.expectVisible(selectors.getByCss('.cm-content'), 60_000);
@@ -1482,7 +1665,11 @@ const historyRegions = {
 const historyChip = selectors.getByRole('button', { name: /^Open History\./u });
 
 /** A delay on History's own read of the line (`log`). */
-const historyRead = (milliseconds: number): WorkerReadDelay => ({ method: 'revision:log', path: '', milliseconds });
+const historyRead = (milliseconds: number): WorkerReadDelay => ({
+  method: 'revision:log',
+  path: '',
+  milliseconds,
+});
 
 knownDefect('F10 (A15f): with the History read 2 s late and History open, the pane draws no skeleton', {
   artifact: 'f10-wide',
@@ -1524,7 +1711,11 @@ knownDefect('F10 (A15f): with the History read 2 s late and History open, the pa
  * from the first frame with the words to the first without.
  */
 /** A15f2's assertion for both minimums (`minimumBreaches`). */
-type MinimumMeasure = { shown: readonly ShownSpan[]; answeredAt: number; stamps: readonly number[] };
+type MinimumMeasure = {
+  shown: readonly ShownSpan[];
+  answeredAt: number;
+  stamps: readonly number[];
+};
 const expectMinimum = (label: string, { shown, answeredAt, stamps }: MinimumMeasure): void => {
   expectMeasured(
     minimumBreaches(shown, answeredAt, stamps),
@@ -1536,7 +1727,11 @@ const expectMinimum = (label: string, { shown, answeredAt, stamps }: MinimumMeas
 const historyHold: WorkerReadDelay = {
   ...historyRead(0),
   afterShown: historyRegions.historyIndicator,
-  longTask: { selector: historyRegions.historyIndicator, milliseconds: 500, acrossReveal: true },
+  longTask: {
+    selector: historyRegions.historyIndicator,
+    milliseconds: 500,
+    acrossReveal: true,
+  },
 };
 
 knownDefect(
@@ -1558,7 +1753,11 @@ knownDefect(
       await target.waitFor(
         () =>
           (
-            globalThis as typeof globalThis & { __TAU_WORKER_READS__: { delivered: ReadonlyArray<{ method: string }> } }
+            globalThis as typeof globalThis & {
+              __TAU_WORKER_READS__: {
+                delivered: ReadonlyArray<{ method: string }>;
+              };
+            }
           ).__TAU_WORKER_READS__.delivered.some((delivery) => delivery.method === 'revision:log'),
         undefined,
         { timeout: 60_000 },
@@ -1604,7 +1803,12 @@ const measureSourceOpen = async (
   readonly sentAt: number;
   readonly answeredAt: number;
 }> => {
-  const read: WorkerReadDelay = { method: 'readFileWithDigest', path: String.raw`^notes\.ts$`, milliseconds, ...hold };
+  const read: WorkerReadDelay = {
+    method: 'readFileWithDigest',
+    path: String.raw`^notes\.ts$`,
+    milliseconds,
+    ...hold,
+  };
   await seedProjects('wide', { regions: openedFileRegions, frameTimes: true });
   await writeWorkbenchFile(openedFile, 'export const note = "A file no pane has read yet.";\n');
   await armWorkerReadDelay([read]);
@@ -1643,7 +1847,12 @@ const measureSourceOpen = async (
     `project-load-frames/${label}-timing.json`,
     `${JSON.stringify({ clicked: clicked!.t, sentAt: first!.sentAt, answeredAt: first!.t }, null, 2)}\n`,
   );
-  return { record, clicked: clicked!, sentAt: first!.sentAt, answeredAt: first!.t };
+  return {
+    record,
+    clicked: clicked!,
+    sentAt: first!.sentAt,
+    answeredAt: first!.t,
+  };
 };
 
 /* The read is answered 600 ms after the page's click (`fromClick`), so every sample answers inside the reveal; a send
@@ -1696,7 +1905,13 @@ knownDefect(
           textAtAnswer: text === undefined ? undefined : afterAnswer.length <= 2 && text.t - answeredAt < 500,
         },
         `F12: after the click at ${click.t} ms the indicator showed ${shown.map((span) => `${span.from}-${span.to} (at most ${span.longest} ms)`).join(', ') || 'never'}; the read answered at ${answeredAt} ms and the text showed at ${String(text?.t)} ms, ${afterAnswer.length} frames after the answer without it (the longest ${longestFrame} ms)`,
-        { spans: 1, revealAfterClick: true, revealBeforeAnswer: true, heldTo1500: true, textAtAnswer: true },
+        {
+          spans: 1,
+          revealAfterClick: true,
+          revealBeforeAnswer: true,
+          heldTo1500: true,
+          textAtAnswer: true,
+        },
       );
     },
   },
@@ -1721,7 +1936,11 @@ knownDefect(
       const clickedAt = measured.record.frameStamps[measured.clicked.frame - 1]!;
       const shown = regionShownOnFrames(measured.record, 'fileIndicator', clickedAt);
       precondition(shown.length > 0, 'Opening file minimum: "Opening file" never showed');
-      return { shown, answeredAt: measured.answeredAt, stamps: measured.record.frameStamps };
+      return {
+        shown,
+        answeredAt: measured.answeredAt,
+        stamps: measured.record.frameStamps,
+      };
     },
     assert: (measured) => {
       expectMinimum('Opening file minimum: "Opening file"', measured);
@@ -1758,7 +1977,10 @@ knownDefect('F15 (A15b): a project at its default layout draws its lanes at thei
   expectedFailure: true,
   budget: loadBudget,
   measure: async () => {
-    await seedProjects('wide', { regions: { content: wideFrameRegions.content }, boxSets: workspaceLanes });
+    await seedProjects('wide', {
+      regions: { content: wideFrameRegions.content },
+      boxSets: workspaceLanes,
+    });
     /* No frame hint: the device remembers nothing for this project, so its layout is the default. */
     await target.evaluate(() => {
       localStorage.clear();

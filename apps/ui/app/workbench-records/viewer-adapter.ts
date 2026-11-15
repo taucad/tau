@@ -68,7 +68,10 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
   const existing = api.panels.flatMap((panel) =>
     isViewerPanelParameters(panel.params) ? [{ id: panel.id, title: panel.title, params: panel.params }] : [],
   );
-  const dimensions = { width: Math.max(1, api.width), height: Math.max(1, api.height) };
+  const dimensions = {
+    width: Math.max(1, api.width),
+    height: Math.max(1, api.height),
+  };
   const projection = toDockview('viewer', node, { dimensions });
   // Dockview reuses panel instances but replaces their metadata from the serialized projection.
   for (const prior of existing) {
@@ -77,7 +80,11 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
     }
     const panel = projection.panels[prior.id];
     if (panel) {
-      projection.panels[prior.id] = { ...panel, title: prior.title, params: prior.params };
+      projection.panels[prior.id] = {
+        ...panel,
+        title: prior.title,
+        params: prior.params,
+      };
     }
   }
   if (node.kind === 'group' && landInSeededGroup(api, projection)) {
@@ -102,7 +109,10 @@ function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): bo
   if (seed === undefined || others.length > 0 || leaf?.type !== 'leaf' || siblings.length > 0) {
     return false;
   }
-  const { views, activeView } = leaf.data as { readonly views: readonly string[]; readonly activeView?: string };
+  const { views, activeView } = leaf.data as {
+    readonly views: readonly string[];
+    readonly activeView?: string;
+  };
   const active = activeView !== undefined && views.includes(activeView) ? activeView : views[0];
   // Dockview makes the first panel of an empty group active whatever `inactive` says, so the active view goes first
   // and the rest take their places beside it without being shown.
@@ -118,7 +128,11 @@ function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): bo
       ...(panel.tabComponent === undefined ? {} : { tabComponent: panel.tabComponent }),
       title: panel.title,
       params: panel.params,
-      position: { referenceGroup: seed, direction: 'within', index: views.indexOf(id) },
+      position: {
+        referenceGroup: seed,
+        direction: 'within',
+        index: views.indexOf(id),
+      },
       inactive: id !== active,
     });
   }
@@ -210,8 +224,16 @@ export type ViewerAdapterLayoutPort = Readonly<{
 
 /** What the page's React tree owns and the adapter reads: fed as a value on every commit that changes it. */
 export type ViewerAdapterFacts = Readonly<{
-  /** The project machine is ready and the model may be shown: demand is admitted only then. */
-  admitsDemand: boolean;
+  /**
+   * The project machine is ready: each visible view gets its graphics and its entry, so the viewer stage and its canvas
+   * mount once, during a file check too (A15e).
+   */
+  admitsView: boolean;
+  /**
+   * The model may be shown as well (its files have settled): only then does a view get its geometry unit and its demand,
+   * so the kernel never runs over files still being checked or downloaded (blueprint P-j).
+   */
+  admitsGeometry: boolean;
   mainEntryPath: string | undefined;
   viewRecords: ReadonlyMap<string, WorkbenchView>;
   entriesRecord: WorkbenchEntries | undefined;
@@ -268,7 +290,10 @@ export type ViewerAdapterPorts = Readonly<{
 }>;
 
 /** What the adapter is spawned with. The `DockviewApi` lives only here and in the closure built from it (D4). */
-export type ViewerAdapterInput = Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts }>;
+export type ViewerAdapterInput = Readonly<{
+  api: DockviewApi;
+  ports: ViewerAdapterPorts;
+}>;
 
 /** The viewer Dockview hands its adapter to a host: the project's layout, or the editor on a page without one. */
 export type ViewerDockReady = Readonly<{
@@ -281,7 +306,11 @@ export type ViewerDockReady = Readonly<{
 }>;
 
 /** The viewer Dockview that made `dockId` is gone (its ref cleanup): its adapter stops. */
-export type ViewerDockReleased = Readonly<{ type: 'dockReleased'; adapter: 'viewer'; dockId: string }>;
+export type ViewerDockReleased = Readonly<{
+  type: 'dockReleased';
+  adapter: 'viewer';
+  dockId: string;
+}>;
 
 /**
  * The adapter's one event: `attach`, which the dock sends once its host's `dockReady` step has returned (A8c's
@@ -298,7 +327,9 @@ export type ViewerAdapterEvent = Readonly<{ type: 'attach' }>;
  * @returns The adapter, to send `attach` to.
  */
 export const selectViewerDockAdapter = (
-  host: Readonly<{ getSnapshot: () => { children: Readonly<Record<string, unknown>> } }>,
+  host: Readonly<{
+    getSnapshot: () => { children: Readonly<Record<string, unknown>> };
+  }>,
   dockId: string,
 ): Readonly<{ send: (event: ViewerAdapterEvent) => void }> | undefined =>
   host.getSnapshot().children[dockAdapterId('viewer', dockId)] as
@@ -444,7 +475,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
 
     const admit = (panel: Panel): void => {
       const current = facts.get();
-      if (!current.admitsDemand || !isViewerPanelParameters(panel.params)) {
+      if (!current.admitsView || !isViewerPanelParameters(panel.params)) {
         return;
       }
       const viewId = panel.id;
@@ -457,7 +488,11 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
           ? graphicsSettingsForView(settings, resolvedViewFields(settings, readViewLevels(projectId, viewId)))
           : defaultGraphicsSettings;
         admittedGraphics.add(viewId);
-        project.send({ type: 'createViewGraphics', viewId, settings: validatedSettings });
+        project.send({
+          type: 'createViewGraphics',
+          viewId,
+          settings: validatedSettings,
+        });
       }
       if (!visible) {
         releaseDemand(viewId);
@@ -475,6 +510,9 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
             : undefined,
         });
       current.setViewEntryPath(viewId, entryPath ?? null);
+      if (!current.admitsGeometry) {
+        return;
+      }
       if (entryPath && admittedGeometry.get(viewId) !== entryPath) {
         admittedGeometry.set(viewId, entryPath);
         project.send({

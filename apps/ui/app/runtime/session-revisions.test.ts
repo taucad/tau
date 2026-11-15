@@ -1145,26 +1145,32 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     expect(log).toContain('a:saveRevision:close');
     log.length = 0;
 
-    /* The next document has not heard who is signed in yet: the owed cut is still Ada's. */
+    /* The next document has not heard who is signed in yet: the owed cut is still Ada's. As the real client, it has
+     * no settled registry until it opens. */
     let save: PromiseWithResolvers<void> | undefined;
     const next = await openDocument('b', workerB, {
       log,
       debts,
       prepare: (client) => {
         save = client.holdSave();
+        client.setStatus({ registrySettled: false });
       },
     });
-    const own = log.filter((line) => line.startsWith('b:'));
-    expect(own).toEqual([
+    expect(log.filter((line) => line.startsWith('b:'))).toEqual([
       expect.stringMatching(/^b:send:setDeviceId:/u),
       'b:setUser:none',
       expect.stringMatching(/^b:send:setActor:/u),
-      expect.stringMatching(/^b:send:setActor:/u),
-      'b:saveRevision:close',
       'b:open',
     ]);
+    next.client.setStatus({ registrySettled: true });
+    await settle();
+    expect(log.filter((line) => line.startsWith('b:')).slice(4)).toEqual([
+      expect.stringMatching(/^b:send:setActor:/u),
+      'b:saveRevision:close',
+    ]);
     const live = { command: 'setActor', actor: revisionUserActor({ workspace, user: undefined, anonymous: false }) };
-    const closing = { command: 'setActor', actor: { kind: 'user', id: 'usr_1', name: 'Ada' } };
+    /* The record keeps no display name: the id alone says who the cut is by. */
+    const closing = { command: 'setActor', actor: { kind: 'user', id: 'usr_1' } };
     expect(sent(log, 'b', 'setActor')).toEqual([live, closing]);
     expect(debts.records.size).toBe(1);
 
@@ -1201,6 +1207,117 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     expect(log.filter((line) => line.includes('saveRevision'))).toEqual(['b:saveRevision:close']);
     expect(debts.records.size).toBe(0);
     next.session.stop();
+  });
+
+  it('should keep the closing person on a debt read but not yet paid when the document goes again', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } }));
+    /* A second reload before the registry answers: the debt is still Ada's. */
+    const second = await openDocument('b', workerB, {
+      log,
+      debts,
+      prepare: (client) => {
+        client.setStatus({ registrySettled: false });
+      },
+    });
+    await reload(second);
+    expect(debts.port.read({ workspace, projectId })?.actor).toEqual({ kind: 'user', id: 'usr_1' });
+    log.length = 0;
+    const third = await openDocument('c', workerA, { log, debts });
+    expect(sent(log, 'c', 'setActor')[1]).toEqual({ command: 'setActor', actor: { kind: 'user', id: 'usr_1' } });
+    third.session.stop();
+  });
+
+  it('should hold nothing back when the owed cut is by the person the next document records as', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } }));
+    log.length = 0;
+    let save: PromiseWithResolvers<void> | undefined;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: { id: 'usr_1', name: 'Ada' },
+      prepare: (client) => {
+        save = client.holdSave();
+      },
+    });
+    expect(log).toContain('b:saveRevision:close');
+    /* One actor, the live one: no swap, so a change made during the cut goes at once. */
+    expect(sent(log, 'b', 'setActor')).toEqual([
+      { command: 'setActor', actor: { kind: 'user', id: 'usr_1', name: 'Ada' } },
+    ]);
+    next.fake.setAnonymous(workspace, true);
+    expect(sent(log, 'b', 'setActor').at(-1)?.['actor']).toMatchObject({ anonymous: true });
+    save?.resolve();
+    await settle();
+    next.session.stop();
+  });
+
+  it("should give another person's owed cut its author only until the cut's revision is minted", async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    debts.port.write({ workspace, projectId }, { token: 't', actor: { kind: 'user', id: 'usr_1' } });
+    let save: PromiseWithResolvers<void> | undefined;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: { id: 'usr_2', name: 'Bea' },
+      prepare: (client) => {
+        save = client.holdSave();
+      },
+    });
+    expect(sent(log, 'b', 'setActor').at(-1)).toEqual({ command: 'setActor', actor: { kind: 'user', id: 'usr_1' } });
+    next.fake.setAnonymous(workspace, true);
+    expect(sent(log, 'b', 'setActor')).toHaveLength(2);
+    /* The close revision is minted: the head moves, and the live actor, anonymous now, goes at once. */
+    next.client.setStatus({ headRevisionId: 'rev_close' });
+    expect(sent(log, 'b', 'setActor').at(-1)?.['actor']).toMatchObject({ anonymous: true });
+    expect(debts.records.size).toBe(1);
+    save?.resolve();
+    await settle();
+    expect(debts.records.size).toBe(0);
+    expect(sent(log, 'b', 'setActor')).toHaveLength(3);
+    next.session.stop();
+  });
+
+  it('should keep no display name in storage for a named person', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: { id: 'usr_1', name: 'Ada' } }));
+    expect(JSON.stringify([...debts.records.values()])).not.toContain('Ada');
+  });
+
+  it('should settle the debt by a cut that answers after its client stopped, and keep it through a worker swap', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts }));
+    let save: PromiseWithResolvers<void> | undefined;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      prepare: (client) => {
+        save = client.holdSave();
+      },
+    });
+    /* A worker swap mid-payment: the new client reads the debt still owed and asks again. */
+    const swapped = createFakeClient('c', log);
+    swapped.userAnswer.resolve();
+    const swappedSave = swapped.holdSave();
+    revisionClientTestApi.adopt(projectId, workerA, swapped);
+    next.fileManager.set({ worker: workerA });
+    await settle();
+    expect(log).toContain('c:saveRevision:close');
+    expect(debts.records.size).toBe(1);
+    /* The first client's late answer still means its cut landed. */
+    save?.resolve();
+    await settle();
+    expect(debts.records.size).toBe(0);
+    next.session.stop();
+    swappedSave.resolve();
+    await settle();
+    expect(debts.records.size).toBe(0);
   });
 
   it('should owe nothing once the close cut has answered, so the next open takes no cut', async () => {

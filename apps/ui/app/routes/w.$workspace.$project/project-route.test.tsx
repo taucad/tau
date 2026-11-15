@@ -1,5 +1,5 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
 import type { NavigateOptions } from 'react-router';
@@ -30,6 +30,8 @@ import type * as NoticesModule from '#routes/w.$workspace.$project/project-route
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type * as ProjectWorkspaceWarmupModule from '#lib/project-workspace-warmup.js';
+import type * as FocusedProjectViewModule from '#routes/w.$workspace.$project/focused-project-view.js';
+import type * as ProjectSyncPlaceholderModule from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 
 /*
  * A6d: each session's `project` child builds its runtime; a stand-in records what the session handed it: the chat
@@ -81,6 +83,9 @@ let projectManager = {
 };
 const mounts: string[] = [];
 const unmounts: string[] = [];
+/** A11: mounts of the focused project's view (`FocusedProjectView`, in the outlet), by project. */
+const viewMounts: string[] = [];
+const viewUnmounts: string[] = [];
 const fileManagerInputs: Array<{ projectId: string; rootDirectory: string }> = [];
 const projectProviderInputs: string[] = [];
 const projectProviderChatInputs: Array<{
@@ -317,6 +322,33 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => projectManager,
 }));
 
+/* Marks the subtree the focused project's view renders, so the provider stand-in tells it from a session's. */
+const { focusedViewContext, projectIdContext, palette } = await vi.hoisted(async () => {
+  const { createContext } = await import('react');
+  return {
+    focusedViewContext: createContext(false),
+    /* The project a provider stand-in serves, for the palette's stand-in. */
+    projectIdContext: createContext<string | undefined>(undefined),
+    /* The palette's registry as `CommandPaletteProvider` keeps it: one entry per registration id. */
+    palette: new Map<string, string | undefined>(),
+  };
+});
+vi.mock('#routes/w.$workspace.$project/focused-project-view.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof FocusedProjectViewModule>();
+  return {
+    ...actual,
+    FocusedProjectView: (props: React.ComponentProps<typeof actual.FocusedProjectView>) => (
+      <focusedViewContext.Provider value>
+        <actual.FocusedProjectView {...props} />
+      </focusedViewContext.Provider>
+    ),
+  };
+});
+/* The session's focus as its subtree shows it: the binding announces sync for the focused project only. */
+vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ProjectSyncPlaceholderModule>()),
+  ProjectSyncAnnouncement: () => <span data-testid='focused-session' />,
+}));
 vi.mock('#hooks/use-file-manager.js', () => ({
   SharedWorkerGate: ({
     children,
@@ -333,15 +365,19 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     projectId,
     rootDirectory,
   }: React.PropsWithChildren<{ projectId: string; rootDirectory: string }>) => {
-    fileManagerInputs.push({ projectId, rootDirectory });
+    /* A11: the focused project's view re-homes this provider in the outlet; that copy is the view's, not a session. */
+    const isView = useContext(focusedViewContext);
+    if (!isView) {
+      fileManagerInputs.push({ projectId, rootDirectory });
+    }
     useEffect(() => {
-      mounts.push(projectId);
+      (isView ? viewMounts : mounts).push(projectId);
       return () => {
-        unmounts.push(projectId);
+        (isView ? viewUnmounts : unmounts).push(projectId);
       };
-    }, [projectId]);
+    }, [isView, projectId]);
     return (
-      <div data-testid='project-session' data-project-id={projectId}>
+      <div data-testid={isView ? 'focused-view' : 'project-session'} data-project-id={projectId}>
         {children}
       </div>
     );
@@ -356,9 +392,14 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     projectProviderInputs.push(projectId);
-    return <div>{children}</div>;
+    return (
+      <projectIdContext.Provider value={projectId}>
+        <div>{children}</div>
+      </projectIdContext.Provider>
+    );
   },
   useProject: () => ({
+    projectId: useContext(projectIdContext),
     projectRef,
     editorRef,
     parameterService,
@@ -407,7 +448,7 @@ vi.mock('#hooks/use-models.js', () => ({
   }),
 }));
 /* The `Mod+S` registration needs the application root's `KeyboardProvider`,
- * which this route-level suite does not mount; the shortcut has its own test. */
+ * which this route-level suite does not mount; the shortcut has its own test. It marks the focused project's view. */
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
   RevisionSaveShortcut: () => <span data-testid='focused-project' />,
 }));
@@ -423,8 +464,19 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
+/* A11: the palette's project items register from the focused project's view, as `useCommandPaletteItems` does: set
+ * under their id on mount, deleted under it on unmount. */
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({
-  ProjectCommandPaletteItems: () => null,
+  ProjectCommandPaletteItems: ({ paletteId }: { readonly paletteId: string }) => {
+    const projectId = useContext(projectIdContext);
+    useEffect(() => {
+      palette.set(paletteId, projectId);
+      return () => {
+        palette.delete(paletteId);
+      };
+    }, [paletteId, projectId]);
+    return null;
+  },
 }));
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({
   ProjectExportAction: () => null,
@@ -644,6 +696,9 @@ beforeEach(() => {
   unmounts.length = 0;
   fileManagerInputs.length = 0;
   projectProviderInputs.length = 0;
+  viewMounts.length = 0;
+  viewUnmounts.length = 0;
+  palette.clear();
   projectProviderChatInputs.length = 0;
   editorSend.mockReset();
   projectSend.mockReset();
@@ -679,6 +734,10 @@ beforeEach(() => {
  * route's children.
  */
 const focusedSessionId = (): string | undefined =>
+  screen.queryByTestId('focused-session')?.closest<HTMLElement>('[data-project-id]')?.dataset['projectId'];
+
+/** The project whose view the outlet holds (A11): its providers and its focused-only siblings. */
+const focusedViewId = (): string | undefined =>
   screen.queryByTestId('focused-project')?.closest<HTMLElement>('[data-project-id]')?.dataset['projectId'];
 
 /** Every mounted project subtree, in render order. */
@@ -748,6 +807,7 @@ describe('project route session identity', () => {
     const view = render(<Shell projectId={projectA} />);
     await screen.findAllByTestId('project-session');
     const originalSession = screen.getByTestId('project-session');
+    const pageInput = screen.getByRole('textbox', { name: 'Page input' });
     setEditorIdle(false);
     view.rerender(<Shell />);
     await waitFor(() => {
@@ -763,10 +823,11 @@ describe('project route session identity', () => {
     });
     view.rerender(<Shell projectId={projectA} />);
     await waitFor(() => {
-      expect(screen.getByTestId('project-session')).toContainElement(
-        screen.getByRole('textbox', { name: 'Page input' }),
-      );
+      expect(focusedSessionId()).toBe(projectA);
     });
+    /* D24 (A11): the shell is never inside a session's subtree; it keeps its one node across the visit. */
+    expect(screen.getByRole('textbox', { name: 'Page input' })).toBe(pageInput);
+    expect(screen.getByTestId('project-session')).not.toContainElement(pageInput);
     expect(screen.getByTestId('project-session')).toBe(originalSession);
     expect(mounts).toEqual([projectA]);
     expect(unmounts).toEqual([]);
@@ -2424,7 +2485,7 @@ describe('A0.2 the other senders of open keep what the gate kept (S39)', () => {
 });
 
 /*
- * A0.7: the route-shell load defects, pinned red until their fix (U1, U2, U22).
+ * A0.7: the route-shell load defects, pinned red until their fix (U1, U2, U22), flipped by A11 (D24, I19).
  *
  * `children` is the app shell (the sidebar and the outlet). The marker counts
  * its own mounts, so a shell that moves between tree positions, or waits under
@@ -2498,7 +2559,7 @@ describe('project route shell identity (A0.7)', () => {
     workspaceImport.calls = 0;
   });
 
-  it.fails('U1: should keep one shell mounted while the workspace import is pending', async () => {
+  it('U1: should keep one shell mounted while the workspace import is pending', async () => {
     const workspace = deferred<Awaited<WorkspaceLoad>>();
     workspaceImport.pending = workspace.promise;
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
@@ -2530,7 +2591,7 @@ describe('project route shell identity (A0.7)', () => {
     }
   });
 
-  it.fails('U2: should mount the shell once across resolving to editor', async () => {
+  it('U2: should mount the shell once across resolving to editor', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     render(<ShellRoute projectId={projectA} />);
     expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
@@ -2540,7 +2601,7 @@ describe('project route shell identity (A0.7)', () => {
     expect(shell.mounts).toBe(1);
   });
 
-  it.fails('U2: should mount the shell once across project A to project B', async () => {
+  it('U2: should mount the shell once across project A to project B', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const view = render(<ShellRoute projectId={projectA} />);
     await screen.findByTestId('focused-project');
@@ -2555,7 +2616,7 @@ describe('project route shell identity (A0.7)', () => {
     expect(shell.mounts).toBe(1);
   });
 
-  it.fails('U22: should mount the shell once across Home to a project', async () => {
+  it('U22: should mount the shell once across Home to a project', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const view = render(<ShellRoute />);
     expect(shellNodes()).toHaveLength(1);
@@ -2564,6 +2625,90 @@ describe('project route shell identity (A0.7)', () => {
     await screen.findByTestId('focused-project');
     expect(focusedSessionId()).toBe(projectA);
     expect(shell.mounts).toBe(1);
+  });
+
+  /* A0.7 carry: every row above runs with the worker ready. The app's own tree: the shell beside the gate, the
+   * project's content in the outlet under the route's providers. */
+  it('A11: should mount the shell once while the file-manager worker connects, then opens the project', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    listing.set([listed(projectA, 'ws', 'alpha')]);
+    sharedWorkerState = 'pending';
+    const tree = (): React.JSX.Element => (
+      <MemoryRouter initialEntries={['/w/ws/alpha']}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
+          <routeModule.ProjectSessionsHost>
+            <ShellMarker />
+            <Routes>
+              <Route
+                path='/w/:workspace/:project'
+                element={
+                  <routeModule.ProjectRouteProviders>
+                    <sessionsModule.ProjectChatRoute />
+                  </routeModule.ProjectRouteProviders>
+                }
+              />
+            </Routes>
+          </routeModule.ProjectSessionsHost>
+        </SessionsProvider>
+      </MemoryRouter>
+    );
+    const view = render(tree());
+    await flushTasks();
+    /* Connecting: the shell is there and the content region holds the workspace's placeholder. */
+    expect(shellNodes()).toHaveLength(1);
+    expect(screen.getByTestId('workspace-skeleton')).toBeInTheDocument();
+    expect(screen.queryByTestId('focused-project')).not.toBeInTheDocument();
+
+    sharedWorkerState = 'ready';
+    view.rerender(tree());
+    await screen.findByTestId('focused-project');
+    expect(shellNodes()).toHaveLength(1);
+    expect(shell.mounts).toBe(1);
+  });
+});
+
+/*
+ * A11 (programme-control ruling, 2026-11-15): the palette's project items register from the focused project's view
+ * into the registry above the shell.
+ */
+describe('the palette reads the focused project (A11)', () => {
+  function PaletteRoute({ projectId }: { readonly projectId?: string }): React.JSX.Element {
+    return (
+      <SessionsProvider actor={sessionsActor} focus={focusHost}>
+        <CommittedRoute projectId={projectId}>
+          <sessionsModule.ProjectChatRoute />
+        </CommittedRoute>
+      </SessionsProvider>
+    );
+  }
+
+  it("should hold B's project items and none of A's after a move from A to B", async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const view = render(<PaletteRoute projectId={projectA} />);
+    await screen.findByTestId('focused-project');
+    expect([...palette.entries()]).toEqual([['focused-project', projectA]]);
+
+    view.rerender(<PaletteRoute projectId={projectB} />);
+    await waitFor(() => {
+      expect(focusedViewId()).toBe(projectB);
+    });
+    await flushTasks();
+    expect([...palette.entries()]).toEqual([['focused-project', projectB]]);
+  });
+
+  it('should hold no project items while the route resolves, as main does', async () => {
+    const pending = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockImplementation(async () => pending.promise);
+    render(<PaletteRoute projectId={projectA} />);
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
+    await flushTasks();
+    expect(palette.size).toBe(0);
+    await act(async () => {
+      pending.resolve(ready(projectA));
+      await pending.promise;
+    });
+    await screen.findByTestId('focused-project');
+    expect([...palette.entries()]).toEqual([['focused-project', projectA]]);
   });
 });
 
@@ -2667,7 +2812,7 @@ describe('round 13: a project left for a non-project route', () => {
       </SessionsProvider>
     );
     const view = render(<Shell projectId={projectA} />);
-    await screen.findByTestId('focused-project');
+    await screen.findByTestId('focused-session');
     expect(focusedSessionId()).toBe(projectA);
     view.rerender(<Shell />);
     await flushTasks();

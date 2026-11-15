@@ -639,14 +639,7 @@ function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
   const liveProjectIds = useLiveProjectIds();
   return (
     <LiveProjectSessions
-      focused={
-        focus === undefined
-          ? undefined
-          : {
-              projectId: focus.projectId,
-              children: undefined,
-            }
-      }
+      focused={focus === undefined ? undefined : { projectId: focus.projectId }}
       liveProjectIds={liveProjectIds}
       onFlushRegistration={(registration) => {
         flushRegistrations.push(registration);

@@ -14,20 +14,9 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { SessionProjectProvider, useProject } from '#hooks/use-project.js';
-import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
-import { ProjectPrintRouteIntent } from '#routes/w.$workspace.$project/project-print-route-intent.js';
-import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { SessionFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
-import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
-import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
-import { RevisionRestore } from '#routes/w.$workspace.$project/revision-restore.js';
-import { WorkbenchCheckoutRoot } from '#routes/w.$workspace.$project/workbench-checkout-root.js';
-import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
-import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import { RevisionSaveShortcut } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
@@ -35,6 +24,7 @@ import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-cont
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { ProjectRouteNotice } from '#routes/w.$workspace.$project/project-route-notices.js';
+import { FocusedProjectView } from '#routes/w.$workspace.$project/focused-project-view.js';
 import { useProjectSession } from '#hooks/use-sessions.js';
 import {
   registerProjectSessionServices,
@@ -273,12 +263,10 @@ function TauCloudIntentConnector({
 }
 
 function ProjectSession({
-  children,
   projectId,
   isFocused,
   onFlushRegistration,
 }: {
-  readonly children?: React.ReactNode;
   readonly projectId: string;
   readonly isFocused?: boolean;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
@@ -306,29 +294,6 @@ function ProjectSession({
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
           <ViewSettingsSyncHost />
           <ProjectSessionBinding projectId={projectId} isFocused={focused} />
-          {focused ? (
-            <>
-              <RevisionSaveShortcut isFocused={focused} />
-              <EditorDocumentSessionProvider>
-                <ChatWorkspaceAuthorityProvider>
-                  <ProjectWorkspaceProvider>
-                    <WorkbenchRecordHost />
-                    <ProjectShareRouteIntent />
-                    <ProjectPrintRouteIntent />
-                    <RevisionRestore />
-                    {/* AC14: *Ask chat to resolve* seeds one chat, bound to the
-                        conflict its turn is being started for. */}
-                    <RevisionConflictChat />
-                    {/* S27: the workbench follows the selected checkout's route. */}
-                    <WorkbenchCheckoutRoot />
-                    {/* A4: the two outcomes that record no revision are not silent. */}
-                    <RevisionOutcomes />
-                    {children}
-                  </ProjectWorkspaceProvider>
-                </ChatWorkspaceAuthorityProvider>
-              </EditorDocumentSessionProvider>
-            </>
-          ) : null}
         </SessionProjectProvider>
       </WebglContextTrackerProvider>
     </SessionFileManagerProvider>
@@ -337,7 +302,6 @@ function ProjectSession({
 
 type FocusedProjectSession = Readonly<{
   projectId: string;
-  children: React.ReactNode;
 }>;
 
 /**
@@ -363,9 +327,7 @@ export function LiveProjectSessions({
             projectId={projectId}
             isFocused={isFocused}
             onFlushRegistration={isFocused ? onFlushRegistration : noFlushRegistration}
-          >
-            {isFocused ? focused.children : undefined}
-          </ProjectSession>
+          />
         );
       })}
     </>
@@ -471,5 +433,13 @@ export function ProjectChatRoute(): React.ReactNode {
   if (state === undefined) {
     return null;
   }
-  return state.kind === 'editor' ? <ChatWithProvider /> : <ProjectRouteNotice state={state} />;
+  /* A11: the shell's outlet holds the focused project's view, keyed by project, so the project being left supplies
+   * nothing to the next. */
+  return state.kind === 'editor' ? (
+    <FocusedProjectView key={state.projectId} projectId={state.projectId}>
+      <ChatWithProvider />
+    </FocusedProjectView>
+  ) : (
+    <ProjectRouteNotice state={state} />
+  );
 }

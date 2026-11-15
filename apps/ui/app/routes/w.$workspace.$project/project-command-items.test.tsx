@@ -1,7 +1,6 @@
 import { render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { UIMatch } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
@@ -188,15 +187,6 @@ const revisionRow = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'
   ...over,
 });
 
-const match: UIMatch = {
-  data: undefined,
-  handle: undefined,
-  id: 'project-route',
-  loaderData: undefined,
-  params: {},
-  pathname: '/projects/project-1',
-};
-
 describe('ProjectCommandPaletteItems', () => {
   beforeEach(() => {
     registeredItems = [];
@@ -225,7 +215,7 @@ describe('ProjectCommandPaletteItems', () => {
     ];
     /* A reload, or a restore another device made: the head is a restore row, but the machine holds no undo target. */
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const { rerender } = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     await waitFor(() => {
       expect(registeredItems.find((item) => item.id === 'undo-restore')).toBeDefined();
     });
@@ -236,7 +226,7 @@ describe('ProjectCommandPaletteItems', () => {
       ...revisionStatusHarness.status,
       restore: { ...revisionStatusHarness.status.restore, undoable: true },
     };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     await waitFor(() => {
       expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
     });
@@ -252,7 +242,7 @@ describe('ProjectCommandPaletteItems', () => {
     expect(revisionStatusHarness.commands.undo).toHaveBeenCalledOnce();
 
     revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
 
     /* A save landed on top: the projection says the restore row is no longer undoable. */
@@ -261,7 +251,7 @@ describe('ProjectCommandPaletteItems', () => {
       dirty: false,
       restore: { ...revisionStatusHarness.status.restore, undoable: false },
     };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
 
     revisionStatusHarness.role = 'read';
@@ -269,14 +259,14 @@ describe('ProjectCommandPaletteItems', () => {
       ...revisionStatusHarness.status,
       restore: { ...revisionStatusHarness.status.restore, undoable: true },
     };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(false);
   });
 
   /* D15: Undo where the operation log has something of this device's to reverse, on the strip's condition;
      Undo restore takes over when both apply, since on an unmoved line they make the same files. */
   it('offers Undo where the log can answer it, and yields to Undo restore', async () => {
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const { rerender } = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     await waitFor(() => {
       expect(registeredItems.find((item) => item.id === 'undo-operation')).toBeDefined();
     });
@@ -287,7 +277,7 @@ describe('ProjectCommandPaletteItems', () => {
       headRevisionId: 'rev-2',
       restore: { ...revisionStatusHarness.status.restore, canUndo: true },
     };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     await waitFor(() => {
       expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(true);
     });
@@ -300,23 +290,23 @@ describe('ProjectCommandPaletteItems', () => {
       ...revisionStatusHarness.status,
       restore: { ...revisionStatusHarness.status.restore, canUndo: true, undoable: true },
     };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'undo-operation')?.visible).toBe(false);
     expect(registeredItems.find((item) => item.id === 'undo-restore')?.visible).toBe(true);
   });
 
   it('should defer command registration until project context exists', () => {
     hasProjectContext = false;
-    const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const view = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     expect(registeredItems).toEqual([]);
 
     hasProjectContext = true;
-    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    view.rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'share-project')).toBeDefined();
   });
 
   it('keeps Export navigation available while geometry is pending', () => {
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     const exportItem = registeredItems.find((item) => item.id === 'export');
     expect(exportItem?.disabled).toBeUndefined();
@@ -325,13 +315,13 @@ describe('ProjectCommandPaletteItems', () => {
   });
 
   it('registers Share with the shared Workbench owner', () => {
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     registeredItems.find((item) => item.id === 'share-project')?.action?.();
     expect(openPanel).toHaveBeenCalledWith('share');
   });
 
   it('routes every Workbench command through the shared workspace owner', () => {
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     const expectedPanels = new Map([
       ['open-parameters', 'parameters'],
@@ -358,7 +348,7 @@ describe('ProjectCommandPaletteItems', () => {
         { name: 'enclosure-v2', head: 'rev-4', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
       ],
     };
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     const item = (id: string): CommandPaletteItem | undefined => registeredItems.find((entry) => entry.id === id);
 
     expect(['create-version', 'switch-branch', 'new-branch'].map((id) => [item(id)?.label, item(id)?.visible])).toEqual(
@@ -405,7 +395,7 @@ describe('ProjectCommandPaletteItems', () => {
         },
       ],
     };
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     expect(registeredItems.find((item) => item.id === 'switch-branch')?.visible).toBe(false);
     expect(registeredItems.find((item) => item.id === 'new-branch')?.visible).toBe(true);
@@ -414,7 +404,7 @@ describe('ProjectCommandPaletteItems', () => {
   it('offers no branch or version verb before anything is saved, or to a viewer', () => {
     revisionStatusHarness.role = 'read';
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-4' };
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     expect(registeredItems.find((item) => item.id === 'create-version')?.visible).toBe(false);
     expect(registeredItems.find((item) => item.id === 'new-branch')?.visible).toBe(false);
@@ -422,7 +412,7 @@ describe('ProjectCommandPaletteItems', () => {
   });
 
   it('routes backup choices through Revisions and uses the shared save request', () => {
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     registeredItems.find((item) => item.id === 'connect-tau-cloud')?.action?.();
     expect(openPanel).toHaveBeenLastCalledWith('revisions');
@@ -446,15 +436,15 @@ describe('ProjectCommandPaletteItems', () => {
     };
 
     revisionStatusHarness.role = 'write';
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const { rerender } = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(false);
 
     revisionStatusHarness.role = 'read';
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(true);
 
     revisionStatusHarness.role = 'revoked';
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(true);
   });
 
@@ -465,7 +455,7 @@ describe('ProjectCommandPaletteItems', () => {
       line: { kind: 'unknown' },
       remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected' },
     };
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const { rerender } = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     const revisionIds = ['change-backup', 'disconnect-remote', 'sync-now', 'save-revision', 'revision-history'];
     for (const id of revisionIds) {
       expect(registeredItems.find((item) => item.id === id)?.group).toBe('History');
@@ -474,16 +464,16 @@ describe('ProjectCommandPaletteItems', () => {
     expect(registeredItems.find((item) => item.id === 'disconnect-remote')?.visible).toBe(false);
 
     revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'change-backup')?.visible).toBe(true);
   });
 
   it('keeps Kernel hidden unless tauDebug is enabled', () => {
-    const { rerender } = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const { rerender } = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'open-kernel')?.visible).toBe(false);
 
     isTauDebugEnabled = true;
-    rerender(<ProjectCommandPaletteItems match={match} />);
+    rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     const kernel = registeredItems.find((item) => item.id === 'open-kernel');
     expect(kernel?.visible).toBe(true);
     kernel?.action?.();
@@ -500,7 +490,7 @@ describe('ProjectCommandPaletteItems', () => {
       files: [{ name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }],
       omittedSectionCutIds: [],
     });
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     const download = registeredItems.find((item) => item.id === 'download-png');
     expect(download?.disabled).toBe(false);
@@ -530,7 +520,7 @@ describe('ProjectCommandPaletteItems', () => {
       files: [{ name: 'render.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }],
       omittedSectionCutIds: ['cutaway'],
     });
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     registeredItems.find((item) => item.id === 'download-png')?.action?.();
     await vi.waitFor(() => {
@@ -542,7 +532,7 @@ describe('ProjectCommandPaletteItems', () => {
 
   it('should archive the file manager root, not an absolute project path', async () => {
     getZippedDirectory.mockResolvedValue(new Blob(['zip']));
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     registeredItems.find((item) => item.id === 'download-zip')?.action?.();
 
@@ -558,7 +548,7 @@ describe('ProjectCommandPaletteItems', () => {
 
   it('should name the cause when the archive cannot be built', async () => {
     getZippedDirectory.mockRejectedValue(new Error('EACCES: workspace folder is unreadable'));
-    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
 
     registeredItems.find((item) => item.id === 'download-zip')?.action?.();
 
@@ -572,11 +562,11 @@ describe('ProjectCommandPaletteItems', () => {
   it('enables PNG capture once a canvas presents the camera, and keeps it after that canvas detaches', () => {
     geometryFormat = 'gltf';
     cameraPresented = false;
-    const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    const view = render(<ProjectCommandPaletteItems paletteId='focused-project' />, { wrapper });
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
 
     cameraPresented = true;
-    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    view.rerender(<ProjectCommandPaletteItems paletteId='focused-project' />);
     expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(false);
   });
 });

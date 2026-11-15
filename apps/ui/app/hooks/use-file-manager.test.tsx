@@ -877,21 +877,21 @@ describe('SharedWorkerGate', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
-  /* The app-wide gate sits above the shell, where nothing sizes it; its notice
-   * collapsed to the top of its icon until it took the window. */
-  it('lets the notice of a gate above the shell take the window', async () => {
+  /* D24 (A11): no gate sits above the shell any more, so the notice fills the region its gate stands in. */
+  it('fills the gate\u2019s own region with the notice', async () => {
     mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
 
     render(
       <RootFileManagerProvider>
-        <SharedWorkerGate withShellFrame>
+        <SharedWorkerGate>
           <div>subtree</div>
         </SharedWorkerGate>
       </RootFileManagerProvider>,
     );
 
     const notice = await screen.findByRole('alert');
-    expect(notice).toHaveClass('h-dvh', 'w-full');
+    expect(notice).toHaveClass('size-full');
+    expect(notice).not.toHaveClass('h-dvh');
   });
 
   /* Connecting is progress, and a route that knows what it is opening says so instead of a blank. */

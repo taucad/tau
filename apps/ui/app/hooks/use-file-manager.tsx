@@ -459,13 +459,11 @@ function useHomeBackendFailure(): string | undefined {
 function SharedWorkerFallback({
   fileManagerRef,
   placeholder,
-  withShellFrame,
   isInline = false,
 }: {
   readonly isInline?: boolean;
   readonly fileManagerRef: FileManagerRef;
   readonly placeholder: ReactNode;
-  readonly withShellFrame: boolean;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
   const isBackendPending = useSelector(fileManagerRef, (state) => state.context.backendType === undefined);
@@ -506,7 +504,7 @@ function SharedWorkerFallback({
     );
   }
   return (
-    <div role='alert' className={withShellFrame ? 'h-dvh w-full' : 'size-full'}>
+    <div role='alert' className='size-full'>
       <PanelEmptyState
         icon={OctagonAlert}
         iconClassName='text-feature'
@@ -529,20 +527,18 @@ function SharedWorkerFallback({
  * @param properties - The gated subtree, and the `placeholder` to show while
  *   the worker connects. A route that knows what it is opening passes its own
  *   loading state; without one the gate waits invisibly, as it always did.
- *   `withShellFrame` marks a gate above the app shell, whose failure notice
- *   then takes the window.
+ *   The failure notice fills the gate's own region: the app shell is never
+ *   below a gate (D24).
  * @returns The children, the placeholder, or the failure notice.
  */
 export function SharedWorkerGate({
   children,
   placeholder,
-  withShellFrame = false,
   shouldReportFailure = true,
 }: {
   readonly shouldReportFailure?: boolean;
   readonly children: ReactNode;
   readonly placeholder?: ReactNode;
-  readonly withShellFrame?: boolean;
 }): React.ReactNode {
   const isWorkerPresent = useSharedWorkerPresent();
   const fileManager = useOptionalFileManager();
@@ -555,11 +551,7 @@ export function SharedWorkerGate({
   return fileManager === undefined || !shouldReportFailure ? (
     placeholder
   ) : (
-    <SharedWorkerFallback
-      fileManagerRef={fileManager.fileManagerRef}
-      placeholder={placeholder}
-      withShellFrame={withShellFrame}
-    />
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={placeholder} />
   );
 }
 
@@ -567,12 +559,7 @@ export function SharedWorkerGate({
 export function HomeFileManagerNotice(): React.ReactNode {
   const fileManager = useOptionalFileManager();
   return fileManager ? (
-    <SharedWorkerFallback
-      fileManagerRef={fileManager.fileManagerRef}
-      placeholder={undefined}
-      withShellFrame={false}
-      isInline
-    />
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
   ) : undefined;
 }
 

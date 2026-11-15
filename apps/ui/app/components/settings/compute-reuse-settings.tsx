@@ -5,8 +5,7 @@ import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.j
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { setComputeReuseMode, useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
-import { useProject } from '#hooks/use-project.js';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-project-view.session.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { desktopProjectRoot } from '#constants/desktop-kernel-options.js';
 
@@ -35,8 +34,9 @@ const modes: ReadonlyArray<{
 
 export function ComputeReuseSettings(): React.JSX.Element {
   const selected = useComputeReuseMode();
-  const project = useProject({ enableNoContext: true });
-  const fileManager = useOptionalFileManager();
+  /* Settings is in the shell, outside the focused project's view: it reads the focused session (A11). */
+  const project = useFocusedProjectSession();
+  const fileManagerRef = project?.fileManagerRef;
   const [status, setStatus] = useState<{ projectId: string; value: string }>();
   const [collection, setCollection] = useState<{
     projectId: string;
@@ -47,15 +47,13 @@ export function ComputeReuseSettings(): React.JSX.Element {
   const collectCursor = collection && collection.projectId === projectId ? collection.cursor : undefined;
   const currentStatus = status && status.projectId === projectId ? status.value : undefined;
   const confirmClear = projectId !== undefined && confirmClearProjectId === projectId;
-  const available = Boolean(
-    project && (desktopBridge() ?? fileManager?.fileManagerRef.getSnapshot().context.computeControl),
-  );
+  const available = Boolean(project && (desktopBridge() ?? fileManagerRef?.getSnapshot().context.computeControl));
   const control = async (action: 'inspect' | 'clear' | 'collect', cursor?: string): Promise<void> => {
     if (!project) {
       return;
     }
     const bridge = desktopBridge();
-    const browserControl = fileManager?.fileManagerRef.getSnapshot().context.computeControl;
+    const browserControl = fileManagerRef?.getSnapshot().context.computeControl;
     if (!bridge && !browserControl) {
       throw new Error('The active project compute authority is unavailable.');
     }

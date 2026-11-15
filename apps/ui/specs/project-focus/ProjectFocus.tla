@@ -121,6 +121,10 @@
 \* nothing mounted; the route's binding relays none of them. `selectFocusTarget` moved beside the route
 \* state it reads (`focus.route-state.ts`), so the app runtime reads the focused project with it too. The
 \* sessions' facts were already the registry's in the model (environment here). No action or verdict changes.
+\* A11: the app shell renders at one tree position beside the keyed live sessions, never inside the focused
+\* one, and the focused project's providers are re-homed in the shell's outlet (`focused-project-view.tsx`),
+\* keyed by the project the route shows in the editor. The gate's worker wait moves into the outlet. Focus,
+\* the route state and the mounted live set are unchanged, so no action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

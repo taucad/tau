@@ -317,7 +317,9 @@ describe('sessionRuntimeWork — the leave and unload flushes (A7c, I3, I6)', ()
       editorRef: editor,
       flushWorkbenchRecords: async () => producer.promise,
     });
-    await Promise.resolve();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
 
     expect(order).toEqual([]);
 
@@ -342,5 +344,32 @@ describe('sessionRuntimeWork — the leave and unload flushes (A7c, I3, I6)', ()
 
     await expect(flushed).rejects.toThrow('Pane layout is not confirmed saved.');
     expect(order).toEqual(['project', 'editor']);
+  });
+
+  it("should refuse an unload only with a producer's refusal when a store fails before it settles", async () => {
+    const order: string[] = [];
+    const parameters = mock<ParameterSetService>();
+    const { project, editor } = idleStores(order);
+    const failing = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
+    failing.matches.mockImplementation((value) => value === 'ready');
+    project.getSnapshot.mockReturnValue(failing);
+    project.subscribe.mockImplementation(((observer: { error?: (error: unknown) => void }) => {
+      observer.error?.(new Error('project store failed'));
+      return { unsubscribe: () => undefined };
+    }) as unknown as ActorRefFrom<typeof projectMachine>['subscribe']);
+    const input = (refusal: boolean) => ({
+      parameterService: parameters,
+      projectRef: project,
+      editorRef: editor,
+      flushWorkbenchRecords: async () => {
+        if (refusal) {
+          throw new Error('Pane layout is not confirmed saved.');
+        }
+      },
+    });
+
+    await expect(flushOf('unload')(input(true))).rejects.toThrow('Pane layout is not confirmed saved.');
+    await expect(flushOf('unload')(input(false))).resolves.toBeUndefined();
+    expect(order).toEqual(['project', 'editor', 'project', 'editor']);
   });
 });

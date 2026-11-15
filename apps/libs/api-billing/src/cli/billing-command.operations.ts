@@ -151,7 +151,9 @@ export const recoveryNoticeEmailOrigin = (env: Readonly<Record<string, string | 
 
 /**
  * Drains the recovery-notice outbox once. A notice that used its last attempt is a `billing.alert`:
- * its customer was never told, and only an operator can re-queue it.
+ * its customer was never told, and only an operator can re-queue it. So is a notice parked because the
+ * owner's address is undeliverable (email bounce blueprint R10): the alert names each account, so the
+ * operator can reach the customer another way. The grace period runs as normal (ruling E1).
  */
 export const deliverRecoveryNotices = async (input: {
   readonly payments: Pick<BillingPaymentsService, 'deliverRecoveryNotices'>;
@@ -166,6 +168,17 @@ export const deliverRecoveryNotices = async (input: {
         environment: input.environment,
         kind: 'recovery_notice_abandoned',
         notices: report.abandoned,
+      }),
+    );
+  }
+  if (report.undeliverable.length > 0) {
+    console.error(
+      JSON.stringify({
+        event: 'billing.alert',
+        environment: input.environment,
+        kind: 'recovery_notice_undeliverable',
+        notices: report.undeliverable.map(({ notice }) => notice),
+        accounts: [...new Set(report.undeliverable.map(({ accountId }) => accountId))],
       }),
     );
   }

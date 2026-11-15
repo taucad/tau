@@ -134,6 +134,8 @@ export const publicationAccessGrantSchema = z
     status: publicationAccessStatusSchema,
     createdAt: z.iso.datetime(),
     revokedAt: z.iso.datetime().nullable(),
+    /** Mail to this recipient cannot be delivered (bounced, reported or suppressed); the reason is not disclosed. */
+    notDelivered: z.boolean().optional(),
   })
   .meta({ id: 'PublicationAccessGrant' });
 

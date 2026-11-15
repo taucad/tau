@@ -9,6 +9,7 @@ describe('package exports', () => {
   it('pins the public @taucad/api-email surface', () => {
     expect(packageJson.exports).toEqual({
       '.': './src/index.ts',
+      './retention': './src/email-event-retention.ts',
       './package.json': './package.json',
     });
   });

@@ -669,7 +669,45 @@ export const TauMetrics = {
     description: 'Invite notification emails suppressed before send, by reason',
     attributes: z.object({
       trigger: z.enum(['publish', 'invite']).optional(),
-      reason: z.enum(['cap_exceeded', 'limiter_unavailable']).optional(),
+      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable']).optional(),
+    }),
+  }),
+
+  emailEventsTotal: defineCounter({
+    name: 'email.events',
+    unit: '{event}',
+    description:
+      'Resend delivery events received by the signed webhook, by event type, template kind, bounce type and outcome',
+    attributes: z.object({
+      type: z
+        .enum([
+          'email.sent',
+          'email.delivered',
+          'email.delivery_delayed',
+          'email.bounced',
+          'email.complained',
+          'email.failed',
+          'email.suppressed',
+          'suppression.added',
+          'suppression.removed',
+        ])
+        .optional(),
+      kind: z
+        .enum([
+          'verify-email',
+          'account-exists',
+          'magic-link',
+          'reset-password',
+          'password-changed',
+          'publication-invite',
+          'payment-failed',
+          'auto-reload-disabled',
+          'auto-reload-action-required',
+          'unknown',
+        ])
+        .optional(),
+      bounce_type: z.enum(['Permanent', 'Transient', 'Undetermined', 'other', 'none']).optional(),
+      outcome: z.enum(['stored', 'other_environment']).optional(),
     }),
   }),
 

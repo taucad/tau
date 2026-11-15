@@ -9,6 +9,7 @@ DELETE /publications/:id/access/:accessId | v1 | AuthGuard,AuthGuard | required 
 GET /agents | v1 | AuthGuard | optional | HostsController.listDevices
 GET /agents/:id/runs | v1 | AuthGuard,AuthGuard | required | HostsController.listRuns
 GET /agents/worker-affinity | v1 | AuthGuard | public | HostsController.getWorkerAffinity
+GET /email/deliverability | v1 | AuthGuard | required | EmailDeliverabilityController.getOwnDeliverability
 GET /git/:repo/info/refs | v1 | AuthGuard | required | GitController.infoRefs
 GET /git/lfs/:handle | v1 | AuthGuard | required | GitProxyController.relayGet
 GET /git/proxy | v1 | AuthGuard | required | GitProxyController.proxyGet
@@ -115,4 +116,5 @@ GET /v1/auth/*
 OPTIONS /v1/auth/*
 PATCH /v1/auth/*
 POST /v1/auth/*
+POST /v1/auth/resend/webhook
 PUT /v1/auth/*

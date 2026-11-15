@@ -42,6 +42,7 @@ import {
 } from '@taucad/api-git-mirror/maintenance/lfs-relocation-run';
 import { activeLfsReservationPages } from '@taucad/api-git-mirror/maintenance/lfs-reservation-scope';
 import { applicationNameOf } from '@taucad/api-database/application-name';
+import { reapExpiredEmailEvents } from '@taucad/api-email/retention';
 import { optionValue, optionalOperand as optionalOperandOf, requiredOperand } from '#maintenance-arguments.js';
 
 /**
@@ -447,6 +448,18 @@ async function main(): Promise<void> {
               await pass('collect-blobs', async () => {
                 await collectZeroCountBlobs({ database, driver, report });
               });
+              stop.signal.throwIfAborted();
+              // Resend delivery events are kept 90 days (email bounce blueprint D6); one bounded batch a day.
+              const reaped = await reapExpiredEmailEvents(database, {
+                now: new Date(),
+                limit: 50_000,
+              });
+              await writeLine(
+                JSON.stringify({
+                  event: 'revisions_maintenance.email_events_reaped',
+                  ...reaped,
+                }),
+              );
             },
           });
         } finally {

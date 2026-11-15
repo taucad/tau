@@ -27,7 +27,7 @@ import { runMigrationJob } from '@taucad/api-database/migration';
 import * as schema from '@taucad/api-database/schema';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { BillingRecoveryNoticeEmailTransport } from '#billing-recovery-notice.transport.js';
-import { EmailService } from '@taucad/api-email';
+import { EmailDeliverabilityService, EmailService } from '@taucad/api-email';
 import {
   createOperationsGaugeSource,
   deliverRecoveryNotices,
@@ -59,7 +59,7 @@ const createRecoveryNoticeTransport = (
   return new BillingRecoveryNoticeEmailTransport(
     database,
     new EmailService(config as unknown as ConstructorParameters<typeof EmailService>[0]),
-    frontendURL,
+    { frontendURL, deliverability: new EmailDeliverabilityService(database) },
   );
 };
 

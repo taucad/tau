@@ -728,14 +728,9 @@ describe('large-object fill', () => {
     expect(harness.text('models/a.step')).toBe('solid a');
   });
 
-  it('fetches a placeholder no head names by its own oid: failed while offline, filled once the network answers', async () => {
+  it('fetches a placeholder by its own oid: failed while offline, filled once the network answers', async () => {
     const harness = setup({ byOid: true });
     const done = harness.fill.fill(place, head);
-    const headless = new ImmutableRevisionTree([['main.scad', harness.files.get('main.scad')!]]);
-    await vi.waitFor(() => {
-      expect(harness.readTree).toHaveBeenCalled();
-    });
-    harness.finish(headless);
     await vi.waitFor(() => {
       expect(harness.fetchLargeObjects).toHaveBeenCalled();
     });
@@ -749,14 +744,34 @@ describe('large-object fill', () => {
     expect(harness.files.get('models/a.step')).toStrictEqual(pointerOf('solid a').bytes);
     failed.retry();
     await vi.waitFor(() => {
-      expect(harness.readTree).toHaveBeenCalledTimes(2);
-    });
-    harness.finish(headless);
-    await vi.waitFor(() => {
       expect(harness.fetchLargeObjects).toHaveBeenCalledTimes(2);
     });
+    expect(harness.readTree).not.toHaveBeenCalled();
     harness.land('models/a.step');
     harness.fetched()?.resolve(new Map([[pointerOf('solid bb').pointer.oid, encoder.encode('solid bb')]]));
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
+  it('fetches the objects its placeholders name at once, never reading the head’s tree for them (Tau #2013)', async () => {
+    const harness = setup({ byOid: true });
+    const placeholders = largeObjectPlaceholders(
+      new ImmutableRevisionTree([...harness.files].map(([path, content]) => [path, content] as const)),
+    );
+    const done = harness.fill.fill(place, head, placeholders);
+    await vi.waitFor(() => {
+      expect(harness.fetchLargeObjects).toHaveBeenCalled();
+    });
+    expect(harness.readTree).not.toHaveBeenCalled();
+    expect(harness.fetchLargeObjects.mock.calls[0]?.[0]).toStrictEqual(
+      Object.values(parts).map((content) => pointerOf(content).pointer),
+    );
+    harness.land('models/a.step');
+    harness.fetched()?.resolve(new Map([[pointerOf('solid bb').pointer.oid, encoder.encode('solid bb')]]));
+    await done;
     await vi.waitFor(() => {
       expect(harness.reports.at(-1)?.facet).toBeUndefined();
     });

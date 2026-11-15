@@ -17,8 +17,7 @@ import type { SessionProjectRuntimePorts } from '#runtime/project-runtime.sessio
 import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
 import { oweWhileStoring, selectEditorRef } from '#runtime/project-runtime.js';
-import { waitFor } from 'xstate';
-import type { AnyActorRef } from 'xstate';
+import { createActor, createMachine, waitFor } from 'xstate';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
@@ -179,21 +178,29 @@ describe("a session runtime's replacement flush (A6e)", () => {
   });
 
   it('should owe the page a write while the project store repairs its manifest (A7c review round 4)', () => {
-    let observer: { next: (snapshot: { matches: (value: unknown) => boolean }) => void } | undefined;
-    const storing = (state: string) => ({
-      matches: (value: unknown) => JSON.stringify(value) === JSON.stringify({ ready: { storing: state } }),
-    });
-    const subscribe = (next: typeof observer) => {
-      observer = next;
-      return { unsubscribe: () => undefined };
-    };
-    oweWhileStoring({ subscribe: subscribe as unknown as AnyActorRef['subscribe'] });
+    const store = createActor(
+      createMachine({
+        initial: 'ready',
+        states: {
+          ready: {
+            initial: 'storing',
+            states: {
+              storing: {
+                initial: 'idle',
+                states: { idle: { on: { repair: 'repairing' } }, repairing: { on: { repaired: 'idle' } } },
+              },
+            },
+          },
+        },
+      }),
+    ).start();
+    oweWhileStoring(store);
 
-    observer?.next(storing('repairing'));
+    store.send({ type: 'repair' });
 
     expect(owedRecordWrites.owes()).toBe(true);
 
-    observer?.next(storing('idle'));
+    store.send({ type: 'repaired' });
 
     expect(owedRecordWrites.owes()).toBe(false);
   });

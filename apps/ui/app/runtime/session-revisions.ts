@@ -557,6 +557,8 @@ export const sessionRevisionsCallback =
 
     try {
       followWorker();
+      /* A14: the first word, even with no client yet: a Tau Cloud open still owed is settled at once. */
+      relayFileCheck(client?.status());
       unregisterCut = ports.closeCut.register(closeCut);
       requestSalt();
 

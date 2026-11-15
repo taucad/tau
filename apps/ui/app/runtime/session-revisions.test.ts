@@ -916,6 +916,22 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     expect(guard.take()).toEqual([]);
   });
 
+  it('A14: should settle the check of a Tau Cloud open at once, before its client has published anything', async () => {
+    const guard = guardActors();
+    const fake = createFakePorts();
+    fake.setCloudOpen(true);
+    /* No worker yet, so no client and no status. */
+    const fileManager = createFileManager({ rootDirectory: `/projects/${projectId}` });
+    const received: SessionRevisionsEmitted[] = [];
+    const session = createSession(fake.ports, fileManager.ref, { guard, received });
+    session.start();
+    await settle();
+
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: true }]);
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
   it('A14: should not hold a Tau Cloud open behind the file check, whose own placeholder speaks as it does today', async () => {
     const { client, fake, received, session } = await startSession();
     client.setStatus({ readiness: 'connected' });

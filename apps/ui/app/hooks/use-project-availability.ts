@@ -112,6 +112,10 @@ export function modelAvailability(
  * @returns `true` once the check has settled.
  */
 export function isFileCheckSettled(status: RevisionStatusProjection | undefined, isCloudOpenPending: boolean): boolean {
+  /* Checked first: before its first status the open's placeholder ("Connecting to Tau Cloud") speaks, as on main. */
+  if (isCloudOpenPending) {
+    return true;
+  }
   if (status === undefined) {
     return false;
   }

@@ -11,7 +11,6 @@
   ],
   "loadPath": [
     "apps/libs/chat-ui/src/components/chat-textarea-skeleton.tsx",
-    "apps/libs/project-workspace/src/components/chat-pane-skeleton.tsx",
     "apps/ui/app/components/auth/user/user-avatar.tsx",
     "apps/ui/app/components/auth/user/user-view.tsx",
     "apps/ui/app/components/chat/chat-textarea.tsx",
@@ -30,13 +29,12 @@
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx",
     "apps/ui/app/routes/w.$workspace.$project/revision-marker.tsx",
     "apps/ui/app/routes/w.$workspace.$project/route.tsx",
-    "apps/ui/app/routes/w.$workspace.$project/workspace-skeleton.tsx",
+    "apps/ui/app/routes/w.$workspace.$project/workspace-frame.tsx",
     "packages/ui/src/components/sidebar.tsx"
   ],
   "counts": {
     "apps/libs/chat-ui/src/components/chat-textarea-skeleton.tsx": 1,
     "apps/libs/project-workspace/src/components/archived-chats-view.tsx": 1,
-    "apps/libs/project-workspace/src/components/chat-pane-skeleton.tsx": 6,
     "apps/libs/ui-kit/src/components/data-table.tsx": 1,
     "apps/ui/app/components/auth/api-key/api-key-skeleton.tsx": 5,
     "apps/ui/app/components/auth/api-key/api-keys.tsx": 1,
@@ -61,14 +59,6 @@
     "apps/ui/app/routes/import.$/repository-card.tsx": 3,
     "apps/ui/app/routes/loader/route.tsx": 4,
     "apps/ui/app/routes/loader_.glass/route.tsx": 3,
-    "apps/ui/app/routes/w.$workspace.$project/chat-interface-desktop.tsx": 3,
-    "apps/ui/app/routes/w.$workspace.$project/chat-interface-mobile.tsx": 1,
-    "apps/ui/app/routes/w.$workspace.$project/chat-interface.tsx": 2,
-    "apps/ui/app/routes/w.$workspace.$project/focused-chat-gate.tsx": 1,
-    "apps/ui/app/routes/w.$workspace.$project/project-route-notices.tsx": 1,
-    "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": 1,
-    "apps/ui/app/routes/w.$workspace.$project/route.tsx": 1,
-    "apps/ui/app/routes/w.$workspace.$project/workspace-skeleton.tsx": 5,
     "packages/ui/src/components/skeleton.tsx": 1,
     "packages/workbench-panes/src/model/part-gallery.tsx": 1
   }

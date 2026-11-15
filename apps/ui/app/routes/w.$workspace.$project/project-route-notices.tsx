@@ -40,7 +40,7 @@ import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
 
 /** Every verb a notice may offer. Closed on purpose: the table cannot invent an effect. @public */
@@ -363,10 +363,10 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
   const heading = noticeHeading(state);
   const isProgressOnly = spec.title === '';
 
-  /* Nothing to say yet, so this is the workspace arriving, not a notice about it: the same
-   * skeleton the session gate shows next, rather than a spinner and a header that both vanish. */
+  /* Nothing to say yet, so this is the workspace arriving, not a notice about it: the workspace frame above shows
+   * through, as it does under every gate that follows, rather than a spinner and a header that both vanish. */
   if (isProgressOnly) {
-    return <WorkspaceSkeleton />;
+    return <WorkspaceOpening />;
   }
 
   return (

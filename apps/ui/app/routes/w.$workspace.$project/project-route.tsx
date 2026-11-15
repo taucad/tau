@@ -7,7 +7,7 @@ import {
   ProjectRouteRetryContext,
   ProjectRouteStateContext,
 } from '#routes/w.$workspace.$project/project-route-state.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceFrame, WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import type { LiveProjectSessions as LiveProjectSessionsComponent } from '#routes/w.$workspace.$project/project-live-sessions.js';
 import {
   ProjectRouteIntent,
@@ -212,10 +212,11 @@ function DetachedProjectRoute({
 }
 
 /**
- * A project route's content region until this document's file-manager worker exists: the workspace's own
- * placeholder, or the file service's failure notice in its place. The shell around it is already there (D24), so the
- * placeholder draws the content region only; this is also what the server renders for a project URL, beside the shell.
- * Any other route's content is never held, and keeps its tree position whichever route comes next.
+ * A project route's content region: the persistent workspace frame (A15b), with the content over it once this
+ * document's file-manager worker exists, or the file service's failure notice in its place. The shell around it is
+ * already there (D24), so the frame draws the content region only; this is also what the server renders for a project
+ * URL, beside the shell. Any other route's content is never held, and keeps its tree position whichever route comes
+ * next.
  *
  * @param props - The route's content, and whether the route is a project's.
  * @returns The content, once the worker exists or at once off a project route.
@@ -227,14 +228,16 @@ function ProjectRouteContent({
   readonly children?: React.ReactNode;
   readonly isProjectRoute: boolean;
 }): React.ReactNode {
-  return (
+  const gate = (
     <SharedWorkerGate
       shouldReportFailure={isProjectRoute}
-      placeholder={isProjectRoute ? <WorkspaceSkeleton /> : children}
+      placeholder={isProjectRoute ? <WorkspaceOpening /> : children}
     >
       {children}
     </SharedWorkerGate>
   );
+  /* One host element whatever the route, so a visit off a project route keeps the content's tree position. */
+  return <WorkspaceFrame isDrawn={isProjectRoute}>{gate}</WorkspaceFrame>;
 }
 
 /** The latest `onFocusedChatResolved`, read when focus shows a chat. */

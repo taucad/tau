@@ -27,8 +27,8 @@ vi.mock('#components/geometry/cad/part-gallery.js', () => ({
 }));
 /* The product tour's host registers its palette entry; the palette is the app shell's, outside this suite. */
 vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <div role='status' aria-label='Opening project' />,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <div role='status' aria-label='Opening project' />,
 }));
 
 function stubViewport(mobile: boolean): void {

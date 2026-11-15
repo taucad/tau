@@ -6,7 +6,7 @@ import {
   ChatInterfaceSessionGate,
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
-import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
+import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -87,36 +87,38 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   ),
 }));
 
-describe('ChatPaneSkeleton', () => {
-  it('renders the loading variant with an aria-label and testid', () => {
-    render(<ChatPaneSkeleton variant='loading' />);
+/* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
+ * workspace opens and the chat gate shows while the focused chat is ensured. */
+describe('ChatLaneFrame', () => {
+  it("renders the workspace frame's chat lane with its testid and no busy state of its own", () => {
+    render(<ChatLaneFrame />);
 
-    const placeholder = screen.getByTestId('chat-pane-skeleton-loading');
+    const placeholder = screen.getByTestId('chat-lane-frame');
     expect(placeholder).toBeDefined();
-    expect(placeholder.getAttribute('aria-busy')).toBe('true');
-    expect(placeholder.getAttribute('aria-label')).toContain('Loading');
+    expect(placeholder.getAttribute('aria-busy')).toBeNull();
+    expect(placeholder.querySelector('[data-slot=skeleton]')).toBeNull();
   });
 
-  it('renders the ensuring variant with the matching aria-label', () => {
-    render(<ChatPaneSkeleton variant='ensuring' />);
+  it('renders the ensuring wait with the matching aria-label', () => {
+    render(<ChatLaneFrame busyLabel='Preparing chat session…' />);
 
-    const placeholder = screen.getByTestId('chat-pane-skeleton-ensuring');
+    const placeholder = screen.getByTestId('chat-lane-frame');
     expect(placeholder).toBeDefined();
     expect(placeholder.getAttribute('aria-busy')).toBe('true');
     expect(placeholder.getAttribute('aria-label')).toContain('Preparing');
   });
 
   it('carries the floating-panel data-slot so it inherits chat-pane chrome', () => {
-    render(<ChatPaneSkeleton variant='loading' />);
+    render(<ChatLaneFrame />);
 
-    const placeholder = screen.getByTestId('chat-pane-skeleton-loading');
+    const placeholder = screen.getByTestId('chat-lane-frame');
     expect(placeholder.dataset['slot']).toBe('floating-panel');
   });
 
   it('draws the composer as the live empty composer frame rather than a pulsing block', () => {
-    render(<ChatPaneSkeleton variant='loading' />);
+    render(<ChatLaneFrame />);
 
-    const composer = screen.getByTestId('chat-pane-skeleton-composer');
+    const composer = screen.getByTestId('chat-lane-frame-composer');
     expect(composer.className).toContain('rounded-2xl');
     expect(composer.className).toContain('min-h-20.5');
     expect(composer.className).not.toContain('animate-pulse');
@@ -225,7 +227,7 @@ describe('ChatHistoryGate', () => {
     // Provider mount is now owned by ChatInterfaceSessionGate upstream, not by ChatHistoryGate.
     expect(screen.queryByTestId('active-chat-provider')).toBeNull();
     expect(screen.queryByTestId('focused-chat-error-panel')).toBeNull();
-    expect(screen.queryByTestId('chat-pane-skeleton-ensuring')).toBeNull();
+    expect(screen.queryByTestId('chat-lane-frame')).toBeNull();
   });
 });
 

@@ -35,6 +35,7 @@ import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
+import type * as WorkspaceFrameModule from '#routes/w.$workspace.$project/workspace-frame.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as ViewerDockviewModule from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
@@ -443,8 +444,9 @@ vi.mock('#components/tour/tour-host.js', () => ({
   TourHost: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <div data-testid='workspace-skeleton' />,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof WorkspaceFrameModule>()),
+  WorkspaceOpening: () => <div data-testid='workspace-opening' />,
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ActiveChatProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -844,7 +846,9 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     /* Today the layout mounts while the chat is ensured and its pane waits below the viewer; once the open waits for
      * the chat, nothing of the layout mounts until it is ready. Either way, no viewer box shows an empty state. */
     const boxes = viewerBoxes();
-    expect(boxes.length === 0 || screen.queryByTestId('chat-pane-skeleton-ensuring') !== null).toBe(true);
+    expect(
+      boxes.length === 0 || document.querySelector('[data-testid="chat-lane-frame"][aria-busy="true"]') !== null,
+    ).toBe(true);
     expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
     expect(added.map((node) => node.textContent)).toEqual([]);
   });

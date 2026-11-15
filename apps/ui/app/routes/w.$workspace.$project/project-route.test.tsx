@@ -2467,9 +2467,10 @@ describe('project route shell identity (A0.7)', () => {
     );
     const view = render(tree());
     await flushTasks();
-    /* Connecting: the shell is there and the content region holds the workspace's placeholder. */
+    /* Connecting: the shell is there and the content region holds the workspace frame, with nothing over it. */
     expect(shellNodes()).toHaveLength(1);
-    expect(screen.getByTestId('workspace-skeleton')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-opening')).toBeInTheDocument();
     expect(screen.queryByTestId('focused-project')).not.toBeInTheDocument();
 
     sharedWorkerState = 'ready';

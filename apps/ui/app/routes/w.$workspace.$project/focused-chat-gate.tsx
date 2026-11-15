@@ -9,7 +9,7 @@ import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 import { DebugProbes } from '#chat-clients/debug-probes.js';
 import { ENV } from '#environment.config.js';
-import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
+import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 
 /**
  * Renders when `ensureFocusedChatActor` rejects. Surfaces the typed
@@ -178,7 +178,7 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   }
 
   if (isEnsuring) {
-    return <ChatPaneSkeleton variant='ensuring' />;
+    return <ChatLaneFrame busyLabel='Preparing chat session…' />;
   }
 
   // oxlint-disable-next-line react/jsx-no-useless-fragment -- forwarding children verbatim

@@ -19,6 +19,7 @@
       "apps/ui/app/routes/w.$workspace.$project/project-workspace-context.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx",
+      "apps/ui/app/routes/w.$workspace.$project/workspace-frame.tsx",
       "apps/ui/app/runtime/app-runtime-provider.tsx",
       "apps/ui/app/runtime/app-runtime-spa-entry.server.tsx",
       "apps/ui/desktop/app/entry.server.tsx",
@@ -30,6 +31,7 @@
   "modules": {
     "files": [
       "apps/ui/app/flags/layout-flags.ts",
+      "apps/ui/app/lib/frame-hint.ts",
       "apps/ui/app/machines/focus.machine.ts",
       "apps/ui/app/machines/focus.route-state.ts",
       "apps/ui/app/machines/library-access.machine.ts",

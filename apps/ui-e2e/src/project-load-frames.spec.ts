@@ -445,12 +445,17 @@ test(
   },
 );
 
+/*
+ * U4's placeholder node is, from A15b, the persistent workspace frame (`[data-slot="workspace-frame"]`), which took the
+ * skeleton's place. The row counts that node, and both kinds: the frame must be created exactly once and never
+ * removed, and the skeleton must never be created, so the row cannot pass because nothing stands in the content region.
+ */
 knownDefect('U4: the workspace placeholder node is created at most once per load with the workspace chunk 3 s late', {
   artifact: 'u4-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
-    await seedProjects('wide');
+    await seedProjects('wide', { regions: { workspaceFrame: '[data-slot="workspace-frame"]' } });
     await delayWorkspaceChunk();
     await target.reload();
     await settleProject();
@@ -458,10 +463,12 @@ knownDefect('U4: the workspace placeholder node is created at most once per load
     return keepRecord('u4-wide');
   },
   assert: (record) => {
+    const frames = record.regionMounts['workspaceFrame'] ?? [];
+    const removals = record.regionRemovals['workspaceFrame'] ?? [];
     expect(
-      record.placeholders.length,
-      `U4: [data-testid=workspace-skeleton] was created ${record.placeholders.length} times, in ${describeFrames(record.placeholders)}`,
-    ).toBeLessThanOrEqual(1);
+      { frames: frames.length, removals: removals.length, skeletons: record.placeholders.length },
+      `U4: the workspace frame was created ${frames.length} times (${describeFrames(frames)}) and removed ${removals.length} times; [data-testid=workspace-skeleton] was created ${record.placeholders.length} times, in ${describeFrames(record.placeholders)}`,
+    ).toEqual({ frames: 1, removals: 0, skeletons: 0 });
   },
 });
 
@@ -498,7 +505,7 @@ knownDefect(
   'U5: a workbench-closed project never paints a third lane border in any frame with the workspace chunk 3 s late',
   {
     artifact: 'u5-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('wide', { laneBorders: true });
@@ -994,7 +1001,7 @@ knownDefect(
   'F1 (A15b): with the workspace chunk 3 s late, the content region draws no skeleton and every lane is at its final box from its first frame',
   {
     artifact: 'f1-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record, settled }) => {
@@ -1015,7 +1022,7 @@ knownDefect(
   'F2 (A15b): with the workspace chunk 3 s late, one workspace frame element is created and never removed, and no workspace placeholder exists',
   {
     artifact: 'f2-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record }) => {
@@ -1034,7 +1041,7 @@ knownDefect(
   'F3 (A15b): with the workspace chunk 3 s late, no lane container runs an animation and the first lanes drawn are the final ones',
   {
     artifact: 'f3-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record, settled }) => {
@@ -1087,6 +1094,84 @@ knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a proj
     expectMeasured(standIns, 'F4: the server HTML, with tau-shell-op-sidebar=0, draws a sidebar stand-in', []);
   },
 });
+
+/*
+ * F11, A15b half (programme control, 2026-11-13T14:40Z): S-nav took the root loader's half
+ * (`root-revalidation.spec.ts`). This row holds the destination's own route module 3 s, the chunk a click from Home has
+ * to load before the router commits, and asks that the click still commits the URL and paints the destination's
+ * workspace frame within the acknowledge time (blueprint, § One timing ladder: 100 ms).
+ */
+const acknowledgeMilliseconds = 100;
+
+type DestinationFrameLoad = {
+  readonly record: ProjectLoadRecord;
+  readonly click: ProjectLoadFrame;
+  readonly pushAt: number | undefined;
+  readonly routeChunk: string;
+};
+
+knownDefect(
+  'F11 (A15b): a click on a project row from Home, with the project route module 3 s late, commits the URL and paints the destination workspace frame within 100 ms',
+  {
+    artifact: 'f11-wide',
+    expectedFailure: true,
+    budget: loadBudget,
+    measure: async (): Promise<DestinationFrameLoad> => {
+      await seedProjects('wide', { regions: { workspaceFrame } });
+      await target.navigate('/');
+      await target.expectVisible(composer, 60_000);
+      await target.delay(settleWindow);
+      /* The project route's module, as the router's manifest names it. */
+      const routeChunk = await target.evaluate(() => {
+        const manifest = (
+          globalThis as typeof globalThis & {
+            __reactRouterManifest?: { routes: Record<string, { module?: string }> };
+          }
+        ).__reactRouterManifest;
+        return manifest?.routes['routes/w.$workspace.$project']?.module ?? '';
+      });
+      precondition(routeChunk !== '', 'F11: the router manifest names no module for the project route');
+      await delayRequests(routeChunk.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`), chunkDelay);
+      await target.evaluate(() => {
+        const record = globalThis as typeof globalThis & { __f11PushAt?: number };
+        const push = history.pushState.bind(history);
+        history.pushState = (...parameters: Parameters<History['pushState']>) => {
+          record.__f11PushAt ??= performance.now();
+          push(...parameters);
+        };
+      });
+      const row = selectors.getByRole('link', { name: projectNames.a }).first();
+      await target.expectVisible(row, 60_000);
+      await markProjectLoadOnClick('click');
+      await target.click(row);
+      await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 60_000);
+      await settleProject();
+      const delayed = await readDelayedRequests();
+      precondition(
+        delayed.some((url) => url.includes(routeChunk)),
+        `F11: the project route module (${routeChunk}) was never delayed: ${delayed.join(', ') || 'none'}`,
+      );
+      const pushAt = await target.evaluate(
+        () => (globalThis as typeof globalThis & { __f11PushAt?: number }).__f11PushAt,
+      );
+      const record = await keepRecord('f11-wide', { routeChunk, pushAt });
+      const click = record.marks.find((mark) => mark.name === 'click');
+      precondition(click !== undefined, 'F11: the click was not marked');
+      return { record, click: click!, pushAt, routeChunk };
+    },
+    assert: ({ record, click, pushAt }) => {
+      const frame = regionsOf(record, 'workspaceFrame').find((entry) => entry.present && entry.t >= click.t);
+      expectMeasured(
+        {
+          pushWithin: pushAt !== undefined && pushAt - click.t <= acknowledgeMilliseconds,
+          frameWithin: frame !== undefined && frame.t - click.t <= acknowledgeMilliseconds,
+        },
+        `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}`,
+        { pushWithin: true, frameWithin: true },
+      );
+    },
+  },
+);
 
 /** The phone frame's four parts (blueprint P-h). */
 const phoneFrameRegions = {
@@ -1755,7 +1840,7 @@ knownDefect(
 
 knownDefect('F15 (A15b): a project at its default layout draws its lanes at their final boxes from the first frame', {
   artifact: 'f15-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     await seedProjects('wide', { regions: { content: wideFrameRegions.content }, boxSets: workspaceLanes });

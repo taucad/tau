@@ -39,9 +39,6 @@ vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('@taucad/project-workspace/components/chat-pane-skeleton', () => ({
-  ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
-}));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
   ViewerDockview: () => {
     renderViewer();
@@ -70,7 +67,11 @@ vi.mock('allotment', () => {
     </div>
   );
   const Allotment = Object.assign(
-    ({ children }: React.PropsWithChildren) => <div data-testid='allotment'>{children}</div>,
+    ({ children, className }: React.PropsWithChildren<{ readonly className?: string }>) => (
+      <div data-testid='allotment' className={className}>
+        {children}
+      </div>
+    ),
     { Pane },
   );
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
@@ -104,16 +105,22 @@ const resizeObserver: ResizeObserver = {
 const { ChatInterfaceDesktop, compactWorkspaceWidth } = await import('./chat-interface-desktop.js');
 const { panelMinSizeChat, panelMinSizeViewer, panelMinSizeViewerTight, panelMinSizeWorkbench, tightWorkspaceWidth } =
   await import('@taucad/ui-core/constants/editor.constants');
-const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
+const { WorkspaceFrame } = await import('./workspace-frame.js');
+const { MemoryRouter } = await import('react-router');
 
-const renderDesktop = () =>
-  render(
+/* `mount` remounts the workspace below one frame, as the gates above it hand over. */
+const desktopTree = (mount = 'first'): React.JSX.Element => (
+  <MemoryRouter initialEntries={['/w/home/one']}>
     <KeyboardProvider>
       <TooltipProvider>
-        <ChatInterfaceDesktop />
+        <WorkspaceFrame>
+          <ChatInterfaceDesktop key={mount} />
+        </WorkspaceFrame>
       </TooltipProvider>
-    </KeyboardProvider>,
-  );
+    </KeyboardProvider>
+  </MemoryRouter>
+);
+const renderDesktop = () => render(desktopTree());
 
 const resizeTo = (width: number): void => {
   act(() => {
@@ -218,45 +225,56 @@ describe('ChatInterfaceDesktop', () => {
     );
   });
 
-  /* The editor state loads from storage before the lanes can take their
-   * persisted widths; the lanes stand in at their defaults, never a blank. */
-  it('shows the workspace skeleton instead of a blank while the editor state loads', async () => {
+  /* The editor state loads from storage before the lanes can take their persisted widths. The workspace
+   * draws nothing of its own meanwhile: the persistent frame's lanes show beneath, never a blank (A15b). */
+  it('shows the workspace frame instead of a blank while the editor state loads', async () => {
     editorState.isReady = false;
-    /* Inside the load's first blink, where the lanes still ease in. */
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
     renderDesktop();
 
-    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
-    expect(skeleton).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByTestId('chat-skeleton')).toBeInTheDocument();
+    const opening = await screen.findByRole('status', { name: 'Opening project' });
+    expect(opening).toHaveAttribute('aria-busy', 'true');
+    expect(opening).toHaveClass('sr-only');
     expect(screen.queryByTestId('allotment')).not.toBeInTheDocument();
-    /* The workbench lane drops at the compact width through the skeleton's own container query,
-     * which jsdom does not evaluate: the class is the assertion, the width is checked in a browser. */
-    const workbenchLane = skeleton.querySelector('.border-l');
-    expect(workbenchLane).toHaveClass('@min-[1120px]:flex');
-    expect(compactWorkspaceWidth).toBe(1120);
-    /* The frame paints at once; its lanes wait out a blink, so a warm load never flashes them. */
-    expect(skeleton).toHaveClass('bg-background');
-    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).toHaveClass(
-      'animate-in',
-      'fade-in',
-      'fill-mode-both',
-      '[animation-delay:300ms]',
-      'motion-reduce:animate-none',
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
+    expect(frame).toHaveClass('bg-background');
+    expect(frame?.querySelector('[data-testid="chat-lane-frame"]')).toBeInTheDocument();
+    /* The workbench lane drops at the compact width through the frame's own container query, which jsdom
+     * does not evaluate: the class is the assertion, the width is checked in a browser. */
+    expect(frame?.querySelector('[data-lane="workbench"]')?.className).toContain(
+      '@max-[1119px]:[display:var(--frame-workbench-compact-display,none)]',
     );
-    clock.mockRestore();
+    expect(compactWorkspaceWidth).toBe(1120);
+    /* No wait is held back and nothing eases in: the frame is at rest from its first paint (U15). */
+    expect(frame?.innerHTML).not.toMatch(/animate-in|fade-in|animation-delay/u);
   });
 
-  /* Opening a project hands the skeleton from gate to gate. The blink belongs to the load, not to
-   * each mount, or the lanes would fade in again at every handover and spend the wait invisible. */
-  it('spends the blink once per load, so a later gate shows the lanes at once', async () => {
+  /* The frame belongs to the load, not to each gate: a gate that hands over to the next mounts nothing in the
+   * frame's place, so there is no blink to spend and the lanes show at once at every handover. */
+  it('keeps one frame across the hand-over from the editor state to the lanes', async () => {
     editorState.isReady = false;
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(revealDelayMilliseconds);
-    renderDesktop();
+    const view = renderDesktop();
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
 
-    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
-    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).not.toHaveClass('animate-in');
-    clock.mockRestore();
+    editorState.isReady = true;
+    view.rerender(desktopTree('second'));
+    await screen.findByTestId('allotment');
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
+  });
+
+  // C4 (blueprint, § Red-first tests): the frame element before the lanes are laid out is the same element after;
+  // no descendant draws a skeleton; no animation class on the lane container.
+  it('C4: the frame before the lanes are laid out is the same element after, with no skeleton and no animation', async () => {
+    renderDesktop();
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
+    const lanes = await screen.findByTestId('allotment');
+    const workspace = document.querySelector('[data-project-workspace]');
+
+    expect(workspace).not.toHaveAttribute('data-workspace-lanes');
+    expect(frame?.querySelector('[data-slot=skeleton]')).toBeNull();
+    expect(workspace?.querySelector('[data-testid="workspace-skeleton"]')).toBeNull();
+    expect(workspace?.innerHTML).not.toMatch(/animate-in|fade-in/u);
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
+    expect(lanes.className).not.toMatch(/animate-|fade-/u);
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

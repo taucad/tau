@@ -80,6 +80,7 @@
       "apps/ui/app/runtime/session-file-manager.ts",
       "apps/ui/app/runtime/session-revisions.fixture.ts",
       "apps/ui/app/runtime/session-revisions.ts",
+      "apps/ui/app/runtime/standalone-project-port.ts",
       "apps/ui/app/runtime/ui-runtime.config.ts",
       "apps/ui/app/runtime/ui-runtime.definition.ts",
       "apps/ui/app/runtime/ui-runtime.schema.ts",

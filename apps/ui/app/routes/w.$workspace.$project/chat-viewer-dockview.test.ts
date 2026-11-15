@@ -108,7 +108,7 @@ describe('viewer split launchers', () => {
       fieldOfView: 42,
       upDirection: 'y',
       grid: { unit: 'in' },
-      display: { ...formatView.display, grid: false, postProcessing: false },
+      display: { ...formatView.display, grid: false },
       camera: {
         kind: 'pose',
         frameId: 'tau:root',
@@ -131,7 +131,7 @@ describe('viewer split launchers', () => {
       fieldOfView: 42,
       upDirection: 'y',
       grid: { ...formatView.grid, unit: 'in' },
-      display: { ...formatView.display, grid: false, postProcessing: false },
+      display: { ...formatView.display, grid: false },
     });
   });
 

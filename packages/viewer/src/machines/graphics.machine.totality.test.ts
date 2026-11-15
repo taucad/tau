@@ -122,7 +122,6 @@ const samples: Samples = {
   setGridVisibility: [{ type: 'setGridVisibility', payload: false }],
   setAxesVisibility: [{ type: 'setAxesVisibility', payload: false }],
   setMatcapVisibility: [{ type: 'setMatcapVisibility', payload: true }],
-  setPostProcessingVisibility: [{ type: 'setPostProcessingVisibility', payload: false }],
   setUpDirection: [{ type: 'setUpDirection', payload: 'y' }],
   adoptUpDirection: [{ type: 'adoptUpDirection', payload: 'y' }],
   setGraphicsBackendPreference: [{ type: 'setGraphicsBackendPreference', payload: 'webgl' }],

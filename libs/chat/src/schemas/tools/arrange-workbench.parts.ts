@@ -75,7 +75,6 @@ export const viewPatchSchema = z.strictObject({
       grid: z.boolean(),
       axes: z.boolean(),
       matcap: z.boolean(),
-      postProcessing: z.boolean(),
     })
     .partial()
     .optional(),

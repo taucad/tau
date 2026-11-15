@@ -4,7 +4,6 @@
  * or the host; the components pass in what they read.
  */
 import type {
-  DeviceRecord,
   GoalId,
   LanguageId,
   OnboardingState,
@@ -16,8 +15,8 @@ import { effectiveGizmoStyle, effectivePreset, suggestedPreset, toolSuggestions 
 import { cameraMappings } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import type {
   CameraGesture,
-  CameraMappingId,
   CameraModifier,
+  CameraPresetId,
 } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import {
   agentRowText,
@@ -33,7 +32,6 @@ import {
   presetReasonText,
   setupStepIds,
   viewerRowText,
-  viewerStepCopy,
 } from '#components/onboarding/setup-copy.js';
 import type { GizmoChoiceId, SetupStepId } from '#components/onboarding/setup-copy.js';
 
@@ -160,7 +158,6 @@ export type AnswerRow = Readonly<{
 export type AnswerRowsInput = Readonly<{
   profile: PersonProfile;
   viewer: ViewerPreferences;
-  device: DeviceRecord;
   kernels: KernelLanguages;
   /** The Viewer row is shown only while `viewerControls` is on: otherwise the answer changes no viewer. */
   isViewerControlsEnabled: boolean;
@@ -171,14 +168,10 @@ export type AnswerRowsInput = Readonly<{
  *
  * @param viewer - The person's viewer preferences.
  * @param profile - The person's profile.
- * @param device - This device's record.
  * @returns The text.
  */
-export const viewerSummary = (viewer: ViewerPreferences, profile: PersonProfile, device: DeviceRecord): string => {
-  const preset =
-    device.inputDevice === 'trackpad' ? viewerStepCopy.trackpad : presetCopy[effectivePreset(viewer, profile)].name;
-  return viewerRowText(preset, gizmoCopy[gizmoChoice(viewer, profile)].rowName);
-};
+export const viewerSummary = (viewer: ViewerPreferences, profile: PersonProfile): string =>
+  viewerRowText(presetCopy[effectivePreset(viewer, profile)].name, gizmoCopy[gizmoChoice(viewer, profile)].rowName);
 
 /**
  * The rows of "What your answers change".
@@ -189,7 +182,6 @@ export const viewerSummary = (viewer: ViewerPreferences, profile: PersonProfile,
 export const answerRows = ({
   profile,
   viewer,
-  device,
   kernels,
   isViewerControlsEnabled,
 }: AnswerRowsInput): readonly AnswerRow[] => {
@@ -203,8 +195,7 @@ export const answerRows = ({
     profile.tool !== undefined ||
     viewer.controls.preset !== undefined ||
     viewer.gizmo.style !== undefined ||
-    viewer.viewDefaults['display.gizmo'] !== undefined ||
-    device.inputDevice !== undefined;
+    viewer.viewDefaults['display.gizmo'] !== undefined;
   const rows: AnswerRow[] = [
     {
       id: 'agent',
@@ -217,7 +208,7 @@ export const answerRows = ({
     rows.push({
       id: 'viewer',
       label: answersPanelCopy.viewer,
-      text: hasViewerAnswer ? viewerSummary(viewer, profile, device) : answersPanelCopy.viewerDefault,
+      text: hasViewerAnswer ? viewerSummary(viewer, profile) : answersPanelCopy.viewerDefault,
       isPending: !hasViewerAnswer,
     });
   }
@@ -262,22 +253,16 @@ const modifierOrder: readonly CameraModifier[] = ['shift', 'ctrl', 'alt'];
  * @returns Each gesture's bindings.
  */
 export const legendBindings = (
-  mapping: CameraMappingId,
+  mapping: CameraPresetId,
 ): Readonly<Record<Exclude<CameraGesture, 'none'>, readonly LegendBinding[]>> => {
-  const isTrackpad = mapping === 'trackpad';
   const caps = (modifiers: readonly CameraModifier[]): string[] =>
     modifierOrder.filter((name) => modifiers.includes(name)).map((name) => modifierCaps[name]);
   const out: Record<Exclude<CameraGesture, 'none'>, LegendBinding[]> = { orbit: [], pan: [], zoom: [] };
   for (const binding of cameraMappings[mapping].drag) {
-    const button = isTrackpad && binding.button === 'left' ? keyCapCopy.trackpadLeft : keyCapCopy[binding.button];
-    out[binding.gesture].push([...caps(binding.modifiers), button]);
+    out[binding.gesture].push([...caps(binding.modifiers), keyCapCopy[binding.button]]);
   }
   for (const binding of cameraMappings[mapping].wheel) {
-    let input: string = keyCapCopy.pinch;
-    if (binding.input === 'scroll') {
-      input = isTrackpad ? keyCapCopy.trackpadScroll : keyCapCopy.scroll;
-    }
-    out[binding.gesture].push([...caps(binding.modifiers), input]);
+    out[binding.gesture].push([...caps(binding.modifiers), keyCapCopy[binding.input]]);
   }
   return out;
 };
@@ -291,7 +276,7 @@ export const legendBindings = (
  */
 export const isStepAnswered = (
   step: SetupStepId,
-  record: Readonly<{ profile: PersonProfile; viewer: ViewerPreferences; device: DeviceRecord }>,
+  record: Readonly<{ profile: PersonProfile; viewer: ViewerPreferences }>,
 ): boolean => {
   switch (step) {
     case 'goals': {
@@ -304,8 +289,7 @@ export const isStepAnswered = (
       return (
         record.viewer.controls.preset !== undefined ||
         record.viewer.gizmo.style !== undefined ||
-        record.viewer.viewDefaults['display.gizmo'] !== undefined ||
-        record.device.inputDevice !== undefined
+        record.viewer.viewDefaults['display.gizmo'] !== undefined
       );
     }
     case 'how': {

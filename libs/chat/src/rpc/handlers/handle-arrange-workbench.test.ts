@@ -80,7 +80,7 @@ describe('handleArrangeWorkbench', () => {
           entryPath: 'main.ts',
           fieldOfView: 35,
           upDirection: 'y',
-          display: { grid: false, postProcessing: true },
+          display: { grid: false, matcap: true },
           grid: { unit: 'in' },
         }),
       });
@@ -104,7 +104,7 @@ describe('handleArrangeWorkbench', () => {
       const written = record(state.files);
       expect(written.display.grid).toBe(true);
       expect(written.fieldOfView).toBe(60);
-      expect([written.upDirection, written.grid.unit, written.display.postProcessing]).toEqual(['y', 'in', true]);
+      expect([written.upDirection, written.grid.unit, written.display.matcap]).toEqual(['y', 'in', true]);
     });
 
     it('tells the device which leaves this call set, with the values written', async () => {
@@ -386,7 +386,6 @@ describe('handleArrangeWorkbench', () => {
           gizmo: true,
           grid: true,
           matcap: false,
-          postProcessing: false,
         },
         measurements: [{ id: 'old', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
       }),

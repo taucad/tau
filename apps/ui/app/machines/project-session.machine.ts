@@ -35,8 +35,8 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  * (`chatFocused`), which the session passes to the registry for focus.
  *
  * A6e: a change of the device's choices that selects another kernel is the session event `replaceRuntime` (D8, B4). The
- * `project` child reports it and the session hands it back while it opens, is live or asks to close: the child flushes the
- * runtime's producers, then builds the next runtime and stops the old one.
+ * `project` child reports it and the session hands it back while it opens, is live, has failed or asks to close: the
+ * child flushes the runtime's producers, then builds the next runtime and stops the old one.
  *
  * A7b: the session wires its own facts, with nothing mounted (I5). Each file manager the `fileManager` child reports
  * gets a `revisions` child, which owns the project's revision-client lifecycle for the workspace of the session's own
@@ -229,8 +229,8 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'chatRequested'; readonly chatId?: string; readonly createdChatId?: string }
   /**
    * The device's choices select another kernel than the runtime's (A6e; D8, B4). The `project` child reports it; the
-   * session hands it back to that child while it opens, is live or asks to close, and the child flushes what the runtime
-   * owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
+   * session hands it back to that child while it opens, is live, has failed or asks to close, and the child flushes what
+   * the runtime owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
    */
   | { readonly type: 'replaceRuntime' };
 

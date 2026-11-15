@@ -7,6 +7,7 @@ import type { DesktopSession } from '#support/desktop-app.js';
 import { evaluateModelOutputSchema, screenshotOutputSchema, testModelOutputSchema } from '@taucad/chat';
 import { currentRun, durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
+import { loadRoutingCases, runRoutingCase } from '#support/kernel-routing-smoke.js';
 import {
   activeChatId,
   connectPickedFolder,
@@ -334,4 +335,61 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
       throw error;
     }
   },
+);
+
+/**
+ * AKS-3c's Grok smoke (automatic kernel selection blueprint, D9 and Appendix E): two entry-less development cases under
+ * Auto through Grok Build, a BRep part and a computational-engineering part, judged like the Codex ACP cases in
+ * `desktop-kernel-skills.spec.ts`. The count is reported, not gated. Opt-in (`TAU_E2E_AKS_GROK=true`); it uses the
+ * operator's cached Grok login and quota, and `TAU_E2E_GROK_PACKAGED` as the tests above do.
+ */
+const aksEnabled = process.env['TAU_E2E_AKS_GROK'] === 'true';
+/* A release build talks only to its channel's API, so the test user this suite seeds cannot sign in to it:
+ * `TAU_E2E_AKS_SIGNED_OUT=true` runs the vendor agent signed out. */
+const aksSignedOut = process.env['TAU_E2E_AKS_SIGNED_OUT'] === 'true';
+const aksOnly = process.env['TAU_E2E_AKS_ONLY']?.split(',').map((id) => id.trim());
+const aksCases = aksEnabled
+  ? await loadRoutingCases(
+      ['u3-m8-bolt', 'u8-cooling-jacket'].filter((id) => aksOnly === undefined || aksOnly.includes(id)),
+    )
+  : [];
+
+test.skipIf(!aksEnabled).each(aksCases.map((routingCase) => [routingCase.id, routingCase] as const))(
+  '[aks-grok] Grok Build binds an acceptable kernel for %s',
+  async (id, routingCase) => {
+    const account = tauTestAccount(`aks-grok-${id}`);
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    const packaged = process.env['TAU_E2E_GROK_PACKAGED'] === 'true';
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged && !aksSignedOut) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    try {
+      const verdict = await runRoutingCase(session, routingCase, {
+        signedOut: aksSignedOut,
+        chooseAgent: async (page) => {
+          // A device that already chose Grok 4.7 (the composer remembers it) needs no choice.
+          const trigger = page.getByRole('button', { name: /^Agent and model: /u }).first();
+          const current = (await trigger.getAttribute('aria-label')) ?? '';
+          const placed = /^Agent and model: Grok Build, Grok 4\.7\b/u.test(current)
+            ? current
+            : await selectAgent(page, 'Grok Build', 'Grok 4.7');
+          // As the composer test above: harmless tool calls must not stop on approvals nobody answers.
+          const permissionControl = page.getByRole('button', { name: /^Mode:/u }).first();
+          if ((await permissionControl.getAttribute('aria-label')) !== 'Mode: Always approve') {
+            await permissionControl.click();
+            await page.getByRole('option', { name: /^Always approve(?:\s|$)/u }).click();
+          }
+          await expect.poll(async () => permissionControl.getAttribute('aria-label')).toBe('Mode: Always approve');
+          return placed;
+        },
+      });
+      expect(verdict.pass, verdict.reason).toBe(true);
+    } catch (error) {
+      await session.capture(`aks-grok-failure-${id}`);
+      throw error;
+    }
+  },
+  1_800_000,
 );

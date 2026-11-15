@@ -514,7 +514,10 @@ export const launchDesktopApp = async (options: {
   const packaged = desktopE2ECompletedArtifact || options.packaged === true;
   const packagedExecutable =
     options.packagedExecutable ??
-    (desktopE2ECompletedArtifact ? desktopE2EPackagedExecutable() : defaultPackagedExecutable);
+    // An installed app (a release channel's build, say) is chosen the same way a completed-artifact run chooses one.
+    (desktopE2ECompletedArtifact || process.env['TAU_E2E_DESKTOP_EXECUTABLE'] !== undefined
+      ? desktopE2EPackagedExecutable()
+      : defaultPackagedExecutable);
   if (desktopE2ECompletedArtifact) {
     delete inheritedEnvironment['NODE_OPTIONS'];
     delete inheritedEnvironment['NODE_PATH'];

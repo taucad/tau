@@ -3844,3 +3844,140 @@ groups:
           service: tau-r2-audit
           component: r2
         isPaused: true
+      - uid: storage-audit-degraded
+        title: "R2 Audit Worker Degraded"
+        condition: audit_degraded_threshold
+        data:
+          - refId: audit_degraded_logs
+            queryType: range
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({service_name="tau-r2-audit"} | json | event="r2_audit.heartbeat" | pass="scheduled" | poll!="ok" or truncated="true" or expectedWritersValid="false" or foreignBucketsValid="false" [15m]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: audit_degraded_logs
+          - refId: audit_degraded_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: audit_degraded_logs
+              refId: audit_degraded_reduce
+          - refId: audit_degraded_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: audit_degraded_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 1
+                  operator:
+                    type: and
+              refId: audit_degraded_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
+          summary: "More than one scheduled heartbeat of the tau-r2-audit Worker in 15 minutes reported a degraded pass: poll skipped (no query token) or failed (pollDetail says why), truncated=true (the Data Access Log page was full, so events past it were not checked), or expectedWritersValid=false or foreignBucketsValid=false (AUDIT_EXPECTED_WRITERS or AUDIT_FOREIGN_BUCKETS did not parse). Heartbeats still arrive, so storage-audit-silent stays green while storage-unexpected-writer and storage-dependency-bulk-delete are blind or wrong. One failed poll does not fire."
+        labels:
+          severity: warning
+          service: tau-r2-audit
+          component: r2
+      - uid: storage-audit-no-events
+        title: "R2 Audit Logs Deliver Nothing"
+        condition: audit_no_events_threshold
+        data:
+          - refId: audit_no_events_logs
+            queryType: range
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: sum(sum_over_time({service_name="tau-r2-audit"} | json | event="r2_audit.heartbeat" | pass="scheduled" | poll="ok" | unwrap eventsSeen [1h]))
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: audit_no_events_logs
+          - refId: audit_no_events_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: audit_no_events_logs
+              refId: audit_no_events_reduce
+          - refId: audit_no_events_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: audit_no_events_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: lt
+                    params:
+                      - 1
+                  operator:
+                    type: and
+              refId: audit_no_events_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
+          summary: "Scheduled heartbeats of the tau-r2-audit Worker with poll=ok saw no write or delete event in the R2 Data Access Logs for an hour. eventsSeen is account-wide and has never been near zero (hourly sum at least 423 in the six days to 2026-11-15), so the poll works but logging delivers nothing: Data Access Logs were turned off or stopped for the account, and storage-unexpected-writer is blind. It does not detect one bucket's toggle; the 90-day settings read does. No data (no ok heartbeat) is storage-audit-degraded's or storage-audit-silent's case."
+        labels:
+          severity: warning
+          service: tau-r2-audit
+          component: r2
+      - uid: storage-public-objects-dropped
+        title: Public Bucket Objects Dropped
+        condition: public_objects_dropped
+        data:
+          - refId: public_objects_dropped
+            queryType: ''
+            relativeTimeRange:
+              from: 86400
+              to: 0
+            datasourceUid: prometheus
+            model:
+              instant: true
+              range: false
+              expr: (1 - max by (app) (tau_r2_objects{app=~".*",service_name="tau-api",tau_r2_bucket="public"}) / max by (app) (max_over_time(tau_r2_objects{app=~".*",service_name="tau-api",tau_r2_bucket="public"}[24h])) > 0.2) and max by (app) (max_over_time(tau_r2_objects{app=~".*",service_name="tau-api",tau_r2_bucket="public"}[24h])) - max by (app) (tau_r2_objects{app=~".*",service_name="tau-api",tau_r2_bucket="public"}) > 20
+              intervalMs: 15000
+              maxDataPoints: 20
+              refId: public_objects_dropped
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/playbooks/object-integrity.md
+          summary: "The public R2 bucket (tau_r2_objects, tau_r2_bucket=public, from the API's hourly storage accounting) holds more than 20% and more than 20 objects fewer than its own 24-hour maximum; it stays firing until that maximum leaves the window. Publication blobs are deleted by the API and the maintenance credential, which the per-event write alarms expect, so this aggregate is the only alarm on a mass delete by an expected writer. A mass unpublish followed by collect-blobs also fires it: read the maintenance log first. The trailing 20 is the threshold Tau Cloud's rule policy can override."
+        labels:
+          severity: warning
+          service: tau-api
+          component: r2

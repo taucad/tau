@@ -2077,6 +2077,7 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
       createMachine({
         context: { unavailableReason: 'permission', activeWorkspaceId: 'w', rootDirectory: '/projects/p' },
       }),
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a started actor over only the context fields the scope reads stands in for the file manager machine
     ).start() as unknown as FileManagerRef;
     const view = render(
       <SessionFileManagerProvider fileManagerRef={fileManagerRef} projectId='p' rootDirectory='/projects/p'>

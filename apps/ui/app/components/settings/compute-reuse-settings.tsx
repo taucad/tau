@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSelector } from '@xstate/react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
@@ -47,13 +48,15 @@ export function ComputeReuseSettings(): React.JSX.Element {
   const collectCursor = collection && collection.projectId === projectId ? collection.cursor : undefined;
   const currentStatus = status && status.projectId === projectId ? status.value : undefined;
   const confirmClear = projectId !== undefined && confirmClearProjectId === projectId;
-  const available = Boolean(project && (desktopBridge() ?? fileManagerRef?.getSnapshot().context.computeControl));
+  /* Follow the file manager's control: it arrives when the worker connects and goes when the worker is replaced. */
+  const computeControl = useSelector(fileManagerRef, (snapshot) => snapshot?.context.computeControl);
+  const available = Boolean(project && (desktopBridge() ?? computeControl));
   const control = async (action: 'inspect' | 'clear' | 'collect', cursor?: string): Promise<void> => {
     if (!project) {
       return;
     }
     const bridge = desktopBridge();
-    const browserControl = fileManagerRef?.getSnapshot().context.computeControl;
+    const browserControl = computeControl;
     if (!bridge && !browserControl) {
       throw new Error('The active project compute authority is unavailable.');
     }

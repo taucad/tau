@@ -19,37 +19,28 @@ vi.mock('@taucad/ui-core/lib/compute-reuse-preference', () => ({
   useComputeReuseMode: () => state.mode,
   setComputeReuseMode: state.set,
 }));
-/* A11: Settings reads the focused session (focus and the registry), not provider ancestry. */
+/* A11: Settings reads the focused session (focus and the registry), not provider ancestry. The file manager is one
+ * stable ref whose control answers from the test's state, so a selector over it settles. */
+const focusedFiles = vi.hoisted(() => {
+  const snapshot = {
+    context: {
+      computeControl: async (_projectId: string, action: 'inspect' | 'clear' | 'collect', input: unknown) => {
+        if (action === 'inspect') {
+          return state.inspect(input);
+        }
+        if (action === 'clear') {
+          return state.clear(input);
+        }
+        return state.collect(input);
+      },
+    },
+  };
+  return { getSnapshot: () => snapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
+});
 vi.mock('#routes/w.$workspace.$project/focused-project-view.session.js', () => ({
   useFocusedProjectSession: () =>
     state.projectId
-      ? {
-          projectId: state.projectId,
-          runtime: undefined,
-          fileManagerRef: state.available
-            ? {
-                getSnapshot: () => ({
-                  context: {
-                    computeControl: async (
-                      _projectId: string,
-                      action: 'inspect' | 'clear' | 'collect',
-                      input: unknown,
-                    ) => {
-                      let result: unknown;
-                      if (action === 'inspect') {
-                        result = await state.inspect(input);
-                      } else if (action === 'clear') {
-                        result = await state.clear(input);
-                      } else {
-                        result = await state.collect(input);
-                      }
-                      return result;
-                    },
-                  },
-                }),
-              }
-            : undefined,
-        }
+      ? { projectId: state.projectId, runtime: undefined, fileManagerRef: state.available ? focusedFiles : undefined }
       : undefined,
 }));
 vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => undefined }));

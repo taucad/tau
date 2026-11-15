@@ -1063,13 +1063,17 @@ describe('dual-write of the old kernel instruments (PR-7, package §8 dual-write
     });
   });
 
-  it('should count issue, failed, timed-out, terminated and discarded as error, signed out too', async () => {
+  it('should count issue, failed, timed-out, terminated and discarded as error', async () => {
     const harness = await createApp();
     const failures = ['issue', 'failed', 'timed-out', 'terminated', 'discarded'] as const;
-    const response = await post(harness, {
-      batch: batchId(),
-      entries: failures.map((outcome) => operation({ operation: 'evaluate', outcome }, 100)),
-    });
+    const response = await post(
+      harness,
+      {
+        batch: batchId(),
+        entries: failures.map((outcome) => operation({ operation: 'evaluate', outcome }, 100)),
+      },
+      { user: 'user-1' },
+    );
     expect(response.json()).toMatchObject({ recorded: failures.length });
     const { executions, durations } = legacyWrites(harness);
     expect(executions).toEqual(failures.map(() => [1, { 'kernel.status': 'error' }]));
@@ -1078,31 +1082,45 @@ describe('dual-write of the old kernel instruments (PR-7, package §8 dual-write
 
   it('should write nothing for superseded, cancelled, abandoned, refused or unknown attempts', async () => {
     const harness = await createApp();
-    const response = await post(harness, {
-      batch: batchId(),
-      entries: [
-        operation({ outcome: 'superseded', count: 7 }),
-        operation({ operation: 'evaluate', outcome: 'cancelled' }),
-        operation({ outcome: 'abandoned' }),
-        operation({ operation: 'evaluate', outcome: 'refused', code: 'RESOURCE_LIMIT' }),
-        operation({ outcome: 'unknown' }),
-        operation({ operation: 'export', format: 'stl', outcome: 'superseded' }),
-      ],
-    });
+    const response = await post(
+      harness,
+      {
+        batch: batchId(),
+        entries: [
+          operation({ outcome: 'superseded', count: 7 }),
+          operation({ operation: 'evaluate', outcome: 'cancelled' }),
+          operation({ outcome: 'abandoned' }),
+          operation({ operation: 'evaluate', outcome: 'refused', code: 'RESOURCE_LIMIT' }),
+          operation({ outcome: 'unknown' }),
+          operation({ operation: 'export', format: 'stl', outcome: 'superseded' }),
+        ],
+      },
+      { user: 'user-1' },
+    );
     expect(response.json()).toMatchObject({ recorded: 6 });
     expect(legacyWrites(harness)).toEqual({ executions: [], durations: [], exports: [] });
   });
 
   it('should time a recorded export into the old export histogram with export.format _OTHER only', async () => {
     const harness = await createApp();
-    await post(harness, {
-      batch: batchId(),
-      entries: [
-        operation({ operation: 'export', format: 'stl' }, 2000),
-        operation({ operation: 'export', format: 'step', outcome: 'issue', code: 'RESOURCE_LIMIT' }, 40),
-        operation({ operation: 'transcode', kernel: undefined, plugin: 'assimp', sourceFormat: 'glb', format: 'gltf' }),
-      ],
-    });
+    await post(
+      harness,
+      {
+        batch: batchId(),
+        entries: [
+          operation({ operation: 'export', format: 'stl' }, 2000),
+          operation({ operation: 'export', format: 'step', outcome: 'issue', code: 'RESOURCE_LIMIT' }, 40),
+          operation({
+            operation: 'transcode',
+            kernel: undefined,
+            plugin: 'assimp',
+            sourceFormat: 'glb',
+            format: 'gltf',
+          }),
+        ],
+      },
+      { user: 'user-1' },
+    );
     expect(legacyWrites(harness)).toEqual({
       executions: [],
       durations: [],
@@ -1113,10 +1131,20 @@ describe('dual-write of the old kernel instruments (PR-7, package §8 dual-write
     });
   });
 
+  it('should write nothing for a signed-out entry, which the old instruments never counted', async () => {
+    const harness = await createApp();
+    const response = await post(harness, {
+      batch: batchId(),
+      entries: [operation({ operation: 'evaluate' }, 100), operation({ operation: 'export', format: 'stl' }, 100)],
+    });
+    expect(response.json()).toMatchObject({ recorded: 2 });
+    expect(legacyWrites(harness)).toEqual({ executions: [], durations: [], exports: [] });
+  });
+
   it('should write nothing for a duplicate, a rejected entry, a refused batch or a disabled deployment', async () => {
     const harness = await createApp();
     const body = { batch: batchId(), entries: [operation()] };
-    await post(harness, body);
+    await post(harness, body, { user: 'user-1' });
     expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
     const duplicate = await post(harness, body, { user: 'user-1' });
     expect(duplicate.json()).toMatchObject({ duplicate: 1 });

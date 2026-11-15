@@ -68,7 +68,7 @@ import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
-import type { ReportingConsent } from '@taucad/telemetry/client';
+import type { ReportingConsent } from '#telemetry.js';
 
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;

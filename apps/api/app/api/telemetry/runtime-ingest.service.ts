@@ -541,7 +541,9 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       'tau.runtime.route': detail.route,
       'tau.runtime.cold': worker?.cold ?? false,
     });
-    this.recordLegacyKernel(entry, seconds);
+    if (population === 'signed-in') {
+      this.recordLegacyKernel(entry, seconds);
+    }
     if (detail.code !== undefined) {
       this.runtimeMetrics.count('runtimeOperationErrors', count, {
         'tau.runtime.operation': operation,
@@ -602,9 +604,10 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Dual-write window: a recorded `evaluate` or `render` also lands in `kernel.executions` and
+   * Dual-write window: a recorded signed-in `evaluate` or `render` also lands in `kernel.executions` and
    * `kernel.execution.duration`, an `export` in `kernel.geometry.export.duration` with `export.format` `_OTHER`, each
-   * with only the old instruments' attributes and unit (seconds). Removed with the old instruments once the dashboards
+   * with only the old instruments' attributes and unit (seconds). Signed-in only, the population the old middleware
+   * reported, so the old series stay comparable across the window. Removed with the old instruments once the dashboards
    * read `tau_runtime_*` and 14 days pass with no old-entry receipts.
    *
    * @param entry - The recorded operation.

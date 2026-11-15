@@ -73,7 +73,7 @@ import {
   withCommitAuthor,
 } from '@taucad/revisions';
 import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
-import type { ReportingConsent } from '@taucad/telemetry/client';
+import type { ReportingConsent } from '#telemetry.js';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';

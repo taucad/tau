@@ -25,7 +25,7 @@ const maximumLfsBytes = 64 * 1024 * 1024 * 1024;
 
 /**
  * Receives batched telemetry from the client runtime (web workers).
- * Metrics are reported directly from the observability middleware via fetch().
+ * Kernel metrics arrive as runtime operation entries (`RuntimeIngestService`); the other entry kinds keep their own handlers.
  */
 @UseGuards(AuthGuard)
 @Controller({ path: 'telemetry', version: '1' })

@@ -1,5 +1,5 @@
 import '#components/select.browser.css';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { afterEach, expect, it } from 'vitest';
@@ -496,7 +496,7 @@ it('should hold words a settle drew after a long render for the minimum from the
   act(() => {
     view.rerender(page(2, { active: false, startedAt: restartedAt }));
   });
-  const second = view.container.querySelector<HTMLElement>('[data-region=second] [data-slot=wait-indicator]')!;
+  const second = within(view.container.querySelector<HTMLElement>('[data-region=second]')!).getByRole('status');
 
   expect(second.dataset['state'], 'the restart hid words that still owed their minimum').toBe('holding');
   expect(

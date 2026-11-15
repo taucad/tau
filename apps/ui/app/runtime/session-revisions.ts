@@ -533,10 +533,15 @@ export const sessionRevisionsCallback =
     /* The persons whose owed close cut this client has looked for, so each is asked for at most once (A7d). */
     let debtsLookedFor = new Set<string>();
 
+    /* A7d: the registry has answered with a checkout, so a cut asked now can record. A failed registry read also
+     * answers (`registrySettled`), with no checkout. */
+    const hasCheckoutToCut = (status: RevisionStatusProjection | undefined): boolean =>
+      status?.registrySettled === true && status.checkoutId !== undefined;
+
     /*
      * A7d (I6, S26): the close cut an earlier document owed. It is asked for as soon as the client records as the
-     * person who owed it, in the session's own workspace, and the checkout registry has answered (`registrySettled`),
-     * since a cut asked of a root with no checkout yet records nothing. It is cut under the live actor, which is that
+     * person who owed it, in the session's own workspace, and the checkout registry has answered with a checkout,
+     * since a cut asked of a root with no checkout records nothing. It is cut under the live actor, which is that
      * person: the client never records as anyone else. A person who never comes back in this document leaves the debt
      * for a later one; the bytes stay on disk for the next cut either way. Only the cut's answer settles the record,
      * and only while it carries the token read: a client closed first leaves it to the next open, and a newer record
@@ -545,7 +550,7 @@ export const sessionRevisionsCallback =
     function payDebt(): void {
       const target = client;
       const actorId = recordsAs;
-      if (target === undefined || actorId === undefined || target.status()?.registrySettled !== true) {
+      if (target === undefined || actorId === undefined || !hasCheckoutToCut(target.status())) {
         return;
       }
       if (debtsLookedFor.has(actorId)) {
@@ -647,9 +652,9 @@ export const sessionRevisionsCallback =
        */
       const owedToken = owe();
       if (phase === 'hidden') {
-        /* A root whose registry has not answered has no checkout to cut, so its answer records nothing: the debt
-         * stays for the next open. */
-        const canRecord = current.status()?.registrySettled === true;
+        /* A root with no checkout to cut (its registry has not answered, or answered with none) records nothing:
+         * the debt stays for the next open. */
+        const canRecord = hasCheckoutToCut(current.status());
         await current.saveRevision('close');
         if (owedToken !== undefined && canRecord) {
           ports.closeDebt.clear(owedToken.key, owedToken.token);

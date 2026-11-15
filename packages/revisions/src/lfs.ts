@@ -83,6 +83,27 @@ export const lfsPointerFor = (
   });
 };
 
+/*
+ * The pointer `readLfsPointer` accepts is fixed text around a 64-digit oid and
+ * a one- to nineteen-digit size: 126 to 144 bytes.
+ */
+const pointerBytesWith = (sizeDigits: number): number =>
+  `version ${specVersion}\noid sha256:${'0'.repeat(64)}\nsize ${'0'.repeat(sizeDigits)}\n`.length;
+const smallestPointerBytes = pointerBytesWith(1);
+const largestPointerBytes = pointerBytesWith(19);
+
+/**
+ * Whether a file of this many bytes (126 to 144) could be a pointer
+ * {@link readLfsPointer} accepts, so a scan for placeholders reads only such
+ * files (charter D4, I3).
+ *
+ * @internal
+ * @param size - The file's size in bytes.
+ * @returns `false` when no pointer has that size.
+ */
+export const mayBeLfsPointerSize = (size: number): boolean =>
+  size >= smallestPointerBytes && size <= largestPointerBytes;
+
 /**
  * Read one blob's content as a pointer, or report that it is content.
  *
@@ -199,7 +220,8 @@ export type CleanLargeObjectsOptions = Readonly<{
  *
  * Pure: the objects come back for the caller's own store to write. They are
  * the tree's own bytes, shared rather than copied — a store writes them out
- * and must never write *into* them.
+ * and must never write *into* them. A change that can move what it records
+ * bumps `compareRulesRevision` (`compare-record.ts`).
  *
  * @param tree - The captured tree, with every file's real bytes.
  * @param options - The parent's basis, and case folding.

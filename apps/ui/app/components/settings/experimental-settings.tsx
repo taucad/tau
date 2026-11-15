@@ -1,10 +1,12 @@
-import { useId } from 'react';
+import { useId, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { selectCanvasBackend } from '@taucad/viewer/machines/canvas.machine';
 import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units';
-import { useProject } from '#hooks/use-project.js';
+import { selectProjectRef } from '#runtime/project-runtime.js';
+import type { ProjectRuntimeViewSource } from '#runtime/project-runtime.session.js';
+import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-project-view.session.js';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { Switch } from '@taucad/ui/components/switch';
 import { flagRegistry, experimentalFeatureFlagNames } from '#flags/flag.constants.js';
@@ -36,13 +38,40 @@ function ActiveRendererStatus({
 }
 
 function RendererStatus({ shouldPreferWebGpu }: { readonly shouldPreferWebGpu: boolean }): React.JSX.Element {
-  const project = useProject({ enableNoContext: true });
-  const graphicsRef = project
-    ? findEntryGraphics(project.viewGraphics, project.viewEntryPaths, project.mainEntryPath)
-    : undefined;
+  /* Settings is in the shell, outside the focused project's view: it reads the focused session (A11). */
+  const runtime = useFocusedProjectSession()?.runtime;
+  return runtime ? (
+    <FocusedRendererStatus source={runtime} shouldPreferWebGpu={shouldPreferWebGpu} />
+  ) : (
+    <NoActiveViewer />
+  );
+}
+
+function FocusedRendererStatus({
+  source,
+  shouldPreferWebGpu,
+}: {
+  readonly source: ProjectRuntimeViewSource;
+  readonly shouldPreferWebGpu: boolean;
+}): React.JSX.Element {
+  const projectRef = useSelector(source.runtime.actor, selectProjectRef);
+  const viewGraphics = useSelector(projectRef, (state) => state.context.viewGraphics);
+  const mainEntryPath = useSelector(projectRef, (state) => state.context.mainEntryPath);
+  const { viewEntryPaths } = useSyncExternalStore(
+    source.viewRecords.subscribe,
+    source.viewRecords.getSnapshot,
+    source.viewRecords.getSnapshot,
+  );
+  const graphicsRef = findEntryGraphics(viewGraphics, viewEntryPaths, mainEntryPath);
   return graphicsRef ? (
     <ActiveRendererStatus graphicsRef={graphicsRef} shouldPreferWebGpu={shouldPreferWebGpu} />
   ) : (
+    <NoActiveViewer />
+  );
+}
+
+function NoActiveViewer(): React.JSX.Element {
+  return (
     <span role='status' className='text-xs text-muted-foreground'>
       No active 3D viewer.
     </span>

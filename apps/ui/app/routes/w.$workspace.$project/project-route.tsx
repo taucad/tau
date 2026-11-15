@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, use, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, Suspense, use, useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Handle } from '#types/matches.types.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
@@ -35,11 +35,6 @@ function LiveProjectSessions(props: React.ComponentProps<typeof LiveProjectSessi
   return <Sessions {...props} />;
 }
 
-const ProjectCommandPaletteItems = lazy(async () => {
-  const module = await import('#routes/w.$workspace.$project/project-command-items.js');
-  return { default: module.ProjectCommandPaletteItems };
-});
-
 const ProjectSessionsHostContext = createContext(false);
 
 /** What the route-state selector reads of the registry: each session's status and why each closed project closed. */
@@ -56,7 +51,8 @@ const sameRegistryView = (left: FocusRegistryView, right: FocusRegistryView): bo
  * registry and the committed route (plan § 4 A5b). It owns no state and sends nothing in an effect: the committed
  * route reaches focus through `ProjectRouteIntent`, and focus opens, touches and flushes.
  *
- * @param props - The app shell, and the route as committed.
+ * @param props - The app shell, rendered at one position whatever the route and its state (D24), and the route as
+ *   committed.
  * @returns The gate.
  */
 export function ProjectRouteGate({
@@ -84,27 +80,11 @@ export function ProjectRouteGate({
   }, [focus]);
 
   /*
-   * I22/P72: the focused project's subtree hosts the shell when the editor is live, because the editor is the only
-   * route state that reads the project's providers (`ProjectChatRoute`). While focus is on its way to another project
-   * the person is looking at the `resolving` notice behind the overlay, so the shell renders as a sibling: the project
-   * being left must not supply providers to the project being navigated to.
+   * D24/I19 (A11): the shell renders here, at one tree position on every route: outside the worker gate, the
+   * workspace's Suspense boundary and the keyed list of live projects. The focused project's providers are re-homed
+   * inside its outlet (`FocusedProjectView`), keyed by project, so the project being left supplies nothing to the next.
    */
-  const isShellHostedByFocusedSession = state?.kind === 'editor' && !retained;
-  const focused =
-    target === undefined
-      ? undefined
-      : {
-          projectId: target,
-          children: isShellHostedByFocusedSession ? children : undefined,
-        };
-
-  /*
-   * This gate is app-wide: `ProjectSessionsHost` mounts it from the root layout on every route, so live projects
-   * survive navigation. Only a project URL may wear the project's skeleton while the file service connects. Keep the
-   * live resource list at one stable position inside the worker gate, but let non-project shell content render
-   * independently beside it.
-   */
-  const isProjectRoute = committed !== undefined;
+  const focused = target === undefined ? undefined : { projectId: target };
 
   return (
     <ProjectRouteStateContext.Provider value={state}>
@@ -112,26 +92,20 @@ export function ProjectRouteGate({
         {/* A move in progress holds the whole page; a held answer only the project it left, so its notice and the
             page around it stay usable (round 2). */}
         <div className='contents' inert={moving || undefined} aria-busy={moving}>
-          <SharedWorkerGate
-            shouldReportFailure={isProjectRoute}
-            withShellFrame={isProjectRoute}
-            placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}
-          >
-            {/* P72: this keyed resource list stays at one React tree position for
-                project, loading, error and non-project routes alike. It is absent only while no
-                project is live at all, where it would render nothing anyway (W21). */}
-            {/* The shell is inside the boundary below once the editor is live, so a null fallback
-                would blank the window while the workspace chunk loads. */}
+          {/* The worker's wait and failure are the content region's: a project route's outlet holds its own gate
+              (`ProjectRouteContent`), so this one waits invisibly. */}
+          <SharedWorkerGate shouldReportFailure={false}>
+            {/* P72: this keyed resource list stays at one React tree position for every route. It is absent only
+                while no project is live at all, where it would render nothing anyway (W21). */}
             {liveProjectIds.length > 0 ? (
               <div className='contents' inert={retained || undefined}>
-                <Suspense fallback={isShellHostedByFocusedSession ? <WorkspaceSkeleton withShellFrame /> : null}>
+                <Suspense fallback={null}>
                   <LiveProjectSessions focused={focused} liveProjectIds={liveProjectIds} />
                 </Suspense>
               </div>
             ) : null}
-            {isProjectRoute && !isShellHostedByFocusedSession ? children : undefined}
           </SharedWorkerGate>
-          {isProjectRoute ? undefined : children}
+          {children}
         </div>
         {moving ? (
           <div
@@ -147,7 +121,7 @@ export function ProjectRouteGate({
   );
 }
 
-/** Mount every live project below the app registry and place route chrome in the focused one. */
+/** Mount every live project below the app registry, and the app shell at one position beside them (D24). */
 export function ProjectSessionsHost({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const route = useCommittedProjectRoute();
   const sink = useRouterRouteSink(route);
@@ -164,8 +138,8 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
 }
 
 /**
- * The live-project host once its focused `proj_` id is known. The app shell
- * owns this; project routes contribute only their focused content. Outside the app host (a suite that mounts the
+ * The project route's content. Under the app host it only gates that content on the file-manager worker: the live
+ * projects and the shell render beside it (D24). Outside the app host (a suite that mounts the
  * route without the root layout) it reports the given project to focus and shows the focused chat through
  * `onFocusedChatResolved`.
  */
@@ -184,7 +158,7 @@ export function ProjectRouteProviders({
 }): React.ReactNode {
   const appHosted = useContext(ProjectSessionsHostContext);
   if (appHosted) {
-    return children;
+    return <ProjectRouteContent isProjectRoute>{children}</ProjectRouteContent>;
   }
   return (
     <DetachedProjectRoute
@@ -230,8 +204,36 @@ function DetachedProjectRoute({
   return (
     <>
       <ProjectRouteIntent route={route} sink={sink} />
-      <ProjectRouteGate committed={route.committed}>{children}</ProjectRouteGate>
+      <ProjectRouteGate committed={route.committed}>
+        <ProjectRouteContent isProjectRoute={route.committed !== undefined}>{children}</ProjectRouteContent>
+      </ProjectRouteGate>
     </>
+  );
+}
+
+/**
+ * A project route's content region until this document's file-manager worker exists: the workspace's own
+ * placeholder, or the file service's failure notice in its place. The shell around it is already there (D24), so the
+ * placeholder draws the content region only; this is also what the server renders for a project URL, beside the shell.
+ * Any other route's content is never held, and keeps its tree position whichever route comes next.
+ *
+ * @param props - The route's content, and whether the route is a project's.
+ * @returns The content, once the worker exists or at once off a project route.
+ */
+function ProjectRouteContent({
+  children,
+  isProjectRoute,
+}: {
+  readonly children?: React.ReactNode;
+  readonly isProjectRoute: boolean;
+}): React.ReactNode {
+  return (
+    <SharedWorkerGate
+      shouldReportFailure={isProjectRoute}
+      placeholder={isProjectRoute ? <WorkspaceSkeleton /> : children}
+    >
+      {children}
+    </SharedWorkerGate>
   );
 }
 
@@ -246,14 +248,10 @@ function useLatestChatShown(
   return holder;
 }
 
-/** Chrome shared by every project route. */
+/**
+ * Chrome shared by every project route. The palette's project items register from the focused project's view
+ * (`FocusedProjectView`, A11), not from a route handle.
+ */
 export const projectRouteHandle: Omit<Handle, 'providers'> = {
-  commandPalette(match) {
-    return (
-      <Suspense fallback={null}>
-        <ProjectCommandPaletteItems match={match} />
-      </Suspense>
-    );
-  },
   enablePageHeader: false,
 };

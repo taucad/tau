@@ -13,8 +13,7 @@ import { cn } from '@taucad/ui/utils/cn';
  * row, kernel shelf and the first cards — so the gallery fills in instead of
  * appearing from a blank window (lane C P6).
  *
- * It renders above the app shell, so like `WorkspaceSkeleton withShellFrame`
- * it owns the window and stands in for the sidebar at its resting width.
+ * It renders above the app shell, so it owns the window and stands in for the sidebar at its resting width.
  *
  * @returns The skeleton.
  */

@@ -53,6 +53,7 @@ import { createEntriesRecordSession } from '#workbench-records/entries-record-se
 import type { EntriesRecordSnapshot } from '#workbench-records/entries-record-session.js';
 import { sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
 import type { ProjectRuntimeViewSource } from '#runtime/project-runtime.session.js';
+import { standaloneProjectPortOf } from '#runtime/standalone-project-port.js';
 
 type ProjectContextType = {
   manifestObservationError: string | undefined;
@@ -174,6 +175,8 @@ type ProjectProviderProps = {
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
   readonly previewParameterService?: ParameterSetService;
+  /** A project outside the session registry (the owned preview): published to the runtime's standalone port (A11). */
+  readonly isStandalone?: boolean;
 };
 
 /* One mount's identity, for its lease key. `useId` is the mount's tree position, which a keyed remount (a new kernel
@@ -258,6 +261,7 @@ export function ProjectProvider({
   kernelOptionsFactory,
   profile = 'editor',
   previewParameterService,
+  isStandalone = false,
 }: ProjectProviderProps): React.JSX.Element {
   const appRuntime = useAppRuntime();
   const fileManager = useFileManager();
@@ -323,6 +327,16 @@ export function ProjectProvider({
       runtime.replacePreviewParameterService(previewParameterService);
     }
   }, [files, replaceFiles, runtime, previewParameterService]);
+
+  /* The shell's readers (Settings) find a project outside the registry through the runtime's port, never ancestry. */
+  const { fileManagerRef } = fileManager;
+  useLayoutEffect(
+    () =>
+      isStandalone
+        ? standaloneProjectPortOf(appRuntime).publish({ projectId, fileManagerRef, runtime: leased })
+        : undefined,
+    [isStandalone, appRuntime, projectId, fileManagerRef, leased],
+  );
 
   return (
     <ProjectRuntimeView projectId={projectId} profile={profile} source={leased}>

@@ -126,6 +126,12 @@
 \* the session's step, so the facts an open it leads to produces still come before that open's answer. A project
 \* with no live session answers ok, and one that leaves the live set before it answers ran its own close flush in
 \* place of the leave flush (`TLeft`). The route's binding registers no leave flush. No action or verdict changes.
+\* A11: the app shell renders at one tree position beside the keyed live sessions, never inside the focused
+\* one, and the focused project's providers are re-homed in the shell's outlet (`focused-project-view.tsx`),
+\* keyed by the project the route shows in the editor. The gate's worker wait moves into the outlet. Focus,
+\* the route state and the mounted live set are unchanged, so no action or verdict changes. The route and
+\* live-session sources name the re-homing in their comments.
+\* Merged with A7c: the live sessions' focused block is gone, so its imports are too. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

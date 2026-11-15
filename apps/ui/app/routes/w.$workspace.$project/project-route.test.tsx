@@ -188,6 +188,7 @@ const sessionWiring: SessionWiring = {
   }),
   loadHostConnector: async () => import('#runtime/host-connector.js'),
   registerCloseCut: () => () => undefined,
+  registerProducer: () => () => undefined,
   focusedProject: { get: () => undefined, subscribe: () => () => undefined },
   documentVisible: { get: () => true, subscribe: () => () => undefined },
   chatSessions: chatSessionStore as unknown as SessionWiring['chatSessions'],
@@ -257,14 +258,15 @@ const revisionClient = { subscribeEvents: () => () => undefined, quiesce: async 
 let editorIsIdle = true;
 type EditorSnapshot = Readonly<{
   status: 'active';
-  matches: () => boolean;
+  matches: (state?: unknown) => boolean;
   /* The producers flush reads `context.error` to tell "idle" from "idle, having
    * failed to store"; a double without it throws inside `closing.flushing`. */
   context: { error?: Error };
 }>;
 const editorSnapshot = (): EditorSnapshot => ({
   status: 'active',
-  matches: () => editorIsIdle,
+  /* A loaded store (A6e: a store that has not loaded owes nothing), idle once it has stored. */
+  matches: (state?: unknown) => state === 'ready' || editorIsIdle,
   context: {},
 });
 const editorObservers = new Set<{

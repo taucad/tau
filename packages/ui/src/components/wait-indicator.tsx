@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { Button } from '#components/button.js';
 import { Loader } from '#components/loader.js';
 import { useWaitClock } from '#hooks/use-wait-clock.js';
@@ -125,7 +126,7 @@ export function WaitIndicator({
   variant = 'inline',
   className,
 }: WaitIndicatorProps): React.JSX.Element {
-  const { timing, wait } = useWaitClock({ active, startedAt });
+  const { timing, wait, revealed } = useWaitClock({ active, startedAt });
   const isWaiting = timing.state === 'waiting';
   const hasSlowWords = slowLabel !== undefined || onRetry !== undefined;
   const words = wordClasses(timing, hasSlowWords);
@@ -148,6 +149,16 @@ export function WaitIndicator({
           data-slot='wait-indicator-body'
           style={timingStyle(timing)}
           className={cn('inline-flex items-center', variantClasses[variant], isWaiting ? 'wait-reveal' : 'wait-hold')}
+          /* The minimum runs from the frame the words show in: the reveal's, or the hold's when it draws words no reveal
+             drew. Synchronous, so a wait that settles or restarts in the next task already counts from that frame. */
+          onAnimationStart={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              (event.animationName === 'wait-reveal' || event.animationName === 'wait-held')
+            ) {
+              flushSync(revealed);
+            }
+          }}
         >
           <Loader className='size-3.5 text-primary' />
           {/* Both sets of words share one grid cell, so the slot is as wide as the longer and the swap moves nothing. */}

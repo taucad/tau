@@ -180,8 +180,10 @@ const fixturePattern = /^(?:none|root-(?:10|1000|10000)|library-(?:1|20|64|500))
 const routeTemplates = new Set(['/', '/w/:workspace/:project', '/projects', '/projects/new']);
 const localConfigSlot = '__TAU_LOCAL_PROJECT_OPEN_PERFORMANCE__';
 /**
- * The most measures a deployed page writes. User Timing keeps every measure until it is cleared, so a long session must
- * not grow the timeline; one project open writes a few dozen.
+ * The most measures a deployed page keeps in its timeline. User Timing keeps every measure until it is cleared, so a
+ * long session must not grow the timeline; one project open writes a few dozen. At the bound the recorder clears the
+ * measures it wrote and starts again, so a later open in a long-lived tab is still measured (an observer has already
+ * been given each cleared entry).
  */
 const deployedMeasureLimit = 256;
 const noopSpan: ProjectOpenSpan = { spanId: '', finish: () => undefined };
@@ -320,6 +322,18 @@ const createRecorder = (
     realm: harness?.realm ?? 'page',
   });
   let remaining = limit;
+  const written = new Set<string>();
+  /** At the bound, clear this recorder's own measures, so the timeline stays bounded and later spans are still kept. */
+  const makeRoom = (): void => {
+    if (remaining > 0) {
+      return;
+    }
+    for (const name of written) {
+      performance.clearMeasures(name);
+    }
+    written.clear();
+    remaining = limit;
+  };
   const emit = (
     phase: ProjectOpenPhase,
     ids: Readonly<{ spanId: string; parentSpanId: string | undefined }>,
@@ -327,13 +341,16 @@ const createRecorder = (
   ): void => {
     const { spanId, parentSpanId } = ids;
     try {
-      if (remaining <= 0 || !outcomes.has(span.outcome) || !Number.isFinite(span.start) || !Number.isFinite(span.end)) {
+      if (!outcomes.has(span.outcome) || !Number.isFinite(span.start) || !Number.isFinite(span.end)) {
         return;
       }
+      makeRoom();
       remaining--;
       const { start } = span;
       const end = Math.max(start, span.end);
-      performance.measure(`tau.load.${phase}`, {
+      const name = `tau.load.${phase}`;
+      written.add(name);
+      performance.measure(name, {
         start,
         end,
         detail: {
@@ -364,7 +381,7 @@ const createRecorder = (
   };
   return {
     begin: (phase, parentSpanId) => {
-      if (remaining <= 0 || !phaseNames.has(phase) || (parentSpanId !== undefined && !uuidPattern.test(parentSpanId))) {
+      if (!phaseNames.has(phase) || (parentSpanId !== undefined && !uuidPattern.test(parentSpanId))) {
         return noopSpan;
       }
       let start: number;
@@ -394,7 +411,7 @@ const createRecorder = (
       };
     },
     record: (phase, span) => {
-      if (remaining <= 0 || !phaseNames.has(phase)) {
+      if (!phaseNames.has(phase)) {
         return;
       }
       let spanId: string;
@@ -461,7 +478,7 @@ const readPageRecorder = (): PageRecorder => {
 
 /**
  * This page's recorder, chosen once: the admitted harness injection; otherwise, on any browser page, a deployed
- * recorder that writes at most 256 `tau.load.*` measures with no harness identifiers and sends nothing anywhere;
+ * recorder that keeps at most 256 `tau.load.*` measures with no harness identifiers and sends nothing anywhere;
  * otherwise (server rendering, a worker) the inert recorder. Owners that are not handed a recorder, such as the
  * composer and the code editor, time themselves through this.
  *

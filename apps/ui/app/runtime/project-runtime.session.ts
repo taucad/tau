@@ -121,11 +121,15 @@ export const sessionProjectRuntimeOf = (runtimeRef: AnyActorRef): SessionProject
 
 /*
  * Write what one store (the project or the editor machine) holds now and wait, with no timer, until it is idle again
- * (I15): the session bounds the wait on its clock, and `gone` ends it when the session's child stops.
+ * (I15): the session bounds the wait on its clock, and `gone` ends it when the session's child stops. A store that has
+ * not loaded owes nothing (A6e).
  *
  * @returns The write's error, if the store recorded one.
  */
 const flushStore = async (store: AnyActorRef, gone: AbortSignal): Promise<unknown> => {
+  if (!(store.getSnapshot() as { matches: (value: unknown) => boolean }).matches('ready')) {
+    return undefined;
+  }
   store.send({ type: 'flushNow' });
   const settled = await waitFor(
     store,
@@ -133,6 +137,55 @@ const flushStore = async (store: AnyActorRef, gone: AbortSignal): Promise<unknow
     { signal: gone },
   );
   return (settled as { context: { error?: unknown } }).context.error;
+};
+
+/*
+ * A6e (B4): what a replacement flushes. The producer set (the layout, the entries and view records) and the project and
+ * editor stores write what they owe, together. Unlike the close flush it neither closes the parameter service nor
+ * refuses on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person.
+ * It keeps no timer (I15): the session bounds it on its clock, and `gone` ends it when the child stops.
+ */
+const flushForReplacement = async (
+  producers: SessionRuntimeWorkInput['producers'],
+  stores: readonly AnyActorRef[],
+  gone: AbortSignal,
+): Promise<void> => {
+  const owed: Array<Promise<unknown>> = [
+    producers.flushAll(),
+    ...stores.map(async (store) => {
+      const error = await flushStore(store, gone);
+      if (error !== undefined) {
+        throw error;
+      }
+    }),
+  ];
+  /* A producer has no signal of its own: once `gone` aborts the flush stops waiting on it, and rejects with the
+   * abort, which confirms no write. */
+  let leave: () => void = () => undefined;
+  const abandoned = new Promise<never>((_resolve, reject) => {
+    leave = () => {
+      reject(
+        gone.reason instanceof Error ? gone.reason : new Error('The flush was abandoned.', { cause: gone.reason }),
+      );
+    };
+  });
+  if (gone.aborted) {
+    leave();
+  }
+  gone.addEventListener('abort', leave, { once: true });
+  let outcomes: Array<PromiseSettledResult<unknown>>;
+  try {
+    outcomes = await Promise.race([Promise.allSettled(owed), abandoned]);
+  } finally {
+    gone.removeEventListener('abort', leave);
+  }
+  const refusals = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+  if (refusals.length > 0) {
+    throw new AggregateError(
+      refusals.map((refusal) => refusal.reason as unknown),
+      'The superseded runtime did not confirm every write.',
+    );
+  }
 };
 
 /** What {@link sessionRuntimeWork} works over: the parts of a built project runtime a flush and a close reach. @public */
@@ -153,6 +206,7 @@ export type SessionRuntimeWorkInput = Readonly<{
  *   is torn down; then the producers, the parameter service's close, and both stores, whose write errors refuse it.
  * - `leave` (focus's leave flush, I3): the producers, then the editor store.
  * - `unload` (the producer stage of `environment`'s sequencer, I6, D26): the producers, then both stores.
+ * - `replace` (a replacement, A6e, B4): the producers and both stores together; any write it could not confirm refuses it.
  *
  * @param input - The project, and the runtime's producer set, parameter service and project and editor stores.
  * @returns The runtime's flush and its close.
@@ -167,6 +221,10 @@ export const sessionRuntimeWork = ({
 }: SessionRuntimeWorkInput): Pick<SessionRuntime, 'flush' | 'closeRuntime'> => {
   return {
     flush: async (kind: SessionRuntimeFlushKind, gone: AbortSignal) => {
+      if (kind === 'replace') {
+        await flushForReplacement(producers, [projectRef, editorRef], gone);
+        return;
+      }
       if (kind === 'close') {
         refuseCloseWhileRecording(projectId);
       }

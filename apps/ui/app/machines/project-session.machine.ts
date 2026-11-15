@@ -34,6 +34,10 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  * provider, and reports that the chat session is ready (`chatReady`, M2) and each chat the editor focused
  * (`chatFocused`), which the session passes to the registry for focus.
  *
+ * A6e: a change of the device's choices that selects another kernel is the session event `replaceRuntime` (D8, B4). The
+ * `project` child reports it and the session hands it back while it opens, is live, has failed or asks to close: the
+ * child flushes the runtime's producers, then builds the next runtime and stops the old one.
+ *
  * A7b: the session wires its own facts, with nothing mounted (I5). Each file manager the `fileManager` child reports
  * gets a `revisions` child, which owns the project's revision-client lifecycle for the workspace of the session's own
  * open request (B7) and registers the close cut at the session stage of `environment`'s sequencer (D26), and a
@@ -262,10 +266,16 @@ export type ProjectSessionMachineEvent =
   /**
    * The session's own timer: an asked flush ran past its bound (A7c, I15). It is raised with a delay and cancelled by
    * the flush's answer; any other delivery finds no flush under its id and is answered with nothing (MC-R18). It is in
-   * the public alphabet because `schemas.internalEvents` loses the emitted types of a spawned session in the registry's
-   * `refs` under the pinned XState alpha.
+   * the public alphabet under D14 because `schemas.internalEvents` loses the emitted types of a spawned session in the
+   * registry's `refs` under the pinned XState alpha; A10 moves it back to internal once the pin allows.
    */
-  | { readonly type: 'flushExpired'; readonly requestId: string };
+  | { readonly type: 'flushExpired'; readonly requestId: string }
+  /**
+   * The device's choices select another kernel than the runtime's (A6e; D8, B4). The `project` child reports it; the
+   * session hands it back to that child while it opens, is live, has failed or asks to close, and the child flushes what
+   * the runtime owes, then builds the next runtime and stops this one. Once the close is under way it stops the child instead.
+   */
+  | { readonly type: 'replaceRuntime' };
 
 /**
  * The project session machine's public alphabet: every {@link ProjectSessionMachineEvent} type, in the union's order.
@@ -295,6 +305,7 @@ export const projectSessionEventTypes = [
   'syncQuiesced',
   'runtimeClosed',
   'flushExpired',
+  'replaceRuntime',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
 
 /** What a session tells its watchers. @public */
@@ -566,14 +577,29 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
   };
 };
 
-/* A close step that failed leaves the session failed with the reason recorded. */
-const closeFailed = ({
-  context,
-  event,
-}: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>) => ({
-  target: '#project-session.failed',
-  context: { ...recordCloseFailure(context, event.error), closeStep: undefined },
-});
+/* A6e: the `project` child flushes what its runtime owes, then builds the next one and stops it (D8, B4). */
+const handRuntimeReplacement = (
+  { context }: Readonly<{ context: ProjectSessionMachineContext }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  if (context.projectRef !== undefined) {
+    enq.sendTo(context.projectRef, { type: 'replaceRuntime' });
+  }
+  return {};
+};
+
+/* A close step that failed leaves the session failed with the reason recorded. Its children still run, so a kernel change
+ * the close ignored while it ran is handed back to the `project` child (A6e). */
+const closeFailed = (
+  { context, event }: Readonly<{ context: ProjectSessionMachineContext; event: Readonly<{ error: unknown }> }>,
+  enq: ProjectSessionEnqueue,
+) => {
+  handRuntimeReplacement({ context }, enq);
+  return {
+    target: '#project-session.failed',
+    context: { ...recordCloseFailure(context, event.error), closeStep: undefined },
+  } as const;
+};
 
 /*
  * The child reports each file manager it builds, and `undefined` when it closes one because the shared worker was lost
@@ -673,6 +699,8 @@ const closingSteps = [
  * - `confirmClose` and `cancelClose` outside `closing.asking`: the dialog answered a question no longer asked.
  * - `activity` outside `live.idle`: it only re-arms the idle window, which runs there alone (and has no production
  *   sender, V1-6).
+ * - `replaceRuntime` once the close has started cancelling runs, and when closed: a close that goes on stops the
+ *   `project` child, and a close step that fails hands the replacement back as the session goes live or failed (A6e).
  *
  * @public
  */
@@ -682,6 +710,7 @@ export const projectSessionIgnoredEvents: ReadonlyArray<readonly [state: string,
     [state, 'cancelClose'] as const,
   ]),
   ...['opening', 'live.busy', 'closing', 'closed', 'failed'].map((state) => [state, 'activity'] as const),
+  ...[...closingSteps, 'closed'].map((state) => [state, 'replaceRuntime'] as const),
 ];
 
 /**
@@ -895,6 +924,7 @@ export const projectSessionMachine = setup({
   states: {
     opening: {
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'opening') }),
+      on: { replaceRuntime: handRuntimeReplacement },
       initial: 'starting',
       states: {
         starting: {
@@ -935,6 +965,7 @@ export const projectSessionMachine = setup({
       entry: ({ context }, enq) => ({ context: reportState(context, enq, 'live') }),
       initial: 'idle',
       on: {
+        replaceRuntime: handRuntimeReplacement,
         projectedRunsChanged: ({ context, event }, enq) => {
           const { runs } = event;
           reportFacts({ ...context, runs }, enq);
@@ -1019,13 +1050,30 @@ export const projectSessionMachine = setup({
       initial: 'asking',
       states: {
         asking: {
+          /* A6e: a close asked again after it started lifts the hold on a replacement it ignored or held. */
+          entry: ({ context }, enq) => {
+            handRuntimeReplacement({ context }, enq);
+          },
           always: ({ context, guards }) => (guards.shouldAsk(context) ? undefined : { target: 'cancellingRuns' }),
           on: {
+            /* Nothing is flushed or stopped yet, and a cancel keeps the session live with this runtime. */
+            replaceRuntime: handRuntimeReplacement,
             confirmClose: { target: 'cancellingRuns' },
-            cancelClose: { target: '#project-session.live', context: { closeReason: undefined } },
+            /* A6e: a close asked again after it had started holds a replacement; cancelling it hands that back. */
+            cancelClose: ({ context }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return { target: '#project-session.live', context: { closeReason: undefined } };
+            },
           },
         },
         cancellingRuns: {
+          /* A6e: a replacement handed on before the close builds nothing once its flush settles; the close stops the
+           * child, and a close step that fails hands `replaceRuntime` back, which lifts the hold. */
+          entry: ({ context }, enq) => {
+            if (context.projectRef !== undefined) {
+              enq.sendTo(context.projectRef, { type: 'holdReplacement' });
+            }
+          },
           invoke: {
             src: 'cancelRuns',
             input: ({ context }) => ({ projectId: context.projectId, runs: context.stoppableRuns }),
@@ -1051,30 +1099,37 @@ export const projectSessionMachine = setup({
           /* A session whose runtime child is gone has nothing to flush. */
           always: ({ context }) => (context.projectRef === undefined ? { target: 'flushing' } : undefined),
           after: {
-            producerFlush: ({ context }) => ({
-              target: '#project-session.live',
-              context: {
-                ...recordCloseFailure(context, producerFlushExpired),
-                closeReason: undefined,
-                closeStep: undefined,
-              },
-            }),
+            /* A6e: a kernel change the close ignored while it ran is handed back with the session, which is live again;
+             * the child replaces only a runtime whose kernel is no longer selected. */
+            producerFlush: ({ context }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: {
+                  ...recordCloseFailure(context, producerFlushExpired),
+                  closeReason: undefined,
+                  closeStep: undefined,
+                },
+              };
+            },
           },
           on: {
             runtimeFlushSettled: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
                 return { context: settleAskedFlush(context, enq, event.requestId, event.error) ?? {} };
               }
-              return event.error === undefined
-                ? { target: 'flushing', context: { closeStep: undefined } }
-                : {
-                    target: '#project-session.live',
-                    context: {
-                      ...recordCloseFailure(context, event.error),
-                      closeReason: undefined,
-                      closeStep: undefined,
-                    },
-                  };
+              if (event.error === undefined) {
+                return { target: 'flushing', context: { closeStep: undefined } };
+              }
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: {
+                  ...recordCloseFailure(context, event.error),
+                  closeReason: undefined,
+                  closeStep: undefined,
+                },
+              };
             },
           },
         },
@@ -1093,13 +1148,13 @@ export const projectSessionMachine = setup({
           /* No revision client was started (no file manager yet, or a registry composed without wiring). */
           always: ({ context }) => (context.revisionsRef === undefined ? { target: 'closingRuntime' } : undefined),
           on: {
-            syncQuiesced: ({ context, event }) => {
+            syncQuiesced: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
                 return {}; // MC-R18: an earlier attempt's answer; this step asks under its own id.
               }
               return event.error === undefined
                 ? { target: 'closingRuntime', context: { closeStep: undefined } }
-                : closeFailed({ context, event: { error: event.error } });
+                : closeFailed({ context, event: { error: event.error } }, enq);
             },
             /* A new file manager replaces the `revisions` child this step asked; the new one's client is asked again. */
             fileManagerChanged: (args, enq) => ({
@@ -1121,13 +1176,13 @@ export const projectSessionMachine = setup({
           },
           always: ({ context }) => (context.projectRef === undefined ? { target: 'releasingAgentHost' } : undefined),
           on: {
-            runtimeClosed: ({ context, event }) => {
+            runtimeClosed: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
                 return {}; // MC-R18: not this step's answer.
               }
               return event.error === undefined
                 ? { target: 'releasingAgentHost', context: { closeStep: undefined } }
-                : closeFailed({ context, event: { error: event.error } });
+                : closeFailed({ context, event: { error: event.error } }, enq);
             },
           },
         },
@@ -1163,7 +1218,12 @@ export const projectSessionMachine = setup({
         return { context: patch };
       },
     },
-    failed: { entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }) },
+    /* A failed session keeps its children until it is closed or the registry lets it go: a kernel change still replaces
+     * its runtime, which may be the remedy (a kernel refused on this device, compute moved to another, A6e). */
+    failed: {
+      entry: ({ context }, enq) => ({ context: reportState(context, enq, 'failed') }),
+      on: { replaceRuntime: handRuntimeReplacement },
+    },
   },
   exit: ({ context }, enq) => stopChildren(context, enq),
 });

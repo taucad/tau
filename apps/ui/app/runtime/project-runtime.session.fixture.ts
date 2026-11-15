@@ -3,7 +3,7 @@
  * project runtime (A6d).
  *
  * The session's `project` child reads only the runtime's root ref, its facts and their changes, asks it for chats,
- * asks whether its kernel is current, and closes what it built. So a plain object a test moves stands in for the
+ * asks whether its kernel is current, flushes it before a replacement (A6e) and closes what it built. So a plain object a test moves stands in for the
  * runtime, and a no-op actor for its root.
  */
 import { Topic } from '@taucad/events';
@@ -32,8 +32,16 @@ export type SessionRuntimeStandIn = SessionRuntime &
     chats: readonly SessionRuntimeChat[];
     /** Make `kernelIsCurrent` answer `false` from now on, as a change of compute placement does. */
     supersede: () => void;
+    /** Make it answer `true` again, as choices that come back to its kernel do. */
+    restore: () => void;
     /** Whether `close` ran. */
     isClosed: () => boolean;
+    /** Writes the runtime owes until its next `flush` lands them (A6e). */
+    owed: string[];
+    /** Writes a `flush` landed, in order. */
+    landed: readonly string[];
+    /** Run `next` as the flush from now on, after the owed writes land: a row holds or refuses the flush with it. */
+    flushWith: (next: () => Promise<void>) => void;
     /** Every parking signal and focused-chat retry the child sent, and every flush and close it asked, in order. */
     signals: readonly string[];
     /**
@@ -77,6 +85,9 @@ export function openSessionRuntimeStandIn(
   const chats: SessionRuntimeChat[] = [];
   let kernelCurrent = true;
   let closed = false;
+  const owed: string[] = [];
+  const landed: string[] = [];
+  let flushRest: () => Promise<void> = async () => undefined;
   const signals: string[] = [];
   let held: Promise<void> | undefined;
   let holds: ((signal: string) => boolean) | undefined;
@@ -108,7 +119,15 @@ export function openSessionRuntimeStandIn(
     retryFocusedChat: () => {
       signals.push('retryEnsureFocusedChat');
     },
-    flush: async (kind) => work(`flush:${kind}`),
+    /* A replacement's flush lands what is owed and runs the row's own (A6e); the session's flushes are signals (A7c). */
+    flush: async (kind) => {
+      if (kind === 'replace') {
+        landed.push(...owed.splice(0));
+        await flushRest();
+        return;
+      }
+      await work(`flush:${kind}`);
+    },
     closeRuntime: async () => work('closeRuntime'),
     close: () => {
       if (closed) {
@@ -126,7 +145,15 @@ export function openSessionRuntimeStandIn(
     supersede: () => {
       kernelCurrent = false;
     },
+    restore: () => {
+      kernelCurrent = true;
+    },
     isClosed: () => closed,
+    owed,
+    landed,
+    flushWith: (next) => {
+      flushRest = next;
+    },
     signals,
     hold: (only) => {
       const gate = Promise.withResolvers<void>();

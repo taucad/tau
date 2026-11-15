@@ -83,7 +83,11 @@ const createFixtureActor = (
     return {
       status: 'active',
       context,
-      matches: (value) => active.has(typeof value === 'string' ? value : JSON.stringify(value)),
+      /* A parent state matches while any of its children does, as XState's `matches` answers. */
+      matches: (value) =>
+        value === 'ready'
+          ? active.has('ready') || [...active].some((state) => state.startsWith('{"ready":'))
+          : active.has(typeof value === 'string' ? value : JSON.stringify(value)),
     };
   };
   let snapshot = build();

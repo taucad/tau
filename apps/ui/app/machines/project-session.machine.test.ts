@@ -1,11 +1,12 @@
 import { createActor, createCallbackLogic } from 'xstate';
-import type { AnyActorRef, EventObject } from 'xstate';
+import type { AnyActorRef, AnyEventObject, EventObject } from 'xstate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { confirmFlush, slowWriteMilliseconds } from '#workbench-records/record-health.js';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 import * as machineModule from './project-session.machine.js';
 import { guardActors } from '@taucad/xstate-testing/inspect';
+import { StepClock } from '@taucad/xstate-testing/clock';
 import { unansweredEvents } from '@taucad/xstate-testing/paths';
 import {
   isProjectSessionClosable,
@@ -56,9 +57,15 @@ const harness = (options?: {
   readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'closeRuntime' | 'releaseAgentHost';
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
   readonly request?: ProjectSessionOpenRequest;
+  /** The session's clock; the test's fake timers by default. */
+  readonly clock?: StepClock;
+  /** The `project` child never answers a leave or unload flush. */
+  readonly holdAskedFlushes?: boolean;
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
+  /* What the session handed each child, in order. */
+  const received: string[] = [];
   /* A close step's scripted refusal, as its child answers it. */
   const failure = (step: NonNullable<typeof options>['failCloseStep']): { error?: string } =>
     options?.failCloseStep === step ? { error: `${step} failed` } : {};
@@ -66,11 +73,17 @@ const harness = (options?: {
     name: string,
     region?: ProjectSessionRegion,
     script?: (
-      sendBack: (event: EventObject) => void,
+      sendBack: (event: AnyEventObject) => void,
       receive: (listener: (event: EventObject) => void) => void,
     ) => void,
   ) =>
     createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
+      receive((event) => {
+        /* A6e's rows read the replacement traffic only. */
+        if (event.type === 'replaceRuntime' || event.type === 'holdReplacement') {
+          received.push(`${name}:${event.type}`);
+        }
+      });
       order.push(`start:${name}`);
       live.add(name);
       if (region !== undefined && (options?.readyRegions ?? regions).includes(region)) {
@@ -120,7 +133,7 @@ const harness = (options?: {
                   error: error instanceof Error ? error.message : String(error),
                 });
               });
-            } else if (event.type === 'flushRuntime') {
+            } else if (event.type === 'flushRuntime' && options?.holdAskedFlushes !== true) {
               sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
             } else if (event.type === 'closeRuntime') {
               order.push('closeRuntime');
@@ -154,13 +167,14 @@ const harness = (options?: {
         ...(options?.request === undefined ? {} : { request: options.request }),
       },
       ...(options?.inspect === undefined ? {} : { inspect: options.inspect }),
+      ...(options?.clock === undefined ? {} : { clock: options.clock }),
     },
   );
   /* R3: what the session told its project's runtime to do, in order. */
   const parking: boolean[] = [];
   actor.on('runtimeParking', (event) => parking.push(event.parked));
   actor.start();
-  return { actor, order, live, parking };
+  return { actor, order, live, parking, received };
 };
 
 const settle = async (): Promise<void> => {
@@ -175,6 +189,61 @@ describe('projectSessionMachine', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  /* A7c (I15): the close's producer step is an `after` on the session's clock. On main the close awaited the React
+   * provider's producer flush with no bound of the session's own, so a store that never settled held the close. */
+  it('should leave the close and stay live when its producer flush runs past the bound on the clock (A7c, I15)', async () => {
+    const clock = new StepClock();
+    const { actor } = harness({
+      clock,
+      flushProducers: async () =>
+        new Promise<void>(() => {
+          /* Never lands. */
+        }),
+    });
+    await settle();
+    actor.send({ type: 'close', reason: 'user' });
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+    clock.advance(machineModule.projectSessionProducerFlushMilliseconds - 1);
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+    clock.advance(1);
+    await settle();
+    expect(actor.getSnapshot().matches('live')).toBe(true);
+    expect(actor.getSnapshot().context.failures['close']).toBe('Project changes are not confirmed saved.');
+    actor.stop();
+  });
+
+  it('should refuse an asked flush that runs past the bound on the clock, and ignore its late answer (A7c, I15)', async () => {
+    const clock = new StepClock();
+    const { actor } = harness({ clock, holdAskedFlushes: true });
+    await settle();
+    const settled: Array<{ requestId: string; ok: boolean; error?: string }> = [];
+    actor.on('flushSettled', (event) =>
+      settled.push({
+        requestId: event.requestId,
+        ok: event.ok,
+        ...(event.error === undefined ? {} : { error: event.error }),
+      }),
+    );
+    actor.send({ type: 'flushAsked', requestId: 'leave-1', kind: 'leave' });
+    await settle();
+
+    clock.advance(machineModule.projectSessionProducerFlushMilliseconds - 1);
+    await settle();
+    expect(settled).toEqual([]);
+
+    clock.advance(1);
+    await settle();
+    actor.send({ type: 'runtimeFlushSettled', requestId: 'leave-1' });
+    await settle();
+    expect(settled).toEqual([{ requestId: 'leave-1', ok: false, error: 'Project changes are not confirmed saved.' }]);
+    expect(actor.getSnapshot().matches({ live: 'idle' })).toBe(true);
+    actor.stop();
   });
 
   it('exports exactly one machine value', () => {
@@ -458,6 +527,45 @@ describe('projectSessionMachine', () => {
 
     actor.send({ type: 'cancelClose' });
     expect(actor.getSnapshot().matches({ live: 'busy' })).toBe(true);
+    actor.stop();
+  });
+
+  it('A6e: should hand replaceRuntime to its project child while opening, live or asking, and not once the close runs', async () => {
+    const opening = harness({ readyRegions: [] });
+    opening.actor.send({ type: 'replaceRuntime' });
+    expect(opening.received).toEqual(['project:replaceRuntime']);
+    opening.actor.stop();
+
+    let releaseFlush: () => void = () => undefined;
+    const { actor, received } = harness({
+      flushProducers: async () =>
+        new Promise<void>((resolve) => {
+          releaseFlush = resolve;
+        }),
+    });
+    await settle();
+    actor.send({ type: 'replaceRuntime' });
+    expect(received).toEqual(['project:replaceRuntime']);
+
+    actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+    actor.send({ type: 'close', reason: 'user' });
+    expect(actor.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+    /* Entering `asking` hands any held replacement back; a change while it asks is handed on too. */
+    actor.send({ type: 'replaceRuntime' });
+    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime', 'project:replaceRuntime']);
+
+    actor.send({ type: 'confirmClose' });
+    await settle();
+    expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    actor.send({ type: 'replaceRuntime' });
+    /* The close holds any replacement already handed on, and hands on no other. */
+    expect(received).toEqual([
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:holdReplacement',
+    ]);
+    releaseFlush();
     actor.stop();
   });
 

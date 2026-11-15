@@ -23,6 +23,8 @@ import {
   precondition,
   projectRowMoves,
   readDelayedRequests,
+  holdRequestsUntilReleased,
+  releaseHeldRequests,
   readHomeLoad,
   readProjectLoad,
   firstDelayedRead,
@@ -658,7 +660,7 @@ const requireEntryChunkHeld = async (label: string): Promise<void> => {
   );
 };
 
-/** A fresh visitor types on Home before it hydrates, with the entry chunk 2 s late; what happened after adoption. */
+/** A fresh visitor types on Home before it hydrates, the entry chunk held until the typing is done; what happened after adoption. */
 const typeBeforeHomeHydrates = async (
   label: string,
   input: { readonly enter: boolean; readonly afterEnter?: string },
@@ -677,7 +679,8 @@ const typeBeforeHomeHydrates = async (
   ]);
   await target.navigate('/');
   await target.expectVisible(richComposer, 60_000);
-  await target.commands.uiDelayTargetRequests(entryChunk, 2000);
+  /* Hydration waits for the typing, not for a fixed time a loaded runner can outlast. */
+  await holdRequestsUntilReleased(entryChunk);
   const early = await openBeforeHydration({
     path: '/',
     input: homeLoadProbe.composerEditor,
@@ -688,6 +691,7 @@ const typeBeforeHomeHydrates = async (
     wait: 1500,
     settle: 0,
   });
+  await releaseHeldRequests();
   await target.expectVisible(richComposer, 60_000);
   /* A send creates a project and opens it; time for it to happen, or not. */
   await target.delay(settleWindow * 4);
@@ -706,7 +710,7 @@ const typeBeforeHomeHydrates = async (
 };
 
 knownDefect(
-  'H-f (A15d): Enter pressed before Home hydrates, with the entry chunk 2 s late, sends exactly once after adoption',
+  'H-f (A15d): Enter pressed before Home hydrates, with the entry chunk held until the typing is done, sends exactly once after adoption',
   {
     artifact: 'h-f-send-wide',
     expectedFailure: true,

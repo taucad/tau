@@ -100,7 +100,8 @@ const {
   const editorSnapshot = (): unknown => ({
     context: { viewSettings: {} },
     status: 'active',
-    matches: () => editorState.idle,
+    /* A loaded store (A6e: a store that has not loaded owes nothing), idle once it has stored. */
+    matches: (value: unknown) => value === 'ready' || editorState.idle,
   });
   const editorActor = {
     send: (event: { type: string }) => {
@@ -362,11 +363,13 @@ const projectContextOf = (projectId: string): unknown => {
       error: runtimeError,
     },
     matches: (value: unknown) =>
-      value === 'runtimeClosed'
-        ? runtimeClosed
-        : value === 'runtimeCloseFailed'
-          ? runtimeError !== undefined
-          : JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
+      value === 'ready'
+        ? true
+        : value === 'runtimeClosed'
+          ? runtimeClosed
+          : value === 'runtimeCloseFailed'
+            ? runtimeError !== undefined
+            : JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
   });
   const created = {
     projectId: 'unused',

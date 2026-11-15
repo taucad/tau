@@ -121,6 +121,8 @@ const samples: Samples = {
     ...answeredIds.map((requestId) => ({ type: 'runtimeClosed', requestId }) as const),
     { type: 'runtimeClosed', requestId: 'close:3', error: 'refused' },
   ],
+  /* A6e: the `project` child's report that the choices select another kernel; the session hands it back. */
+  replaceRuntime: [{ type: 'replaceRuntime' }],
 };
 
 /** Children that never report and close steps that never settle: the traversal delivers their answers. */

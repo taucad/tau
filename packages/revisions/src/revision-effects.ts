@@ -1913,6 +1913,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return tree;
   };
 
+  /* Checkouts whose placeholders this session has declared at least once (D9). */
+  const declaredCheckouts = new Set<string>();
   const captureCheckout = async (
     place: Checkout,
     captureOptions: Readonly<{
@@ -1925,6 +1927,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
       captureOptions.signal?.throwIfAborted();
+      /*
+       * D9: this layer owns the checkout's placeholders, and this capture's end is its word. Until the first one,
+       * every other view holds a file the size of a pointer, so a reload whose index forgot its marks never shows a
+       * placeholder as a small file (I7). Said once, and never after the word.
+       */
+      if (!declaredCheckouts.has(place.id)) {
+        rooted.awaitDeclaration?.();
+      }
       await sweepTemporarySiblings(place, rooted);
       /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
        * checkout a failed tree write owes a check is checked again here (D10). */
@@ -1959,6 +1969,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        */
       try {
         await rooted.declarePending?.(declaredPlaceholders(tree));
+        declaredCheckouts.add(place.id);
       } catch (error) {
         /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
         console.warn('[revisions] the checkout index could not learn its placeholders', error);

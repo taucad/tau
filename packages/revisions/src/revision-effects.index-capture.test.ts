@@ -104,9 +104,19 @@ const fixture = async (
   /* Where each capture asked the index from: a walk probes it with a generation past any it issued. */
   const asked: number[] = [];
   const overrides: Overrides = {};
+  /* What the revision layer says of its placeholders, in order (D9). */
+  const declarations: string[] = [];
   /* Every capture read, counted; and the index's answers, replaceable per test. */
   const counted = (): RevisionFileSystem =>
     Object.assign(Object.create(rooted) as RevisionFileSystem, {
+      awaitDeclaration: () => {
+        declarations.push('await');
+        rooted.awaitDeclaration?.();
+      },
+      declarePending: (async (declared, paths) => {
+        declarations.push('declare');
+        return rooted.declarePending?.(declared, paths);
+      }) satisfies NonNullable<RevisionFileSystem['declarePending']>,
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
         reads.push(path);
         // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
@@ -220,6 +230,7 @@ const fixture = async (
     actors,
     walking,
     fillChecked,
+    declarations,
     reads,
     listed,
     overrides,
@@ -888,6 +899,14 @@ describe("a cut under the checkout's own Git ignore rules (S10)", () => {
 
 /* The revision layer is the placeholders' only writer and reads the attributes that make a pointer one (D9). */
 describe("a capture declares the checkout's placeholders to its index (D9)", () => {
+  /* Until that word every other view holds a file the size of a pointer, so a reload never shows one as a small file. */
+  it('should say it will declare the checkout as it starts, before its first capture declares it', async () => {
+    const at = await fixture(files(3), { backend: 'memory', raw: true });
+    await at.fillChecked;
+    expect(at.declarations[0]).toBe('await');
+    expect(at.declarations).toContain('declare');
+  });
+
   it('should mark each pointer the attributes track, and no other, and follow the attributes when they change', async () => {
     const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
     const text = new TextDecoder().decode(pointer);

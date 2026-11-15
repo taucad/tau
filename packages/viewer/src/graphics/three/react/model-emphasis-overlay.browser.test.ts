@@ -376,6 +376,61 @@ it.each(['webgpu', 'webgl'] as const)(
   },
 );
 
+// A dimmed component writes no depth, so the grid drawn after the emphasis overlay must still show through it.
+it.each(['webgpu', 'webgl'] as const)(
+  'should leave the grid visible behind a highlighted translucent component on %s',
+  async (backend) => {
+    const renderer = await createRenderer('viewport', backend, {
+      canvas: document.createElement('canvas'),
+      nodePipeline: true,
+    });
+    if (!(renderer instanceof WebGPURenderer)) {
+      throw new Error('Expected node renderer');
+    }
+    // 512-byte rows: WebGPU pads readback rows to 256 bytes.
+    const width = 128;
+    const height = 96;
+    const geometry = new PlaneGeometry(4, 4);
+    const dimmed = new Mesh(geometry, new MeshBasicMaterial({ transparent: true, opacity: 0.3, depthWrite: false }));
+    dimmed.updateMatrixWorld();
+    const grid = new Mesh(geometry, new MeshBasicMaterial({ color: 0xff_00_00 }));
+    grid.position.z = -1;
+    grid.updateMatrixWorld();
+    const gridScene = new Scene();
+    gridScene.add(grid);
+    const camera = new PerspectiveCamera(40, width / height, 0.1, 20);
+    camera.position.z = 5;
+    camera.updateMatrixWorld();
+    const target = new WebGLRenderTarget(width, height);
+    const resources = createModelEmphasisResources(backend, createSectionClip(backend));
+    resources.overlayGroup.children[1]!.visible = false;
+    const output = new Scene();
+    output.add(resources.overlayGroup);
+    try {
+      syncModelEmphasisProxies(resources, { hover: [dimmed], selected: [] });
+      syncModelEmphasisFrame(resources);
+      renderer.setRenderTarget(target);
+      renderer.setClearColor(0x00_00_00, 1);
+      renderer.autoClear = true;
+      renderer.render(output, camera);
+      // The grid overlay runs after emphasis against the same depth, without clearing it.
+      renderer.autoClear = false;
+      renderer.render(gridScene, camera);
+      const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, width, height);
+      const centre = ((height / 2) * width + width / 2) * 4;
+      expect(pixels[centre]).toBeGreaterThan(200);
+    } finally {
+      renderer.setRenderTarget(null);
+      resources.dispose();
+      target.dispose();
+      geometry.dispose();
+      dimmed.material.dispose();
+      grid.material.dispose();
+      renderer.dispose();
+    }
+  },
+);
+
 // Finding 6 of docs/research/orthographic-controls-distance-clip-and-low-fov-grid-blueprint.md: native WebGPU's first
 // render of a fresh crop camera recomputed its projection for reversed depth and drew the mask uncropped.
 it('should crop the mask on the first render of a fresh crop camera on webgpu', async () => {

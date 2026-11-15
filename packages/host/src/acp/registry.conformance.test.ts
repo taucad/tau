@@ -348,6 +348,20 @@ describe.each(profiles)('the $label profile', ({ profile }) => {
       expect(parsedDescriptors(discovery, profile, 'linux')[0]).not.toHaveProperty('fixCommand');
     });
 
+    it('should refuse EXTERNAL_AGENT_UNAVAILABLE when the CLI ends cleanly on the timeout signal without a version', async () => {
+      const home = await temporaryHome();
+      /* A CLI that traps the timeout's SIGTERM and exits 0 resolves the run with empty stdout. */
+      await writeStub(inHome(home, firstHomeEntry(profile)), "trap 'exit 0' TERM\nsleep 5 & wait");
+
+      const { discovery } = await discoverIn(profile, home, { probeTimeout: 100 });
+
+      expect(discovery.agents).toEqual([]);
+      expect(discovery.refused).toEqual([
+        expect.objectContaining({ id: profile.id, code: 'EXTERNAL_AGENT_UNAVAILABLE' }),
+      ]);
+      expect(discovery.refused[0]?.message).toMatch(/did not answer within 100 ms/u);
+    });
+
     it('should refuse EXTERNAL_AGENT_UNAVAILABLE when the CLI exits non-zero', async () => {
       const home = await temporaryHome();
       await writeStub(inHome(home, firstHomeEntry(profile)), 'exit 3');

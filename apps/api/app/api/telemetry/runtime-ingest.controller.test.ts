@@ -177,6 +177,7 @@ const createMetricsSpy = (target?: RuntimeMetricsTarget) => ({
 const legacyMetrics = () => ({
   kernelExecutionDuration: { record: vi.fn() },
   kernelExecutions: { add: vi.fn() },
+  kernelExportDuration: { record: vi.fn() },
 });
 
 type Harness = Awaited<ReturnType<typeof createApp>>;
@@ -1031,5 +1032,109 @@ describe('dedupe, budget and fail-open (T29)', () => {
     expect(checks).toContain('budget');
     expect(checks).toContain('dedupe');
     await harness.service.refreshGauges();
+  });
+});
+
+describe('dual-write of the old kernel instruments (PR-7, package §8 dual-write window)', () => {
+  const legacyWrites = (harness: Harness) => ({
+    executions: harness.metrics.kernelExecutions.add.mock.calls,
+    durations: harness.metrics.kernelExecutionDuration.record.mock.calls,
+    exports: harness.metrics.kernelExportDuration.record.mock.calls,
+  });
+
+  it('should count a recorded succeeded evaluate or render as success, in seconds', async () => {
+    const harness = await createApp();
+    const response = await post(
+      harness,
+      { batch: batchId(), entries: [operation({ operation: 'evaluate' }, 1500), operation({}, 250)] },
+      { user: 'user-1' },
+    );
+    expect(response.json()).toMatchObject({ recorded: 2 });
+    expect(legacyWrites(harness)).toEqual({
+      executions: [
+        [1, { 'kernel.status': 'success' }],
+        [1, { 'kernel.status': 'success' }],
+      ],
+      durations: [
+        [1.5, { 'kernel.status': 'success' }],
+        [0.25, { 'kernel.status': 'success' }],
+      ],
+      exports: [],
+    });
+  });
+
+  it('should count issue, failed, timed-out, terminated and discarded as error, signed out too', async () => {
+    const harness = await createApp();
+    const failures = ['issue', 'failed', 'timed-out', 'terminated', 'discarded'] as const;
+    const response = await post(harness, {
+      batch: batchId(),
+      entries: failures.map((outcome) => operation({ operation: 'evaluate', outcome }, 100)),
+    });
+    expect(response.json()).toMatchObject({ recorded: failures.length });
+    const { executions, durations } = legacyWrites(harness);
+    expect(executions).toEqual(failures.map(() => [1, { 'kernel.status': 'error' }]));
+    expect(durations).toEqual(failures.map(() => [0.1, { 'kernel.status': 'error' }]));
+  });
+
+  it('should write nothing for superseded, cancelled, abandoned, refused or unknown attempts', async () => {
+    const harness = await createApp();
+    const response = await post(harness, {
+      batch: batchId(),
+      entries: [
+        operation({ outcome: 'superseded', count: 7 }),
+        operation({ operation: 'evaluate', outcome: 'cancelled' }),
+        operation({ outcome: 'abandoned' }),
+        operation({ operation: 'evaluate', outcome: 'refused', code: 'RESOURCE_LIMIT' }),
+        operation({ outcome: 'unknown' }),
+        operation({ operation: 'export', format: 'stl', outcome: 'superseded' }),
+      ],
+    });
+    expect(response.json()).toMatchObject({ recorded: 6 });
+    expect(legacyWrites(harness)).toEqual({ executions: [], durations: [], exports: [] });
+  });
+
+  it('should time a recorded export into the old export histogram with export.format _OTHER only', async () => {
+    const harness = await createApp();
+    await post(harness, {
+      batch: batchId(),
+      entries: [
+        operation({ operation: 'export', format: 'stl' }, 2000),
+        operation({ operation: 'export', format: 'step', outcome: 'issue', code: 'RESOURCE_LIMIT' }, 40),
+        operation({ operation: 'transcode', kernel: undefined, plugin: 'assimp', sourceFormat: 'glb', format: 'gltf' }),
+      ],
+    });
+    expect(legacyWrites(harness)).toEqual({
+      executions: [],
+      durations: [],
+      exports: [
+        [2, { 'kernel.status': 'success', 'export.format': '_OTHER' }],
+        [0.04, { 'kernel.status': 'error', 'export.format': '_OTHER' }],
+      ],
+    });
+  });
+
+  it('should write nothing for a duplicate, a rejected entry, a refused batch or a disabled deployment', async () => {
+    const harness = await createApp();
+    const body = { batch: batchId(), entries: [operation()] };
+    await post(harness, body);
+    expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
+    const duplicate = await post(harness, body, { user: 'user-1' });
+    expect(duplicate.json()).toMatchObject({ duplicate: 1 });
+    const rejected = await post(harness, {
+      batch: batchId(),
+      entries: [operation({ outcome: 'succeeded', count: 400 })],
+    });
+    expect(rejected.json()).toMatchObject({ rejected: 1 });
+    const invalidBatch = await post(harness, { batch: 'not-a-batch', entries: [operation()] });
+    expect(invalidBatch.statusCode).toBe(400);
+    const flood = Array.from({ length: runtimeIngestLimits.entriesSignedOut + 1 }, () => operation());
+    const refused = await post(harness, { batch: batchId(), entries: flood.slice(0, 200) }, { ip: '203.0.113.9' });
+    expect(refused.statusCode).toBe(429);
+    expect(harness.metrics.kernelExecutions.add).toHaveBeenCalledTimes(1);
+    expect(harness.metrics.kernelExecutionDuration.record).toHaveBeenCalledTimes(1);
+
+    const off = await createApp({ TAU_RUNTIME_TELEMETRY: 'off' });
+    await post(off, { batch: batchId(), entries: [operation()] }, { user: 'user-1' });
+    expect(legacyWrites(off)).toEqual({ executions: [], durations: [], exports: [] });
   });
 });

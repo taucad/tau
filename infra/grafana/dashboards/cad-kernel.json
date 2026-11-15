@@ -45,8 +45,8 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[5m])) by (kernel_status)",
-          "legendFormat": "{{kernel_status}}"
+          "expr": "sum by (tau_runtime_outcome) (rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"succeeded|issue|failed|timed-out|terminated|discarded\"}[5m]))",
+          "legendFormat": "{{tau_runtime_outcome}}"
         }
       ],
       "id": 1
@@ -57,11 +57,11 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(kernel_execution_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"succeeded|issue|failed|timed-out|terminated|discarded\"}[5m])))",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(kernel_execution_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"succeeded|issue|failed|timed-out|terminated|discarded\"}[5m])))",
           "legendFormat": "p95"
         }
       ],
@@ -76,7 +76,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\",kernel_status=\"error\"}[5m])) / sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[5m])) * 100"
+          "expr": "sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"issue|failed|timed-out|terminated|discarded\"}[5m])) / sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"succeeded|issue|failed|timed-out|terminated|discarded\"}[5m])) * 100"
         }
       ],
       "fieldConfig": {

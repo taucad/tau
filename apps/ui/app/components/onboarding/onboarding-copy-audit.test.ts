@@ -55,7 +55,7 @@ const stringsOf = (value: unknown, path: string): CopyString[] => {
 };
 
 const gizmoChoices = [...gizmoStyleIds, 'none'] as const;
-const mappings = [...mousePresetIds, 'trackpad'] as const;
+const mappings = mousePresetIds;
 /** A board kernel's list, a BRep kernel's list, a mesh kernel's one format and an empty list. */
 const formatLists: ReadonlyArray<readonly string[]> = [['GLB'], ['STEP', 'STL', '3MF'], ['STL'], []];
 

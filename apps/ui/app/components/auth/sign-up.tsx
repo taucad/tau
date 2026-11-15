@@ -22,6 +22,7 @@ import type { SocialLayout } from '#components/auth/provider-buttons.js';
 import { useAuthEmailDraft } from '#components/auth/auth-email-draft.js';
 import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 import { CheckEmail } from '#components/auth/check-email.js';
+import { suggestEmailDomain } from '#components/auth/email-domain-suggestion.js';
 
 export type SignUpProps = {
   className?: string;
@@ -261,6 +262,14 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
                   />
 
                   <FieldError>{fieldErrors.email}</FieldError>
+                  <EmailDomainSuggestion
+                    email={email}
+                    isDisabled={isPending}
+                    onAccept={(corrected) => {
+                      setEmail(corrected);
+                      setEmailDraft(corrected);
+                    }}
+                  />
                 </Field>
 
                 {additionalFields?.map(
@@ -427,5 +436,41 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * "Did you mean …?" under the email field when the domain is a known misspelling (email bounce blueprint R11).
+ * Prevention is the cheapest bounce handling: the verification email is the first mail to any address.
+ */
+function EmailDomainSuggestion({
+  email,
+  isDisabled,
+  onAccept,
+}: {
+  readonly email: string;
+  readonly isDisabled: boolean;
+  readonly onAccept: (corrected: string) => void;
+}): React.JSX.Element | undefined {
+  const suggestion = suggestEmailDomain(email);
+  if (suggestion === undefined) {
+    return undefined;
+  }
+  return (
+    <FieldDescription role='status'>
+      Did you mean{' '}
+      <Button
+        type='button'
+        variant='link'
+        className='h-auto p-0 align-baseline'
+        disabled={isDisabled}
+        onClick={() => {
+          onAccept(suggestion);
+        }}
+      >
+        {suggestion}
+      </Button>
+      ?
+    </FieldDescription>
   );
 }

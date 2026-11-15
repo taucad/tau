@@ -58,7 +58,7 @@ vi.mock('#hooks/use-telemetry-switch.js', async (importOriginal) => {
       ...mockTelemetrySwitch,
       consent: mockTelemetrySwitch.checked ? 'granted' : 'denied',
       onCheckedChange: mockTelemetryChange,
-      details: [...actual.telemetryCopy.details, actual.telemetryCopy.untilActivation.caveat],
+      details: actual.telemetryCopy.details,
     }),
   };
 });
@@ -182,12 +182,12 @@ describe('DataControlsSettings', () => {
       expect(screen.getByRole('group', { name: usage })).toHaveAccessibleDescription(
         /anonymous data about how tau runs/i,
       );
-      // The full disclosure, including what the switch does not yet stop, is one focus away.
+      // The full disclosure is one focus away; since PR-7 it names no producer the switch does not stop.
       await user.hover(screen.getByRole('button', { name: 'About share usage and diagnostics' }));
       expect(
         await screen.findAllByText(/never includes prompts, code, parameter values, file names or geometry/i),
       ).not.toHaveLength(0);
-      expect(screen.getAllByText(/may still be sent while this is off/i)).not.toHaveLength(0);
+      expect(screen.queryByText(/may still be sent while this is off/i)).toBeNull();
     },
   );
 

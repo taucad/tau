@@ -238,9 +238,6 @@ export const gizmoCopy: Readonly<Record<GizmoChoiceId, Readonly<{ name: string; 
 /** Step 3's labels and lines. */
 export const viewerStepCopy = {
   mouseControls: 'Mouse controls',
-  trackpad: 'I use a trackpad',
-  trackpadHint: 'Two-finger scroll pans and pinch zooms on this device',
-  trackpadNote: 'Trackpad gestures are on for this device. Mouse controls apply where they are off',
   gizmo: 'Orientation gizmo',
   pickAnother: 'Pick another if it is closer to what you know',
   legendLabel: 'How to move the view',
@@ -291,10 +288,7 @@ export const keyCapCopy = {
   left: 'Left drag',
   middle: 'Middle drag',
   right: 'Right drag',
-  trackpadLeft: 'Click drag',
   scroll: 'Scroll',
-  trackpadScroll: 'Two-finger scroll',
-  pinch: 'Pinch',
 } as const;
 
 /** Step 4's cards. The three headline sentences are the marketing site's copy. */

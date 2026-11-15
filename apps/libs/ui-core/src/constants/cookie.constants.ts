@@ -24,12 +24,6 @@ export const cookieName = {
   /* Layout */
   // Whether the sidebar is open.
   sidebarOp: 'sidebar-op',
-  // The last selected chat console size.
-  chatRsEditor: 'chat-rs-editor',
-  // Whether the chat interface is full height.
-  chatInterfaceFullHeight: 'chat-interface-full-height',
-  // Whether the chat interface is transparent.
-  chatInterfaceTransparent: 'chat-interface-transparent',
   // The settled values of the flags that decide first-paint geometry (`affectsLayout`), for the server render.
   layoutFlags: 'layout-flags',
 
@@ -38,8 +32,6 @@ export const cookieName = {
   cadKernel: 'cad-kernel',
 
   /* Chat */
-  // Whether to enable web search in the chat.
-  chatWebSearch: 'chat-web-search',
   // The last execution used — any agent, with its model, level and config — carried onto new chats.
   chatExecution: 'chat-execution',
   // The last chosen Tau model.
@@ -109,10 +101,6 @@ export const cookieName = {
   desktopAnalytics: 'desktop-analytics',
   // When this device first ran Tau, and which baseline onboarding events it has reported (telemetry marker, BD5).
   firstSeen: 'first-seen',
-
-  /* Docs */
-  // Whether the docs sidebar is open.
-  docsOpSidebar: 'docs-op-sidebar',
 
   /* Person record: device-only sections, each a `StoredSection` (`@taucad/preferences`). Never server-visible. */
   // What the person told setup: goals, last tool, languages.

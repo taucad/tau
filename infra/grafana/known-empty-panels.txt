@@ -284,3 +284,10 @@ R2 buckets › Other buckets: request errors last hour
 # consent, so these stay empty on a local stack and on any deployment until a browser ends a page.
 Runtime operations › Tab Kills by Kernel and Phase (1h)
 Runtime operations › Tab Kills by Kernel, Phase, Class and Device (24h)
+
+# Resend delivery row (IDN-3 R8). It reads verified Resend webhook events, which a local stack never
+# receives, and Fly's event_provider label, which local OTLP logs do not carry.
+API Overview (REST) › Resend Events by Type
+API Overview (REST) › Bounces by Type
+API Overview (REST) › Complaints by Kind
+API Overview (REST) › Suppressed by Kind

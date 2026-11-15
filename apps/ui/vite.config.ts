@@ -17,11 +17,7 @@ import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
-import {
-  resolveTauBuildRelease,
-  resolveTauCloudBuildEnabled,
-  resolveTauTelemetryHostCloud,
-} from './build-environment.js';
+import { resolveTauBuildRelease, resolveTauCloudBuildEnabled } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -535,10 +531,11 @@ export default defineConfig(({ command, mode }) => {
       tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
-      /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
-      tauTelemetryHostCloudBuild: JSON.stringify(
-        !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
-      ),
+      /*
+       * Every web build may report signed-out runtime telemetry; the deployment's own API policy probe is the only
+       * gate (unset means off), so a self-hosted UI reports only to an API its operator turned on. Tests stub the module.
+       */
+      tauTelemetryHostCloudBuild: JSON.stringify(!isTest),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
       tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),

@@ -25,7 +25,6 @@ describe('viewRecordV1Defaults', () => {
         "display.grid": true,
         "display.lines": true,
         "display.matcap": false,
-        "display.postProcessing": false,
         "display.surfaces": true,
         "fieldOfView": 60,
         "grid.unit": "mm",
@@ -45,7 +44,6 @@ describe('viewRecordV1Defaults', () => {
       'display.grid',
       'display.axes',
       'display.matcap',
-      'display.postProcessing',
       'grid.unit',
     ]);
   });

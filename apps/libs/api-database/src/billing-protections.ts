@@ -23,6 +23,9 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     /* Stripe Customer creation and the operations worker's recovery notices address the account owner, so the
      * billing role reads these three columns of the auth user and nothing else in `public`. */
     await transaction`GRANT SELECT (id, name, email) ON public."user" TO tau_billing_runtime`;
+    /* A recovery notice to an owner address Resend suppresses is parked instead of sent (bounce blueprint R10),
+     * so the worker reads whether the address is undeliverable and nothing else about it. */
+    await transaction`GRANT SELECT (address, state, cleared_at) ON public.email_address_state TO tau_billing_runtime`;
     await transaction`REVOKE SELECT ON ALL TABLES IN SCHEMA billing FROM tau_billing_policy_publisher`;
     await transaction`GRANT SELECT ON billing.billing_policy, billing.billing_policy_activation,
       billing.billing_policy_activation_cancellation, billing.billing_policy_head TO tau_billing_policy_publisher`;

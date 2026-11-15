@@ -1,12 +1,12 @@
 import { useAuth, useListAccounts } from '@better-auth-ui/react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
-import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { SettingsRow } from '#components/settings/settings-item.js';
 import { LinkedAccount } from '#components/auth/settings/security/linked-account.js';
 import { getGithubGistCapability, setGithubGistEnabled } from '#lib/share-providers.js';
+import { Button } from '@taucad/ui/components/button';
 
 /**
  * GitHub sign-in and its provider-verified Gist access, as two rows of the sign-in methods group.
@@ -63,7 +63,6 @@ export function GithubPermissions(): React.JSX.Element {
             {capability.error ? (
               <Button
                 variant='outline'
-                size='sm'
                 onClick={() => {
                   void capability.refetch();
                 }}
@@ -72,7 +71,7 @@ export function GithubPermissions(): React.JSX.Element {
               </Button>
             ) : null}
             {account && capability.data ? (
-              <Button asChild variant='outline' size='sm'>
+              <Button asChild variant='outline'>
                 <a href={capability.data.authorizationUrl} target='_blank' rel='noopener noreferrer'>
                   Review on GitHub
                   <ExternalLink aria-hidden />

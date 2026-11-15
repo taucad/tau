@@ -32,11 +32,6 @@ export type ModelViewerGraphicsOptions = {
   readonly enableGizmo?: boolean;
   readonly enableGrid?: boolean;
   readonly enableAxes?: boolean;
-  /**
-   * Post-processing for the viewer's own graphics actor, read once when it starts. With an external `graphicsRef`
-   * its owner sets this.
-   */
-  readonly enablePostProcessing?: boolean;
   readonly viewerClassName?: string;
 };
 
@@ -321,14 +316,12 @@ const ModelViewerCore = memo(function ModelViewerCore({
 });
 
 /**
- * The standalone viewer's graphics options: the default settings, with post-processing seeded once from
- * `graphicsOptions.enablePostProcessing` and the camera child seeded once from `initialVerticalFieldOfView` through
+ * The standalone viewer's graphics options: the default settings, with the camera child seeded once from `initialVerticalFieldOfView` through
  * graphics' `camera` input. Graphics spawns the camera, so the tree needs no
  * wiring beyond starting this one actor.
  */
 const createStandaloneGraphicsOptions = (
   initialVerticalFieldOfView: number | undefined,
-  enablePostProcessing: boolean | undefined,
 ): ActorOptions<typeof graphicsMachine> => ({
   input: {
     enableSurfaces: defaultGraphicsSettings.enableSurfaces,
@@ -337,7 +330,6 @@ const createStandaloneGraphicsOptions = (
     enableGrid: defaultGraphicsSettings.enableGrid,
     enableAxes: defaultGraphicsSettings.enableAxes,
     enableMatcap: defaultGraphicsSettings.enableMatcap,
-    enablePostProcessing: enablePostProcessing ?? defaultGraphicsSettings.enablePostProcessing,
     upDirection: defaultGraphicsSettings.upDirection,
     graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     camera: { cameraFovAngle: initialVerticalFieldOfView },
@@ -351,10 +343,7 @@ const createStandaloneGraphicsOptions = (
 const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
   props: Omit<ModelViewerProps, 'graphicsRef'>,
 ): React.JSX.Element {
-  const graphicsRef = useActorRef(
-    graphicsMachine,
-    createStandaloneGraphicsOptions(props.initialVerticalFieldOfView, props.graphicsOptions?.enablePostProcessing),
-  );
+  const graphicsRef = useActorRef(graphicsMachine, createStandaloneGraphicsOptions(props.initialVerticalFieldOfView));
 
   return <ModelViewerCore {...props} graphicsRef={graphicsRef} />;
 });

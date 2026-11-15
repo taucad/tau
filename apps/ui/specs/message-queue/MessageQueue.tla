@@ -117,6 +117,8 @@
 \* when the registry lets it go. Admission, delivery, persistence and the queue barrier are unchanged.
 \* A7c review: the store's members are reordered for lint and its session loop reads the map's keys directly; the
 \* binding, admission, delivery, persistence and the queue barrier are unchanged.
+\* PR-7: the turn host reads usage-metrics consent from the one telemetry consent rule; it gates only
+\* telemetry, so admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

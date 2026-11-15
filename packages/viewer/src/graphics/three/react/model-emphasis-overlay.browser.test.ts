@@ -18,12 +18,14 @@ import {
   WebGLCoordinateSystem,
   WebGPUCoordinateSystem,
   WebGLRenderTarget,
+  Vector4,
 } from 'three';
 import type { WebGLRenderer } from 'three';
 import { NodeMaterial, QuadMesh, WebGPURenderer } from 'three/webgpu';
 import { texture, screenUV } from 'three/tsl';
 import { createRenderer } from '#graphics/three/renderer.js';
 import { createSectionClip } from '#graphics/three/materials/section-clip.js';
+import { createEmphasisMaskCrop } from '#graphics/three/materials/model-emphasis-crop.js';
 import type { SilhouetteNodeMaterial } from '#graphics/three/materials/model-emphasis-silhouette.node.js';
 import {
   createModelEmphasisResources,
@@ -373,3 +375,61 @@ it.each(['webgpu', 'webgl'] as const)(
     }
   },
 );
+
+// Finding 6 of docs/research/orthographic-controls-distance-clip-and-low-fov-grid-blueprint.md: native WebGPU's first
+// render of a fresh crop camera recomputed its projection for reversed depth and drew the mask uncropped.
+it('should crop the mask on the first render of a fresh crop camera on webgpu', async () => {
+  const renderer = await createRenderer('viewport', 'webgpu', {
+    canvas: document.createElement('canvas'),
+    nodePipeline: true,
+  });
+  if (!(renderer instanceof WebGPURenderer)) {
+    throw new Error('Expected node renderer');
+  }
+  const size = { width: 128, height: 96, pixelRatio: 1 };
+  const geometry = new BoxGeometry(0.6, 0.4, 0.2);
+  const mesh = new Mesh(geometry, new MeshBasicMaterial());
+  mesh.position.set(0.3, 0.2, 0);
+  mesh.updateMatrixWorld();
+  const scene = new Scene();
+  scene.add(mesh);
+  const camera = new PerspectiveCamera(40, size.width / size.height, 0.1, 10);
+  camera.position.z = 4;
+  camera.updateMatrixWorld();
+  const full = new WebGLRenderTarget(size.width, size.height);
+  // Production renders the source camera before the mask, so its projection is already in this renderer's convention.
+  renderer.setRenderTarget(full);
+  renderer.render(scene, camera);
+  const crop = createEmphasisMaskCrop();
+  const cropCamera = crop.update(camera, new Vector4(-0.2, -0.2, 0.8, 0.8), size);
+  expect(cropCamera).not.toBe(camera);
+  const target = new WebGLRenderTarget(crop.pixels.z, crop.pixels.w);
+  const capture = async (): Promise<Uint8Array<ArrayBuffer>> => {
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x00_00_00, 1);
+    renderer.autoClear = true;
+    renderer.render(scene, cropCamera);
+    const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, target.width, target.height);
+    renderer.setRenderTarget(null);
+    return new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength).slice();
+  };
+  try {
+    const first = await capture();
+    crop.update(camera, new Vector4(-0.2, -0.2, 0.8, 0.8), size);
+    const second = await capture();
+    expect(second.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+    let differing = 0;
+    for (const [index, value] of first.entries()) {
+      if (value !== second[index]) {
+        differing++;
+      }
+    }
+    expect(differing).toBe(0);
+  } finally {
+    full.dispose();
+    target.dispose();
+    geometry.dispose();
+    mesh.material.dispose();
+    renderer.dispose();
+  }
+});

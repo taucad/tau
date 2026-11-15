@@ -228,7 +228,7 @@ describe('model emphasis overlay resources', () => {
       true,
       true,
     ]);
-    expect([material.side, material.polygonOffset]).toEqual([DoubleSide, false]);
+    expect([material.side, material.forceSinglePass, material.polygonOffset]).toEqual([DoubleSide, true, false]);
     const dispose = vi.spyOn(material, 'dispose');
     resources.dispose();
     expect(dispose).toHaveBeenCalledOnce();

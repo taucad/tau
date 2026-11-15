@@ -181,13 +181,15 @@ function createWashMaterial(state: ModelEmphasisState): MeshBasicMaterial {
  * Depth-only prepass for the washes: the nearest emphasised fragment owns the pixel, so a buried layer closer than
  * the surface bias (a PCB's mask under its silkscreen) no longer stacks a second wash. The wash's own class and
  * clip, so both draws of a proxy compile to the same vertex stage and depth and the wash's `LessEqual` ties exactly;
- * transparent so it sorts into the washes' list, where `renderOrder` draws it first.
+ * transparent so it sorts into the washes' list, where `renderOrder` draws it first. Single pass: depth needs no
+ * back-then-front split, which would double its draws.
  */
 function createWashDepthMaterial(): MeshBasicMaterial {
   const material = new MeshBasicMaterial({
     transparent: true,
     colorWrite: false,
     side: DoubleSide,
+    forceSinglePass: true,
     depthTest: true,
     depthWrite: true,
     toneMapped: false,

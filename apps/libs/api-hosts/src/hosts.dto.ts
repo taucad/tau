@@ -66,6 +66,22 @@ const acpThoughtLevelSchema = z.object({
   ]),
 });
 
+/** A bounded non-model control from the agent's discovery session (mirrors `externalAgentConfigOptionSchema`). */
+const acpConfigBaseSchema = z.object({
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(128),
+  category: z.string().min(1).max(128).nullish(),
+  description: z.string().max(512).nullish(),
+});
+const acpConfigOptionSchema = z.discriminatedUnion('type', [
+  acpConfigBaseSchema.extend({
+    type: z.literal('select'),
+    currentValue: z.string().max(128),
+    options: acpThoughtLevelSchema.shape.options,
+  }),
+  acpConfigBaseSchema.extend({ type: z.literal('boolean'), currentValue: z.boolean() }),
+]);
+
 /**
  * What a paired daemon can do beyond remote compute.
  *
@@ -107,6 +123,7 @@ export const hostCapabilitiesSchema = z.object({
               .default([]),
             defaultModel: z.string().min(1).max(128).optional(),
             thoughtLevel: acpThoughtLevelSchema.optional(),
+            configOptions: z.array(acpConfigOptionSchema).max(32).optional(),
             refusal: z.string().min(1).max(64).optional(),
             fixCommand: z.string().min(1).max(256).optional(),
           }),

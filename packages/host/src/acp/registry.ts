@@ -656,6 +656,12 @@ export const probeAcpAgents = async (
         });
         const line = String(stdout).trim().split('\n')[0] ?? '';
         const installed = /\d+\.\d+\.\d+/u.exec(line)?.[0];
+        const elapsed = Math.round(performance.now() - started);
+        if (installed === undefined && elapsed >= budget) {
+          /* A CLI that traps the timeout's signal and exits 0 resolves with
+           * nothing printed; that is a probe that did not answer (rule 5). */
+          return probeFailure({ adapter, executable, error: { killed: true, signal: 'SIGTERM' }, budget, elapsed });
+        }
         if (installed === undefined) {
           /* A vendor changing its banner must not remove a working agent; the
            * profile's `versionSample` guards the parser instead (D13). */

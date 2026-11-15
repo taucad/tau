@@ -236,6 +236,21 @@ describe('pending entries (D9)', () => {
 });
 
 describe('pending paths', () => {
+  /* The revision layer, the placeholders' only writer, says which they are: the index keeps it, and reads nothing. */
+  it('should keep what the raw view declares, answering it without a read', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]));
+    const read = vi.spyOn(memory, 'readFile');
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+    expect(read).not.toHaveBeenCalled();
+    /* A declaration that speaks for other paths leaves this one as it is. */
+    await raw.declarePending!(new Map(), ['main.scad']);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+    expect(read).not.toHaveBeenCalled();
+  });
+
   /* A reload whose index snapshot was lost or marked for rescan rebuilt it from metadata (I3): no read, no tree write. */
   it('should know a placeholder the index was never told of, from its own bytes, starting no download', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);

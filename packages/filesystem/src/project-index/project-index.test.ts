@@ -1575,3 +1575,83 @@ describe('ProjectIndexes import facts (D12)', () => {
     expect(facts.get('kept.txt')?.blobOid).not.toBe('a'.repeat(40));
   });
 });
+
+/* The revision layer declares which files are placeholders; the index keeps exactly what it said (D9). */
+describe('ProjectIndex declared placeholders (D9)', () => {
+  const object = { oid: 'b'.repeat(64), size: 5_000_000 };
+  const other = { oid: 'c'.repeat(64), size: 7 };
+
+  it('should mark what a whole declaration names and clear every other mark under it', () => {
+    const index = observed([file('a.step', 131, 1000), file('b.step', 131, 1000), file('sub/c.step', 128, 1000)]);
+    index.markPending('b.step', other);
+    const before = index.generation;
+    index.declarePending(
+      new Map([
+        ['a.step', { object, pointerSize: 131 }],
+        ['sub/c.step', { object: other, pointerSize: 128 }],
+      ]),
+      { under: '' },
+    );
+    expect(index.pendingFor('a.step')).toStrictEqual(object);
+    expect(index.pendingFor('sub/c.step')).toStrictEqual(other);
+    expect(index.pendingFor('b.step')).toBeUndefined();
+    expect(index.generation).toBeGreaterThan(before);
+    /* Saying it again changes nothing. */
+    const declared = index.generation;
+    index.declarePending(
+      new Map([
+        ['a.step', { object, pointerSize: 131 }],
+        ['sub/c.step', { object: other, pointerSize: 128 }],
+      ]),
+      { under: '' },
+    );
+    expect(index.generation).toBe(declared);
+  });
+
+  it('should not mark a file whose size is no longer the pointer it was declared by', () => {
+    const index = observed([file('a.step', 2048, 1000)]);
+    index.declarePending(new Map([['a.step', { object, pointerSize: 131 }]]), { under: '' });
+    expect(index.pendingFor('a.step')).toBeUndefined();
+  });
+
+  it('should clear only the paths a scoped declaration speaks for', () => {
+    const index = observed([file('a.step', 131, 1000), file('b.step', 131, 1000)]);
+    index.markPending('a.step', object);
+    index.markPending('b.step', object);
+    index.declarePending(new Map(), { paths: ['a.step'] });
+    expect(index.pendingFor('a.step')).toBeUndefined();
+    expect(index.pendingFor('b.step')).toStrictEqual(object);
+  });
+
+  it('should clear only under the directory a declaration speaks for', () => {
+    const index = observed([file('a.step', 131, 1000), file('sub/b.step', 131, 1000)]);
+    index.markPending('a.step', object);
+    index.markPending('sub/b.step', object);
+    index.declarePending(new Map(), { under: 'sub' });
+    expect(index.pendingFor('a.step')).toStrictEqual(object);
+    expect(index.pendingFor('sub/b.step')).toBeUndefined();
+  });
+});
+
+describe('ProjectIndexes declared placeholders (D9)', () => {
+  it('should keep a declaration in every warm index that holds the path, each by its own sizes', async () => {
+    const { provider } = await durableRoot();
+    await provider.mkdir('project/sub', { recursive: true });
+    await provider.writeFile('project/sub/x.step', 'p'.repeat(131));
+    const indexes = new ProjectIndexes({
+      resolve: (root) => ({ provider, path: root === '/p' ? 'project' : 'project/sub' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await indexes.ready('/p/sub');
+    await indexes.ready('/p');
+    const object = { oid: 'd'.repeat(64), size: 9 };
+    await indexes.declarePending('/p', new Map([['sub/x.step', { object, pointerSize: 131 }]]));
+    expect(indexes.get('/p')?.pendingFor('sub/x.step')).toStrictEqual(object);
+    expect(indexes.get('/p/sub')?.pendingFor('x.step')).toStrictEqual(object);
+    expect(indexes.pendingAt('/p/sub/x.step')).toStrictEqual(object);
+    /* A whole declaration of the outer root without it clears it in both. */
+    await indexes.declarePending('/p', new Map());
+    expect(indexes.get('/p')?.pendingFor('sub/x.step')).toBeUndefined();
+    expect(indexes.get('/p/sub')?.pendingFor('x.step')).toBeUndefined();
+  });
+});

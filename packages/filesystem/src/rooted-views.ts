@@ -47,6 +47,7 @@ import type {
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ProjectIndexes, IndexFactsOptions } from '#project-index/project-indexes.js';
 import type {
+  DeclaredPlaceholder,
   ExpectedEntry,
   IndexAdmits,
   IndexChanges,
@@ -219,6 +220,13 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      * own view keeps an index.
      */
     expectEntries?(entries: readonly ExpectedEntry[]): Promise<void>;
+    /**
+     * Declare which files under this root are placeholders (D9), as the revision layer, their only writer, knows them:
+     * each declared file still at its pointer's size is pending on its object, and every other pending entry the
+     * declaration speaks for stops being one. `paths` names the files it speaks for; omitted, it speaks for the whole
+     * root. Optional: only the authority's own view keeps an index.
+     */
+    declarePending?(declared: ReadonlyMap<string, DeclaredPlaceholder>, paths?: readonly string[]): Promise<void>;
     /**
      * Which of these files the root's index holds as pending entries: their
      * large object is not on the device yet. Answered from the index, and for
@@ -1146,6 +1154,18 @@ export class RootedViews {
       watchChangeSets,
       search,
       statTree,
+      declarePending: async (
+        declared: ReadonlyMap<string, DeclaredPlaceholder>,
+        paths?: readonly string[],
+      ): Promise<void> => {
+        assertCurrent();
+        const local = (path: string): string => resolveLocal(path).localPath;
+        await this._projectIndexes.declarePending(
+          root,
+          new Map([...declared].map(([path, placeholder]) => [local(path), placeholder])),
+          paths?.map((path) => local(path)),
+        );
+      },
       expectEntries: async (entries: readonly ExpectedEntry[]): Promise<void> => {
         assertCurrent();
         await this._projectIndexes.expect(

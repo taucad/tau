@@ -132,6 +132,21 @@ export type ProjectIndexOptions = Readonly<{
  */
 export type ExpectedEntry = Readonly<{ path: string; size: number; pending?: PendingObject; arriving: boolean }>;
 
+/**
+ * One placeholder the revision layer declares (D9): the large object its pointer names, and the pointer's size, which
+ * the file must still have to be it.
+ *
+ * @public
+ */
+export type DeclaredPlaceholder = Readonly<{ object: PendingObject; pointerSize: number }>;
+
+/**
+ * What one declaration speaks for: every path under a directory (`''` for the whole root), or exactly these paths.
+ *
+ * @public
+ */
+export type DeclarationScope = Readonly<{ under: string }> | Readonly<{ paths: readonly string[] }>;
+
 /** One row an observation of the provider listed: head metadata only. @public */
 export type ObservedRow = Readonly<{ path: string; kind: IndexEntryKind; size: number; mtimeMs: number }>;
 
@@ -911,6 +926,42 @@ export class ProjectIndex {
     }
     node.pending = object;
     node.generation = this._bump(path);
+  }
+
+  /**
+   * Keep what the revision layer says the placeholders are (D9): it is their only writer, and reads the attributes
+   * that make a pointer one. Each declared file the index holds at its pointer's size is pending on its object; every
+   * other pending entry the declaration speaks for stops being one. A file of another size was written since, and is
+   * left as it is.
+   *
+   * @param declared - The placeholders, by root-relative path.
+   * @param scope - The paths the declaration speaks for.
+   */
+  public declarePending(declared: ReadonlyMap<string, DeclaredPlaceholder>, scope: DeclarationScope): void {
+    const spoken =
+      'paths' in scope
+        ? scope.paths
+        : [...this.walk(scope.under, { kinds: ['file'] })].flatMap((entry) =>
+            entry.pending === undefined ? [] : [entry.path],
+          );
+    for (const path of spoken) {
+      const node = this._resolve(segmentsOf(path));
+      if (node?.pending !== undefined && !declared.has(path)) {
+        delete node.pending;
+        node.generation = this._bump(path);
+      }
+    }
+    for (const [path, { object, pointerSize }] of declared) {
+      const node = this._resolve(segmentsOf(path));
+      if (
+        node?.kind === 'file' &&
+        node.size === pointerSize &&
+        (node.pending?.oid !== object.oid || node.pending.size !== object.size)
+      ) {
+        node.pending = object;
+        node.generation = this._bump(path);
+      }
+    }
   }
 
   /**

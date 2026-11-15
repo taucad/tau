@@ -22,6 +22,7 @@ import { workerTimings } from '#worker-timings.js';
 import type { ContentFacts, ContentFactsOptions, FileStatEntry, FileSystemProvider, PathPolicy } from '#types.js';
 import { ProjectIndex, timestampGranularityMilliseconds } from '#project-index/project-index.js';
 import type {
+  DeclaredPlaceholder,
   ExpectedEntry,
   IndexAdmits,
   IndexCompareResult,
@@ -600,6 +601,47 @@ export class ProjectIndexes {
   public pendingAt(absolutePath: string): PendingObject | undefined {
     const covering = this._covering(absolutePath);
     return covering?.index.pendingFor(covering.relative);
+  }
+
+  /**
+   * Keep what the revision layer declares the placeholders under one root are (see
+   * {@link ProjectIndex.declarePending}), in every warm index that holds them, each by its own entries; the root's own
+   * index is opened first when it is cold, so the declaration is never lost to a cold open.
+   *
+   * @param root - Absolute root the declaration is about.
+   * @param declared - The placeholders, by root-relative path.
+   * @param paths - The root-relative paths it speaks for; omitted, every path under the root.
+   */
+  public async declarePending(
+    root: string,
+    declared: ReadonlyMap<string, DeclaredPlaceholder>,
+    paths?: readonly string[],
+  ): Promise<void> {
+    const key = normalizePath(root);
+    await this.ready(key);
+    const absolute = (path: string): string => (key === '/' ? `/${path}` : `${key}/${path}`);
+    for (const [indexRoot, state] of this._states) {
+      /* Where the root lies in this index: its prefix when the index holds it, `''` when the index lies inside it. */
+      const prefix = this._inside(indexRoot, key) ?? (this._inside(key, indexRoot) === undefined ? undefined : '');
+      if (prefix === undefined || !state.index.isComplete) {
+        continue;
+      }
+      const inIndex = (path: string): string | undefined => {
+        const relative = this._inside(indexRoot, absolute(path));
+        return relative === undefined || relative === '' ? undefined : relative;
+      };
+      const translated = new Map(
+        [...declared].flatMap(([path, placeholder]) => {
+          const relative = inIndex(path);
+          return relative === undefined ? [] : [[relative, placeholder] as const];
+        }),
+      );
+      state.index.declarePending(
+        translated,
+        paths === undefined ? { under: prefix } : { paths: paths.flatMap((path) => inIndex(path) ?? []) },
+      );
+      this._schedulePersist(indexRoot);
+    }
   }
 
   /**

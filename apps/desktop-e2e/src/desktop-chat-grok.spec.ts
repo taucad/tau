@@ -340,23 +340,24 @@ test.skipIf(process.env['TAU_E2E_GROK'] !== 'true')(
 /**
  * AKS-3c's Grok smoke (automatic kernel selection blueprint, D9 and Appendix E): two entry-less development cases under
  * Auto through Grok Build, a BRep part and a computational-engineering part, judged like the Codex ACP cases in
- * `desktop-kernel-skills.spec.ts`. The count is reported, not gated. Opt-in (`TAU_E2E_AKS_GROK=true`); it uses the
- * operator's cached Grok login and quota, and `TAU_E2E_GROK_PACKAGED` as the tests above do.
+ * `desktop-kernel-skills.spec.ts`. The count is reported, not gated. Opt-in (`TAU_E2E_AKS_GROK=true`, or
+ * `TAU_E2E_AKS_AGENT=grok`, the switch that also runs the eight ACP cases there on Grok); it uses the operator's cached
+ * Grok login and quota, and `TAU_E2E_GROK_PACKAGED` as the tests above do.
  */
-const aksEnabled = process.env['TAU_E2E_AKS_GROK'] === 'true';
+const aksEnabled = process.env['TAU_E2E_AKS_GROK'] === 'true' || process.env['TAU_E2E_AKS_AGENT'] === 'grok';
 /* A release build talks only to its channel's API, so the test user this suite seeds cannot sign in to it:
  * `TAU_E2E_AKS_SIGNED_OUT=true` runs the vendor agent signed out. */
 const aksSignedOut = process.env['TAU_E2E_AKS_SIGNED_OUT'] === 'true';
 const aksOnly = process.env['TAU_E2E_AKS_ONLY']?.split(',').map((id) => id.trim());
-const aksCases = aksEnabled
-  ? await loadRoutingCases(
-      ['u3-m8-bolt', 'u8-cooling-jacket'].filter((id) => aksOnly === undefined || aksOnly.includes(id)),
-    )
-  : [];
+const aksCaseIds = ['u3-m8-bolt', 'u8-cooling-jacket'].filter((id) => aksOnly === undefined || aksOnly.includes(id));
 
-test.skipIf(!aksEnabled).each(aksCases.map((routingCase) => [routingCase.id, routingCase] as const))(
+test.skipIf(!aksEnabled).each(aksCaseIds)(
   '[aks-grok] Grok Build binds an acceptable kernel for %s',
-  async (id, routingCase) => {
+  async (id) => {
+    const [routingCase] = await loadRoutingCases([id]);
+    if (routingCase === undefined) {
+      throw new Error(`No development case ${id}.`);
+    }
     const account = tauTestAccount(`aks-grok-${id}`);
     seededEmail = account.email;
     const token = await seedTauTestUser(account);

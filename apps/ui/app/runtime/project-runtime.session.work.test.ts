@@ -62,7 +62,7 @@ const idleStores = (order: string[]) => {
 };
 
 describe('sessionRuntimeWork — the close flush (A7c, S6)', () => {
-  it('should settle the parameters and both stores for a close, and leave the cut to the sync step', async () => {
+  it('should settle both stores for a close, leave the parameters open, and leave the cut to the sync step', async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
@@ -89,22 +89,28 @@ describe('sessionRuntimeWork — the close flush (A7c, S6)', () => {
       editorRef: editor,
     });
 
-    expect(order).toEqual(['parameters', 'project', 'editor']);
+    /* An expired close flush leaves a live session, so the flush closes nothing: the parameters close in their own
+     * step (A7c review round 1). */
+    expect(order).toEqual(['project', 'editor']);
+    expect(parameters.close).not.toHaveBeenCalled();
   });
 
-  it('should refuse the close flush when parameter settlement fails', async () => {
+  it('should close the parameter service in its own step, and refuse when parameter settlement fails', async () => {
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
     parameters.close.mockRejectedValue(new Error('checked parameter flush failed'));
 
-    await expect(
-      closeFlush({
-        parameterService: parameters,
-        projectRef: project,
-        editorRef: editor,
-      }),
-    ).rejects.toThrow('checked parameter flush failed');
+    const work = sessionRuntimeWork({
+      projectId: 'proj-work',
+      producers: { flushAll: async () => undefined },
+      parameterService: () => parameters,
+      projectRef: project,
+      editorRef: editor,
+    });
+
+    await expect(work.closeParameters()).rejects.toThrow('checked parameter flush failed');
+    expect(parameters.close).toHaveBeenCalledTimes(1);
     expect(project.send).not.toHaveBeenCalled();
     expect(editor.send).not.toHaveBeenCalled();
   });
@@ -147,7 +153,7 @@ describe('sessionRuntimeWork — the close flush (A7c, S6)', () => {
     expect(order).toEqual(['workbench']);
     offline = false;
     await flush();
-    expect(order).toEqual(['workbench', 'workbench', 'parameters', 'project', 'editor']);
+    expect(order).toEqual(['workbench', 'workbench', 'project', 'editor']);
   });
 
   it('should keep the real parameter service usable after record confirmation refuses close', async () => {

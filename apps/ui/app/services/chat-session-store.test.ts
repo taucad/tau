@@ -2383,7 +2383,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     liveSessions.set('proj_a', projectA.ref);
     /* The session holds runs the store's projection no longer has: arriving there tells it again. */
     const drift = (): void => {
-      projectA.ref?.send({ type: 'projectedRunsChanged', runs: ['stale'], stoppableRuns: [] });
+      projectA.ref.send({ type: 'projectedRunsChanged', runs: ['stale'], stoppableRuns: [] });
       projectA.heard.length = 0;
     };
     drift();

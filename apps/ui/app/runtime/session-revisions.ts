@@ -517,14 +517,18 @@ export const sessionRevisionsCallback =
     receive((event) => {
       const current = client;
       const settle = async (): Promise<void> => {
-        let error: string | undefined;
+        let refusal: string | undefined;
         try {
           await current?.quiesce();
-        } catch (failure) {
-          error = failure instanceof Error ? failure.message : 'The project could not finish syncing.';
+        } catch (error) {
+          refusal = error instanceof Error ? error.message : 'The project could not finish syncing.';
         }
         if (!stopped) {
-          sendBack({ type: 'syncQuiesced', requestId: event.requestId, ...(error === undefined ? {} : { error }) });
+          sendBack({
+            type: 'syncQuiesced',
+            requestId: event.requestId,
+            ...(refusal === undefined ? {} : { error: refusal }),
+          });
         }
       };
       // async-iife: bootstrap -- `receive` is synchronous; the answer goes through `sendBack`.

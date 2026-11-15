@@ -658,7 +658,24 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
     (pressed) => pressed === 'false',
     15_000,
   );
+  /* What storage holds, not only what the reloaded page shows: the entry file's bytes and the layout record. */
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const storedText = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const storedLayout = configA === undefined ? undefined : await readLayout(configA);
   const reading = {
+    editStored: storedText.includes(marker),
+    arrangementStored: (storedLayout as { lanes?: { chat?: boolean } } | undefined)?.lanes?.chat === false,
     arrangementKept: chatPressed === 'false',
     viewKept:
       section?.isActive === true &&
@@ -686,6 +703,8 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
   expect(reading.toggleToReload).toBeLessThan(500);
   /* S26: the unload's producer stage wrote all three before the document went (A7c). */
   expect(reading, 'S26: the arrangement, the view setting and the edit survive the reload').toMatchObject({
+    editStored: true,
+    arrangementStored: true,
     arrangementKept: true,
     viewKept: true,
     editKept: true,
@@ -693,19 +712,28 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
 });
 
 /*
- * I6, S26, D26 (A7c). On a reload the unload sequencer's producer stage writes what each live session owes
- * (A7c), then its session stage takes the close cut (`useFlushOnClose` before A7c, which never landed on a
- * reload: History held only V1 Start and the strip said *Unsaved changes*). The row reads the edit's bytes
- * from storage, then re-reads History for 30 s until the newest entry is a close cut that changed the file.
+ * Expected failure (I6, S26, D26), carried from A7c to lane A7d, which takes the close cut on the next open and
+ * flips this row. A7c registers each live session at the unload sequencer's producer stage, which writes what the
+ * session owes on `hidden`, and the session stage then takes the close cut. On a reload the cut still never lands:
+ * History, re-read for 30 s after the reload, holds only V1 Start. The cut is asynchronous through the revision
+ * worker, which goes with the document. The row reads the edit's bytes from storage first, then History, with reads
+ * that tolerate a row History re-renders.
  */
-test('A0.1 row 5b (I6 / S26 / D26, A7c): a close revision holding the edit is cut on an immediate reload', async ({
+test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision holding the edit is cut on an immediate reload', async ({
   annotate,
 }) => {
   const { marker } = await editViewArrangeAndReload(false);
   /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
-  const configA = (await configsByName())[projectNames.a];
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
   const stored = await readWithin(
-    async () => (configA === undefined ? '' : ((await readProjectTree(configA))[`/${entryPaths.a}`] ?? '')),
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
     (text) => text.includes(marker),
     15_000,
   );

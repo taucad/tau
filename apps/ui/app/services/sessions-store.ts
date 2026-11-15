@@ -105,14 +105,19 @@ export type SessionRuntime = Readonly<{
    * Write what the runtime owes (A7c, row S6), with no timer (I15): the session's state bounds the wait, and `gone`
    * aborts it when the child stops. Rejects with every write it could not confirm.
    *
-   * - `close`: refused while an editor's conflict is being recorded; the producers, then the parameter service's close,
-   *   then both stores.
+   * - `close`: refused while an editor's conflict is being recorded; the producers, then both stores. It closes
+   *   nothing: the parameter service closes in the session's next step (`closeParameters`).
    * - `leave`: the producers, then the editor store (I3).
    * - `unload`: the producers, then both stores (I6, D26).
    * - `replace`: before a replacement stops it (A6e, B4), the producers and both stores together; it closes nothing and
    *   asks nothing.
    */
   flush: (kind: SessionRuntimeFlushKind, gone: AbortSignal) => Promise<void>;
+  /**
+   * Close the parameter service once the close flush has landed (A7c). Rejects, leaving it open, on unsaved drafts or
+   * an incomplete sidecar cleanup.
+   */
+  closeParameters: () => Promise<void>;
   /** Shut the runtime's kernels down before the agent host goes (`closeProjectRuntime`). Rejects when one refuses. */
   closeRuntime: () => Promise<void>;
   /** Park or resume the runtime's kernel processes, as the session decides (R3, row S5). */
@@ -153,6 +158,7 @@ type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefine
 /** What the session asks its `project` child (A7c), matched by id (I18). @public */
 export type SessionRuntimeCommand =
   | Readonly<{ type: 'flushRuntime'; requestId: string; kind: SessionRuntimeFlushKind }>
+  | Readonly<{ type: 'closeParameters'; requestId: string }>
   | Readonly<{ type: 'closeRuntime'; requestId: string }>;
 
 /** A refusal's message, as the session records it and the quit hold shows it. */
@@ -217,18 +223,18 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       const gone = new AbortController();
       /* A7c: answer the session, unless the child stopped meanwhile (a stopped child tells nothing more). */
       const answer = async (
-        type: 'runtimeFlushSettled' | 'runtimeClosed',
+        type: 'runtimeFlushSettled' | 'parametersClosed' | 'runtimeClosed',
         requestId: string,
         work: (() => Promise<void>) | undefined,
       ): Promise<void> => {
-        let error: string | undefined;
+        let refusal: string | undefined;
         try {
           await work?.();
-        } catch (failure) {
-          error = failureMessage(failure);
+        } catch (error) {
+          refusal = failureMessage(error);
         }
         if (!stopped) {
-          sendBack({ type, requestId, ...(error === undefined ? {} : { error }) });
+          sendBack({ type, requestId, ...(refusal === undefined ? {} : { error: refusal }) });
         }
       };
 
@@ -397,6 +403,13 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
           void answer('runtimeFlushSettled', requestId, runtime && (async () => runtime.flush(kind, gone.signal)));
           return;
         }
+        if (event.type === 'closeParameters') {
+          const { requestId } = event as Extract<SessionRuntimeCommand, { type: 'closeParameters' }>;
+          const runtime = current?.runtime;
+          // async-iife: bootstrap -- `receive` is synchronous; the close answers through `sendBack`.
+          void answer('parametersClosed', requestId, runtime && (async () => runtime.closeParameters()));
+          return;
+        }
         if (event.type === 'closeRuntime') {
           const { requestId } = event as Extract<SessionRuntimeCommand, { type: 'closeRuntime' }>;
           const runtime = current?.runtime;
@@ -470,14 +483,21 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
  * The runtime region of a registry composed with no runtime opener (rows that run the registry alone): no runtime is
  * built, and the region and the chat session are up at once, as the subtree's report made them before A6d.
  */
+/* Each command a session sends its `project` child, and the answer it waits for. */
+const runtimeCommandAnswers: ReadonlyMap<string, string> = new Map<SessionRuntimeCommand['type'], string>([
+  ['flushRuntime', 'runtimeFlushSettled'],
+  ['closeParameters', 'parametersClosed'],
+  ['closeRuntime', 'runtimeClosed'],
+]);
+
 const withoutRuntime = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
   sendBack({ type: 'childReady', region: 'runtime' });
   sendBack({ type: 'chatReady' });
   /* A7c: no runtime owes anything, so every flush and close is answered at once. */
   receive((event) => {
-    if (event.type === 'flushRuntime' || event.type === 'closeRuntime') {
-      const { requestId } = event as SessionRuntimeCommand;
-      sendBack({ type: event.type === 'flushRuntime' ? 'runtimeFlushSettled' : 'runtimeClosed', requestId });
+    const answer = runtimeCommandAnswers.get(event.type);
+    if (answer !== undefined) {
+      sendBack({ type: answer, requestId: (event as SessionRuntimeCommand).requestId });
     }
   });
   return undefined;

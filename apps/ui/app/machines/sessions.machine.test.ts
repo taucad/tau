@@ -77,6 +77,7 @@ const harness = (options?: {
       const event = received as Command;
       if (event.type === 'flushRuntime' && event.kind === 'close') {
         closeSteps.push(`producers:${input.projectId}`);
+        // async-iife: bootstrap -- `receive` is synchronous; the child answers through `sendBack`.
         void (async () => {
           try {
             await options?.producerFlush;
@@ -92,10 +93,24 @@ const harness = (options?: {
             });
           }
         })();
-      } else if (event.type === 'flushRuntime') {
-        sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
-      } else if (event.type === 'closeRuntime') {
-        sendBack({ type: 'runtimeClosed', requestId: event.requestId });
+        return;
+      }
+      switch (event.type) {
+        case 'flushRuntime': {
+          sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
+          break;
+        }
+        case 'closeParameters': {
+          sendBack({ type: 'parametersClosed', requestId: event.requestId });
+          break;
+        }
+        case 'closeRuntime': {
+          sendBack({ type: 'runtimeClosed', requestId: event.requestId });
+          break;
+        }
+        default: {
+          break;
+        }
       }
     });
     return () => undefined;
@@ -108,6 +123,7 @@ const harness = (options?: {
         return;
       }
       closeSteps.push(`flush:${input.projectId}`);
+      // async-iife: bootstrap -- `receive` is synchronous; the child answers through `sendBack`.
       void (async () => {
         try {
           await (typeof options?.closeFlush === 'function' ? options.closeFlush() : options?.closeFlush);

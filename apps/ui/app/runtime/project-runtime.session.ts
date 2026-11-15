@@ -131,7 +131,7 @@ const flushStore = async (store: AnyActorRef, gone: AbortSignal): Promise<unknow
     return undefined;
   }
   store.send({ type: 'flushNow' });
-  const settled = await waitFor(
+  const settled: unknown = await waitFor(
     store,
     (state: { matches: (value: unknown) => boolean }) => state.matches({ ready: { storing: 'idle' } }),
     { signal: gone },
@@ -155,7 +155,7 @@ const flushForReplacement = async (
     ...stores.map(async (store) => {
       const error = await flushStore(store, gone);
       if (error !== undefined) {
-        throw error;
+        throw error instanceof Error ? error : new Error('The store did not confirm its write.', { cause: error });
       }
     }),
   ];
@@ -202,8 +202,9 @@ export type SessionRuntimeWorkInput = Readonly<{
  * What a session asks of a built project runtime (A7c, row S6): its flushes and its close, over the runtime's producer
  * set, parameter service and project and editor stores. No React and no timer: the session's states bound each one.
  *
- * - `close` (the close step `flushingProducers`): refused while an editor's conflict is being recorded, before anything
- *   is torn down; then the producers, the parameter service's close, and both stores, whose write errors refuse it.
+ * - `close` (the close step `flushingProducers`): refused while an editor's conflict is being recorded; then the
+ *   producers and both stores, whose write errors refuse it. It closes nothing, so a session whose close ran past its
+ *   bound is live with every resource intact; the parameter service closes in the next step (`closeParameters`).
  * - `leave` (focus's leave flush, I3): the producers, then the editor store.
  * - `unload` (the producer stage of `environment`'s sequencer, I6, D26): the producers, then both stores.
  * - `replace` (a replacement, A6e, B4): the producers and both stores together; any write it could not confirm refuses it.
@@ -218,7 +219,7 @@ export const sessionRuntimeWork = ({
   parameterService,
   projectRef,
   editorRef,
-}: SessionRuntimeWorkInput): Pick<SessionRuntime, 'flush' | 'closeRuntime'> => {
+}: SessionRuntimeWorkInput): Pick<SessionRuntime, 'flush' | 'closeParameters' | 'closeRuntime'> => {
   return {
     flush: async (kind: SessionRuntimeFlushKind, gone: AbortSignal) => {
       if (kind === 'replace') {
@@ -234,9 +235,6 @@ export const sessionRuntimeWork = ({
         await flushStore(editorRef, gone);
         return;
       }
-      if (kind === 'close') {
-        await parameterService().close();
-      }
       const errors = await Promise.all([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
       /* The close refuses on a write it could not confirm; the unload's producer stage waits for the writes, as the
        * persistence guard did. */
@@ -245,6 +243,7 @@ export const sessionRuntimeWork = ({
         throw error instanceof Error ? error : new Error('Project changes are not confirmed saved.');
       }
     },
+    closeParameters: async () => parameterService().close(),
     closeRuntime: async () => closeProjectRuntime(projectRef),
   };
 };

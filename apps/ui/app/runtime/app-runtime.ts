@@ -176,8 +176,13 @@ const warnRejectedChatEvent = (rejection: EventRejection): void => {
 const createChatSessions = (
   library: ProjectLibrary,
   options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
-  focusedProject: SessionsObservable<string | undefined>,
-  projectSessions: SessionsObservable<LiveProjectSessions>,
+  {
+    focusedProject,
+    projectSessions,
+  }: Readonly<{
+    focusedProject: SessionsObservable<string | undefined>;
+    projectSessions: SessionsObservable<LiveProjectSessions>;
+  }>,
 ): ChatSessionStore =>
   new ChatSessionStore({
     /* A7b: the store reads the focused project from focus, not from a setter React calls. */
@@ -388,7 +393,10 @@ export const createAppRuntime = ({
   const focusedProject = lateObservable<string | undefined>(undefined);
   const documentVisible = lateObservable(false);
   const liveSessions = lateObservable<LiveProjectSessions>({});
-  const chatSessions = createChatSessions(projectLibrary, options, focusedProject, liveSessions);
+  const chatSessions = createChatSessions(projectLibrary, options, {
+    focusedProject,
+    projectSessions: liveSessions,
+  });
   composed.chatSessions = chatSessions;
   const unload = createUnloadSequencer();
   /* Focus's five ports (A5b): the library's route access at its epoch, the registry, the leave flush React registers,
@@ -516,9 +524,9 @@ export const createAppRuntime = ({
   });
   /* A7c: the live sessions reach the chat store as the registry holds them; only a change of the set is told. */
   const registry = selectSessionsRegistry(runtime.getSnapshot());
-  const followLiveSessions = (refs: LiveProjectSessions): void => {
-    if (refs !== liveSessions.get()) {
-      liveSessions.set(refs);
+  const followLiveSessions = (sessions: LiveProjectSessions): void => {
+    if (sessions !== liveSessions.get()) {
+      liveSessions.set(sessions);
       liveSessions.notify();
     }
   };

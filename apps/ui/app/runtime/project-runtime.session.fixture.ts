@@ -128,6 +128,7 @@ export function openSessionRuntimeStandIn(
       }
       await work(`flush:${kind}`);
     },
+    closeParameters: async () => work('closeParameters'),
     closeRuntime: async () => work('closeRuntime'),
     close: () => {
       if (closed) {

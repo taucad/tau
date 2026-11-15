@@ -264,6 +264,11 @@ export type ProjectSessionMachineEvent =
   /** The `project` child's answer to `closeRuntime`: the runtime's kernels are shut down, or refused. */
   | { readonly type: 'runtimeClosed'; readonly requestId: string; readonly error?: string }
   /**
+   * The `project` child's answer to `closeParameters`: the parameter service closed, or refused (unsaved drafts, an
+   * incomplete sidecar cleanup) and stayed open.
+   */
+  | { readonly type: 'parametersClosed'; readonly requestId: string; readonly error?: string }
+  /**
    * The session's own timer: an asked flush ran past its bound (A7c, I15). It is raised with a delay and cancelled by
    * the flush's answer; any other delivery finds no flush under its id and is answered with nothing (MC-R18). It is in
    * the public alphabet under D14 because `schemas.internalEvents` loses the emitted types of a spawned session in the
@@ -304,6 +309,7 @@ export const projectSessionEventTypes = [
   'runtimeFlushSettled',
   'syncQuiesced',
   'runtimeClosed',
+  'parametersClosed',
   'flushExpired',
   'replaceRuntime',
 ] as const satisfies ReadonlyArray<ProjectSessionMachineEvent['type']>;
@@ -513,8 +519,7 @@ const flushTimerId = (requestId: string): string => `flush:${requestId}`;
 const settleAskedFlush = (
   context: ProjectSessionMachineContext,
   enq: ProjectSessionEnqueue,
-  requestId: string,
-  error: string | undefined,
+  { requestId, error }: Readonly<{ requestId: string; error: string | undefined }>,
 ): ProjectSessionPatch | undefined => {
   const kind = context.flushes[requestId];
   if (kind === undefined) {
@@ -542,7 +547,7 @@ const stopChildren = (context: ProjectSessionMachineContext, enq: ProjectSession
    * own producer flush first, and a session the registry lets go has nothing left to write through. */
   let pending: ProjectSessionMachineContext = context;
   for (const requestId of Object.keys(context.flushes)) {
-    pending = { ...pending, ...settleAskedFlush(pending, enq, requestId, undefined) };
+    pending = { ...pending, ...settleAskedFlush(pending, enq, { requestId, error: undefined }) };
   }
   /* The runtime, the revision client and the connector read the file manager, so they stop first. */
   for (const ref of [
@@ -688,6 +693,7 @@ const startupRegion = (region: ProjectSessionRegion) =>
 const closingSteps = [
   'closing.cancellingRuns',
   'closing.flushingProducers',
+  'closing.closingParameters',
   'closing.flushing',
   'closing.closingRuntime',
   'closing.releasingAgentHost',
@@ -815,7 +821,10 @@ export const projectSessionMachine = setup({
     flushAsked: ({ context, event }, enq) => {
       if (context.projectRef === undefined) {
         const flushes = { ...context.flushes, [event.requestId]: event.kind };
-        return { context: settleAskedFlush({ ...context, flushes }, enq, event.requestId, undefined) ?? {} };
+        return {
+          context:
+            settleAskedFlush({ ...context, flushes }, enq, { requestId: event.requestId, error: undefined }) ?? {},
+        };
       }
       if (context.flushes[event.requestId] !== undefined) {
         return {}; // MC-R18: already asked under this id; its answer settles both.
@@ -829,14 +838,15 @@ export const projectSessionMachine = setup({
     },
     /* The `project` child's answer to an asked flush; `closing.flushingProducers` matches its own step first. */
     runtimeFlushSettled: ({ context, event }, enq) => ({
-      context: settleAskedFlush(context, enq, event.requestId, event.error) ?? {},
+      context: settleAskedFlush(context, enq, { requestId: event.requestId, error: event.error }) ?? {},
     }),
     /* The writes ran past their bound: the flush is refused, and a later answer finds nothing to settle (MC-R18). */
     flushExpired: ({ context, event }, enq) => ({
-      context: settleAskedFlush(context, enq, event.requestId, producerFlushExpired) ?? {},
+      context: settleAskedFlush(context, enq, { requestId: event.requestId, error: producerFlushExpired }) ?? {},
     }),
     /* MC-R18: a close step's answer outside its step (the step failed, timed out or was left): nothing asks it now. */
     syncQuiesced: () => ({}),
+    parametersClosed: () => ({}),
     runtimeClosed: () => ({}),
     /* S1: the `project` child retries a deferred focused chat once the chats have arrived. */
     revisionChatsChanged: ({ context, event }, enq) => {
@@ -1082,10 +1092,10 @@ export const projectSessionMachine = setup({
           },
         },
         /*
-         * S6: the `project` child flushes what its runtime owes (the producers, the parameter service and both stores),
-         * with nothing mounted. A refusal (unsaved parameter drafts, an uncertain write, a conflict being recorded) or
-         * writes that run past their bound leave every resource intact, so the project stays live with the reason
-         * recorded and the close can be retried.
+         * S6: the `project` child flushes what its runtime owes (the producers and both stores), with nothing mounted. A
+         * refusal (an uncertain write, a conflict being recorded) or writes that run past their bound leave every
+         * resource intact, so the project stays live with the reason recorded and the close can be retried. Nothing
+         * here closes anything: the parameter service closes in the next step, which only a settled flush reaches.
          */
         flushingProducers: {
           entry: ({ context }, enq) => {
@@ -1097,7 +1107,7 @@ export const projectSessionMachine = setup({
             return { context: step };
           },
           /* A session whose runtime child is gone has nothing to flush. */
-          always: ({ context }) => (context.projectRef === undefined ? { target: 'flushing' } : undefined),
+          always: ({ context }) => (context.projectRef === undefined ? { target: 'closingParameters' } : undefined),
           after: {
             /* A6e: a kernel change the close ignored while it ran is handed back with the session, which is live again;
              * the child replaces only a runtime whose kernel is no longer selected. */
@@ -1116,7 +1126,44 @@ export const projectSessionMachine = setup({
           on: {
             runtimeFlushSettled: ({ context, event }, enq) => {
               if (event.requestId !== context.closeStep) {
-                return { context: settleAskedFlush(context, enq, event.requestId, event.error) ?? {} };
+                return {
+                  context: settleAskedFlush(context, enq, { requestId: event.requestId, error: event.error }) ?? {},
+                };
+              }
+              if (event.error === undefined) {
+                return { target: 'closingParameters', context: { closeStep: undefined } };
+              }
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: {
+                  ...recordCloseFailure(context, event.error),
+                  closeReason: undefined,
+                  closeStep: undefined,
+                },
+              };
+            },
+          },
+        },
+        /*
+         * The parameter service closes (unsaved drafts refuse it), through the `project` child, once the writes it owes
+         * landed within their bound (round 1 of A7c's review). It has no bound of its own, as on main: an expired bound
+         * cannot leave a live session whose parameter service then closes under it. A refusal keeps the project live.
+         */
+        closingParameters: {
+          entry: ({ context }, enq) => {
+            if (context.projectRef === undefined) {
+              return {};
+            }
+            const step = nextCloseStep(context);
+            enq.sendTo(context.projectRef, { type: 'closeParameters', requestId: step.closeStep });
+            return { context: step };
+          },
+          always: ({ context }) => (context.projectRef === undefined ? { target: 'flushing' } : undefined),
+          on: {
+            parametersClosed: ({ context, event }, enq) => {
+              if (event.requestId !== context.closeStep) {
+                return {}; // MC-R18: not this step's answer.
               }
               if (event.error === undefined) {
                 return { target: 'flushing', context: { closeStep: undefined } };

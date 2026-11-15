@@ -26,7 +26,6 @@ import type { WorkbenchLayout } from '@taucad/workbench';
 import type { Chat } from '@taucad/chat';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { EditorState } from '@taucad/ui-core/types/editor.types';
-import type { ParameterFilesClient } from '#hooks/use-file-manager.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import {
   createProjectRuntime,
@@ -114,7 +113,9 @@ const buildRuntime = (projectId: string, clock: StepClock) => {
         resource: 'tau.json',
         watch: () => ({
           ready: Promise.resolve(),
-          closed: new Promise<void>(() => undefined),
+          closed: new Promise<void>(() => {
+            /* Stays open. */
+          }),
           dispose: () => undefined,
         }),
         read: async () => ({ kind: 'text', content: manifestBytes }),
@@ -152,7 +153,10 @@ const buildRuntime = (projectId: string, clock: StepClock) => {
     fileManager: {
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a ready file manager, read by snapshot only.
       fileManagerRef: createActor(fileManagerMachine).start() as unknown as ProjectRuntimeFileManager['fileManagerRef'],
-      parameterFiles: { get: () => mock<ParameterFilesClient>(), subscribe: () => () => undefined },
+      parameterFiles: {
+        get: () => mock<ReturnType<ProjectRuntimeFileManager['parameterFiles']['get']>>(),
+        subscribe: () => () => undefined,
+      },
     },
     library,
     profile: 'editor',
@@ -178,9 +182,11 @@ type Built = ReturnType<typeof buildRuntime>;
 const built = new Map<string, Built>();
 
 /* The session's runtime work, named here by its module export so the rows read the same before and after A7c. */
-type RuntimeWork = (
-  input: Readonly<Record<string, unknown>>,
-) => Readonly<{ flush?: (kind: string, gone: AbortSignal) => Promise<void>; closeRuntime?: () => Promise<void> }>;
+type RuntimeWork = (input: Readonly<Record<string, unknown>>) => Readonly<{
+  flush?: (kind: string, gone: AbortSignal) => Promise<void>;
+  closeParameters?: () => Promise<void>;
+  closeRuntime?: () => Promise<void>;
+}>;
 const runtimeWork = (sessionModule as unknown as Readonly<{ sessionRuntimeWork?: RuntimeWork }>).sessionRuntimeWork;
 
 /** The opener the app composes, over a real runtime per session: the session drives its park, flushes and close. */
@@ -222,6 +228,14 @@ const openerOn = (clock: StepClock): SessionRuntimeOpener => ({
             flush: async (kind: string, gone: AbortSignal) => {
               log.push(`flush:${kind}`);
               await work.flush?.(kind, gone);
+            },
+          }),
+      ...(work?.closeParameters === undefined
+        ? {}
+        : {
+            closeParameters: async () => {
+              log.push('closeParameters');
+              await work.closeParameters?.();
             },
           }),
       ...(work?.closeRuntime === undefined
@@ -364,6 +378,7 @@ describe('a session over a real runtime, nothing mounted (A7c, S6, I5, I6)', () 
     expect(log.filter((entry) => !entry.startsWith('connector:'))).toEqual([
       'flush:close',
       `write:layout:${project.id}`,
+      'closeParameters',
       'quiesce',
       'closeRuntime',
       `stop:${project.id}`,

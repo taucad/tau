@@ -14,9 +14,8 @@ import { createSessionsActor, selectProjectSessionRuntime } from '#services/sess
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
-import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import type { SessionRuntimeOpenerStandIn, SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeFacts, SessionWiring } from '#services/sessions-store.js';
-import type { SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
 import type * as AppRuntimeFaultsModule from '#runtime/app-runtime-faults.js';

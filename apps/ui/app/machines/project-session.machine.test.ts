@@ -54,7 +54,13 @@ const harness = (options?: {
   readonly readyRegions?: readonly ProjectSessionRegion[];
   readonly parentRef?: AnyActorRef;
   readonly flushProducers?: () => Promise<void>;
-  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'closeRuntime' | 'releaseAgentHost';
+  readonly failCloseStep?:
+    | 'cancelRuns'
+    | 'flushProducers'
+    | 'closeParameters'
+    | 'flushSync'
+    | 'closeRuntime'
+    | 'releaseAgentHost';
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
   readonly request?: ProjectSessionOpenRequest;
   /** The session's clock; the test's fake timers by default. */
@@ -111,36 +117,38 @@ const harness = (options?: {
             throw new Error('releaseAgentHost failed');
           }
         }),
-        fileManager: child('fileManager', 'views', (sendBack) =>
-          sendBack({ type: 'fileManagerChanged', fileManagerRef: createActor(createCallbackLogic(() => undefined)) }),
-        ),
-        project: child('project', 'runtime', (sendBack, receive) =>
+        fileManager: child('fileManager', 'views', (sendBack) => {
+          sendBack({ type: 'fileManagerChanged', fileManagerRef: createActor(createCallbackLogic(() => undefined)) });
+        }),
+        project: child('project', 'runtime', (sendBack, receive) => {
           receive((received) => {
             const event = received as Command;
             if (event.type === 'flushRuntime' && event.kind === 'close') {
               order.push('flushProducers');
+              // async-iife: bootstrap -- `receive` is synchronous; the child answers through `sendBack`.
               void (async () => {
-                await options?.flushProducers?.();
-                sendBack({
-                  type: 'runtimeFlushSettled',
-                  requestId: event.requestId,
-                  ...failure('flushProducers'),
-                });
-              })().catch((error: unknown) => {
-                sendBack({
-                  type: 'runtimeFlushSettled',
-                  requestId: event.requestId,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              });
+                try {
+                  await options?.flushProducers?.();
+                  sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId, ...failure('flushProducers') });
+                } catch (error) {
+                  sendBack({
+                    type: 'runtimeFlushSettled',
+                    requestId: event.requestId,
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                }
+              })();
             } else if (event.type === 'flushRuntime' && options?.holdAskedFlushes !== true) {
               sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
+            } else if (event.type === 'closeParameters') {
+              order.push('closeParameters');
+              sendBack({ type: 'parametersClosed', requestId: event.requestId, ...failure('closeParameters') });
             } else if (event.type === 'closeRuntime') {
               order.push('closeRuntime');
               sendBack({ type: 'runtimeClosed', requestId: event.requestId, ...failure('closeRuntime') });
             }
-          }),
-        ),
+          });
+        }),
         agentHost: child('agentHost', 'agentHost'),
         compute: child('compute', 'compute'),
         /* The revision client the file manager's change started: it quiesces the project's sync on the close. */
@@ -215,6 +223,32 @@ describe('projectSessionMachine', () => {
     await settle();
     expect(actor.getSnapshot().matches('live')).toBe(true);
     expect(actor.getSnapshot().context.failures['close']).toBe('Project changes are not confirmed saved.');
+    actor.stop();
+  });
+
+  it('should not close the parameter service when the close flush lands after its bound (A7c review round 1)', async () => {
+    const clock = new StepClock();
+    let land: () => void = () => undefined;
+    const { actor, order } = harness({
+      clock,
+      flushProducers: async () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    });
+    await settle();
+    actor.send({ type: 'close', reason: 'user' });
+    await settle();
+
+    clock.advance(machineModule.projectSessionProducerFlushMilliseconds);
+    await settle();
+    expect(actor.getSnapshot().matches('live')).toBe(true);
+    /* The flush landing late answers under a close step that is gone: the live session keeps its parameter service. */
+    land();
+    await settle();
+    expect(actor.getSnapshot().matches('live')).toBe(true);
+    expect(order).not.toContain('closeParameters');
+    expect(order).not.toContain('closeRuntime');
     actor.stop();
   });
 
@@ -587,6 +621,7 @@ describe('projectSessionMachine', () => {
     expect(order.filter((entry) => !entry.startsWith('start:'))).toEqual([
       'cancelRuns:chat-1',
       'flushProducers',
+      'closeParameters',
       'flushSync',
       'closeRuntime',
       'releaseAgentHost',

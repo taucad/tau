@@ -51,7 +51,7 @@ import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
-import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
 const {
@@ -605,8 +605,8 @@ const sessionsActor = createSessionsActor({
           projectId: input.projectId,
           producers: { flushAll: async () => parts.flushWorkbenchRecordProducers() },
           parameterService: () => parts.parameterService,
-          projectRef: parts.projectRef as unknown as AnyActorRef,
-          editorRef: parts.editorRef as unknown as AnyActorRef,
+          projectRef: parts.projectRef,
+          editorRef: parts.editorRef,
         }),
         requestChat: (chat) => {
           projectProviderInputs.push({
@@ -659,8 +659,10 @@ const settle = async (
         !snapshot.matches('opening') &&
         !snapshot.matches({ closing: 'cancellingRuns' }) &&
         !snapshot.matches({ closing: 'flushingProducers' }) &&
+        !snapshot.matches({ closing: 'closingParameters' }) &&
         !snapshot.matches({ closing: 'flushing' }) &&
-        !snapshot.matches({ closing: 'releasing' })
+        !snapshot.matches({ closing: 'closingRuntime' }) &&
+        !snapshot.matches({ closing: 'releasingAgentHost' })
       );
     }),
 ): Promise<void> => {
@@ -1529,10 +1531,22 @@ describe('sessions composition — the idle window (S48(6))', () => {
     sendBack({ type: 'childReady', region: 'runtime' });
     receive((event) => {
       const { requestId } = event as EventObject & Readonly<{ requestId: string }>;
-      if (event.type === 'flushRuntime') {
-        sendBack({ type: 'runtimeFlushSettled', requestId });
-      } else if (event.type === 'closeRuntime') {
-        sendBack({ type: 'runtimeClosed', requestId });
+      switch (event.type) {
+        case 'flushRuntime': {
+          sendBack({ type: 'runtimeFlushSettled', requestId });
+          break;
+        }
+        case 'closeParameters': {
+          sendBack({ type: 'parametersClosed', requestId });
+          break;
+        }
+        case 'closeRuntime': {
+          sendBack({ type: 'runtimeClosed', requestId });
+          break;
+        }
+        default: {
+          break;
+        }
       }
     });
     return undefined;
@@ -1576,6 +1590,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
             !snapshot.matches('opening') &&
             !snapshot.matches({ closing: 'cancellingRuns' }) &&
             !snapshot.matches({ closing: 'flushingProducers' }) &&
+            !snapshot.matches({ closing: 'closingParameters' }) &&
             !snapshot.matches({ closing: 'flushing' }) &&
             !snapshot.matches({ closing: 'closingRuntime' }) &&
             !snapshot.matches({ closing: 'releasingAgentHost' })

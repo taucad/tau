@@ -22,15 +22,17 @@
  *    `fileManagerChanged`
  * 4. `closing.flushingProducers`: then the run cancel's done event, with and without a revision client
  * 5. `failed`: `close`, the run cancel's error event
- * 6. `closing.closingRuntime`: from row 4 without a client, the runtime's `runtimeFlushSettled`; the sync step has
- *    nothing to quiesce and passes through
+ * 6. `closing.closingParameters`: from row 4 without a client, the runtime's `runtimeFlushSettled`
  * 7. `live.idle`: the same path, the runtime refusing (a refused close goes live)
- * 8. `closing.flushing`: from row 4 with a client, the runtime's `runtimeFlushSettled`
- * 9. `closing.closingRuntime` with a client: from row 6, `fileManagerChanged`
- * 10. `closing.releasingAgentHost`: from row 6, `runtimeClosed`, and from row 9 the same
- * 11. `live.busy`: from row 7, `projectedRunsChanged` with a run
- * 12. `closed`: from row 10, the agent-host release's done event
- * 13. `closing.asking`: from row 11, `close` for the person, and with a client after `fileManagerChanged`
+ * 8. `closing.closingParameters` with a client: from row 4 with a client, the same
+ * 9. `closing.closingRuntime`: from row 6, the runtime's `parametersClosed`; the sync step has nothing to quiesce and
+ *    passes through
+ * 10. `live.busy`: from row 7, `projectedRunsChanged` with a run
+ * 11. `closing.flushing`: from row 8, `parametersClosed`
+ * 12. `closing.closingRuntime` with a client: from row 9, `fileManagerChanged`
+ * 13. `closing.releasingAgentHost`: from row 9, `runtimeClosed`, and from row 12 the same
+ * 14. `closed`: from row 13, the agent-host release's done event
+ * 15. `closing.asking`: from row 10, `close` for the person, and with a client after `fileManagerChanged`
  */
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
@@ -52,7 +54,7 @@ const regions: readonly ProjectSessionRegion[] = ['views', 'runtime', 'agentHost
 const fileManagerStandIn = createCallbackLogic(() => undefined) as unknown as typeof fileManagerMachine;
 
 /** The close step ids the traversal's paths reach, and one nothing asked. */
-const answeredIds = ['close:0', 'close:1', 'close:2', 'close:3'] as const;
+const answeredIds = ['close:0', 'close:1', 'close:2', 'close:3', 'close:4'] as const;
 
 /** One or more samples of every event type; the mapped type fails to compile when the union gains a type. */
 type Samples = {
@@ -116,6 +118,10 @@ const samples: Samples = {
   syncQuiesced: [
     ...answeredIds.map((requestId) => ({ type: 'syncQuiesced', requestId }) as const),
     { type: 'syncQuiesced', requestId: 'close:2', error: 'refused' },
+  ],
+  parametersClosed: [
+    ...answeredIds.map((requestId) => ({ type: 'parametersClosed', requestId }) as const),
+    { type: 'parametersClosed', requestId: 'close:1', error: 'refused' },
   ],
   runtimeClosed: [
     ...answeredIds.map((requestId) => ({ type: 'runtimeClosed', requestId }) as const),
@@ -188,7 +194,7 @@ const builtInsAt = (snapshot: AnyMachineSnapshot): readonly ProjectSessionMachin
 const options = {
   input: { projectId: 'p' },
   events: (snapshot: AnyMachineSnapshot) => [...events, ...builtInsAt(snapshot)],
-  limit: 4000,
+  limit: 8000,
   /* A closing session with a revision client waits in `closing.flushing` for its `quiesce`; one without passes through
    * it. The projection tells the two apart while closing, so the traversal reaches the waiting step. */
   serializeState: (snapshot: AnyMachineSnapshot) =>
@@ -230,21 +236,24 @@ describe('project session machine totality baseline', () => {
     const done = (step: (typeof closeSteps)[number]) => `xstate.done.actor.0.project-session.closing.${step}`;
     const flushed = ['close', done('cancellingRuns'), 'runtimeFlushSettled'];
     const withClient = ['close', 'fileManagerChanged', done('cancellingRuns')];
+    const closed = [...flushed, 'parametersClosed'];
     expect(rows.filter((row) => !row.state.startsWith('opening.'))).toEqual([
       { state: 'closing.cancellingRuns', events: ['close'] },
       { state: 'closing.cancellingRuns', events: ['close', 'fileManagerChanged'] },
       { state: 'closing.flushingProducers', events: ['close', done('cancellingRuns')] },
       { state: 'failed', events: ['close', 'xstate.error.actor.0.project-session.closing.cancellingRuns'] },
       { state: 'closing.flushingProducers', events: withClient },
-      { state: 'closing.closingRuntime', events: flushed },
+      { state: 'closing.closingParameters', events: flushed },
       { state: 'live.idle', events: flushed },
-      { state: 'closing.flushing', events: [...withClient, 'runtimeFlushSettled'] },
-      { state: 'closing.closingRuntime', events: [...flushed, 'fileManagerChanged'] },
-      { state: 'closing.releasingAgentHost', events: [...flushed, 'runtimeClosed'] },
+      { state: 'closing.closingParameters', events: [...withClient, 'runtimeFlushSettled'] },
+      { state: 'closing.closingRuntime', events: closed },
       { state: 'live.busy', events: [...flushed, 'projectedRunsChanged'] },
-      { state: 'closing.releasingAgentHost', events: [...flushed, 'fileManagerChanged', 'runtimeClosed'] },
-      { state: 'closed', events: [...flushed, 'runtimeClosed', done('releasingAgentHost')] },
+      { state: 'closing.flushing', events: [...withClient, 'runtimeFlushSettled', 'parametersClosed'] },
+      { state: 'closing.closingRuntime', events: [...closed, 'fileManagerChanged'] },
+      { state: 'closing.releasingAgentHost', events: [...closed, 'runtimeClosed'] },
       { state: 'closing.asking', events: [...flushed, 'projectedRunsChanged', 'close'] },
+      { state: 'closing.releasingAgentHost', events: [...closed, 'fileManagerChanged', 'runtimeClosed'] },
+      { state: 'closed', events: [...closed, 'runtimeClosed', done('releasingAgentHost')] },
       { state: 'closing.asking', events: [...flushed, 'projectedRunsChanged', 'close', 'fileManagerChanged'] },
     ]);
     // `closing.stopping` is transient: its entry stops the children and its `always` leaves for `closed` at once.

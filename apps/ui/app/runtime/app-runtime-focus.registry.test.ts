@@ -79,7 +79,7 @@ it('should tell focus the victim the open closed before answering the open that 
     host.stop();
     registry.stop();
   });
-  /* p1's close is slow: its close flush holds until the row releases it, while its leave flush settles at once. */
+  /* Project p1's close is slow: its close flush holds until the row releases it, while its leave flush settles at once. */
   let release: () => void = () => undefined;
   opener.onBuilt('p1', (standIn) => {
     release = standIn.hold((signal) => signal === 'flush:close');

@@ -201,7 +201,7 @@ it('should a return to a closing project refused by another close that came back
     port.stop();
     registry.stop();
   });
-  /* px's close never settles, so px stays closing; py's is held until the row refuses it. */
+  /* Project px's close never settles, so px stays closing; py's is held until the row refuses it. */
   opener.onBuilt('px', (standIn) => {
     standIn.hold();
   });

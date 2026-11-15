@@ -1007,7 +1007,7 @@ export class ChatSessionStore {
     if (projectSessions !== undefined) {
       const follow = (): void => {
         const live = projectSessions.get();
-        for (const projectId of [...this.#projectSessions.keys()]) {
+        for (const projectId of this.#projectSessions.keys()) {
           if (live[projectId] === undefined) {
             this.#bindProjectSession(projectId, undefined);
           }

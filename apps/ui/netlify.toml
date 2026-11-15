@@ -218,8 +218,41 @@ for = "/wordmark.png"
 [headers.values]
 Cross-Origin-Resource-Policy = "cross-origin"
 
+# Unhashed SVGs from public/ only. A site-wide `/*.svg` rule also matched the hashed
+# sprites under /assets/ and replaced their immutable year with one day (audit R17).
 [[headers]]
-for = "/*.svg"
+for = "/avatar-circle.svg"
 [headers.values]
 Cache-Control = "public, max-age=86400"
 Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/avatar-square.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/favicon.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/placeholder.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/wordmark.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+# The web app manifest. Netlify serves an unknown `.webmanifest` as
+# application/octet-stream (audit R17).
+[[headers]]
+for = "/manifest.webmanifest"
+[headers.values]
+Content-Type = "application/manifest+json"

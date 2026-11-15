@@ -1866,6 +1866,140 @@
       "rules": {
         "tau-lint/no-awaited-mutation-in-loop": "off"
       }
+    },
+    {
+      /*
+       * Guard G1 of the progressive loading architecture (Brain research/progressive-loading-architecture.md):
+       * a heavy module is loaded only through import(). `modules` is the heavy list of
+       * apps/ui/scripts/critical-path.mts, and apps/ui/app/lib/critical-graph.node.test.ts (G2) holds it
+       * equal, holds every `deferredLeaves` entry off each route class's static graph and every `known`
+       * entry on one. Scope: the web UI and the app libraries it composes; tests, workers and server
+       * modules are never in a document's interactive tier.
+       */
+      "files": [
+        "apps/ui/app/**/*.{ts,tsx}",
+        "apps/libs/chat-ui/src/**/*.{ts,tsx}",
+        "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "apps/libs/ui-core/src/**/*.{ts,tsx}",
+        "apps/libs/ui-kit/src/**/*.{ts,tsx}"
+      ],
+      "rules": {
+        "tau-lint/no-static-heavy-import": [
+          "error",
+          {
+            "modules": [
+              "ai",
+              "ai/*",
+              "@ai-sdk/*",
+              "three",
+              "three/*",
+              "@react-three/*",
+              "@taucad/runtime",
+              "@taucad/assimp",
+              "@taucad/assimp/*",
+              "@taucad/brep",
+              "@taucad/brep/*",
+              "@taucad/build123d",
+              "@taucad/build123d/*",
+              "@taucad/esbuild",
+              "@taucad/esbuild/*",
+              "@taucad/jscad",
+              "@taucad/jscad/*",
+              "@taucad/manifold",
+              "@taucad/manifold/*",
+              "@taucad/opencascade",
+              "@taucad/opencascade/*",
+              "@taucad/openrscad",
+              "@taucad/openrscad/*",
+              "@taucad/picogk",
+              "@taucad/picogk/*",
+              "@taucad/picovoxel",
+              "@taucad/picovoxel/*",
+              "@taucad/replicad",
+              "@taucad/replicad/*",
+              "@taucad/rolldown",
+              "@taucad/rolldown/*",
+              "@taucad/smlib",
+              "@taucad/smlib/*",
+              "@taucad/smlibpy",
+              "@taucad/smlibpy/*",
+              "@taucad/tscircuit",
+              "@taucad/tscircuit/*",
+              "@taucad/zoo",
+              "@taucad/zoo/*",
+              "@codemirror/*",
+              "posthog-js",
+              "posthog-js/*",
+              "@sentry/react"
+            ],
+            // Reached only through a dynamic import: the editor, the viewer's loaders and debug tools, the
+            // language services, the conversion and preview routes and the e2e fixtures.
+            "deferredLeaves": [
+              "apps/libs/ui-core/src/lib/lsp-completion-apply.ts",
+              "apps/ui/app/components/cad/ar-webxr-scene.ts",
+              "apps/ui/app/components/code/code-editor-view.client.tsx",
+              "apps/ui/app/components/code/editor-definition.ts",
+              "apps/ui/app/components/code/editor-language-features.ts",
+              "apps/ui/app/components/code/editor-lint.ts",
+              "apps/ui/app/components/code/editor-search-panel.tsx",
+              "apps/ui/app/components/code/editor-surface-theme.ts",
+              "apps/ui/app/components/code/json-depth-highlighting.ts",
+              "apps/ui/app/components/geometry/debug/",
+              "apps/ui/app/components/geometry/loader/glass-prism-controller.ts",
+              "apps/ui/app/components/geometry/loader/glass-prism-light-sheet.ts",
+              "apps/ui/app/components/geometry/loader/glass-prism-material.node.ts",
+              "apps/ui/app/components/geometry/loader/glass-prism.constants.ts",
+              "apps/ui/app/components/geometry/loader/metal-morph-controller.ts",
+              "apps/ui/app/components/geometry/loader/metal-morph-environment.ts",
+              "apps/ui/app/components/geometry/loader/metal-morph-material.node.ts",
+              "apps/ui/app/components/geometry/loader/metal-morph.constants.ts",
+              "apps/ui/app/components/geometry/loader/showcase-capture.ts",
+              "apps/ui/app/components/geometry/loader/showcase-post.ts",
+              "apps/ui/app/hooks/rpc-handlers.ts",
+              "apps/ui/app/lib/csharp-language/",
+              "apps/ui/app/lib/json-language/",
+              "apps/ui/app/lib/kcl-language/",
+              "apps/ui/app/lib/openscad-language/",
+              "apps/ui/app/lib/sentry-tracing.lib.ts",
+              "apps/ui/app/lib/sentry.lib.ts",
+              "apps/ui/app/lib/typescript-language/",
+              "apps/ui/app/routes/[__e2e].onshape-render-profile/",
+              "apps/ui/app/routes/[__e2e].remote-host/",
+              "apps/ui/app/routes/[__e2e].shader-fixture/",
+              "apps/ui/app/routes/convert/",
+              "apps/ui/app/routes/w.$workspace.$project_.preview/",
+              "apps/ui/app/runtime/ui-runtime.definition.ts",
+              "apps/ui/app/runtime/usdz-runtime.definition.ts",
+              "apps/ui/app/workers/geospec-runner.impl.ts"
+            ],
+            "known": [
+              // PL1 (runtime entry cut): the chat session store's transport and the `ai` SDK.
+              "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
+              "apps/ui/app/machines/chat-projection.logic.ts",
+              "apps/ui/app/services/chat-session-store.ts",
+              // PL5 (interactive-tier cut): the viewer, three.js and the runtime's root entry.
+              "apps/libs/ui-core/src/services/headless-capture-presentation.ts",
+              "apps/ui/app/components/printer/printer-camera-controls.tsx",
+              "apps/ui/app/components/printer/printer-filament-material.node.ts",
+              "apps/ui/app/components/printer/printer-filament-material.ts",
+              "apps/ui/app/components/printer/printer-hardware.ts",
+              "apps/ui/app/components/printer/printer-plate-surface.ts",
+              "apps/ui/app/components/printer/printer-plates.ts",
+              "apps/ui/app/components/printer/printer-scene.tsx",
+              "apps/ui/app/components/printer/printer-toolpath.ts",
+              "apps/ui/app/hooks/use-thumbnail-generator.ts",
+              "apps/ui/app/routes/w.$workspace.$project/chat-converter.tsx",
+              "apps/ui/app/routes/w.$workspace.$project/chat-print-prepare.tsx",
+              "apps/ui/app/routes/w.$workspace.$project/chat-viewer.tsx",
+              "apps/ui/app/services/headless-capture.ts",
+              "apps/ui/app/services/part-thumbnail-visual.ts",
+              // PL5: the editor, and the full error-reporting SDK.
+              "apps/ui/app/routes/w.$workspace.$project/chat-editor-code-viewer.tsx",
+              "apps/ui/app/lib/sentry-event.lib.ts"
+            ]
+          }
+        ]
+      }
     }
   ],
   "settings": {

@@ -505,6 +505,11 @@
     "reason": "reads a Tau example from tau-examples as a fixture or source"
   },
   {
+    "file": "apps/ui/app/lib/critical-graph.node.test.ts",
+    "target": ".oxlintrc.json",
+    "reason": "holds the options of tau-lint/no-static-heavy-import (G1) to the heavy list and the route classes' static graphs"
+  },
+  {
     "file": "apps/ui/app/routes/[__e2e].onshape-render-profile/ablation-transform.test.ts",
     "target": "packages/viewer/src/graphics/three/utils/section-stencil-caps.ts",
     "reason": "reads another project's source text to assert on or extract from it"

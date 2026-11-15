@@ -918,6 +918,31 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     session.stop();
   });
 
+  it('D23: should report nothing when a checkout route still installing is cut short by the session stopping', async () => {
+    const pending: Array<(error: Error) => void> = [];
+    const syncProjectRoots = vi.fn(
+      async () =>
+        new Promise<void>((_resolve, reject) => {
+          pending.push(reject);
+        }),
+    );
+    const { client, fake, fileManager, session } = await startSession({ focused: projectId, syncProjectRoots });
+    fileManager.sent.length = 0;
+    handleStore.setCheckoutRootConfigs.mockReturnValue(true);
+    client.setStatus(onBranch('co-2'));
+    await settle();
+    expect(syncProjectRoots).toHaveBeenCalledTimes(1);
+
+    session.stop();
+    for (const reject of pending.splice(0)) {
+      reject(new Error('Workspace root synchronization owner is disposed'));
+    }
+    await settle();
+
+    expect(fake.faults).toEqual([]);
+    expect(fileManager.sent).toEqual([]);
+  });
+
   it('S23: should let the newest selection win when two switches land together', async () => {
     const pending: Array<() => void> = [];
     const syncProjectRoots = vi.fn(

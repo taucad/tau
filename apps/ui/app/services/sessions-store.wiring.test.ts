@@ -10,11 +10,13 @@
  * each of these from the mounted project route, so a registry alone did none of them and every row below fails there.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Topic } from '@taucad/events';
 import { flush, StepClock } from '@taucad/xstate-testing/clock';
 import { createSessionsActor } from '#services/sessions-store.js';
 import type {
   HostConnectorModule,
   SessionRevisionsModule,
+  SessionFileManagerWorker,
   SessionRuntimeFacts,
   SessionsObservable,
   SessionWiring,
@@ -27,6 +29,14 @@ import { createSessionRevisionsPorts } from '#runtime/session-revisions.js';
 import type { SessionRevisionsEmitted, SessionRevisionsInput } from '#runtime/session-revisions.js';
 import type { HostConnectorInput } from '#runtime/host-connector.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
+
+const faults = vi.hoisted(() => [] as unknown[]);
+vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#runtime/app-runtime-faults.js')>()),
+  reportAppRuntimeFault: (error: unknown) => {
+    faults.push(error);
+  },
+}));
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -76,7 +86,19 @@ type Harness = Readonly<{
 let current: Harness | undefined;
 
 const harness = (
-  options: Readonly<{ facts?: Partial<SessionRuntimeFacts>; focused?: string; visible?: boolean }> = {},
+  options: Readonly<{
+    facts?: Partial<SessionRuntimeFacts>;
+    focused?: string;
+    visible?: boolean;
+    /** The host's shared worker the session's file managers are built on (none: each is built at once). */
+    worker?: SessionFileManagerWorker;
+    /** Replace the module loads, as a row that fails one does. */
+    loads?: Partial<Pick<SessionWiring, 'loadRevisions' | 'loadHostConnector'>>;
+    /** Hold the `revisions` module back until this settles, as a slow chunk does. */
+    revisionsArrival?: Promise<void>;
+    /** What each stopped `revisions` child's teardown does, as a row that throws from it does. */
+    revisionsTeardown?: () => void;
+  }> = {},
 ): Harness => {
   const clock = new StepClock();
   const files: SessionFileManagerStandIn[] = [];
@@ -97,6 +119,7 @@ const harness = (
         revisions.push({ input, sendBack, stopped: () => stopped });
         return () => {
           stopped = true;
+          options.revisionsTeardown?.();
         };
       },
   };
@@ -115,12 +138,14 @@ const harness = (
   const wiring: SessionWiring = {
     loadRevisions: async () => {
       loads.revisions += 1;
+      await options.revisionsArrival;
       return revisionsModule;
     },
     loadHostConnector: async () => {
       loads.hostConnector += 1;
       return hostConnectorModule;
     },
+    ...options.loads,
     registerCloseCut: () => () => undefined,
     focusedProject,
     documentVisible,
@@ -154,6 +179,7 @@ const harness = (
     },
     openRuntime: opener,
     wiring,
+    ...(options.worker === undefined ? {} : { fileManagerWorker: options.worker }),
   }).start();
   current = {
     registry,
@@ -178,9 +204,29 @@ const open = async (registry: Harness['registry'], id = projectId): Promise<void
   await flush();
 };
 
+/** The host's shared worker as a row moves it: lost, then replaced. */
+const sharedWorkerOf = (initial: Worker | undefined) => {
+  let value = initial;
+  const changes = new Topic<Worker | undefined>({ name: 'test.sharedWorker' });
+  const port: SessionFileManagerWorker = {
+    current: () => value,
+    subscribe: (listener) => changes.subscribe(listener),
+  };
+  return {
+    port,
+    set: (next: Worker | undefined) => {
+      value = next;
+      changes.emit(next);
+    },
+  };
+};
+const workerA = { name: 'worker-a' } as unknown as Worker;
+const workerB = { name: 'worker-b' } as unknown as Worker;
+
 afterEach(() => {
   current?.registry.stop();
   current = undefined;
+  faults.length = 0;
 });
 
 describe('the session starts its revision client and read connector (A7b)', () => {
@@ -245,6 +291,102 @@ describe('the session holds its revision facts with nothing mounted (A7b)', () =
     await flush();
 
     expect(opener.built[0]?.signals).toEqual(['retryEnsureFocusedChat']);
+  });
+});
+
+describe('the session keeps its children apart from a module that fails (A7b, D23)', () => {
+  it('should report a module that fails to load through the fault hook, and keep the session live', async () => {
+    const failure = new Error('chunk failed');
+    const { registry, connectors } = harness({
+      loads: {
+        loadRevisions: async () => {
+          throw failure;
+        },
+      },
+    });
+
+    await open(registry);
+
+    expect(faults).toEqual([failure]);
+    expect(connectors).toHaveLength(1);
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it('should never start a child whose session closed before its module arrived', async () => {
+    let arrive: (() => void) | undefined;
+    const revisionsArrival = new Promise<void>((resolve) => {
+      arrive = resolve;
+    });
+    const { registry, revisions, connectors } = harness({ revisionsArrival });
+    await open(registry);
+
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    arrive?.();
+    await flush();
+    await flush();
+
+    expect(revisions).toEqual([]);
+    expect(connectors[0]?.stopped()).toBe(true);
+    expect(faults).toEqual([]);
+  });
+
+  it('should report a teardown that throws, and still close the session', async () => {
+    const failure = new Error('teardown failed');
+    const { registry, connectors } = harness({
+      revisionsTeardown: () => {
+        throw failure;
+      },
+    });
+    await open(registry);
+
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
+
+    expect(faults).toEqual([failure]);
+    expect(connectors[0]?.stopped()).toBe(true);
+    expect(sessionOf(registry)).toBeUndefined();
+  });
+});
+
+describe('the session rebuilds what it owns on a new file manager (A7b review)', () => {
+  it("S1: should wait for the new revision client's chats before retrying a deferred chat after a worker loss", async () => {
+    const worker = sharedWorkerOf(workerA);
+    const { registry, revisions, opener } = harness({ facts: { chatDeferred: true }, worker: worker.port });
+    await open(registry);
+    revisions[0]?.sendBack({ type: 'revisionChatsChanged', ready: true });
+    await flush();
+    expect(opener.built[0]?.signals).toEqual(['retryEnsureFocusedChat']);
+
+    worker.set(undefined);
+    worker.set(workerB);
+    await flush();
+    await flush();
+    expect(revisions).toHaveLength(2);
+    expect(opener.built[1]?.signals).toEqual([]);
+
+    revisions[1]?.sendBack({ type: 'revisionChatsChanged', ready: true });
+    await flush();
+    expect(opener.built[1]?.signals).toEqual(['retryEnsureFocusedChat']);
+  });
+
+  it('S5: should park a runtime rebuilt while the session is parked', async () => {
+    const { registry, clock, focusedProject, opener } = harness({ focused: undefined, visible: true });
+    await open(registry);
+    clock.advance(projectSessionParkWindowMilliseconds);
+    await flush();
+    expect(opener.built[0]?.signals).toEqual(['parkRuntime']);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+
+    expect(opener.built[1]?.signals).toEqual(['parkRuntime']);
+    focusedProject.set(projectId);
+    await flush();
+    expect(opener.built[1]?.signals).toEqual(['parkRuntime', 'resumeRuntime']);
   });
 });
 

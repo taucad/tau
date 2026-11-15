@@ -134,3 +134,34 @@ export const selectProjectRouteState = (
     ? { kind: 'editor', projectId, project }
     : { kind: 'closed', projectId, project, reason: registry.closed[projectId]?.reason };
 };
+
+/**
+ * The project whose session is the focused one, whether it is kept behind the route's state, and whether the route is
+ * on its way somewhere else.
+ *
+ * Focus opening or on a project makes that project's session the focused one. While focus resolves, leaves, is blocked
+ * by a failed leave flush or holds another project's answer, the project it was on stays focused, inert, until the move settles
+ * (today's `resolved`/`pending`); a project the route has not settled on never supplies providers to the one being
+ * opened. Only a move in progress shows the overlay: a held answer is the notice the person reads. The session's
+ * `presence` and `revisions` children read the same project as the focused one (A7b).
+ *
+ * @param focus - Focus's snapshot.
+ * @returns The focused project, whether it is retained, and whether a move is in progress.
+ * @public
+ */
+export const selectFocusTarget = (
+  focus: FocusSnapshot,
+): Readonly<{ target: string | undefined; retained: boolean; moving: boolean }> => {
+  const { answer, on, request } = focus.context;
+  if (focus.hasTag('on-project')) {
+    return { target: answer?.projectId, retained: false, moving: false };
+  }
+  const away = on !== undefined && (request?.home === true || request?.projectId !== on);
+  if (focus.matches('resolving') || focus.matches('leaving') || focus.matches('flushFailed')) {
+    return { target: away ? on : undefined, retained: away, moving: away };
+  }
+  if (focus.matches('held') && away) {
+    return { target: on, retained: true, moving: false };
+  }
+  return { target: undefined, retained: false, moving: false };
+};

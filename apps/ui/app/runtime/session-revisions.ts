@@ -2,9 +2,8 @@
  * The session's revision-client lifecycle as actor logic (app state orchestration charter D4, D8, I5; plan § 4 A7a;
  * inventory row S27).
  *
- * `useRevisionClientLifecycle` (`hooks/use-revision-status.ts`) owns a project's revision connection from React
- * today, mounted by the session binding. This module is the same lifecycle with no React, for the session child
- * `revisions` that A7b invokes:
+ * Each session's `revisions` child owns its project's revision connection for one file manager, with nothing mounted
+ * (A7b; `useRevisionClientLifecycle` did this from the session binding before):
  *
  * - while an apply writes the tree's root, the tree's refreshes are held;
  * - the page's device id is sent once per client;
@@ -12,29 +11,53 @@
  *   and closed (its GitHub credential withdrawn first) when the client changes or the actor stops;
  * - the actor identity is sent on each change of the user, the workspace's anonymity, the account's salt or the
  *   project's GitHub binding;
- * - the close cut for the unload session stage is registered once, for the actor's whole life.
+ * - the close cut for the unload session stage is registered once, for the actor's whole life;
+ * - the client is told whether its project is the focused one, so only that one holds the long poll (RV-W5b F12).
+ *
+ * It gives the session its revision facts, which the session binding relayed from React before:
+ *
+ * - the facts a policy close relies on go to the session (`revisionState`) and to the chat store (row S3);
+ * - whether the chats have arrived goes to the session (`revisionChatsChanged`), whose `project` child retries a
+ *   deferred focused chat (row S1);
+ * - while the project is focused, the workbench follows the selected checkout's route (row S23).
  *
  * The client is the project's one client (`getRevisionClient`), looked up again only when the file manager's worker
- * changes, as `useRevisionClient` memoises it. Every input that is React-only today is a port: the session user, and,
- * for the session's own workspace (B7, from its open request), the anonymity preference and the account's salt. A7b
- * supplies the real ports and the close-cut registration (the session stage of `environment`'s sequencer); tests
- * pass fakes.
+ * changes, as `useRevisionClient` memoises it; the session's close reaches the same client through
+ * `peekRevisionClient`. Every input that React read is a port: the session user, and, for the session's own
+ * workspace (B7, from its open request), the anonymity preference and the account's salt; the focused project; the
+ * chat store's revision facts and an editor's conflict still being recorded. {@link createSessionRevisionsPorts}
+ * builds the real ones over the module stores; tests pass fakes.
  *
- * The ports and the client live in this closure, never in a machine's context (D4). Nothing in the app imports this
- * module yet: A7b loads it lazily from the session (D5).
+ * The ports and the client live in this closure, never in a machine's context (D4). The session loads this module
+ * lazily (D5): the entry graph never reaches it.
  *
  * @module
  */
 import { createCallbackLogic } from 'xstate';
-import type { ActorRefFrom, CallbackActorLogic } from 'xstate';
+import type { ActorRefFrom, CallbackActorLogic, EventObject } from 'xstate';
+import type { CheckoutRootConfig } from '@taucad/filesystem';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh-hold';
-import { revisionUserActor } from '#lib/revision-actor.js';
+import {
+  getAnonymousRevisions,
+  getRevisionSalt,
+  getRevisionSessionUser,
+  requestRevisionSalt,
+  revisionUserActor,
+  subscribeAnonymousRevisions,
+  subscribeRevisionSalt,
+  subscribeRevisionSessionUser,
+} from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
+import { isRecordingEditorConflict, subscribeEditorConflictRecords } from '#lib/editor-document-session.js';
+import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
+import type { ChatSyncState } from '#machines/chat-session.machine.js';
+import type { ChatRevisionFacts } from '#services/chat-session-store.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 
 /** A value that can change: the current value, and a listener called after each change. */
@@ -66,57 +89,151 @@ export type SessionRevisionsAnonymityPort = Readonly<{
 /** The close cut the unload session stage runs: `hidden` awaits the close revision, `pagehide` offers the keepalive. */
 export type SessionRevisionsCloseCut = (phase: FlushPhase) => Promise<void>;
 
-/** Where the close cut is registered: today `useFlushOnClose` at stage `session`; from A7b `environment`'s stage. */
+/** Where the close cut is registered: the session stage of `environment`'s sequencer (D26). */
 export type SessionRevisionsCloseCutPort = Readonly<{
   register: (cut: SessionRevisionsCloseCut) => () => void;
 }>;
 
-/** The ports the lifecycle reads. A7b supplies the real ones; tests pass fakes. */
-export type SessionRevisionsPorts = Readonly<{
-  sessionUser: SessionRevisionsObservable<RevisionSessionUser | undefined>;
-  anonymity: SessionRevisionsAnonymityPort;
-  salt: SessionRevisionsSaltPort;
-  closeCut: SessionRevisionsCloseCutPort;
+/** An editor's conflict still being recorded for a project (RV-W5b2 R2-1): its value, and its changes. */
+export type SessionRevisionsRecordingPort = Readonly<{
+  get: (projectId: string) => boolean;
+  subscribe: (listener: () => void) => () => void;
 }>;
+
+/** What the session's composition supplies: the parts of the ports that are not module stores. */
+export type SessionRevisionsWiring = Readonly<{
+  closeCut: SessionRevisionsCloseCutPort;
+  /** The project focus is on: the one whose client holds the long poll and whose workbench follows its checkout. */
+  focusedProject: SessionRevisionsObservable<string | undefined>;
+  /** Tell one project's chats its revision facts (the chat store's `setRevisionFacts`). */
+  chatFacts: (projectId: string, facts: ChatRevisionFacts) => void;
+}>;
+
+/** The ports the lifecycle reads. {@link createSessionRevisionsPorts} builds the real ones; tests pass fakes. */
+export type SessionRevisionsPorts = SessionRevisionsWiring &
+  Readonly<{
+    sessionUser: SessionRevisionsObservable<RevisionSessionUser | undefined>;
+    anonymity: SessionRevisionsAnonymityPort;
+    salt: SessionRevisionsSaltPort;
+    recording: SessionRevisionsRecordingPort;
+    /** Where a failure in a teardown goes, so the session is not faulted by a cleanup (D23). */
+    reportFault: (error: unknown) => void;
+  }>;
 
 /** One session's identity. `workspace` is the slug of the session's own open request (B7), not the focused route's. */
 export type SessionRevisionsInput = Readonly<{
   projectId: string;
   workspace: string;
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
+  /** Install the checkout routes this tab's file managers serve (the session file manager's root synchronisation). */
+  syncProjectRoots: () => Promise<void>;
 }>;
 
 /** `revisions` takes no events. */
 export type SessionRevisionsEvent = Readonly<{ type: 'never' }>;
 
+/**
+ * What `revisions` tells the session: the facts a policy close reads (row S3), and whether the chats arrived (S1).
+ *
+ * @public
+ */
+export type SessionRevisionsEmitted =
+  | Readonly<{ type: 'revisionState'; dirty: boolean; pushed: boolean; recording: boolean; pendingCount: number }>
+  | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>;
+
 export type SessionRevisionsLogic = CallbackActorLogic<SessionRevisionsEvent, SessionRevisionsInput>;
+
+/** The callback a `revisions` child runs, for a composition that loads this module lazily (D5). */
+export type SessionRevisionsCallback = (
+  params: Readonly<{ input: SessionRevisionsInput; sendBack: (event: SessionRevisionsEmitted) => void }>,
+) => () => void;
 
 const withdrawnCredential = { kind: 'withdrawn', reason: 'Open this project in Tau to sync with GitHub.' } as const;
 
-/** Run every step even when one throws, then rethrow the first failure (worker policy rule 5). */
-const runIsolated = (steps: ReadonlyArray<(() => void) | undefined>): void => {
-  const failures: unknown[] = [];
+/** Run every step even when one throws, and report each failure, so a teardown never faults the session (D23). */
+const runIsolated = (steps: ReadonlyArray<(() => void) | undefined>, reportFault: (error: unknown) => void): void => {
   for (const step of steps) {
     try {
       step?.();
     } catch (error) {
-      failures.push(error);
+      reportFault(error);
     }
-  }
-  if (failures.length > 0) {
-    throw failures[0];
   }
 };
 
 /**
- * Build the `revisions` logic over its ports.
+ * Build the real ports over the module stores: the published session user, the workspace's anonymity, the account's
+ * salt and the editor's conflict records. The composition supplies the rest.
  *
- * @param ports - The session user, anonymity, salt and close-cut ports.
- * @returns Callback logic that owns one project's revision-client lifecycle until it stops.
+ * @param wiring - The close-cut registration, the focused project, the chat store's facts and the fault report.
+ * @returns The ports.
+ * @public
  */
-export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): SessionRevisionsLogic =>
-  createCallbackLogic<SessionRevisionsEvent, SessionRevisionsInput>(({ input }) => {
-    const { projectId, workspace, fileManagerRef } = input;
+export const createSessionRevisionsPorts = (
+  wiring: SessionRevisionsWiring & Pick<SessionRevisionsPorts, 'reportFault'>,
+): SessionRevisionsPorts => ({
+  ...wiring,
+  sessionUser: { get: getRevisionSessionUser, subscribe: subscribeRevisionSessionUser },
+  anonymity: { get: getAnonymousRevisions, subscribe: subscribeAnonymousRevisions },
+  salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
+  recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
+});
+
+/**
+ * Give this project's linked checkouts their routes (blueprint S27, W2 review R4), as `WorkbenchCheckoutRoot` did.
+ *
+ * A checkout rides its own project's storage root in the dot-prefixed space project discovery never scans (charter
+ * D4), so a route needs no new capability and no new storage root, only a base path beside the project.
+ *
+ * @returns The re-issue, or `undefined` when the set was already installed.
+ */
+const mountCheckoutRoutes = (
+  projectId: string,
+  linkedIds: string,
+  syncProjectRoots: () => Promise<void>,
+): Promise<void> | undefined => {
+  if (linkedIds === '') {
+    /* Nothing to mount is still an answer: a discarded branch's route must go, or its rooted views keep answering
+     * from a tree nothing writes. */
+    return setCheckoutRootConfigs([]) ? syncProjectRoots() : undefined;
+  }
+  return (async () => {
+    const configuration = await getProjectRootConfigs();
+    const project = configuration.projects.find((config) => config.projectId === projectId);
+    if (project === undefined) {
+      return;
+    }
+    const routes: readonly CheckoutRootConfig[] = linkedIds.split(' ').map((checkoutId) => ({
+      ...project,
+      checkoutId,
+      providerBasePath: `.tau/checkouts/${projectId}/${checkoutId}`,
+    }));
+    if (setCheckoutRootConfigs(routes)) {
+      await syncProjectRoots();
+    }
+  })();
+};
+
+/** The sync facet as a chat shows it (R11): `pending`/`queued`/`failed` all hold something the remote has not taken. */
+const chatSyncOf = (sync: RevisionStatusProjection['sync']): ChatSyncState =>
+  sync.state === 'conflicted'
+    ? 'conflicted'
+    : sync.state === 'pending' || sync.state === 'queued' || sync.state === 'failed'
+      ? 'pending'
+      : 'synced';
+
+/**
+ * The `revisions` callback over its ports.
+ *
+ * @param ports - The session user, anonymity, salt, close-cut, focus, chat-facts and recording ports.
+ * @returns The callback a `revisions` child runs until it stops.
+ * @public
+ */
+// oxlint-disable-next-line max-lines-per-function -- One lifecycle: every follower shares the client in this closure.
+export const sessionRevisionsCallback =
+  (ports: SessionRevisionsPorts): SessionRevisionsCallback =>
+  ({ input, sendBack }) => {
+    const { projectId, workspace, fileManagerRef, syncProjectRoots } = input;
 
     /* What the hook reads in render, kept current by the subscriptions below. */
     let user = ports.sessionUser.get();
@@ -134,6 +251,10 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
     /* The client whose open is in flight or done: the user relay's target. */
     let connected: RevisionClient | undefined;
     let unsubscribeBinding: (() => void) | undefined;
+    let unsubscribeStatus: (() => void) | undefined;
+    /* The project focus is on, as the route's focused session reads it; the client hears each change of `focused`. */
+    let focused = ports.focusedProject.get() === projectId;
+    let recording = ports.recording.get(projectId);
     /* The inputs the last `setActor` was sent for, compared as React compares effect dependencies. */
     let actorSentFor: Readonly<{ user: unknown; anonymous: boolean; salt: unknown }> | undefined;
 
@@ -221,17 +342,114 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
       };
     };
 
+    /*
+     * The session's revision facts (row S3), relayed for each projection the client publishes and each change of an
+     * editor's recording, as the binding's effect re-ran on the projection and the recording: what a policy close may
+     * rely on goes to the session, and the chats' `revision` region to the chat store.
+     */
+    let relayedFor: Readonly<{ status: RevisionStatusProjection; recording: boolean }> | undefined;
+    let chatsReady = false;
+    const relayFacts = (): void => {
+      const status = client?.status();
+      const ready = status?.sync.chats === 'ready';
+      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive. */
+      if (ready !== chatsReady) {
+        chatsReady = ready;
+        sendBack({ type: 'revisionChatsChanged', ready });
+      }
+      if (status === undefined || (relayedFor?.status === status && relayedFor.recording === recording)) {
+        return;
+      }
+      relayedFor = { status, recording };
+      const { sync } = status;
+      sendBack({
+        type: 'revisionState',
+        dirty: status.projectDirty,
+        recording,
+        pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
+        pendingCount: sync.pendingCount,
+      });
+      /* R11: the branch the checkout is on gives `revision.line` its producer. */
+      ports.chatFacts(projectId, {
+        dirty: status.projectDirty,
+        sync: chatSyncOf(sync),
+        ...(status.line.kind === 'unknown' ? {} : { branch: status.line.name }),
+      });
+    };
+
+    /*
+     * Where the workbench's file services are rooted (S27, S23). While the project is focused, the workbench follows
+     * the selected checkout's route: the route is installed before the move, since a `setRoot` at a route no
+     * configuration installed would leave every rooted view answering ESTALE. Only the focused project installs, as
+     * only its subtree mounted the follower: the installed set is the whole configuration's.
+     */
+    let checkoutFor: string | undefined;
+    let checkoutLive: { current: boolean } | undefined;
+    const followCheckout = (): void => {
+      const status = client?.status();
+      const checkoutRoot = status?.checkoutRoot;
+      /* The route ids, not the rows: the facet array is rebuilt on every publication. */
+      const linkedIds = (status?.branches ?? [])
+        .flatMap((row) =>
+          row.checkoutId === undefined || row.checkoutRoot !== `/checkouts/${row.checkoutId}` ? [] : [row.checkoutId],
+        )
+        .join(' ');
+      const key = !focused || checkoutRoot === undefined ? undefined : `${checkoutRoot}\0${linkedIds}`;
+      if (key === checkoutFor) {
+        return;
+      }
+      checkoutFor = key;
+      /* Two switches in flight are one person changing their mind: the superseded installation never lands. */
+      if (checkoutLive !== undefined) {
+        checkoutLive.current = false;
+        checkoutLive = undefined;
+      }
+      if (key === undefined || checkoutRoot === undefined) {
+        return;
+      }
+      const mounted = mountCheckoutRoutes(projectId, linkedIds, syncProjectRoots);
+      if (mounted === undefined) {
+        /* The file manager's own guard drops a `setRoot` that moves nothing, so following is idempotent. */
+        fileManagerRef.send({ type: 'setRoot', path: checkoutRoot, projectId });
+        return;
+      }
+      const live = { current: true };
+      checkoutLive = live;
+      // async-iife: bootstrap -- the settlement a caller would want is the `setRoot` itself.
+      void (async (): Promise<void> => {
+        try {
+          await mounted;
+        } catch (error) {
+          /* An installation the session stopped or a newer selection overtook is cut short, not faulted (D23). */
+          if (live.current) {
+            ports.reportFault(error);
+          }
+          return;
+        }
+        if (live.current) {
+          fileManagerRef.send({ type: 'setRoot', path: checkoutRoot, projectId });
+        }
+      })();
+    };
+
+    const followStatus = (): void => {
+      relayFacts();
+      followCheckout();
+    };
+
     /* Tear down the current client in the hook's cleanup order: the hold, the connection, the actor's binding. */
     const releaseClient = (): void => {
       const hold = releaseHold;
       const connection = closeConnection;
       const binding = unsubscribeBinding;
+      const statusSubscription = unsubscribeStatus;
       releaseHold = undefined;
       tree = undefined;
       closeConnection = undefined;
       unsubscribeBinding = undefined;
+      unsubscribeStatus = undefined;
       actorSentFor = undefined;
-      runIsolated([hold, connection, binding]);
+      runIsolated([hold, connection, binding, statusSubscription], ports.reportFault);
     };
 
     const followWorker = (): void => {
@@ -249,6 +467,7 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
       }
       releaseClient();
       if (client === undefined) {
+        followStatus();
         return;
       }
       const current = client;
@@ -259,6 +478,10 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
       sendActor();
       /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
       unsubscribeBinding = githubProjectBinding.subscribe(sendActor);
+      /* RV-W5b F12: only the focused project holds its revision long poll; one that gains focus pulls once open. */
+      current.focus?.(focused);
+      unsubscribeStatus = current.subscribe(followStatus);
+      followStatus();
     };
 
     /*
@@ -278,49 +501,102 @@ export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): Sessi
       current.send({ command: 'flushKeepalive' });
     };
 
-    followWorker();
-    const unregisterCut = ports.closeCut.register(closeCut);
-    requestSalt();
-
-    const fileManagerSubscription = fileManagerRef.subscribe({
-      next: followWorker,
-      error: () => undefined,
-    });
-    /*
-     * One user subscription, so the relay to the open client always runs before the actor is sent again, as the
-     * store's listener runs before the re-render does today. A refetch or a new display name is relayed too: `setUser`
-     * leaves D2's one-retry latch as it was.
-     */
-    const unsubscribeUserFacts = ports.sessionUser.subscribe(() => {
-      if (connected !== undefined) {
-        // async-iife: bootstrap -- the credential reports through the frame it sends.
-        void connected.setUser(ports.sessionUser.get());
+    /* Each step's release, as it is taken: a start that throws partway releases what it took, then rethrows (D23). */
+    let unregisterCut: (() => void) | undefined;
+    let unsubscribeFileManager: (() => void) | undefined;
+    let unsubscribeUserFacts: (() => void) | undefined;
+    let unsubscribeAnonymity: (() => void) | undefined;
+    let unsubscribeSalt: (() => void) | undefined;
+    let unsubscribeFocus: (() => void) | undefined;
+    let unsubscribeRecording: (() => void) | undefined;
+    const stop = (): void => {
+      if (checkoutLive !== undefined) {
+        checkoutLive.current = false;
       }
-      user = ports.sessionUser.get();
-      salt = saltOf();
-      requestSalt();
-      sendActorIfChanged();
-    });
-    const unsubscribeAnonymity = ports.anonymity.subscribe(() => {
-      anonymous = ports.anonymity.get(workspace);
-      sendActorIfChanged();
-    });
-    const unsubscribeSalt = ports.salt.subscribe(() => {
-      salt = saltOf();
-      requestSalt();
-      sendActorIfChanged();
-    });
-
-    return () => {
-      runIsolated([
-        () => {
-          fileManagerSubscription.unsubscribe();
-        },
-        unsubscribeUserFacts,
-        unsubscribeAnonymity,
-        unsubscribeSalt,
-        unregisterCut,
-        releaseClient,
-      ]);
+      runIsolated(
+        [
+          unsubscribeFileManager,
+          unsubscribeUserFacts,
+          unsubscribeAnonymity,
+          unsubscribeSalt,
+          unsubscribeFocus,
+          unsubscribeRecording,
+          unregisterCut,
+          releaseClient,
+        ],
+        ports.reportFault,
+      );
     };
-  });
+
+    try {
+      followWorker();
+      unregisterCut = ports.closeCut.register(closeCut);
+      requestSalt();
+
+      const fileManagerSubscription = fileManagerRef.subscribe({
+        next: followWorker,
+        error: () => undefined,
+      });
+      unsubscribeFileManager = () => {
+        fileManagerSubscription.unsubscribe();
+      };
+      /*
+       * One user subscription, so the relay to the open client always runs before the actor is sent again, as the
+       * store's listener runs before the re-render does today. A refetch or a new display name is relayed too:
+       * `setUser` leaves D2's one-retry latch as it was.
+       */
+      unsubscribeUserFacts = ports.sessionUser.subscribe(() => {
+        if (connected !== undefined) {
+          // async-iife: bootstrap -- the credential reports through the frame it sends.
+          void connected.setUser(ports.sessionUser.get());
+        }
+        user = ports.sessionUser.get();
+        salt = saltOf();
+        requestSalt();
+        sendActorIfChanged();
+      });
+      unsubscribeAnonymity = ports.anonymity.subscribe(() => {
+        anonymous = ports.anonymity.get(workspace);
+        sendActorIfChanged();
+      });
+      unsubscribeSalt = ports.salt.subscribe(() => {
+        salt = saltOf();
+        requestSalt();
+        sendActorIfChanged();
+      });
+      unsubscribeFocus = ports.focusedProject.subscribe(() => {
+        const next = ports.focusedProject.get() === projectId;
+        if (next === focused) {
+          return;
+        }
+        focused = next;
+        client?.focus?.(focused);
+        followCheckout();
+      });
+      unsubscribeRecording = ports.recording.subscribe(() => {
+        const next = ports.recording.get(projectId);
+        if (next === recording) {
+          return;
+        }
+        recording = next;
+        relayFacts();
+      });
+    } catch (error) {
+      stop();
+      throw error;
+    }
+
+    return stop;
+  };
+
+/**
+ * Build the `revisions` logic over its ports.
+ *
+ * @param ports - The session user, anonymity, salt, close-cut, focus, chat-facts and recording ports.
+ * @returns Callback logic that owns one project's revision-client lifecycle until it stops.
+ * @public
+ */
+export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): SessionRevisionsLogic =>
+  createCallbackLogic<SessionRevisionsEvent, SessionRevisionsInput>(({ input, sendBack }) =>
+    sessionRevisionsCallback(ports)({ input, sendBack: sendBack as (event: EventObject) => void }),
+  );

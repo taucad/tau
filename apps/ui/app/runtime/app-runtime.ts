@@ -17,6 +17,7 @@ import type {
 } from 'xstate';
 import { hashKey } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
+import { Topic } from '@taucad/events';
 import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
@@ -48,10 +49,12 @@ import type { RootFileFacade } from '#runtime/file-manager-facade.js';
 import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
 import {
+  createSessionRootSync,
   createSessionsRegistryLogic,
   sessionFileManagerOpener,
   sessionsRegistryInput,
 } from '#services/sessions-store.js';
+import { selectFocusTarget } from '#machines/focus.route-state.js';
 import {
   isPlacementOnThisDevice,
   isPlacementOnThisDeviceNow,
@@ -61,7 +64,7 @@ import {
 } from '#lib/agent-host-placement.js';
 import { createChoicesLogic, readChoices } from '#runtime/choices.js';
 import type { ChoicesModelCatalog, ChoicesPorts, ProjectChoices } from '#runtime/choices.js';
-import type { SessionRuntimeOpener } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener, SessionWiring, SessionsObservable } from '#services/sessions-store.js';
 import { store as preferenceStore } from '#hooks/use-cookie.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { getAllFlags } from '#flags/feature-flags.js';
@@ -172,8 +175,11 @@ const warnRejectedChatEvent = (rejection: EventRejection): void => {
 const createChatSessions = (
   library: ProjectLibrary,
   options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
+  focusedProject: SessionsObservable<string | undefined>,
 ): ChatSessionStore =>
   new ChatSessionStore({
+    /* A7b: the store reads the focused project from focus, not from a setter React calls. */
+    focusedProject,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined
@@ -251,6 +257,25 @@ const createChoicesPorts = (queryClient: QueryClient): ChoicesPorts => ({
     subscribe: onLoopbackAgentHostsChanged,
   },
 });
+
+/** A value the composition fills once the root exists: its value now, and its listeners. */
+type LateObservable<T> = SessionsObservable<T> & Readonly<{ set: (value: T) => void; notify: () => void }>;
+
+const lateObservable = <T>(initial: T): LateObservable<T> => {
+  let value = initial;
+  const changes = new Topic<void>({ name: 'appRuntime.lateObservable' });
+  const notify = (): void => {
+    changes.emit(undefined);
+  };
+  return {
+    get: () => value,
+    subscribe: (listener) => changes.subscribe(listener),
+    set: (next) => {
+      value = next;
+    },
+    notify,
+  };
+};
 
 /**
  * The module a session builds its project runtime with, by dynamic import (D5): the entry graph never reaches it.
@@ -354,7 +379,11 @@ export const createAppRuntime = ({
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
   });
-  const chatSessions = createChatSessions(projectLibrary, options);
+  /* A7b: the project focus has the person on, and whether the page is on screen, as the root's focus and `environment`
+   * report them once the root exists. The sessions' `presence` and `revisions` children and the chat store read them. */
+  const focusedProject = lateObservable<string | undefined>(undefined);
+  const documentVisible = lateObservable(false);
+  const chatSessions = createChatSessions(projectLibrary, options, focusedProject);
   composed.chatSessions = chatSessions;
   const unload = createUnloadSequencer();
   /* Focus's five ports (A5b): the library's route access at its epoch, the registry, the leave flush React registers,
@@ -374,6 +403,32 @@ export const createAppRuntime = ({
    * root exists, before any session can open. */
   const builtHost: { current: FileManagerHostRef | undefined } = { current: undefined };
   const choicesPorts = createChoicesPorts(queryClient);
+  /* A7b: what each session's facts are wired to. Each port is a closure over the composition, never machine context. */
+  const sessionWiring: SessionWiring = {
+    loadRevisions: async () => import('#runtime/session-revisions.js'),
+    loadHostConnector: async () => import('#runtime/host-connector.js'),
+    registerCloseCut: (cut) => unload.register('session', cut),
+    focusedProject,
+    documentVisible,
+    chatSessions,
+    choices: () => {
+      const { runtime } = composed;
+      return (runtime === undefined ? undefined : selectAppChoices(runtime.getSnapshot())) ?? readChoices(choicesPorts);
+    },
+    rootSync: (fileManagerRef, gone) =>
+      createSessionRootSync({
+        fileManagerRef,
+        gone,
+        files: {
+          awaitFileManager: async (fileManager, readiness, wait) =>
+            awaitFileManager(fileManager, readiness, {
+              ...(options.clock === undefined ? {} : { clock: options.clock }),
+              ...wait,
+            }),
+        },
+        telemetry: workspaceTelemetry,
+      }),
+  };
   const runtime = createActor(
     appRuntimeMachine.provide({
       actors: {
@@ -431,6 +486,7 @@ export const createAppRuntime = ({
             runtime: () => composed.runtime,
             options,
           }),
+          wiring: sessionWiring,
         }),
       },
     }),
@@ -443,7 +499,20 @@ export const createAppRuntime = ({
       },
     },
   );
-  const { fileManagerHost, leases } = runtime.getSnapshot().context;
+  const { fileManagerHost, leases, focus } = runtime.getSnapshot().context;
+  focus.subscribe((snapshot) => {
+    const next = selectFocusTarget(snapshot).target;
+    if (next !== focusedProject.get()) {
+      focusedProject.set(next);
+      focusedProject.notify();
+    }
+  });
+  /* Every report of the page reaches the sessions, as every `visibilitychange` reached the binding's listener. */
+  documentVisible.set(selectAppEnvironment(runtime.getSnapshot()).visible === true);
+  runtime.on('visibilityChanged', (event) => {
+    documentVisible.set(event.visible);
+    documentVisible.notify();
+  });
   builtHost.current = fileManagerHost;
   const store: LeaseStore = table.storeFor(leases);
   const buildOptions: FileManagerBuildOptions = options;

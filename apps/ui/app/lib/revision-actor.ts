@@ -94,6 +94,15 @@ export const setAnonymousRevisions = (workspace: string, anonymous: boolean): vo
 };
 
 /**
+ * Hear every change of any workspace's anonymity preference, outside React (the session's `revisions` child).
+ *
+ * @param listener - Called after each change; read {@link getAnonymousRevisions}.
+ * @returns The unsubscribe function.
+ * @public
+ */
+export const subscribeAnonymousRevisions = (listener: () => void): (() => void) => topic.subscribe(listener);
+
+/**
  * React binding for {@link getAnonymousRevisions}.
  *
  * @param workspace - Workspace slug from the route.
@@ -102,7 +111,7 @@ export const setAnonymousRevisions = (workspace: string, anonymous: boolean): vo
  */
 export const useAnonymousRevisions = (workspace: string): boolean =>
   useSyncExternalStore(
-    (listener) => topic.subscribe(listener),
+    subscribeAnonymousRevisions,
     () => getAnonymousRevisions(workspace),
     () => false,
   );
@@ -249,6 +258,51 @@ const fetchAccountSalt = async (workspace: string): Promise<string> => {
 };
 
 /**
+ * The account's salt for a workspace as host state holds it, outside React (the session's `revisions` child).
+ *
+ * @param input - Workspace slug and the signed-in account.
+ * @returns The salt, or `undefined` before the API has answered once.
+ * @public
+ */
+export const getRevisionSalt = (input: Readonly<{ workspace: string; userId: string }>): string | undefined =>
+  readSalt(saltKey(input.workspace, input.userId));
+
+/**
+ * Hear every salt the API answers, outside React.
+ *
+ * @param listener - Called after each answer; read {@link getRevisionSalt}.
+ * @returns The unsubscribe function.
+ * @public
+ */
+export const subscribeRevisionSalt = (listener: () => void): (() => void) => saltTopic.subscribe(listener);
+
+/**
+ * Ask the API for the account's salt once per account and workspace while nothing is held: the request
+ * {@link useRevisionSalt} makes, shared with every other caller. A failure is forgotten, so a later ask retries.
+ *
+ * @param input - Workspace slug and the signed-in account.
+ * @public
+ */
+export const requestRevisionSalt = (input: Readonly<{ workspace: string; userId: string }>): void => {
+  const { workspace } = input;
+  const key = saltKey(workspace, input.userId);
+  if (workspace === '' || readSalt(key) !== undefined || requestedSalts.has(key)) {
+    return;
+  }
+  requestedSalts.add(key);
+  // async-iife: bootstrap -- the answer lands in host state and every reader hears it.
+  void (async (): Promise<void> => {
+    try {
+      writeSalt(key, await fetchAccountSalt(workspace));
+      saltTopic.emit();
+    } catch {
+      /* Offline, or not signed in on the server: this device's salt stands in. */
+      requestedSalts.delete(key);
+    }
+  })();
+};
+
+/**
  * The signed-in account's salt for this workspace, fetched once per account
  * and workspace as soon as either is known, and cached in host state (EQ10
  * option (a)).
@@ -268,26 +322,16 @@ export const useRevisionSalt = (
   const { workspace, userId } = input;
   const key = userId === undefined ? undefined : saltKey(workspace, userId);
   const salt = useSyncExternalStore(
-    (listener) => saltTopic.subscribe(listener),
+    subscribeRevisionSalt,
     () => (key === undefined ? undefined : readSalt(key)),
     () => undefined,
   );
   useEffect(() => {
-    if (key === undefined || workspace === '' || salt !== undefined || requestedSalts.has(key)) {
+    if (userId === undefined || salt !== undefined) {
       return;
     }
-    requestedSalts.add(key);
-    // async-iife: bootstrap -- the answer lands in host state and re-renders every consumer.
-    void (async (): Promise<void> => {
-      try {
-        writeSalt(key, await fetchAccountSalt(workspace));
-        saltTopic.emit();
-      } catch {
-        /* Offline, or not signed in on the server: this device's salt stands in. */
-        requestedSalts.delete(key);
-      }
-    })();
-  }, [key, salt, workspace]);
+    requestRevisionSalt({ workspace, userId });
+  }, [salt, userId, workspace]);
   return salt;
 };
 /**

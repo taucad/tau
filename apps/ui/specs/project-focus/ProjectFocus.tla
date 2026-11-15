@@ -116,6 +116,11 @@
 \* after `live` the model already has. The editor's focused chat reaches focus through the registry
 \* (`chatFocused`, the port's `focusedChatResolved`), not through a prop the route handed the subtree, and
 \* the route no longer passes the subtree a chat or a native kernel id. No action or verdict changes.
+\* A7b: the session's own children report its visibility (from `environment` and focus), its revision facts
+\* and its parking, start its revision client and read connector, and follow the selected checkout, with
+\* nothing mounted; the route's binding relays none of them. `selectFocusTarget` moved beside the route
+\* state it reads (`focus.route-state.ts`), so the app runtime reads the focused project with it too. The
+\* sessions' facts were already the registry's in the model (environment here). No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

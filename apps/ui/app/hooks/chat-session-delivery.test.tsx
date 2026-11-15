@@ -100,7 +100,6 @@ it('should deliver a reply through the retained active session without a sidebar
   const session = current.get('mounted')!;
   const owner = createActor(projectSessionMachine, { input: { projectId: 'project' } });
   owner.start();
-  current.setFocusedProject('project');
   current.setProjectSession('project', owner);
   let rows: unknown[] = [];
   let deliver: (() => void) | undefined;
@@ -229,7 +228,6 @@ it('should publish the first held live reasoning chunk through the actual SDK be
   const session = current.get('mounted')!;
   const owner = createActor(projectSessionMachine, { input: { projectId: 'project' } });
   owner.start();
-  current.setFocusedProject('project');
   current.setProjectSession('project', owner);
   let rows: unknown[] = [];
   let deliver: (() => void) | undefined;

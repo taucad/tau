@@ -732,6 +732,14 @@ export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
       get: () => Pick<ChatSessionDeps, 'client' | 'watchRecordFile'> | undefined;
       subscribe: (listener: () => void) => () => void;
     }>;
+    /**
+     * The project the person is on, as focus says it (A7b): each time focus arrives at a project, its chats are bound
+     * to its live session again. Focus never names a chat's project: its caller does (PV-S4, L3 D9).
+     */
+    focusedProject?: Readonly<{
+      get: () => string | undefined;
+      subscribe: (listener: () => void) => () => void;
+    }>;
   }>;
 
 /** The revision facts one project's chats show (the project's route reports them). @public */
@@ -966,7 +974,7 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const { chatSession, dependencies, files, ...rootOptions } = options;
+    const { chatSession, dependencies, files, focusedProject, ...rootOptions } = options;
     if (dependencies !== undefined) {
       this.#deps = { ...this.#deps, ...dependencies };
     }
@@ -984,6 +992,17 @@ export class ChatSessionStore {
         actors: { admitTurn: chatTurnAdmission, lookUpModelAttempt: modelAttemptLookup },
       });
     this.#rootOptions = rootOptions;
+    if (focusedProject !== undefined) {
+      let focused = focusedProject.get();
+      this.#bindFocusedProject(focused);
+      focusedProject.subscribe(() => {
+        const next = focusedProject.get();
+        if (next !== focused) {
+          focused = next;
+          this.#bindFocusedProject(next);
+        }
+      });
+    }
     // E2E reads the same owner that drives the sidebar. Keeping this bridge
     // debug-only makes a liveness failure report the store's SDK/cache facts
     // and the project actors' run sets instead of guessing from labels.
@@ -2114,20 +2133,6 @@ export class ChatSessionStore {
   }
 
   /**
-   * Say which project the person is on, so its chats are bound to its live session. Focus never names a chat's
-   * project: its caller does (PV-S4, L3 D9).
-   *
-   * @param projectId - The focused project, or `undefined` on leaving.
-   * @public
-   */
-  public setFocusedProject(projectId: string | undefined): void {
-    if (projectId === undefined) {
-      return;
-    }
-    this.setProjectSession(projectId, this.#projectSessions.get(projectId));
-  }
-
-  /**
    * Say which chat the person has in front of them (R3). Every sidebar row holds
    * a view of its chat, so a view is not attention: only the focused chat, in an
    * active document, is attended when a turn ends.
@@ -2395,6 +2400,14 @@ export class ChatSessionStore {
     }
     const binding = await session.composer;
     await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
+  }
+
+  /** Bind the focused project's chats to its live session again, as focus arrives there (A7b). */
+  #bindFocusedProject(projectId: string | undefined): void {
+    if (projectId === undefined) {
+      return;
+    }
+    this.setProjectSession(projectId, this.#projectSessions.get(projectId));
   }
 
   async #readForeignSegment(path: string, client = this.#deps.client): Promise<Uint8Array<ArrayBuffer>> {

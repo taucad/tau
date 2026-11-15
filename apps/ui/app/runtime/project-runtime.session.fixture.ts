@@ -34,6 +34,8 @@ export type SessionRuntimeStandIn = SessionRuntime &
     supersede: () => void;
     /** Whether `close` ran. */
     isClosed: () => boolean;
+    /** Every parking signal and focused-chat retry the child sent, in order (A7b). */
+    signals: readonly string[];
   }>;
 
 /** The facts of a runtime whose project loaded and whose editor focused its chat. @public */
@@ -41,6 +43,7 @@ export const loadedSessionRuntimeFacts: SessionRuntimeFacts = {
   loaded: true,
   kernelRefusal: undefined,
   chatReady: true,
+  chatDeferred: false,
   focusedChat: undefined,
 };
 
@@ -62,6 +65,7 @@ export function openSessionRuntimeStandIn(
   const chats: SessionRuntimeChat[] = [];
   let kernelCurrent = true;
   let closed = false;
+  const signals: string[] = [];
   return {
     input,
     runtimeRef: root,
@@ -71,6 +75,12 @@ export function openSessionRuntimeStandIn(
       chats.push(chat);
     },
     kernelIsCurrent: () => kernelCurrent,
+    park: (parked) => {
+      signals.push(parked ? 'parkRuntime' : 'resumeRuntime');
+    },
+    retryFocusedChat: () => {
+      signals.push('retryEnsureFocusedChat');
+    },
     close: () => {
       if (closed) {
         return;
@@ -88,6 +98,7 @@ export function openSessionRuntimeStandIn(
       kernelCurrent = false;
     },
     isClosed: () => closed,
+    signals,
   };
 }
 

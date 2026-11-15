@@ -234,19 +234,24 @@ describe('UnloadProvider', () => {
 });
 
 /*
- * A0.2 (row S26, D26): the `useFlushOnClose` registrations the app mounts today, with the stage each declares. Five
- * are producers; the revision lifecycle's is the session stage — the close cut. The layout record's producer left
- * `workbench-record-host.tsx` in A8b and the entries host's left with the host in A9: the project runtime registers
- * both, and the persistence guard's registration walks the runtime's producers.
+ * A0.2 (row S26, D26): the `useFlushOnClose` registrations the app mounts today, with the stage each declares: five
+ * producers. The layout record's producer left `workbench-record-host.tsx` in A8b and the entries host's left with the
+ * host in A9: the project runtime registers both, and the persistence guard's registration walks the runtime's
+ * producers. The session stage's close cut left `useRevisionClientLifecycle` in A7b: each session's `revisions` child
+ * registers it on the sequencer through the app runtime's wiring.
  */
-const unloadRegistrations = [
+const reactRegistrations = [
   { site: 'routes/w.$workspace.$project/project-live-sessions.tsx', stage: 'producer' },
   { site: 'routes/w.$workspace.$project/view-settings-sync-host.tsx', stage: 'producer' },
-  { site: 'hooks/use-revision-status.ts', stage: 'session' },
   { site: 'hooks/use-editor-document-session.tsx', stage: 'producer' },
   { site: 'hooks/active-chat-provider.tsx', stage: 'producer' },
   { site: 'components/global-chat-flush-guard.tsx', stage: 'producer' },
 ] as const;
+
+/** The session's close cut, which the app runtime registers for each `revisions` child (A7b). */
+const sessionCut = { site: 'runtime/session-revisions.ts', stage: 'session' } as const;
+
+const unloadRegistrations = [...reactRegistrations, sessionCut] as const;
 
 /** Each registration's callback, as a step a row can hold open and release. */
 const heldRegistrations = (sequence: string[]) =>
@@ -288,16 +293,20 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     });
   });
 
-  it('should name the six registration sites with the stage each declares', async () => {
+  it('should name the five React registration sites with the stage each declares, and the session cut', async () => {
+    const read = async (site: string): Promise<string> =>
+      readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
+    expect(await read('runtime/app-runtime.ts')).toContain("unload.register('session', cut)");
+    expect(await read(sessionCut.site)).not.toContain('useFlushOnClose(');
     const declared = await Promise.all(
-      unloadRegistrations.map(async ({ site }) => {
-        const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
+      reactRegistrations.map(async ({ site }) => {
+        const source = await read(site);
         return [...source.matchAll(/useFlushOnClose\([\s\S]*?\{ stage: '(producer|session)' \}\s*,?\s*\)/gu)].map(
           (match) => match[1],
         );
       }),
     );
-    expect(declared).toEqual(unloadRegistrations.map(({ stage }) => [stage]));
+    expect(declared).toEqual(reactRegistrations.map(({ stage }) => [stage]));
   });
 
   it('should settle every producer on hidden before the session stage runs, and run only the session stage on pagehide', async () => {
@@ -329,7 +338,7 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
       });
     }
     await waitFor(() => {
-      expect(sequence.at(-1)).toBe('session:hooks/use-revision-status.ts:hidden:done');
+      expect(sequence.at(-1)).toBe('session:runtime/session-revisions.ts:hidden:done');
     });
     const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
     const producerDone = sequence.filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done'));
@@ -339,8 +348,8 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     sequence.length = 0;
     globalThis.dispatchEvent(new Event('pagehide'));
     expect(sequence).toEqual([
-      'session:hooks/use-revision-status.ts:pagehide:start',
-      'session:hooks/use-revision-status.ts:pagehide:done',
+      'session:runtime/session-revisions.ts:pagehide:start',
+      'session:runtime/session-revisions.ts:pagehide:done',
     ]);
   });
   it('should settle an actor-registered producer with the React ones on hidden before any session stage (round 15)', async () => {
@@ -379,7 +388,7 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
       await Promise.resolve();
     });
     await waitFor(() => {
-      expect(sequence.at(-1)).toBe('session:hooks/use-revision-status.ts:hidden:done');
+      expect(sequence.at(-1)).toBe('session:runtime/session-revisions.ts:hidden:done');
     });
     const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
     expect(sequence.slice(0, firstSession)).toContain('producer:actor:hidden:done');

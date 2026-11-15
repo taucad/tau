@@ -16,8 +16,8 @@ import {
 } from '#routes/w.$workspace.$project/project-route-intent.js';
 import type { ProjectRouteIntentRoute } from '#routes/w.$workspace.$project/project-route-intent.js';
 import { useFocus, useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
-import { selectProjectRouteState } from '#machines/focus.route-state.js';
-import type { CommittedProjectRoute, FocusRegistryView, FocusSnapshot } from '#machines/focus.route-state.js';
+import { selectFocusTarget, selectProjectRouteState } from '#machines/focus.route-state.js';
+import type { CommittedProjectRoute, FocusRegistryView } from '#machines/focus.route-state.js';
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
 import type { SessionsMachineContext } from '#machines/sessions.machine.js';
 import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
@@ -50,32 +50,6 @@ const selectFocusRegistryView = (context: SessionsMachineContext): FocusRegistry
 
 const sameRegistryView = (left: FocusRegistryView, right: FocusRegistryView): boolean =>
   left.status === right.status && left.closed === right.closed;
-
-/**
- * The project whose session is the focused one, whether it is kept behind the route's state, and whether the route is
- * on its way somewhere else.
- *
- * Focus opening or on a project makes that project's session the focused one. While focus resolves, leaves, is blocked
- * by a failed leave flush or holds another project's answer, the project it was on stays focused, inert, until the move settles
- * (today's `resolved`/`pending`); a project the route has not settled on never supplies providers to the one being
- * opened. Only a move in progress shows the overlay: a held answer is the notice the person reads.
- */
-const selectFocusTarget = (
-  focus: FocusSnapshot,
-): Readonly<{ target: string | undefined; retained: boolean; moving: boolean }> => {
-  const { answer, on, request } = focus.context;
-  if (focus.hasTag('on-project')) {
-    return { target: answer?.projectId, retained: false, moving: false };
-  }
-  const away = on !== undefined && (request?.home === true || request?.projectId !== on);
-  if (focus.matches('resolving') || focus.matches('leaving') || focus.matches('flushFailed')) {
-    return { target: away ? on : undefined, retained: away, moving: away };
-  }
-  if (focus.matches('held') && away) {
-    return { target: on, retained: true, moving: false };
-  }
-  return { target: undefined, retained: false, moving: false };
-};
 
 /**
  * The route gate: renders the shell, every live project's subtree and the route state, all derived from focus, the

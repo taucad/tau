@@ -11,7 +11,7 @@ import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
 import { createSessionsActor } from '#services/sessions-store.js';
-import type { SessionRuntimeOpener } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener, SessionWiring } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
@@ -64,12 +64,6 @@ const resolveFocusedChat = (projectId: string, chatId: string): void => {
   const runtime = runtimes.findLast((candidate) => candidate.input.projectId === projectId && !candidate.isClosed());
   runtime?.set({ focusedChat: { requestedChatId: runtime.chats.at(-1)?.chatId, chatId } });
 };
-
-/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor({
-  openFileManager: (projectId) => openSessionFileManagerStandIn(projectId),
-  openRuntime: runtimeOpener,
-}).start();
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -175,11 +169,49 @@ const chatSessionStore = {
   get: () => undefined,
   setProjectSession: () => undefined,
   setRevisionFacts: () => undefined,
-  setFocusedProject: () => undefined,
   publishProjectHostConnector,
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
   cancelProjectedRun,
 };
+/* A7b: each session publishes its project's host connector from its own `hostConnector` child, over the file manager
+ * its `fileManager` child opened. A row that sets `fileManagerReady` opens one with a worker and the bridge the
+ * connector reads; the rest open one with no worker, so they publish nothing. The revision client is not this suite's. */
+const routeWorker = { name: 'route-worker' } as unknown as Worker;
+const sessionWiring: SessionWiring = {
+  loadRevisions: async () => ({
+    createSessionRevisionsPorts: (ports) => ports as never,
+    sessionRevisionsCallback: () => () => () => undefined,
+  }),
+  loadHostConnector: async () => import('#runtime/host-connector.js'),
+  registerCloseCut: () => () => undefined,
+  focusedProject: { get: () => undefined, subscribe: () => () => undefined },
+  documentVisible: { get: () => true, subscribe: () => () => undefined },
+  chatSessions: chatSessionStore as unknown as SessionWiring['chatSessions'],
+  choices: () => ({
+    computePlacement: { state: 'local' },
+    computeSelectionRevision: 0,
+    computeReuseMode: 'durable',
+    computeReuseRevision: 0,
+    defaultExecution: { kind: 'tau', model: 'fixture-model' },
+    modelCatalog: { status: 'loading' },
+    modelPinning: true,
+    defaultKernel: 'openscad',
+    testingEnabled: true,
+  }),
+  rootSync: () => ({ syncProjectRoots: projectWorkspace.syncProjectRoots, close: () => undefined }),
+};
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor({
+  openFileManager: (projectId) =>
+    openSessionFileManagerStandIn(
+      projectId,
+      fileManagerReady ? { worker: routeWorker, context: projectFileManagerRef.getSnapshot().context } : {},
+    ),
+  openRuntime: runtimeOpener,
+  wiring: sessionWiring,
+}).start();
+
 /** The desktop shell's bridge, when a row stands in for the desktop app; otherwise the web build's none. */
 let desktopShellBridge: unknown;
 vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
@@ -353,8 +385,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 /* The session binding is headless and has its own suites; this route suite is
  * about which subtrees are mounted, so its two app-level handles are stubs. */
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionClient: () => undefined,
-  useRevisionClientLifecycle: () => revisionClient,
+  useRevisionClient: () => revisionClient,
   useRevisionClientStatus: () => revisionStatus(),
   useRevisionStatus: () => undefined,
   useProjectRole: () => 'owner',
@@ -367,6 +398,12 @@ vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     defaultExecution: { kind: 'tau', model: 'fixture-model' },
     resolveModel: (id: string) => ({ id, name: id, isResolved: false, provider: { id: 'unknown', name: 'Unknown' } }),
+  }),
+  resolveCatalogModel: (id: string) => ({
+    id,
+    name: id,
+    isResolved: false,
+    provider: { id: 'unknown', name: 'Unknown' },
   }),
 }));
 /* The `Mod+S` registration needs the application root's `KeyboardProvider`,
@@ -816,7 +853,7 @@ describe('project route session identity', () => {
     expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
   });
 
-  it('opens unopened chats on their own persisted host and retains one browser host until unmount', async () => {
+  it('opens unopened chats on their own persisted host and retains one browser host until the session closes', async () => {
     fileManagerReady = true;
     storedHostSettings.set('chat-browser', {
       activeExecution: { kind: 'tau', model: 'model-browser' },
@@ -850,8 +887,14 @@ describe('project route session identity', () => {
     });
     expect((browserClientOptions[0] as { systemPrompt: string }).systemPrompt).toContain('model-browser');
     expect(daemonClientTransports).toHaveLength(1);
+    /* A7b: the connector is the session's, so leaving the route keeps it (I5); the session's close withdraws it. */
     view.unmount();
-    expect(connectorReleases[0]).toHaveBeenCalledOnce();
+    expect(connectorReleases[0]).not.toHaveBeenCalled();
+    expect(browserHostLeaseReleases[0]).not.toHaveBeenCalled();
+    sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
+    await waitFor(() => {
+      expect(connectorReleases[0]).toHaveBeenCalledOnce();
+    });
     expect(browserHostLeaseReleases[0]).toHaveBeenCalledOnce();
   });
   it('should settle parameters and both UI stores, and leave the cut to flushSync', async () => {

@@ -204,6 +204,7 @@ export function openSessionProjectRuntime(
       loaded: project.context.project !== undefined,
       kernelRefusal: selectProjectKernelRefusal(project),
       chatReady: editor.matches('ready') && !editor.matches({ ready: { operation: 'ensuringFocusedChat' } }),
+      chatDeferred: editor.matches({ ready: { operation: 'focusedChatDeferred' } }),
       focusedChat:
         editor.matches({ ready: { operation: 'idle' } }) && focusedChatId !== undefined
           ? { requestedChatId, chatId: focusedChatId }
@@ -232,6 +233,13 @@ export function openSessionProjectRuntime(
       );
     },
     kernelIsCurrent: () => selectionFor().key === selection.key,
+    /* R3: the session decides; the project machine owns the cad units (A7b, row S5). */
+    park: (parked) => {
+      projectRef.send({ type: parked ? 'parkRuntime' : 'resumeRuntime' });
+    },
+    retryFocusedChat: () => {
+      editorRef.send({ type: 'retryEnsureFocusedChat' });
+    },
     close: () => {
       if (closed) {
         return;

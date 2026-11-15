@@ -321,11 +321,6 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 vi.mock('#hooks/use-revision-status.js', () => {
   const useStatus = (): RevisionStatusProjection | undefined =>
     useSyncExternalStore(revisionStatus.subscribe, revisionStatus.get, revisionStatus.get);
-  const revisionClient = {
-    subscribeEvents: () => () => undefined,
-    quiesce: async () => undefined,
-    send: () => undefined,
-  };
   return {
     useRevisionClient: () => undefined,
     useRevisionClientStatus: useStatus,

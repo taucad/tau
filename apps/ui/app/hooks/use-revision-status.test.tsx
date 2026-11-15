@@ -12,6 +12,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import { createActor, setup, types } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { useEffect } from 'react';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { createIsomorphicGitRevisionPort, createRevisionHttpClient } from '@taucad/revisions';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
@@ -31,9 +33,10 @@ import {
   getRevisionClient,
   revisionClientTestApi,
   useRevisionClient,
-  useRevisionClientLifecycle,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
+import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
+import type { fileManagerMachine as realFileManagerMachine } from '#machines/file-manager.machine.js';
 import type { GitRemoteCredential } from '@taucad/revisions';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 
@@ -294,8 +297,17 @@ function Consumer(): React.JSX.Element {
   return <div data-testid='consumer' />;
 }
 
+/* A7b: the session's `revisions` child owns the lifecycle; this starts it for as long as the row mounts it. */
 function Owner(): React.JSX.Element {
-  useRevisionClientLifecycle();
+  useEffect(
+    () =>
+      startSessionRevisionsStandIn({
+        projectId,
+        fileManagerRef: fileManagerRef as unknown as ActorRefFrom<typeof realFileManagerMachine>,
+        ...(environment === undefined ? {} : { sequencer: environment.sequencer }),
+      }),
+    [],
+  );
   return <div data-testid='owner' />;
 }
 

@@ -82,6 +82,11 @@ const samples: Samples = {
   ],
   attention: [{ type: 'attention', count: 1 }],
   chatRequested: [{ type: 'chatRequested', chatId: 'chat-1' }],
+  /* The `revisions` child's word that the project's chats arrived, which the session passes to its `project` (A7b). */
+  revisionChatsChanged: [
+    { type: 'revisionChatsChanged', ready: true },
+    { type: 'revisionChatsChanged', ready: false },
+  ],
   revisionState: [
     { type: 'revisionState', dirty: true, pushed: false, pendingCount: 1 },
     { type: 'revisionState', dirty: false, pushed: true, recording: true },
@@ -106,6 +111,7 @@ const machine = projectSessionMachine.provide({
     project: silent,
     agentHost: silent,
     compute: silent,
+    presence: silent,
   },
 });
 const events: readonly ProjectSessionMachineEvent[] = Object.values(samples).flat();

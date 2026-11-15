@@ -17,10 +17,10 @@
  *   `choices` when a chat attaches, as the ref is read today (row S32);
  * - the browser agent host's project lease is taken by the first browser attach and released when the actor stops.
  *
- * The chat store, the `choices` read and the root synchronisation are ports. The chat store becomes a runtime child
- * in A2; `choices` is the runtime child A6a built; root synchronisation is the file-manager facade's, which has no
- * source outside React before A6c, so A7b feeds it from the session's file manager. Ports live in this closure, never
- * in a machine's context (D4). Nothing in the app imports this module yet: A7b loads it lazily from the session (D5).
+ * The chat store, the `choices` read and the root synchronisation are ports. The chat store is the app runtime's (A2);
+ * `choices` is the runtime child A6a built; root synchronisation is the session file manager's own, which the session's
+ * `fileManager` child builds beside it and hands the session in the invoke input (A7b), never through its context
+ * (D4). Ports live in this closure. The session loads this module lazily (D5): the entry graph never reaches it.
  *
  * @module
  */
@@ -56,8 +56,10 @@ export type HostConnectorChatStore = Pick<ChatSessionStore, 'publishProjectHostC
 /** The ports the connector reads. A7b supplies the real ones. */
 export type HostConnectorPorts = Readonly<{
   chatSessions: HostConnectorChatStore;
-  /** The current choices, read when a chat attaches: today the binding's ref over four hooks. */
+  /** The current choices, read when a chat attaches: `choices` as the app runtime last reported it. */
   choices: () => ProjectChoices;
+  /** Where a failure in a teardown goes, so the session is not faulted by a cleanup (D23). */
+  reportFault: (error: unknown) => void;
 }>;
 
 /** One session's connector. */
@@ -73,10 +75,13 @@ export type HostConnectorEvent = Readonly<{ type: 'never' }>;
 
 export type HostConnectorLogic = CallbackActorLogic<HostConnectorEvent, HostConnectorInput>;
 
+/** The callback a `hostConnector` child runs, for a composition that loads this module lazily (D5). */
+export type HostConnectorCallback = (params: Readonly<{ input: HostConnectorInput }>) => () => void;
+
 /**
  * The concrete kernel a live session runs: a stored manual preference wins; a row without one keeps its concrete
  * kernel, which behaves as Auto with that owner would, since this connector carries no snapshot facts to route on
- * (blueprint D2). A copy of the binding's `liveSessionKernel`, which A7b deletes with the binding's effect.
+ * (blueprint D2).
  */
 const liveSessionKernel = ({
   stored,
@@ -94,13 +99,16 @@ const liveSessionKernel = ({
 };
 
 /**
- * Build the `hostConnector` logic over its ports.
+ * The `hostConnector` callback over its ports.
  *
- * @param ports - The chat store and the `choices` read.
- * @returns Callback logic that keeps one project's read connector published while its file manager is ready.
+ * @param ports - The chat store, the `choices` read and the fault report.
+ * @returns The callback a `hostConnector` child runs until it stops.
+ * @public
  */
-export const createHostConnectorLogic = (ports: HostConnectorPorts): HostConnectorLogic =>
-  createCallbackLogic<HostConnectorEvent, HostConnectorInput>(({ input }) => {
+// oxlint-disable-next-line max-lines-per-function -- One connector: its publication and its lease share the closure.
+export const hostConnectorCallback =
+  (ports: HostConnectorPorts): HostConnectorCallback =>
+  ({ input }) => {
     const { projectId, fileManagerRef, syncProjectRoots } = input;
     const { chatSessions } = ports;
     let browserHostRelease: (() => void) | undefined;
@@ -276,8 +284,8 @@ export const createHostConnectorLogic = (ports: HostConnectorPorts): HostConnect
     follow();
     const subscription = fileManagerRef.subscribe({ next: follow, error: () => undefined });
 
+    /* Every step runs even when one throws; a failure is reported, so a teardown never faults the session (D23). */
     return () => {
-      const failures: unknown[] = [];
       for (const step of [
         () => {
           subscription.unsubscribe();
@@ -288,13 +296,20 @@ export const createHostConnectorLogic = (ports: HostConnectorPorts): HostConnect
         try {
           step?.();
         } catch (error) {
-          failures.push(error);
+          ports.reportFault(error);
         }
       }
       withdraw = undefined;
       browserHostRelease = undefined;
-      if (failures.length > 0) {
-        throw failures[0];
-      }
     };
-  });
+  };
+
+/**
+ * Build the `hostConnector` logic over its ports.
+ *
+ * @param ports - The chat store, the `choices` read and the fault report.
+ * @returns Callback logic that keeps one project's read connector published while its file manager is ready.
+ * @public
+ */
+export const createHostConnectorLogic = (ports: HostConnectorPorts): HostConnectorLogic =>
+  createCallbackLogic<HostConnectorEvent, HostConnectorInput>(({ input }) => hostConnectorCallback(ports)({ input }));

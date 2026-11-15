@@ -4,10 +4,12 @@
  *
  * The registry is real (`createSessionsActor` on a `StepClock`), and so are the unload sequencer,
  * `LiveProjectSessions`, the binding, the persistence guard and `ProjectProvider` with its lease and the
- * runtime's producer set. Only the leaves are stand-ins: the project and editor actors (as the leased
+ * runtime's producer set. Since A7b the registry carries the session wiring the app runtime composes: each
+ * session's `revisions` and `hostConnector` children run the real modules, and its presence reads focus and
+ * the page's visibility. Only the leaves are stand-ins: the project and editor actors (as the leased
  * project runtime spawns them, since A6b; before it, as `useActorRef` returned them), the file manager,
- * the revision client and the chat store. Each row renders under StrictMode, as the app does in
- * development.
+ * the revision client, focus, the choices and the chat store. Each row renders under StrictMode, as the app
+ * does in development.
  */
 
 import { StrictMode, createContext, useContext, useEffect, useSyncExternalStore } from 'react';
@@ -33,7 +35,10 @@ import { projectSessionParkWindowMilliseconds } from '#machines/project-session.
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
-import type { SessionRuntimeOpener } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener, SessionsObservable, SessionWiring } from '#services/sessions-store.js';
+import { revisionClients } from '#services/revision-client-registry.js';
+import { focusedProjectStandIn } from '#services/focused-project.fixture.js';
+import type { ProjectChoices } from '#runtime/choices.js';
 import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
@@ -129,13 +134,17 @@ type RevisionStatus = Readonly<{
   }>;
 }>;
 
-/** One project's revision client: the session's close cut and the focus long poll. */
+/** One project's revision client: the session's close cut, the focus long poll and what the lifecycle sends it. */
 type FixtureRevisionClient = Readonly<{
   focus: ReturnType<typeof vi.fn<(focused: boolean) => void>>;
   quiesce: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  /* The lifecycle's open and close of the client: the I5 row watches these, which outlive the hook (A7b). */
+  /* The lifecycle's open and close of the client: the I5 row watches these, which outlive the binding (A7b). */
   open: ReturnType<typeof vi.fn<() => void>>;
   close: ReturnType<typeof vi.fn<() => void>>;
+  send: ReturnType<typeof vi.fn<(command: unknown) => void>>;
+  setUser: ReturnType<typeof vi.fn<(user: unknown) => Promise<void>>>;
+  setCredential: ReturnType<typeof vi.fn<(source: unknown) => Promise<boolean>>>;
+  saveRevision: ReturnType<typeof vi.fn<(trigger?: string) => Promise<void>>>;
   status: () => RevisionStatus;
   subscribe: (listener: () => void) => () => void;
   setStatus: (patch: Partial<RevisionStatus>) => void;
@@ -156,6 +165,10 @@ const createRevisionClient = (order: string[], projectId: string): FixtureRevisi
     }),
     open: vi.fn<() => void>(),
     close: vi.fn<() => void>(),
+    send: vi.fn<(command: unknown) => void>(),
+    setUser: vi.fn(async (_user: unknown) => undefined),
+    setCredential: vi.fn(async (_source: unknown) => true),
+    saveRevision: vi.fn(async (_trigger?: string) => undefined),
     status: () => status,
     subscribe: (listener) => {
       listeners.add(listener);
@@ -204,7 +217,6 @@ const fixtures = vi.hoisted(() => ({
   order: [] as string[],
   actors: new Map<string, unknown>(),
   revisionClients: new Map<string, unknown>(),
-  lifecycleMounts: [] as string[],
   fileManagers: new Map<string, unknown>(),
   /** The file manager each project's session provider was last rendered with. */
   providedFileManagers: new Map<string, unknown>(),
@@ -279,6 +291,8 @@ type FixtureFileManager = Readonly<{
   watchRecordFile: undefined;
 }>;
 
+const fixtureWorker = { name: 'fixture-worker' } as unknown as Worker;
+
 const fileManagerOf = (projectId: string): FixtureFileManager => {
   const existing = fixtures.fileManagers.get(projectId) as FixtureFileManager | undefined;
   if (existing !== undefined) {
@@ -292,6 +306,8 @@ const fileManagerOf = (projectId: string): FixtureFileManager => {
     fileManagerRef: createFixtureActor(`fileManager:${projectId}`, {
       states: ['ready'],
       context: {
+        /* A7b: the session's `revisions` and `hostConnector` children start once the file manager has a worker. */
+        worker: fixtureWorker,
         rootDirectory: `/projects/${projectId}`,
         openFileSystemBridge: vi.fn((_root: string, _mode: string) => ({ bridge: 'first' })),
         openRevisionSessionPort: vi.fn((_kind: string, _projectId: string) => ({ port: 'revisions' })),
@@ -448,20 +464,15 @@ vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
 vi.mock('#hooks/use-revision-status.js', async () => {
   const { useProject } = await import('#hooks/use-project.js');
+  const { revisionClients } = await import('#services/revision-client-registry.js');
   return {
-    useRevisionClientLifecycle: () => {
-      const { projectId } = useProject();
-      useEffect(() => {
-        fixtures.lifecycleMounts.push(`mount:${projectId}`);
-        const client = revisionClientOf(projectId);
-        client.open();
-        return () => {
-          fixtures.lifecycleMounts.push(`close:${projectId}`);
-          client.close();
-        };
-      }, [projectId]);
-      return revisionClientOf(projectId);
+    /* The project's one client, in the real table the session's close reads it from (`peekRevisionClient`). */
+    getRevisionClient: ({ projectId, worker }: { readonly projectId: string; readonly worker: Worker }) => {
+      const client = revisionClientOf(projectId);
+      revisionClients.set(projectId, { client: client as never, worker });
+      return client;
     },
+    useRevisionClient: () => revisionClientOf(useProject().projectId),
     useRevisionClientStatus: (client: FixtureRevisionClient | undefined) =>
       useSyncExternalStore(
         (listener) => client?.subscribe(listener) ?? (() => undefined),
@@ -480,6 +491,13 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: (
 vi.mock('#hooks/use-models.js', () => ({
   /* The app runtime's `choices` derives the default model with it (A6b). */
   catalogDefaultModelId: () => undefined,
+  /* The session's connector resolves a chat's model against the catalog its choices hold (A7b). */
+  resolveCatalogModel: (id: string) => ({
+    id,
+    name: id,
+    isResolved: false,
+    provider: { id: 'unknown', name: 'Unknown' },
+  }),
   useModels: () => {
     const { model } = useSyncExternalStore(choiceStore.subscribe, choiceStore.get);
     return {
@@ -570,7 +588,6 @@ async function stopProjectedRun(chatId: string): Promise<'stopped' | 'continuing
 const chatSessions = mock<ChatSessionStore>({
   setRevisionFacts: vi.fn(),
   setProjectSession: vi.fn(),
-  setFocusedProject: vi.fn(),
   publishProjectHostConnector: vi.fn(() => unpublishConnector),
   getChatHostSettings: vi.fn(async () => undefined),
   cancelProjectedRun: vi.fn(stopProjectedRun),
@@ -579,6 +596,8 @@ const chatSessions = mock<ChatSessionStore>({
 });
 
 const { LiveProjectSessions } = await import('#routes/w.$workspace.$project/project-live-sessions.js');
+const sessionRevisionsModule = await import('#runtime/session-revisions.js');
+const hostConnectorModule = await import('#runtime/host-connector.js');
 
 // ===========================================================================
 // Harness
@@ -647,19 +666,65 @@ function SessionStageProbe(): undefined {
   return undefined;
 }
 
-/** The app's root composition around the live sessions: app runtime, unload sequencer, query client, registry. */
-const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => (
-  <StrictMode>
-    <AppRuntimeProvider runtime={appRuntime}>
-      <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
-        {sessionProbe ? <SessionStageProbe /> : null}
-        <QueryClientProvider client={queryClient}>
-          <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
-        </QueryClientProvider>
-      </UnloadProvider>
-    </AppRuntimeProvider>
-  </StrictMode>
-);
+/** The project focus is on, as the route's focus says it (A7b): what the sessions and the chat store hear. */
+const focusedProject = focusedProjectStandIn();
+
+/** The page's visibility as `environment` reports it: each `visibilitychange` is a report. */
+const documentVisible: SessionsObservable<boolean> = {
+  get: () => visibility === 'visible',
+  subscribe: (listener) => {
+    document.addEventListener('visibilitychange', listener);
+    return () => {
+      document.removeEventListener('visibilitychange', listener);
+    };
+  },
+};
+
+/** The session wiring the app runtime composes (A7b), over the rows' stand-ins. */
+const sessionWiring = (): SessionWiring => ({
+  /* Loaded with the suite, so a row's first open does not wait on the transform the app's chunk never needs. */
+  loadRevisions: async () => sessionRevisionsModule,
+  loadHostConnector: async () => hostConnectorModule,
+  /* `environment`'s sequencer, read when the child registers: the rows start it after the registry. */
+  registerCloseCut: (cut) => unloadEnvironment?.sequencer.register('session', cut) ?? (() => undefined),
+  focusedProject,
+  documentVisible,
+  chatSessions,
+  choices: () => ({
+    computePlacement: { state: 'local' },
+    computeSelectionRevision: 0,
+    computeReuseMode: 'durable',
+    computeReuseRevision: 0,
+    defaultExecution: { kind: 'tau', model: choiceStore.get().model },
+    modelCatalog: { status: 'loading' },
+    modelPinning: true,
+    defaultKernel: choiceStore.get().kernel as ProjectChoices['defaultKernel'],
+    testingEnabled: true,
+  }),
+  rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+});
+
+/**
+ * The app's root composition around the live sessions: app runtime, unload sequencer, query client, registry. The
+ * route's focus moves with it, as the focus child moves it in the app.
+ */
+const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => {
+  if (focusedProject.get() !== focus?.projectId) {
+    focusedProject.set(focus?.projectId);
+  }
+  return (
+    <StrictMode>
+      <AppRuntimeProvider runtime={appRuntime}>
+        <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
+          {sessionProbe ? <SessionStageProbe /> : null}
+          <QueryClientProvider client={queryClient}>
+            <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
+          </QueryClientProvider>
+        </UnloadProvider>
+      </AppRuntimeProvider>
+    </StrictMode>
+  );
+};
 
 const flushTasks = async (): Promise<void> => {
   await act(async () => {
@@ -722,10 +787,18 @@ beforeEach(() => {
   /* Each session opens a stand-in file manager, ready at once, so the provider is handed a real session's ref. */
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   /* A6d: each session's child builds its runtime through the real session module, over the stand-in project runtime. */
+  focusedProject.set(undefined);
+  revisionClients.clear();
   registry = createSessionsActor({
     clock,
-    openFileManager: (id) => openSessionFileManagerStandIn(id),
+    /* The stand-in's lifecycle, over the project's fixture file manager, which the binding and the session's children
+     * read and a row moves. */
+    openFileManager: (id) => ({
+      ...openSessionFileManagerStandIn(id),
+      fileManagerRef: fileManagerOf(id).fileManagerRef as never,
+    }),
     openRuntime: sessionRuntimeOpener(queryClient),
+    wiring: sessionWiring(),
   }).start();
   appRuntime = createAppRuntime({
     clock,
@@ -736,7 +809,6 @@ beforeEach(() => {
   fixtures.order.length = 0;
   fixtures.actors.clear();
   fixtures.revisionClients.clear();
-  fixtures.lifecycleMounts.length = 0;
   fixtures.fileManagers.clear();
   fixtures.retryManifestObservation.clear();
   fixtures.chatProducers.clear();
@@ -756,7 +828,7 @@ afterEach(() => {
 });
 
 // ===========================================================================
-// ProjectSessionBinding: one row per relay (S1 to S7, S27), under StrictMode
+// The binding and, since A7b, the session's own children: one row per relay (S1 to S7, S27), under StrictMode
 // ===========================================================================
 
 /* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
@@ -1013,17 +1085,6 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     );
   });
 
-  it('should name only the focused project to the chat store, and clear it when focus leaves (S7)', async () => {
-    const view = await openAndRender([projectA, projectB], { projectId: projectA });
-    expect(vi.mocked(chatSessions.setFocusedProject).mock.calls.at(-1)).toEqual([projectA]);
-    expect(vi.mocked(chatSessions.setFocusedProject).mock.calls).not.toContainEqual([projectB]);
-
-    view.rerender(tree(undefined));
-    await flushTasks();
-
-    expect(vi.mocked(chatSessions.setFocusedProject).mock.calls.at(-1)).toEqual([undefined]);
-  });
-
   it('should hold the revision long poll for the focused project only (S7)', async () => {
     const view = await openAndRender([projectA, projectB], { projectId: projectA });
     expect(revisionClientOf(projectA).focus).toHaveBeenLastCalledWith(true);
@@ -1073,11 +1134,11 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(retrySpyOf(projectA)).toHaveBeenCalled();
   });
 
-  it('should mount one revision client lifecycle per live project and cut the close through it (S27)', async () => {
+  it('should open one revision client per live project from its session, and cut the close through it (S27, A7b)', async () => {
     await openAndRender([projectA, projectB], { projectId: projectA });
-    /* StrictMode mounts, unmounts and remounts every effect once. */
-    expect(fixtures.lifecycleMounts.filter((entry) => entry === `mount:${projectA}`)).toHaveLength(2);
-    expect(fixtures.lifecycleMounts.filter((entry) => entry === `mount:${projectB}`)).toHaveLength(2);
+    /* The session's `revisions` child opens it, not an effect: StrictMode's remount no longer reopens it. */
+    expect(revisionClientOf(projectA).open).toHaveBeenCalledOnce();
+    expect(revisionClientOf(projectB).open).toHaveBeenCalledOnce();
 
     await act(async () => {
       registry.send({ type: 'close', projectId: projectB, reason: 'user' });
@@ -1087,7 +1148,8 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
 
     expect(revisionClientOf(projectB).quiesce).toHaveBeenCalledOnce();
     expect(revisionClientOf(projectA).quiesce).not.toHaveBeenCalled();
-    expect(fixtures.lifecycleMounts.at(-1)).toBe(`close:${projectB}`);
+    expect(revisionClientOf(projectB).close).toHaveBeenCalledOnce();
+    expect(revisionClientOf(projectA).close).not.toHaveBeenCalled();
   });
 });
 
@@ -1107,7 +1169,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(session?.getSnapshot().matches('live')).toBe(true);
   });
 
-  it.fails('I5: should still hear that the window hid after its binding unmounted', async () => {
+  it('I5: should still hear that the window hid after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
@@ -1117,7 +1179,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(sessionOf(projectA)?.getSnapshot().context.visible).toBe(false);
   });
 
-  it.fails('I5: should keep the host connector of a live session published after its binding unmounted', async () => {
+  it('I5: should keep the host connector of a live session published after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     const withdrawnBefore = unpublishConnector.mock.calls.length;
 
@@ -1152,11 +1214,10 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(vi.mocked(chatSessions.setProjectSession).mock.calls.findLast(([id]) => id === projectA)?.[1]).toBe(session);
   });
 
-  /* A0.2 carried this row to A7a: the revision client a live session owns must outlive its binding (row S27). */
-  it.fails('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
+  /* A0.2 carried this row to A7a; A7b made it pass: the session's `revisions` child owns the client (row S27). */
+  it('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     const client = revisionClientOf(projectA);
-    /* StrictMode opens, closes and opens once more: the client is open when the row starts. */
     expect(client.open.mock.calls.length).toBeGreaterThan(client.close.mock.calls.length);
     const closesBefore = client.close.mock.calls.length;
 

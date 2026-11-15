@@ -255,7 +255,6 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
   const projectSession = createActor(projectSessionMachine, { input: { projectId: row.resourceId } });
   projectSession.start();
   harness.projectSession = projectSession;
-  store.setFocusedProject(row.resourceId);
   store.setProjectSession(row.resourceId, projectSession);
 
   function Client(): React.JSX.Element {

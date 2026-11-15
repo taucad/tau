@@ -4,7 +4,9 @@
  *
  * 1. `running`: initial; the child owns the lifecycle until the parent stops it
  *
- * The rows keep what `useRevisionClientLifecycle` (`hooks/use-revision-status.ts` 1531 to 1657) does today.
+ * The first rows keep what `useRevisionClientLifecycle` did before A7b deleted it. The A7b rows add what the session
+ * binding and `WorkbenchCheckoutRoot` did from React: the revision facts (S3), the chats' arrival (S1), the focused
+ * project (F12) and the checkout the workbench follows (S23).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, setup, types } from 'xstate';
@@ -847,9 +849,8 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     const { client, received, session } = await startSession();
     expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([]);
 
-    client.setStatus({
-      sync: { ...revisionStatusHarness.status.sync, chats: 'ready' } as RevisionStatusProjection['sync'],
-    });
+    const sync: RevisionStatusProjection['sync'] = { ...revisionStatusHarness.status.sync, chats: 'ready' };
+    client.setStatus({ sync });
     client.setStatus({ projectDirty: true });
     expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([
       { type: 'revisionChatsChanged', ready: true },
@@ -909,9 +910,9 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     ]);
     expect(fileManager.sent).toEqual([]);
 
-    pending.splice(0).forEach((resolve) => {
+    for (const resolve of pending.splice(0)) {
       resolve();
-    });
+    }
     await settle();
     expect(fileManager.sent).toEqual([setRoot('/checkouts/co-2')]);
     session.stop();
@@ -935,9 +936,9 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     await settle();
     expect(syncProjectRoots).toHaveBeenCalledTimes(2);
 
-    pending.splice(0).forEach((resolve) => {
+    for (const resolve of pending.splice(0)) {
       resolve();
-    });
+    }
     await settle();
     expect(fileManager.sent).toEqual([setRoot('/checkouts/co-3')]);
     session.stop();
@@ -975,9 +976,11 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
   it('D23: should report a teardown that throws rather than fault the session, and still release the rest', async () => {
     const { client, fake, fileManager, session, guard } = await startSession();
     const failure = new Error('close threw');
-    client.close = () => {
-      throw failure;
-    };
+    Object.assign(client, {
+      close: () => {
+        throw failure;
+      },
+    });
 
     session.stop();
 

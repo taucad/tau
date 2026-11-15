@@ -15,6 +15,7 @@ import { createSessionsActor } from '#services/sessions-store.js';
 import type {
   HostConnectorModule,
   SessionRevisionsModule,
+  SessionRuntimeFacts,
   SessionsObservable,
   SessionWiring,
 } from '#services/sessions-store.js';
@@ -22,7 +23,7 @@ import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fix
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
-import type { SessionRuntimeFacts } from '#services/sessions-store.js';
+import { createSessionRevisionsPorts } from '#runtime/session-revisions.js';
 import type { SessionRevisionsEmitted, SessionRevisionsInput } from '#runtime/session-revisions.js';
 import type { HostConnectorInput } from '#runtime/host-connector.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
@@ -54,7 +55,7 @@ const observable = <T>(initial: T): SessionsObservable<T> & Readonly<{ set: (nex
   };
 };
 
-type Started<TInput> = Readonly<{ input: TInput; stopped: () => boolean }>;
+type Started<Input> = Readonly<{ input: Input; stopped: () => boolean }>;
 
 type Harness = Readonly<{
   registry: ReturnType<typeof createSessionsActor>;
@@ -88,7 +89,7 @@ const harness = (
   const loads = { revisions: 0, hostConnector: 0 };
 
   const revisionsModule: SessionRevisionsModule = {
-    createSessionRevisionsPorts: (wiring) => wiring as never,
+    createSessionRevisionsPorts,
     sessionRevisionsCallback:
       () =>
       ({ input, sendBack }) => {
@@ -128,7 +129,9 @@ const harness = (
       getChatHostSettings: () => undefined,
       setRevisionFacts: () => undefined,
     } as unknown as SessionWiring['chatSessions'],
-    choices: () => ({}) as ReturnType<SessionWiring['choices']>,
+    choices: () => {
+      throw new Error('no chat attaches in these rows, so nothing reads the choices');
+    },
     rootSync: () => {
       let closed = false;
       const sync = { syncProjectRoots: async () => undefined, closed: () => closed };

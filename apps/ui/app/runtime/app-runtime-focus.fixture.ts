@@ -13,6 +13,7 @@ import { appFocusPolicy, createFocusComposition } from '#runtime/app-runtime-foc
 import { browserEnvironmentHost, createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
 import type { EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
 import { createSessionsRegistryLogic, sessionsRegistryInput } from '#services/sessions-store.js';
+import type { SessionsRegistryFiles } from '#services/sessions-store.js';
 import type { FocusCompositionOptions, FocusHandle } from '#runtime/app-runtime-focus.js';
 
 /** A started focus host and its stop. */
@@ -99,6 +100,7 @@ export const startRuntimeSlice = ({
   sharedWorker = () => undefined,
   readHost = browserEnvironmentHost,
   sequencer = createUnloadSequencer(),
+  registry = {},
   clock,
   inspect,
   ...sources
@@ -107,6 +109,8 @@ export const startRuntimeSlice = ({
     sharedWorker?: () => Worker | undefined;
     readHost?: () => EnvironmentHost | undefined;
     sequencer?: UnloadSequencer;
+    /** The registry's other composition: its file managers, runtimes and session wiring (none by default). */
+    registry?: Omit<SessionsRegistryFiles, 'sharedWorker'>;
   }> &
   Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect'>): RuntimeSliceFixture => {
   const composition = createFocusComposition(sources);
@@ -115,7 +119,7 @@ export const startRuntimeSlice = ({
       context: types<{ sessions: ActorRefFrom<typeof sessionsMachine>; focus: ActorRefFrom<FocusMachine> }>(),
     },
     actors: {
-      sessions: createSessionsRegistryLogic({ sharedWorker }),
+      sessions: createSessionsRegistryLogic({ ...registry, sharedWorker }),
       environment: createEnvironmentLogic(readHost, { sequencer }),
       focus: createFocusMachine(appFocusPolicy),
       focusLibrary: composition.logics.library,

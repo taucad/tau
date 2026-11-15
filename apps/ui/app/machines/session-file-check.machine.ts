@@ -13,8 +13,8 @@ import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults
  *
  * `idle → checking → slow`, and back to `idle` when the check settles. Each check the session starts carries an id,
  * which the report echoes (MC-R18), so a report the session has moved past is dropped there. The session starts a check
- * when its availability leaves `settled`, and again for each new revision client, which has published nothing and
- * counts its patience from zero; a check that starts while one runs replaces it.
+ * for each new revision client, which has published nothing and counts its patience from zero, and for each later
+ * check its client reports; a check that starts while one runs replaces it.
  */
 
 /** How long a check of the model's files may run before the "Preparing model" view offers a way out. Milliseconds. */

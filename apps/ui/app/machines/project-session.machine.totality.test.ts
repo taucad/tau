@@ -89,8 +89,9 @@ const samples: Samples = {
   ],
   /* A14: the `revisions` child's word on the file check, and the `fileCheck` child's patience; answered everywhere. */
   fileCheckChanged: [
-    { type: 'fileCheckChanged', settled: false },
-    { type: 'fileCheckChanged', settled: true },
+    { type: 'fileCheckChanged', settled: false, published: true },
+    { type: 'fileCheckChanged', settled: false, published: false },
+    { type: 'fileCheckChanged', settled: true, published: true },
   ],
   fileCheckSlow: [{ type: 'fileCheckSlow', check: 1 }],
   revisionState: [

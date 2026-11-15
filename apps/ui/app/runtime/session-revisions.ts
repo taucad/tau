@@ -152,7 +152,7 @@ export type SessionRevisionsEvent = Readonly<{ type: 'never' }>;
 export type SessionRevisionsEmitted =
   | Readonly<{ type: 'revisionState'; dirty: boolean; pushed: boolean; recording: boolean; pendingCount: number }>
   | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>
-  | Readonly<{ type: 'fileCheckChanged'; settled: boolean }>;
+  | Readonly<{ type: 'fileCheckChanged'; settled: boolean; published: boolean }>;
 
 export type SessionRevisionsLogic = CallbackActorLogic<SessionRevisionsEvent, SessionRevisionsInput>;
 
@@ -371,7 +371,7 @@ export const sessionRevisionsCallback =
       const settled = isFileCheckSettled(status, ports.cloudOpen.get(projectId));
       if (settled !== fileCheckSettled) {
         fileCheckSettled = settled;
-        sendBack({ type: 'fileCheckChanged', settled });
+        sendBack({ type: 'fileCheckChanged', settled, published: status !== undefined });
       }
     };
     const relayFacts = (): void => {

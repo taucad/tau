@@ -86,8 +86,9 @@ export type ProjectSessionOpenRequest = Readonly<{
 /**
  * How far the session's file check has come (A14).
  *
- * `pending` until the revision client has published a status and the model is not checking files; `slow` once the
- * check has run for `modelCheckPatienceMilliseconds` while still pending; `settled` after.
+ * `pending` through a revision client's first check, until it has published a status and the model is not checking
+ * files; `slow` once a check, first or later, has run for `modelCheckPatienceMilliseconds`; `settled` otherwise. A
+ * later check leaves it `settled` until it turns slow, because the open waits only for a client's first check (I20).
  *
  * @public
  */
@@ -235,7 +236,7 @@ export type ProjectSessionMachineEvent =
   /** The `revisions` child: whether the project's chats have arrived, which a deferred focused chat waits for (S1). */
   | { readonly type: 'revisionChatsChanged'; readonly ready: boolean }
   /** The `revisions` child (A14): whether its client has published a status and the model is not checking files. */
-  | { readonly type: 'fileCheckChanged'; readonly settled: boolean }
+  | { readonly type: 'fileCheckChanged'; readonly settled: boolean; readonly published: boolean }
   /** The `fileCheck` child (A14): check `check` has run for its patience. */
   | { readonly type: 'fileCheckSlow'; readonly check: number }
   /**
@@ -713,7 +714,9 @@ export const projectSessionMachine = setup({
      * `filesChecking` is the same wait. */
     fileCheckChanged: ({ context, event }, enq) => {
       if (!event.settled) {
-        return context.fileCheckRunning ? {} : { context: startFileCheck(context, enq, false) };
+        /* A check is a later one only once this client has published a status: one that starts before it (a Tau Cloud
+         * open that ended first) is still the client's first, which the open waits for (I20). */
+        return context.fileCheckRunning ? {} : { context: startFileCheck(context, enq, !event.published) };
       }
       if (!context.fileCheckRunning) {
         /* A repeat of the settled report. */

@@ -89,10 +89,11 @@ const revisionStatus = createFact<RevisionStatusProjection | undefined>(undefine
 const revisionsStandIn: SessionRevisionsCallback = ({ sendBack }) => {
   let settled: boolean | undefined;
   const report = (): void => {
-    const next = isFileCheckSettled(revisionStatus.get(), false);
+    const status = revisionStatus.get();
+    const next = isFileCheckSettled(status, false);
     if (next !== settled) {
       settled = next;
-      sendBack({ type: 'fileCheckChanged', settled: next });
+      sendBack({ type: 'fileCheckChanged', settled: next, published: status !== undefined });
     }
   };
   report();

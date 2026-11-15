@@ -75,7 +75,7 @@ const harness = () => {
     reports,
     /** The newest `revisions` child's word on the file check. */
     report: (settled: boolean) => {
-      revisions.at(-1)?.({ type: 'fileCheckChanged', settled });
+      revisions.at(-1)?.({ type: 'fileCheckChanged', settled, published: true });
     },
     /** The `fileManager` child reports a new file manager (the shared worker was replaced). */
     rebuild: () => {
@@ -124,6 +124,19 @@ describe('the session file check (A14)', () => {
       { state: 'live', availability: 'slow' },
       { state: 'live', availability: 'settled' },
     ]);
+    actor.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('should take a check that starts before the client published anything as its first, so the open waits for it (I20)', () => {
+    const { actor, guard, reports, revisions } = harness();
+    /* A Tau Cloud open still owed settles the first word with no status. */
+    revisions.at(-1)?.({ type: 'fileCheckChanged', settled: true, published: false });
+    expect(reports().at(-1)).toEqual({ state: 'live', availability: 'settled' });
+
+    /* The open ends before the first status: the check that follows is the first, and pending. */
+    revisions.at(-1)?.({ type: 'fileCheckChanged', settled: false, published: false });
+    expect(reports().at(-1)).toEqual({ state: 'live', availability: 'pending' });
     actor.stop();
     expect(guard.take()).toEqual([]);
   });

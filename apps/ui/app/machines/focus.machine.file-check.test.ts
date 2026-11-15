@@ -63,11 +63,11 @@ const createRevisionsStandIn = () => {
     },
     /** Report the file check from the newest child, as `session-revisions.ts` does on each projection. */
     report: (settled: boolean) => {
-      children.at(-1)?.({ type: 'fileCheckChanged', settled });
+      children.at(-1)?.({ type: 'fileCheckChanged', settled, published: true });
     },
     /** Report the file check from one project's newest child. */
     reportFor: (id: string, settled: boolean) => {
-      byProject.get(id)?.({ type: 'fileCheckChanged', settled });
+      byProject.get(id)?.({ type: 'fileCheckChanged', settled, published: true });
     },
     children,
     loadRevisions: async () => {

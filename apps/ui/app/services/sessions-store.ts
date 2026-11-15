@@ -706,7 +706,7 @@ const presenceOn = (wiring: SessionWiring) =>
 const unwiredFileManagerChild = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
 /* A14: with no revision client there is no file check to wait for, so it is settled at once. */
 const unwiredRevisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack }) => {
-  sendBack({ type: 'fileCheckChanged', settled: true });
+  sendBack({ type: 'fileCheckChanged', settled: true, published: false });
   return undefined;
 });
 const unwiredPresence = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);

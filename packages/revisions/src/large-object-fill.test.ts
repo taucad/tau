@@ -779,6 +779,27 @@ describe('large-object fill', () => {
     expect(harness.text('models/b.step')).toBe('solid bb');
   });
 
+  it('reads the head’s tree for what a fetch by oid found missing, and fills from it', async () => {
+    const harness = setup({ byOid: true });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.fetchLargeObjects).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    harness.fetched()?.reject(new RevisionPortError('MISSING_LARGE_OBJECT', 'The remote holds no such object.'));
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    expect(harness.readTree.mock.calls[0]?.[0]).toBe(head);
+    harness.finish(harness.fullTree());
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
+  });
+
   it('answers a caller that names what it wrote every time, even when that is nothing (D10)', async () => {
     const harness = setup();
     await harness.fill.fill(place, head, new Map());

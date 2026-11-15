@@ -1264,6 +1264,48 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     next.session.stop();
   });
 
+  it('should keep the debt while the registry answered with no checkout, as a failed registry read does', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    log.length = 0;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: ada,
+      prepare: (client) => {
+        client.setStatus({ registrySettled: true, checkoutId: undefined, checkoutRoot: undefined });
+      },
+    });
+    await settle();
+    /* No checkout to cut: nothing is asked of it, and its own hidden cut clears nothing. */
+    expect(cuts(log)).toEqual([]);
+    const [cut] = next.fake.cuts;
+    await cut?.('hidden');
+    expect(debts.port.read(adaKey)).toBeDefined();
+
+    /* The registry is read again and holds the checkout: the owed cut is asked and settles the debt. */
+    next.client.setStatus({ checkoutId: 'live', checkoutRoot: `/projects/${projectId}` });
+    await settle();
+    expect(cuts(log)).toEqual(['b:saveRevision:close', 'b:saveRevision:close']);
+    expect(debts.port.read(adaKey)).toBeUndefined();
+    next.session.stop();
+  });
+
+  it('should send the owing person as the actor before asking for the owed cut', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    log.length = 0;
+    const next = await openDocument('b', workerB, { log, debts, user: ada });
+    await settle();
+    const actorSent = log.findIndex((line) => line.startsWith('b:send:setActor:') && line.includes('"usr_1"'));
+    const cutAsked = log.indexOf('b:saveRevision:close');
+    expect(actorSent).toBeGreaterThanOrEqual(0);
+    expect(cutAsked).toBeGreaterThan(actorSent);
+    next.session.stop();
+  });
+
   it('should owe nothing once the close cut has answered, so the next open takes no cut', async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();

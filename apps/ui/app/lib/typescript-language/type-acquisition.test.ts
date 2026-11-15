@@ -524,7 +524,11 @@ describe('TypeAcquisitionController network shape', () => {
  * range redirects (302) on esm.sh; `fetch` follows it, so the fake answers the requested URL directly.
  */
 describe('TypeAcquisitionController wide declaration packages', () => {
-  function workerFixture(files: ReadonlyMap<string, string>, types: ReadonlyMap<string, string>) {
+  function workerFixture(
+    files: ReadonlyMap<string, string>,
+    types: ReadonlyMap<string, string>,
+    latency: (url: string) => number = () => 1,
+  ) {
     const service = new TypeScriptProjectService({
       syncFs: {
         readFileText: () => undefined,
@@ -537,15 +541,17 @@ describe('TypeAcquisitionController wide declaration packages', () => {
     });
     let inFlight = 0;
     let peak = 0;
+    const fetched: string[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string) => {
         inFlight += 1;
         peak = Math.max(peak, inFlight);
         await new Promise((resolve) => {
-          setTimeout(resolve, 1);
+          setTimeout(resolve, latency(input));
         });
         inFlight -= 1;
+        fetched.push(input);
         const header = types.get(input);
         if (header) {
           return new Response('', { headers: { 'X-TypeScript-Types': header } });
@@ -577,16 +583,24 @@ describe('TypeAcquisitionController wide declaration packages', () => {
         errors.push(error);
       },
     });
-    const diagnose = async (text: string): Promise<number[]> => {
+    const open = (text: string): EditorDocument => {
       const document = new EditorDocument('main.ts', text);
       service.open(document.uri, document.text, document.version);
       controller.watch(document);
+      return document;
+    };
+    const diagnose = async (text: string): Promise<number[]> => {
+      const document = open(text);
       await vi.advanceTimersByTimeAsync(500);
       await vi.advanceTimersByTimeAsync(5000);
       return service.getDiagnostics(document.uri).map((row) => row.code);
     };
     return {
       diagnose,
+      open,
+      codes: (document: EditorDocument) => service.getDiagnostics(document.uri).map((row) => row.code),
+      subscribe: (listener: () => void) => controller.subscribe(listener),
+      fetched: () => fetched.length,
       errors,
       peak: () => peak,
       dispose: () => {
@@ -677,6 +691,62 @@ describe('TypeAcquisitionController wide declaration packages', () => {
       expect(errors).toEqual([]);
       expect(codes).toEqual([2322]);
     } finally {
+      dispose();
+    }
+  });
+
+  it('should publish a fast package as soon as its own graph loads while a wide one is still loading', async () => {
+    // A wide package whose 60 siblings each take 100 ms, beside a narrow one three files deep at 1 ms each.
+    const wide = 'https://esm.sh/wide@1.0.0/';
+    const narrow = 'https://esm.sh/narrow@1.0.0/';
+    const names = ['first', ...Array.from({ length: 59 }, (_, index) => `fn${index}`)];
+    const files = new Map<string, string>([
+      [`${wide}index.d.ts`, names.map((name) => `export * from "./${name}.d.ts";`).join('\n')],
+      ...names.map((name): [string, string] => [
+        `${wide}${name}.d.ts`,
+        `export declare function ${name}(value: number): number;`,
+      ]),
+      [`${narrow}index.d.ts`, 'export * from "./schema.d.ts";'],
+      [`${narrow}schema.d.ts`, 'export * from "./types.d.ts";'],
+      [`${narrow}types.d.ts`, 'export declare function parse(value: number): number;'],
+    ]);
+    const { open, codes, subscribe, fetched, errors, dispose } = workerFixture(
+      files,
+      new Map([
+        ['https://esm.sh/wide', `${wide}index.d.ts`],
+        ['https://esm.sh/narrow', `${narrow}index.d.ts`],
+      ]),
+      (url) => (url.startsWith(wide) && !url.endsWith('/index.d.ts') ? 100 : 1),
+    );
+    const published: Array<{ codes: number[]; fetched: number }> = [];
+    let document: EditorDocument | undefined;
+    const stop = subscribe(() => {
+      if (document) {
+        published.push({ codes: codes(document), fetched: fetched() });
+      }
+    });
+    try {
+      document = open(
+        [
+          "import { first } from 'https://esm.sh/wide';",
+          "import { parse } from 'https://esm.sh/narrow';",
+          'export const bad: string = parse(1);',
+          'export const alsoBad: string = first(1);',
+        ].join('\n'),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(errors).toEqual([]);
+      expect(codes(document)).toEqual([2322, 2322]);
+      // The narrow package's real error is published while the wide import still reports 2307, and long
+      // before the wide package's 60 siblings have all arrived: it does not wait in line behind them.
+      const narrowFirst = published.find((entry) => entry.codes.includes(2322));
+      expect(narrowFirst?.codes).toEqual([2307, 2322]);
+      expect(narrowFirst?.fetched).toBeLessThan(30);
+      // Each package refreshes editors once, after its files and alias are in place, not once per file.
+      expect(published).toHaveLength(2);
+    } finally {
+      stop();
       dispose();
     }
   });

@@ -41,10 +41,16 @@ const scanDelay = 500;
 const fetchConcurrency = 6;
 const declarationFile = /\.d\.(?:ts|mts|cts)$/u;
 
-/** A counting gate. A finished task hands its slot straight to the next waiter, so the bound is exact. */
+/**
+ * A counting gate, fair across lanes. Each acquisition queues in its own lane and a freed slot goes to
+ * the next lane in turn, so a package with three declarations does not wait behind another's three
+ * hundred. A finished task hands its slot straight to the next waiter, so the bound is exact.
+ */
 class RequestGate {
   private active = 0;
-  private readonly waiting: Array<() => void> = [];
+  /** Lanes with waiters, in service order: a lane served moves to the back. */
+  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Resolvers of request-slot waits, each woken once in lane order; not event subscriptions.
+  private readonly lanes = new Map<string, Array<() => void>>();
   // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly rejects constructor parameter properties.
   private readonly limit: number;
 
@@ -52,24 +58,43 @@ class RequestGate {
     this.limit = limit;
   }
 
-  public async run<T>(task: () => Promise<T>): Promise<T> {
+  public async run<T>(lane: string, task: () => Promise<T>): Promise<T> {
     if (this.active < this.limit) {
       this.active += 1;
     } else {
       await new Promise<void>((resolve) => {
-        this.waiting.push(resolve);
+        const waiting = this.lanes.get(lane);
+        if (waiting) {
+          waiting.push(resolve);
+        } else {
+          this.lanes.set(lane, [resolve]);
+        }
       });
     }
     try {
       return await task();
     } finally {
-      const next = this.waiting.shift();
+      const next = this.next();
       if (next) {
         next();
       } else {
         this.active -= 1;
       }
     }
+  }
+
+  private next(): (() => void) | undefined {
+    const first = this.lanes.entries().next();
+    if (first.done) {
+      return undefined;
+    }
+    const [lane, waiting] = first.value;
+    const next = waiting.shift();
+    this.lanes.delete(lane);
+    if (waiting.length > 0) {
+      this.lanes.set(lane, waiting);
+    }
+    return next;
   }
 }
 
@@ -199,7 +224,8 @@ export class TypeAcquisitionController {
     return this.disposed;
   }
 
-  private async inject(uri: string, text: string): Promise<void> {
+  /** `publish: false` leaves the revision to the caller, which publishes a whole package at once. */
+  private async inject(uri: string, text: string, publish = true): Promise<void> {
     if (this.isDisposed()) {
       return;
     }
@@ -207,9 +233,15 @@ export class TypeAcquisitionController {
     if (this.isDisposed()) {
       return;
     }
+    this.injectedUris.add(uri);
+    if (publish) {
+      this.publish();
+    }
+  }
+
+  private publish(): void {
     this.revision += 1;
     this.changes.emit(this.revision);
-    this.injectedUris.add(uri);
   }
 
   private schedule(document: EditorDocument): void {
@@ -344,24 +376,37 @@ export class TypeAcquisitionController {
     }
   }
 
+  /**
+   * Publish one package as soon as its own graph has loaded, independent of any other import. Its files
+   * and alias reach the worker first and the revision then moves once, so editors refresh once per
+   * package rather than once per file.
+   */
   private async register(specifier: string, uri: string, files: Map<string, string>): Promise<void> {
     if (this.isDisposed()) {
       return;
     }
-    for (const [path, text] of files) {
-      await this.inject(`file://${path}`, text);
+    let changed = false;
+    try {
+      for (const [path, text] of files) {
+        await this.inject(`file://${path}`, text, false);
+        changed = true;
+      }
+      if (this.isDisposed()) {
+        return;
+      }
+      await this.options.client.request({ kind: 'setModuleAlias', specifier, uri });
+      changed = true;
+    } finally {
+      // A worker failure part way still publishes what reached it, as per-file publication did.
+      if (changed && !this.isDisposed()) {
+        this.publish();
+      }
     }
-    if (this.isDisposed()) {
-      return;
-    }
-    await this.options.client.request({ kind: 'setModuleAlias', specifier, uri });
     if (this.isDisposed()) {
       return;
     }
     this.knownPackages.add(specifier);
     this.failures.delete(specifier);
-    this.revision += 1;
-    this.changes.emit(this.revision);
     for (const [path, text] of files) {
       this.declarationSources.set(path, text);
     }
@@ -369,16 +414,16 @@ export class TypeAcquisitionController {
   }
 
   /**
-   * Fetch through the project's request gate, once per URL. A failure, or a response without what the
-   * caller needs, is forgotten so the bounded retry asks again.
+   * Fetch through the project's request gate in the acquisition's own lane, once per URL. A failure, or a
+   * response without what the caller needs, is forgotten so the bounded retry asks again.
    */
-  private async network(url: string, want: 'types' | 'text'): Promise<Fetched> {
+  private async network(lane: string, url: string, want: 'types' | 'text'): Promise<Fetched> {
     const key = `${want} ${url}`;
     const known = this.fetched.get(key);
     if (known) {
       return known;
     }
-    const promise = this.gate.run(async (): Promise<Fetched> => {
+    const promise = this.gate.run(lane, async (): Promise<Fetched> => {
       this.abort.signal.throwIfAborted();
       const response = await fetch(url, { signal: this.abort.signal });
       return {
@@ -407,7 +452,7 @@ export class TypeAcquisitionController {
     if (declarationFile.test(new URL(moduleUrl).pathname)) {
       return moduleUrl;
     }
-    const module = await this.network(moduleUrl, 'types');
+    const module = await this.network(key, moduleUrl, 'types');
     this.abort.signal.throwIfAborted();
     if (!module.ok || !module.types) {
       throw new Error(`No declarations for ${key}: ${module.status}`);
@@ -452,7 +497,7 @@ export class TypeAcquisitionController {
       const url = await this.declarationEntry(key, moduleUrl);
       const read = async (target: string): Promise<string> => {
         this.abort.signal.throwIfAborted();
-        const response = await this.network(target, 'text');
+        const response = await this.network(key, target, 'text');
         if (!response.ok || response.text === undefined) {
           throw new Error(`Declaration fetch failed: ${target}: ${response.status}`);
         }
@@ -509,7 +554,7 @@ export class TypeAcquisitionController {
             dependency && dependencyVersion
               ? `${dependency}@${dependencyVersion}${specifier.slice(dependency.length)}`
               : specifier;
-          const response = await this.network(`${esmShBase}/${request}`, 'types');
+          const response = await this.network(key, `${esmShBase}/${request}`, 'types');
           if (!response.ok || !response.types) {
             throw new Error(`No declarations for ${specifier}`);
           }

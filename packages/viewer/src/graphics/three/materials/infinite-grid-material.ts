@@ -53,6 +53,7 @@ export function createInfiniteGridGlMaterial(
     smallPhase = [0, 0],
     largePhase = [0, 0],
     alphaThreshold = 0.01,
+    gridCenter = [0, 0],
   } = properties ?? {};
 
   // Validate and convert axes parameter to numeric index
@@ -114,7 +115,7 @@ export function createInfiniteGridGlMaterial(
       },
       // The view target's foot on the grid plane, not the camera's: the camera's foot drifts from the model as FOV falls.
       uGridCenter: {
-        value: new THREE.Vector2(),
+        value: new THREE.Vector2(...gridCenter),
       },
     },
 
@@ -299,7 +300,8 @@ export function createInfiniteGridGlMaterial(
 // - work correctly with logarithmic depth buffer
 // - use secure uniform-based axis configuration instead of string interpolation
 /**
- * Create the WebGL infinite grid `ShaderMaterial` without its visual-override handle.
+ * Create the WebGL infinite grid `ShaderMaterial` without its visual-override handle. It stays centred on
+ * `properties.gridCenter`; use {@link createInfiniteGridGlMaterial} to keep it under a moving view.
  *
  * @param properties - Optional grid properties such as sizes, colours and axes.
  * @returns The grid shader material.

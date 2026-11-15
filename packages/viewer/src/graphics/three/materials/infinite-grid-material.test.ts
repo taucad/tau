@@ -1,7 +1,10 @@
 // @vitest-environment node
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createInfiniteGridGlMaterial } from '#graphics/three/materials/infinite-grid-material.js';
+import {
+  createInfiniteGridGlMaterial,
+  infiniteGridMaterial,
+} from '#graphics/three/materials/infinite-grid-material.js';
 import { infiniteGridFadeEndRatio, infiniteGridFadeStartRatio } from '#graphics/three/utils/infinite-grid-frame.js';
 
 describe('createInfiniteGridGlMaterial', () => {
@@ -54,6 +57,15 @@ describe('createInfiniteGridGlMaterial', () => {
     expect((material.uniforms['uSmallPhase']!.value as THREE.Vector2).toArray()).toEqual([0.25, 0.75]);
     expect((material.uniforms['uLargePhase']!.value as THREE.Vector2).toArray()).toEqual([0.125, 0.625]);
     expect((material.uniforms['uGridCenter']!.value as THREE.Vector2).toArray()).toEqual([12, -7]);
+  });
+
+  it('centres the grid on the initial gridCenter property, the origin by default', () => {
+    expect((createInfiniteGridGlMaterial().material.uniforms['uGridCenter']!.value as THREE.Vector2).toArray()).toEqual(
+      [0, 0],
+    );
+    expect(
+      (infiniteGridMaterial({ gridCenter: [3, -4] }).uniforms['uGridCenter']!.value as THREE.Vector2).toArray(),
+    ).toEqual([3, -4]);
   });
 
   it('uses backend depth bias instead of displacing the physical plane', () => {

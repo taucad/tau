@@ -493,4 +493,18 @@ describe('the authority bound on readFile', () => {
     const { whoAmI } = withBoundedReadFile(handlersOf(0));
     expect(whoAmI()).toBe('authority');
   });
+
+  /* The bound wraps the call, not a copy of the method: a handler set's `readFile` as it stands when the read comes. */
+  it('reads through the handler set’s readFile as it is at the call, not as it was when served', async () => {
+    const unrooted = handlersOf(0);
+    const rooted = handlersOf(0);
+    const bounded = withBoundedReadFile(unrooted);
+    const derived = withHostContentCalls(rooted) as unknown as BoundedHandlers;
+    const replaced = new TextEncoder().encode('replaced\n');
+    const replacement = async (): Promise<Uint8Array<ArrayBuffer>> => replaced;
+    Object.assign(unrooted, { readFile: replacement });
+    Object.assign(rooted, { readFile: replacement });
+    await expect(bounded.readFile('a.ts')).resolves.toStrictEqual(replaced);
+    await expect(derived.readFile('a.ts')).resolves.toStrictEqual(replaced);
+  });
 });

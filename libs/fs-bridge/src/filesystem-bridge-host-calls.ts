@@ -561,17 +561,22 @@ const hostBoundedReadFile =
     });
   };
 
-/* The handlers' own `readFile` under the authority's bound, or `undefined` where they read no files. */
+/*
+ * The handlers' own `readFile` under the authority's bound, or `undefined` where they read no files. Both members are
+ * looked up at each call, so the bound wraps the handler set as it stands then, not a copy taken when it was served.
+ */
 const boundedReadFileOf = (
   handlers: StringKeyedObject,
 ): ((path: string, ...rest: unknown[]) => Promise<unknown>) | undefined => {
   const own = handlers as Partial<Record<string, unknown>>;
-  return typeof own['readFile'] === 'function'
-    ? hostBoundedReadFile(
-        (own['readFile'] as (path: string, ...rest: unknown[]) => Promise<unknown>).bind(handlers),
-        typeof own['pendingPaths'] === 'function' ? (own['pendingPaths'] as PendingPaths).bind(handlers) : undefined,
-      )
-    : undefined;
+  if (typeof own['readFile'] !== 'function') {
+    return undefined;
+  }
+  return async (path: string, ...rest: unknown[]): Promise<unknown> => {
+    const readFile = own['readFile'] as (path: string, ...rest: unknown[]) => Promise<unknown>;
+    const pendingPaths = typeof own['pendingPaths'] === 'function' ? (own['pendingPaths'] as PendingPaths) : undefined;
+    return hostBoundedReadFile(readFile.bind(handlers), pendingPaths?.bind(handlers))(path, ...rest);
+  };
 };
 
 /**

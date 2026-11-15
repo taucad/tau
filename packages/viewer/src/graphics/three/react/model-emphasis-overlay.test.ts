@@ -234,6 +234,22 @@ describe('model emphasis overlay resources', () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
+  it('should skip the depth prepass for a source that does not write depth', () => {
+    const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
+    const opaque = makeSource();
+    const dimmed = makeSource();
+    (dimmed.material as MeshStandardMaterial).depthWrite = false;
+    syncModelEmphasisProxies(resources, { hover: [opaque, dimmed], selected: [] });
+
+    syncModelEmphasisFrame(resources);
+
+    expect(resources.proxies.map((proxy) => proxy.depth.visible)).toEqual([true, false]);
+    (dimmed.material as MeshStandardMaterial).depthWrite = true;
+    syncModelEmphasisFrame(resources);
+    expect(resources.proxies.map((proxy) => proxy.depth.visible)).toEqual([true, true]);
+    resources.dispose();
+  });
+
   it('follows source world transforms without traversing the scene', () => {
     const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
     const source = makeSource();

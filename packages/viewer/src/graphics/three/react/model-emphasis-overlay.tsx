@@ -418,13 +418,19 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
   }
 }
 
-/** Per-frame CPU work: follow the sources' world transforms. */
+/**
+ * Per-frame CPU work: follow the sources' world transforms. The depth prepass draws only for a source that writes
+ * depth itself; a dimmed (translucent) source does not, and its prepass would hide the grid and axes behind it.
+ */
 export function syncModelEmphasisFrame(resources: ModelEmphasisResources): void {
   for (const { source, mask, visibility, wash, depth } of resources.proxies) {
     mask.matrixWorld.copy(source.matrixWorld);
     visibility.matrixWorld.copy(source.matrixWorld);
     wash.matrixWorld.copy(source.matrixWorld);
     depth.matrixWorld.copy(source.matrixWorld);
+    depth.visible = Array.isArray(source.material)
+      ? source.material.every((material) => material.depthWrite)
+      : source.material.depthWrite;
   }
 }
 

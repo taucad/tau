@@ -424,8 +424,8 @@ function ProjectPersistenceGuard({
 export function ProjectChatRoute(): React.ReactNode {
   const state = useProjectRouteState();
   /*
-   * W2/W3: the editor is the only state with the project's providers above it,
-   * so `ChatWithProvider`'s `useProject()` stays inside that branch. Every other
+   * W2/W3: the editor is the only state that renders the project's providers
+   * (`FocusedProjectView`, A11), so `ChatWithProvider`'s `useProject()` stays inside that branch. Every other
    * state renders its notice in the same shell, with the sidebar intact. The gate
    * publishes a state for every project route since A5b, so no state means no
    * project route and nothing to show (the editor is never assumed, A6d).

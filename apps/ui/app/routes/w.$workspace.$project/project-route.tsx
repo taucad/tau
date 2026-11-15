@@ -142,8 +142,8 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
 }
 
 /**
- * The live-project host once its focused `proj_` id is known. The app shell
- * owns this; project routes contribute only their focused content. Outside the app host (a suite that mounts the
+ * The project route's content. Under the app host it only gates that content on the file-manager worker: the live
+ * projects and the shell render beside it (D24). Outside the app host (a suite that mounts the
  * route without the root layout) it reports the given project to focus and shows the focused chat through
  * `onFocusedChatResolved`.
  */

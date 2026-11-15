@@ -452,8 +452,7 @@ function useHomeBackendFailure(): string | undefined {
  * not start.
  *
  * @param properties - The root mount's machine, for the failure check and the
- *   retry, what to show while the worker is still on its way, and whether the
- *   notice stands in for the whole shell.
+ *   retry, and what to show while the worker is still on its way.
  * @returns The notice, or the placeholder.
  */
 function SharedWorkerFallback({

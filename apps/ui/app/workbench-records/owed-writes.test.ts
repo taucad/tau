@@ -36,16 +36,26 @@ afterEach(() => {
   }
 });
 
-/** One store over a file whose writes wait until the row lands them. */
-const store = (file = JSON.stringify({ name: 'seed' })) => {
+/** One store over a file whose writes wait until the row lands them; with `holdReads`, its reads after the first too. */
+const store = (file = JSON.stringify({ name: 'seed' }), { holdReads = false } = {}) => {
   let bytes = encoder.encode(file);
+  let reads = 0;
+  const heldReads: Array<() => void> = [];
   const writes: Array<{ input: CheckedWriteInput; settle: (outcome: CheckedWriteOutcome) => void }> = [];
   const sync = createRecordSync({
     machine: createRecordSyncMachine(policy),
     editDebounce: 500,
     clock: new StepClock(),
     ports: {
-      read: async () => ({ status: 'read', bytes }),
+      read: async () => {
+        reads += 1;
+        if (holdReads && reads > 1) {
+          await new Promise<void>((resolve) => {
+            heldReads.push(resolve);
+          });
+        }
+        return { status: 'read', bytes };
+      },
       write: async (input) =>
         new Promise<CheckedWriteOutcome>((resolve) => {
           writes.push({ input, settle: resolve });
@@ -59,6 +69,17 @@ const store = (file = JSON.stringify({ name: 'seed' })) => {
   return {
     ...sync,
     writes,
+    /** Another party writes the file, so the store's write in flight meets a conflict. */
+    conflict: async (next: string): Promise<void> => {
+      bytes = encoder.encode(next);
+      writes.at(-1)?.settle({ status: 'conflict' });
+      await flush();
+    },
+    /** The held read completes. */
+    serve: async (): Promise<void> => {
+      heldReads.shift()?.();
+      await flush();
+    },
     land: async (): Promise<void> => {
       const write = writes.at(-1);
       bytes = encoder.encode(write?.input.data ?? '');
@@ -138,6 +159,28 @@ describe('owed record writes (A7c, D26 as amended)', () => {
 
     expect(await Promise.all([early, hidden, later])).toEqual([true, true, true]);
     expect(record.writes).toHaveLength(1);
+  });
+
+  it('should owe the edit while its write waits for the read a conflict asked for (A7c review round 4)', async () => {
+    const record = store(undefined, { holdReads: true });
+    await record.commands.read();
+    void record.commands.edit({ name: 'Front' });
+    const flushed = record.commands.flush();
+
+    await record.conflict(JSON.stringify({ name: 'seed', unit: 'in' }));
+
+    expect(record.writes).toHaveLength(1);
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    await record.serve();
+
+    expect(record.writes).toHaveLength(2);
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    await record.land();
+
+    expect(await flushed).toBe(true);
+    expect(owedRecordWrites.owes()).toBe(false);
   });
 
   it('should owe nothing for edits over a refused record, which wait for its reset', async () => {

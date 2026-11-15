@@ -217,6 +217,8 @@ describe('environment: the beforeunload producer stage (D26 as amended, A7c)', (
 
     expect(session).not.toHaveBeenCalled();
     expect(event.defaultPrevented).toBe(false);
+    /* The legacy flag a handler sets to prompt stays as dispatched. */
+    expect(event.returnValue).toBe(true);
   });
 
   it('should hold no beforeunload listener while nothing is owed, and drop it once the owed write settles', () => {

@@ -16,7 +16,7 @@ import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/pro
 import type { SessionProjectRuntimePorts } from '#runtime/project-runtime.session.js';
 import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
-import { selectEditorRef } from '#runtime/project-runtime.js';
+import { oweWhileStoring, selectEditorRef } from '#runtime/project-runtime.js';
 import { waitFor } from 'xstate';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
@@ -173,6 +173,27 @@ describe("a session runtime's replacement flush (A6e)", () => {
 
     save.resolve();
     await flushed;
+
+    expect(owedRecordWrites.owes()).toBe(false);
+  });
+
+  it('should owe the page a write while the project store repairs its manifest (A7c review round 4)', () => {
+    let observer: { next: (snapshot: { matches: (value: unknown) => boolean }) => void } | undefined;
+    const storing = (state: string) => ({
+      matches: (value: unknown) => JSON.stringify(value) === JSON.stringify({ ready: { storing: state } }),
+    });
+    oweWhileStoring({
+      subscribe: ((next: typeof observer) => {
+        observer = next;
+        return { unsubscribe: () => undefined };
+      }) as never,
+    });
+
+    observer?.next(storing('repairing'));
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    observer?.next(storing('idle'));
 
     expect(owedRecordWrites.owes()).toBe(false);
   });

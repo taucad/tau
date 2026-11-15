@@ -304,4 +304,42 @@ describe('sessionRuntimeWork — the leave and unload flushes (A7c, I3, I6)', ()
     expect(order).toEqual(['workbench', 'project', 'editor']);
     expect(parameters.close).not.toHaveBeenCalled();
   });
+
+  it("should ask both stores to write on an unload while a producer's write is still on the wire (A7c review round 4)", async () => {
+    const order: string[] = [];
+    const parameters = mock<ParameterSetService>();
+    const { project, editor } = idleStores(order);
+    const producer = Promise.withResolvers<void>();
+
+    const flushed = flushOf('unload')({
+      parameterService: parameters,
+      projectRef: project,
+      editorRef: editor,
+      flushWorkbenchRecords: async () => producer.promise,
+    });
+    await Promise.resolve();
+
+    expect(order).toEqual(['project', 'editor']);
+
+    producer.resolve();
+    await flushed;
+  });
+
+  it("should still ask both stores to write on an unload a producer refuses, and reject with the producer's refusal", async () => {
+    const order: string[] = [];
+    const parameters = mock<ParameterSetService>();
+    const { project, editor } = idleStores(order);
+
+    const flushed = flushOf('unload')({
+      parameterService: parameters,
+      projectRef: project,
+      editorRef: editor,
+      flushWorkbenchRecords: async () => {
+        throw new Error('Pane layout is not confirmed saved.');
+      },
+    });
+
+    await expect(flushed).rejects.toThrow('Pane layout is not confirmed saved.');
+    expect(order).toEqual(['project', 'editor']);
+  });
 });

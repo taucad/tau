@@ -85,13 +85,15 @@ const isServer = (): boolean => false;
  * One wait as the hook tracks it. `shownAt` is when its indicator became, or becomes, visible, measured from
  * `startedAt`: the delay, the activation time for a region that activates after the delay, or a negative time for a
  * wait that took over an indicator already showing. Once the reveal is seen (`isRevealSeen`), it is the frame the
- * reveal painted in, which a long task can make later than predicted.
+ * reveal painted in, which a long task can make later than predicted. `isServerTimed` marks the wait the server render
+ * started, whose reveal ran on CSS before any handler could see it.
  */
 type TrackedWait = Readonly<{
   active: boolean;
   startedAt: number;
   shownAt: number;
   isRevealSeen: boolean;
+  isServerTimed: boolean;
   wait: number;
   timing: WaitIndicatorTiming;
 }>;
@@ -165,6 +167,7 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       startedAt,
       shownAt: shownAtFor(startedAt, now),
       isRevealSeen: false,
+      isServerTimed: now === undefined,
       wait: 0,
       timing: active ? waitingTiming(now === undefined ? { startedAt } : { startedAt, now }) : idleWaitTiming(),
     };
@@ -202,29 +205,44 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       shownAt: isShowing ? tracked.startedAt + tracked.shownAt - startedAt : shownAtFor(startedAt, now),
       /* A wait that takes over a showing indicator keeps its reveal only if a frame drew it: its new element's
          entrance is not a reveal. If none had, the first frame that draws the words still starts the minimum. */
-      isRevealSeen: isShowing && tracked.isRevealSeen,
+      isRevealSeen: isShowing && isPainted(tracked),
+      isServerTimed: false,
       wait: tracked.wait + 1,
       timing: waitingTiming({ startedAt, now, isShowing }),
     };
   } else {
+    const elapsed = now - tracked.startedAt;
+    /* On the page's clock a frame that draws the reveal reports it, so a reveal due but not reported has not been
+       drawn: it paints in the next frame, and its minimum runs from now. Other clocks see no frames. */
+    const shownAt =
+      clock !== performanceClock || isPainted(tracked) ? tracked.shownAt : Math.max(tracked.shownAt, elapsed);
     next = {
       ...tracked,
       active,
+      shownAt,
       /* A seen reveal is on screen, even where the timeline still reads before the paint the reveal recorded. */
       timing: heldWords(
         settledTiming({
-          settledAt: Math.max(
-            now - tracked.startedAt,
-            tracked.isRevealSeen ? tracked.shownAt : Number.NEGATIVE_INFINITY,
-          ),
-          shownAt: tracked.shownAt,
+          settledAt: Math.max(elapsed, tracked.isRevealSeen ? shownAt : Number.NEGATIVE_INFINITY),
+          shownAt,
         }),
-        now - tracked.startedAt,
+        elapsed,
       ),
     };
   }
   setTracked(next);
   return { timing: next.timing, wait: next.wait, revealed };
+}
+
+/**
+ * Whether a frame has drawn the tracked wait's words once its reveal is due: a reveal a frame was seen to draw, or one
+ * the server-rendered page ran on CSS before hydration, where no handler could see it.
+ *
+ * @param tracked - The wait as tracked so far.
+ * @returns True when the predicted reveal stands for the paint.
+ */
+function isPainted(tracked: TrackedWait): boolean {
+  return tracked.isRevealSeen || tracked.isServerTimed;
 }
 
 /**

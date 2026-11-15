@@ -637,3 +637,40 @@ it('should not show words a hidden page never drew when its wait ends', () => {
     Reflect.deleteProperty(document, 'visibilityState');
   }
 });
+
+/**
+ * Moves the named CSS animation on `element` to a hair before the end of its 0.01 ms step, where Chromium already
+ * counts it finished: a frame time a whole hold apart from its start can land there (A15f2 History evidence, a 500 ms
+ * hold started at 6,502.555 ms ended at progress 0.9999999999954).
+ */
+function seekToStepEnd(element: Element, name: string): Animation {
+  const animation = element.getAnimations().find((candidate) => (candidate as CSSAnimation).animationName === name)!;
+  const { delay } = animation.effect!.getComputedTiming();
+  animation.pause();
+  animation.currentTime = Number(delay) + 0.01 - 7e-14;
+  return animation;
+}
+
+it('should hide a hold whose step ends a hair short of progress 1', () => {
+  const view = renderAt(900, { active: true, label: 'Loading chat', startedAt: 0 });
+  view.rerender(
+    <WaitClockProvider clock={clockAt(1000)}>
+      <WaitIndicator active={false} label='Loading chat' startedAt={0} />
+    </WaitClockProvider>,
+  );
+  const body = find('wait-indicator-body');
+  const conceal = seekToStepEnd(body, 'wait-conceal');
+
+  expect(conceal.effect!.getComputedTiming().progress, 'the step did not end short of 1').toBeLessThan(1);
+  expect(isShown(body), 'the hold kept its words past its end').toBe(false);
+});
+
+it('should hide the label at the slow mark when its step ends a hair short of progress 1', () => {
+  renderAt(0, { active: true, label: 'Loading chat', slowLabel: 'Still loading chat', startedAt: 0 });
+  seek(1001);
+  const label = find('wait-indicator-label');
+  const conceal = seekToStepEnd(label, 'wait-conceal');
+
+  expect(conceal.effect!.getComputedTiming().progress, 'the step did not end short of 1').toBeLessThan(1);
+  expect(isShown(label), 'the label stayed beside the slow words').toBe(false);
+});

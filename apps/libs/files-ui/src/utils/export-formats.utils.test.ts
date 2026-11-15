@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
+import type { CapabilitiesManifest, ExportRoute, RuntimeClient } from '@taucad/runtime';
 import type { FileExtension } from '@taucad/types';
-import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 
 const fidelityRank = (fidelity: ExportRoute['fidelity']): number => (fidelity === 'brep' ? 0 : 1);
@@ -20,9 +19,9 @@ function createRoute(format: FileExtension, overrides: Partial<ExportRoute> = {}
   };
 }
 
-function createClient(routes: ExportRoute[]): AppRuntimeClient {
+function createClient(routes: ExportRoute[]): RuntimeClient {
   const capabilities: CapabilitiesManifest = { routes, renderCapabilities: {}, registrations: [] };
-  const client = mock<AppRuntimeClient>();
+  const client = mock<RuntimeClient>();
   Object.defineProperty(client, 'capabilities', { value: capabilities, configurable: true });
   vi.mocked(client.bestRouteFor).mockImplementation((format: string, options?: { kernelId?: string }) => {
     const candidates = routes

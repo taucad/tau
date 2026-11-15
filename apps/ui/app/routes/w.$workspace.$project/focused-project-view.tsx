@@ -7,9 +7,9 @@
  * workspace authority and the project workspace, over the eight siblings that belong to the focused project only.
  *
  * Every provider here is a view of the session's own actors (A6c, A6d, A8b): the session owns the file manager and the
- * runtime, so mounting this view twice over one session, or unmounting it, creates or stops no actor. The file
- * manager's scope effects (workspace telemetry, failure reports) do run here as well as in the session's own subtree.
- * The caller keys it by project, so the project being left supplies nothing to the next.
+ * runtime, so mounting this view twice over one session, or unmounting it, creates or stops no actor. Its file manager
+ * scope is a view too: the file manager's own reports stay with the session's scope, so each fires once. The caller
+ * keys it by project, so the project being left supplies nothing to the next.
  *
  * The command palette's project items register from in here (programme-control ruling, 2026-11-15): their registry
  * sits above the shell, so the palette stays in the shell while its items read the focused session's view.
@@ -65,6 +65,7 @@ export function FocusedProjectView({
       fileManagerRef={fileManagerRef}
       projectId={projectId}
       rootDirectory={`/projects/${projectId}`}
+      isView
     >
       <WebglContextTrackerProvider>
         <SessionProjectProvider projectId={projectId} runtimeRef={runtimeRef}>

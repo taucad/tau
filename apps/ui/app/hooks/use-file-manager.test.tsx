@@ -24,7 +24,8 @@ import {
 import { hydrateRoot } from 'react-dom/client';
 import type { RenderHookOptions, RenderOptions } from '@testing-library/react';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { createActor } from 'xstate';
+import { createActor, createMachine } from 'xstate';
+import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
@@ -2068,6 +2069,26 @@ describe('SessionFileManagerProvider — a view of the session child (A6c)', () 
     expect(listeners).toHaveLength(0);
     untrackOpened();
     opened.close();
+  });
+
+  it('reports a workspace that failed to open once, when the focused view sits beside the session subtree (A11)', () => {
+    /* A file manager already refused its workspace: the scope reports that from its context. */
+    const fileManagerRef = createActor(
+      createMachine({
+        context: { unavailableReason: 'permission', activeWorkspaceId: 'w', rootDirectory: '/projects/p' },
+      }),
+    ).start() as unknown as FileManagerRef;
+    const view = render(
+      <SessionFileManagerProvider fileManagerRef={fileManagerRef} projectId='p' rootDirectory='/projects/p'>
+        <SessionFileManagerProvider fileManagerRef={fileManagerRef} projectId='p' rootDirectory='/projects/p' isView>
+          <span>view</span>
+        </SessionFileManagerProvider>
+      </SessionFileManagerProvider>,
+    );
+
+    expect(workspaceTelemetryMock.workspaceOpenFailed).toHaveBeenCalledTimes(1);
+    expect(workspaceTelemetryMock.workspacePermissionRevoked).toHaveBeenCalledTimes(1);
+    view.unmount();
   });
 
   it('renders nothing before the session reports its file manager', () => {

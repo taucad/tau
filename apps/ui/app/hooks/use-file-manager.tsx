@@ -697,12 +697,19 @@ export function SessionFileManagerProvider({
   fileManagerRef,
   rootDirectory,
   projectId,
+  isView = false,
 }: {
   readonly children: ReactNode;
   /** The session's file manager (`selectProjectSessionFileManager`). */
   readonly fileManagerRef: FileManagerRef | undefined;
   readonly rootDirectory: string;
   readonly projectId: string;
+  /**
+   * A second view over a file manager whose session subtree already provides it (the focused project's view, A11).
+   * It serves its subtree the same way but leaves the file manager's own reports (workspace telemetry, Home's save
+   * observer) to the session's scope, which outlives it, so each fires once.
+   */
+  readonly isView?: boolean;
 }): React.ReactNode {
   if (fileManagerRef === undefined) {
     return null;
@@ -715,6 +722,7 @@ export function SessionFileManagerProvider({
       rootDirectory={rootDirectory}
       projectId={projectId}
       owner={opened?.owner}
+      isOwnerReporter={!isView}
     >
       {children}
     </FileManagerScope>
@@ -760,6 +768,7 @@ function FileManagerScope({
   isRoot = false,
   owner,
   rootFacade,
+  isOwnerReporter = true,
 }: {
   readonly children: ReactNode;
   readonly fileManagerRef: FileManagerRef;
@@ -774,6 +783,8 @@ function FileManagerScope({
   readonly owner?: FileManagerOwner | undefined;
   /** The runtime's root facade, for the root layout's scope only: the scope reads it instead of building its own. */
   readonly rootFacade?: RootFileFacade;
+  /** Whether this scope sends the file manager's own reports; false for a second view over a session's (A11). */
+  readonly isOwnerReporter?: boolean;
 }): React.JSX.Element {
   const files = selectRuntimeFiles(useAppRuntime());
   /* A scope over an owner that ends, before or during a wait (a lease's late-commit case, a session's close), ends the
@@ -791,11 +802,11 @@ function FileManagerScope({
   const unavailableReason = useSelector(fileManagerRef, (state) => state.context.unavailableReason);
 
   useEffect(() => {
-    if (!contentService || !workerChangeChannel || backendType === undefined) {
+    if (!isOwnerReporter || !contentService || !workerChangeChannel || backendType === undefined) {
       return;
     }
     return observeHomeProjectSaves({ projectId, backend: backendType, contentService, channel: workerChangeChannel });
-  }, [projectId, backendType, contentService, workerChangeChannel]);
+  }, [isOwnerReporter, projectId, backendType, contentService, workerChangeChannel]);
 
   const bindProjectToWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
@@ -851,6 +862,9 @@ function FileManagerScope({
   );
 
   useEffect(() => {
+    if (!isOwnerReporter) {
+      return;
+    }
     if (unavailableReason === 'permission' && activeWorkspaceId) {
       workspaceTelemetry.workspacePermissionRevoked({
         workspaceId: activeWorkspaceId,
@@ -862,7 +876,7 @@ function FileManagerScope({
         reason: unavailableReason,
       });
     }
-  }, [activeWorkspaceId, unavailableReason, workspaceTelemetry]);
+  }, [isOwnerReporter, activeWorkspaceId, unavailableReason, workspaceTelemetry]);
 
   /**
    * Wait for the FM machine to enter `ready` and return the typed

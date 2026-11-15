@@ -565,25 +565,54 @@ export const sessionRevisionsCallback =
 
     /*
      * A7d (I6, S26): the close cut an earlier document owed, the client's first cut. It is asked for once the checkout
-     * registry has answered (`registrySettled`), since a cut asked of a root with no checkout yet records nothing. For
-     * the cut alone the client records as the closing document did, and the live actor waits for the answer. Only
-     * that answer settles the record, and only while it carries the token read: a client closed first leaves it to
-     * the next open, and a newer record written meanwhile is kept. The checkout's I5 gate mints nothing for a record
-     * that outlived a cut that landed.
+     * registry has answered (`registrySettled`), since a cut asked of a root with no checkout yet records nothing. When
+     * the closing document recorded as someone else (another account, or anonymity changed), the client records as
+     * that person for the cut alone: the live actor waits until the cut's revision is minted (the head moves) or the
+     * cut answers, whichever is first. Only the answer settles the record, and only while it carries the token read: a
+     * client closed first leaves it to the next open, and a newer record written meanwhile is kept. The checkout's I5
+     * gate mints nothing for a record that outlived a cut that landed.
      */
     const payDebt = (): void => {
       const pending = owedFor;
-      if (pending === undefined || pending.target !== client || pending.target.status()?.registrySettled !== true) {
+      const status = pending?.target.status();
+      if (pending === undefined || pending.target !== client || status?.registrySettled !== true) {
         return;
       }
       owedFor = undefined;
       const { target, owed } = pending;
-      paying = true;
-      actorSentFor = undefined;
-      sendActorAs(target, {
-        actor: owed.actor,
-        ...(owed.commitAuthor === undefined ? {} : { commitAuthor: owed.commitAuthor }),
-      });
+      const live = recordsAs;
+      const isSamePerson =
+        live !== undefined &&
+        live.actor.id === owed.actor.id &&
+        live.actor.anonymous === owed.actor.anonymous &&
+        live.commitAuthor?.email === owed.commitAuthor?.email;
+      let release: (() => void) | undefined;
+      if (!isSamePerson) {
+        paying = true;
+        actorSentFor = undefined;
+        /* The stored record carries no display name; the live one is the same person's when the ids match. */
+        const name = live?.actor.id === owed.actor.id ? live.actor.name : undefined;
+        sendActorAs(target, {
+          actor: { ...owed.actor, ...(name === undefined || owed.actor.anonymous === true ? {} : { name }) },
+          ...(owed.commitAuthor === undefined ? {} : { commitAuthor: owed.commitAuthor }),
+        });
+        const headAtCut = status.headRevisionId;
+        const stopWatching = target.subscribe(() => {
+          if (target.status()?.headRevisionId !== headAtCut) {
+            release?.();
+          }
+        });
+        release = () => {
+          release = undefined;
+          stopWatching();
+          if (client === target) {
+            paying = false;
+            if (!stopped) {
+              sendActor();
+            }
+          }
+        };
+      }
       // async-iife: bootstrap -- the cut's answer settles the record.
       void (async (): Promise<void> => {
         let paid = false;
@@ -603,12 +632,7 @@ export const sessionRevisionsCallback =
             ports.reportFault,
           );
         }
-        if (client === target) {
-          paying = false;
-          if (!stopped) {
-            sendActor();
-          }
-        }
+        release?.();
       })();
     };
 
@@ -698,11 +722,16 @@ export const sessionRevisionsCallback =
 
     /* Record the close cut as owed under who the client records as; nothing is owed before the actor is sent. */
     const owe = (): string | undefined => {
-      if (recordsAs === undefined) {
+      /* A debt this client has read and not yet seen answered stays as it is: its person, not this document's. */
+      if (recordsAs === undefined || owedFor !== undefined || paying) {
         return undefined;
       }
       const token = randomUuid();
-      ports.closeDebt.write(debtKey, { token, ...recordsAs });
+      /* A named person's display name is not kept beside the record: the id names them, and a matching live session
+       * gives the name back when the cut is paid. An anonymous actor's name is only `Anonymous`. */
+      const { name, ...rest } = recordsAs.actor;
+      const actor = recordsAs.actor.anonymous === true || name === undefined ? recordsAs.actor : rest;
+      ports.closeDebt.write(debtKey, { token, ...recordsAs, actor });
       return token;
     };
 

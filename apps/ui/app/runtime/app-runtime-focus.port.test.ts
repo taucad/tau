@@ -58,8 +58,6 @@ it('should an open that displaces the waiting one answers only itself (one slot,
     port.stop();
     registry.stop();
   });
-  for (const id of ['p1', 'p2', 'p3']) {
-  }
   port.send(open('r1', 'p1'));
   await flushTasks();
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
@@ -100,8 +98,6 @@ it('should a queued open that lands waiting is answered when the registry resume
     port.stop();
     registry.stop();
   });
-  for (const id of ['p1', 'p2']) {
-  }
   port.send(open('r1', 'p1'));
   await flushTasks();
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });
@@ -156,8 +152,6 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
     port.stop();
     registry.stop();
   });
-  for (const id of ['p1', 'p2']) {
-  }
   port.send(open('r1', 'p1'));
   await flushTasks();
   registry.getSnapshot().context.refs['p1']?.send({ type: 'projectedRunsChanged', runs: ['run'], stoppableRuns: [] });

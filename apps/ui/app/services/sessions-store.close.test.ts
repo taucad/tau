@@ -256,7 +256,7 @@ const wiringOn = (sequencer: ReturnType<typeof createUnloadSequencer>) =>
           sendBack,
           receive,
         }: Readonly<{
-          sendBack: (event: EventObject) => void;
+          sendBack: (event: AnyEventObject) => void;
           receive?: (listener: (event: EventObject) => void) => void;
         }>) => {
           receive?.((event) => {
@@ -413,7 +413,7 @@ describe('a session over a real runtime, nothing mounted (A7c, S6, I5, I6)', () 
     roots.push(port);
     log.length = 0;
 
-    port.send({ type: 'leaveFlushAsked', requestId: 'flush:1', projectId: project.id });
+    port.send({ type: 'leaveFlushAsked', requestId: 'flush:1', projectId: project.id } as AnyEventObject);
     await settle();
 
     expect(log).toContain(`write:layout:${project.id}`);

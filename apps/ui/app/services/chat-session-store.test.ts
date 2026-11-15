@@ -363,10 +363,10 @@ const turnOwners: Array<{ stop: () => void }> = [];
  * row that drives a verb — or a seeded first turn — has to give the chat the
  * owner the app gives it.
  *
- * @param store - The store under test.
+ * @param _store - The store under test.
  * @param projectId - The project whose session owns the chat.
  */
-function startTurnOwner(store: StoreType, projectId: string): void {
+function startTurnOwner(_store: StoreType, projectId: string): void {
   const session = createActor(projectSessionMachine, { input: { projectId } });
   session.start();
   turnOwners.push(session);
@@ -2378,7 +2378,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
   it('should bind the focused project to its live session each time focus arrives there, and only then (A7b)', () => {
     const focus = focusedProjectStandIn();
-    const store = createStore(focus);
+    createStore(focus);
     const projectA = fakeSession('proj_a');
     liveSessions.set('proj_a', projectA.ref);
     /* The session holds runs the store's projection no longer has: arriving there tells it again. */

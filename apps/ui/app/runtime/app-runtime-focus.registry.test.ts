@@ -109,6 +109,15 @@ it('should tell focus the victim the open closed before answering the open that 
   expect(waitingAt).toBeGreaterThan(-1);
   expect(closingAt).toBeGreaterThan(-1);
   expect(closingAt).toBeLessThan(waitingAt);
+  /* A7c: the leave flush runs through p1's session (`flushAsked` → `flushSettled`) and its answer reaches focus before
+   * the open it releases reaches the registry, so p1's leave flush lands before its close flush starts. */
+  const leftAt = focusEvents.findIndex((event) => event.type === 'leaveFlushSettled');
+  expect(leftAt).toBeGreaterThan(-1);
+  expect(leftAt).toBeLessThan(closingAt);
+  expect(opener.latest('p1')?.signals.filter((signal) => signal.startsWith('flush:'))).toEqual([
+    'flush:leave',
+    'flush:close',
+  ]);
 
   release();
   await vi.waitFor(() => {

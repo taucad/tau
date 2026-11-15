@@ -2106,17 +2106,6 @@ export class ChatSessionStore {
   // Internals
   // -------------------------------------------------------------------------
 
-  /* Bind one live project's session as the registry reports it, or forget it when it closes (A7c). */
-  #bindProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
-    if (ref === undefined) {
-      this.#projectSessions.delete(projectId);
-    } else {
-      this.#projectSessions.set(projectId, ref);
-      this.#projectRunKeys.delete(projectId);
-      this.#refreshProjectRuns(projectId);
-    }
-  }
-
   /**
    * Tell one project's chats what its revision status says (the `revision` region of each chat's machine).
    *
@@ -2426,6 +2415,17 @@ export class ChatSessionStore {
       return;
     }
     this.#bindProjectSession(projectId, this.#projectSessions.get(projectId));
+  }
+
+  /* Bind one live project's session as the registry reports it, or forget it when it closes (A7c). */
+  #bindProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
+    if (ref === undefined) {
+      this.#projectSessions.delete(projectId);
+    } else {
+      this.#projectSessions.set(projectId, ref);
+      this.#projectRunKeys.delete(projectId);
+      this.#refreshProjectRuns(projectId);
+    }
   }
 
   async #readForeignSegment(path: string, client = this.#deps.client): Promise<Uint8Array<ArrayBuffer>> {

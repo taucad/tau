@@ -375,6 +375,17 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
           }
           /* A stop, the close or a new file manager overtook the flush, or the choices came back to this kernel. */
           if (overtaken() || superseded.runtime.kernelIsCurrent()) {
+            /* A runtime a new file manager built meanwhile may have had its kernel change while this flush made the
+             * child ignore it: report that change now, so the session decides on it as on any other. */
+            if (
+              !stopped &&
+              !held &&
+              current !== undefined &&
+              current !== superseded &&
+              !current.runtime.kernelIsCurrent()
+            ) {
+              sendBack({ type: 'replaceRuntime' });
+            }
             return;
           }
           build();

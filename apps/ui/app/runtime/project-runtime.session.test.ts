@@ -17,7 +17,8 @@ import type { SessionProjectRuntimePorts } from '#runtime/project-runtime.sessio
 import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
 import { oweWhileStoring, selectEditorRef } from '#runtime/project-runtime.js';
-import { createActor, createMachine, waitFor } from 'xstate';
+import { createActor, setup, waitFor } from 'xstate';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
@@ -179,7 +180,7 @@ describe("a session runtime's replacement flush (A6e)", () => {
 
   it('should owe the page a write while the project store repairs its manifest (A7c review round 4)', () => {
     const store = createActor(
-      createMachine({
+      setup({ schemas: { events: eventSchemas<{ type: 'repair' } | { type: 'repaired' }>() } }).createMachine({
         initial: 'ready',
         states: {
           ready: {
@@ -187,7 +188,10 @@ describe("a session runtime's replacement flush (A6e)", () => {
             states: {
               storing: {
                 initial: 'idle',
-                states: { idle: { on: { repair: 'repairing' } }, repairing: { on: { repaired: 'idle' } } },
+                states: {
+                  idle: { on: { repair: { target: 'repairing' } } },
+                  repairing: { on: { repaired: { target: 'idle' } } },
+                },
               },
             },
           },

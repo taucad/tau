@@ -723,6 +723,23 @@ carries_conflict() {
       '
 }
 
+# The two Node checks below, as functions that print their source. A here-document
+# inside \`$( … )\` is scanned as shell by bash 3.2, which is macOS's \`/bin/sh\`:
+# an apostrophe or parenthesis in the JavaScript ends the substitution early
+# ("unexpected EOF while looking for matching \`)'"), so the here-documents
+# live in function bodies and the substitutions only call them.
+authorship_check_source() {
+  cat <<'TAU_AUTHORSHIP_CHECK'
+${authorshipCheckScript}
+TAU_AUTHORSHIP_CHECK
+}
+
+version_check_source() {
+  cat <<'TAU_VERSION_CHECK'
+${versionNumberCheckScript}
+TAU_VERSION_CHECK
+}
+
 status=0
 arriving=''
 history=''
@@ -828,10 +845,7 @@ if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$history" ]; then
   fi
   if [ -n "$commits" ]; then
     count=$(printf '%s\\n' "$commits" | wc -l | tr -d ' ')
-    authorship_check=$(cat <<'TAU_AUTHORSHIP_CHECK'
-${authorshipCheckScript}
-TAU_AUTHORSHIP_CHECK
-)
+    authorship_check=$(authorship_check_source)
     if ! printf '%s\\n' "$commits" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$authorship_check" "$count"; then
       echo "Tau: nothing was written." >&2
       exit 1
@@ -848,10 +862,7 @@ if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$versions" ]; then
     echo "Tau: nothing was written." >&2
     exit 1
   fi
-  version_check=$(cat <<'TAU_VERSION_CHECK'
-${versionNumberCheckScript}
-TAU_VERSION_CHECK
-)
+  version_check=$(version_check_source)
   if ! held_tags=$(git for-each-ref --format='%(objectname) %(refname)' refs/tags/ 2>/dev/null); then
     echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
     echo "Tau: nothing was written." >&2

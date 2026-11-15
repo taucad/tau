@@ -1,6 +1,6 @@
-import { accessSync, constants, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
@@ -9,6 +9,7 @@ import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { currentRun } from '#support/acp-evidence.js';
+import { acceptableLoginCommands, locatedFallback } from '#support/acp-install.js';
 import { activeChatId, connectPickedFolder, expectVisible, selectAgent, submitPrompt } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 /* oxlint-disable no-restricted-imports -- This projectless e2e harness cannot resolve the host package export; the
@@ -51,139 +52,6 @@ const signedOutAgent = process.env['TAU_E2E_ACP_INSTALL_SIGNED_OUT'];
 
 /** What a Finder launch gives an app on macOS, and what a `.desktop` launch commonly gives one on Linux. */
 const finderPath = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter);
-
-/** A directory name that is a dotted version, e.g. `2.1.325`. */
-const versionName = /^\d+(?:\.\d+)*$/u;
-
-/**
- * Order directory entries as the locator expands a `*` segment: dotted versions first, newest first, then every other
- * name, descending.
- *
- * @param left - One entry name.
- * @param right - The other entry name.
- * @returns A negative number when `left` is tried first.
- */
-export const fallbackEntryOrder = (left: string, right: string): number => {
-  const leftIsVersion = versionName.test(left);
-  const rightIsVersion = versionName.test(right);
-  if (leftIsVersion !== rightIsVersion) {
-    return leftIsVersion ? -1 : 1;
-  }
-  if (leftIsVersion) {
-    const leftParts = left.split('.').map(Number);
-    const rightParts = right.split('.').map(Number);
-    for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
-      const difference = (rightParts[index] ?? 0) - (leftParts[index] ?? 0);
-      if (difference !== 0) {
-        return difference;
-      }
-    }
-    return 0;
-  }
-  return left === right ? 0 : left < right ? 1 : -1;
-};
-
-/** The file-system reads fallback expansion needs, injectable so the expansion can be checked without the files. */
-export type FallbackFileSystem = {
-  readonly home: string;
-  readonly listDirectory: (path: string) => readonly string[];
-  readonly isExecutableFile: (path: string) => boolean;
-};
-
-/** The real file system, read without following anything the user did not install. */
-export const localFileSystem: FallbackFileSystem = {
-  home: homedir(),
-  listDirectory: (path) => {
-    try {
-      return readdirSync(path);
-    } catch {
-      return [];
-    }
-  },
-  isExecutableFile: (path) => {
-    try {
-      accessSync(path, constants.X_OK);
-      return statSync(path).isFile();
-    } catch {
-      return false;
-    }
-  },
-};
-
-/**
- * Every concrete path one declared fallback names, in the order the locator tries them: `~/` is the home directory and
- * each `*` segment expands to that directory's entries in {@link fallbackEntryOrder}.
- *
- * @param candidate - A declared fallback, absolute or starting `~/`, with `/` separators.
- * @param fileSystem - Where to read directories.
- * @returns The concrete paths, possibly none.
- */
-export const expandFallback = (candidate: string, fileSystem: FallbackFileSystem): readonly string[] => {
-  const absolute = candidate.startsWith('~/') ? join(fileSystem.home, candidate.slice(2)) : candidate;
-  const [first = '', ...rest] = absolute.split('/');
-  let prefixes: readonly string[] = [first];
-  for (const segment of rest) {
-    prefixes =
-      segment === '*'
-        ? prefixes.flatMap((prefix) =>
-            fileSystem
-              .listDirectory(prefix === '' ? '/' : prefix)
-              .toSorted(fallbackEntryOrder)
-              .map((entry) => `${prefix}/${entry}`),
-          )
-        : prefixes.map((prefix) => `${prefix}/${segment}`);
-  }
-  return prefixes;
-};
-
-/**
- * The first executable file among a profile's declared fallbacks for this platform, as discovery would pick it when
- * PATH has none.
- *
- * @param profile - A reviewed agent profile.
- * @param platform - The platform whose fallbacks apply.
- * @param fileSystem - Where to look.
- * @returns The file, or `undefined` when no declared fallback exists here.
- */
-export const locatedFallback = (
-  profile: Pick<AcpAgentProfile, 'fallbackExecutables'>,
-  platform: 'darwin' | 'linux',
-  fileSystem: FallbackFileSystem,
-): string | undefined =>
-  (profile.fallbackExecutables?.[platform] ?? [])
-    .flatMap((candidate) => expandFallback(candidate, fileSystem))
-    .find((path) => fileSystem.isExecutableFile(path));
-
-/**
- * Quote one argument for a POSIX shell (sign-in rule 4): left bare when it is plain, otherwise single-quoted.
- *
- * @param argument - One word of a command line.
- * @returns The word as a user can paste it.
- */
-export const posixQuote = (argument: string): string =>
-  /^[\w@%+=:,./-]+$/u.test(argument) ? argument : `'${argument.replaceAll("'", String.raw`'\''`)}'`;
-
-/**
- * The sign-in commands the card may show first: the profile's `loginCommand` when the CLI was found on PATH, or the
- * same command naming the quoted fallback file when it was found only there (sign-in rule 1).
- *
- * @param profile - The signed-out agent's profile.
- * @param fallback - The fallback file this machine has for it, if any.
- * @returns The acceptable first commands.
- */
-export const acceptableLoginCommands = (
-  profile: Pick<AcpAgentProfile, 'cli' | 'loginCommand'>,
-  fallback: string | undefined,
-): readonly string[] => {
-  const { cli, loginCommand } = profile;
-  if (loginCommand === undefined) {
-    return [];
-  }
-  if (cli === undefined || fallback === undefined || !loginCommand.startsWith(`${cli} `)) {
-    return [loginCommand];
-  }
-  return [loginCommand, `${posixQuote(fallback)}${loginCommand.slice(cli.length)}`];
-};
 
 /** The reviewed profile with this registry id. */
 const profileOf = (id: string): AcpAgentProfile => {
@@ -263,7 +131,7 @@ test.skipIf(!enabled)(
   async () => {
     const platform = finderPlatform();
     const expected = acpAgentProfiles.flatMap((profile) => {
-      const fallback = locatedFallback(profile, platform, localFileSystem);
+      const fallback = locatedFallback(profile, platform);
       return fallback === undefined ? [] : [{ id: profile.id, fallback }];
     });
     expect(
@@ -311,7 +179,7 @@ test.skipIf(!enabled || signedOutAgent === undefined)(
     if (configVariable === undefined) {
       throw new Error(`${profile.id} declares no config directory to point at an empty one.`);
     }
-    const acceptable = acceptableLoginCommands(profile, locatedFallback(profile, platform, localFileSystem));
+    const acceptable = acceptableLoginCommands(profile, locatedFallback(profile, platform));
     expect(acceptable.length, `${profile.id} declares no login command.`).toBeGreaterThan(0);
     /* The vendor reads its login from this directory, so an empty one signs the agent out without touching the
      * operator's own. A vendor that keeps its credential elsewhere still answers, and the poll below says so. */

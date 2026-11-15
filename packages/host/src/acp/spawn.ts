@@ -23,8 +23,6 @@ import { Readable, Writable } from 'node:stream';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import type { Stream } from '@agentclientprotocol/sdk';
 
-import { isRecord } from '@taucad/utils/schema';
-
 import { resolveAcpAdapterExecutable } from '#acp/locate.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
@@ -135,34 +133,6 @@ export type SpawnedAcpAdapter = {
 };
 
 /**
- * The adapter with its CLI located again if a fallback it was found at is gone.
- *
- * @param adapter - The resolved adapter.
- * @param environment - Environment whose `PATH` and home to search.
- * @returns The adapter to spawn, or the vanished file and why, when its CLI is nowhere now.
- */
-const locatedAgain = (
-  adapter: AcpAdapter,
-  environment: NodeJS.ProcessEnv,
-):
-  | { readonly adapter: AcpAdapter; readonly missing?: undefined }
-  | { readonly adapter: AcpAdapter; readonly missing: { readonly path: string; readonly reason: string } } => {
-  try {
-    return { adapter: resolveAcpAdapterExecutable(adapter, { environment }) };
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      isRecord(error) &&
-      error['code'] === 'CLI_NOT_FOUND' &&
-      adapter.executablePath !== undefined
-    ) {
-      return { adapter, missing: { path: adapter.executablePath, reason: `CLI_NOT_FOUND: ${error.message}` } };
-    }
-    throw error;
-  }
-};
-
-/**
  * Spawn one resolved adapter over stdio.
  *
  * Run module adapters with **this process's own `node`** rather than the package's shebang: the
@@ -174,12 +144,9 @@ const locatedAgain = (
  * gone, because a vendor app bundle keeps it under a version directory that
  * moves when the app updates (ACP agent policy rule 4).
  *
- * When that CLI is no longer anywhere, the file it was found at is run
- * anyway: the spawn fails the way a missing CLI always does, and the stderr
- * tail says `CLI_NOT_FOUND` and what was searched.
- *
  * @param options - Adapter, working directory, and optional wire tap.
  * @returns The child, its ACP stream, and a stderr tail.
+ * @throws An error with `code: 'CLI_NOT_FOUND'` when that CLI is no longer anywhere it is searched for.
  * @public
  */
 export const spawnAcpAdapter = (options: {
@@ -190,15 +157,12 @@ export const spawnAcpAdapter = (options: {
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
 }): SpawnedAcpAdapter => {
   const base = options.environment ?? process.env;
-  const { adapter, missing } = locatedAgain(options.adapter, base);
+  const adapter = resolveAcpAdapterExecutable(options.adapter, { environment: base });
   const environment = acpAdapterEnvironment(base, adapter);
-  /* A vanished CLI runs as the file it was found at, so the spawn fails as a missing CLI does. */
   const [command, args] =
-    missing === undefined
-      ? adapter.modulePath === undefined
-        ? [adapter.executablePath ?? adapter.cli, [...adapter.args]]
-        : [process.execPath, [adapter.modulePath]]
-      : [missing.path, []];
+    adapter.modulePath === undefined
+      ? [adapter.executablePath ?? adapter.cli, [...adapter.args]]
+      : [process.execPath, [adapter.modulePath]];
   if (command !== process.execPath) {
     delete environment['ELECTRON_RUN_AS_NODE'];
   }
@@ -213,7 +177,7 @@ export const spawnAcpAdapter = (options: {
   });
   let stderr = '';
   child.on('error', (error) => {
-    stderr = missing?.reason ?? error.message;
+    stderr = error.message;
     child.stdout.destroy(error);
   });
   child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => {

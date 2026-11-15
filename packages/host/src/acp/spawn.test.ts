@@ -287,22 +287,19 @@ describe.skipIf(process.platform === 'win32')('spawnAcpAdapter with a versioned 
     ).resolves.toMatchObject({ protocolVersion: 1 });
   }, 30_000);
 
-  it('should fail with CLI_NOT_FOUND when the fallback is gone and nothing replaces it', async () => {
+  it('should throw CLI_NOT_FOUND, spawning nothing, when the fallback is gone and nothing replaces it', async () => {
     const root = await branch();
     const stale = await bundledTool(root, '1.0.0');
     await rm(join(root, 'Vendor'), { recursive: true });
 
-    const adapter = spawnAcpAdapter({
-      adapter: versionedAdapter(stale),
-      cwd: root,
-      environment: { PATH: '/usr/bin:/bin', HOME: root },
-    });
-    spawned.push(adapter);
-    await new Promise((resolve) => {
-      adapter.child.once('error', resolve);
-    });
+    const spawnGone = (): unknown =>
+      spawnAcpAdapter({
+        adapter: versionedAdapter(stale),
+        cwd: root,
+        environment: { PATH: '/usr/bin:/bin', HOME: root },
+      });
 
-    expect(adapter.child.spawnfile).toBe(stale);
-    expect(adapter.stderr()).toMatch(/^CLI_NOT_FOUND: .*is gone\. The tool CLI was not found on PATH/u);
+    expect(spawnGone).toThrow(/is gone\. The tool CLI was not found on PATH/u);
+    expect(spawnGone).toThrow(expect.objectContaining({ code: 'CLI_NOT_FOUND' }));
   });
 });

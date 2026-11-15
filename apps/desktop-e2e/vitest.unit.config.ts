@@ -29,6 +29,7 @@ export default defineConfig({
       'src/support/gateway-fixture.test.ts',
       'src/support/tau-account.test.ts',
       'src/support/acp-evidence.test.ts',
+      'src/support/acp-install.test.ts',
       'src/support/two-client/git-faults.test.ts',
       'scripts/qualification-cdp-ready.test.mts',
     ],

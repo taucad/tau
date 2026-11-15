@@ -44,5 +44,6 @@ export function startSessionRevisionsStandIn({
   return callback({
     input: { projectId, workspace, fileManagerRef, syncProjectRoots },
     sendBack: () => undefined,
+    receive: () => undefined,
   });
 }

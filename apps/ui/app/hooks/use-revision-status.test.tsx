@@ -85,6 +85,29 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ fileManagerRef }),
 }));
 
+/* The page's resolved consent (PR-7), which the client says to the worker; a stand-in the test moves by hand. */
+const telemetryConsent = vi.hoisted(() => {
+  let current: 'granted' | 'denied' | 'unknown' = 'unknown';
+  const listeners = new Set<(consent: 'granted' | 'denied' | 'unknown') => void>();
+  return {
+    listeners,
+    set: (next: 'granted' | 'denied' | 'unknown'): void => {
+      current = next;
+      for (const listener of listeners) {
+        listener(next);
+      }
+    },
+    page: {
+      consent: () => current,
+      onConsentChange: (listener: (consent: 'granted' | 'denied' | 'unknown') => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+  };
+});
+vi.mock('#telemetry/runtime-telemetry.js', () => ({ pageTelemetry: () => telemetryConsent.page }));
+
 let visibility: DocumentVisibilityState = 'visible';
 Object.defineProperty(document, 'visibilityState', {
   configurable: true,
@@ -777,6 +800,7 @@ describe('the page client of the worker revision root', () => {
     expect(ports).toHaveLength(1);
     expect(messages).toMatchObject([
       { command: 'remoteCredential' },
+      { command: 'telemetryConsent' },
       { command: 'setDeviceId', deviceId: 'device-1' },
       { command: 'remoteCredential', origin: 'https://github.com' },
     ]);
@@ -800,6 +824,31 @@ describe('the page client of the worker revision root', () => {
       { command: 'focus', focused: true },
       { command: 'focus', focused: true },
     ]);
+    revisionClient.close();
+  });
+
+  it("should say the page's resolved telemetry consent on every port and every change, and stop when closed (PR-7)", () => {
+    telemetryConsent.set('denied');
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const consentFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'telemetryConsent');
+
+    revisionClient.open();
+    expect(consentFrames()).toEqual([{ command: 'telemetryConsent', consent: 'denied' }]);
+
+    telemetryConsent.set('granted');
+    expect(consentFrames()).toEqual([
+      { command: 'telemetryConsent', consent: 'denied' },
+      { command: 'telemetryConsent', consent: 'granted' },
+    ]);
+
+    revisionClient.close();
+    expect(telemetryConsent.listeners.size).toBe(0);
+    telemetryConsent.set('unknown');
+    revisionClient.open();
+    expect(consentFrames().at(-1)).toEqual({ command: 'telemetryConsent', consent: 'unknown' });
+    expect(telemetryConsent.listeners.size).toBe(1);
     revisionClient.close();
   });
 

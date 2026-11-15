@@ -1,9 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
+import { RecoveryNoticeUndeliverableError } from '#billing-payments.service.js';
 import type { BillingRecoveryNoticeTransport } from '#billing-payments.service.js';
 import { billingOwnerBinding, user } from '@taucad/api-database/schema';
 import type { DatabaseService } from '@taucad/api-database';
-import type { EmailService } from '@taucad/api-email';
+import type { EmailDeliverabilityService, EmailService } from '@taucad/api-email';
 
 /** The three senders this transport needs from `EmailService`; a test supplies exactly these. */
 export type RecoveryNoticeEmailSender = Pick<
@@ -21,7 +22,9 @@ const deliveredKinds = new Set(['renewal_failed', 'consent_disabled', 'authentic
  * reload consent and reload that needs the customer's confirmation, and `deliverRecoveryNotices`
  * owns the lease, the retry backoff and delivery marking. This transport only resolves the
  * recipient and renders the message, so a failed send leaves the row pending for its next attempt
- * instead of losing the notice.
+ * instead of losing the notice. An owner address Resend suppresses is refused before any send with
+ * `RecoveryNoticeUndeliverableError`: Resend would accept the request and drop the mail, and the
+ * notice would be marked delivered to nobody (email bounce blueprint R10).
  */
 // Constructed directly by the billing module factory and the operations worker, never resolved by
 // a Nest token, so it needs no @Injectable().
@@ -31,7 +34,11 @@ export class BillingRecoveryNoticeEmailTransport implements BillingRecoveryNotic
   public constructor(
     private readonly databaseService: Pick<DatabaseService, 'database'>,
     private readonly emailService: RecoveryNoticeEmailSender,
-    private readonly frontendURL: string,
+    private readonly options: {
+      readonly frontendURL: string;
+      /** Tau's mirror of Resend's suppression list; an owner on it is never sent to. */
+      readonly deliverability: Pick<EmailDeliverabilityService, 'undeliverableAmong'>;
+    },
   ) {}
 
   public async deliver(input: {
@@ -49,8 +56,12 @@ export class BillingRecoveryNoticeEmailTransport implements BillingRecoveryNotic
     if (email === undefined) {
       throw new Error(`No active account owner for ${input.accountId}`);
     }
+    const undeliverable = await this.options.deliverability.undeliverableAmong([email]);
+    if (undeliverable.size > 0) {
+      throw new RecoveryNoticeUndeliverableError(input.accountId);
+    }
 
-    const billingUrl = new URL('/?settings=billing', this.frontendURL).toString();
+    const billingUrl = new URL('/?settings=billing', this.options.frontendURL).toString();
     if (input.kind === 'consent_disabled') {
       await this.emailService.sendAutoReloadDisabled({ email, billingUrl });
     } else if (input.kind === 'authentication_required') {

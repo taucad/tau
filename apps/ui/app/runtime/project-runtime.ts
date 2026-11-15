@@ -26,11 +26,13 @@ import type {
   Actor,
   ActorOptions,
   ActorRefFrom,
+  AnyActorRef,
   AnyActorLogic,
   CallbackActorLogic,
   EventObject,
   InputFrom,
   SnapshotFrom,
+  StateValue,
 } from 'xstate';
 import { toast } from 'sonner';
 import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
@@ -76,6 +78,7 @@ import { startViewRecordSession } from '#workbench-records/view-record-session.j
 import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordPortsHandle } from '#workbench-records/view-record-session.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
+import { followOwedWrite } from '#workbench-records/owed-writes.js';
 import { flushWorkbenchLayout, workbenchLayoutMachine } from '#workbench-records/workbench-layout.machine.js';
 import type { WorkbenchLayoutInput } from '#workbench-records/workbench-layout.machine.js';
 import {
@@ -438,6 +441,32 @@ export type ProjectRuntime = Readonly<{
    */
   replacePreviewParameterService: (service: ParameterSetService) => void;
 }>;
+
+/**
+ * Owe the page a write while a project or editor store waits for its debounce, writes, or repairs its manifest (A7c,
+ * D26 as amended), until the store stops.
+ *
+ * @param store - The project or editor store.
+ * @internal
+ */
+export const oweWhileStoring = (store: Pick<AnyActorRef, 'subscribe'>): void => {
+  const owes = followOwedWrite();
+  store.subscribe({
+    next: (snapshot: Readonly<{ matches: (value: StateValue) => boolean }>) => {
+      owes(
+        snapshot.matches({ ready: { storing: 'pending' } }) ||
+          snapshot.matches({ ready: { storing: 'writing' } }) ||
+          snapshot.matches({ ready: { storing: 'repairing' } }),
+      );
+    },
+    complete: () => {
+      owes(false);
+    },
+    error: () => {
+      owes(false);
+    },
+  });
+};
 
 /**
  * Build a project's producer set. It is a host object of the runtime, beside its root and never in its context (D4).
@@ -1093,6 +1122,16 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
       confirmFlush(async () => flushWorkbenchLayout(layoutRef), 'Pane layout is not confirmed saved.'),
     );
   }
+  /* A7c: the view record sessions' flush is in the set from creation too, so the same flushes settle every view's owed
+   * settings with nothing mounted; `ViewSettingsSyncHost` registered it from an effect before. */
+  if (viewRecordPorts !== undefined) {
+    producers.register(async () => viewRecordPorts.flush());
+  }
+  /* A7c (D26 as amended): the project and editor stores debounce their writes too, so the page owes one while either
+   * waits to write or writes, which holds `beforeunload`'s producer stage; the unload flush writes both stores. */
+  const { projectRef, editorRef } = actor.getSnapshot().context;
+  oweWhileStoring(projectRef);
+  oweWhileStoring(editorRef);
   return {
     actor,
     layout: layoutHost,

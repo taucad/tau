@@ -3,8 +3,7 @@ import { lengthUnits } from '@taucad/workbench';
 import type { ViewFieldValues } from '@taucad/workbench';
 
 /**
- * The six mouse presets: which button and modifier orbit, pan and zoom. Trackpad gestures are the device's
- * `inputDevice`, never a preset.
+ * The six mouse presets: which button and modifier orbit, pan and zoom.
  *
  * @public
  */
@@ -32,24 +31,35 @@ export const gizmoStyleIds = ['cube', 'classic-cube', 'axis-balls', 'axes'] as c
 export type GizmoStyleId = (typeof gizmoStyleIds)[number];
 
 /**
- * The person's own defaults for the nine inheritable view leaves. The up axis is a model convention, chosen per model
- * rather than per person, so it has no personal default.
+ * The person's own defaults for the inheritable view leaves Settings offers. The up axis is a model convention, chosen
+ * per model rather than per person, so it has no personal default; surfaces and edges are set per view only.
  *
  * @public
  */
-export type PersonalViewDefaults = Partial<Omit<ViewFieldValues, 'upDirection'>>;
+export type PersonalViewDefaults = Partial<Omit<ViewFieldValues, 'upDirection' | 'display.surfaces' | 'display.lines'>>;
 
-const viewDefaultsSchema = z.strictObject({
+/** Leaves an earlier build stored that no longer have a personal default; dropped on read so the rest survives. */
+const retiredViewDefaultKeys: ReadonlySet<string> = new Set([
+  'display.surfaces',
+  'display.lines',
+  'display.postProcessing',
+]);
+
+const dropRetiredViewDefaults = (value: unknown): unknown =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value).filter(([key]) => !retiredViewDefaultKeys.has(key)))
+    : value;
+
+const viewDefaultsShape = z.strictObject({
   fieldOfView: z.number().min(0).max(90).optional(),
-  'display.surfaces': z.boolean().optional(),
-  'display.lines': z.boolean().optional(),
   'display.gizmo': z.boolean().optional(),
   'display.grid': z.boolean().optional(),
   'display.axes': z.boolean().optional(),
   'display.matcap': z.boolean().optional(),
-  'display.postProcessing': z.boolean().optional(),
   'grid.unit': z.enum(lengthUnits).optional(),
 }) satisfies z.ZodType<PersonalViewDefaults>;
+
+const viewDefaultsSchema = z.preprocess(dropRetiredViewDefaults, viewDefaultsShape);
 
 /**
  * The `viewer-preferences` section. Every field is absent until the person sets it: an absent `preset` or

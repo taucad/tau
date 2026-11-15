@@ -17,6 +17,10 @@ import { lifecycleRow, publishLogRows, runningRows, writerOwnedCatchUp } from '#
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 const queueMutex = new KeyedMutex<string>();
 vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) => {
@@ -287,7 +291,7 @@ function makeAssistantMessage(id: string, text: string): MyUIMessage {
 const defaultTestChatId = 'chat_test_default';
 
 /**
- * Mounts the full new-architecture stack: `<ChatSessionStoreProvider>`
+ * Mounts the full new-architecture stack: `<ChatSessionStoreProvider projectSessions={liveSessions}>`
  * (singleton vanilla store) → `<ActiveChatProvider>` (per-subtree active
  * chat + draft binding which acquires the session from the store).
  *
@@ -298,7 +302,7 @@ const defaultTestChatId = 'chat_test_default';
 function createWrapper(chatId: string = defaultTestChatId) {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
-      <ChatSessionStoreProvider>
+      <ChatSessionStoreProvider projectSessions={liveSessions}>
         <ActiveChatProvider chatId={chatId} projectId={testProjectId}>
           {children}
         </ActiveChatProvider>
@@ -315,7 +319,7 @@ function createWrapper(chatId: string = defaultTestChatId) {
 function createComposerWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
-      <ChatSessionStoreProvider>
+      <ChatSessionStoreProvider projectSessions={liveSessions}>
         <ChatComposerProvider surface='library'>{children}</ChatComposerProvider>
       </ChatSessionStoreProvider>
     );
@@ -378,11 +382,11 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
     }),
   );
   publishLogRows(store, chatId, []);
-  store.setProjectSession(testProjectId, session);
+  liveSessions.set(testProjectId, session);
   return () => {
     unpublish();
     disconnect();
-    store.setProjectSession(testProjectId, undefined);
+    liveSessions.set(testProjectId, undefined);
     session.stop();
   };
 }
@@ -529,7 +533,7 @@ describe('hooks resolution rules', () => {
   it('useChatById reads a non-active chat by explicit id', () => {
     function MultiChatWrapper({ children }: { readonly children: ReactNode }) {
       return (
-        <ChatSessionStoreProvider>
+        <ChatSessionStoreProvider projectSessions={liveSessions}>
           {/* Background session: ActiveChatProvider acquires chat_background from the store. */}
           <ActiveChatProvider chatId='chat_background' projectId={testProjectId}>
             {/* Inner foreground binding: ActiveChatProvider acquires chat_foreground. */}

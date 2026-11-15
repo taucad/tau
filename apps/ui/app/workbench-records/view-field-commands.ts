@@ -79,7 +79,7 @@ const runAfter = async (previous: Promise<unknown> | undefined, run: () => Promi
 };
 
 const hasPersonalDefault = (defaults: PersonalViewDefaults, leaf: ViewFieldPath): boolean =>
-  leaf !== 'upDirection' && defaults[leaf] !== undefined;
+  (defaults as Readonly<Partial<Record<ViewFieldPath, unknown>>>)[leaf] !== undefined;
 
 /**
  * The view commands over explicit ports, so tests run them against the real record store.

@@ -275,7 +275,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     },
   );
 
-  flagTest('moves the camera as every legend binding says, for every preset and the trackpad (c, d)', async () => {
+  flagTest('moves the camera as every legend binding says, for every preset (c, d)', async () => {
     await openStepThree();
     await expectPreviewRendered();
     const presets = await target.evaluate(() =>
@@ -304,9 +304,6 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
       expect.soft(after.target, `${preset}: camera target after choosing it`).toStrictEqual(before.target);
       await checkLegend(preset);
     }
-    await target.click(selectors.getByRole('switch', { name: 'I use a trackpad' }));
-    await settleCamera();
-    await checkLegend('trackpad');
     await target.writeArtifact('onboarding-setup-preview/legend.json', `${JSON.stringify(findings, null, 2)}\n`);
   });
 

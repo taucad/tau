@@ -16,8 +16,10 @@ import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/pro
 import type { SessionProjectRuntimePorts } from '#runtime/project-runtime.session.js';
 import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
-import { selectEditorRef } from '#runtime/project-runtime.js';
-import { waitFor } from 'xstate';
+import { oweWhileStoring, selectEditorRef } from '#runtime/project-runtime.js';
+import { createActor, setup, waitFor } from 'xstate';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
+import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
 
@@ -90,7 +92,7 @@ describe("a session runtime's replacement flush (A6e)", () => {
 
     let done = false;
     const flushed = (async () => {
-      await runtime.flush(new AbortController().signal);
+      await runtime.flush('replace', new AbortController().signal);
       done = true;
     })();
     await Promise.resolve();
@@ -112,7 +114,7 @@ describe("a session runtime's replacement flush (A6e)", () => {
       landed.push('entries');
     });
 
-    await expect(runtime.flush(new AbortController().signal)).rejects.toThrow(AggregateError);
+    await expect(runtime.flush('replace', new AbortController().signal)).rejects.toThrow(AggregateError);
     expect(landed).toEqual(['entries']);
   });
 
@@ -121,7 +123,7 @@ describe("a session runtime's replacement flush (A6e)", () => {
     producersOf(runtime).register(async () => pending());
     const gone = new AbortController();
 
-    const flushed = runtime.flush(gone.signal);
+    const flushed = runtime.flush('replace', gone.signal);
     gone.abort(new Error('The runtime child stopped.'));
 
     await expect(flushed).rejects.toThrow('The runtime child stopped.');
@@ -130,7 +132,7 @@ describe("a session runtime's replacement flush (A6e)", () => {
   it('should close nothing, so a runtime the choices came back to stays usable', async () => {
     const runtime = build();
 
-    await runtime.flush(new AbortController().signal);
+    await runtime.flush('replace', new AbortController().signal);
 
     expect(sessionProjectRuntimeOf(runtime.runtimeRef)).toBeDefined();
     expect(runtime.runtimeRef.getSnapshot().status).toBe('active');
@@ -155,9 +157,56 @@ describe("a session runtime's replacement flush (A6e)", () => {
       saved.push('editor state');
     });
 
-    await runtime.flush(new AbortController().signal);
+    await runtime.flush('replace', new AbortController().signal);
 
     expect(saved).toEqual(['editor state']);
+  });
+
+  it('should owe the page a write while the editor store waits to write, and nothing once it lands (A7c)', async () => {
+    const save = Promise.withResolvers<void>();
+    const runtime = await withOwedEditorEdit(async () => save.promise);
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    const flushed = runtime.flush('replace', new AbortController().signal);
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    save.resolve();
+    await flushed;
+
+    expect(owedRecordWrites.owes()).toBe(false);
+  });
+
+  it('should owe the page a write while the project store repairs its manifest (A7c review round 4)', () => {
+    const store = createActor(
+      setup({ schemas: { events: eventSchemas<{ type: 'repair' } | { type: 'repaired' }>() } }).createMachine({
+        initial: 'ready',
+        states: {
+          ready: {
+            initial: 'storing',
+            states: {
+              storing: {
+                initial: 'idle',
+                states: {
+                  idle: { on: { repair: { target: 'repairing' } } },
+                  repairing: { on: { repaired: { target: 'idle' } } },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).start();
+    oweWhileStoring(store);
+
+    store.send({ type: 'repair' });
+
+    expect(owedRecordWrites.owes()).toBe(true);
+
+    store.send({ type: 'repaired' });
+
+    expect(owedRecordWrites.owes()).toBe(false);
   });
 
   it("should reject with the editor store's refusal when its write fails", async () => {
@@ -166,7 +215,7 @@ describe("a session runtime's replacement flush (A6e)", () => {
       throw refusal;
     });
 
-    const flushed = runtime.flush(new AbortController().signal);
+    const flushed = runtime.flush('replace', new AbortController().signal);
 
     await expect(flushed).rejects.toThrow(AggregateError);
     await flushed.catch((error: unknown) => {

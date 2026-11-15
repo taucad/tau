@@ -121,6 +121,11 @@
 \* nothing mounted; the route's binding relays none of them. `selectFocusTarget` moved beside the route
 \* state it reads (`focus.route-state.ts`), so the app runtime reads the focused project with it too. The
 \* sessions' facts were already the registry's in the model (environment here). No action or verdict changes.
+\* A7c: focus's leave flush asks the session (`flushAsked`), whose `project` child flushes the runtime's producers
+\* and editor store, and the port answers with the session's `flushSettled` under the same request id (I18), after
+\* the session's step, so the facts an open it leads to produces still come before that open's answer. A project
+\* with no live session answers ok, and one that leaves the live set before it answers ran its own close flush in
+\* place of the leave flush (`TLeft`). The route's binding registers no leave flush. No action or verdict changes.
 \* A11: the app shell renders at one tree position beside the keyed live sessions, never inside the focused
 \* one, and the focused project's providers are re-homed in the shell's outlet (`focused-project-view.tsx`),
 \* keyed by the project the route shows in the editor. The gate's worker wait moves into the outlet. Focus,

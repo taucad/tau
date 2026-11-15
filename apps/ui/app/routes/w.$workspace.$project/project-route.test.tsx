@@ -14,15 +14,9 @@ import { createSessionsActor } from '#services/sessions-store.js';
 import type { SessionRuntimeOpener, SessionWiring } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { openSessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { sessionRuntimeWork } from '#runtime/project-runtime.session.js';
 import type { SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
-import { createParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
-import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
-import type { ActorRefFrom } from 'xstate';
-import type { projectMachine } from '#machines/project.machine.js';
-import type { editorMachine } from '#machines/editor.machine.js';
-import { EditorDocumentSession, isRecordingEditorConflict } from '#lib/editor-document-session.js';
-import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service';
-import type { FileContentService } from '@taucad/fs-client/file-content-service';
+import type { AnyActorRef } from 'xstate';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
@@ -41,7 +35,18 @@ import type * as ProjectSyncPlaceholderModule from '#routes/w.$workspace.$projec
 const runtimes: SessionRuntimeStandIn[] = [];
 const runtimeOpener: SessionRuntimeOpener = {
   open: async (input) => {
-    const standIn = openSessionRuntimeStandIn(input);
+    const standIn = {
+      ...openSessionRuntimeStandIn(input),
+      /* A7c: the session's flushes and close run the real work over the rows' project and editor stand-ins, as the
+       * route's binding ran them over `useProject` before the session's `project` child took them. */
+      ...sessionRuntimeWork({
+        projectId: input.projectId,
+        producers: { flushAll: async () => flushWorkbenchRecords() },
+        parameterService: () => parameterService,
+        projectRef: projectRef as unknown as AnyActorRef,
+        editorRef: editorRef as unknown as AnyActorRef,
+      }),
+    };
     const { requestChat } = standIn;
     kernelOptionInputs.push({ projectId: input.projectId, nativeKernelId: input.request?.nativeKernelId });
     runtimes.push({
@@ -172,7 +177,6 @@ const projectFileManagerRef = {
 };
 const chatSessionStore = {
   get: () => undefined,
-  setProjectSession: () => undefined,
   setRevisionFacts: () => undefined,
   publishProjectHostConnector,
   getChatHostSettings: async (chatId: string) => storedHostSettings.get(chatId),
@@ -189,6 +193,7 @@ const sessionWiring: SessionWiring = {
   }),
   loadHostConnector: async () => import('#runtime/host-connector.js'),
   registerCloseCut: () => () => undefined,
+  registerProducer: () => () => undefined,
   focusedProject: { get: () => undefined, subscribe: () => () => undefined },
   documentVisible: { get: () => true, subscribe: () => () => undefined },
   chatSessions: chatSessionStore as unknown as SessionWiring['chatSessions'],
@@ -258,14 +263,15 @@ const revisionClient = { subscribeEvents: () => () => undefined, quiesce: async 
 let editorIsIdle = true;
 type EditorSnapshot = Readonly<{
   status: 'active';
-  matches: () => boolean;
+  matches: (state?: unknown) => boolean;
   /* The producers flush reads `context.error` to tell "idle" from "idle, having
    * failed to store"; a double without it throws inside `closing.flushing`. */
   context: { error?: Error };
 }>;
 const editorSnapshot = (): EditorSnapshot => ({
   status: 'active',
-  matches: () => editorIsIdle,
+  /* A loaded store (A6e: a store that has not loaded owes nothing), idle once it has stored. */
+  matches: (state?: unknown) => state === 'ready' || editorIsIdle,
   context: {},
 });
 const editorObservers = new Set<{
@@ -404,14 +410,12 @@ vi.mock('#hooks/use-project.js', () => ({
     editorRef,
     parameterService,
     viewGraphics,
-    flushWorkbenchRecordProducers: flushWorkbenchRecords,
   }),
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
   usePublishCloudProjectPreview: () => () => undefined,
 }));
 vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
-vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
@@ -958,203 +962,6 @@ describe('project route session identity', () => {
     });
     expect(browserHostLeaseReleases[0]).toHaveBeenCalledOnce();
   });
-  it('should settle parameters and both UI stores, and leave the cut to flushSync', async () => {
-    const order: string[] = [];
-    const parameters = mock<ParameterSetService>();
-    const project = mock<ActorRefFrom<typeof projectMachine>>();
-    const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const projectSnapshot = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
-    const editorSnapshotValue = mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>();
-    projectSnapshot.matches.mockReturnValue(true);
-    editorSnapshotValue.matches.mockReturnValue(true);
-    project.getSnapshot.mockReturnValue(projectSnapshot);
-    editor.getSnapshot.mockReturnValue(editorSnapshotValue);
-    parameters.close.mockImplementation(async () => {
-      order.push('parameters');
-    });
-    project.send.mockImplementation(() => {
-      order.push('project');
-    });
-    editor.send.mockImplementation(() => {
-      order.push('editor');
-    });
-
-    await sessionsModule.flushProjectSessionPersistence({
-      parameterService: parameters,
-      projectRef: project,
-      editorRef: editor,
-      closeFlushMilliseconds: 100,
-    });
-
-    expect(order).toEqual(['parameters', 'project', 'editor']);
-  });
-
-  it('should refuse the producers flush when parameter settlement fails', async () => {
-    const parameters = mock<ParameterSetService>();
-    const project = mock<ActorRefFrom<typeof projectMachine>>();
-    const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    parameters.close.mockRejectedValue(new Error('checked parameter flush failed'));
-
-    await expect(
-      sessionsModule.flushProjectSessionPersistence({
-        parameterService: parameters,
-        projectRef: project,
-        editorRef: editor,
-        closeFlushMilliseconds: 100,
-      }),
-    ).rejects.toThrow('checked parameter flush failed');
-    expect(project.send).not.toHaveBeenCalled();
-    expect(editor.send).not.toHaveBeenCalled();
-  });
-
-  it('keeps project close retryable until workbench record producers save their latest bytes', async () => {
-    const order: string[] = [];
-    let offline = true;
-    const parameters = mock<ParameterSetService>();
-    const project = mock<ActorRefFrom<typeof projectMachine>>();
-    const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const projectSnapshot = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
-    const editorSnapshot = mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>();
-    projectSnapshot.matches.mockReturnValue(true);
-    editorSnapshot.matches.mockReturnValue(true);
-    project.getSnapshot.mockReturnValue(projectSnapshot);
-    editor.getSnapshot.mockReturnValue(editorSnapshot);
-    parameters.close.mockImplementation(async () => {
-      order.push('parameters');
-    });
-    project.send.mockImplementation(() => {
-      order.push('project');
-    });
-    editor.send.mockImplementation(() => {
-      order.push('editor');
-    });
-    const flushWorkbenchRecords = async (): Promise<void> => {
-      order.push('workbench');
-      if (offline) {
-        throw new Error('checked workbench write unavailable');
-      }
-    };
-    const flush = async () =>
-      sessionsModule.flushProjectSessionPersistence({
-        parameterService: parameters,
-        projectRef: project,
-        editorRef: editor,
-        flushWorkbenchRecords,
-        closeFlushMilliseconds: 100,
-      });
-    await expect(flush()).rejects.toThrow('checked workbench write unavailable');
-    expect(order).toEqual(['workbench']);
-    offline = false;
-    await flush();
-    expect(order).toEqual(['workbench', 'workbench', 'parameters', 'project', 'editor']);
-  });
-
-  it('should keep the real parameter service usable after record confirmation refuses close', async () => {
-    const parameters = createParameterSetService({
-      rootDirectory: '/project',
-      client: mock<Parameters<typeof createParameterSetService>[0]['client']>(),
-      watchReady: vi.fn(),
-    });
-    const project = mock<ActorRefFrom<typeof projectMachine>>();
-    const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    try {
-      await expect(
-        sessionsModule.flushProjectSessionPersistence({
-          parameterService: parameters,
-          projectRef: project,
-          editorRef: editor,
-          flushWorkbenchRecords: async () => {
-            throw new Error('Pane layout is not confirmed saved.');
-          },
-          closeFlushMilliseconds: 100,
-        }),
-      ).rejects.toThrow('Pane layout is not confirmed saved.');
-      const operation = await parameters.prepareFileOperation({
-        kind: 'move',
-        oldPath: 'main.ts',
-        newPath: 'renamed.ts',
-      });
-      await operation.rollback();
-      expect(project.send).not.toHaveBeenCalled();
-      expect(editor.send).not.toHaveBeenCalled();
-    } finally {
-      await parameters.close();
-    }
-  });
-
-  it('should refuse the close flush while an editor conflict is being recorded, before anything is torn down (RV-W5b2 R2-1)', async () => {
-    const parameters = mock<ParameterSetService>();
-    const project = mock<ActorRefFrom<typeof projectMachine>>();
-    const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const content = mock<FileContentService>();
-    content.addEditorSaveFlusher.mockReturnValue(() => undefined);
-    const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
-    content.resolve.mockResolvedValue({ kind: 'text', content: encode('one') });
-    content.peekOutcome.mockReturnValue({ kind: 'text', content: encode('theirs') });
-    content.saveEditor.mockRejectedValueOnce(new EditorSaveConflictError('main.ts', encode('one')));
-    content.onDidContentChange.mockReturnValue(() => undefined);
-    content.onDidChangeOutcome.mockReturnValue(() => undefined);
-    const gate = Promise.withResolvers<void>();
-    const session = new EditorDocumentSession({
-      contentService: content,
-      projectId: 'proj-recording',
-      recordEditorConflict: async () => {
-        await gate.promise;
-        return { status: 'recorded', revisionId: 'r1', line: 'main', into: 'main' };
-      },
-    });
-    try {
-      await session.acquire('main.ts');
-      session.apply('main.ts', { origin: 'view', expectedVersion: 1, changes: [{ from: 0, to: 3, insert: 'mine' }] });
-      const saved = session.save('main.ts');
-      await vi.waitFor(() => {
-        expect(isRecordingEditorConflict('proj-recording')).toBe(true);
-      });
-      await expect(
-        sessionsModule.flushProjectSessionPersistence({
-          projectId: 'proj-recording',
-          parameterService: parameters,
-          projectRef: project,
-          editorRef: editor,
-          closeFlushMilliseconds: 100,
-        }),
-      ).rejects.toThrow('An edit that overlapped another change is still being recorded. Try again in a moment.');
-      expect(parameters.close).not.toHaveBeenCalled();
-      expect(project.send).not.toHaveBeenCalled();
-      gate.resolve();
-      await saved;
-    } finally {
-      gate.resolve();
-      session.dispose();
-    }
-  });
-
-  it('should refuse the producers flush when project storage reports idle with an error', async () => {
-    const parameters = mock<ParameterSetService>();
-    const project = mock<ActorRefFrom<typeof projectMachine>>();
-    const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const projectFailure = new Error('project save failed');
-    const projectSnapshot = {
-      matches: () => true,
-      context: { error: projectFailure },
-    } as unknown as ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>;
-    const editorSnapshotValue = {
-      matches: () => true,
-      context: { error: undefined },
-    } as unknown as ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>;
-    project.getSnapshot.mockReturnValue(projectSnapshot);
-    editor.getSnapshot.mockReturnValue(editorSnapshotValue);
-
-    await expect(
-      sessionsModule.flushProjectSessionPersistence({
-        parameterService: parameters,
-        projectRef: project,
-        editorRef: editor,
-        closeFlushMilliseconds: 100,
-      }),
-    ).rejects.toThrow('project save failed');
-  });
-
   it('connects a Tau Cloud library open through the project-scoped client', async () => {
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     revisionStatus.mockReturnValue(

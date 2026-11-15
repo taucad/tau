@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run disposable full Linux guests for infrastructure proof or protected staging qualification.
+# Run disposable full Linux guests for infrastructure proof or protected staging/production qualification.
 # See desktop-release-signing-pipeline/linux-remote-qualification-2026-10-22.md.
 # Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
-# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging inputs, or clean-host for
+# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging or production inputs, or clean-host for
 #   consumer acceptance from desktop-route-vm-acceptance.yml on a gcp host);
 #   TAU_VM_HOST (qemu default: a nested guest on this runner; gcp: a disposable spot T4 host in Google Cloud
 #   project TAU_GCP_PROJECT, tried in TAU_GCP_ZONES order, reached over an IAP tunnel; tau-cloud stacks/gcp). Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
@@ -19,21 +19,23 @@ case "$mode" in
   qualification)
     [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
        "${GITHUB_REPOSITORY:-}" == taucad/tau && "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux &&
-       "${TAU_QUALIFICATION_CHANNEL:-}" == staging ]] || { printf 'Hosted qualification requires protected Linux staging main dispatch\n' >&2; exit 1; }
+       ( "${TAU_QUALIFICATION_CHANNEL:-}" == staging || "${TAU_QUALIFICATION_CHANNEL:-}" == production ) ]] ||
+      { printf 'Hosted qualification requires protected Linux main dispatch\n' >&2; exit 1; }
     [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
     : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
     ;;
   clean-host)
-    # Consumer ("vm") acceptance: only the protected Linux-scoped staging dispatch of the clean-host workflow, on a
+    # Consumer ("vm") acceptance: only the protected Linux-scoped staging or production (D-H5) dispatch of the clean-host workflow, on a
     # Google Cloud GPU host with stock graphics. The guest adds a standard consumer account that runs the app.
     [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
        "${GITHUB_REPOSITORY:-}" == taucad/tau &&
        "${GITHUB_WORKFLOW_REF:-}" == taucad/tau/.github/workflows/desktop-route-vm-acceptance.yml@refs/heads/main &&
        "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux && "${TAU_DESKTOP_ACCEPTANCE_KIND:-}" == vm &&
-       "${TAU_QUALIFICATION_CHANNEL:-}" == staging && "${TAU_VM_HOST:-}" == gcp &&
+       ( "${TAU_QUALIFICATION_CHANNEL:-}" == staging || "${TAU_QUALIFICATION_CHANNEL:-}" == production ) &&
+       "${TAU_VM_HOST:-}" == gcp &&
        "${TAU_QUALIFICATION_GRAPHICS:-stock}" == stock ]] ||
-      { printf 'Clean-host acceptance requires the protected Linux staging main dispatch on a GPU host\n' >&2; exit 1; }
+      { printf 'Clean-host acceptance requires the protected Linux main dispatch on a GPU host\n' >&2; exit 1; }
     [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
     : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
@@ -72,9 +74,13 @@ if [[ "$host" == gcp ]]; then
   [[ "${TAU_QUALIFICATION_GRAPHICS:-stock}" == stock ]] || { printf 'GCP hosts are for stock graphics only\n' >&2; exit 1; }
   guest_graphics=nvidia
   case "$TAU_VM_DISTRO" in ubuntu) template_distro=ubuntu2404 ;; ubuntu2604) template_distro=ubuntu2604 ;; debian) template_distro=debian13 ;; esac
-  template="$(gcloud compute instance-templates list --project "$TAU_GCP_PROJECT" \
-    --filter="name~^ci-gpu-${template_distro}-" --sort-by=~creationTimestamp --limit=1 --format='value(selfLink)')"
-  [[ -n "$template" ]] || { printf 'No GPU host template for %s\n' "$template_distro" >&2; exit 1; }
+  # Templates are regional (tau-cloud stacks/gcp: the primary region and any fallback regions), so each zone uses the
+  # newest template of its own region; a zone whose region has none is skipped.
+  region_template() {
+    gcloud compute instance-templates list --project "$TAU_GCP_PROJECT" \
+      --filter="name~^ci-gpu-${template_distro}- AND selfLink~/regions/${1}/instanceTemplates/" \
+      --sort-by=~creationTimestamp --limit=1 --format='value(selfLink)'
+  }
   route_slug="${TAU_QUALIFICATION_ROUTE:-proof}"; route_slug="${route_slug#linux-}"
   instance="tau-q-${GITHUB_RUN_ID:-0}-${GITHUB_RUN_ATTEMPT:-1}-${template_distro}-${route_slug}"
   instance="${instance:0:63}"
@@ -157,18 +163,22 @@ CONFIG
   qemu_pid=$!
 fi
 if [[ "$host" == gcp ]]; then
-  # Spot T4 capacity varies by zone; try each configured zone once. The client key is the only login path, and the
+  # T4 capacity varies by zone; try each configured zone once, in order (primary region first, then fallbacks). The client key is the only login path, and the
   # host keys are read back through the guest agent before the first SSH, so StrictHostKeyChecking stays on.
   printf 'tau:%s\n' "$(cat "$work/client.pub")" > "$work/ssh-keys"
+  template=''
   for zone in $TAU_GCP_ZONES; do
+    zone_template="$(region_template "${zone%-*}")"
+    [[ -n "$zone_template" ]] || { printf 'No GPU host template for %s in %s\n' "$template_distro" "${zone%-*}" >&2; continue; }
     if gcloud compute instances create "$instance" --project "$TAU_GCP_PROJECT" --zone "$zone" \
-      --source-instance-template "$template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
+      --source-instance-template "$zone_template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
       --metadata enable-guest-attributes=TRUE; then
+      template="$zone_template"
       instance_zone="$zone"
       break
     fi
   done
-  [[ -n "$instance_zone" ]] || { printf 'No zone had spot GPU capacity\n' >&2; exit 1; }
+  [[ -n "$instance_zone" ]] || { printf 'No zone had GPU capacity\n' >&2; exit 1; }
   # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
   # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
   # Only clean-host receipts carry host facts, so only that mode depends on the description; CI qualification keeps

@@ -1,5 +1,5 @@
 /**
- * Resolution of the ten inheritable view leaves: Tau, then the person, then the view (Finding 6).
+ * Resolution of the nine inheritable view leaves: Tau, then the person, then the view (Finding 6).
  *
  * A view file holds a value for every leaf. A leaf whose value differs from its frozen version 1 format value, or that
  * the device's exceptions list for the view, is set in that view. Any other leaf inherits: the person's default when
@@ -101,7 +101,7 @@ export const readViewField = <Leaf extends ViewFieldPath>(view: ViewFieldsRecord
  * Every inheritable leaf a view record holds, keyed by leaf path.
  *
  * @param view - The parsed view record.
- * @returns The record's ten leaf values.
+ * @returns The record's nine leaf values.
  *
  * @public
  *
@@ -122,7 +122,6 @@ export const viewFieldValuesOf = (view: ViewFieldsRecord): ViewFieldValues => ({
   'display.grid': view.display.grid,
   'display.axes': view.display.axes,
   'display.matcap': view.display.matcap,
-  'display.postProcessing': view.display.postProcessing,
   'grid.unit': view.grid.unit,
 });
 

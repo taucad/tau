@@ -239,12 +239,6 @@ const settingsCatalog = [
         ],
       },
       {
-        id: 'viewer-trackpad-gestures',
-        label: 'Trackpad gestures',
-        description: 'Two-finger scroll pans and pinch zooms, replacing mouse controls here',
-        keywords: ['trackpad', 'touchpad', 'pinch', 'scroll', 'laptop', 'this device'],
-      },
-      {
         id: 'viewer-zoom-to-cursor',
         label: 'Zoom to cursor',
         description: 'Zoom toward the pointer instead of the view centre',
@@ -269,24 +263,12 @@ const settingsCatalog = [
         description: 'The orientation control you click to snap views',
         keywords: ['view cube', 'cube', 'axis balls', 'axes', 'triad', 'orientation'],
       },
-      /* View defaults: one entry per inheritable leaf the person can set (no up axis). */
+      /* View defaults: one entry per row of the group. */
       {
         id: 'viewer-projection',
         label: 'Projection',
         description: 'Perspective shows depth, orthographic keeps parallel edges parallel',
         keywords: ['field of view', 'fov', 'orthographic', 'perspective', 'camera', 'view defaults'],
-      },
-      {
-        id: 'viewer-surfaces',
-        label: 'Surfaces',
-        description: 'Show the faces of every model',
-        keywords: ['faces', 'view defaults'],
-      },
-      {
-        id: 'viewer-edges',
-        label: 'Edges',
-        description: 'Outline the edges of every face',
-        keywords: ['lines', 'outline', 'view defaults'],
       },
       {
         id: 'viewer-show-gizmo',
@@ -311,12 +293,6 @@ const settingsCatalog = [
         label: 'Matcap',
         description: 'Shade surfaces with a studio material',
         keywords: ['material', 'shading', 'lighting', 'view defaults'],
-      },
-      {
-        id: 'viewer-post-processing',
-        label: 'Post-processing',
-        description: 'Soften shadows and smooth edges on screen',
-        keywords: ['ambient occlusion', 'anti-aliasing', 'effects', 'view defaults'],
       },
       {
         id: 'viewer-grid-unit',

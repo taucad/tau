@@ -19,7 +19,7 @@ import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import type { FocusAccessAnswer, FocusRouteCommand } from '#machines/focus.machine.js';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
 import type { FocusHostFixture } from '#runtime/app-runtime-focus.fixture.js';
-import { createSessionsRegistryLogic, registerProjectSessionServices } from '#services/sessions-store.js';
+import { createSessionsRegistryLogic } from '#services/sessions-store.js';
 import type { SessionRuntimeOpener } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
@@ -156,18 +156,6 @@ const compose = ({
   };
 };
 
-/** A session's services, so its close settles. */
-const servicesFor = (projectId: string): void => {
-  cleanups.push(
-    registerProjectSessionServices(projectId, {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => undefined,
-      flushSync: async () => undefined,
-      closeRuntime: async () => undefined,
-    }),
-  );
-};
-
 const flushTasks = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
     globalThis.setTimeout(resolve, 0);
@@ -177,7 +165,6 @@ const flushTasks = async (): Promise<void> => {
 describe('focus and the registry, wired (A5b)', () => {
   it('should answer every open after the facts it produced, and report facts after every live answer', async () => {
     const { focusEvents, route } = compose();
-    servicesFor('p1');
     route('p1');
     await vi.waitFor(() => {
       expect(focusEvents.some((event) => event.type === 'openSettled')).toBe(true);
@@ -195,8 +182,6 @@ describe('focus and the registry, wired (A5b)', () => {
     /* Budget 1 and a memory release (the registry's own close) in flight: focus hears the left session go absent
      * while the registry is still notifying, and sends its next open from inside that notification. */
     const { registry, focusEvents, route } = compose({ budget: 1 });
-    servicesFor('p1');
-    servicesFor('p2');
     route('p1');
     await vi.waitFor(() => {
       expect(Object.keys(registry.getSnapshot().context.refs)).toEqual(['p1']);
@@ -216,8 +201,6 @@ describe('focus and the registry, wired (A5b)', () => {
 
   it('should tell the registry each library epoch before any open that names it', async () => {
     const { registryEvents, bumpEpoch, route, registry } = compose();
-    servicesFor('p1');
-    servicesFor('p2');
     route('p1');
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
@@ -241,8 +224,6 @@ describe('focus and the registry, wired (A5b)', () => {
 
   it('should re-send an open the registry dropped as stale', async () => {
     const { registry, registryEvents, focusEvents, host, route, bumpEpoch } = compose({ budget: 1 });
-    servicesFor('p1');
-    servicesFor('p2');
     route('p1');
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
@@ -283,7 +264,6 @@ describe('focus and the registry, wired (A5b)', () => {
 
   it('should hand the session a chat the route switched to while the open was out, once the session is live', async () => {
     const { registry, route } = compose({ holdRuntime: true });
-    servicesFor('p1');
     route('p1', 'chat-1');
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.refs['p1']).toBeDefined();
@@ -311,7 +291,6 @@ describe("focus and the session's runtime (A6d)", () => {
     const { registry, host, route } = compose({ runtime: opener });
     const commands: FocusRouteCommand[] = [];
     cleanups.push(host.bindings.bindRoute((command) => commands.push(command)));
-    servicesFor('p1');
     route('p1', 'chat-1');
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
@@ -327,7 +306,6 @@ describe("focus and the session's runtime (A6d)", () => {
   it("M2: should hold the open until the session's chat is ready, then settle on the project", async () => {
     const opener = sessionRuntimeOpenerStandIn({ chatReady: false });
     const { registry, host, route } = compose({ runtime: opener });
-    servicesFor('p1');
     route('p1');
     await vi.waitFor(() => {
       expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');

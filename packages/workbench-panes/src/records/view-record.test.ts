@@ -20,7 +20,6 @@ describe('view-record', () => {
         grid: false,
         axes: true,
         matcap: true,
-        postProcessing: false,
       },
       camera: {
         kind: 'pose',
@@ -53,12 +52,12 @@ describe('view-record', () => {
     const view = record();
     const resolved = resolveViewSettings({
       tau: tauViewDefaults,
-      person: { 'display.grid': false, fieldOfView: 0, 'display.postProcessing': true },
+      person: { 'display.grid': false, fieldOfView: 0, 'display.matcap': true },
       view,
     }).values;
     expect(graphicsSettingsForView(view, resolved)).toMatchObject({
       enableGrid: false,
-      enablePostProcessing: true,
+      enableMatcap: true,
       cameraFovAngle: 0,
       upDirection: 'z',
     });

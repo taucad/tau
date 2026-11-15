@@ -22,10 +22,16 @@ import type { QueryClient } from '@tanstack/react-query';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
-import { selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { refuseCloseWhileRecording } from '#lib/editor-document-session.js';
 import { inspect as developmentInspect } from '#machines/inspector.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
-import type { SessionRuntime, SessionRuntimeChat, SessionRuntimeFacts } from '#services/sessions-store.js';
+import type {
+  SessionRuntime,
+  SessionRuntimeChat,
+  SessionRuntimeFacts,
+  SessionRuntimeFlushKind,
+} from '#services/sessions-store.js';
 import type { ProjectChoices } from '#runtime/choices.js';
 import { selectProjectKernelSelection } from '#runtime/choices-kernel-selection.js';
 import { createRecordWatch, selectBridgeOpener, servicesBound, servicesOf } from '#runtime/file-manager-facade.js';
@@ -112,6 +118,149 @@ if (hotData !== undefined) {
  */
 export const sessionProjectRuntimeOf = (runtimeRef: AnyActorRef): SessionProjectRuntimeSource | undefined =>
   sessionProjectRuntimes.get(runtimeRef);
+
+/*
+ * Write what one store (the project or the editor machine) holds now and wait, with no timer, until it is idle again
+ * (I15): the session bounds the wait on its clock, and `gone` ends it when the session's child stops. A store that has
+ * not loaded owes nothing (A6e).
+ *
+ * @returns The write's error, if the store recorded one.
+ */
+const flushStore = async (store: AnyActorRef, gone: AbortSignal): Promise<unknown> => {
+  if (!(store.getSnapshot() as { matches: (value: unknown) => boolean }).matches('ready')) {
+    return undefined;
+  }
+  store.send({ type: 'flushNow' });
+  const settled: unknown = await waitFor(
+    store,
+    (state: { matches: (value: unknown) => boolean }) => state.matches({ ready: { storing: 'idle' } }),
+    { signal: gone },
+  );
+  return (settled as { context: { error?: unknown } }).context.error;
+};
+
+/*
+ * A6e (B4): what a replacement flushes. The producer set (the layout, the entries and view records) and the project and
+ * editor stores write what they owe, together. Unlike the close flush it neither closes the parameter service nor
+ * refuses on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person.
+ * It keeps no timer (I15): the session bounds it on its clock, and `gone` ends it when the child stops.
+ */
+const flushForReplacement = async (
+  producers: SessionRuntimeWorkInput['producers'],
+  stores: readonly AnyActorRef[],
+  gone: AbortSignal,
+): Promise<void> => {
+  const owed: Array<Promise<unknown>> = [
+    producers.flushAll(),
+    ...stores.map(async (store) => {
+      const error = await flushStore(store, gone);
+      if (error !== undefined) {
+        throw error instanceof Error ? error : new Error('The store did not confirm its write.', { cause: error });
+      }
+    }),
+  ];
+  /* A producer has no signal of its own: once `gone` aborts the flush stops waiting on it, and rejects with the
+   * abort, which confirms no write. */
+  let leave: () => void = () => undefined;
+  const abandoned = new Promise<never>((_resolve, reject) => {
+    leave = () => {
+      reject(
+        gone.reason instanceof Error ? gone.reason : new Error('The flush was abandoned.', { cause: gone.reason }),
+      );
+    };
+  });
+  if (gone.aborted) {
+    leave();
+  }
+  gone.addEventListener('abort', leave, { once: true });
+  let outcomes: Array<PromiseSettledResult<unknown>>;
+  try {
+    outcomes = await Promise.race([Promise.allSettled(owed), abandoned]);
+  } finally {
+    gone.removeEventListener('abort', leave);
+  }
+  const refusals = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+  if (refusals.length > 0) {
+    throw new AggregateError(
+      refusals.map((refusal) => refusal.reason as unknown),
+      'The superseded runtime did not confirm every write.',
+    );
+  }
+};
+
+/** What {@link sessionRuntimeWork} works over: the parts of a built project runtime a flush and a close reach. @public */
+export type SessionRuntimeWorkInput = Readonly<{
+  projectId: string;
+  producers: Pick<ProjectRuntime['producers'], 'flushAll'>;
+  /** The runtime's current parameter service, read when the close reaches it. */
+  parameterService: () => Pick<ReturnType<ProjectRuntime['parameterService']['get']>, 'close'>;
+  projectRef: AnyActorRef;
+  editorRef: AnyActorRef;
+}>;
+
+/**
+ * What a session asks of a built project runtime (A7c, row S6): its flushes and its close, over the runtime's producer
+ * set, parameter service and project and editor stores. No React and no timer: the session's states bound each one.
+ *
+ * - `close` (the close step `flushingProducers`): refused while an editor's conflict is being recorded; then the
+ *   producers and both stores, whose write errors refuse it. It closes nothing, so a session whose close ran past its
+ *   bound is live with every resource intact; the parameter service closes in the next step (`closeParameters`).
+ * - `leave` (focus's leave flush, I3): the producers, then the editor store.
+ * - `unload` (the producer stage of `environment`'s sequencer, I6, D26): the producers, then both stores, even after a
+ *   producer's refusal; only a producer's refusal refuses it.
+ * - `replace` (a replacement, A6e, B4): the producers and both stores together; any write it could not confirm refuses it.
+ *
+ * @param input - The project, and the runtime's producer set, parameter service and project and editor stores.
+ * @returns The runtime's flush and its close.
+ * @public
+ */
+export const sessionRuntimeWork = ({
+  projectId,
+  producers,
+  parameterService,
+  projectRef,
+  editorRef,
+}: SessionRuntimeWorkInput): Pick<SessionRuntime, 'flush' | 'closeParameters' | 'closeRuntime'> => {
+  return {
+    flush: async (kind: SessionRuntimeFlushKind, gone: AbortSignal) => {
+      if (kind === 'replace') {
+        await flushForReplacement(producers, [projectRef, editorRef], gone);
+        return;
+      }
+      if (kind === 'close') {
+        refuseCloseWhileRecording(projectId);
+      }
+      if (kind === 'unload') {
+        /* The unload asks the stores once every producer settles (A0.2 item 10, S40), as the close does, and a
+         * producer's refusal skips none of them (A7c review round 4). A store write on `beforeunload` so waits on the
+         * producers' head start; the editor's own save covers it. It refuses only on a producer's refusal, as the
+         * persistence guard did, so a store that fails before it settles refuses nothing (review round 6). */
+        const [records] = await Promise.allSettled([producers.flushAll()]);
+        await Promise.allSettled([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
+        if (records.status === 'rejected') {
+          throw records.reason instanceof Error
+            ? records.reason
+            : new Error('Workbench records are not confirmed saved.', { cause: records.reason });
+        }
+        return;
+      }
+      /* A record refusal keeps the session live, including its parameter editing authority. */
+      await producers.flushAll();
+      if (kind === 'leave') {
+        await flushStore(editorRef, gone);
+        return;
+      }
+      const errors = await Promise.all([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
+      /* The close refuses on a write it could not confirm. */
+      const error = errors.find((candidate) => candidate !== undefined);
+      if (error !== undefined) {
+        throw error instanceof Error ? error : new Error('Project changes are not confirmed saved.');
+      }
+    },
+    closeParameters: async () => parameterService().close(),
+    closeRuntime: async () => closeProjectRuntime(projectRef),
+  };
+};
 
 /**
  * Build and start one session's project runtime.
@@ -234,56 +383,6 @@ export function openSessionProjectRuntime(
       );
     },
     kernelIsCurrent: () => selectionFor().key === selection.key,
-    /* A6e (B4): what a replacement flushes. The producer set (the layout, the entries and view records) and the project
-     * and editor stores write what they owe. Unlike the close flush it neither closes the parameter service nor refuses
-     * on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person. It
-     * keeps no timer (I15): a store's wait ends when it settles, when it stops, or when `gone` aborts. */
-    flush: async (gone) => {
-      const owed = [runtime.producers.flushAll()];
-      for (const ref of [projectRef, editorRef] as const) {
-        /* A store that has not loaded owes nothing; one that has writes now and settles in `storing.idle`. */
-        if (ref.getSnapshot().matches('ready')) {
-          ref.send({ type: 'flushNow' });
-          owed.push(
-            (async () => {
-              const settled = await waitFor(ref, (state) => state.matches({ ready: { storing: 'idle' } }), {
-                signal: gone,
-              });
-              if (settled.context.error !== undefined) {
-                throw settled.context.error;
-              }
-            })(),
-          );
-        }
-      }
-      /* A producer has no signal of its own: once `gone` aborts the flush stops waiting on it, and rejects with the
-       * abort, which confirms no write. */
-      let leave: () => void = () => undefined;
-      const abandoned = new Promise<never>((_resolve, reject) => {
-        leave = () => {
-          reject(
-            gone.reason instanceof Error ? gone.reason : new Error('The flush was abandoned.', { cause: gone.reason }),
-          );
-        };
-      });
-      if (gone.aborted) {
-        leave();
-      }
-      gone.addEventListener('abort', leave, { once: true });
-      let outcomes: Array<PromiseSettledResult<void>>;
-      try {
-        outcomes = await Promise.race([Promise.allSettled(owed), abandoned]);
-      } finally {
-        gone.removeEventListener('abort', leave);
-      }
-      const refusals = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
-      if (refusals.length > 0) {
-        throw new AggregateError(
-          refusals.map((refusal) => refusal.reason as unknown),
-          'The superseded runtime did not confirm every write.',
-        );
-      }
-    },
     /* R3: the session decides; the project machine owns the cad units (A7b, row S5). */
     park: (parked) => {
       projectRef.send({ type: parked ? 'parkRuntime' : 'resumeRuntime' });
@@ -291,6 +390,13 @@ export function openSessionProjectRuntime(
     retryFocusedChat: () => {
       editorRef.send({ type: 'retryEnsureFocusedChat' });
     },
+    ...sessionRuntimeWork({
+      projectId,
+      producers: runtime.producers,
+      parameterService: () => runtime.parameterService.get(),
+      projectRef: selectProjectRef(runtime.actor.getSnapshot()),
+      editorRef: selectEditorRef(runtime.actor.getSnapshot()),
+    }),
     close: () => {
       if (closed) {
         return;

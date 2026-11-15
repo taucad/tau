@@ -252,7 +252,9 @@ const apiLibraryDependencies = {
   lifecycle: ['observability', 'core'],
   database: ['core'],
   redis: ['core', 'observability'],
-  email: ['core'],
+  // The Resend webhook inbox and the address-state mirror (email bounce blueprint R7, R9) are email's own
+  // tables, and each stored event increments `email.events`.
+  email: ['database', 'core', 'observability'],
   // measured: `bearer-auth.logging.test.ts` builds the API's pino logger.
   auth: ['database', 'email', 'core', 'observability'],
   // measured: `HostsGateway` records WebSocket metrics through `MetricsService`.

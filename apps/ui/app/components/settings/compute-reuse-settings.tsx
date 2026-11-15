@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Button } from '@taucad/ui/components/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
@@ -8,6 +7,7 @@ import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-prefere
 import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-project-view.session.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { desktopProjectRoot } from '#constants/desktop-kernel-options.js';
+import { Button } from '@taucad/ui/components/button';
 
 const modes: ReadonlyArray<{
   value: ComputeReuseMode;
@@ -118,6 +118,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
         }
         control={
           <Select
+            size='md'
             value={selected}
             onValueChange={(value) => {
               setComputeReuseMode(value as ComputeReuseMode);
@@ -148,20 +149,14 @@ export function ComputeReuseSettings(): React.JSX.Element {
         }
       >
         <div className='flex flex-wrap items-center gap-2'>
-          <Button size='sm' variant='outline' disabled={!available} onClick={async () => control('inspect')}>
+          <Button variant='outline' disabled={!available} onClick={async () => control('inspect')}>
             Check size
           </Button>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={!available}
-            onClick={async () => control('collect', collectCursor)}
-          >
+          <Button variant='outline' disabled={!available} onClick={async () => control('collect', collectCursor)}>
             {collectCursor ? 'Free more' : 'Free space'}
           </Button>
           {confirmClear ? (
             <Button
-              size='sm'
               variant='destructive'
               onClick={async () => {
                 setConfirmClearProjectId(undefined);
@@ -172,7 +167,6 @@ export function ComputeReuseSettings(): React.JSX.Element {
             </Button>
           ) : (
             <Button
-              size='sm'
               variant='outline'
               disabled={!available}
               onClick={() => {

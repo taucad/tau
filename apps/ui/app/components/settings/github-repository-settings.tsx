@@ -40,7 +40,7 @@ function StatusRow({
     >
       <span className={cn(kind === 'error' && 'text-foreground')}>{children}</span>
       {onRetry ? (
-        <Button variant='outline' size='sm' onClick={onRetry}>
+        <Button variant='outline' onClick={onRetry}>
           Try again
         </Button>
       ) : null}
@@ -60,7 +60,7 @@ function MoreRow({
 }): React.JSX.Element {
   return (
     <div className='flex justify-center py-2'>
-      <Button variant='ghost' size='sm' disabled={isDisabled} onClick={onClick}>
+      <Button variant='ghost' disabled={isDisabled} onClick={onClick}>
         {label}
       </Button>
     </div>
@@ -91,7 +91,6 @@ const RepositoryRow = memo(function RepositoryRow({
       description={repositoryAccess(repository, installation)}
       control={
         <Button
-          size='sm'
           variant='ghost'
           aria-expanded={open}
           aria-label={`Manage ${repository.fullName}`}
@@ -262,7 +261,6 @@ const ConnectionRow = memo(function ConnectionRow({
       control={
         <>
           <Button
-            size='sm'
             variant='outline'
             aria-label={`Disconnect @${connection.login}`}
             onClick={() => {
@@ -402,7 +400,6 @@ export function GithubRepositorySettings(): React.JSX.Element {
               {connected && !pending ? (
                 <Button
                   variant='ghost'
-                  size='sm'
                   onClick={() => {
                     void connect();
                   }}
@@ -413,7 +410,7 @@ export function GithubRepositorySettings(): React.JSX.Element {
               ) : null}
               <Button
                 variant='ghost'
-                size='icon-sm'
+                size='icon'
                 aria-label='Refresh'
                 onClick={() => {
                   void queryClient.invalidateQueries({ queryKey: ['github'] });
@@ -438,7 +435,6 @@ export function GithubRepositorySettings(): React.JSX.Element {
               control={
                 <Button
                   variant='outline'
-                  size='sm'
                   onClick={() => {
                     void configure();
                   }}
@@ -460,7 +456,6 @@ export function GithubRepositorySettings(): React.JSX.Element {
                   {pending ? (
                     <Button
                       variant='ghost'
-                      size='sm'
                       onClick={() => {
                         void cancel();
                       }}
@@ -469,7 +464,6 @@ export function GithubRepositorySettings(): React.JSX.Element {
                     </Button>
                   ) : null}
                   <Button
-                    size='sm'
                     disabled={pending}
                     onClick={() => {
                       void connect();

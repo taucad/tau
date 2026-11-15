@@ -6,7 +6,7 @@
  * snapshot, a clock or React state: the binding machine holds every value they read and calls them inside its
  * transitions.
  *
- * The ten inheritable leaves (up direction, field of view, the seven display flags and the grid unit) are command-written
+ * The nine inheritable leaves (up direction, field of view, the six display flags and the grid unit) are command-written
  * and resolver-seeded (graphics charter ruling of 2026-11-12, amending D20, I6 and I7 for those leaves; onboarding
  * blueprint Finding 6): the live owners adopt `resolveViewSettings` output whenever the record (of any origin), the
  * person's defaults or the exceptions change, and {@link nextRecord} never writes them from the live owners. Camera,
@@ -28,7 +28,6 @@ export const viewDisplayOwners = [
   ['enableGrid', 'display.grid', 'setGridVisibility'],
   ['enableAxes', 'display.axes', 'setAxesVisibility'],
   ['enableMatcap', 'display.matcap', 'setMatcapVisibility'],
-  ['enablePostProcessing', 'display.postProcessing', 'setPostProcessingVisibility'],
 ] as const;
 
 /**
@@ -41,7 +40,7 @@ export type ViewResolutionLevels = Readonly<{
 }>;
 
 /**
- * What the live owners show for a view's ten inheritable leaves.
+ * What the live owners show for a view's nine inheritable leaves.
  *
  * @param record - The view record; absent, the view holds the format value for every leaf.
  * @param levels - The levels above it.
@@ -95,7 +94,7 @@ export type ViewForeignChanges = Readonly<{
 
 /**
  * The live owners' values a view record holds. `camera` is present only while this view's person made the pose the
- * record should hold (D20, I7); absent, the record's own camera stands. The ten inheritable leaves are not here: they
+ * record should hold (D20, I7); absent, the record's own camera stands. The nine inheritable leaves are not here: they
  * are written by view commands only.
  */
 export type ViewOwners = Readonly<{
@@ -214,7 +213,7 @@ const cameraChanges = ({ previous, next, patch, resolution }: Publication): View
 
 /**
  * What the live owners adopt while a view has no record (its file is missing or refused and none was read before):
- * the ten inheritable leaves resolved with no view level, so Tau's values and the person's defaults still show.
+ * the nine inheritable leaves resolved with no view level, so Tau's values and the person's defaults still show.
  *
  * @param seeded - The resolution last seeded while the record was absent, or `undefined` when none was.
  * @param levels - The levels above the view now.

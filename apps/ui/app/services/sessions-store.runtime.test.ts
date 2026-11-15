@@ -10,16 +10,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
-import {
-  createSessionsActor,
-  registerProjectSessionServices,
-  selectProjectSessionRuntime,
-} from '#services/sessions-store.js';
+import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
-import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
-import type { SessionRuntimeFacts } from '#services/sessions-store.js';
+import type { SessionRuntimeOpenerStandIn, SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
+import type { SessionRuntimeFacts, SessionWiring } from '#services/sessions-store.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
 import type * as AppRuntimeFaultsModule from '#runtime/app-runtime-faults.js';
@@ -48,7 +44,7 @@ type Harness = Readonly<{
 
 let current: Harness | undefined;
 
-const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock): Harness => {
+const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock, wiring?: SessionWiring): Harness => {
   const files: SessionFileManagerStandIn[] = [];
   const closes: string[] = [];
   const opener = sessionRuntimeOpenerStandIn(facts);
@@ -73,9 +69,12 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock): H
         closes.push(`open:${opener.built.length - 1}`);
         return {
           ...runtime,
-          flush: async (gone) => {
-            closes.push(`flush:${opener.built.indexOf(runtime)}`);
-            await runtime.flush(gone);
+          /* A replacement's flush; the session's own flushes (A7c) are the stand-in's signals. */
+          flush: async (kind, gone) => {
+            if (kind === 'replace') {
+              closes.push(`flush:${opener.built.indexOf(runtime)}`);
+            }
+            await runtime.flush(kind, gone);
           },
           close: () => {
             if (!runtime.isClosed()) {
@@ -87,6 +86,7 @@ const harness = (facts: Partial<SessionRuntimeFacts> = {}, clock?: StepClock): H
       },
     },
     ...(clock === undefined ? {} : { clock }),
+    ...(wiring === undefined ? {} : { wiring }),
   }).start();
   current = { registry, files, opener, closes };
   return current;
@@ -313,6 +313,59 @@ describe('a change of kernel selection replaces the runtime through the session 
     };
   };
 
+  /* A7c: the close's producer flush is the runtime's own `flush('close')`; a row holds it, then lets it land or refuse. */
+  const heldClose = (runtime: SessionRuntimeStandIn | undefined) => {
+    const release = runtime?.hold((signal) => signal === 'flush:close') ?? (() => undefined);
+    return {
+      settle: (error?: Error) => {
+        if (error !== undefined) {
+          runtime?.refuse(error.message);
+        }
+        release();
+      },
+    };
+  };
+
+  /* A7c: the wiring the session's close cancels runs through; its revision client quiesces at once. */
+  const wiringCancelling = (cancelProjectedRun: () => Promise<'stopped' | 'continuing'>): SessionWiring =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the wiring the app runtime composes, its leaves stood in.
+    ({
+      loadRevisions: async () => ({
+        createSessionRevisionsPorts: (ports: unknown) => ports,
+        sessionRevisionsCallback:
+          () =>
+          ({
+            sendBack,
+            receive,
+          }: Readonly<{
+            sendBack: (event: { type: string; requestId?: string }) => void;
+            receive?: (listener: (event: { type: string; requestId?: string }) => void) => void;
+          }>) => {
+            receive?.((event) => {
+              if (event.type === 'quiesce') {
+                sendBack({ type: 'syncQuiesced', requestId: event.requestId });
+              }
+            });
+            return () => undefined;
+          },
+      }),
+      loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
+      registerCloseCut: () => () => undefined,
+      registerProducer: () => () => undefined,
+      focusedProject: { get: () => undefined, subscribe: () => () => undefined },
+      documentVisible: { get: () => true, subscribe: () => () => undefined },
+      chatSessions: {
+        cancelProjectedRun,
+        publishProjectHostConnector: () => undefined,
+        getChatHostSettings: () => undefined,
+        setRevisionFacts: () => undefined,
+      },
+      choices: () => {
+        throw new Error('no chat attaches in these rows');
+      },
+      rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+    }) as unknown as SessionWiring;
+
   it('B4: should land what the superseded runtime owes before it stops, with nothing mounted', async () => {
     const { registry, opener, closes } = harness();
     await open(registry, { workspace: 'ws', chatId: 'chat-1' });
@@ -436,35 +489,35 @@ describe('a change of kernel selection replaces the runtime through the session 
   });
 
   it('should replace the runtime once a close whose run cancel was under way during the change fails (D21 round 2)', async () => {
-    const { registry, opener } = harness();
+    let answer: (outcome: 'stopped' | 'continuing') => void = () => undefined;
+    const { registry, opener } = harness(
+      {},
+      undefined,
+      wiringCancelling(
+        async () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      ),
+    );
     await open(registry);
-    let refuse: (error: Error) => void = () => undefined;
-    const unregister = registerProjectSessionServices(projectId, {
-      flushProducers: async () => undefined,
-      flushSync: async () => undefined,
-      cancelRuns: async () =>
-        new Promise<void>((_resolve, reject) => {
-          refuse = reject;
-        }),
-      closeRuntime: async () => undefined,
-    });
-    try {
-      registry.send({ type: 'close', projectId, reason: 'idle' });
-      await flush();
-      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'cancellingRuns' })).toBe(true);
+    const session = sessionOf(registry)!;
+    session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+    registry.send({ type: 'close', projectId, reason: 'idle' });
+    session.send({ type: 'confirmClose' });
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'cancellingRuns' })).toBe(true);
 
-      opener.built[0]?.supersede();
-      opener.changeChoices();
-      await flush();
-      refuse(new Error('A run changed holder'));
-      await flush();
-      await flush();
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    /* The run changed holder: the chat store could not stop it, so the close fails. */
+    answer('continuing');
+    await flush();
+    await flush();
 
-      expect(sessionOf(registry)?.getSnapshot().matches('failed')).toBe(true);
-      expect(opener.built).toHaveLength(2);
-    } finally {
-      unregister();
-    }
+    expect(sessionOf(registry)?.getSnapshot().matches('failed')).toBe(true);
+    expect(opener.built).toHaveLength(2);
   });
 
   it('should still replace the runtime when the flush is refused, and report the refusal (D23 hook)', async () => {
@@ -513,33 +566,20 @@ describe('a change of kernel selection replaces the runtime through the session 
   it('should replace the runtime once a close that was under way during the change is refused (D21 round 1)', async () => {
     const { registry, opener } = harness();
     await open(registry);
-    let refuse: (error: Error) => void = () => undefined;
-    const unregister = registerProjectSessionServices(projectId, {
-      flushProducers: async () =>
-        new Promise<void>((_resolve, reject) => {
-          refuse = reject;
-        }),
-      flushSync: async () => undefined,
-      cancelRuns: async () => undefined,
-      closeRuntime: async () => undefined,
-    });
-    try {
-      registry.send({ type: 'close', projectId, reason: 'user' });
-      await flush();
-      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    const closing = heldClose(opener.built[0]);
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
 
-      opener.built[0]?.supersede();
-      opener.changeChoices();
-      await flush();
-      refuse(new Error('Unsaved parameter drafts'));
-      await flush();
-      await flush();
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    closing.settle(new Error('Unsaved parameter drafts'));
+    await flush();
+    await flush();
 
-      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
-      expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
-    } finally {
-      unregister();
-    }
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+    expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
   });
 
   it('A6 exit: should open, park, replace the runtime of and close a project in order, with no React', async () => {
@@ -575,40 +615,30 @@ describe('a change of kernel selection replaces the runtime through the session 
     await open(registry);
     const flushing = held();
     opener.built[0]?.flushWith(flushing.flush);
-    const closing = held();
-    const unregister = registerProjectSessionServices(projectId, {
-      flushProducers: closing.flush,
-      flushSync: async () => undefined,
-      cancelRuns: async () => undefined,
-      closeRuntime: async () => undefined,
-    });
-    try {
-      opener.built[0]?.supersede();
-      opener.changeChoices();
-      await flush();
-      await flush();
-      const before = [...closes];
-      registry.send({ type: 'close', projectId, reason: 'user' });
-      await flush();
-      expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    const closing = heldClose(opener.built[0]);
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+    const before = [...closes];
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
 
-      flushing.settle();
-      await flush();
-      await flush();
-      expect(closes).toEqual(before);
+    flushing.settle();
+    await flush();
+    await flush();
+    expect(closes).toEqual(before);
 
-      /* The close is refused: the session is live again and the replacement goes ahead, flushed afresh. */
-      closing.settle(new Error('Unsaved parameter drafts'));
-      await flush();
-      await flush();
-      flushing.settle();
-      await flush();
-      await flush();
-      expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
-      expect(closes).toEqual([...before, 'flush:0', 'open:1', 'runtime:0']);
-    } finally {
-      unregister();
-    }
+    /* The close is refused: the session is live again and the replacement goes ahead, flushed afresh. */
+    closing.settle(new Error('Unsaved parameter drafts'));
+    await flush();
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
+    expect(sessionOf(registry)?.getSnapshot().matches('live')).toBe(true);
+    expect(closes).toEqual([...before, 'flush:0', 'open:1', 'runtime:0']);
   });
 
   it('should not report a flush the close cut short as a fault (D21 round 3)', async () => {
@@ -636,79 +666,55 @@ describe('a change of kernel selection replaces the runtime through the session 
     await open(registry);
     const flushing = held();
     opener.built[0]?.flushWith(flushing.flush);
-    const closing = held();
-    const unregister = registerProjectSessionServices(projectId, {
-      flushProducers: closing.flush,
-      flushSync: async () => undefined,
-      cancelRuns: async () => undefined,
-      closeRuntime: async () => undefined,
-    });
-    try {
-      const session = sessionOf(registry)!;
-      session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
-      opener.built[0]?.supersede();
-      opener.changeChoices();
-      await flush();
-      registry.send({ type: 'close', projectId, reason: 'user' });
-      session.send({ type: 'confirmClose' });
-      await flush();
-      expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    heldClose(opener.built[0]);
+    const session = sessionOf(registry)!;
+    session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    session.send({ type: 'confirmClose' });
+    await flush();
+    expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
 
-      registry.send({ type: 'close', projectId, reason: 'user' });
-      await flush();
-      expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
-      flushing.settle();
-      await flush();
-      session.send({ type: 'cancelClose' });
-      await flush();
-      flushing.settle();
-      await flush();
-      await flush();
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+    flushing.settle();
+    await flush();
+    session.send({ type: 'cancelClose' });
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
 
-      expect(session.getSnapshot().matches('live')).toBe(true);
-      expect(opener.built).toHaveLength(2);
-      expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
-    } finally {
-      unregister();
-    }
+    expect(session.getSnapshot().matches('live')).toBe(true);
+    expect(opener.built).toHaveLength(2);
+    expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
   });
 
   it('should replace the runtime when a close is asked again after a kernel change it ignored (D21 round 6)', async () => {
     const { registry, opener } = harness();
     await open(registry);
-    const unregister = registerProjectSessionServices(projectId, {
-      flushProducers: async () => pendingForever(),
-      flushSync: async () => undefined,
-      cancelRuns: async () => undefined,
-      closeRuntime: async () => undefined,
-    });
-    try {
-      const session = sessionOf(registry)!;
-      session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
-      registry.send({ type: 'close', projectId, reason: 'user' });
-      session.send({ type: 'confirmClose' });
-      await flush();
-      expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+    /* The close's producer flush never lands. */
+    heldClose(opener.built[0]);
+    const session = sessionOf(registry)!;
+    session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    session.send({ type: 'confirmClose' });
+    await flush();
+    expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
 
-      opener.built[0]?.supersede();
-      opener.changeChoices();
-      await flush();
-      await flush();
-      registry.send({ type: 'close', projectId, reason: 'user' });
-      await flush();
-      await flush();
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    await flush();
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await flush();
+    await flush();
 
-      expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
-      expect(opener.built).toHaveLength(2);
-      expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
-    } finally {
-      unregister();
-    }
+    expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+    expect(opener.built).toHaveLength(2);
+    expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
   });
 });
-
-/** A promise that never settles. */
-const pendingForever = async (): Promise<void> =>
-  new Promise<void>(() => {
-    /* Never settles. */
-  });

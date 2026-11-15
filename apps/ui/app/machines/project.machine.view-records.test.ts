@@ -1,11 +1,10 @@
-// @vitest-environment jsdom
 /**
- * The view record's owners after G6b: the project machine spawns each view's record session beside its graphics actor,
- * and `ViewSettingsSyncHost` only registers the sessions' flush on close. These rows run a real project actor with the
- * session logic provided over in-memory files, as `ProjectProvider` provides it.
+ * The view record's owners after G6b: the project machine spawns each view's record session beside its graphics actor.
+ * The sessions' flush is in the project runtime's producer set from its creation (A7c; `project-runtime.test.ts`), so
+ * no React host registers it. These rows run a real project actor with the session logic provided over in-memory
+ * files, as the project runtime provides it. Moved from `view-settings-sync-host.test.tsx` when A7c deleted the host.
  */
 import type { WatchEvent } from '@taucad/filesystem';
-import { render } from '@testing-library/react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,15 +12,9 @@ import { createActor, createCallbackLogic } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { projectMachine } from '#machines/project.machine.js';
 import type { ProjectContext, ViewRecordSessionActorInput } from '#machines/project.machine.js';
-import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
 import { createViewRecordPorts, startViewRecordSession } from '#workbench-records/view-record-session.js';
-
-const flushOnClose = vi.hoisted(() => vi.fn());
-const project = vi.hoisted(() => ({ current: undefined as unknown }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: flushOnClose }));
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => project.current }));
 
 const projectId = 'host-test';
 const encode = (record: WorkbenchView): Uint8Array<ArrayBuffer> =>
@@ -97,7 +90,7 @@ function startProject() {
   return { actor, files, writes, ports, sessions, pathOf };
 }
 
-describe('ViewSettingsSyncHost and the project-spawned view record sessions', () => {
+describe('the project-spawned view record sessions', () => {
   it("should read a view's record when the project spawns its graphics, and adopt it through the owners", async () => {
     const harness = startProject();
     harness.files.set(
@@ -138,17 +131,5 @@ describe('ViewSettingsSyncHost and the project-spawned view record sessions', ()
     );
     expect(written.section.active).toBe(true);
     expect(readRecordIssues(projectId)).toEqual([]);
-  });
-
-  it("should register the sessions' flush as a workbench record producer and with the close guard", () => {
-    const harness = startProject();
-    const unregister = vi.fn();
-    const registerWorkbenchRecordProducer = vi.fn(() => unregister);
-    project.current = { viewRecordPorts: harness.ports, registerWorkbenchRecordProducer };
-    const view = render(<ViewSettingsSyncHost />);
-    expect(registerWorkbenchRecordProducer).toHaveBeenCalledWith(harness.ports.flush);
-    expect(flushOnClose).toHaveBeenCalledWith(harness.ports.flush, { stage: 'producer' });
-    view.unmount();
-    expect(unregister).toHaveBeenCalled();
   });
 });

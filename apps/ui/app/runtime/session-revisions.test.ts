@@ -1020,6 +1020,7 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
       sessionRevisionsCallback(ports)({
         input: { projectId, workspace, fileManagerRef: fileManager.ref, syncProjectRoots: async () => undefined },
         sendBack: () => undefined,
+        receive: () => undefined,
       }),
     ).toThrow(failure);
     await settle();

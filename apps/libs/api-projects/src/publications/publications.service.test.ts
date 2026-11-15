@@ -737,6 +737,89 @@ describe('PublicationsService.publishFromRevision', () => {
     expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
   });
 
+  // T8 (email bounce blueprint R9): skip the undeliverable recipient before the cap; both grants exist.
+  it('should send one invite and consume one cap slot when one of two recipients is undeliverable', async () => {
+    const email = createEmailStub();
+    const metrics = createMetricsStub();
+    const limiter = createRateLimiterStub();
+    const { databaseService, txInserts } = createPublishDatabase();
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
+    const deliverability = {
+      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
+    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
+
+    const service = createTestService(
+      databaseService,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      limiter,
+      metrics,
+      email,
+      createBillingStub(),
+      ...leaseDependencies(repositoryPath),
+      deliverability,
+    );
+
+    await service.publishFromRevision({
+      ownerId: 'user_1',
+      request: publishRequest(repositoryPath, {
+        sharedEmails: ['friend@example.com', 'gone@example.com'],
+        notifyRecipients: true,
+      }),
+    });
+
+    const accessPayloads = txInserts
+      .filter((entry) => entry.table === schema.publicationAccess)
+      .flatMap((entry) => (Array.isArray(entry.payload) ? entry.payload : [entry.payload]));
+    expect(accessPayloads.map((payload) => (payload as { recipientEmail: string }).recipientEmail).toSorted()).toEqual([
+      'friend@example.com',
+      'gone@example.com',
+    ]);
+    expect(vi.mocked(limiter.consumeInviteEmailSlots)).toHaveBeenCalledExactlyOnceWith({ ownerId: 'user_1', count: 1 });
+    expect(vi.mocked(email.sendPublicationInvite)).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ recipientEmail: 'friend@example.com' }),
+    );
+    expect(vi.mocked(metrics.publicationInviteEmailsSuppressedTotal.add)).toHaveBeenCalledExactlyOnceWith(1, {
+      trigger: 'publish',
+      reason: 'recipient_undeliverable',
+    });
+  });
+
+  it('should consume no cap slot when every recipient is undeliverable', async () => {
+    const email = createEmailStub();
+    const limiter = createRateLimiterStub();
+    const { databaseService } = createPublishDatabase();
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('code')]]));
+    const deliverability = {
+      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
+    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
+
+    const service = createTestService(
+      databaseService,
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      limiter,
+      createMetricsStub(),
+      email,
+      createBillingStub(),
+      ...leaseDependencies(repositoryPath),
+      deliverability,
+    );
+
+    await service.publishFromRevision({
+      ownerId: 'user_1',
+      request: publishRequest(repositoryPath, {
+        sharedEmails: ['Gone@Example.com'],
+        notifyRecipients: true,
+      }),
+    });
+
+    expect(vi.mocked(limiter.consumeInviteEmailSlots)).not.toHaveBeenCalled();
+    expect(vi.mocked(email.sendPublicationInvite)).not.toHaveBeenCalled();
+  });
+
   it('should refuse a named version larger than a publication may be', async () => {
     const repositoryPath = seedRepository(
       new Map([
@@ -1492,6 +1575,53 @@ describe('PublicationsService access grants', () => {
     expect(result.grants).toHaveLength(1);
     expect(result.grants[0]?.recipientEmail).toBe('friend@example.com');
     expect(accessWhere).toHaveBeenCalledTimes(1);
+  });
+
+  // R9 and D5: the owner sees "Not delivered" and nothing about why.
+  it('should mark a grant whose recipient is undeliverable as not delivered, and only that', async () => {
+    const ownerLimit = vi.fn().mockResolvedValue([publicationRow]);
+    const ownerWhere = vi.fn().mockReturnValue({ limit: ownerLimit });
+    const ownerFrom = vi.fn().mockReturnValue({ where: ownerWhere });
+    const goneRow = {
+      ...accessRow,
+      id: 'pva_gone',
+      recipientEmail: 'gone@example.com',
+    };
+    const orderBy = vi.fn().mockResolvedValue([accessRow, goneRow]);
+    const accessWhere = vi.fn().mockReturnValue({ orderBy });
+    const accessFrom = vi.fn().mockReturnValue({ where: accessWhere });
+    const select = vi.fn().mockReturnValueOnce({ from: ownerFrom }).mockReturnValueOnce({ from: accessFrom });
+    const deliverability = {
+      undeliverableAmong: vi.fn(async () => new Set(['gone@example.com'])),
+    } as unknown as NonNullable<PublicationsServiceDeps[10]>;
+    const service = createTestService(
+      { database: { select } } as unknown as PublicationsServiceDeps[0],
+      createStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub(),
+      ...leaseDependencies(''),
+      deliverability,
+    );
+
+    const result = await service.listAccessGrants({
+      publicationId: 'pub_access',
+      ownerId: 'user_owner',
+    });
+
+    expect(
+      result.grants.map(({ recipientEmail, notDelivered }) => ({
+        recipientEmail,
+        notDelivered,
+      })),
+    ).toStrictEqual([
+      { recipientEmail: 'friend@example.com', notDelivered: false },
+      { recipientEmail: 'gone@example.com', notDelivered: true },
+    ]);
+    expect(Object.keys(result.grants[1] ?? {})).not.toContain('reason');
   });
 
   it('should not send notification when re-adding an already active grant', async () => {

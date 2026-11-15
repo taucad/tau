@@ -3,7 +3,7 @@
  * orchestration A0.2, inventory S1 to S7, S12, S26, S27 and S40).
  *
  * The registry is real (`createSessionsActor` on a `StepClock`), and so are the unload sequencer,
- * `LiveProjectSessions`, the binding, the persistence guard and `ProjectProvider` with its lease and the
+ * `LiveProjectSessions`, the binding and `ProjectProvider` with its lease and the
  * runtime's producer set. Since A7b the registry carries the session wiring the app runtime composes: each
  * session's `revisions` and `hostConnector` children run the real modules, and its presence reads focus and
  * the page's visibility. Only the leaves are stand-ins: the project and editor actors (as the leased
@@ -42,7 +42,6 @@ import type { ProjectChoices } from '#runtime/choices.js';
 import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 
 // ===========================================================================
 // Leaf stand-ins
@@ -84,7 +83,11 @@ const createFixtureActor = (
     return {
       status: 'active',
       context,
-      matches: (value) => active.has(typeof value === 'string' ? value : JSON.stringify(value)),
+      /* A parent state matches while any of its children does, as XState's `matches` answers. */
+      matches: (value) =>
+        value === 'ready'
+          ? active.has('ready') || [...active].some((state) => state.startsWith('{"ready":'))
+          : active.has(typeof value === 'string' ? value : JSON.stringify(value)),
     };
   };
   let snapshot = build();
@@ -387,7 +390,7 @@ vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
                 await fixtures.chatProducers.get(projectId)?.();
               }),
             );
-            /* A second member of the set, so the guard is seen walking every producer, not the first. */
+            /* A second member of the set, so the session's flush is seen walking every producer, not the first. */
             if (fixtures.secondProducer) {
               registrations.push(
                 producers.register(async () => {
@@ -587,7 +590,6 @@ async function stopProjectedRun(chatId: string): Promise<'stopped' | 'continuing
 
 const chatSessions = mock<ChatSessionStore>({
   setRevisionFacts: vi.fn(),
-  setProjectSession: vi.fn(),
   publishProjectHostConnector: vi.fn(() => unpublishConnector),
   getChatHostSettings: vi.fn(async () => undefined),
   cancelProjectedRun: vi.fn(stopProjectedRun),
@@ -631,7 +633,6 @@ const sessionRuntimeOpener = (client: QueryClient): SessionRuntimeOpener => ({
 let queryClient: QueryClient;
 /* The app runtime `ProjectProvider` leases its project runtime from; the rows' query client is its own (A6b). */
 let appRuntime: ReturnType<typeof createAppRuntime>;
-const flushRegistrations: Array<ProjectSessionFlushRegistration | undefined> = [];
 
 type Focus = Readonly<{ projectId: string }> | undefined;
 
@@ -641,9 +642,6 @@ function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
     <LiveProjectSessions
       focused={focus === undefined ? undefined : { projectId: focus.projectId }}
       liveProjectIds={liveProjectIds}
-      onFlushRegistration={(registration) => {
-        flushRegistrations.push(registration);
-      }}
     />
   );
 }
@@ -680,6 +678,8 @@ const sessionWiring = (): SessionWiring => ({
   loadHostConnector: async () => hostConnectorModule,
   /* `environment`'s sequencer, read when the child registers: the rows start it after the registry. */
   registerCloseCut: (cut) => unloadEnvironment?.sequencer.register('session', cut) ?? (() => undefined),
+  /* A7c: each live session's producer-stage flush, on the same sequencer. */
+  registerProducer: (flush) => unloadEnvironment?.sequencer.register('producer', flush) ?? (() => undefined),
   focusedProject,
   documentVisible,
   chatSessions,
@@ -806,7 +806,6 @@ beforeEach(() => {
   fixtures.retryManifestObservation.clear();
   fixtures.chatProducers.clear();
   fixtures.secondProducer = false;
-  flushRegistrations.length = 0;
   browserClientOptions.length = 0;
   browserLease.retained.length = 0;
   browserLease.released.length = 0;
@@ -1021,20 +1020,23 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(sentOf(`project:${projectB}`).at(-1)).toBe('resumeRuntime');
   });
 
-  it("should hand the route the focused project's leave flush, which flushes its producers and editor (S6)", async () => {
+  it("should flush the focused project's producers and editor when its session is asked for the leave flush (S6, A7c)", async () => {
     await openAndRender([projectA, projectB], { projectId: projectA });
-    const registration = flushRegistrations.findLast((entry) => entry !== undefined);
-    expect(registration?.projectId).toBe(projectA);
+    const session = sessionOf(projectA)!;
+    const settled: unknown[] = [];
+    session.on('flushSettled', (event) => settled.push(event));
     fixtures.order.length = 0;
 
-    await act(async () => {
-      await registration?.flush();
+    act(() => {
+      session.send({ type: 'flushAsked', requestId: 'leave:1', kind: 'leave' });
     });
+    await flushTasks();
 
     expect(fixtures.order).toEqual([`producer:${projectA}`, `editor:${projectA}:flushNow`]);
+    expect(settled).toEqual([{ type: 'flushSettled', projectId: projectA, requestId: 'leave:1', ok: true }]);
   });
 
-  it('should register the close services, so a close cancels, flushes producers, cuts and releases in order (S7)', async () => {
+  it("should close through the session's children in order: cancel, producers, stores, quiesce, runtime (S7, A7c)", async () => {
     await openAndRender([projectA], { projectId: projectA });
     act(() => {
       sessionOf(projectA)?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: ['chat-1'] });
@@ -1058,25 +1060,8 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(sessionOf(projectA)).toBeUndefined();
   });
 
-  it('should register each live session with the chat store and clear it when the registry closes it (S7)', async () => {
-    await openAndRender([projectA, projectB], { projectId: projectA });
-    const sessionA = sessionOf(projectA);
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toContainEqual([projectA, sessionA]);
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toContainEqual([projectB, sessionOf(projectB)]);
-    vi.mocked(chatSessions.setProjectSession).mockClear();
-
-    await closeThroughRegistry([projectA, projectB]);
-
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toEqual(
-      expect.arrayContaining([
-        [projectA, undefined],
-        [projectB, undefined],
-      ]),
-    );
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.every(([, session]) => session === undefined)).toBe(
-      true,
-    );
-  });
+  /* A7c: the chat store follows the registry's live set through the app runtime, not the binding: the row lives in
+   * `app-runtime.wiring.test.tsx` ("should bind each live project's session to the chat store ..."). */
 
   it('should hold the revision long poll for the focused project only (S7)', async () => {
     const view = await openAndRender([projectA, projectB], { projectId: projectA });
@@ -1196,16 +1181,9 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(sessionProjectRuntimeOf(runtimeRef!)).toBeDefined();
   });
 
-  it.fails('I5: should keep a live session registered with the chat store after its binding unmounted', async () => {
-    const view = await openAndRender([projectA], { projectId: projectA });
-    const session = sessionOf(projectA);
-
-    view.rerender(tree({ projectId: projectA }, false));
-    await flushTasks();
-
-    expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.findLast(([id]) => id === projectA)?.[1]).toBe(session);
-  });
+  /* A0.2's red row "should keep a live session registered with the chat store after its binding unmounted" passes since
+   * A7c, where it moved: the app runtime binds each live session to the chat store from the registry's live set, with
+   * nothing mounted (`app-runtime.wiring.test.tsx`). */
 
   /* A0.2 carried this row to A7a; A7b made it pass: the session's `revisions` child owns the client (row S27). */
   it('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
@@ -1221,7 +1199,8 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(client.close.mock.calls.length - closesBefore).toBe(0);
   });
 
-  it.fails('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {
+  /* A0.2 carried this row red; A7c makes it pass: the session's close steps run over its own children (row S6). */
+  it('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
@@ -1245,7 +1224,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
 });
 
 // ===========================================================================
-// cancelRuns (D18), the chat request (S12) and the guard's walk (S40)
+// cancelRuns (D18), the chat request (S12) and the session's walk of the producer set (S40)
 // ===========================================================================
 
 describe('cancelRuns on close (A0.2 item 8, D18)', () => {
@@ -1349,7 +1328,9 @@ describe("the chat request after open reaches the project's editor (A0.2 item 3,
   });
 });
 
-describe("the persistence guard walks the project's producer set (A0.2 item 10, S40)", () => {
+/* A7c: the persistence guard is gone; each live session registers once at the producer stage, and its `project` child
+ * flushes the runtime's producer set and both stores for the unload, with nothing mounted (D26). */
+describe("each session's unload flush walks the project's producer set (A0.2 item 10, S40, A7c)", () => {
   beforeEach(() => {
     fixtures.secondProducer = true;
   });
@@ -1382,18 +1363,21 @@ describe("the persistence guard walks the project's producer set (A0.2 item 10, 
     await hide();
     expect(fixtures.order).toContain(`producer:${projectB}`);
     expect(fixtures.order).toContain(`producer:${projectB}:second`);
+    expect(fixtures.order).not.toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
     first.resolve();
     await flushTasks();
+    expect(fixtures.order).not.toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
     second.resolve();
     await flushTasks();
+    expect(fixtures.order).toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).toContain(`editor:${projectB}:flushNow`);
   });
 
-  it("should hold the session stage on hide until the guard's editor flush reaches storing idle (item 9)", async () => {
+  it("should hold the session stage on hide until the session's editor flush reaches storing idle (item 9)", async () => {
     registry.send({ type: 'open', projectId: projectA });
     render(tree({ projectId: projectA }, true, true));
     await flushTasks();

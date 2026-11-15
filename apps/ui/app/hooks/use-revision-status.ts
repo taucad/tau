@@ -50,6 +50,8 @@ import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 
 type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
 
@@ -1148,6 +1150,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
   let nextRequestId = 0;
   let connectionGeneration = 0;
   let channel: MessageChannel | undefined;
+  /** Stops telling the current port about consent changes (PR-7). */
+  let stopConsent: (() => void) | undefined;
   /* Frames posted before the route opens this client (D36). Connecting starts the
    * root and its opening fetch, so the connection waits for `open`, which the
    * lifecycle calls once the GitHub credential is minted and queued first. */
@@ -1214,6 +1218,14 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       command: 'remoteCredential',
       apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
     } satisfies WorkerRevisionRequest);
+    /* PR-7 (AR-W6-02): the page's resolved consent, said on every new port and on every change, because the sync
+     * attempt reporter in the worker cannot resolve it. No page composition (SSR) says `unknown`, which sends nothing. */
+    const sayConsent = (consent: ReportingConsent): void => {
+      opened.port2.postMessage({ command: 'telemetryConsent', consent } satisfies WorkerRevisionRequest);
+    };
+    sayConsent(pageTelemetry()?.consent() ?? 'unknown');
+    stopConsent?.();
+    stopConsent = pageTelemetry()?.onConsentChange(sayConsent);
     channel = opened;
     return opened.port2;
   };
@@ -1389,6 +1401,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       const closing = channel;
       cancelPendingRequests();
       channel = undefined;
+      stopConsent?.();
+      stopConsent = undefined;
       connectionGeneration += 1;
       status = undefined;
       projectedChatIds.clear();
@@ -1428,6 +1442,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         cancelPendingRequests();
         if (channel === closing) {
           channel = undefined;
+          stopConsent?.();
+          stopConsent = undefined;
           connectionGeneration += 1;
           status = undefined;
           projectedChatIds.clear();

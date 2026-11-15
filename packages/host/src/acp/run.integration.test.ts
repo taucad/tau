@@ -1883,15 +1883,17 @@ describe('the fixture agent', () => {
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     });
 
-    /* The `_meta` form, because Tau advertised `_meta['terminal-auth']`: a
-     * command line the user runs themselves, not one Tau reproduces (V11). */
+    /* The list codex-acp 1.7.0 sends: no method carries a terminal command, and the
+     * device-code method is offered only to a client that advertised
+     * `elicitation.url`, which this one did not. */
     expect(initialized.authMethods).toEqual([
       {
-        id: 'codex-login',
-        name: 'Log in with Codex',
-        description: 'Sign in to the Codex CLI on the machine running this agent.',
-        _meta: { 'terminal-auth': { command: 'codex', args: ['login'], label: 'Log in with Codex' } },
+        id: 'api-key',
+        name: 'API Key',
+        description: 'Use an API key to authenticate',
+        _meta: { 'api-key': { provider: 'openai' } },
       },
+      { id: 'chat-gpt', name: 'ChatGPT', description: 'Use ChatGPT to authenticate' },
     ]);
     await expect(connection.newSession({ cwd, mcpServers: [] })).rejects.toThrow(/Authentication required/u);
   }, 30_000);
@@ -1981,8 +1983,8 @@ describe('one ACP session per chat', () => {
       login: {
         agentId: 'grok',
         authMethods: [
-          { id: 'grok.com', name: 'Grok' },
           { id: 'cli-login', name: 'Sign in to Grok Build', terminalCommand: 'grok login' },
+          { id: 'grok.com', name: 'Grok' },
         ],
       },
     });
@@ -2617,8 +2619,12 @@ const promptFrames = (frames: readonly AcpWireFrame[]): readonly string[] =>
 
 describe('authentication, initialize and prompt content', () => {
   it('refuses a logged-out agent with a typed code and the login it offered', async () => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
-    const loggedOut: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: 'auth-required' } };
+    const loggedOut: AcpAdapter = {
+      ...fakeAgent,
+      loginCommand: 'codex login',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
+      spawnEnv: { TAU_FAKE_AGENT_MODE: 'auth-required' },
+    };
     const harness = await startHarness({ agents: [loggedOut] });
 
     await runTurn(harness, { chatId: 'chat-auth', runId: 'run-auth', text: 'noask' });
@@ -2628,13 +2634,23 @@ describe('authentication, initialize and prompt content', () => {
       state: 'failed',
       detail: { code: 'EXTERNAL_AGENT_AUTH_REQUIRED' },
     });
-    /* The affordance, durable beside the refusal: the methods the agent listed,
-     * with the command line the user runs themselves (X6). */
+    /* The affordance, durable beside the refusal: Tau's own CLI login first,
+     * the one command line the user runs themselves (X6), then the methods
+     * codex-acp listed, none of which carries a command. */
     const authInterrupts = eventsOfType(events, 'interrupt.recorded');
-    expect(authInterrupts.at(0)?.payload).toMatchObject({
+    expect(authInterrupts.at(0)?.payload).toEqual({
       kind: 'external-agent-login',
       agentId: 'codex',
-      authMethods: [{ id: 'codex-login', name: 'Log in with Codex', terminalCommand: 'codex login' }],
+      authMethods: [
+        { id: 'cli-login', name: 'Sign in to Codex', terminalCommand: 'codex login' },
+        { id: 'api-key', name: 'API Key', description: 'Use an API key to authenticate' },
+        { id: 'chat-gpt', name: 'ChatGPT', description: 'Use ChatGPT to authenticate' },
+        {
+          id: 'chat-gpt-device-code',
+          name: 'ChatGPT (device code)',
+          description: 'Sign in to ChatGPT by opening a verification page and entering a one-time code',
+        },
+      ],
     });
     /* Nothing ever answers a login interrupt — there is no completion event and
      * the affordance is deliberately buttonless — so the refusal settles its own
@@ -2650,9 +2666,11 @@ describe('authentication, initialize and prompt content', () => {
   }, 30_000);
 
   it('offers the CLI login for an agent that lists no auth method and refuses at prompt', async () => {
-    /* Claude's adapter (0.70.0) advertises no auth method and turns the CLI's
-     * "Please run /login" into `-32000` on `session/prompt`; the profile's own
-     * login command is then the only affordance to show. */
+    /* An agent that advertises no auth method and turns the CLI's "Please run
+     * /login" into `-32000` on `session/prompt`: the profile's own login command
+     * is then the only affordance to show. Claude's adapter (0.70.0) refuses at
+     * prompt the same way, but it does advertise methods to a client that sent
+     * `_meta['terminal-auth']`, which Tau always does; the next case has that. */
     const claude: AcpAdapter = {
       ...fakeAgent,
       id: 'claude',
@@ -2675,6 +2693,52 @@ describe('authentication, initialize and prompt content', () => {
       agentId: 'claude',
       authMethods: [{ id: 'cli-login', name: 'Sign in to Claude Code', terminalCommand: 'claude auth login' }],
     });
+  }, 30_000);
+
+  it('should offer the CLI login first and drop the adapter’s own process from Claude’s terminal-auth methods', async () => {
+    /* Claude's adapter (0.70.0) shape: two methods whose `terminal-auth` command
+     * is the adapter's own process — the host's `process.execPath` running the
+     * adapter module. On the desktop that is Tau's Electron helper, which no
+     * user's terminal can run (F1). */
+    const claude: AcpAdapter = {
+      ...fakeAgent,
+      id: 'claude',
+      displayName: 'Claude Code',
+      loginCommand: 'claude auth login',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
+      spawnEnv: { TAU_FAKE_AGENT_MODE: 'prompt-auth,claude-terminal-auth' },
+    };
+    const harness = await startHarness({ agents: [claude] });
+
+    await runTurn(harness, {
+      chatId: 'chat-claude-terminal-auth',
+      runId: 'run-claude-terminal-auth',
+      text: 'noask',
+      agentId: 'claude',
+    });
+
+    const events = await readLog(harness.workspaceRoot, 'chat-claude-terminal-auth');
+    expect(eventsOfType(events, 'run.lifecycle').at(-1)).toMatchObject({
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_AUTH_REQUIRED' },
+    });
+    const login = eventsOfType(events, 'interrupt.recorded').at(0)?.payload;
+    expect(login).toEqual({
+      kind: 'external-agent-login',
+      agentId: 'claude',
+      authMethods: [
+        { id: 'cli-login', name: 'Sign in to Claude Code', terminalCommand: 'claude auth login' },
+        { id: 'claude-ai-login', name: 'Claude Subscription', description: 'Use Claude subscription ' },
+        { id: 'console-login', name: 'Anthropic Console', description: 'Use Anthropic Console (API usage billing)' },
+      ],
+    });
+    /* The fixture really did advertise its own process, so the drop is proven. */
+    const initialized = harness.frames.find(
+      (frame) => frame.direction === 'agent->client' && frame.frame.includes('"claude-ai-login"'),
+    );
+    expect(initialized?.frame).toContain(JSON.stringify(process.execPath));
+    expect(JSON.stringify(login)).not.toContain(process.execPath);
+    expect(JSON.stringify(login)).not.toContain(new URL('fixtures/fake-agent.ts', import.meta.url).pathname);
   }, 30_000);
 
   it('should refuse a raw secret form before SDK normalization can create a plaintext question record', async () => {

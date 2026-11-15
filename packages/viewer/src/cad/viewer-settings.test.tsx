@@ -17,7 +17,6 @@ type GraphicsState = {
     readonly enableGrid: boolean;
     readonly enableAxes: boolean;
     readonly enableMatcap: boolean;
-    readonly enablePostProcessing: boolean;
     readonly graphicsBackendPreference: 'webgl' | 'webgpu';
     readonly webGpuAvailable: boolean;
     readonly upDirection: 'x' | 'y' | 'z';
@@ -56,7 +55,6 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
         enableGrid: true,
         enableAxes: true,
         enableMatcap: false,
-        enablePostProcessing: false,
         graphicsBackendPreference: 'webgpu',
         webGpuAvailable: true,
         upDirection: 'z',

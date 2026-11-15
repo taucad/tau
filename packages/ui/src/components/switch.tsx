@@ -7,7 +7,8 @@ import { SwitchRowLabel } from '#components/switch-row-label.js';
 import { cn } from '#utils/cn.js';
 
 const switchVariants = cva(
-  'peer data-[state=checked]:primary-action data-[state=unchecked]:bg-input dark:data-[state=unchecked]:bg-input/80 inline-flex shrink-0 items-center rounded-full border border-muted-foreground/30 data-[state=checked]:border-transparent shadow-xs outline-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50',
+  // The track is thinner than 24px at every size; the `after` strip makes the pointer target 24px tall (WCAG 2.5.8).
+  'peer relative after:absolute after:inset-x-0 after:top-1/2 after:h-6 after:-translate-y-1/2 after:content-[""] data-[state=checked]:primary-action data-[state=unchecked]:bg-input dark:data-[state=unchecked]:bg-input/80 inline-flex shrink-0 items-center rounded-full border border-muted-foreground/30 data-[state=checked]:border-transparent shadow-xs outline-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {
       size: {

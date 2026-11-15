@@ -631,16 +631,15 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
  * Row 5a makes the three changes and reloads within one page turn: the lane change, the section cut and
  * the edit, then `location.reload()` on the first frame on which the editor's own document holds the edit
  * and the lane shows closed, under 200 ms after the lane change. The layout record's 500 ms debounce
- * cannot have written the lane by then, so only the unload can. The row asserts those preconditions; the
- * three changes' local survival is report-only (S26 local loss; owner A7c, after A5b's unload sequencer;
- * the arrangement's close producer is A8b's `workbench-record-host.tsx:416`). Each was lost in some runs and
+ * cannot have written the lane by then, so only the unload can. Before A7c each was lost in some runs and
  * kept in others (over 20 runs at `4ff549a9` the edit was lost in 7, the view setting in 12 and the
- * arrangement in 8; at `279a3a30`, in 7, 9 and 8), so none can be an expected failure (D25). Forcing was
- * tried: with the reload in the very task of the changes, all three were lost, but the editor had not yet
- * read the input, so that loss was the harness's, not the app's. A7c moves the three reads into assertions once the unload settles every
- * producer.
+ * arrangement in 8; at `279a3a30`, in 7, 9 and 8). A7c registers each live session once at the unload
+ * sequencer's producer stage, which writes the layout record, the view records and both stores before the
+ * close cut (D26, S26). A reload fires `pagehide` and `hidden` only as the document goes, and a record write
+ * first issued there landed in about 7 runs of 10, so while a record write is owed `beforeunload` runs the
+ * producer stage as the reload starts (D26 as amended by A7c). The row asserts all three survive.
  */
-test('A0.1 row 5a (S26 report-only, D26, A7c): an arrangement, a view setting and an edit made just before a reload, kept or lost', async ({
+test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit made just before a reload survive it', async ({
   annotate,
 }) => {
   const { marker, cut, timings } = await editViewArrangeAndReload(true);
@@ -661,7 +660,24 @@ test('A0.1 row 5a (S26 report-only, D26, A7c): an arrangement, a view setting an
     (pressed) => pressed === 'false',
     15_000,
   );
+  /* What storage holds, not only what the reloaded page shows: the entry file's bytes and the layout record. */
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const storedText = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const storedLayout = configA === undefined ? undefined : await readLayout(configA);
   const reading = {
+    editStored: storedText.includes(marker),
+    arrangementStored: (storedLayout as { lanes?: { chat?: boolean } } | undefined)?.lanes?.chat === false,
     arrangementKept: chatPressed === 'false',
     viewKept:
       section?.isActive === true &&
@@ -683,24 +699,49 @@ test('A0.1 row 5a (S26 report-only, D26, A7c): an arrangement, a view setting an
   };
   await annotate(`S26 local survival after reload: ${JSON.stringify(reading)}`);
   await target.writeArtifact(`a01-s26local-report-${String(Date.now())}.json`, JSON.stringify(reading));
-  /* Every change was in place when the reload was called, the lane change under the 500 ms debounce; the
-   * survival readings are recorded above, never failed on. */
+  /* Every change was in place when the reload was called, the lane change under the 500 ms debounce. */
   expect(timings?.isLaneClosed).toBe(true);
   expect(timings?.editInState).toBe(true);
   expect(reading.toggleToReload).toBeLessThan(500);
+  /* S26: the unload's producer stage wrote all three before the document went (A7c). */
+  expect(reading, 'S26: the arrangement, the view setting and the edit survive the reload').toMatchObject({
+    editStored: true,
+    arrangementStored: true,
+    arrangementKept: true,
+    viewKept: true,
+    editKept: true,
+  });
 });
 
 /*
- * Expected failure, owned by A7c, which depends on A5b's unload sequencer (I6, S26, D26). The session
- * stage already takes a close cut on `hidden` (`use-revision-status.ts`, `useFlushOnClose`, an awaited
- * `saveRevision('close')`), but on a reload it never lands: History, re-read for 30 s after the reload,
- * holds only V1 Start (`Tau-Trigger: create`) and the strip says *Unsaved changes*. The fix is that cut
- * reaching History, before the document goes or once the next one opens. A7c flips this row to `test`.
+ * Expected failure (I6, S26, D26), carried from A7c to lane A7d, which takes the close cut on the next open and
+ * flips this row. A7c registers each live session at the unload sequencer's producer stage, which writes what the
+ * session owes on `hidden`, and the session stage then takes the close cut. On a reload the cut still never lands:
+ * History, re-read for 30 s after the reload, holds only V1 Start. The cut is asynchronous through the revision
+ * worker, which goes with the document. The row reads the edit's bytes from storage first, then History, with reads
+ * that tolerate a row History re-renders.
  */
-test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revision holding the edit is cut on an immediate reload', async ({
+test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision holding the edit is cut on an immediate reload', async ({
   annotate,
 }) => {
-  await editViewArrangeAndReload(false);
+  const { marker } = await editViewArrangeAndReload(false);
+  /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const stored = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (text) => text.includes(marker),
+    15_000,
+  );
+  /* Read, not asserted: inside `test.fails` a failing assertion here would pass the row. Row 5a asserts the stored edit
+   * (`editStored`); this reading says whether the cut had the edit's bytes to take. */
+  await annotate(`S26 stored edit before History: ${String(stored.includes(marker))}`);
   await target.click(revisionChip());
   const panel = selectors.getByCss(visibleRevisionsPanel);
   const trailerOf = () => panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });
@@ -713,10 +754,15 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure, A7c): no close revisi
     if (!(await target.isVisible(newest))) {
       return '';
     }
-    if ((await target.getAttribute(newest, 'aria-expanded')) !== 'true') {
-      await target.click(newest);
+    /* History re-renders as entries land, so a read of a row that has just gone is a miss, not a failure. */
+    const expanded = await target.getAttribute(newest, 'aria-expanded').catch(() => undefined);
+    if (expanded === undefined) {
+      return '';
     }
-    return (await target.isVisible(trailerOf())) ? ((await target.textContent(trailerOf())) ?? '') : '';
+    if (expanded !== 'true') {
+      await target.click(newest).catch(() => undefined);
+    }
+    return (await target.isVisible(trailerOf())) ? ((await target.textContent(trailerOf()).catch(() => '')) ?? '') : '';
   };
   const trailer = await readWithin(newestTrailer, (text) => /Tau-Trigger: close\b/u.test(text), 30_000);
   /* The trailer is kept, so the run shows the row failing on its own assertion, not on a wait. */

@@ -9,6 +9,7 @@ import { createActor } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
+import type { OwedWritesPort } from '#runtime/environment.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 
 type FocusRequest = Readonly<{ projectId?: string; home?: boolean }> | undefined;
@@ -57,7 +58,13 @@ const start = ({
   coarse,
   projectId,
   sequencer,
-}: Readonly<{ coarse: boolean; projectId?: string; sequencer?: ReturnType<typeof createUnloadSequencer> }>) => {
+  owedWrites,
+}: Readonly<{
+  coarse: boolean;
+  projectId?: string;
+  sequencer?: ReturnType<typeof createUnloadSequencer>;
+  owedWrites?: OwedWritesPort;
+}>) => {
   const host = createFakeEnvironmentHost({ coarse });
   const registry = mock<AnyActorRef>();
   /* The quit hold listens for `quiesced`; these rows never quit. */
@@ -65,7 +72,7 @@ const start = ({
   const { send } = registry;
   const focus = createFakeFocus(projectId === undefined ? undefined : { projectId });
   const actor = createActor(
-    createEnvironmentLogic(() => host, { sequencer }),
+    createEnvironmentLogic(() => host, { sequencer, owedWrites }),
     { input: { registry, focus: focus.ref } },
   ).start();
   stops.push(() => {
@@ -166,5 +173,81 @@ describe('environment: the memory release (B-08)', () => {
     host.window.dispatchEvent(new Event('pagehide'));
 
     expect(order).toEqual(['flush:pagehide', 'releaseMemory']);
+  });
+});
+
+/** A stand-in for the page's owed record writes: the row says whether one is owed and when that changes. */
+const createOwedWrites = (initial: boolean) => {
+  let owes = initial;
+  const listeners = new Set<() => void>();
+  const port: OwedWritesPort = {
+    owes: () => owes,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  return {
+    port,
+    set: (next: boolean) => {
+      owes = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+};
+
+describe('environment: the beforeunload producer stage (D26 as amended, A7c)', () => {
+  it('should run the producer stage and no session stage on beforeunload while a write is owed, and never prompt', async () => {
+    const sequencer = createUnloadSequencer();
+    const producer = vi.fn(async () => undefined);
+    const session = vi.fn(async () => undefined);
+    sequencer.register('producer', producer);
+    sequencer.register('session', session);
+    const { host } = start({ coarse: false, sequencer, owedWrites: createOwedWrites(true).port });
+    const event = new Event('beforeunload', { cancelable: true });
+
+    host.window.dispatchEvent(event);
+    await vi.waitFor(() => {
+      expect(producer).toHaveBeenCalledWith('hidden');
+    });
+
+    expect(session).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('should hold no beforeunload listener while nothing is owed, and drop it once the owed write settles', () => {
+    const owed = createOwedWrites(false);
+    const { host } = start({ coarse: false, sequencer: createUnloadSequencer(), owedWrites: owed.port });
+
+    expect(host.listeners()).not.toContain('window:beforeunload');
+
+    owed.set(true);
+
+    expect(host.listeners()).toContain('window:beforeunload');
+
+    owed.set(false);
+
+    expect(host.listeners()).not.toContain('window:beforeunload');
+  });
+
+  it('should take its beforeunload listener away when it stops while a write is owed', () => {
+    const owed = createOwedWrites(true);
+    const host = createFakeEnvironmentHost();
+    const actor = createActor(
+      createEnvironmentLogic(() => host, { owedWrites: owed.port }),
+      {
+        input: undefined,
+      },
+    ).start();
+
+    expect(host.listeners()).toContain('window:beforeunload');
+
+    actor.stop();
+
+    expect(host.listeners()).not.toContain('window:beforeunload');
   });
 });

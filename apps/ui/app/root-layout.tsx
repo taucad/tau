@@ -225,6 +225,8 @@ export function ProductApp(): React.JSX.Element {
   );
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
+  /* D24, I19 (A11): the app shell, at one tree position on every route. The host renders it beside the live
+   * projects, never inside one, so a project open, a move between projects or a Home visit never remounts it. */
   const page = <Page />;
   return isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
     page

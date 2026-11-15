@@ -2,9 +2,6 @@ import { useSyncExternalStore } from 'react';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { useCookie } from '#hooks/use-cookie.js';
-import { sidebarDefaultOpen, sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
 
 const { chatWidth, workbenchWidth } = defaultPanelState.desktopLayout;
@@ -48,19 +45,12 @@ const holdOnServer = (): boolean => true;
  * (`compactWorkspaceWidth`) through a container query, so it follows the
  * workspace's own width rather than the window's.
  *
- * @param properties - `withShellFrame` for the gates that render above the app
- *   shell, where nothing has mounted yet: the skeleton then owns the window —
- *   the viewport's height, and a stand-in at the sidebar's resting width so the
- *   lanes do not shift when the shell arrives. Inside the shell, leave it off.
+ * It always renders inside the app shell's content region: the shell has one tree position on every route (D24), so
+ * nothing stands in for its sidebar.
+ *
  * @returns The skeleton.
  */
-export function WorkspaceSkeleton({
-  withShellFrame = false,
-}: {
-  readonly withShellFrame?: boolean;
-} = {}): React.JSX.Element {
-  /* The shell's own source for the sidebar's resting state, so a collapsed sidebar gets no stand-in. */
-  const [isSidebarOpen] = useCookie(cookieName.sidebarOp, sidebarDefaultOpen);
+export function WorkspaceSkeleton(): React.JSX.Element {
   const isDelayed = useSyncExternalStore(subscribeToNothing, isWithinRevealDelay, holdOnServer);
 
   return (
@@ -69,11 +59,7 @@ export function WorkspaceSkeleton({
       aria-busy='true'
       aria-label='Opening project'
       data-testid='workspace-skeleton'
-      className={cn(
-        '@container bg-background max-md:absolute max-md:inset-0',
-        /* Above the shell nothing sizes this mount, so it takes the window itself. */
-        withShellFrame ? 'h-dvh w-full' : 'size-full',
-      )}
+      className='@container size-full bg-background max-md:absolute max-md:inset-0'
     >
       <div
         aria-hidden='true'
@@ -84,12 +70,6 @@ export function WorkspaceSkeleton({
             'animate-in duration-300 fill-mode-both [animation-delay:300ms] fade-in motion-reduce:animate-none',
         )}
       >
-        {withShellFrame && isSidebarOpen ? (
-          <div
-            className='hidden h-full shrink-0 border-r border-sidebar-border bg-sidebar md:block'
-            style={{ width: sidebarPreferredWidth }}
-          />
-        ) : null}
         <div className='hidden h-full shrink-0 border-r border-border md:block' style={{ width: chatWidth }}>
           <ChatPaneSkeleton variant='loading' />
         </div>

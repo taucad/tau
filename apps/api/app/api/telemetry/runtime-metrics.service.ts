@@ -4,6 +4,7 @@
  * ingest; the cardinality views for them live in `#telemetry/cardinality-views.js` (PR-0), not here.
  */
 import { Injectable } from '@nestjs/common';
+import type { BeforeApplicationShutdown } from '@nestjs/common';
 import { metrics } from '@opentelemetry/api';
 import type { Attributes, Counter, Histogram } from '@opentelemetry/api';
 import { runtimeMetrics } from '@taucad/telemetry';
@@ -30,13 +31,33 @@ export type RuntimeGaugeObservation<K extends RuntimeGaugeKey> = Readonly<{
   attributes: RuntimeAttributesOf<K>;
 }>;
 
+/**
+ * Milliseconds. How long a counter series this process has not exported yet stays at 0 before its first increment lands, in
+ * milliseconds: two Fly scrape intervals (15 s), so at least one scrape reads the 0.
+ *
+ * Why: a restarted process starts every series from nothing. When a low-rate series climbs back to the value it had
+ * before the restart (7, restart, 7), Prometheus sees no reset and `increase()` drops the whole increment. Exporting 0
+ * first makes every restart a visible reset, so the first increment after it is counted (R07, 2026-11-15).
+ */
+export const runtimeCounterZeroHold = 30_000;
+
+type PendingSeries = {
+  pending: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  onRelease?: () => void;
+};
+
 @Injectable()
-export class RuntimeMetricsService {
+export class RuntimeMetricsService implements BeforeApplicationShutdown {
   /* Client-reported runtime instruments share the `tau-client` meter with today's client instruments. */
   private readonly meter = metrics.getMeter('tau-client');
   private readonly counters = new Map<string, Counter>();
   private readonly histograms = new Map<string, Histogram>();
   private readonly gauges = new Map<string, ReadonlyArray<Readonly<{ value: number; attributes: Attributes }>>>();
+  /* Counter series this process has started, by instrument and attributes; `pending` holds increments not yet added. */
+  private readonly series = new Map<string, PendingSeries>();
+  private readonly releasers = new Map<string, () => void>();
+  private closing = false;
 
   public constructor() {
     for (const [key, definition] of Object.entries(runtimeMetrics)) {
@@ -75,7 +96,63 @@ export class RuntimeMetricsService {
    * @param attributes - The closed attributes.
    */
   public count<K extends RuntimeCounterKey>(key: K, value: number, attributes: RuntimeAttributesOf<K>): void {
-    this.counters.get(key)?.add(value, attributes as Attributes);
+    const counter = this.counters.get(key);
+    if (counter === undefined) {
+      return;
+    }
+    const seriesKey = `${key}\u0000${stableAttributes(attributes as Attributes)}`;
+    const existing = this.series.get(seriesKey);
+    const isLive = existing !== undefined && existing.timer === undefined;
+    if (this.closing || isLive) {
+      counter.add(value, attributes as Attributes);
+      return;
+    }
+    if (existing !== undefined) {
+      existing.pending += value;
+      return;
+    }
+    counter.add(0, attributes as Attributes);
+    const entry: PendingSeries = { pending: value, timer: undefined };
+    entry.timer = setTimeout(() => {
+      this.release(counter, entry, attributes as Attributes);
+    }, runtimeCounterZeroHold);
+    entry.timer.unref();
+    this.series.set(seriesKey, entry);
+    this.releasers.set(seriesKey, () => {
+      this.release(counter, entry, attributes as Attributes);
+    });
+    entry.onRelease = () => this.releasers.delete(seriesKey);
+  }
+
+  /**
+   * Add every held increment before shutdown, so the final scrape the observability module waits for reads them.
+   */
+  public beforeApplicationShutdown(): void {
+    this.closing = true;
+    this.releaseHeld();
+  }
+
+  /**
+   * Add every increment still held behind a series' first 0 now. Each release deletes its own entry, which Map iteration allows.
+   */
+  public releaseHeld(): void {
+    for (const release of this.releasers.values()) {
+      release();
+    }
+    this.releasers.clear();
+  }
+
+  private release(counter: Counter, entry: PendingSeries, attributes: Attributes): void {
+    if (entry.timer === undefined) {
+      return;
+    }
+    clearTimeout(entry.timer);
+    entry.timer = undefined;
+    if (entry.pending !== 0) {
+      counter.add(entry.pending, attributes);
+    }
+    entry.pending = 0;
+    entry.onRelease?.();
   }
 
   /**
@@ -105,3 +182,10 @@ export class RuntimeMetricsService {
     );
   }
 }
+
+const stableAttributes = (attributes: Attributes): string =>
+  JSON.stringify(
+    Object.keys(attributes)
+      .sort()
+      .map((name) => [name, attributes[name]]),
+  );

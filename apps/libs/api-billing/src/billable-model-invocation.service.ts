@@ -27,6 +27,7 @@ import {
   assertMatchingRequestDigest,
   classifyFundedLlmCapacity,
   CreditLedgerService,
+  isBillingAdmissionInvalid,
   recordSettledGenAiUsage,
 } from '#credit-ledger.service.js';
 import type {
@@ -194,6 +195,14 @@ export class BillableModelInvocationService {
     } catch (error) {
       if (isBillingAccountClosed(error)) {
         throw isBillingAccountRestricted(error) ? billingAccountRestrictedError() : billingAccountClosedError();
+      }
+      if (isBillingAdmissionInvalid(error)) {
+        // A request field billing cannot record is the request's fault, answered before any dispatch.
+        throw new LlmGatewayError(
+          HttpStatus.BAD_REQUEST,
+          'INVALID_REQUEST',
+          'The request carries a field Tau billing cannot record.',
+        );
       }
       throw error;
     }

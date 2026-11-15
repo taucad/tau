@@ -15,7 +15,15 @@ import { calculateSupplierCost } from '#billable-model-cost.js';
 import { routeSkuFamily } from '#billable-model-qualification.js';
 import { parseCommercialPolicyDocument, resolvePolicyRoute } from '#billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+} from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -23,6 +31,7 @@ import {
   rationalUnsignedIntegerStringSchema,
   financialActivityKindSchema,
   billingExecutionStatusSchema,
+  supplierModelIdSchema,
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '@taucad/api-database';
@@ -107,12 +116,41 @@ const pendingLlmCapacityPool = (accountId: string, pool: FundedLlmCapacityPool) 
   );
 
 const admissionHistorySchema = z.object({
-  modelId: financialIdentitySchema,
+  // The supplier's own model id, which may be namespaced; meter and route identities never derive from it.
+  modelId: supplierModelIdSchema,
   modelDisplayName: z.string().min(1).max(128).optional(),
   providerId: financialIdentitySchema.optional(),
   projectHint: financialIdentitySchema.optional(),
   chatHint: financialIdentitySchema.optional(),
 });
+const billingAdmissionInvalidCode = 'billing_admission_invalid';
+
+/**
+ * Parses the fields an admission records for history, refusing a malformed one as a client fault.
+ *
+ * The refusal names the offending fields, never their values, so a caller can map it to a typed 4xx.
+ */
+const parseAdmissionHistory = (input: QualifiedAdmissionInput): z.infer<typeof admissionHistorySchema> => {
+  const parsed = admissionHistorySchema.safeParse(input);
+  if (!parsed.success) {
+    throw new BadRequestException({
+      code: billingAdmissionInvalidCode,
+      message: 'Admission history fields are invalid',
+      fields: [...new Set(parsed.error.issues.map((issue) => issue.path.join('.')))],
+    });
+  }
+  return parsed.data;
+};
+
+/** True for the ledger's refusal of malformed admission history fields. */
+export const isBillingAdmissionInvalid = (error: unknown): boolean => {
+  if (!(error instanceof BadRequestException)) {
+    return false;
+  }
+  const body = error.getResponse();
+  return typeof body === 'object' && 'code' in body && body.code === billingAdmissionInvalidCode;
+};
+
 const terminalHistorySchema = z.object({
   executionStatus: billingExecutionStatusSchema.optional(),
   normalizationEvidence: z
@@ -635,7 +673,7 @@ export class CreditLedgerService {
   public async admitOperation(
     input: QualifiedAdmissionInput,
   ): Promise<Exclude<AdmissionResult, { status: 'denied' }> | AdmissionDenied> {
-    const history = admissionHistorySchema.parse(input);
+    const history = parseAdmissionHistory(input);
     const invocation = input.invocation === undefined ? undefined : invocationSchema.parse(input.invocation);
     const capacity = classifyFundedLlmCapacity(input.activity);
     if (

@@ -1,5 +1,8 @@
+import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
-import { CreditLedgerService, recordSettledGenAiUsage } from '#credit-ledger.service.js';
+import { CreditLedgerService, isBillingAdmissionInvalid, recordSettledGenAiUsage } from '#credit-ledger.service.js';
+import { supplierIdentityForRoute } from '#billable-model-qualification.js';
+import type { QualifiedAdmissionInput } from '#credit-ledger.types.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 import type { DatabaseService } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
@@ -116,5 +119,67 @@ describe('CreditLedgerService.recordFundedWorkDenial', () => {
     await expect(ledger.recordFundedWorkDenial(denial(requestDigest))).rejects.toThrow('Invalid funded request digest');
 
     expect(select).not.toHaveBeenCalled();
+  });
+});
+
+describe('CreditLedgerService.admitOperation', () => {
+  /** A ledger whose first database read is the account binding; reaching it means every input check passed. */
+  const ledgerReachingDatabase = () => {
+    const transaction = vi.fn(async () => {
+      throw new Error('database reached');
+    });
+    const ledger = new CreditLedgerService(
+      { database: { transaction } } as unknown as Pick<DatabaseService, 'database'>,
+      {} as BillingPolicyService,
+    );
+    return { ledger, transaction };
+  };
+  /* The catalog fact a funded Together route bills against: its supplier id carries an organization prefix. */
+  const together = supplierIdentityForRoute('together-kimi-k3.1-pro');
+  const admission = (overrides: Partial<QualifiedAdmissionInput> = {}): QualifiedAdmissionInput => ({
+    environment: 'development',
+    authUserId: 'user',
+    surface: 'gateway',
+    attemptKey: 'attempt_0000000001',
+    requestDigest: `hmac-sha256:${'a'.repeat(64)}`,
+    requestKeyVersion: 1,
+    category: 'llm',
+    modelId: together.modelId,
+    modelDisplayName: 'Kimi K3.1 Pro',
+    providerId: together.providerId,
+    activity: 'agent',
+    sku: 'model:together-kimi-k3.1-pro',
+    maximumQuantities: [{ dimension: 'uncached_input', tier: null, quantity: 1n }],
+    replica: { schemaVersion: 1, meterContractIds: ['model-meter-v1:together-kimi-k3.1-pro'] },
+    executionDeadline: new Date(Date.now() + 30_000),
+    ...overrides,
+  });
+
+  it('should admit a Together supplier model id past validation to the account binding', async () => {
+    const { ledger, transaction } = ledgerReachingDatabase();
+
+    expect(together).toEqual({ modelId: 'moonshotai/Kimi-K3.1-Pro', providerId: 'together' });
+    await expect(ledger.admitOperation(admission())).rejects.toThrow('database reached');
+
+    expect(transaction).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['a model id with whitespace', { modelId: 'moonshotai/Kimi K3' }],
+    ['a model id with an empty segment', { modelId: 'moonshotai//Kimi' }],
+    ['a provider id with a slash', { providerId: 'together/ai' }],
+    ['a project hint outside the identity class', { projectHint: 'project hint' }],
+  ])('should refuse %s as a typed bad request before reading the database', async (_name, overrides) => {
+    const { ledger, transaction } = ledgerReachingDatabase();
+
+    const refusal = await ledger.admitOperation(admission(overrides)).then(
+      () => expect.fail('admission should refuse'),
+      (error: unknown) => error,
+    );
+
+    expect(refusal).toBeInstanceOf(BadRequestException);
+    expect(isBillingAdmissionInvalid(refusal)).toBe(true);
+    expect((refusal as BadRequestException).getResponse()).toMatchObject({ code: 'billing_admission_invalid' });
+    expect(transaction).not.toHaveBeenCalled();
   });
 });

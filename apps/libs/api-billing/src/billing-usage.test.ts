@@ -85,6 +85,22 @@ describe('BillingUsageService query admission', () => {
     expect(databaseService.database.transaction).not.toHaveBeenCalled();
   });
 
+  it('should admit a namespaced supplier model id as a usage filter but refuse a malformed one', async () => {
+    const { databaseService, service } = createService();
+    databaseService.database.transaction.mockRejectedValue(new Error('database reached'));
+
+    await expect(
+      service.getUsage({ authUserId: 'user_1', rawQuery: { models: ['moonshotai/Kimi-K3.1-Pro', 'gpt-5.5'] } }),
+    ).rejects.toThrow('database reached');
+    await expect(
+      service.getUsage({ authUserId: 'user_1', rawQuery: { models: 'moonshotai//Kimi' } }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.getUsage({ authUserId: 'user_1', rawQuery: { projects: 'project/one' } }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(databaseService.database.transaction).toHaveBeenCalledOnce();
+  });
+
   it('fails closed at request time when the server billing environment is invalid', async () => {
     const { databaseService, service } = createService('invalid');
     await expect(service.getUsage({ authUserId: 'user_1', rawQuery: {} })).rejects.toBeInstanceOf(
@@ -283,6 +299,28 @@ describe('BillingUsageService open holds', () => {
     expect(compiled.sql).toContain("o.customer_state = 'pending'");
     expect(compiled.sql).toContain('order by o.admitted_at desc nulls last, o.id desc limit $4');
     expect(compiled.params).toEqual([5, 'staging', 'user_1', 200]);
+  });
+
+  it('should publish a pending Together hold under its namespaced supplier model id', async () => {
+    const { databaseService, service } = createService();
+    const transaction = mockDeep<Tx>();
+    databaseService.database.transaction.mockImplementation(async (callback) => callback(transaction));
+    transaction.execute.mockResolvedValueOnce(queryRows([])).mockResolvedValueOnce(
+      queryRows([
+        {
+          ...holdRow,
+          model_id: 'moonshotai/Kimi-K3.1-Pro',
+          model_display_name: 'Kimi K3.1 Pro',
+          provider_id: 'together',
+        },
+      ]),
+    );
+
+    const result = await service.getOpenHolds({ authUserId: 'user_1' });
+
+    expect(result.holds.map((hold) => hold.model)).toEqual([
+      { id: 'moonshotai/Kimi-K3.1-Pro', displayName: 'Kimi K3.1 Pro', providerId: 'together' },
+    ]);
   });
 
   it('refuses to publish a hold whose amount is not a canonical unsigned atom string', async () => {

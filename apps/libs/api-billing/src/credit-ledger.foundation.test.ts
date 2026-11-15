@@ -1379,6 +1379,22 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(after?.currentActivationId).toBe(scheduledActivationId);
   });
 
+  it('should admit and record a namespaced Together supplier model id', async () => {
+    const fixture = await createFixture({ promoAtoms: 0n, planAtoms: 0n, purchasedAtoms: 10n });
+    const admitted = await firstLedger.admitOperation({
+      ...admission(fixture, 'together-model', 1n),
+      modelId: 'moonshotai/Kimi-K3.1-Pro',
+      providerId: 'together',
+    });
+    if (admitted.status !== 'admitted') {
+      throw new Error('Together operation was not admitted');
+    }
+    const [stored] = await firstClient`select model_id, provider_id
+      from billing.credit_operation where id = ${admitted.operationId}`;
+    expect(stored!['model_id']).toBe('moonshotai/Kimi-K3.1-Pro');
+    expect(stored!['provider_id']).toBe('together');
+  });
+
   it('should freeze reporting time at dispatch intent before terminal evidence', async () => {
     const fixture = await createFixture({ promoAtoms: 0n, planAtoms: 0n, purchasedAtoms: 10n });
     const admitted = await firstLedger.admitOperation(admission(fixture, 'history-time', 1n));

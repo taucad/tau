@@ -5756,6 +5756,9 @@ importers:
         specifier: 'catalog:'
         version: 0.0.75(patch_hash=9c022eecadd2d5415a264964fd46fa04d44009ef10a5a13f2f3118c9bd8867d9)
     devDependencies:
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../filesystem
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../../tools/nx

@@ -343,21 +343,25 @@ it('should not serve the minimum again when a wait takes over an indicator the s
   container.innerHTML = renderToString(element);
   document.body.append(container);
   const shownAt = await frameAtOrAfter(startedAt + 1000);
-  await frameAtOrAfter(shownAt + 200);
+  await frameAtOrAfter(shownAt + 100);
   const root = hydrateRoot(container, element);
   try {
     await act(async () => {
       await nextFrame();
     });
     const takenOverAt = Number(document.timeline.currentTime);
-    await act(async () => {
+    /* The takeover commits now and stays active through frames, so its new element's entrance is seen. */
+    act(() => {
       root.render(<WaitIndicator active label='Loading history' startedAt={takenOverAt} />);
-      await frameAtOrAfter(takenOverAt + 200);
     });
     await act(async () => {
+      await frameAtOrAfter(takenOverAt + 100);
+    });
+    act(() => {
       root.render(<WaitIndicator active={false} label='Loading history' startedAt={takenOverAt} />);
     });
 
+    expect(find('wait-indicator').dataset['state'], 'the takeover kept the words').toBe('holding');
     const concealedAt = await effectTime('wait-conceal');
     expect(concealedAt - shownAt, 'the words hold their minimum').toBeGreaterThanOrEqual(499);
     expect(concealedAt - shownAt, 'the takeover served the minimum again from its own frame').toBeLessThan(534);
@@ -366,4 +370,36 @@ it('should not serve the minimum again when a wait takes over an indicator the s
     container.remove();
     document.documentElement.style.removeProperty('--wait-offset');
   }
+});
+
+it('should hold a wait that settled at the end of a long task its reveal fell due in 500 ms from the frame it showed in', async () => {
+  /* The reveal falls due 50 ms into a 400 ms task, no frame draws it, and the content arrives at the task's end. */
+  const startedAt = Number(document.timeline.currentTime) - 950;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  await act(async () => {
+    await nextFrame();
+  });
+  let shownAt = Number.NaN;
+  const onFrame = (): void => {
+    if (Number.isNaN(shownAt)) {
+      shownAt = performance.now();
+    }
+  };
+  holdMainThread(400);
+  act(() => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  });
+  document.addEventListener('animationstart', onFrame, { capture: true });
+  requestAnimationFrame(onFrame);
+  await act(async () => {
+    await nextFrame();
+    await nextFrame();
+  });
+  document.removeEventListener('animationstart', onFrame, { capture: true });
+
+  expect(find('wait-indicator').dataset['state'], 'the settled words hold').toBe('holding');
+  expect(
+    (await effectTime('wait-conceal')) - shownAt,
+    'the hold counted its minimum from a reveal no frame had drawn',
+  ).toBeGreaterThanOrEqual(500 - oneFrame);
 });

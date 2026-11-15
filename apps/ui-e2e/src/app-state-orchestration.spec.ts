@@ -777,6 +777,121 @@ test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is 
 });
 
 /*
+ * S26, D17 (A7d; programme control, 2026-11-15T20:26Z). An edit, Escape and a reload at once, as a person types and
+ * reloads: nothing else is owed, so only the editor document session's own debounced save holds the edit. The row
+ * asserts the edit is on disk and shown after the reload. The reload's own timing is read back from the page's clock.
+ */
+test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload is kept on disk and in the editor', async ({
+  annotate,
+}) => {
+  await openSeed();
+  const marker = `// immediate-reload witness ${Math.random().toString(36).slice(2, 10)}`;
+  await target.expectVisible(revisionChip(), 60_000);
+  await awaitSaved();
+  const source = await openSource();
+  await target.expectContainingText(source, 'makeBaseBox(18', 30_000);
+  await target.click(source);
+  await target.keyboardPress('ControlOrMeta+End');
+  /* The edit and the reload in one page task, once the editor's own document holds the edit: the reload comes inside
+   * the editor's 250 ms save window, with nothing else owed. */
+  const reloadKey = 'a01-row5c-reload';
+  await target
+    .evaluateLocator(
+      source,
+      (element, input) => {
+        const clock = (): number => performance.timeOrigin + performance.now();
+        if (element instanceof HTMLElement) {
+          element.focus();
+          // oxlint-disable-next-line @typescript-eslint/no-deprecated -- the one atomic input path a contenteditable takes
+          document.execCommand('insertText', false, input.text);
+        }
+        const insertedAt = clock();
+        type EditorDom = Element & { cmTile?: { root?: { view?: { state: { doc: { toString(): string } } } } } };
+        const isInState = (): boolean =>
+          (element as EditorDom).cmTile?.root?.view?.state.doc.toString().includes(input.text.trim()) ?? false;
+        const finish = (frames: number): void => {
+          if (!isInState() && frames < 30) {
+            requestAnimationFrame(() => {
+              finish(frames + 1);
+            });
+            return;
+          }
+          sessionStorage.setItem(
+            input.key,
+            JSON.stringify({ insertedAt, reloadAt: clock(), editInState: isInState(), frames }),
+          );
+          location.reload();
+        };
+        finish(0);
+      },
+      { text: `\n${marker}`, key: reloadKey },
+    )
+    .catch(() => undefined);
+  await expect
+    .poll(
+      async () =>
+        target
+          .evaluate((key) => {
+            const stored = sessionStorage.getItem(key);
+            return stored !== null && performance.timeOrigin > (JSON.parse(stored) as { reloadAt: number }).reloadAt;
+          }, reloadKey)
+          .catch(() => false),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  const timings = await target.evaluate(
+    (key) =>
+      JSON.parse(sessionStorage.getItem(key) ?? 'null') as {
+        insertedAt: number;
+        reloadAt: number;
+        editInState: boolean;
+        frames: number;
+      },
+    reloadKey,
+  );
+  await target.expectUrl(projectRoute, 60_000);
+  await target.expectVisible(dockTab(entryPaths.a), 60_000);
+
+  /* What storage holds, then what the reloaded editor shows. */
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const storedText = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const reopened = await openSource();
+  await target.expectContainingText(reopened, 'makeBaseBox(18', 60_000);
+  const shownText = await readWithin(
+    async () => (await target.textContent(reopened)) ?? '',
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const reading = {
+    editStored: storedText.includes(marker),
+    editKept: shownText.includes(marker),
+    editToReload: Math.round(timings.reloadAt - timings.insertedAt),
+    editInState: timings.editInState,
+    frames: timings.frames,
+  };
+  await annotate(`S26 edit then immediate reload: ${JSON.stringify(reading)}`);
+  await target.writeArtifact(`a01-row5c-report-${String(Date.now())}.json`, JSON.stringify(reading));
+  /* The edit was in the editor's state when the reload was called, inside the 250 ms window. */
+  expect(timings.editInState).toBe(true);
+  expect(reading.editToReload).toBeLessThan(250);
+  expect(reading, 'S26: the edit is on disk and in the editor after the reload').toMatchObject({
+    editStored: true,
+    editKept: true,
+  });
+});
+
+/*
  * I2 (`ProjectFocus` `FocusFollowsLatestRequest`; fixed by A5b). Going back to A as soon as B's path commits used to
  * settle on B sometimes (6 of 10 trips in A5c's run): B's `?chat=` correction was the route's own
  * `navigate(replace)`, fired once B's editor reached `ready.operation.idle` (`use-project.tsx`), and could land after

@@ -1,0 +1,338 @@
+/**
+ * A warm reopen (Tau #2013, STO-25): a new session over a checkout an earlier
+ * session compared. The comparison answers from the Project Index's stats
+ * (D5, D11: capture by index deltas across sessions) and the fill's check reads
+ * only files of a pointer's size (D4, I3), so a checkout nothing touched is
+ * not read again. Anything the stats cannot vouch for — an edit by another
+ * program, a racy timestamp, a moved head — is read, as a walk would (I5).
+ */
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createActor } from 'xstate';
+
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+import type { RevisionPort } from '#revision-port.js';
+import { createRevisionActors } from '#revision-effects.js';
+import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
+import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
+
+const author = { name: 'Tau', email: 'noreply@tau.new' };
+
+const cleanups: Array<() => Promise<void> | void> = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).toReversed()) {
+    // oxlint-disable-next-line no-await-in-loop -- torn down in the reverse of the order they were made.
+    await cleanup();
+  }
+});
+
+/** Older than the racy window of any capture in the test, so only what a test writes is fresh. */
+const settledTime = new Date(Date.now() - 60_000);
+
+const files = (count: number): Record<string, string> =>
+  Object.fromEntries(
+    Array.from({ length: count }, (_, index) => [
+      `dir${String(index % 5)}/f${String(index)}.txt`,
+      `file ${String(index)}\n`,
+    ]),
+  );
+
+const pointerOf = (oid: string, size: number): string =>
+  `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${String(size)}\n`;
+
+const asError = (failure: unknown): Error => (failure instanceof Error ? failure : new Error(String(failure)));
+
+const run = async <Output>(logic: unknown, input: unknown): Promise<Output> =>
+  new Promise<Output>((resolve, reject) => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- the actor logic is the machine's own; this drives it directly.
+    const running = createActor(logic as Parameters<typeof createActor>[0], { input });
+    running.subscribe({
+      next: (snapshot) => {
+        if (snapshot.status === 'done') {
+          // oxlint-disable-next-line typescript/consistent-type-assertions -- the output type is the caller's contract.
+          resolve(snapshot.output as Output);
+        }
+        if (snapshot.status === 'error') {
+          reject(asError(snapshot.error));
+        }
+      },
+      error: (failure: unknown) => {
+        reject(asError(failure));
+      },
+    });
+    running.start();
+  });
+
+/* One checkout on disk, opened by as many sessions as a test asks for. */
+const fixture = async (initial: Readonly<Record<string, string>>) => {
+  const root = await mkdtemp(join(tmpdir(), 'tau-warm-reopen-'));
+  cleanups.push(async () => rm(root, { recursive: true, force: true }));
+  for (const [path, content] of Object.entries(initial)) {
+    // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
+    await writeFile(join(root, path), content);
+    // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
+    await utimes(join(root, path), settledTime, settledTime);
+  }
+  let initialized = false;
+  /*
+   * A session: a fresh service, index, port and actors over the same disk, as a
+   * reload opens them. `reads` names every file a revision effect read.
+   */
+  const session = async () => {
+    const mountTable = new MountTable();
+    mountTable.mount('/', new NodeFsProvider(root), {
+      class: 'authored',
+      backend: 'node',
+      storageRootKey: `node:${root}`,
+    });
+    const service = new WorkspaceFileService({
+      providerRegistry: new ProviderRegistry(),
+      mountTable,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+    });
+    /* The revision layer's own view, which reads a pointer as it is (D9). */
+    const rooted = service.createRootedFileSystem('/', undefined, { placeholders: 'raw' });
+    const port: RevisionPort = createIsomorphicGitRevisionPort({ filesystem: rooted });
+    if (!initialized) {
+      initialized = true;
+      await port.init({ author });
+      await rooted.writeFile(generatedGitattributesPath, generatedGitattributesContent(undefined));
+      for (const path of ['.gitattributes', '.gitignore']) {
+        // oxlint-disable-next-line no-await-in-loop -- two files.
+        await utimes(join(root, path), settledTime, settledTime).catch(() => undefined);
+      }
+    }
+    const reads: string[] = [];
+    const counted = Object.assign(Object.create(rooted) as RevisionFileSystem, {
+      readFile: (async (path: string, ...rest: readonly unknown[]) => {
+        reads.push(path);
+        // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
+        return (rooted.readFile as (...arguments_: any[]) => Promise<unknown>)(path, ...rest);
+      }) as RevisionFileSystem['readFile'],
+      readFileStream: ((path: string, ...rest: readonly unknown[]) => {
+        reads.push(path);
+        // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
+        return (rooted.readFileStream as (...arguments_: any[]) => unknown)(path, ...rest);
+      }) as RevisionFileSystem['readFileStream'],
+    });
+    let answered: () => void = () => undefined;
+    const fillChecked = new Promise<void>((resolve) => {
+      answered = resolve;
+    });
+    const actors: RevisionActors = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      filesystem: async () => counted,
+      onLargeObjects: () => {
+        answered();
+      },
+    });
+    /* The same files walked by actors with no index to ask: what every answer must hash to. */
+    const walking = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      filesystem: async () => Object.assign(Object.create(rooted) as RevisionFileSystem, { changedSince: undefined }),
+    });
+    const close = async (): Promise<void> => {
+      await actors.settled();
+      await walking.settled();
+      service.dispose();
+    };
+    cleanups.push(close);
+    return { root, rooted, port, actors, walking, reads, fillChecked, close };
+  };
+  return { root, session };
+};
+
+type Session = Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>['session']>>;
+
+const compare = async (actors: RevisionActors): Promise<string> => {
+  const { treeId } = await run<{ treeId: string }>(actors.checkout.captureTree, { checkoutId: 'live' });
+  return treeId;
+};
+
+const mint = async (at: Session): Promise<string> => {
+  const taken = await run<{ treeId: string; cutId: string }>(at.actors.checkout.cut, {
+    checkoutId: 'live',
+    trigger: 'save',
+  });
+  const { revisionId: written } = await run<{ revisionId: string }>(at.actors.checkout.writeRevision, {
+    checkoutId: 'live',
+    cutId: taken.cutId,
+    treeId: taken.treeId,
+    parents: [],
+    trigger: 'save',
+    leaseIds: [],
+  });
+  const head = await at.port.readRef('main');
+  await at.port.updateRef({ name: 'main', expectedHead: head, head: revisionId(written) });
+  return written;
+};
+
+describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', () => {
+  it('should answer the comparison and the fill check without reading a file when nothing changed', async () => {
+    const { session } = await fixture(files(40));
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toEqual([]);
+    expect(treeId).toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read an edit another program made between the sessions', async () => {
+    const { root, session } = await fixture(files(40));
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+    await writeFile(join(root, 'dir3/f8.txt'), 'edited by another program\n');
+    await utimes(join(root, 'dir3/f8.txt'), settledTime, new Date(Date.now() - 30_000));
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toContain('dir3/f8.txt');
+    expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should take a file another program added between the sessions', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+    await writeFile(join(root, 'dir1/added.txt'), 'new\n');
+    await utimes(join(root, 'dir1/added.txt'), settledTime, settledTime);
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toContain('dir1/added.txt');
+    expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read a file whose mode alone changed between the sessions', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+    await chmod(join(root, 'dir0/f5.txt'), 0o755);
+    await utimes(join(root, 'dir0/f5.txt'), settledTime, settledTime);
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads.length).toBeGreaterThan(0);
+    expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read the checkout when the record is torn', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    await compare(first.actors);
+    await first.close();
+    await writeFile(join(root, '.git/tau-compare-live.json'), '{"format":"tau-checkout-compare","vers');
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads.length).toBeGreaterThan(0);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read a file whose timestamp was racy when the earlier session compared it (EQ7)', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    /* Written moments before the comparison that records it: its timestamp cannot prove its bytes. */
+    await writeFile(join(root, 'racy.txt'), 'first\n');
+    await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads).toContain('racy.txt');
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should read the checkout again when the head moved between the sessions', async () => {
+    const { session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    const head = await second.port.readRef('main');
+    const receipt = await second.port.writeRevision({
+      parents: head === undefined ? [] : [head],
+      tree: new ImmutableRevisionTree([['other.txt', 'elsewhere\n']]),
+      provenance: { source: 'user', ...recordedBy('actor-1'), runId: 'run-1', createdAt: Date.UTC(2026, 10, 7) },
+      summary: { generated: 'Moved' },
+    });
+    await second.port.updateRef({ name: 'main', expectedHead: head, head: revisionId(receipt.commitId) });
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(second.reads.length).toBeGreaterThan(0);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+});
+
+describe('the fill check of a warm reopen (Tau #2013)', () => {
+  it('should read only the files a pointer could be, never the rest of the checkout', async () => {
+    const big = 'x'.repeat(4096);
+    const { session } = await fixture({ ...files(20), 'model/big.bin': big });
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+
+    expect(second.reads).toEqual([]);
+  });
+
+  it('should still find a placeholder a pointer-sized file holds', async () => {
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': pointer });
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+
+    expect(second.reads).toEqual(['assets/part.stl']);
+  });
+});

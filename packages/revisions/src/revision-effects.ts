@@ -111,7 +111,7 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects, largeObjectBasisOf, withOwedAttributes } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, mayBeLfsPointerSize, withOwedAttributes } from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
@@ -228,6 +228,17 @@ import type { TurnAttemptKey, TurnCutOf, TurnLease as TurnLeaseRecord } from '#t
 
 import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.types.js';
 import { coveredByIgnoreListing } from '#git-ignore.js';
+import { revisionTreeFiles } from '#algorithms/revision-tree.js';
+import { parseTemporarySibling } from '#revision-temporary-sibling.js';
+import {
+  compareRecordMaximumFiles,
+  compareRecordOf,
+  compareRecordPath,
+  parseCompareRecord,
+  recordAnswers,
+  serializeCompareRecord,
+} from '#compare-record.js';
+import type { CompareObservation } from '#compare-record.js';
 
 /** The head a listing was read under: the paths it tracks are never ignored. */
 type TrackedHead = Readonly<{ revisionId: string; tree: ImmutableRevisionTree }>;
@@ -748,6 +759,22 @@ const requestTitleOf = (request: string | undefined): string | undefined => {
 };
 /** Identity every revision this host records is committed under. */
 const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
+/* Whether a path is one of a capture's changed roots or lies under one; `''` is the whole tree. */
+const isUnderRoot = (path: string, roots: ReadonlySet<string>): boolean => {
+  if (roots.has('') || roots.has(path)) {
+    return true;
+  }
+  for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+    if (roots.has(path.slice(0, at))) {
+      return true;
+    }
+  }
+  return false;
+};
+const isMissingFile = (error: unknown): boolean => {
+  const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+  return code === 'ENOENT' || name === 'NotFoundError';
+};
 /**
  * How far back a pull looks to decide fast-forward from divergence.
  *
@@ -1077,6 +1104,30 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
   /* Captures begin in this order; `last` only moves forward along it. */
   let captureSequence = 0;
+  /*
+   * When each file of a captured tree was read: a clock reading taken before
+   * its bytes were, carried over from the tree a capture started from for the
+   * files it kept. A comparison's record keys its racy guard on it (Tau #2013).
+   */
+  const readings = new WeakMap<ImmutableRevisionTree, ReadonlyMap<string, number>>();
+  const recordReadings = (
+    tree: ImmutableRevisionTree,
+    at: number,
+    kept?: Readonly<{ from: ImmutableRevisionTree; roots: ReadonlySet<string> }>,
+  ): void => {
+    const before = kept === undefined ? undefined : readings.get(kept.from);
+    const read = new Map<string, number>();
+    for (const path of revisionTreeFiles(tree).keys()) {
+      const reread = kept === undefined || isUnderRoot(path, kept.roots);
+      const when = reread ? at : before?.get(path);
+      if (when === undefined) {
+        /* A kept file with no reading of its own: no record can key on this tree. */
+        return;
+      }
+      read.set(path, when);
+    }
+    readings.set(tree, read);
+  };
   /* ponytail: one bound for `last` and `basis` each; above it a capture walks and reads the head, as before E1. */
   const heldTreeBytes = 256 * 1024 * 1024;
   const heldTree = (tree: ImmutableRevisionTree): ImmutableRevisionTree | undefined =>
@@ -1115,12 +1166,27 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<CheckoutCaptureTreeActorOutput> => {
     const memos = memosOf(input.checkoutId);
     let published: CheckoutMemos['comparing'];
-    const captured = (async () => {
+    const compared = (async (): Promise<Readonly<{ treeId: string; tree?: ImmutableRevisionTree }>> => {
       try {
-        return await captureCheckout(await placeOf(input.checkoutId), {
-          bypassMemo: false,
-          changed: { paths: input.changedPaths },
-          ...(signal === undefined ? {} : { signal }),
+        const place = await placeOf(input.checkoutId);
+        return await useFileSystem(place, async (rooted) => {
+          /* A session that has captured nothing yet asks the record an earlier one left first (Tau #2013). */
+          if (memos.last === undefined) {
+            const treeId = await recordedComparison(place, rooted).catch(() => undefined);
+            if (treeId !== undefined) {
+              return { treeId };
+            }
+          }
+          const head = await headOf(place);
+          const tree = await captureOpened(place, rooted, {
+            bypassMemo: false,
+            changed: { paths: input.changedPaths },
+            ...(signal === undefined ? {} : { signal }),
+          });
+          const treeId = await checkoutTreeId(input.checkoutId, tree);
+          /* Evidence for the next session, never this comparison's outcome. */
+          await keepComparison(place, rooted, { treeId, head, tree }).catch(() => undefined);
+          return { treeId, tree };
         });
       } finally {
         if (published !== undefined && memos.comparing === published) {
@@ -1128,12 +1194,148 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
       }
     })();
+    /* A comparison the record answered has no tree: a cut waiting on it captures its own. */
+    const captured = (async (): Promise<ImmutableRevisionTree> => {
+      const { tree } = await compared;
+      if (tree === undefined) {
+        throw new Error('This comparison was answered from its record and holds no tree.');
+      }
+      return tree;
+    })();
+    // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled without awaiting it.
+    captured.catch(() => undefined);
     /* Published before the first await, so a cut asked on the next event finds it. */
     if (input.generation !== undefined) {
       published = { generation: input.generation, tree: captured };
       memos.comparing = published;
     }
-    return { treeId: await checkoutTreeId(input.checkoutId, await captured) };
+    const { treeId } = await compared;
+    return { treeId };
+  };
+
+  /*
+   * Tau #2013: what a session sees of one checkout without reading a file — its
+   * head, its ignore context and the Project Index's stats of every versioned
+   * path — or `undefined` where the stats cannot vouch for bytes: no index, a
+   * provider whose timestamps are not trustworthy, an ignore source with no
+   * context to compare (D5, closeout EQ7). `compare` runs the D5 compare first,
+   * so an edit no observer reported is in the stats.
+   */
+  const observeCheckout = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    compare: boolean,
+  ): Promise<CompareObservation | undefined> => {
+    const { compareIndex, statTree } = rooted;
+    if (rooted.capabilities.trustworthyMtime !== true || compareIndex === undefined || statTree === undefined) {
+      return undefined;
+    }
+    const ignores =
+      port.ignoredPaths === undefined ? '' : await port.ignoreContext?.(place.kind === 'live' ? undefined : place.root);
+    if (ignores === undefined) {
+      return undefined;
+    }
+    const head = await headOf(place);
+    if (compare) {
+      await compareIndex.call(rooted);
+    }
+    const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
+    return { head, ignores, stats };
+  };
+  /* Every path the registry versions, as a capture lists it: a reserved temporary sibling is none. */
+  const versionedAdmits = (path: string): boolean =>
+    policy.classify(path).versioned && parseTemporarySibling(path) === undefined;
+  /* The text each checkout's record was last written with, so an unchanged answer writes nothing. */
+  const keptComparisons = new Map<string, string>();
+  /*
+   * Keep a comparison's answer for the next session (Tau #2013): its tree id
+   * with the index's stats of every file it captured and when each was read.
+   * Kept only when everything the stats name is accounted for: each captured
+   * file has a reading, the head did not move under the capture, and every
+   * versioned path it left out is one the ignore rules leave out.
+   */
+  const keepComparison = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    compared: Readonly<{ treeId: string; head: string | undefined; tree: ImmutableRevisionTree }>,
+  ): Promise<void> => {
+    const path = compareRecordPath(place.id);
+    const readAt = readings.get(compared.tree);
+    if (path === undefined || readAt === undefined || readAt.size > compareRecordMaximumFiles) {
+      return;
+    }
+    const kept = await (async () => {
+      const now = await observeCheckout(place, rooted, false);
+      if (now === undefined || now.head !== compared.head || now.stats.length > compareRecordMaximumFiles) {
+        return undefined;
+      }
+      const left = now.stats.flatMap(({ path: statPath }) => (readAt.has(statPath) ? [] : [statPath]));
+      if (left.length > 0) {
+        const listing = new Set(
+          (await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root, left)) ?? [],
+        );
+        if (left.some((leftPath) => !coveredByIgnoreListing(listing, leftPath))) {
+          return undefined;
+        }
+      }
+      const modes =
+        rooted.getFileMode === undefined
+          ? undefined
+          : Object.fromEntries([...revisionTreeFiles(compared.tree)].map(([file, { mode }]) => [file, mode]));
+      return compareRecordOf(
+        { treeId: compared.treeId, head: now.head, ignores: now.ignores, modes },
+        now.stats,
+        readAt,
+      );
+    })();
+    if (kept === undefined) {
+      return;
+    }
+    const text = serializeCompareRecord(kept);
+    if (keptComparisons.get(place.id) === text) {
+      return;
+    }
+    await writeControlRecord(controlPlaneFiles(await recordsFileSystem()), path, text);
+    keptComparisons.set(place.id, text);
+  };
+  /*
+   * The tree id an earlier session's record answers for the files now, or
+   * `undefined` when anything it was answered over has moved: the comparison
+   * then reads the checkout (Tau #2013; I5).
+   */
+  const recordedComparison = async (place: Checkout, rooted: RevisionFileSystem): Promise<string | undefined> => {
+    const path = compareRecordPath(place.id);
+    if (path === undefined) {
+      return undefined;
+    }
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), path, {
+      accepts: (candidate) => parseCompareRecord(candidate) !== undefined,
+    });
+    const record = text === undefined ? undefined : parseCompareRecord(text);
+    if (record === undefined) {
+      return undefined;
+    }
+    const now = await observeCheckout(place, rooted, true);
+    if (now === undefined || !recordAnswers(record, now)) {
+      return undefined;
+    }
+    /* A mode change moves neither size nor timestamp, so where the provider reports modes each is asked again. */
+    const { getFileMode } = rooted;
+    if ((getFileMode === undefined) !== (record.modes === undefined)) {
+      return undefined;
+    }
+    if (getFileMode !== undefined) {
+      const modes = Object.entries(record.modes ?? {});
+      const moved = await mapConcurrent(modes, captureModeConcurrency, async ([file, mode]) => {
+        const current = await getFileMode.call(rooted, file).catch(() => undefined);
+        return current !== mode;
+      });
+      if (moved.some(Boolean)) {
+        return undefined;
+      }
+    }
+    checkFill(place);
+    return record.treeId;
   };
 
   /* An effect timed as one worker span, whether it settles or fails. */
@@ -1748,6 +1950,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (leavesRecords !== true) {
         await recordedBlobOids(rooted, read, stats);
       }
+      recordReadings(captured, observedAt);
       return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
@@ -1845,26 +2048,31 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         return walk();
       }
       cursor = { epoch: changes.epoch, generation: changes.generation, observedAt };
-      return captureRevisionTree(rooted, {
+      const captured = await captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
         changedSince: { tree: last, paths: [...paths] },
         ...(signal === undefined ? {} : { signal }),
       });
+      recordReadings(captured, observedAt, { from: last, roots: paths });
+      return captured;
     };
     /* A complete feed names the paths: only they are asked about, unless an ignore rule changed, which walks. */
     const fromFeed = async (from: ImmutableRevisionTree, named: readonly string[]): Promise<ImmutableRevisionTree> => {
+      const readAt = clock();
       const paths = [...new Set([...named, ...(await trackingMoved(from))])];
-      return (await askAgain(paths, new Set()))
-        ? /* `last` carries the modes it inherited, and a moved head empties
-           * the paths, so it is still the head's (I6). */
-          captureRevisionTree(rooted, {
-            exclude,
-            inheritedMode: (path) => from.mode(path),
-            changedSince: { tree: from, paths },
-            ...(signal === undefined ? {} : { signal }),
-          })
-        : walk();
+      if (!(await askAgain(paths, new Set()))) {
+        return walk();
+      }
+      /* `last` carries the modes it inherited, and a moved head empties the paths, so it is still the head's (I6). */
+      const captured = await captureRevisionTree(rooted, {
+        exclude,
+        inheritedMode: (path) => from.mode(path),
+        changedSince: { tree: from, paths },
+        ...(signal === undefined ? {} : { signal }),
+      });
+      recordReadings(captured, readAt, { from, roots: new Set(paths) });
+      return captured;
     };
     const tree =
       since === undefined || changed?.paths === undefined ? await fromIndex() : await fromFeed(since, changed.paths);
@@ -1913,46 +2121,53 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return tree;
   };
 
+  type CheckoutCaptureOptions = Readonly<{
+    modeBasis?: ImmutableRevisionTree | undefined;
+    bypassMemo: boolean;
+    changed?: Readonly<{ paths: readonly string[] | undefined }>;
+    signal?: AbortSignal | undefined;
+    leavesRecords?: boolean | undefined;
+  }>;
   const captureCheckout = async (
     place: Checkout,
-    captureOptions: Readonly<{
-      modeBasis?: ImmutableRevisionTree | undefined;
-      bypassMemo: boolean;
-      changed?: Readonly<{ paths: readonly string[] | undefined }>;
-      signal?: AbortSignal | undefined;
-      leavesRecords?: boolean | undefined;
-    }>,
+    captureOptions: CheckoutCaptureOptions,
   ): Promise<ImmutableRevisionTree> =>
-    useFileSystem(place, async (rooted) => {
-      captureOptions.signal?.throwIfAborted();
-      await sweepTemporarySiblings(place, rooted);
-      /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
-       * checkout a failed tree write owes a check is checked again here (D10). */
-      checkFill(place);
-      const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
-      const memos = memosOf(place.id);
-      const ignoreRoot = place.kind === 'live' ? undefined : place.root;
-      const ignores: CaptureIgnores | undefined =
-        port.ignoredPaths === undefined
-          ? undefined
-          : {
-              context: await port.ignoreContext?.(ignoreRoot),
-              list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
-              head: async () => {
-                const head = await headOf(place);
-                const tree = head === undefined ? undefined : await headBasis(place, memos);
-                return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
-              },
-            };
-      return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
-        memos,
-        bypassMemo,
-        signal,
-        leavesRecords,
-        ...(changed === undefined ? {} : { changed }),
-        ...(ignores === undefined ? {} : { ignores }),
-      });
+    useFileSystem(place, async (rooted) => captureOpened(place, rooted, captureOptions));
+  /* One capture over a checkout the caller already holds open. */
+  const captureOpened = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    captureOptions: CheckoutCaptureOptions,
+  ): Promise<ImmutableRevisionTree> => {
+    captureOptions.signal?.throwIfAborted();
+    await sweepTemporarySiblings(place, rooted);
+    /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
+     * checkout a failed tree write owes a check is checked again here (D10). */
+    checkFill(place);
+    const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
+    const memos = memosOf(place.id);
+    const ignoreRoot = place.kind === 'live' ? undefined : place.root;
+    const ignores: CaptureIgnores | undefined =
+      port.ignoredPaths === undefined
+        ? undefined
+        : {
+            context: await port.ignoreContext?.(ignoreRoot),
+            list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
+            head: async () => {
+              const head = await headOf(place);
+              const tree = head === undefined ? undefined : await headBasis(place, memos);
+              return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
+            },
+          };
+    return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
+      memos,
+      bypassMemo,
+      signal,
+      leavesRecords,
+      ...(changed === undefined ? {} : { changed }),
+      ...(ignores === undefined ? {} : { ignores }),
     });
+  };
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
     memosOf(checkoutId).treeIds.treeId(await recordedTree(tree, await recordingParentOf(checkoutId)), await formatOf());
@@ -1968,6 +2183,49 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * stays for the cut that builds the next revision, which reuses these bytes (D12). */
   const captureForFill = async (place: Checkout): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { bypassMemo: false, leavesRecords: true });
+  /*
+   * The placeholders a checkout holds, found from the Project Index's stats
+   * (D4, I3; Tau #2013): a pointer is a few lines of fixed form, so only a
+   * versioned file of a pointer's size is read, and the rest of the checkout is
+   * never read to answer the fill. The D5 compare runs first, so a pointer
+   * another program wrote is found. Ignored paths are left out, as a capture
+   * leaves them out. Without an index it captures the checkout, as before.
+   */
+  const placeholdersOf = async (place: Checkout): Promise<ReturnType<typeof largeObjectPlaceholders>> =>
+    useFileSystem(place, async (rooted) => {
+      const { compareIndex, statTree } = rooted;
+      if (compareIndex === undefined || statTree === undefined) {
+        return largeObjectPlaceholders(await captureOpened(place, rooted, { bypassMemo: false, leavesRecords: true }));
+      }
+      await compareIndex.call(rooted);
+      const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
+      const candidates = stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : []));
+      const read = await mapConcurrent(candidates, captureModeConcurrency, async (path) => {
+        try {
+          return [path, await rooted.readFile(path)] as const;
+        } catch (error) {
+          /* Gone since the listing: a capture skips it too. */
+          if (isMissingFile(error)) {
+            return undefined;
+          }
+          throw error;
+        }
+      });
+      const found = largeObjectPlaceholders(
+        new ImmutableRevisionTree(read.flatMap((entry) => (entry === undefined ? [] : [entry]))),
+      );
+      if (found.size > 0 && port.ignoredPaths !== undefined) {
+        const listing = new Set(
+          (await port.ignoredPaths(place.kind === 'live' ? undefined : place.root, [...found.keys()])) ?? [],
+        );
+        for (const path of found.keys()) {
+          if (coveredByIgnoreListing(listing, path)) {
+            found.delete(path);
+          }
+        }
+      }
+      return found;
+    });
 
   /**
    * The live checkout, asked of a store that already exists, without waiting
@@ -2266,7 +2524,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       void (async (): Promise<void> => {
         try {
           const head = await headOf(place);
-          const placeholders = largeObjectPlaceholders(await captureForFill(place));
+          const placeholders = await placeholdersOf(place);
           if (fillsStopped || generationOf(place.id) !== generation) {
             return;
           }
@@ -2430,7 +2688,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (fillsStopped) {
             return;
           }
-          const placeholders = largeObjectPlaceholders(tree ?? (await captureForFill(place)));
+          const placeholders = tree === undefined ? await placeholdersOf(place) : largeObjectPlaceholders(tree);
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
@@ -2497,7 +2755,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const generation = generationOf(place.id);
       /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
-      const placeholders = largeObjectPlaceholders(await captureForFill(place));
+      const placeholders = await placeholdersOf(place);
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
       if (fillsStopped || generationOf(place.id) !== generation) {
         return;

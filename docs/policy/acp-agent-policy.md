@@ -74,6 +74,10 @@ Resolve the same executable from Finder, the Dock, the Start menu, a `.desktop` 
 
 **Why**: A desktop app starts with the launcher's PATH, not the user's shell PATH.
 
+The process that runs a turn must give the adapter the same account variables that discovery saw. On the desktop, discovery runs in main, but turns spawn from the services utility, whose environment has no `HOME` or `USER`. So main hands each adapter its allowlisted values on `spawnEnv` (`withMainAgentEnvironment`).
+
+**Why**: Claude Code finds its macOS keychain sign-in by `USER`. Without it, a signed-in CLI answered "not logged in" on every turn, while discovery listed it as available.
+
 ### 4. Run the File You Found, Never Through a Shell
 
 Use the located file for the version probe, the session and `executableEnv`. Never start a CLI with `shell: true`. On Windows, never select a `.cmd` or `.bat` file. Locate a `*` fallback again before a spawn when its file is gone.

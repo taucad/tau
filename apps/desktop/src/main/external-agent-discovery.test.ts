@@ -30,7 +30,7 @@ const refusalOf = (id: string, message = `${id} --version timed out after 10000 
 });
 
 /** A discovery whose answers the test queues and settles by hand. */
-const createHarness = () => {
+const createHarness = (environment: NodeJS.ProcessEnv = {}) => {
   let time = 0;
   const pending: Array<PromiseWithResolvers<AcpAgentDiscovery>> = [];
   const discover = vi.fn(async (_options: ExternalAgentDiscoverOptions): Promise<AcpAgentDiscovery> => {
@@ -46,7 +46,14 @@ const createHarness = () => {
       records.push({ level, event, detail });
     },
   };
-  const discovery = createExternalAgentDiscovery({ resolveFrom, discover, configure, log, now: () => time });
+  const discovery = createExternalAgentDiscovery({
+    resolveFrom,
+    discover,
+    configure,
+    log,
+    now: () => time,
+    environment,
+  });
   /** Settle the oldest discovery still waiting. */
   const settle = async (answer: AcpAgentDiscovery | Error): Promise<void> => {
     const next = pending.shift();
@@ -73,6 +80,37 @@ const createHarness = () => {
 };
 
 describe('createExternalAgentDiscovery', () => {
+  it("should hand each adapter main's account and agent variables, because the services utility runs without them", async () => {
+    /* Claude Code finds its keychain sign-in by USER; the services utility's own environment carries no HOME or USER. */
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
+    const harness = createHarness({
+      HOME: '/Users/ada',
+      USER: 'ada',
+      CLAUDE_CONFIG_DIR: '/Users/ada/.claude-work',
+      CODEX_HOME: '/Users/ada/.codex-work',
+      XDG_CONFIG_HOME: '/Users/ada/.config',
+      HTTPS_PROXY: 'http://proxy.example:3128',
+      TAU_API_URL: 'https://api.example',
+      AWS_SECRET_ACCESS_KEY: 'not-for-agents',
+    });
+
+    const listing = harness.discovery.list();
+    await harness.settle({ agents: [adapterFor('claude'), adapterFor('codex')], refused: [] });
+    await listing;
+
+    const [claude, codex] = harness.configure.mock.calls.at(-1)?.[0] ?? [];
+    expect(claude?.spawnEnv).toEqual({
+      HOME: '/Users/ada',
+      USER: 'ada',
+      CLAUDE_CONFIG_DIR: '/Users/ada/.claude-work',
+      XDG_CONFIG_HOME: '/Users/ada/.config',
+      HTTPS_PROXY: 'http://proxy.example:3128',
+    });
+    expect(codex?.spawnEnv).toMatchObject({ HOME: '/Users/ada', USER: 'ada', CODEX_HOME: '/Users/ada/.codex-work' });
+    expect(codex?.spawnEnv).not.toHaveProperty('CLAUDE_CONFIG_DIR');
+    /* eslint-enable @typescript-eslint/naming-convention -- end of the environment variable names */
+  });
+
   it('should discover with the library probe budgets when no timeout is passed', async () => {
     const harness = createHarness();
 

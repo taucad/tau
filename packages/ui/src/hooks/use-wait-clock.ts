@@ -216,7 +216,8 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       !tracked.isRevealSeen &&
       elapsed >= tracked.shownAt &&
       elapsed < tracked.shownAt + indicatorMinimumMilliseconds;
-    const shownAt = isUndrawn ? elapsed : tracked.shownAt;
+    /* The timeline holds still through the task; the words paint after it, no earlier than the performance clock. */
+    const shownAt = isUndrawn ? Math.max(elapsed, clock.now() - tracked.startedAt) : tracked.shownAt;
     next = {
       ...tracked,
       active,
@@ -225,7 +226,7 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       /* A seen reveal is on screen, even where the timeline still reads before the paint the reveal recorded. */
       timing: heldWords(
         settledTiming({
-          settledAt: Math.max(elapsed, tracked.isRevealSeen ? shownAt : Number.NEGATIVE_INFINITY),
+          settledAt: Math.max(elapsed, tracked.isRevealSeen || isUndrawn ? shownAt : Number.NEGATIVE_INFINITY),
           shownAt,
         }),
         elapsed,
@@ -238,13 +239,19 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
 
 /**
  * Whether the frames that draw a reveal report it to `revealed`: on the page's own clock, where the document runs
- * animations. Injected clocks and documents without a timeline (jsdom) see no frames, and keep the predicted reveal.
+ * animations and is visible. Injected clocks, documents without a timeline (jsdom) and hidden documents see no frames,
+ * and keep the predicted reveal.
  *
  * @param clock - The clock the wait is measured on.
  * @returns True when an unreported reveal has not been drawn.
  */
 function framesReportReveals(clock: WaitClock): boolean {
-  return clock === performanceClock && typeof document !== 'undefined' && 'timeline' in document;
+  return (
+    clock === performanceClock &&
+    typeof document !== 'undefined' &&
+    'timeline' in document &&
+    document.visibilityState === 'visible'
+  );
 }
 
 /**

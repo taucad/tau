@@ -1401,6 +1401,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     pendingKeeps.set(place.id, { place, compared, timer });
   };
+  /*
+   * A removed checkout's record goes with it: its held answer, its pending
+   * keep and its last text are forgotten, and the file is removed once any keep
+   * already running has landed, so nothing it answered outlives it.
+   */
+  const forgetComparison = async (checkoutId: string): Promise<void> => {
+    heldAnswers.delete(checkoutId);
+    const pending = pendingKeeps.get(checkoutId);
+    if (pending !== undefined) {
+      clearTimeout(pending.timer);
+      pendingKeeps.delete(checkoutId);
+    }
+    keptComparisons.delete(checkoutId);
+    const path = compareRecordPath(checkoutId);
+    if (path === undefined) {
+      return;
+    }
+    await keeping;
+    await controlPlaneFiles(await recordsFileSystem())
+      .unlink(path)
+      .catch((error: unknown) => {
+        if (!isMissingFile(error)) {
+          throw error;
+        }
+      });
+  };
   const flushKeeps = async (): Promise<void> => {
     for (const checkoutId of pendingKeeps.keys()) {
       runKeep(checkoutId);
@@ -5597,6 +5623,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         await port.removeCheckout(input.id);
         await noteRemovedCheckout(input.id, true);
+        /* Evidence for a checkout that is gone: a failure to remove it is never the removal's. */
+        await forgetComparison(input.id).catch(() => undefined);
         /* The bytes a closed checkout's captures could reuse describe a tree
          * this process can no longer reach (EQ7). */
         checkoutMemos.delete(input.id);

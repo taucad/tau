@@ -9,7 +9,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
@@ -72,7 +72,7 @@ const run = async <Output>(logic: unknown, input: unknown): Promise<Output> =>
   });
 
 /* One checkout on disk, opened by as many sessions as a test asks for. */
-const fixture = async (initial: Readonly<Record<string, string>>) => {
+const fixture = async (initial: Readonly<Record<string, string>>, options: Readonly<{ linked?: boolean }> = {}) => {
   const root = await mkdtemp(join(tmpdir(), 'tau-warm-reopen-'));
   cleanups.push(async () => rm(root, { recursive: true, force: true }));
   for (const [path, content] of Object.entries(initial)) {
@@ -83,6 +83,8 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
     // oxlint-disable-next-line no-await-in-loop -- fixture files, written in order.
     await utimes(join(root, path), settledTime, settledTime);
   }
+  const linkedRoot = await mkdtemp(join(tmpdir(), 'tau-warm-reopen-linked-'));
+  cleanups.push(async () => rm(linkedRoot, { recursive: true, force: true }));
   let initialized = false;
   /*
    * A session: a fresh service, index, port and actors over the same disk, as a
@@ -103,7 +105,24 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
     });
     /* The revision layer's own view, which reads a pointer as it is (D9). */
     const rooted = service.createRootedFileSystem('/', undefined, { placeholders: 'raw' });
-    const port: RevisionPort = createIsomorphicGitRevisionPort({ filesystem: rooted });
+    /* Linked checkouts, where a test asks for them, under `checkouts/<id>` beside the project's own files. */
+    const linkedView = async (id: string): Promise<RevisionFileSystem> => {
+      const at = `/checkouts/${id}`;
+      if (mountTable.getExactMount(at) === undefined) {
+        const directory = join(linkedRoot, id);
+        await mkdir(directory, { recursive: true });
+        mountTable.mount(at, new NodeFsProvider(directory), {
+          class: 'authored',
+          backend: 'node',
+          storageRootKey: `node:${directory}`,
+        });
+      }
+      return service.createRootedFileSystem(at, undefined, { placeholders: 'raw' });
+    };
+    const port: RevisionPort = createIsomorphicGitRevisionPort({
+      filesystem: rooted,
+      ...(options.linked === true ? { checkouts: { projectId: 'project-1', root: linkedView } } : {}),
+    });
     if (!initialized) {
       initialized = true;
       await port.init({ author });
@@ -176,7 +195,7 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       identity: testIdentity,
       port,
       projectId: 'project-1',
-      filesystem: async () => counted,
+      filesystem: async (checkout) => (checkout?.kind === 'linked' ? linkedView(checkout.id) : counted),
       onLargeObjects: (report) => {
         reports.push(report);
         answered();
@@ -593,6 +612,33 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
 
     expect(second.reads.length).toBeGreaterThan(0);
     expect(treeId).toBe(await compare(second.walking));
+  });
+});
+
+describe('a removed checkout’s comparison record (Tau #2013)', () => {
+  it('should go with the checkout, so nothing it answered survives the removal', async () => {
+    const { root, session } = await fixture(files(5), { linked: true });
+    const first = await session();
+    await mint(first);
+    const head = await first.port.readRef('main');
+    const { checkout } = await run<{ checkout: { id: string } }>(first.actors.checkouts.addCheckout, {
+      projectId: 'project-1',
+      branch: 'candidate',
+      from: head ?? '',
+    });
+    await run(first.actors.checkout.captureTree, { checkoutId: checkout.id });
+    const recordPath = join(root, `.git/tau-compare-${checkout.id}.json`);
+    await vi.waitFor(
+      async () => {
+        await expect(readFile(recordPath, 'utf8')).resolves.toContain('tau-checkout-compare');
+      },
+      { timeout: 5000 },
+    );
+
+    await run(first.actors.checkouts.removeCheckout, { projectId: 'project-1', id: checkout.id });
+    await first.close();
+
+    await expect(readFile(recordPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 

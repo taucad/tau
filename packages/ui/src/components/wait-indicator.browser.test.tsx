@@ -403,3 +403,57 @@ it('should hold a wait that settled at the end of a long task its reveal fell du
     'the hold counted its minimum from a reveal no frame had drawn',
   ).toBeGreaterThanOrEqual(500 - oneFrame);
 });
+
+it('should not show the words once a wait that no frame revealed has outlasted its minimum', async () => {
+  /* The reveal falls due 50 ms into a 700 ms task, and the content arrives at its end: by then the minimum the words
+     would have owed is over, so they never show. */
+  const startedAt = Number(document.timeline.currentTime) - 950;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  await act(async () => {
+    await nextFrame();
+  });
+  holdMainThread(700);
+  act(() => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  });
+
+  expect(find('wait-indicator').dataset['state'], 'the words showed after their content arrived').toBe('idle');
+});
+
+it('should not serve the minimum again when a wait restarts during a hold that drew the words first', async () => {
+  /* The region mounts with its reveal due and its content in the same task, so the hold draws the words. A refetch
+     restarts the wait 150 ms into that hold and settles: the words were on screen all along, so the minimum runs from
+     the hold's first frame, not from the restart's. */
+  const startedAt = Number(document.timeline.currentTime) - 1200;
+  let shownAt = Number.NaN;
+  const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+  act(() => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+  });
+  requestAnimationFrame(() => {
+    shownAt = performance.now();
+  });
+  await act(async () => {
+    await nextFrame();
+  });
+  await act(async () => {
+    await frameAtOrAfter(shownAt + 150);
+  });
+  const restartedAt = Number(document.timeline.currentTime);
+  act(() => {
+    view.rerender(<WaitIndicator active label='Loading chat' startedAt={restartedAt} />);
+  });
+  await act(async () => {
+    await nextFrame();
+    await nextFrame();
+  });
+  act(() => {
+    view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={restartedAt} />);
+  });
+
+  expect(find('wait-indicator').dataset['state']).toBe('holding');
+  expect(
+    (await effectTime('wait-conceal')) - shownAt,
+    'the restart served the minimum again from its own frame',
+  ).toBeLessThan(500 + oneFrame);
+});

@@ -110,7 +110,7 @@ export function SettingsInfo({
           <button
             type='button'
             aria-label={`About ${label.toLowerCase()}`}
-            className='inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:focus-outline'
+            className='inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:focus-outline'
           >
             <Info className='size-3.5' />
           </button>

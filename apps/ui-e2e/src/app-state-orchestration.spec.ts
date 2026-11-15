@@ -892,6 +892,46 @@ test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload
 });
 
 /*
+ * Expected failure (S26, D17, D26; programme control, 2026-11-15T20:40Z). The arrangement and the view setting go first,
+ * then the edit, Escape and a reload by the harness: the lane record still owes its write, so `beforeunload` runs the
+ * producer stage, which starts the editor's save beside the record writes, and the document goes before that save
+ * answers. The edit is lost from disk and from the editor: 7 of 10 runs on f9a1bd11 (before A7c's `beforeunload`
+ * stage) and 10 of 10 on 648a28ce. A follow-up the programme names owns the fix and flips this row.
+ */
+test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in flight when the document goes is lost', async ({
+  annotate,
+}) => {
+  const { marker } = await editViewArrangeAndReload(false);
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const storedText = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const source = await openSource();
+  await target.expectContainingText(source, 'makeBaseBox(18', 60_000);
+  const shownText = await readWithin(
+    async () => (await target.textContent(source)) ?? '',
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const reading = { editStored: storedText.includes(marker), editKept: shownText.includes(marker) };
+  await annotate(`S26 edit with a save in flight at reload: ${JSON.stringify(reading)}`);
+  await target.writeArtifact(`a01-row5d-report-${String(Date.now())}.json`, JSON.stringify(reading));
+  expect(reading, 'S26: the edit is on disk and in the editor after the reload').toMatchObject({
+    editStored: true,
+    editKept: true,
+  });
+});
+
+/*
  * I2 (`ProjectFocus` `FocusFollowsLatestRequest`; fixed by A5b). Going back to A as soon as B's path commits used to
  * settle on B sometimes (6 of 10 trips in A5c's run): B's `?chat=` correction was the route's own
  * `navigate(replace)`, fired once B's editor reached `ready.operation.idle` (`use-project.tsx`), and could land after

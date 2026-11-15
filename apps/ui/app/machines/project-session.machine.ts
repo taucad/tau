@@ -800,6 +800,10 @@ export const projectSessionMachine = setup({
       initial: 'asking',
       states: {
         asking: {
+          /* A6e: a close asked again after it started lifts the hold on a replacement it ignored or held. */
+          entry: ({ context }, enq) => {
+            handRuntimeReplacement({ context }, enq);
+          },
           always: ({ context, guards }) => (guards.shouldAsk(context) ? undefined : { target: 'cancellingRuns' }),
           on: {
             /* Nothing is flushed or stopped yet, and a cancel keeps the session live with this runtime. */

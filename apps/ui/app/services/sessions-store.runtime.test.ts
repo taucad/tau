@@ -646,4 +646,43 @@ describe('a change of kernel selection replaces the runtime through the session 
       unregister();
     }
   });
+
+  it('should replace the runtime when a close is asked again after a kernel change it ignored (D21 round 6)', async () => {
+    const { registry, opener } = harness();
+    await open(registry);
+    const unregister = registerProjectSessionServices(projectId, {
+      flushProducers: async () => pendingForever(),
+      flushSync: async () => undefined,
+      cancelRuns: async () => undefined,
+      closeRuntime: async () => undefined,
+    });
+    try {
+      const session = sessionOf(registry)!;
+      session.send({ type: 'projectedRunsChanged', runs: ['run-1'], stoppableRuns: ['run-1'] });
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      session.send({ type: 'confirmClose' });
+      await flush();
+      expect(session.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
+
+      opener.built[0]?.supersede();
+      opener.changeChoices();
+      await flush();
+      await flush();
+      registry.send({ type: 'close', projectId, reason: 'user' });
+      await flush();
+      await flush();
+
+      expect(session.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+      expect(opener.built).toHaveLength(2);
+      expect(selectProjectSessionRuntime(session.getSnapshot())).toBe(opener.built[1]?.runtimeRef);
+    } finally {
+      unregister();
+    }
+  });
 });
+
+/** A promise that never settles. */
+const pendingForever = async (): Promise<void> =>
+  new Promise<void>(() => {
+    /* Never settles. */
+  });

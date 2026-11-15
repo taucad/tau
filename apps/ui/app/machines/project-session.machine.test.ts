@@ -445,15 +445,21 @@ describe('projectSessionMachine', () => {
     actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
     actor.send({ type: 'close', reason: 'user' });
     expect(actor.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+    /* Entering `asking` hands any held replacement back; a change while it asks is handed on too. */
     actor.send({ type: 'replaceRuntime' });
-    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime']);
+    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime', 'project:replaceRuntime']);
 
     actor.send({ type: 'confirmClose' });
     await settle();
     expect(actor.getSnapshot().matches({ closing: 'flushingProducers' })).toBe(true);
     actor.send({ type: 'replaceRuntime' });
     /* The close holds any replacement already handed on, and hands on no other. */
-    expect(received).toEqual(['project:replaceRuntime', 'project:replaceRuntime', 'project:holdReplacement']);
+    expect(received).toEqual([
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:replaceRuntime',
+      'project:holdReplacement',
+    ]);
     releaseFlush();
     actor.stop();
   });

@@ -20,7 +20,7 @@
 import { createCallbackLogic } from 'xstate';
 import { Topic } from '@taucad/events';
 import type { ActorRefFrom, CallbackActorLogic } from 'xstate';
-import type { DockviewApi } from 'dockview-react';
+import type { DockviewApi, SerializedDockview } from 'dockview-react';
 import type { ViewerNode, WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { Evaluation } from '@taucad/runtime';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -80,8 +80,46 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
       projection.panels[prior.id] = { ...panel, title: prior.title, params: prior.params };
     }
   }
+  if (node.kind === 'group' && landInSeededGroup(api, projection)) {
+    return [];
+  }
   api.fromJSON(projection, { reuseExistingPanels: true });
   return existing.filter(({ id }) => !desired.has(id)).map(({ id }) => id);
+}
+
+/**
+ * Land a one-group projection in the empty group the dock's ready step seeded (`ensureViewerGroup`), instead of
+ * clearing the grid and building a group again: a rebuild builds the viewer's tab bar twice on every open (U16).
+ *
+ * @returns Whether the dock held only that empty group, so the projection landed in it.
+ */
+function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): boolean {
+  if (api.panels.length > 0) {
+    return false;
+  }
+  const [seed, ...others] = api.groups;
+  const [leaf, ...siblings] = Array.isArray(projection.grid.root.data) ? projection.grid.root.data : [];
+  if (seed === undefined || others.length > 0 || leaf?.type !== 'leaf' || siblings.length > 0) {
+    return false;
+  }
+  const { views, activeView } = leaf.data as { readonly views: readonly string[]; readonly activeView?: string };
+  for (const id of views) {
+    const panel = projection.panels[id];
+    if (panel === undefined) {
+      continue;
+    }
+    api.addPanel({
+      id,
+      component: panel.contentComponent ?? 'viewer',
+      ...(panel.tabComponent === undefined ? {} : { tabComponent: panel.tabComponent }),
+      title: panel.title,
+      params: panel.params,
+      position: { referenceGroup: seed, direction: 'within' },
+      inactive: true,
+    });
+  }
+  api.getPanel(activeView ?? views[0] ?? '')?.api.setActive();
+  return true;
 }
 
 /** A restored view whose record has not loaded yet keeps the entry its durable record names. */

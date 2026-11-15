@@ -553,4 +553,60 @@ describe('viewer adapter (A8d)', () => {
     expect(facts.get().viewCommands.remove).toHaveBeenCalledTimes(1);
     expect(facts.get().viewCommands.remove).toHaveBeenCalledWith('iso');
   });
+
+  // U16 (loading audit, class c): the dock's ready step seeds one empty group so the watermark has somewhere to show;
+  // the record's first apply then cleared and rebuilt it, so a warm open built the viewer's tab bar twice (18 of 20
+  // warm opens in the nightly report-only row). A one-group record lands in the seeded group instead.
+  it('should land a one-group record in the seeded group, building the tab bar once', async () => {
+    const harness = mountLayout('desktop');
+    const headers = new Set<Element>();
+    const observer = new MutationObserver(() => {
+      for (const header of document.querySelectorAll('.dv-tabs-and-actions-container')) {
+        headers.add(header);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    stops.push(() => {
+      observer.disconnect();
+    });
+    let seeded: DockviewApi | undefined;
+    const rendered = render(
+      <DockviewReact
+        watermarkComponent={() => <div data-testid='viewer-empty'>Empty</div>}
+        components={{ viewer: () => <div>Model</div> }}
+        onReady={(event) => {
+          seeded = event.api;
+          ensureViewerGroup(event.api);
+        }}
+      />,
+    );
+    stops.push(() => {
+      rendered.unmount();
+    });
+    const api = seeded!;
+    api.layout(900, 600);
+    const seededGroup = api.groups[0];
+    const personViewerChanged = vi.spyOn(harness.controller, 'personViewerChanged');
+    const project = mountProject();
+    const facts = createViewerAdapterFactsPort(baseFacts());
+    await act(async () => {
+      harness.layout.send({
+        type: 'dockReady',
+        adapter: 'viewer',
+        dockId: 'dock-1',
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: harness.controller, facts },
+      });
+      selectViewerDockAdapter(harness.layout, 'dock-1')?.send({ type: 'attach' });
+      harness.publish(group('front', 'iso'));
+    });
+    expect(viewIds(api)).toEqual(['front', 'iso']);
+    expect(api.activePanel?.id).toBe('iso');
+    expect(api.groups).toHaveLength(1);
+    expect(api.groups[0]).toBe(seededGroup);
+    expect(headers.size).toBe(1);
+    expect([...headers].every((header) => header.isConnected)).toBe(true);
+    // The landing is the record's apply, not the person's edit.
+    expect(personViewerChanged).not.toHaveBeenCalled();
+  });
 });

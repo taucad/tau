@@ -131,6 +131,7 @@
 \* keyed by the project the route shows in the editor. The gate's worker wait moves into the outlet. Focus,
 \* the route state and the mounted live set are unchanged, so no action or verdict changes. The route and
 \* live-session sources name the re-homing in their comments.
+\* Merged with A7c: the live sessions' focused block is gone, so its imports are too. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

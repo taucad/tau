@@ -64,9 +64,6 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
-          "env": "TAU_TELEMETRY_HOST"
-        },
-        {
           "env": "COMMIT_REF"
         },
         {
@@ -215,9 +212,6 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
-        },
-        {
-          "env": "TAU_TELEMETRY_HOST"
         },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"

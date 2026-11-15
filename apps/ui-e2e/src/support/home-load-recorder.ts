@@ -383,6 +383,12 @@ export type ProjectLoadRecord = {
   >;
   /** Every sampled frame's time, by frame index from 1 (`frameTimes[0]` is frame 1), when asked for (`frameTimes`). */
   readonly frameTimes: readonly number[];
+  /**
+   * Every sampled frame's own time, the timestamp `requestAnimationFrame` passes, by frame index from 1, when asked for
+   * (`frameTimes`). `frameTimes` is when the sample ran, which other frame callbacks can push later; this is the time
+   * the frame's animations were evaluated at (A15f2).
+   */
+  readonly frameStamps: readonly number[];
 };
 
 /** A node's rounded box. */
@@ -490,6 +496,7 @@ export const recordProjectLoad = (input: {
     regionRemovals: Object.create(null) as Record<string, ProjectLoadFrame[]>,
     boxSets: Object.create(null) as Record<string, Array<ProjectLoadFrame & { boxes: ProjectLoadBox[] }>>,
     frameTimes: [] as number[],
+    frameStamps: [] as number[],
     mark: (name: string): void => {
       record.marks.push({ frame: record.frames + 1, t: now(), name });
     },
@@ -776,7 +783,20 @@ export const recordProjectLoad = (input: {
       }
     }
   };
-  const sample = (): void => {
+  const trackComposer = (frame: ProjectLoadFrame): void => {
+    const composer = document.querySelector(probe.composer);
+    if (!composer) {
+      return;
+    }
+    const rect = composer.getBoundingClientRect();
+    const face = { y: Math.round(rect.y), height: Math.round(rect.height) };
+    const key = JSON.stringify(face);
+    if (key !== lastComposer) {
+      lastComposer = key;
+      keep(record.composer, { ...frame, ...face });
+    }
+  };
+  const sample = (stamp: number): void => {
     record.frames += 1;
     const frame: ProjectLoadFrame = { frame: record.frames, t: now() };
     track();
@@ -795,16 +815,7 @@ export const recordProjectLoad = (input: {
         keep(record.placeholderWorkbenchLane, { ...frame, width: Math.round(width) });
       }
     }
-    const composer = document.querySelector(probe.composer);
-    if (composer) {
-      const rect = composer.getBoundingClientRect();
-      const face = { y: Math.round(rect.y), height: Math.round(rect.height) };
-      const key = JSON.stringify(face);
-      if (key !== lastComposer) {
-        lastComposer = key;
-        keep(record.composer, { ...frame, ...face });
-      }
-    }
+    trackComposer(frame);
     scanProjectRows(frame);
     if (input.laneBorders) {
       scanLaneBorders(frame);
@@ -831,6 +842,7 @@ export const recordProjectLoad = (input: {
     }
     if (input.frameTimes === true) {
       keep(record.frameTimes, frame.t);
+      keep(record.frameStamps, stamp);
     }
     requestAnimationFrame(sample);
   };
@@ -907,6 +919,135 @@ export const markProjectLoad = async (name: string): Promise<void> =>
     (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__.mark(label);
   }, name);
 
+/**
+ * Mark the record when the page itself dispatches the next click, so a row times from the click the app handled, not
+ * from before the driver sent it (A15f2, F12).
+ *
+ * @param name - The mark's name.
+ */
+export const markProjectLoadOnClick = async (name: string): Promise<void> =>
+  target.evaluate((label) => {
+    document.addEventListener(
+      'click',
+      () => {
+        (globalThis as ProjectLoadGlobal).__TAU_PROJECT_LOAD__.mark(label);
+      },
+      { capture: true, once: true },
+    );
+  }, name);
+
+/**
+ * A15f2: fail a row whose record stopped keeping frame times past its frame limit: a span or a frame count read from
+ * them would then be empty or NaN, and pass.
+ *
+ * @param label - The row, for the failure message.
+ * @param record - The row's record, kept with `frameTimes`.
+ */
+export const requireFrameTimes = (label: string, record: ProjectLoadRecord): void => {
+  precondition(
+    record.dropped['frameTimes'] === undefined && record.dropped['frameStamps'] === undefined,
+    `${label}: the record dropped frame times past its frame limit`,
+  );
+};
+
+/** A span a region was on screen, in frame-stamp time (`shownOnFrames`). Milliseconds. */
+export type ShownSpan = { readonly from: number; readonly to: number };
+
+/**
+ * A15f2: the spans that break a wait indicator's minimum: shorter than 500 ms on screen (UI Policy § 5), or drawn in
+ * a frame more than 1,000 ms after the later of the minimum's end and the answer, so a hold never outlives the wait it
+ * served; any span still open when the record ended; and any span with no frame stamp, which no check could read.
+ * Lingering is read from frames, as the span is: a long task after the hold ended delays the first frame without the
+ * words, but draws no frame with them.
+ *
+ * @param shown - The indicator's spans (`shownOnFrames`).
+ * @param answeredAt - When the wait's answer reached the page. Milliseconds.
+ * @param frameStamps - The record's frame stamps.
+ * @returns Each breaking span as `from-to`, by kind.
+ */
+export const minimumBreaches = (
+  shown: readonly ShownSpan[],
+  answeredAt: number,
+  frameStamps: readonly number[],
+): {
+  readonly short: string[];
+  readonly lingering: string[];
+  readonly unended: string[];
+  readonly unstamped: string[];
+} => {
+  const describe = (span: ShownSpan): string => `${Math.round(span.from)}-${Math.round(span.to)}`;
+  return {
+    /* A span on a frame with no stamp (frame times off, or past the record's frame limit) reads NaN and would pass. */
+    unstamped: shown.filter((span) => Number.isNaN(span.from) || Number.isNaN(span.to)).map((span) => describe(span)),
+    short: shown.filter((span) => span.to - span.from < 500).map((span) => describe(span)),
+    /* Still shown when the record ended: never hidden, whatever frames the record caught after it was due to go. */
+    unended: shown.filter((span) => span.to === Infinity).map((span) => describe(span)),
+    lingering: shown
+      .filter((span) => {
+        const overdue = Math.max(span.from + 500, answeredAt) + 1000;
+        return frameStamps.some((stamp) => stamp > overdue && stamp < span.to);
+      })
+      .map((span) => describe(span)),
+  };
+};
+
+/**
+ * A15f2: each span a region was shown in, on the frames' own times (`frameStamps`): from the first frame that drew it
+ * to the first that did not, or to the region's node leaving the document if that came first. A node removed in a
+ * task is gone from the next frame however late a busy page paints it, so a removal ends the span when it happens.
+ *
+ * @param entries - The region's entries.
+ * @param frameStamps - The record's frame stamps.
+ * @param removals - The region's node removals (`regionRemovals`), each timed when it happened.
+ * @returns The spans, in frame-stamp time.
+ */
+export const shownOnFrames = (
+  entries: readonly ProjectLoadRegionEntry[],
+  frameStamps: readonly number[],
+  removals: readonly ProjectLoadFrame[] = [],
+): ShownSpan[] => {
+  const stampOf = (frame: number): number => frameStamps[frame - 1] ?? Number.NaN;
+  /* A removal ends a span only after the span's last frame with the words: a node a new wait took over is removed in
+     the frame its successor shows the words in, and the span goes on. */
+  const removedAfter = (time: number, lastShown: number): number =>
+    Math.min(
+      ...removals.filter((removal) => removal.t > time && removal.frame > lastShown).map((removal) => removal.t),
+    );
+  const spans: Array<{ from: number; to: number }> = [];
+  let open: ProjectLoadRegionEntry | undefined;
+  let lastShown = 0;
+  for (const entry of entries) {
+    const shown = entry.present && entry.visible && entry.text !== '';
+    if (shown) {
+      open ??= entry;
+      lastShown = entry.frame;
+    } else if (open !== undefined) {
+      const from = stampOf(open.frame);
+      spans.push({ from, to: Math.min(stampOf(entry.frame), removedAfter(from, lastShown)) });
+      open = undefined;
+    }
+  }
+  if (open !== undefined) {
+    const from = stampOf(open.frame);
+    spans.push({ from, to: removedAfter(from, lastShown) });
+  }
+  return spans;
+};
+
+/**
+ * A15f2: {@link shownOnFrames} for one of a record's regions, from `since` on.
+ *
+ * @param record - The row's record, kept with `frameTimes`.
+ * @param region - The region's name.
+ * @param since - Keep only spans from this frame stamp on. Milliseconds.
+ * @returns The region's spans, in frame-stamp time.
+ */
+export const regionShownOnFrames = (record: ProjectLoadRecord, region: string, since = -Infinity): ShownSpan[] =>
+  shownOnFrames(record.regions[region] ?? [], record.frameStamps, record.regionRemovals[region]).filter(
+    /* An unstamped span is kept, so `minimumBreaches` reports it rather than the filter dropping it. */
+    (span) => Number.isNaN(span.from) || span.from >= since,
+  );
+
 /** What the server's HTML for a document holds, before any script runs. */
 export type ServerShellInspection = {
   readonly wrapper: boolean;
@@ -947,6 +1088,30 @@ export type WorkerReadDelay = {
   /** A regular expression source, matched against the call's first argument: a path, or its JSON when not a string. */
   readonly path: string;
   readonly milliseconds: number;
+  /**
+   * A15f2: hand the reply over in the frame after the first one this selector's node is visible in (in that frame's
+   * callbacks, before it paints), not `milliseconds` after the send, so it lands at the start of a wait indicator's
+   * minimum whatever the load did to the reveal.
+   */
+  readonly afterShown?: string;
+  /**
+   * A15f2: hold the main thread this long right before the reply is handed over, in the same task, as a long task on
+   * a loading page does: no frame runs between them, so the reply's render reads the animation timeline as it stood
+   * before the task.
+   */
+  readonly busyMilliseconds?: number;
+  /**
+   * A15f2: also hold the main thread `milliseconds` from the first frame this selector matches a node in, whatever the
+   * reply does. With `acrossReveal`, the selector is a wait indicator's body and the task runs from the first frame
+   * its `wait-reveal` has a start time in until `milliseconds` past the reveal's due time: the frame that draws the
+   * reveal then runs that late, on the timeline as well as on screen.
+   */
+  readonly longTask?: { readonly selector: string; readonly milliseconds: number; readonly acrossReveal?: boolean };
+  /**
+   * A15f2: count `milliseconds` from the page's last click, not from the send, so a wait a click starts is answered at
+   * a set time into it whatever the app took to send the read. A reply already past it goes on at once.
+   */
+  readonly fromClick?: boolean;
 };
 
 /** The `sessionStorage` key the rules are read from when each document starts. */
@@ -968,7 +1133,7 @@ export type WorkerReadDeliveries = ReadonlyArray<{
 }>;
 
 type WorkerReadGlobal = typeof globalThis & {
-  __TAU_WORKER_READS__: { log: WorkerReadLog; delivered: WorkerReadDeliveries };
+  __TAU_WORKER_READS__: { log: WorkerReadLog; delivered: WorkerReadDeliveries; longTasks: readonly number[] };
 };
 
 /**
@@ -978,7 +1143,15 @@ type WorkerReadGlobal = typeof globalThis & {
  * @param key - The `sessionStorage` key holding the rules as JSON.
  */
 export const delayWorkerReads = (key: string): void => {
-  let rules: Array<{ method: string; path: RegExp; milliseconds: number }> = [];
+  let rules: Array<{
+    method: string;
+    path: RegExp;
+    milliseconds: number;
+    afterShown?: string;
+    busyMilliseconds?: number;
+    longTask?: { selector: string; milliseconds: number; acrossReveal?: boolean };
+    fromClick?: boolean;
+  }> = [];
   try {
     const raw = sessionStorage.getItem(key);
     rules = (raw ? (JSON.parse(raw) as WorkerReadDelay[]) : []).map((rule) => ({
@@ -988,11 +1161,70 @@ export const delayWorkerReads = (key: string): void => {
   } catch {
     rules = [];
   }
+  const holdMainThread = (milliseconds: number): void => {
+    const until = performance.now() + milliseconds;
+    while (performance.now() < until) {
+      /* A long task: no frame runs until it ends. */
+    }
+  };
+  /* When each long task started, so a row can show its forcing ran. */
+  const longTasks: number[] = [];
+  for (const { longTask } of rules) {
+    if (longTask === undefined) {
+      continue;
+    }
+    const untilPresent = (): void => {
+      const node = document.querySelector(longTask.selector);
+      if (node === null) {
+        requestAnimationFrame(untilPresent);
+        return;
+      }
+      if (longTask.acrossReveal !== true) {
+        longTasks.push(Math.round(performance.now()));
+        holdMainThread(longTask.milliseconds);
+        return;
+      }
+      const reveal = node
+        .getAnimations({ subtree: true })
+        .find((animation) => animation instanceof CSSAnimation && animation.animationName === 'wait-reveal');
+      if (reveal?.startTime === null || reveal === undefined) {
+        requestAnimationFrame(untilPresent);
+        return;
+      }
+      const due = Number(reveal.startTime) + Number(reveal.effect?.getTiming().delay ?? 0);
+      /* From the first frame the reveal has a start time in, always before it is due (its delay is 1,000 ms), until
+         `milliseconds` past the due time: the next frame, the first that can draw it, runs that late on the timeline
+         as well as on screen. */
+      if (Number(document.timeline.currentTime) < due) {
+        longTasks.push(Math.round(performance.now()));
+        holdMainThread(due - Number(document.timeline.currentTime) + longTask.milliseconds);
+      }
+    };
+    requestAnimationFrame(untilPresent);
+  }
+  /* The page's last click, for replies timed from it (`fromClick`). */
+  let clickedAt: number | undefined;
+  document.addEventListener(
+    'click',
+    () => {
+      clickedAt = performance.now();
+    },
+    { capture: true },
+  );
   const log: Array<{ t: number; method: string; path: string | undefined; delayed: boolean }> = [];
   /* Each held reply as it reached the page's listener: proof the late answer was late, not only that it was held. */
   const delivered: Array<{ t: number; sentAt: number; method: string; path: string | undefined }> = [];
-  Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log, delivered } });
-  const held = new Map<string, { milliseconds: number; sentAt: number; method: string; path: string | undefined }>();
+  Object.defineProperty(globalThis, '__TAU_WORKER_READS__', { value: { log, delivered, longTasks } });
+  type Held = {
+    milliseconds: number;
+    sentAt: number;
+    method: string;
+    path: string | undefined;
+    afterShown?: string;
+    busyMilliseconds?: number;
+    fromClick?: boolean;
+  };
+  const held = new Map<string, Held>();
 
   const { postMessage } = MessagePort.prototype;
   MessagePort.prototype.postMessage = function (this: MessagePort, message: unknown, ...rest: unknown[]): void {
@@ -1013,7 +1245,15 @@ export const delayWorkerReads = (key: string): void => {
       const method = String(frame.n);
       const rule = rules.find((candidate) => candidate.method === method && candidate.path.test(path ?? ''));
       if (rule) {
-        held.set(frame.i, { milliseconds: rule.milliseconds, sentAt: Math.round(performance.now()), method, path });
+        held.set(frame.i, {
+          milliseconds: rule.milliseconds,
+          sentAt: Math.round(performance.now()),
+          method,
+          path,
+          afterShown: rule.afterShown,
+          busyMilliseconds: rule.busyMilliseconds,
+          fromClick: rule.fromClick,
+        });
       }
       if (log.length < 2000) {
         log.push({ t: Math.round(performance.now()), method, path, delayed: rule !== undefined });
@@ -1030,6 +1270,9 @@ export const delayWorkerReads = (key: string): void => {
           sentAt: Math.round(performance.now()),
           method,
           path: undefined,
+          afterShown: rule.afterShown,
+          busyMilliseconds: rule.busyMilliseconds,
+          fromClick: rule.fromClick,
         });
       }
       if (log.length < 2000) {
@@ -1085,17 +1328,33 @@ export const delayWorkerReads = (key: string): void => {
         deliver(this, event);
         return;
       }
-      setTimeout(() => {
+      const reply: Held = late;
+      const release = (): void => {
+        holdMainThread(reply.busyMilliseconds ?? 0);
         if (delivered.length < 2000) {
           delivered.push({
             t: Math.round(performance.now()),
-            sentAt: late.sentAt,
-            method: late.method,
-            path: late.path,
+            sentAt: reply.sentAt,
+            method: reply.method,
+            path: reply.path,
           });
         }
         deliver(this, event);
-      }, late.milliseconds);
+      };
+      const { afterShown } = reply;
+      if (afterShown === undefined) {
+        const from = reply.fromClick === true && clickedAt !== undefined ? clickedAt : performance.now();
+        setTimeout(release, Math.max(0, from + reply.milliseconds - performance.now()));
+        return;
+      }
+      const untilShown = (): void => {
+        const node = document.querySelector(afterShown);
+        /* Visible here means painted in this frame: the reply goes in the next one, after one frame on screen. */
+        requestAnimationFrame(
+          node?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) ? release : untilShown,
+        );
+      };
+      requestAnimationFrame(untilShown);
     };
     wrappers.set(listener, wrapper);
     return wrapper;
@@ -1141,6 +1400,29 @@ export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
 
 /**
+ * A15f2: wait until `selector`'s node is gone or not visible, up to 5 s, so a record kept next takes in the frame its
+ * indicator went in. One that never goes is left to the row: its span reads as unended.
+ *
+ * @param selector - The indicator's selector.
+ */
+export const untilHidden = async (selector: string): Promise<void> => {
+  try {
+    await target.waitFor(
+      (query) =>
+        document.querySelector(query)?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) !== true,
+      selector,
+      { timeout: 5000 },
+    );
+  } catch {
+    /* Never hidden: the span stays open and the row reports it. */
+  }
+};
+
+/** When each `longTask` started on the page (`WorkerReadDelay.longTask`), in milliseconds from navigation start. */
+export const readLongTasks = async (): Promise<readonly number[]> =>
+  target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.longTasks);
+
+/**
  * The held replies the page has received so far.
  *
  * @returns Each delivery, with its request's send time.
@@ -1170,7 +1452,8 @@ export const firstDelayedRead = (deliveries: WorkerReadDeliveries, rule: WorkerR
  * `external-target.ts`. */
 declare module 'vitest/browser' {
   interface BrowserCommands {
-    uiDelayTargetRequests: (pattern: string, milliseconds: number) => Promise<void>;
+    uiDelayTargetRequests: (pattern: string, milliseconds: number | 'until-released') => Promise<void>;
+    uiReleaseTargetRequests: () => Promise<void>;
     uiReadDelayedTargetRequests: () => Promise<readonly string[]>;
     uiOpenBeforeHydration: (request: EarlyInputRequest) => Promise<EarlyInput>;
   }
@@ -1224,6 +1507,18 @@ export const openBeforeHydration = async (request: EarlyInputRequest): Promise<E
  */
 export const delayRequests = async (pattern: string, milliseconds: number): Promise<void> =>
   commands.uiDelayTargetRequests(pattern, milliseconds);
+
+/**
+ * Hold every request whose URL matches `pattern` until {@link releaseHeldRequests} (at most 30 s), so the acts a row
+ * makes before what the request starts (typing before hydration) come first however slow the runner is.
+ *
+ * @param pattern - A regular expression source matched against the request URL.
+ */
+export const holdRequestsUntilReleased = async (pattern: string): Promise<void> =>
+  commands.uiDelayTargetRequests(pattern, 'until-released');
+
+/** Let the requests {@link holdRequestsUntilReleased} holds go on. */
+export const releaseHeldRequests = async (): Promise<void> => commands.uiReleaseTargetRequests();
 
 /** The URLs {@link delayRequests} held in this target context so far. */
 export const readDelayedRequests = async (): Promise<readonly string[]> => commands.uiReadDelayedTargetRequests();

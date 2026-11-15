@@ -11,7 +11,7 @@ import { cn } from '@taucad/ui/utils/cn';
  *
  * The metrics follow `code-editor-view.client.tsx`: 14 px (16 px on a phone) at line height 1.5, a line-number gutter
  * at least 4ch wide with `var(--spacing)` either side, the fold gutter as wide as its closed marker plus 2 px, a
- * lint gutter of zero width, and CodeMirror's own 6 px and 2 px line padding.
+ * lint gutter 1em wide, and CodeMirror's own 6 px and 2 px line padding.
  *
  * The busy state is on the pane for the whole wait. The wait's words ("Opening file") belong to the pane that hosts
  * this placeholder, which outlives it (the workbench's `FileEditor`): this node is replaced when the editor mounts, so
@@ -74,6 +74,8 @@ export function EditorPanePlaceholder({
             ) : null}
             {/* The fold gutter is as wide as its closed marker, which CodeMirror pads by 1 px each side. */}
             <span className='invisible px-px'>›</span>
+            {/* The lint gutter, 1em wide whether or not it holds a marker. */}
+            <span className='w-[1em] shrink-0' />
           </div>
           <div
             data-slot='editor-pane-text'

@@ -236,6 +236,7 @@ import {
   compareRecordMaximumFiles,
   compareRecordOf,
   compareRecordPath,
+  compareRulesText,
   parseCompareRecord,
   recordAnswers,
   serializeCompareRecord,
@@ -1266,7 +1267,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /*
    * What turns a checkout's files into a tree id beyond the files themselves:
    * the registry that versions paths, the threshold that makes a file a large
-   * object, and the store's engine, format and attributes matching. A record
+   * object, and the store's engine, format and attributes matching, beside
+   * Tau's own rules revision (`compareRulesRevision`). A record
    * kept under other rules answers nothing. A host's own policy is opaque, so
    * it keeps no record.
    */
@@ -1277,7 +1279,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const { engine, version, objectFormat, largeObjects, ignoreCase, keepsLargeObjectFiles } = await describePort();
     registryRules ??= JSON.stringify([largeObjectThresholdBytes, tauRevisionPolicy.rows]);
-    const rules = JSON.stringify([
+    const rules = compareRulesText([
       registryRules,
       engine,
       version,
@@ -1683,6 +1685,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * The writer keeps the representation of every entry unchanged from the
    * cut's first parent (rule 13), so the prediction reads the same parent's
    * listing — blob ids only — and folds case exactly where the writer does.
+   * A change here that can move a tree id bumps `compareRulesRevision`.
    *
    * @param tree - The captured tree.
    * @param parent - The revision the cut would follow: the checkout's head.

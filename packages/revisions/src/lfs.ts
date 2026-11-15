@@ -220,7 +220,8 @@ export type CleanLargeObjectsOptions = Readonly<{
  *
  * Pure: the objects come back for the caller's own store to write. They are
  * the tree's own bytes, shared rather than copied — a store writes them out
- * and must never write *into* them.
+ * and must never write *into* them. A change that can move what it records
+ * bumps `compareRulesRevision` (`compare-record.ts`).
  *
  * @param tree - The captured tree, with every file's real bytes.
  * @param options - The parent's basis, and case folding.

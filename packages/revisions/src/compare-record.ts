@@ -63,6 +63,28 @@ export type CompareObservation = Readonly<{
   stats: readonly FileStatEntry[];
 }>;
 
+/**
+ * The revision of Tau's own rules that turn files into a tree id: the clean
+ * step (`lfs.ts`), tree recording and the tree-id memo. Bump it with any change
+ * to them that can move a tree id, so a record an earlier release kept answers
+ * nothing; the host's rules (registry, threshold, engine) are fingerprinted
+ * beside it.
+ *
+ * @internal
+ */
+export const compareRulesRevision = 1;
+
+/**
+ * The text a record's rules fingerprint digests: Tau's rules revision, then
+ * the host's parts.
+ *
+ * @internal
+ * @param parts - The registry, threshold and engine facts, JSON-serializable.
+ * @returns The JSON text.
+ */
+export const compareRulesText = (parts: readonly unknown[]): string =>
+  JSON.stringify([`tau-rules-${String(compareRulesRevision)}`, ...parts]);
+
 const recordFormat = 'tau-checkout-compare';
 const recordVersion = 2;
 

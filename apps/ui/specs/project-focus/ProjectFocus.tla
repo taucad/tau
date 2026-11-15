@@ -132,6 +132,9 @@
 \* the route state and the mounted live set are unchanged, so no action or verdict changes. The route and
 \* live-session sources name the re-homing in their comments.
 \* Merged with A7c: the live sessions' focused block is gone, so its imports are too. No action or verdict changes.
+\* A15b: the route content renders inside the persistent workspace frame (`workspace-frame.tsx`), and the gate's
+\* worker wait draws only a busy marker over it. Focus, the route state and the mounted live set are unchanged, so
+\* no action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

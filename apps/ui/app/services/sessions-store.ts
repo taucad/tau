@@ -124,6 +124,11 @@ export type SessionRuntime = Readonly<{
   requestChat: (chat: SessionRuntimeChat) => void;
   /** Whether the device's choices still select the kernel this runtime was built with. */
   kernelIsCurrent: () => boolean;
+  /**
+   * Write what the runtime owes before a replacement stops it (A6e, B4): its producers and its project and editor
+   * stores. It closes nothing and asks nothing. Rejects with every write it could not confirm.
+   */
+  flush: () => Promise<void>;
   /** Stop the runtime and release what it holds. Calling it twice closes once. */
   close: () => void;
 }>;
@@ -163,12 +168,12 @@ type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefine
  * (a rebuilt shared worker) builds a new runtime; none closes the runtime, which reads the closed one.
  *
  * A change of the device's choices that selects another kernel is the session event `replaceRuntime` (A6e; D8, B4): the
- * child reports it, and when the session hands it back the child flushes the project's producers, the same flush the
- * close runs, then builds the next runtime and stops this one. Building the next first lets the entries record session
+ * child reports it, and when the session hands it back the child flushes what this runtime owes (its producers and its
+ * project and editor stores, never the close's refusals), then builds the next runtime and stops this one. Building the next first lets the entries record session
  * yield (I13), and keeps the session's readers on a runtime throughout. A build that finds the choices moved on while it
  * ran builds again at once: nothing has written through a runtime that has just been built.
  */
-const runtimeRegionOn = (opener: SessionRuntimeOpener, flushProducers: (projectId: string) => Promise<void>) =>
+const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
   createCallbackLogic<EventObject, { projectId: string; request?: ProjectSessionOpenRequest }>(
     ({ input, sendBack, receive }) => {
       const { projectId } = input;
@@ -294,7 +299,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener, flushProducers: (projectI
 
       /* Flush what the superseded runtime owes, then build the next and stop it (B4). A refusal is reported and the
        * replacement goes on: the kernel the runtime was built with is no longer selected, and before A6e nothing was
-       * flushed at all. */
+       * flushed at all. The flush closes nothing, so a runtime the choices came back to stays usable. */
       const replace = (): void => {
         const superseded = current;
         if (superseded === undefined || replacing || superseded.runtime.kernelIsCurrent()) {
@@ -303,7 +308,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener, flushProducers: (projectI
         replacing = true;
         const settle = async (): Promise<void> => {
           try {
-            await flushProducers(projectId);
+            await superseded.runtime.flush();
           } catch (error) {
             reportAppRuntimeFault(error);
           } finally {
@@ -613,10 +618,7 @@ const projectSessionOn = ({ sharedWorker, openFileManager, fileManagerWorker, op
       }),
       fileManager:
         openFileManager === undefined ? withoutFileManager : fileManagerRegionOn(openFileManager, fileManagerWorker),
-      project:
-        openRuntime === undefined
-          ? withoutRuntime
-          : runtimeRegionOn(openRuntime, async (projectId) => servicesFor(projectId).flushProducers()),
+      project: openRuntime === undefined ? withoutRuntime : runtimeRegionOn(openRuntime),
       agentHost: agentHostRegion,
       compute: computeRegionOn(sharedWorker),
     },

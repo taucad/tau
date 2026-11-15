@@ -490,8 +490,9 @@ const closingSteps = [
  * - `confirmClose` and `cancelClose` outside `closing.asking`: the dialog answered a question no longer asked.
  * - `activity` outside `live.idle`: it only re-arms the idle window, which runs there alone (and has no production
  *   sender, V1-6).
- * - `replaceRuntime` once the close has started cancelling runs, and when closed or failed: the close flushes and stops
- *   the `project` child itself, and a closed or failed session has no runtime to replace (A6e).
+ * - `replaceRuntime` once the close has started cancelling runs, and when closed or failed: a close that goes on stops
+ *   the `project` child, a refused producer flush hands the replacement back as the session goes live again, and a
+ *   closed or failed session has no runtime to replace (A6e).
  *
  * @public
  */
@@ -822,12 +823,14 @@ export const projectSessionMachine = setup({
             src: 'flushProducers',
             input: ({ context }) => ({ projectId: context.projectId }),
             onDone: { target: 'flushing' },
-            onError: {
-              target: '#project-session.live',
-              context: ({ context, event }) => ({
-                ...recordCloseFailure(context, event.error),
-                closeReason: undefined,
-              }),
+            /* A6e: a kernel change the close ignored while it ran is handed back with the session, which is live again;
+             * the child replaces only a runtime whose kernel is no longer selected. */
+            onError: ({ context, event }, enq) => {
+              handRuntimeReplacement({ context }, enq);
+              return {
+                target: '#project-session.live',
+                context: { ...recordCloseFailure(context, event.error), closeReason: undefined },
+              };
             },
           },
         },

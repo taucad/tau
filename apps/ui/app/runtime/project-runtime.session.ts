@@ -16,6 +16,7 @@
  *
  * @module
  */
+import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic, AnyActorRef } from 'xstate';
 import type { QueryClient } from '@tanstack/react-query';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
@@ -38,6 +39,9 @@ import type { ProjectViewRecords } from '#runtime/project-runtime.view-records.j
 import { createEntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { EntriesRecordSession } from '#workbench-records/entries-record-session.js';
 import type { ViewRecordHost } from '#workbench-records/view-record-session.js';
+
+/** The bound on a replacement's wait for the project and editor writes, the close flush's own bound. */
+const replacementFlushMilliseconds = 10_000;
 
 /** What a provider is a view of: the runtime, its view records and its entries record session. @public */
 export type ProjectRuntimeViewSource = Readonly<{
@@ -232,6 +236,36 @@ export function openSessionProjectRuntime(
       );
     },
     kernelIsCurrent: () => selectionFor().key === selection.key,
+    /* A6e (B4): what a replacement flushes. The producer set (the layout, the entries and view records) and the project
+     * and editor stores write what they owe. Unlike the close flush it neither closes the parameter service nor refuses
+     * on held drafts or a conflict being recorded: the runtime may stay current, and nothing here asks the person. */
+    flush: async () => {
+      const owed = [runtime.producers.flushAll()];
+      for (const ref of [projectRef, editorRef] as const) {
+        /* A store that has not loaded owes nothing; one that has writes now and settles in `storing.idle`. */
+        if (ref.getSnapshot().matches('ready')) {
+          ref.send({ type: 'flushNow' });
+          owed.push(
+            (async () => {
+              const settled = await waitFor(ref, (state) => state.matches({ ready: { storing: 'idle' } }), {
+                timeout: replacementFlushMilliseconds,
+              });
+              if (settled.context.error !== undefined) {
+                throw settled.context.error;
+              }
+            })(),
+          );
+        }
+      }
+      const outcomes = await Promise.allSettled(owed);
+      const refusals = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+      if (refusals.length > 0) {
+        throw new AggregateError(
+          refusals.map((refusal) => refusal.reason as unknown),
+          'The superseded runtime did not confirm every write.',
+        );
+      }
+    },
     close: () => {
       if (closed) {
         return;

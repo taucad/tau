@@ -328,7 +328,6 @@ vi.mock('#hooks/use-revision-status.js', () => {
   };
   return {
     useRevisionClient: () => undefined,
-    useRevisionClientLifecycle: () => revisionClient,
     useRevisionClientStatus: useStatus,
     useRevisionStatus: useStatus,
     useProjectRole: () => 'owner',

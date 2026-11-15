@@ -501,65 +501,21 @@ export const sessionRevisionsCallback =
       current.send({ command: 'flushKeepalive' });
     };
 
-    followWorker();
-    const unregisterCut = ports.closeCut.register(closeCut);
-    requestSalt();
-
-    const fileManagerSubscription = fileManagerRef.subscribe({
-      next: followWorker,
-      error: () => undefined,
-    });
-    /*
-     * One user subscription, so the relay to the open client always runs before the actor is sent again, as the
-     * store's listener runs before the re-render does today. A refetch or a new display name is relayed too: `setUser`
-     * leaves D2's one-retry latch as it was.
-     */
-    const unsubscribeUserFacts = ports.sessionUser.subscribe(() => {
-      if (connected !== undefined) {
-        // async-iife: bootstrap -- the credential reports through the frame it sends.
-        void connected.setUser(ports.sessionUser.get());
-      }
-      user = ports.sessionUser.get();
-      salt = saltOf();
-      requestSalt();
-      sendActorIfChanged();
-    });
-    const unsubscribeAnonymity = ports.anonymity.subscribe(() => {
-      anonymous = ports.anonymity.get(workspace);
-      sendActorIfChanged();
-    });
-    const unsubscribeSalt = ports.salt.subscribe(() => {
-      salt = saltOf();
-      requestSalt();
-      sendActorIfChanged();
-    });
-    const unsubscribeFocus = ports.focusedProject.subscribe(() => {
-      const next = ports.focusedProject.get() === projectId;
-      if (next === focused) {
-        return;
-      }
-      focused = next;
-      client?.focus?.(focused);
-      followCheckout();
-    });
-    const unsubscribeRecording = ports.recording.subscribe(() => {
-      const next = ports.recording.get(projectId);
-      if (next === recording) {
-        return;
-      }
-      recording = next;
-      relayFacts();
-    });
-
-    return () => {
+    /* Each step's release, as it is taken: a start that throws partway releases what it took, then rethrows (D23). */
+    let unregisterCut: (() => void) | undefined;
+    let unsubscribeFileManager: (() => void) | undefined;
+    let unsubscribeUserFacts: (() => void) | undefined;
+    let unsubscribeAnonymity: (() => void) | undefined;
+    let unsubscribeSalt: (() => void) | undefined;
+    let unsubscribeFocus: (() => void) | undefined;
+    let unsubscribeRecording: (() => void) | undefined;
+    const stop = (): void => {
       if (checkoutLive !== undefined) {
         checkoutLive.current = false;
       }
       runIsolated(
         [
-          () => {
-            fileManagerSubscription.unsubscribe();
-          },
+          unsubscribeFileManager,
           unsubscribeUserFacts,
           unsubscribeAnonymity,
           unsubscribeSalt,
@@ -571,6 +527,66 @@ export const sessionRevisionsCallback =
         ports.reportFault,
       );
     };
+
+    try {
+      followWorker();
+      unregisterCut = ports.closeCut.register(closeCut);
+      requestSalt();
+
+      const fileManagerSubscription = fileManagerRef.subscribe({
+        next: followWorker,
+        error: () => undefined,
+      });
+      unsubscribeFileManager = () => {
+        fileManagerSubscription.unsubscribe();
+      };
+      /*
+       * One user subscription, so the relay to the open client always runs before the actor is sent again, as the
+       * store's listener runs before the re-render does today. A refetch or a new display name is relayed too:
+       * `setUser` leaves D2's one-retry latch as it was.
+       */
+      unsubscribeUserFacts = ports.sessionUser.subscribe(() => {
+        if (connected !== undefined) {
+          // async-iife: bootstrap -- the credential reports through the frame it sends.
+          void connected.setUser(ports.sessionUser.get());
+        }
+        user = ports.sessionUser.get();
+        salt = saltOf();
+        requestSalt();
+        sendActorIfChanged();
+      });
+      unsubscribeAnonymity = ports.anonymity.subscribe(() => {
+        anonymous = ports.anonymity.get(workspace);
+        sendActorIfChanged();
+      });
+      unsubscribeSalt = ports.salt.subscribe(() => {
+        salt = saltOf();
+        requestSalt();
+        sendActorIfChanged();
+      });
+      unsubscribeFocus = ports.focusedProject.subscribe(() => {
+        const next = ports.focusedProject.get() === projectId;
+        if (next === focused) {
+          return;
+        }
+        focused = next;
+        client?.focus?.(focused);
+        followCheckout();
+      });
+      unsubscribeRecording = ports.recording.subscribe(() => {
+        const next = ports.recording.get(projectId);
+        if (next === recording) {
+          return;
+        }
+        recording = next;
+        relayFacts();
+      });
+    } catch (error) {
+      stop();
+      throw error;
+    }
+
+    return stop;
   };
 
 /**

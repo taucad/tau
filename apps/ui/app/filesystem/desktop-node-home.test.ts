@@ -69,11 +69,11 @@ describe('desktop node Home', () => {
     vi.resetModules();
     // The OPFS probe needs a Storage Manager jsdom does not have; the branch
     // under test is the one before it.
-    vi.doMock('#filesystem/home-opfs-probe.js', () => ({ probeHomeOpfs: async () => false }));
+    vi.doMock('@taucad/files-ui/filesystem/home-opfs-probe', () => ({ probeHomeOpfs: async () => false }));
     const { handleStore } = await loadModules();
 
     await expect(handleStore.getHomeStorageBackend()).resolves.toBe('indexeddb');
-    vi.doUnmock('#filesystem/home-opfs-probe.js');
+    vi.doUnmock('@taucad/files-ui/filesystem/home-opfs-probe');
   });
 
   it('publishes the node Home root with its absolute host path', async () => {

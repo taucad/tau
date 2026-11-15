@@ -1,7 +1,6 @@
-import type { ExportResult, ExportRoute, RuntimeContentInput, RuntimeDocument } from '@taucad/runtime';
+import type { ExportResult, ExportRoute, RuntimeClient, RuntimeContentInput, RuntimeDocument } from '@taucad/runtime';
 import type { FileExtension } from '@taucad/types';
 import { fileExtensions, formatConfigurations } from '@taucad/types/constants';
-import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 
 export type FormatEntry = {
   format: FileExtension;
@@ -9,14 +8,14 @@ export type FormatEntry = {
   direct: boolean;
 };
 
-export type AppRuntimeExportRoute = NonNullable<ReturnType<AppRuntimeClient['bestRouteFor']>>;
+export type AppRuntimeExportRoute = NonNullable<ReturnType<RuntimeClient['bestRouteFor']>>;
 
 /**
  * Narrow a dynamic file extension and runtime-reported kernel id through the
  * capabilities manifest before exporting from its committed document.
  */
 export function bestRouteForActiveKernel(
-  client: AppRuntimeClient,
+  client: RuntimeClient,
   format: FileExtension,
   activeKernelId?: string,
 ): AppRuntimeExportRoute | undefined {
@@ -56,7 +55,7 @@ const isCatalogFormat = (value: string): value is FileExtension => fileExtension
  * excluded so the list reflects only routes the active kernel can serve.
  */
 export function deriveAvailableFormats(
-  client: AppRuntimeClient | undefined,
+  client: RuntimeClient | undefined,
   activeKernelId: string | undefined,
 ): FormatEntry[] {
   const manifest = client?.capabilities;

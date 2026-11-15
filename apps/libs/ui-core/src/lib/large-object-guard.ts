@@ -15,7 +15,8 @@ import type {
 import { rpcClientErrorCode } from '@taucad/chat';
 import { getErrno } from '@taucad/utils/error';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
-import type { LargeObjectsFacet } from '@taucad/revisions';
+import type { LargeObjectsFacet, ProjectReadiness } from '@taucad/revisions';
+import { reachesReadiness } from '@taucad/revisions';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 
@@ -220,6 +221,31 @@ const blockingFacet = (facet: LargeObjectsFacet | undefined, closure: KernelClos
   facet !== undefined && (facet.phase === 'failed' || closureHasPending(closure, facet.paths)) ? facet : undefined;
 
 /**
+ * Whether a run over this closure waits for the fill's first word: with no facet, a project that has not reached
+ * `filled` may still hold pointers the fill has not reported (`readinessOf` reads `materialized` then). A closure of
+ * named paths reads any of them through; a workspace mirror lists their raw sizes first, so it waits.
+ *
+ * @param closure - See {@link kernelClosure}.
+ * @param readiness - The published readiness; `undefined` where the host publishes none.
+ * @returns `true` while the run must wait for the fill to report.
+ */
+export const awaitsFillReport = (closure: KernelClosure, readiness: ProjectReadiness | undefined): boolean =>
+  closure === 'workspace' && readiness !== undefined && !reachesReadiness(readiness, 'filled');
+
+/** The retryable answer a mirroring kernel call gets while the fill has not reported what it brings. */
+const largeObjectsCheckingResult: Readonly<{
+  success: false;
+  errorCode: 'OPERATION_TIMEOUT';
+  message: string;
+  retryable: true;
+}> = {
+  success: false,
+  errorCode: rpcClientErrorCode.operationTimeout,
+  message: "The project's files are still being checked for large files to download. Try again in a moment.",
+  retryable: true,
+};
+
+/**
  * The retryable answer a kernel call gets while any of the checkout's large objects is still to land.
  *
  * @param facet - The checkout's large-object facet.
@@ -243,12 +269,23 @@ export const largeObjectsPendingResult = (
  *
  * @param clients - The evaluate, export, capture and GeoSpec clients.
  * @param largeObjects - The checkout's current large-object facet; `undefined` once everything is local.
+ * @param readiness - The published readiness, so a mirroring kernel waits for the fill's first report.
  * @returns The same clients, gated.
  */
 export const guardLargeObjectKernel = <Clients extends KernelClients>(
   clients: Clients,
   largeObjects: () => LargeObjectsFacet | undefined,
+  readiness: () => ProjectReadiness | undefined = () => undefined,
 ): Clients => {
+  /* The answer a run over this closure gets now, or `undefined` when it may run. */
+  const refusal = (closure: KernelClosure): ReturnType<typeof largeObjectsPendingResult> | undefined => {
+    const facet = largeObjects();
+    if (facet === undefined) {
+      return awaitsFillReport(closure, readiness()) ? largeObjectsCheckingResult : undefined;
+    }
+    const blocking = blockingFacet(facet, closure);
+    return blocking === undefined ? undefined : largeObjectsPendingResult(blocking);
+  };
   const { kernelClient, graphics, images, geospec } = clients;
   return {
     ...clients,
@@ -258,10 +295,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           kernelClient: {
             ...kernelClient,
             evaluateModel: async (input, context) => {
-              const facet = blockingFacet(largeObjects(), kernelClosure(input.targetFile));
-              return facet === undefined
-                ? kernelClient.evaluateModel(input, context)
-                : largeObjectsPendingResult(facet);
+              return refusal(kernelClosure(input.targetFile)) ?? kernelClient.evaluateModel(input, context);
             },
           } satisfies RpcRuntimeClient,
         }),
@@ -271,8 +305,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           graphics: {
             ...graphics,
             exportModel: async (...parameters) => {
-              const facet = blockingFacet(largeObjects(), kernelClosure(parameters[0].targetFile));
-              return facet === undefined ? graphics.exportModel(...parameters) : largeObjectsPendingResult(facet);
+              return refusal(kernelClosure(parameters[0].targetFile)) ?? graphics.exportModel(...parameters);
             },
           } satisfies RpcGraphicsClient,
         }),
@@ -282,8 +315,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           images: {
             ...images,
             captureImages: async (input, context) => {
-              const facet = blockingFacet(largeObjects(), kernelClosure(input.targetFile));
-              return facet === undefined ? images.captureImages(input, context) : largeObjectsPendingResult(facet);
+              return refusal(kernelClosure(input.targetFile)) ?? images.captureImages(input, context);
             },
           } satisfies RpcImageClient,
         }),
@@ -293,8 +325,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           geospec: {
             ...geospec,
             runTests: async (input, context) => {
-              const facet = blockingFacet(largeObjects(), 'workspace');
-              return facet === undefined ? geospec.runTests(input, context) : largeObjectsPendingResult(facet);
+              return refusal('workspace') ?? geospec.runTests(input, context);
             },
           } satisfies RpcGeoSpecClient,
         }),

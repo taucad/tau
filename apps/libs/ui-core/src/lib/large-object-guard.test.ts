@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClient } from '@taucad/chat/rpc';
 import { toRpcError } from '@taucad/chat/rpc';
-import type { LargeObjectsFacet } from '@taucad/revisions';
+import type { LargeObjectsFacet, ProjectReadiness } from '@taucad/revisions';
 import { lfsPointerFor } from '@taucad/revisions';
 import {
   closureHasPending,
@@ -200,6 +200,37 @@ describe('the agent tools while large objects download', () => {
     facet = { ...downloading, phase: 'failed', error: 'offline' };
     await expect(guarded.kernelClient.evaluateModel(evaluate)).resolves.toMatchObject({ retryable: true });
     expect(kernelClient.evaluateModel).toHaveBeenCalledTimes(1);
+  });
+
+  /* `materialized` with no facet is a fill that has not reported yet: a mirroring kernel would copy pointers. */
+  it('holds a mirroring kernel call until the fill has reported, and lets an entry-only call through', async () => {
+    let readiness: ProjectReadiness | undefined = 'materialized';
+    const kernelClient = mock<RpcRuntimeClient>();
+    const geospec = mock<RpcGeoSpecClient>();
+    kernelClient.evaluateModel.mockResolvedValue(mock());
+    geospec.runTests.mockResolvedValue(mock());
+    const guarded = guardLargeObjectKernel(
+      { kernelClient, geospec },
+      () => undefined,
+      () => readiness,
+    );
+    const mirrored: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.py' };
+    const entryOnly: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.scad' };
+
+    await expect(guarded.kernelClient.evaluateModel(mirrored)).resolves.toMatchObject({
+      success: false,
+      errorCode: 'OPERATION_TIMEOUT',
+      retryable: true,
+    });
+    await expect(guarded.geospec.runTests({})).resolves.toMatchObject({ retryable: true });
+    await guarded.kernelClient.evaluateModel(entryOnly);
+    expect(kernelClient.evaluateModel).toHaveBeenCalledExactlyOnceWith(entryOnly, undefined);
+
+    readiness = 'filled';
+    await guarded.kernelClient.evaluateModel(mirrored);
+    await guarded.geospec.runTests({});
+    expect(kernelClient.evaluateModel).toHaveBeenCalledTimes(2);
+    expect(geospec.runTests).toHaveBeenCalledTimes(1);
   });
 });
 

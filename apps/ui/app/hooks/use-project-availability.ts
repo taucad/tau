@@ -6,7 +6,7 @@ import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
-import { closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { awaitsFillReport, closureHasPending, kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import type { KernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 
@@ -89,7 +89,8 @@ export type ModelStatus = Readonly<{
  *
  * A render opens at `materialized` (D10, {@link surfaceReadiness}): a project
  * whose host publishes readiness waits for it there, a check and never a
- * download (T5). From there, only a pending path in the closure holds it; a
+ * download (T5). A workspace mirror also waits there for the fill's first
+ * report ({@link awaitsFillReport}). From there, only a pending path in the closure holds it; a
  * failed fill is shown whatever it was fetching, so Try again stays reachable.
  *
  * @param project - The project's availability.
@@ -110,7 +111,7 @@ export function modelAvailability(
     return 'filesChecking';
   }
   if (largeObjects === undefined) {
-    return 'ready';
+    return awaitsFillReport(closure, readiness) ? 'filesChecking' : 'ready';
   }
   if (largeObjects.phase === 'failed') {
     return 'filesFailed';

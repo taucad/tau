@@ -142,7 +142,16 @@ describe('render closure', () => {
     expect(
       modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'materialized' }, mirror),
     ).toBe('files');
-    expect(modelAvailability('ready', { readiness: 'materialized' }, mirror)).toBe('ready');
+    expect(modelAvailability('ready', { readiness: 'filled' }, mirror)).toBe('ready');
+    expect(modelAvailability('ready', undefined, mirror)).toBe('ready');
+  });
+  /* `materialized` with no facet is a fill that has not reported yet (readinessOf): a mirror would copy pointers. */
+  it('holds a mirroring kernel as a check until the fill has reported, whatever is authored', () => {
+    const mirror = kernelClosure('main.py', 'build123d');
+    expect(modelAvailability('ready', { readiness: 'materialized' }, mirror)).toBe('filesChecking');
+    expect(modelAvailability('ready', { readiness: 'materialized' }, kernelClosure('main.ts', 'replicad'))).toBe(
+      'ready',
+    );
   });
   it('waits on nothing but the manifest while the project names no main entry', () => {
     const entryless = kernelClosure('');

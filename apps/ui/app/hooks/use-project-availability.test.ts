@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import {
   modelAvailability,
@@ -9,6 +9,7 @@ import {
   pendingPathSet,
   projectAvailability,
   readyFor,
+  renderClosure,
   surfaceReadiness,
   useLargeObjectPending,
   useOpenedLargeObjectPending,
@@ -66,24 +67,74 @@ describe('first-open availability', () => {
   });
 });
 
-/* The operator's "open the UI, model waits": files open with the checkout; the model waits for every large object. */
+/* T6: files open with the checkout; a model waits only on the large objects its own render closure reads. */
 describe('model availability', () => {
-  it('follows the project until the project is ready', () => {
-    expect(modelAvailability('downloading', { phase: 'fetching' })).toBe('downloading');
-    expect(modelAvailability('preparing', undefined)).toBe('preparing');
+  const fetching = (paths: readonly string[]): Pick<LargeObjectsFacet, 'phase' | 'paths'> => ({
+    phase: 'fetching',
+    paths,
   });
-  it('waits for the large objects once the files are open', () => {
-    expect(modelAvailability('ready', { phase: 'fetching' })).toBe('files');
-    expect(modelAvailability('ready', { phase: 'failed' })).toBe('filesFailed');
+  const closure = ['tau.json', 'main.ts'];
+  it('follows the project until the project is ready', () => {
+    expect(modelAvailability('downloading', { largeObjects: fetching(['main.ts']) }, closure)).toBe('downloading');
+    expect(modelAvailability('preparing', undefined, closure)).toBe('preparing');
+  });
+  it('waits for a large object its render closure reads', () => {
+    expect(
+      modelAvailability(
+        'ready',
+        { largeObjects: fetching(['assets/a.png', 'main.ts']), readiness: 'materialized' },
+        closure,
+      ),
+    ).toBe('files');
+    expect(
+      modelAvailability(
+        'ready',
+        { largeObjects: { phase: 'failed', paths: ['main.ts'] }, readiness: 'materialized' },
+        closure,
+      ),
+    ).toBe('filesFailed');
+  });
+  /* STO-25: geometry was ready ~100 s before it showed, held by media the kernel never reads (L8). */
+  it('renders while only large objects outside its render closure are downloading', () => {
+    expect(
+      modelAvailability(
+        'ready',
+        { largeObjects: fetching(['assets/a.png', 'assets/b.bin']), readiness: 'materialized' },
+        closure,
+      ),
+    ).toBe('ready');
+    expect(modelAvailability('ready', { largeObjects: fetching(['assets/a.png']) }, closure)).toBe('ready');
+  });
+  it('shows a failed fill whatever the closure, so Try again stays reachable', () => {
+    expect(
+      modelAvailability(
+        'ready',
+        { largeObjects: { phase: 'failed', paths: ['assets/a.png'] }, readiness: 'materialized' },
+        closure,
+      ),
+    ).toBe('filesFailed');
   });
   it('is ready when no large object is outstanding', () => {
-    expect(modelAvailability('ready', undefined)).toBe('ready');
-    expect(modelAvailability('ready', undefined, 'filled')).toBe('ready');
+    expect(modelAvailability('ready', undefined, closure)).toBe('ready');
+    expect(modelAvailability('ready', { readiness: 'filled' }, closure)).toBe('ready');
   });
-  /* T5: "Downloading" only while a download runs; a wait for the fill's word is a check, never a download. */
-  it('waits as a check, not a download, while no download runs and the files are not yet filled', () => {
-    expect(modelAvailability('ready', undefined, 'materialized')).toBe('filesChecking');
-    expect(modelAvailability('ready', undefined, 'entryReady')).toBe('filesChecking');
+  /* Every authored file is a file at `materialized`; a pending object the kernel reads is read through (D9). */
+  it('renders once every authored file is written, before the fill has given its word', () => {
+    expect(modelAvailability('ready', { readiness: 'materialized' }, closure)).toBe('ready');
+  });
+  /* T5: before every authored file is written the wait is a check, never a download, whatever is pending. */
+  it('waits as a check, not a download, until every authored file is written', () => {
+    expect(modelAvailability('ready', { readiness: 'entryReady' }, closure)).toBe('filesChecking');
+    expect(
+      modelAvailability('ready', { largeObjects: fetching(['assets/a.png']), readiness: 'treeReady' }, closure),
+    ).toBe('filesChecking');
+  });
+});
+
+describe('render closure', () => {
+  it('is the manifest and the main entry the kernel opens', () => {
+    expect(renderClosure('main.ts')).toStrictEqual(['tau.json', 'main.ts']);
+    expect(renderClosure('')).toStrictEqual(['tau.json']);
   });
 });
 
@@ -98,7 +149,7 @@ describe('pending large-object paths', () => {
   });
 });
 
-/* D10: the editor, tree and viewer open early; search, export, LSP and a cut wait for every file; a render for every object. */
+/* D10: the editor, tree and viewer open early; search, export, LSP, a cut and a render wait for every authored file. */
 describe('surface readiness', () => {
   it('opens the tree at treeReady and the editor and viewer at entryReady', () => {
     expect(readyFor('tree', 'treeReady')).toBe(true);
@@ -113,9 +164,9 @@ describe('surface readiness', () => {
       expect(readyFor(surface, 'materialized')).toBe(true);
     }
   });
-  it('holds a model render until every large object is here', () => {
-    expect(readyFor('model', 'materialized')).toBe(false);
-    expect(readyFor('model', 'filled')).toBe(true);
+  it('holds a model render until every authored file is a file, not until every large object is here', () => {
+    expect(readyFor('model', 'entryReady')).toBe(false);
+    expect(readyFor('model', 'materialized')).toBe(true);
   });
   it('serves nothing from an unknown state', () => {
     expect(readyFor('tree', undefined)).toBe(false);

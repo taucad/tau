@@ -61,48 +61,76 @@ export function useProjectAvailability(): ProjectAvailability {
 }
 
 /**
- * What a model surface waits for: the project first, then every large object.
+ * What a model surface waits for: the project first, then every authored file,
+ * then the large objects of its own render closure (T6).
  *
  * The operator's "open the UI, model waits": code, files and chats open once
- * the checkout is written, while a file whose large object has not arrived
- * still holds its pointer. A render over a pointer would be partial geometry,
- * so the viewer, and everything else that runs the kernel, waits for them all.
+ * the checkout is written. A render waits until every authored file is a file,
+ * and for a large object only when its closure (the manifest and the entry the
+ * kernel opens) still holds that object's pointer; media and assets it never
+ * reads arrive in the background. A kernel read of any other pending path goes
+ * through to its object and waits for it (D9), never reading the pointer.
  */
 export type ModelAvailability = ProjectAvailability | 'files' | 'filesFailed' | 'filesChecking';
 
 /**
- * {@link ModelAvailability} from the project's availability, its large-object
- * facet and its published readiness.
+ * The paths a render reads before anything else: `tau.json` and the main entry (T6).
  *
- * A render opens at `filled` (D10, {@link surfaceReadiness}): a project whose
- * host publishes readiness waits for it there, even between a tree write and
- * the new tree's fill. A host that publishes none yet is read from its facet.
+ * @param mainEntryPath - The manifest's main entry path; empty while unknown.
+ * @returns The render closure, manifest first.
+ */
+export function renderClosure(mainEntryPath: string): readonly string[] {
+  return mainEntryPath === '' ? ['tau.json'] : ['tau.json', mainEntryPath];
+}
+
+/** What {@link modelAvailability} reads of the projection. */
+export type ModelStatus = Readonly<{
+  largeObjects?: Pick<LargeObjectsFacet, 'phase' | 'paths'> | undefined;
+  readiness?: ProjectReadiness | undefined;
+}>;
+
+/**
+ * {@link ModelAvailability} from the project's availability, its large-object
+ * facet and published readiness, and the render's closure.
+ *
+ * A render opens at `materialized` (D10, {@link surfaceReadiness}): a project
+ * whose host publishes readiness waits for it there, a check and never a
+ * download (T5). From there, only a pending path in the closure holds it; a
+ * failed fill is shown whatever it was fetching, so Try again stays reachable.
  *
  * @param project - The project's availability.
- * @param largeObjects - The large-object facet.
- * @param readiness - The published readiness, when the host publishes one.
+ * @param status - The large-object facet, and the published readiness when the host publishes one.
+ * @param closure - The render closure, see {@link renderClosure}.
  * @returns What the model surface shows.
  */
 export function modelAvailability(
   project: ProjectAvailability,
-  largeObjects: Pick<LargeObjectsFacet, 'phase'> | undefined,
-  readiness?: ProjectReadiness,
+  status: ModelStatus | undefined,
+  closure: readonly string[],
 ): ModelAvailability {
   if (project !== 'ready') {
     return project;
   }
-  if (largeObjects === undefined) {
-    /* No download runs: the wait is for the fill's word on this tree, a check, never shown as a download (T5). */
-    return readiness === undefined || readyFor('model', readiness) ? 'ready' : 'filesChecking';
+  const { largeObjects, readiness } = status ?? {};
+  if (readiness !== undefined && !readyFor('model', readiness)) {
+    return 'filesChecking';
   }
-  return largeObjects.phase === 'failed' ? 'filesFailed' : 'files';
+  if (largeObjects === undefined) {
+    return 'ready';
+  }
+  if (largeObjects.phase === 'failed') {
+    return 'filesFailed';
+  }
+  const pending = pendingPathSet(largeObjects.paths);
+  return closure.some((path) => pending.has(path)) ? 'files' : 'ready';
 }
 
 /** Shared readiness for the viewer, export and the other kernel surfaces. */
 export function useModelAvailability(): ModelAvailability {
+  const { mainEntryPath } = useProject();
   const project = useProjectAvailability();
   const status = useRevisionStatus();
-  return modelAvailability(project, status?.largeObjects, status?.readiness);
+  return modelAvailability(project, status, renderClosure(mainEntryPath));
 }
 
 /**
@@ -165,8 +193,9 @@ export function useLargeObjects(): LargeObjectsFacet | undefined {
  * The surfaces that wait on readiness, and the state each opens at (D10).
  *
  * The tree opens once the tree is known; the editor and viewer once the entry
- * closure is readable; search, export, the LSP workspace and a revision cut
- * need every authored file; a model render needs every large object.
+ * closure is readable; search, export, the LSP workspace, a revision cut and a
+ * model render need every authored file. A render then waits only on the large
+ * objects of its own closure ({@link modelAvailability}, T6).
  */
 export type ReadinessSurface = 'tree' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
 
@@ -179,7 +208,7 @@ export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadines
   export: 'materialized',
   lsp: 'materialized',
   cut: 'materialized',
-  model: 'filled',
+  model: 'materialized',
 };
 
 /**

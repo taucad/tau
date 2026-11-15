@@ -553,15 +553,6 @@ export type AcpLoginHost = {
   readonly execPath: string;
 };
 
-/**
- * The resolved adapter as sign-in reads it.
- *
- * `executableSource` is the field resolution sets to say whether `executablePath`
- * came from PATH or from a declared fallback. It is read through this local
- * widening until the registry declares it; unset means the bare command.
- */
-type SignInAdapter = AcpAdapter & { readonly executableSource?: 'path' | 'fallback' | undefined };
-
 /** Characters a POSIX shell never splits or expands, so an argument of only these needs no quotes. */
 const posixPlainArgument = /^[\w@%+=:,./-]+$/u;
 
@@ -641,7 +632,7 @@ const terminalInvocationOf = (
  * @param host - Where the command will be shown.
  * @returns The quoted command line, or `undefined`.
  */
-const terminalCommandOf = (method: AuthMethod, adapter: SignInAdapter, host: AcpLoginHost): string | undefined => {
+const terminalCommandOf = (method: AuthMethod, adapter: AcpAdapter, host: AcpLoginHost): string | undefined => {
   const invocation = terminalInvocationOf(method);
   if (
     invocation === undefined ||
@@ -665,7 +656,7 @@ const terminalCommandOf = (method: AuthMethod, adapter: SignInAdapter, host: Acp
  * @param host - Where the command will be shown.
  * @returns The command line, or `undefined` when the profile has none.
  */
-const cliLoginCommandOf = (adapter: SignInAdapter, host: AcpLoginHost): string | undefined => {
+const cliLoginCommandOf = (adapter: AcpAdapter, host: AcpLoginHost): string | undefined => {
   const { loginCommand, cli, executablePath } = adapter;
   if (
     loginCommand === undefined ||
@@ -698,7 +689,7 @@ const thisHost: AcpLoginHost = { platform: process.platform, execPath: process.e
  * @internal
  */
 export const loginOf = (
-  adapter: SignInAdapter,
+  adapter: AcpAdapter,
   authMethods: readonly AuthMethod[],
   host: AcpLoginHost = thisHost,
 ): ExternalAgentLogin => {

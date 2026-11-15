@@ -1,3 +1,4 @@
+import { toRenderPoint } from '@taucad/spatial';
 import type { RenderFrame } from '@taucad/spatial';
 
 type GridAxes = 'xyz' | 'xzy' | 'zyx';
@@ -91,4 +92,26 @@ export const resolveInfiniteGridFrame = ({
     smallPhase: phase(smallSizeMeters),
     smallSize: smallSizeMeters / metersPerRenderUnit,
   } as const;
+};
+
+/**
+ * Project a physical view target onto the grid plane, as the render-local tangent pair both shaders centre the proxy
+ * and its fade on. The pair follows each shader's tangent order: `xyz` is (x, y), `xzy` is (x, z) and `zyx` is (z, y).
+ *
+ * @param options - Grid axes, the render frame and the physical view target in metres.
+ * @returns The target's render-local tangent coordinates on the grid plane.
+ * @public
+ */
+export const resolveInfiniteGridCenter = ({
+  axes,
+  renderFrame,
+  targetMeters,
+}: {
+  readonly axes: GridAxes;
+  readonly renderFrame: RenderFrame;
+  readonly targetMeters: readonly [number, number, number];
+}): readonly [number, number] => {
+  const target = toRenderPoint({ renderFrame, point: targetMeters });
+  const [first, second] = tangentAxesByGrid[axes];
+  return [target[first], target[second]];
 };

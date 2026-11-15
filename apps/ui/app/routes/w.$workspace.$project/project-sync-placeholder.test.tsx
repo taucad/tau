@@ -11,12 +11,15 @@ const mocks = vi.hoisted(() => ({
   facet: undefined as LargeObjectsFacet | undefined,
   send: vi.fn(),
   status: undefined as unknown,
+  /* The session's word that the file check has outlasted its patience (A14). */
+  slow: false,
 }));
 
 vi.mock('react-router', () => ({ useLocation: () => ({ pathname: '/w/x/p', search: '' }), Link: () => null }));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useLargeObjects: () => mocks.facet,
   useProjectAvailability: () => 'ready',
+  useFileCheckSlow: () => mocks.slow,
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => ({ send: mocks.send }),
@@ -59,26 +62,25 @@ describe('model files placeholder', () => {
     expect(mocks.send).toHaveBeenCalledWith({ command: 'retryLargeObjects' });
   });
 
-  /* T5: no download runs, so it never says one does; a wait that outlasts its bound offers a way out. */
-  it('says it is preparing the model, not downloading, while no download runs, and offers a retry once it waits too long', async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.facet = undefined;
-      mocks.send.mockClear();
-      render(<ProjectSyncPlaceholder state='filesChecking' />);
-      expect(screen.getByRole('region', { name: 'Preparing model' })).toHaveAttribute('aria-busy', 'true');
-      expect(screen.queryByText('Downloading model files')).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
-      act(() => {
-        vi.advanceTimersByTime(10_000);
-      });
-      act(() => {
-        screen.getByRole('button', { name: 'Try again' }).click();
-      });
-      expect(mocks.send).toHaveBeenCalledWith({ command: 'retryLargeObjects' });
-    } finally {
-      vi.useRealTimers();
-    }
+  /* T5: no download runs, so it never says one does; a wait the session reports slow offers a way out (A14). */
+  it('says it is preparing the model, not downloading, while no download runs, and offers a retry once the session reports it slow', () => {
+    mocks.facet = undefined;
+    mocks.slow = false;
+    mocks.send.mockClear();
+    const { rerender } = render(<ProjectSyncPlaceholder state='filesChecking' />);
+    expect(screen.getByRole('region', { name: 'Preparing model' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('Checking your model files.')).toBeInTheDocument();
+    expect(screen.queryByText('Downloading model files')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+
+    mocks.slow = true;
+    rerender(<ProjectSyncPlaceholder state='filesChecking' />);
+    expect(screen.getByText('This is taking longer than it should.')).toBeInTheDocument();
+    act(() => {
+      screen.getByRole('button', { name: 'Try again' }).click();
+    });
+    expect(mocks.send).toHaveBeenCalledWith({ command: 'retryLargeObjects' });
+    mocks.slow = false;
   });
 });
 

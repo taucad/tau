@@ -98,6 +98,13 @@ const samples: Samples = {
     { type: 'revisionChatsChanged', ready: true },
     { type: 'revisionChatsChanged', ready: false },
   ],
+  /* A14: the `revisions` child's word on the file check, and the `fileCheck` child's patience; answered everywhere. */
+  fileCheckChanged: [
+    { type: 'fileCheckChanged', settled: false, judged: true },
+    { type: 'fileCheckChanged', settled: false, judged: false },
+    { type: 'fileCheckChanged', settled: true, judged: true },
+  ],
+  fileCheckSlow: [{ type: 'fileCheckSlow', check: 1 }],
   revisionState: [
     { type: 'revisionState', dirty: true, pushed: false, pendingCount: 1 },
     { type: 'revisionState', dirty: false, pushed: true, recording: true },

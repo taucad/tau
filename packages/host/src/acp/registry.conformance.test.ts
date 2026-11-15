@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   acpAgentProfiles,
+  acpModelProbeTimeout,
   discoverAcpAgents,
   externalAgentDescriptors,
   probeAcpAgents,
@@ -191,6 +192,14 @@ describe.each(profiles)('the $label profile', ({ profile }) => {
     expect(profiles.filter((each) => each.profile.id === profile.id)).toHaveLength(1);
     expect(profile.cli).toMatch(/^[\w.-]+$/u);
     expect(profile.minimumCliVersion).toMatch(/^\d+\.\d+\.\d+$/u);
+  });
+
+  it('should keep any wait for a pushed model list short and inside the model probe budget', () => {
+    if (profile.modelListGrace !== undefined) {
+      expect(profile.modelListGrace).toBeGreaterThan(0);
+      expect(profile.modelListGrace).toBeLessThanOrEqual(2000);
+      expect(profile.modelListGrace).toBeLessThan(acpModelProbeTimeout);
+    }
   });
 
   it('should declare fallbacks for every supported platform in the allowed shape', () => {

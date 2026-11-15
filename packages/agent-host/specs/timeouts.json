@@ -589,6 +589,14 @@
       "owner": "W10"
     },
     {
+      "id": "ACP-MODEL-LIST-GRACE",
+      "bound": "ACP model probe's wait for an agent's pushed model list after session/new, 1 s within the model probe's deadline; only for a profile that declares it, and expiry keeps the answered list",
+      "site": "packages/host/src/acp/registry.ts",
+      "token": "modelListGrace",
+      "class": "External edge",
+      "owner": "W10"
+    },
+    {
       "id": "E26",
       "bound": "Relay session lifetime",
       "site": "packages/host/src/host-daemon.ts",

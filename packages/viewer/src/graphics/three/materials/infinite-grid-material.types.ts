@@ -10,6 +10,8 @@ export type InfiniteGridVisualOverrides = {
   readonly planeOffset?: number;
   readonly smallPhase?: readonly [number, number];
   readonly largePhase?: readonly [number, number];
+  /** View target's render-local tangent pair on the grid plane; the proxy and its fade centre on it. */
+  readonly gridCenter?: readonly [number, number];
 };
 
 /**
@@ -42,4 +44,9 @@ export type InfiniteGridMaterialProperties = {
   readonly smallPhase?: readonly [number, number];
   readonly largePhase?: readonly [number, number];
   readonly alphaThreshold?: number;
+  /**
+   * Initial render-local tangent pair the proxy and its fade centre on; defaults to the origin. The grid does not
+   * follow the camera: update it through {@link InfiniteGridMaterialHandle.applyVisualOverrides} as the view moves.
+   */
+  readonly gridCenter?: readonly [number, number];
 };

@@ -25,6 +25,7 @@
 
 import { permissionReadbackCapability, supportsPermissionReadback } from '#acp/provider-permission.js';
 import type { GrokQuestionRequest, GrokQuestionResponse } from '#acp/grok-questions.js';
+import { withGrokModels } from '#acp/grok-models.js';
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef } from 'xstate';
 import type {
@@ -328,6 +329,7 @@ type Enqueue = {
     event: { readonly type: 'killDue' },
     options: { readonly id: string } & Readonly<Record<'delay', number>> /* E17: acpKillGrace */,
   ): void;
+  raise(event: Extract<AcpSessionEvent, { readonly type: 'sessionUpdate' }>): void;
 };
 
 /*
@@ -356,6 +358,7 @@ export const acpSessionIgnoredEvents = {
     ['closing', 'close'],
     ['*', 'grokNotification'],
     ['*', 'grokSettings'],
+    ['*', 'grokModels'],
   ],
 } as const satisfies Readonly<Record<string, ReadonlyArray<readonly [state: string, eventType: string]>>>;
 
@@ -649,7 +652,12 @@ const withGrokControls = (
 
 /* The session the restore ladder answered with, as context. */
 const adopt = (context: AcpSessionContext, sessionId: string, answer: SessionAnswer) => {
-  const configOptions = withGrokControls(context, answer.configOptions ?? undefined);
+  const listed = answer.configOptions ?? undefined;
+  /* A model list pushed before this answer is the newer one: the answer may hold only the built-in models. */
+  const configOptions = withGrokControls(
+    context,
+    (context.grokModels && withGrokModels(listed, context.grokModels)) ?? listed,
+  );
   const modeId = answer.modes?.currentModeId ?? context.presentation.modeId;
   return {
     acpSessionId: sessionId,
@@ -1229,7 +1237,7 @@ const machineDefinition = setup({
 
 const acpSessionMachineDefinition = machineDefinition.createMachine({
   id: 'acpSession',
-  version: '3',
+  version: '4',
   context: ({ input }: Readonly<{ input: AcpSessionInput }>) => ({
     key: input.key,
     parentRef: input.parentRef,
@@ -1303,6 +1311,22 @@ const acpSessionMachineDefinition = machineDefinition.createMachine({
     sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate'>) =>
       ownUpdate(context, event.sessionId) ? { context: folded(context, event.update) } : {},
     ),
+    /*
+     * Grok's own model-list push stands for the `config_option_update` it never sends: raised as one,
+     * so every state folds, persists or forwards it exactly as that update. Kept for an open still
+     * waiting on its answer, which has no model option to refresh yet.
+     */
+    grokModels: refines('Stutter', ({ context, event }: On<'grokModels'>, enq: Enqueue) => {
+      const configOptions = withGrokModels(context.configOptions, event.models);
+      if (configOptions !== undefined) {
+        enq.raise({
+          type: 'sessionUpdate',
+          sessionId: context.acpSessionId ?? '',
+          update: { sessionUpdate: 'config_option_update', configOptions },
+        });
+      }
+      return { context: { grokModels: event.models } };
+    }),
     /* No active prompt owns these replayed/late vendor events. */
     grokNotification: refines('Stutter', () => ({})),
     grokSettings: refines('Stutter', ({ context, event }: On<'grokSettings'>) => {

@@ -189,7 +189,13 @@ const routeWorker = { name: 'route-worker' } as unknown as Worker;
 const sessionWiring: SessionWiring = {
   loadRevisions: async () => ({
     createSessionRevisionsPorts: (ports) => ports as never,
-    sessionRevisionsCallback: () => () => () => undefined,
+    /* A14: no client publishes in these rows, so the file check is settled at once, as for a registry without one. */
+    sessionRevisionsCallback:
+      () =>
+      ({ sendBack }) => {
+        sendBack({ type: 'fileCheckChanged', settled: true, judged: true });
+        return () => undefined;
+      },
   }),
   loadHostConnector: async () => import('#runtime/host-connector.js'),
   registerCloseCut: () => () => undefined,

@@ -2,6 +2,7 @@ import { Blob } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
+import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
@@ -153,6 +154,64 @@ describe('saved catalog preview producer', () => {
       client.clear();
     },
   );
+
+  it('should backfill a project the server already holds a preview for once per session, not on every open', async () => {
+    // Tau #2012: each open re-sent the create-only backfill and the API answered 412 every time.
+    vi.mocked(useRevisionSessionUser).mockReturnValue({ id: 'owner-2012', name: 'Owner' });
+    vi.mocked(useProjectThumbnail).mockReturnValue({
+      url: 'blob:local-thumbnail',
+      status: 'ready',
+      error: undefined,
+      refresh: vi.fn(),
+    });
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => ({ width: 768, height: 576, close: vi.fn() })),
+    );
+    vi.stubGlobal(
+      'OffscreenCanvas',
+      class {
+        public width = 768;
+        public height = 576;
+        public getContext() {
+          return { drawImage: vi.fn() };
+        }
+        public async convertToBlob() {
+          return new Blob([new Uint8Array([1])], { type: 'image/webp' });
+        }
+      },
+    );
+    const urlOf = (input: Parameters<typeof fetch>[0]): string =>
+      typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const fetcher = vi.fn<typeof fetch>(async (input) =>
+      urlOf(input).startsWith('blob:') ? new Response(new Uint8Array([1])) : new Response(null, { status: 412 }),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    const uploads = (): number => fetcher.mock.calls.filter(([input]) => urlOf(input).startsWith('https:')).length;
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    const first = renderHook(() => usePublishCloudProjectPreview({ projectId: 'project-2012', enabled: true }), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(uploads()).toBe(1);
+    });
+    await waitFor(() => {
+      expect(client.isMutating()).toBe(0);
+    });
+    first.unmount();
+    const second = renderHook(() => usePublishCloudProjectPreview({ projectId: 'project-2012', enabled: true }), {
+      wrapper,
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+    expect(uploads()).toBe(1);
+    second.unmount();
+    client.clear();
+  });
 
   it('should release the bitmap and refuse oversized derivatives without uploading', async () => {
     const close = vi.fn();

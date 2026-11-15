@@ -22,7 +22,7 @@ import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import { createSessionRevisionsLogic } from '#runtime/session-revisions.js';
+import { createSessionRevisionsLogic, sessionRevisionsCallback } from '#runtime/session-revisions.js';
 import type {
   SessionRevisionsCloseCut,
   SessionRevisionsEmitted,
@@ -996,6 +996,38 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     expect(fileManager.sent).toEqual([]);
     session.stop();
     expect(guard.take()).toEqual([]);
+  });
+
+  it('D23: should release what a start that throws partway had already taken', async () => {
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts({});
+    const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
+    const failure = new Error('subscribe threw');
+    const ports: SessionRevisionsPorts = {
+      ...fake.ports,
+      recording: {
+        ...fake.ports.recording,
+        subscribe: () => {
+          throw failure;
+        },
+      },
+    };
+
+    expect(() =>
+      sessionRevisionsCallback(ports)({
+        input: { projectId, workspace, fileManagerRef: fileManager.ref, syncProjectRoots: async () => undefined },
+        sendBack: () => undefined,
+      }),
+    ).toThrow(failure);
+    await settle();
+
+    expect(log).toContain('a:close');
+    expect(fake.cuts).toEqual([]);
+    expect(fake.listeners()).toBe(0);
+    expect(fileManager.listeners).toBe(0);
   });
 
   it('D23: should report a teardown that throws rather than fault the session, and still release the rest', async () => {

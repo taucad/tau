@@ -108,6 +108,7 @@ export const hostCapabilitiesSchema = z.object({
             defaultModel: z.string().min(1).max(128).optional(),
             thoughtLevel: acpThoughtLevelSchema.optional(),
             refusal: z.string().min(1).max(64).optional(),
+            fixCommand: z.string().min(1).max(256).optional(),
           }),
         )
         .max(16)

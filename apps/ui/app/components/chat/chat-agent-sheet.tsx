@@ -65,8 +65,7 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { externalAgentFixCommand, externalAgentRefusalReasons } from '@taucad/ui-core/lib/external-agent';
-import type { ExternalAgentHostShell } from '@taucad/ui-core/lib/external-agent';
+import { externalAgentRefusalReasons } from '@taucad/ui-core/lib/external-agent';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { groupModels } from '@taucad/chat-ui/utils/model-groups';
@@ -294,24 +293,6 @@ function SheetAgentGlyph({
 const hostWhere = (placement: AgentHostPlacementTarget): string =>
   placement.hostId === 'desktop' ? 'this computer' : placement.label;
 
-/**
- * Which shell a fix command for this host is written in.
- *
- * A daemon's workspace root is the host's own path, so a drive letter or UNC
- * share names Windows; the desktop host is this computer, so its answer is the
- * browser's own platform.
- *
- * @param placement - The host the refused agent belongs to.
- * @returns The host's shell family.
- */
-const hostShell = (placement: AgentHostPlacementTarget): ExternalAgentHostShell => {
-  if (placement.workspaceRoot !== '') {
-    return /^(?:[A-Za-z]:[\\/]|\\\\)/u.test(placement.workspaceRoot) ? 'windows' : 'posix';
-  }
-  // oxlint-disable-next-line @typescript-eslint/no-deprecated -- Firefox and Safari expose no client-hints platform.
-  return typeof navigator !== 'undefined' && /^win/iu.test(navigator.platform) ? 'windows' : 'posix';
-};
-
 const acpKey = (hostId: TauAgentHostId, agentId: string): string =>
   `acp:${encodeURIComponent(hostId)}:${encodeURIComponent(agentId)}`;
 
@@ -327,7 +308,7 @@ const acpAgent = (
       : {
           reason: externalAgentRefusalReasons[descriptor.refusal],
           code: descriptor.refusal,
-          command: externalAgentFixCommand(descriptor.id, descriptor.refusal, hostShell(placement)),
+          command: descriptor.fixCommand,
           where,
         }
     : { reason: `${placement.label} is offline`, code: 'HOST_OFFLINE', command: undefined, where };

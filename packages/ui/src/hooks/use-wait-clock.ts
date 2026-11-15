@@ -85,13 +85,15 @@ const isServer = (): boolean => false;
  * One wait as the hook tracks it. `shownAt` is when its indicator became, or becomes, visible, measured from
  * `startedAt`: the delay, the activation time for a region that activates after the delay, or a negative time for a
  * wait that took over an indicator already showing. Once the reveal is seen (`isRevealSeen`), it is the frame the
- * reveal painted in, which a long task can make later than predicted.
+ * reveal painted in, which a long task can make later than predicted. `isHoldPending` marks a hold that draws words no
+ * frame drew while the wait ran; its first frame reports itself as the reveal.
  */
 type TrackedWait = Readonly<{
   active: boolean;
   startedAt: number;
   shownAt: number;
   isRevealSeen: boolean;
+  isHoldPending: boolean;
   wait: number;
   timing: WaitIndicatorTiming;
 }>;
@@ -165,6 +167,7 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       startedAt,
       shownAt: shownAtFor(startedAt, now),
       isRevealSeen: false,
+      isHoldPending: false,
       wait: 0,
       timing: active ? waitingTiming(now === undefined ? { startedAt } : { startedAt, now }) : idleWaitTiming(),
     };
@@ -175,10 +178,11 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
        carry a time from before the task, so the timeline reads early there; the performance clock reads the paint. */
     const revealedAt = Math.max(readNow(), clock.now());
     setTracked((previous) =>
-      previous.active && !previous.isRevealSeen
+      (previous.active || previous.isHoldPending) && !previous.isRevealSeen
         ? {
             ...previous,
             isRevealSeen: true,
+            isHoldPending: false,
             shownAt: Math.max(previous.shownAt, revealedAt - previous.startedAt),
           }
         : previous,
@@ -203,6 +207,7 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       /* A wait that takes over a showing indicator keeps its reveal only if a frame drew it: its new element's
          entrance is not a reveal. If none had, the first frame that draws the words still starts the minimum. */
       isRevealSeen: isShowing && tracked.isRevealSeen,
+      isHoldPending: false,
       wait: tracked.wait + 1,
       timing: waitingTiming({ startedAt, now, isShowing }),
     };
@@ -222,7 +227,8 @@ export function useWaitClock({ active, startedAt = 0 }: UseWaitClockOptions): Wa
       ...tracked,
       active,
       shownAt,
-      isRevealSeen: tracked.isRevealSeen || isUndrawn,
+      /* The hold draws the words; its first frame reports itself through `revealed`, and moves `shownAt` to it. */
+      isHoldPending: isUndrawn,
       /* A seen reveal is on screen, even where the timeline still reads before the paint the reveal recorded. */
       timing: heldWords(
         settledTiming({
@@ -289,7 +295,7 @@ function owesMinimum(tracked: TrackedWait, now: number): boolean {
   const elapsed = now - tracked.startedAt;
   return (
     tracked.timing.state !== 'idle' &&
-    (tracked.isRevealSeen || elapsed >= tracked.shownAt) &&
+    (tracked.isRevealSeen || tracked.isHoldPending || elapsed >= tracked.shownAt) &&
     elapsed < tracked.shownAt + indicatorMinimumMilliseconds
   );
 }

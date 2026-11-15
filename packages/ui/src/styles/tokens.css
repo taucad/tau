@@ -656,8 +656,12 @@
   animation: wait-reveal var(--wait-entrance, 150ms) ease-out var(--wait-reveal-delay, 1000ms) both;
 }
 
+/* `wait-held` changes nothing: it starts in the hold's first frame, so a hold that draws words no reveal drew reports
+   the frame they show in. */
 @utility wait-hold {
-  animation: wait-conceal 0.01ms linear var(--wait-hide-delay, 0ms) both;
+  animation:
+    wait-conceal 0.01ms linear var(--wait-hide-delay, 0ms) both,
+    wait-held 0.01ms linear both;
 }
 
 @utility wait-until-slow {
@@ -685,6 +689,12 @@
 @keyframes wait-conceal {
   to {
     visibility: hidden;
+  }
+}
+
+@keyframes wait-held {
+  to {
+    --wait-held: 1;
   }
 }
 

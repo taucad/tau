@@ -149,10 +149,13 @@ export function WaitIndicator({
           data-slot='wait-indicator-body'
           style={timingStyle(timing)}
           className={cn('inline-flex items-center', variantClasses[variant], isWaiting ? 'wait-reveal' : 'wait-hold')}
-          /* The minimum runs from the frame the words show in. Synchronous, so a wait that settles in the next task
-             already holds from that frame. */
+          /* The minimum runs from the frame the words show in: the reveal's, or the hold's when it draws words no reveal
+             drew. Synchronous, so a wait that settles or restarts in the next task already counts from that frame. */
           onAnimationStart={(event) => {
-            if (event.target === event.currentTarget && event.animationName === 'wait-reveal') {
+            if (
+              event.target === event.currentTarget &&
+              (event.animationName === 'wait-reveal' || event.animationName === 'wait-held')
+            ) {
               flushSync(revealed);
             }
           }}

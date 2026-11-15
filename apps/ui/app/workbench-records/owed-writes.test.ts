@@ -42,8 +42,8 @@ const store = () => {
     ports: {
       read: async () => ({ status: 'read', bytes }),
       write: async (input) =>
-        new Promise<CheckedWriteOutcome>((settle) => {
-          writes.push({ input, settle });
+        new Promise<CheckedWriteOutcome>((resolve) => {
+          writes.push({ input, settle: resolve });
         }),
     },
   });

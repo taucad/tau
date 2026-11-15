@@ -635,7 +635,9 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
  * kept in others (over 20 runs at `4ff549a9` the edit was lost in 7, the view setting in 12 and the
  * arrangement in 8; at `279a3a30`, in 7, 9 and 8). A7c registers each live session once at the unload
  * sequencer's producer stage, which writes the layout record, the view records and both stores before the
- * close cut (D26, S26), so the row asserts all three survive.
+ * close cut (D26, S26). A reload fires `pagehide` and `hidden` only as the document goes, and a record write
+ * first issued there landed in about 7 runs of 10, so while a record write is owed `beforeunload` runs the
+ * producer stage as the reload starts (D26 as amended by A7c). The row asserts all three survive.
  */
 test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit made just before a reload survive it', async ({
   annotate,

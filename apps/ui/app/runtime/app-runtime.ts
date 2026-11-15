@@ -25,6 +25,7 @@ import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { appRuntimeMachine } from '#runtime/app-runtime.machine.js';
 import type { AppRuntimeEnvironment, AppRuntimeQuitHold } from '#runtime/app-runtime.machine.js';
 import { createEnvironmentLogic, createUnloadSequencer } from '#runtime/environment.js';
+import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import type { FocusHandle } from '#runtime/app-runtime-focus.js';
@@ -447,7 +448,12 @@ export const createAppRuntime = ({
   const runtime = createActor(
     appRuntimeMachine.provide({
       actors: {
-        environment: createEnvironmentLogic(environment, { sequencer: unload, desktopQuit }),
+        /* A7c (D26 as amended): `beforeunload` runs the producer stage while a record write is owed. */
+        environment: createEnvironmentLogic(environment, {
+          sequencer: unload,
+          owedWrites: owedRecordWrites,
+          desktopQuit,
+        }),
         focusLibrary: focusComposition.logics.library,
         focusRegistry: focusComposition.logics.registry,
         focusFlush: focusComposition.logics.flush,

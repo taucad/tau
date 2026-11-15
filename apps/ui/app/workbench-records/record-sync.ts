@@ -17,6 +17,16 @@ import type {
   RecordSyncMachine,
 } from '#workbench-records/record-sync.machine.js';
 import type { RecordBytes } from '#workbench-records/record-sync-policy.js';
+import { followOwedWrite } from '#workbench-records/owed-writes.js';
+
+/**
+ * Whether the store owes its file a write (A7c): a write on the wire, or, until the store is closed, an edit, a
+ * command or a deferred patch no write has taken. A closed store's deferred patch has no writer left.
+ */
+const owesWrite = <T, P>(context: RecordSyncContext<T, P>): boolean =>
+  context.inFlight !== undefined ||
+  (!context.closeFenced &&
+    (context.pending !== undefined || context.deferred !== undefined || context.commands.length > 0));
 
 /** The two effects of a record file. Both answer with a typed outcome; a rejection is a defect in the port. */
 export type RecordSyncPorts = Readonly<{
@@ -125,15 +135,23 @@ export function createRecordSync<T, P>(
   // MC-R12: a fault discards the step that raised it, which can leave a region waiting on an effect that already
   // finished. So a fault answers every waiting request `false`, and the store answers `false` to every request after.
   let faults = 0;
+  /* A7c (D26 as amended): while an edit is not yet saved, the page owes a write, which holds the `beforeunload`
+   * producer stage. A store that stopped owes nothing it can still write. */
+  const owes = followOwedWrite();
+  const stop = (): void => {
+    owes(false);
+    settleAll();
+  };
   actor.subscribe({
     next: (snapshot) => {
       if (snapshot.context.faults !== faults) {
         ({ faults } = snapshot.context);
         settleAll();
       }
+      owes(owesWrite(snapshot.context));
     },
-    complete: settleAll,
-    error: settleAll,
+    complete: stop,
+    error: stop,
   });
   const stopped = (): boolean => actor.getSnapshot().status !== 'active';
   const faulted = (): boolean => actor.getSnapshot().context.faults > 0;

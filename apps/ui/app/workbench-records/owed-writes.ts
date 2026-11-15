@@ -1,7 +1,8 @@
 /**
- * The record writes this page owes now (A7c; D26 as amended): every record store with an edit not yet saved, and every
- * view whose section is still inside graphics' quiet gate. `environment` holds its `beforeunload` producer stage only
- * while one is owed, so a settled page stays eligible for the back/forward cache.
+ * The writes this page owes now (A7c; D26 as amended): every record store with an edit not yet saved, every view whose
+ * section is still inside graphics' quiet gate, and every project or editor store waiting for its debounce or writing.
+ * `environment` holds its `beforeunload` producer stage only while one is owed, so a settled page stays eligible for the
+ * back/forward cache.
  *
  * It is a host object of the page, like the view stores' active writes: each owner takes a debt with
  * {@link oweRecordWrite} and pays it when nothing is owed, and the composition hands {@link owedRecordWrites} to

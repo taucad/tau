@@ -21,15 +21,17 @@ import { followOwedWrite } from '#workbench-records/owed-writes.js';
 
 /**
  * Whether the store owes its file a write that a flush can still make (A7c): a write on the wire, or, until the store
- * is closed, a command, or an edit or deferred patch no write has taken. A closed store's deferred patch has no writer
- * left, a faulted store answers nothing again (MC-R12), and the edits over a refused record wait for its reset, so none
- * of them holds the page's `beforeunload` stage for a write it cannot make.
+ * is closed, a command, a cycle waiting for the read its write needs (the first read, a conflict's or a lost reply's
+ * read-back), or an edit or deferred patch no write has taken. A closed store's deferred patch has no writer left, a
+ * faulted store answers nothing again (MC-R12), and the edits over a refused record wait for its reset, so none of them
+ * holds the page's `beforeunload` stage for a write it cannot make.
  */
 const owesWrite = <T, P>(context: RecordSyncContext<T, P>): boolean =>
   context.faults === 0 &&
   (context.inFlight !== undefined ||
     (!context.closeFenced &&
       (context.commands.length > 0 ||
+        context.cycle !== undefined ||
         (context.published.refusal === undefined &&
           (context.pending !== undefined || context.deferred !== undefined)))));
 

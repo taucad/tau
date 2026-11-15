@@ -18,6 +18,7 @@ import type { ProjectRuntimeLibrary } from '#runtime/project-runtime.js';
 import type { SessionRuntime } from '#services/sessions-store.js';
 import { oweWhileStoring, selectEditorRef } from '#runtime/project-runtime.js';
 import { waitFor } from 'xstate';
+import type { AnyActorRef } from 'xstate';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
 vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
@@ -182,12 +183,11 @@ describe("a session runtime's replacement flush (A6e)", () => {
     const storing = (state: string) => ({
       matches: (value: unknown) => JSON.stringify(value) === JSON.stringify({ ready: { storing: state } }),
     });
-    oweWhileStoring({
-      subscribe: ((next: typeof observer) => {
-        observer = next;
-        return { unsubscribe: () => undefined };
-      }) as never,
-    });
+    const subscribe = (next: typeof observer) => {
+      observer = next;
+      return { unsubscribe: () => undefined };
+    };
+    oweWhileStoring({ subscribe: subscribe as unknown as AnyActorRef['subscribe'] });
 
     observer?.next(storing('repairing'));
 

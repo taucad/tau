@@ -442,16 +442,22 @@ export type ProjectRuntime = Readonly<{
   replacePreviewParameterService: (service: ParameterSetService) => void;
 }>;
 
-/** Whether a project or editor store owes its file a write: one waits for its debounce or is on the wire (A7c). */
 /**
- * Owe the page a write while a project or editor store waits for its debounce or writes (A7c, D26 as amended), until
- * the store stops.
+ * Owe the page a write while a project or editor store waits for its debounce, writes, or repairs its manifest (A7c,
+ * D26 as amended), until the store stops.
+ *
+ * @param store - The project or editor store.
+ * @internal
  */
-const oweWhileStoring = (store: Pick<AnyActorRef, 'subscribe'>): void => {
+export const oweWhileStoring = (store: Pick<AnyActorRef, 'subscribe'>): void => {
   const owes = followOwedWrite();
   store.subscribe({
     next: (snapshot: Readonly<{ matches: (value: StateValue) => boolean }>) => {
-      owes(snapshot.matches({ ready: { storing: 'pending' } }) || snapshot.matches({ ready: { storing: 'writing' } }));
+      owes(
+        snapshot.matches({ ready: { storing: 'pending' } }) ||
+          snapshot.matches({ ready: { storing: 'writing' } }) ||
+          snapshot.matches({ ready: { storing: 'repairing' } }),
+      );
     },
     complete: () => {
       owes(false);

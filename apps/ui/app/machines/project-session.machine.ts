@@ -1203,7 +1203,10 @@ export const projectSessionMachine = setup({
                 ? { target: 'closingRuntime', context: { closeStep: undefined } }
                 : closeFailed({ context, event: { error: event.error } }, enq);
             },
-            /* A new file manager replaces the `revisions` child this step asked; the new one's client is asked again. */
+            /* A new file manager replaces the `revisions` child this step asked. The `fileManager` child reports the old
+             * one gone before the new one arrives, so the step re-enters with no client and the close goes on: the old
+             * child's teardown releases its client, and the worker's own release settles its sync (W13). A file manager
+             * swapped in one report re-asks the new child. */
             fileManagerChanged: (args, enq) => ({
               ...followFileManager(args, enq),
               target: 'flushing',

@@ -62,7 +62,7 @@ const idleStores = (order: string[]) => {
 };
 
 describe('sessionRuntimeWork — the close flush (A7c, S6)', () => {
-  it('should settle both stores for a close, leave the parameters open, and leave the cut to the sync step', async () => {
+  it('should settle both stores for a close and leave the parameters open', async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();

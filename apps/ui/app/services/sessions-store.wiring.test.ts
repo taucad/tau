@@ -76,7 +76,10 @@ type Harness = Readonly<{
   focusedProject: ReturnType<typeof observable<string | undefined>>;
   documentVisible: ReturnType<typeof observable<boolean>>;
   /** Each `revisions` child started, with its `sendBack`. */
-  revisions: Array<Started<SessionRevisionsInput> & Readonly<{ sendBack: (event: SessionRevisionsEmitted) => void }>>;
+  revisions: Array<
+    Started<SessionRevisionsInput> &
+      Readonly<{ sendBack: (event: SessionRevisionsEmitted) => void; received: string[] }>
+  >;
   /** Each `hostConnector` child started. */
   connectors: Array<Started<HostConnectorInput>>;
   /** Each root synchronisation opened, by the file manager it was opened for. */
@@ -99,6 +102,8 @@ const harness = (
     revisionsArrival?: Promise<void>;
     /** What each stopped `revisions` child's teardown does, as a row that throws from it does. */
     revisionsTeardown?: () => void;
+    /** The revision client leaves the session's `quiesce` unanswered (it answers at once otherwise). */
+    holdQuiesce?: boolean;
   }> = {},
 ): Harness => {
   const clock = new StepClock();
@@ -115,9 +120,17 @@ const harness = (
     createSessionRevisionsPorts,
     sessionRevisionsCallback:
       () =>
-      ({ input, sendBack }) => {
+      ({ input, sendBack, receive }) => {
         let stopped = false;
-        revisions.push({ input, sendBack, stopped: () => stopped });
+        const received: string[] = [];
+        /* The client hears the session's `quiesce`, and answers it unless the row holds it. */
+        receive((event) => {
+          received.push(event.type);
+          if (options.holdQuiesce !== true) {
+            sendBack({ type: 'syncQuiesced', requestId: event.requestId });
+          }
+        });
+        revisions.push({ input, sendBack, received, stopped: () => stopped });
         return () => {
           stopped = true;
           options.revisionsTeardown?.();
@@ -196,6 +209,16 @@ const harness = (
     loads,
   };
   return current;
+};
+
+/** Let the session's close steps answer one another: each step hands the next a microtask or two. */
+const settleSteps = async (): Promise<void> => {
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+  await flush();
+  await flush();
 };
 
 const sessionOf = (registry: Harness['registry']) => registry.getSnapshot().context.refs[projectId];
@@ -371,6 +394,26 @@ describe('the session rebuilds what it owns on a new file manager (A7b review)',
     revisions[1]?.sendBack({ type: 'revisionChatsChanged', ready: true });
     await flush();
     expect(opener.built[1]?.signals).toEqual(['retryEnsureFocusedChat']);
+  });
+
+  it('should go on with the close when the shared worker is replaced while the close quiesces (A7c review round 2)', async () => {
+    const worker = sharedWorkerOf(workerA);
+    const { registry, revisions } = harness({ worker: worker.port, holdQuiesce: true });
+    await open(registry);
+    const session = sessionOf(registry);
+    registry.send({ type: 'close', projectId, reason: 'user' });
+    await settleSteps();
+    expect(session?.getSnapshot().matches({ closing: 'flushing' })).toBe(true);
+    expect(revisions[0]?.received).toEqual(['quiesce']);
+
+    /* The old file manager is reported gone before the new one: the step finds no client, the old client is released
+     * by its child's teardown, and the close goes on rather than waiting on a quiesce nobody can answer. */
+    worker.set(workerB);
+    await settleSteps();
+    expect(revisions[0]?.stopped()).toBe(true);
+    expect(revisions.slice(1).every((child) => child.stopped())).toBe(true);
+    expect(session?.getSnapshot().matches('closed')).toBe(true);
+    expect(sessionOf(registry)).toBeUndefined();
   });
 
   it('S5: should park a runtime rebuilt while the session is parked', async () => {

@@ -737,7 +737,9 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision ho
     (text) => text.includes(marker),
     15_000,
   );
-  expect(stored, 'S26: the edit is in the stored file').toContain(marker);
+  /* Read, not asserted: inside `test.fails` a failing assertion here would pass the row. Row 5a asserts the stored edit
+   * (`editStored`); this reading says whether the cut had the edit's bytes to take. */
+  await annotate(`S26 stored edit before History: ${String(stored.includes(marker))}`);
   await target.click(revisionChip());
   const panel = selectors.getByCss(visibleRevisionsPanel);
   const trailerOf = () => panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });

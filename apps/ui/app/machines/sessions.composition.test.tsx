@@ -337,8 +337,8 @@ const StubProjectContext = createContext('');
 type StubProjectContextValue = Readonly<{
   parameterService: typeof parameterService;
   flushWorkbenchRecordProducers: () => Promise<void>;
-  projectRef: unknown;
-  editorRef: unknown;
+  projectRef: AnyActorRef;
+  editorRef: AnyActorRef;
 }>;
 /* A project's runtime close refusal, cleared by a row that leaves it behind: its stores report the error too, so the
  * session's next close flush (A7c) would refuse on it, as a real project in `runtimeCloseFailed` never stores again. */

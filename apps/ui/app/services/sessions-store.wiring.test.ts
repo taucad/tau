@@ -25,6 +25,7 @@ import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fix
 import type { SessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import type * as AppRuntimeFaults from '#runtime/app-runtime-faults.js';
 import { createSessionRevisionsPorts } from '#runtime/session-revisions.js';
 import type { SessionRevisionsEmitted, SessionRevisionsInput } from '#runtime/session-revisions.js';
 import type { HostConnectorInput } from '#runtime/host-connector.js';
@@ -32,7 +33,7 @@ import { projectSessionParkWindowMilliseconds } from '#machines/project-session.
 
 const faults = vi.hoisted(() => [] as unknown[]);
 vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('#runtime/app-runtime-faults.js')>()),
+  ...(await importOriginal<typeof AppRuntimeFaults>()),
   reportAppRuntimeFault: (error: unknown) => {
     faults.push(error);
   },

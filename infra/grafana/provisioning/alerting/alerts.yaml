@@ -1632,6 +1632,281 @@ groups:
           severity: warning
           service: tau-api
           component: email
+      - uid: api-email-complaint
+        title: 'P1: Email Marked as Spam'
+        condition: email_complaint_threshold
+        data:
+          - refId: email_complaint_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum by (kind) (count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.complained" | regexp `Resend event email[.]complained kind=(?P<kind>[a-z-]+)` [1h]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: email_complaint_logs
+          - refId: email_complaint_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: email_complaint_logs
+              refId: email_complaint_reduce
+          - refId: email_complaint_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: email_complaint_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: email_complaint_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/email-deliverability.md
+          summary: "The API logged `Resend event email.complained` in the last hour: a recipient marked Tau mail as spam and Resend suppressed the address. Resend's limit is one complaint in 1,250 sends, so each one deserves a look at this volume. The `kind` label names the mail: an invite means read that owner's invite volume, an identity kind means check for a sign-up flood, billing needs no action beyond the notice path. Follow the runbook's Complaint received section."
+        labels:
+          severity: warning
+          service: tau-api
+          component: email
+      - uid: api-email-bounce-rate
+        title: 'P1: Hard-Bounce Rate Above 2% (7 d)'
+        condition: email_bounce_rate_threshold
+        data:
+          - refId: email_bounce_rate_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: '(sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) / sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent" [7d])) > 0.02) and (sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) >= 5)'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: email_bounce_rate_logs
+          - refId: email_bounce_rate_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: email_bounce_rate_logs
+              refId: email_bounce_rate_reduce
+          - refId: email_bounce_rate_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: email_bounce_rate_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: email_bounce_rate_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/email-deliverability.md
+          summary: "Permanent bounces are above 2% of `email.sent` events over 7 days, with at least 5 bounces (the value is the ratio). 2% is half of Resend's limit: past 4% Resend may pause sending, which stops sign-up and password reset. Find the kind and whether the bounced addresses share a domain or pattern; a flood on verify-email is abuse, so tighten sign-up with the existing rate-limit levers. Follow the runbook's Bounce spike section."
+        labels:
+          severity: warning
+          service: tau-api
+          component: email
+      - uid: api-email-bounce-urgent
+        title: 'P1: Hard-Bounce Rate Above 4% (7 d, urgent)'
+        condition: email_bounce_urgent_threshold
+        data:
+          - refId: email_bounce_urgent_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: '(sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) / sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent" [7d])) > 0.04) and (sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) >= 10)'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: email_bounce_urgent_logs
+          - refId: email_bounce_urgent_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: email_bounce_urgent_logs
+              refId: email_bounce_urgent_reduce
+          - refId: email_bounce_urgent_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: email_bounce_urgent_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: email_bounce_urgent_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/email-deliverability.md
+          summary: "URGENT: permanent bounces are above 4% of `email.sent` events over 7 days, with at least 10 bounces (the value is the ratio). This is Resend's own limit; Resend may pause the account, which stops verification, magic-link and reset mail. Act now: find the kind and the source of the bad addresses, stop it (pause or tighten sign-up if verify-email is flooded), and read the Resend dashboard for a notice. If Resend has paused sending, declare an incident first. Follow the runbook's Bounce spike and Resend pauses sending sections."
+        labels:
+          severity: warning
+          service: tau-api
+          component: email
+      - uid: api-email-identity-undelivered
+        title: 'P1: Identity Email Suppressed or Failed'
+        condition: email_identity_threshold
+        data:
+          - refId: email_identity_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum by (type, kind) (count_over_time({service_name="tau-api"} | event_provider="app" |~ `Resend event email[.](suppressed|failed) kind=(verify-email|magic-link|reset-password|account-exists|password-changed)\b` | regexp `Resend event email[.](?P<type>[a-z_]+) kind=(?P<kind>[a-z-]+)` [1h]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: email_identity_logs
+          - refId: email_identity_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: email_identity_logs
+              refId: email_identity_reduce
+          - refId: email_identity_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: email_identity_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: email_identity_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/email-deliverability.md
+          summary: "Resend reported `email.suppressed` or `email.failed` for an identity email (verify-email, magic-link, reset-password, account-exists or password-changed) in the last hour: a person asked for a link and did not get it. Suppressed means the address is on Resend's suppression list after an earlier bounce or complaint; failed means Resend could not send it. Look the recipient up in Resend's suppressions and follow the runbook's A user says no email arrives section."
+        labels:
+          severity: warning
+          service: tau-api
+          component: email
+      - uid: api-email-webhook-silent
+        title: 'P1: Resend Webhook Silent'
+        condition: email_webhook_silent_threshold
+        data:
+          - refId: email_webhook_silent_logs
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: 'sum(count_over_time({service_name="tau-api"} | event_provider="app" |~ "Sent .* via Resend" [6h])) unless sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent" [6h]))'
+              intervalMs: 15000
+              maxDataPoints: 43200
+              queryType: range
+              refId: email_webhook_silent_logs
+          - refId: email_webhook_silent_reduce
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              reducer: last
+              expression: email_webhook_silent_logs
+              refId: email_webhook_silent_reduce
+          - refId: email_webhook_silent_threshold
+            queryType: ''
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: email_webhook_silent_reduce
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params:
+                      - 0
+                  operator:
+                    type: and
+              refId: email_webhook_silent_threshold
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          runbook_url: docs/handbooks/cloud/operate/email-deliverability.md
+          summary: "The API logged `Sent ... via Resend` in the last 6 h but no `Resend event email.sent` webhook event in the same window: Resend is not delivering events, or the API rejects them. Bounces and complaints are invisible until this is fixed, and the other email alerts cannot fire. Search the API logs for `Resend webhook rejected` (a wrong or rotated signing secret), then check the endpoint's delivery log in Resend; fix, re-enable and replay missed events from the dashboard. Do not recreate the endpoint by hand: it is a Terraform resource. Follow the runbook's Webhook failing or disabled section."
+        labels:
+          severity: warning
+          service: tau-api
+          component: email
       - uid: db-pooler-clients-high
         title: 'P1: Pooler Login Over Its Connection Budget'
         condition: db_pooler_clients_high

@@ -53,6 +53,7 @@ export {
   parseUnsignedIntegerString,
   rationalUnsignedIntegerStringSchema,
   signedIntegerStringSchema,
+  supplierModelIdSchema,
   unsignedIntegerStringSchema,
   wireBaseReceiptSchema,
   wireBalanceExplanationSchema,

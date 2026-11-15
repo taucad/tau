@@ -9,12 +9,14 @@ import {
   financialEnvironmentSchema,
   parseSignedIntegerString,
   signedIntegerStringSchema,
+  supplierModelIdSchema,
   unsignedIntegerStringSchema,
   wireBalanceExplanationSchema,
   wireBaseReceiptSchema,
   wireCorrectionReceiptSchema,
   wireCreditBalanceSchema,
   wireMeterItemSchema,
+  wireOpenHoldsSchema,
   wireOperationReceiptSchema,
   wireTokenSummarySchema,
   wireUsageQuerySchema,
@@ -515,5 +517,76 @@ describe('usage snapshot wires', () => {
     });
     expect(parsed.journalTotals?.byKind.map(({ kind }) => kind)).toEqual(['period_grant', 'plan_expiry']);
     expect(parsed.history?.items[0]?.kind).toBe('plan_expiry');
+  });
+});
+
+describe('supplier model id wires', () => {
+  /* Together names its models `<organization>/<model>`; the catalog row `together-kimi-k3.1-pro` bills this id. */
+  const together = { id: 'moonshotai/Kimi-K3.1-Pro', displayName: 'Kimi K3.1 Pro', providerId: 'together' };
+
+  it('should accept every financial identity and a namespaced supplier model id', () => {
+    for (const id of ['claude-opus-5-5', 'gpt-5.6-luna', 'gemini-3.5-flash', 'a:b_c', together.id, 'a/b/c']) {
+      expect(supplierModelIdSchema.parse(id)).toBe(id);
+    }
+  });
+
+  it.each([
+    ['an empty id', ''],
+    ['a leading slash', '/Kimi-K3.1-Pro'],
+    ['a trailing slash', 'moonshotai/'],
+    ['an empty segment', 'moonshotai//Kimi'],
+    ['whitespace', 'moonshotai/Kimi K3'],
+    ['a control character', 'moonshotai/Kimi\n'],
+    ['a query delimiter', 'moonshotai/Kimi?x=1'],
+    ['an over-long id', `a/${'b'.repeat(127)}`],
+  ])('should refuse %s as a supplier model id', (_name, id) => {
+    expect(supplierModelIdSchema.safeParse(id).success).toBe(false);
+  });
+
+  it('should carry a Together model id through a receipt, an open hold, a usage filter and a model group', () => {
+    const receipt = { ...baseReceipt, model: together };
+    const togetherQuery = { ...query, models: [together.id] };
+    const snapshot = {
+      ...identity,
+      snapshotRevision: '2',
+      asOf: '2026-09-05T00:00:04.000Z',
+      query: togetherQuery,
+      coverage: {
+        historyStart: baseReceipt.usageOccurredAt,
+        legacyBefore: null,
+        complete: true,
+        detailComplete: true,
+        excludedUnknownTimeCount: '0',
+      },
+      availability: { state: 'available', reason: null },
+      totals,
+      rows: { items: [receipt], nextCursor: null, complete: true },
+      models: {
+        items: [{ modelId: together.id, modelDisplayName: together.displayName, ...totals }],
+        nextCursor: null,
+        complete: true,
+      },
+    };
+    const holds = {
+      environment: 'development',
+      ownerId: 'owner-1',
+      holds: [
+        {
+          operationId: 'operation-1',
+          model: together,
+          heldCreditAtoms: '1',
+          admittedAt: '2026-09-05T00:00:00.000Z',
+          dueAt: '2026-09-05T00:00:30.000Z',
+          releaseAfter: '2026-09-05T00:01:30.000Z',
+          dispatchState: 'accepted',
+          customerState: 'pending',
+        },
+      ],
+    };
+
+    expect(wireBaseReceiptSchema.parse(receipt)).toEqual(receipt);
+    expect(wireUsageQuerySchema.parse(togetherQuery)).toEqual(togetherQuery);
+    expect(wireUsageSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(wireOpenHoldsSchema.parse(holds)).toEqual(holds);
   });
 });

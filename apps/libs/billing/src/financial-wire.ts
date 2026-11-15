@@ -17,6 +17,21 @@ export const financialIdentitySchema = z
   .min(1)
   .max(128)
   .regex(/^[A-Za-z0-9._:-]+$/u);
+/**
+ * A supplier's own model id, as billing records it on an operation and reports it back.
+ *
+ * It is not a financial identity: meter, rate, SKU and route identities derive from the catalog
+ * route id and stay in `financialIdentitySchema`. Suppliers namespace some ids (Together's
+ * `moonshotai/Kimi-K3.1-Pro`), so this admits `/`-separated non-empty segments of the identity
+ * class, a strict superset that keeps every id recorded before it valid.
+ *
+ * @public
+ */
+export const supplierModelIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9._:-]+(?:\/[A-Za-z0-9._:-]+)*$/u);
 /** Canonical signed 64-bit integer string used by credit-atom wires. @public */
 export const signedIntegerStringSchema = boundedInteger(true, maxAtomDigits).refine((value) => {
   if (value.length > maxAtomDigits + 1 || !signedPattern.test(value)) {
@@ -114,7 +129,7 @@ const identityEnvelope = {
 };
 const historicalModelSchema = z
   .object({
-    id: financialIdentitySchema,
+    id: supplierModelIdSchema,
     displayName: z.string().min(1).max(128).nullable(),
     providerId: financialIdentitySchema.nullable(),
   })
@@ -379,7 +394,7 @@ export const wireUsageQuerySchema = z
     fromDate: calendarDateSchema.nullable(),
     toDate: calendarDateSchema.nullable(),
     timeZone: z.string().min(1).max(128),
-    models: z.array(financialIdentitySchema).max(32),
+    models: z.array(supplierModelIdSchema).max(32),
     activities: z.array(financialActivityKindSchema).max(32),
     projects: z.array(hintSchema).max(32),
   })
@@ -468,7 +483,7 @@ export const wireUsageDayPageSchema = page(
 export const wireUsageModelPageSchema = page(
   z
     .object({
-      modelId: financialIdentitySchema,
+      modelId: supplierModelIdSchema,
       modelDisplayName: z.string().min(1).max(128).nullable(),
       ...groupedTotals,
     })

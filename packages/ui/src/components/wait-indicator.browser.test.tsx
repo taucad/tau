@@ -333,16 +333,18 @@ it('should hold a wait that settled before any frame drew its reveal 500 ms from
   ).toBeGreaterThanOrEqual(500 - oneFrame);
 });
 
-it('should not serve the minimum again when a wait takes over an indicator the server-rendered page revealed', async () => {
+it('should hold words the server-rendered page revealed for their minimum through a takeover', async () => {
   /* Before hydration the reveal runs on CSS alone, so no handler sees it start. A wait that takes over after
-     hydration keeps words that are already on screen; their minimum runs from the reveal, not from the takeover. */
+     hydration keeps the words on screen, and cannot tell a reveal drawn before hydration from one no frame drew: it
+     serves the minimum from its own frame, which holds the words longer, never shorter. */
   const startedAt = Number(document.timeline.currentTime);
   document.documentElement.style.setProperty('--wait-offset', `${-startedAt}ms`);
   const element = <WaitIndicator active label='Loading history' startedAt={startedAt} />;
   const container = document.createElement('div');
   container.innerHTML = renderToString(element);
   document.body.append(container);
-  const shownAt = await frameAtOrAfter(startedAt + 1000);
+  await nextFrame();
+  const shownAt = await effectTime('wait-reveal');
   await frameAtOrAfter(shownAt + 100);
   const root = hydrateRoot(container, element);
   try {
@@ -364,7 +366,8 @@ it('should not serve the minimum again when a wait takes over an indicator the s
     expect(find('wait-indicator').dataset['state'], 'the takeover kept the words').toBe('holding');
     const concealedAt = await effectTime('wait-conceal');
     expect(concealedAt - shownAt, 'the words hold their minimum').toBeGreaterThanOrEqual(499);
-    expect(concealedAt - shownAt, 'the takeover served the minimum again from its own frame').toBeLessThan(534);
+    /* The takeover's entrance reports itself a few frames after the takeover commits. */
+    expect(concealedAt - takenOverAt, 'the takeover held past its own minimum').toBeLessThan(500 + 100);
   } finally {
     root.unmount();
     container.remove();

@@ -19,6 +19,8 @@
  * - the facts a policy close relies on go to the session (`revisionState`) and to the chat store (row S3);
  * - whether the chats have arrived goes to the session (`revisionChatsChanged`), whose `project` child retries a
  *   deferred focused chat (row S1);
+ * - whether the file check has settled goes to the session (`fileCheckChanged`, A14): a status is published and the model
+ *   is not checking its files, or a Tau Cloud open is still owed, whose own placeholder speaks;
  * - while the project is focused, the workbench follows the selected checkout's route (row S23).
  *
  * The client is the project's one client (`getRevisionClient`), looked up again only when the file manager's worker
@@ -54,6 +56,8 @@ import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { isRecordingEditorConflict, subscribeEditorConflictRecords } from '#lib/editor-document-session.js';
 import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
+import { isFileCheckSettled } from '#hooks/use-project-availability.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
@@ -100,6 +104,12 @@ export type SessionRevisionsRecordingPort = Readonly<{
   subscribe: (listener: () => void) => () => void;
 }>;
 
+/** Whether a Tau Cloud open is still owed for a project (its intent is `open`): its value, and its changes. */
+export type SessionRevisionsCloudOpenPort = Readonly<{
+  get: (projectId: string) => boolean;
+  subscribe: (listener: () => void) => () => void;
+}>;
+
 /** What the session's composition supplies: the parts of the ports that are not module stores. */
 export type SessionRevisionsWiring = Readonly<{
   closeCut: SessionRevisionsCloseCutPort;
@@ -116,6 +126,8 @@ export type SessionRevisionsPorts = SessionRevisionsWiring &
     anonymity: SessionRevisionsAnonymityPort;
     salt: SessionRevisionsSaltPort;
     recording: SessionRevisionsRecordingPort;
+    /** Whether a Tau Cloud open is still owed (A14): the file check then defers to the open's own placeholder. */
+    cloudOpen: SessionRevisionsCloudOpenPort;
     /** Where a failure in a teardown goes, so the session is not faulted by a cleanup (D23). */
     reportFault: (error: unknown) => void;
   }>;
@@ -140,6 +152,7 @@ export type SessionRevisionsEvent = Readonly<{ type: 'quiesce'; requestId: strin
 export type SessionRevisionsEmitted =
   | Readonly<{ type: 'revisionState'; dirty: boolean; pushed: boolean; recording: boolean; pendingCount: number }>
   | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>
+  | Readonly<{ type: 'fileCheckChanged'; settled: boolean; judged: boolean }>
   /** The answer to `quiesce`, with the refusal's message if the client refused (A7c). */
   | Readonly<{ type: 'syncQuiesced'; requestId: string; error?: string }>;
 
@@ -184,6 +197,7 @@ export const createSessionRevisionsPorts = (
   anonymity: { get: getAnonymousRevisions, subscribe: subscribeAnonymousRevisions },
   salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
   recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
+  cloudOpen: { get: (projectId) => tauCloudIntent.get(projectId) === 'open', subscribe: tauCloudIntent.subscribe },
 });
 
 /**
@@ -356,8 +370,27 @@ export const sessionRevisionsCallback =
      */
     let relayedFor: Readonly<{ status: RevisionStatusProjection; recording: boolean }> | undefined;
     let chatsReady = false;
+    /* A14: the file check, told on its first word and on each change after it. The session starts this client's
+     * check as pending; the first word always goes out, so a word the session got from before cannot stand. */
+    let fileCheckSettled: boolean | undefined;
+    /* Whether the check has judged one of this client's statuses: one published while no Tau Cloud open was owed. Until
+     * then a check that starts is still the client's first, which the open waits for (I20); after it, a later one. */
+    let hasJudged = false;
+    const relayFileCheck = (status: RevisionStatusProjection | undefined): void => {
+      /* Read on each word, as the view's hook reads it on each render: another tab can end the open with no signal here. */
+      const isCloudOpen = ports.cloudOpen.get(projectId);
+      const settled = isFileCheckSettled(status, isCloudOpen);
+      if (settled !== fileCheckSettled) {
+        fileCheckSettled = settled;
+        sendBack({ type: 'fileCheckChanged', settled, judged: hasJudged });
+      }
+      if (status !== undefined && !isCloudOpen) {
+        hasJudged = true;
+      }
+    };
     const relayFacts = (): void => {
       const status = client?.status();
+      relayFileCheck(status);
       const ready = status?.sync.chats === 'ready';
       /* S1: the session's `project` child retries a deferred focused chat once the chats arrive. */
       if (ready !== chatsReady) {
@@ -543,6 +576,7 @@ export const sessionRevisionsCallback =
     let unsubscribeSalt: (() => void) | undefined;
     let unsubscribeFocus: (() => void) | undefined;
     let unsubscribeRecording: (() => void) | undefined;
+    let unsubscribeCloudOpen: (() => void) | undefined;
     const stop = (): void => {
       stopped = true;
       if (checkoutLive !== undefined) {
@@ -556,6 +590,7 @@ export const sessionRevisionsCallback =
           unsubscribeSalt,
           unsubscribeFocus,
           unsubscribeRecording,
+          unsubscribeCloudOpen,
           unregisterCut,
           releaseClient,
         ],
@@ -565,6 +600,8 @@ export const sessionRevisionsCallback =
 
     try {
       followWorker();
+      /* A14: the first word, even with no client yet: a Tau Cloud open still owed is settled at once. */
+      relayFileCheck(client?.status());
       unregisterCut = ports.closeCut.register(closeCut);
       requestSalt();
 
@@ -615,6 +652,9 @@ export const sessionRevisionsCallback =
         }
         recording = next;
         relayFacts();
+      });
+      unsubscribeCloudOpen = ports.cloudOpen.subscribe(() => {
+        relayFileCheck(client?.status());
       });
     } catch (error) {
       stop();

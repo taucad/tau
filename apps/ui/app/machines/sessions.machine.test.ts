@@ -115,8 +115,10 @@ const harness = (options?: {
     });
     return () => undefined;
   });
-  /* The revisions stand-in answers `quiesce` once the test's sync flush settles. */
+  /* The revisions stand-in reports its first file check settled (A14), and answers `quiesce` once the test's sync
+   * flush settles. */
   const revisionsChild = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack, receive }) => {
+    sendBack({ type: 'fileCheckChanged', settled: true, judged: true });
     receive((received) => {
       const event = received as Command;
       if (event.type !== 'quiesce') {

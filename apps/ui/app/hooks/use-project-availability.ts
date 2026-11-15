@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import { reachesReadiness } from '@taucad/revisions';
+import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
+import { useSessions } from '#hooks/use-sessions.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
@@ -96,6 +98,40 @@ export function modelAvailability(
     return readiness === undefined || readyFor('model', readiness) ? 'ready' : 'filesChecking';
   }
   return largeObjects.phase === 'failed' ? 'filesFailed' : 'files';
+}
+
+/**
+ * Whether a project's file check has settled, as its session reports it (A14; U13, U20): its revision client has
+ * published a status, and the model is not checking its files. Until then the session is `pending` and focus's open
+ * waits, up to its bound, so the viewer is not shown and then withdrawn for the check that follows.
+ *
+ * A Tau Cloud open that is still owed is not a file check: its project placeholder speaks, as it does today.
+ *
+ * @param status - The revision client's published status, `undefined` until its first.
+ * @param isCloudOpenPending - Whether a Tau Cloud open is still owed for the project (its intent is `open`).
+ * @returns `true` once the check has settled.
+ */
+export function isFileCheckSettled(status: RevisionStatusProjection | undefined, isCloudOpenPending: boolean): boolean {
+  /* Checked first: before its first status the open's placeholder ("Connecting to Tau Cloud") speaks, as on main. */
+  if (isCloudOpenPending) {
+    return true;
+  }
+  if (status === undefined) {
+    return false;
+  }
+  return (
+    modelAvailability(projectAvailability(isCloudOpenPending, status), status.largeObjects, status.readiness) !==
+    'filesChecking'
+  );
+}
+
+/**
+ * Whether the focused project's file check has outlasted its patience, as its session reports it (A14): the
+ * "Preparing model" view then offers "Try again".
+ */
+export function useFileCheckSlow(): boolean {
+  const { projectId } = useProject();
+  return useSelector(useSessions(), (state) => state.context.status[projectId]?.availability === 'slow');
 }
 
 /** Shared readiness for the viewer, export and the other kernel surfaces. */

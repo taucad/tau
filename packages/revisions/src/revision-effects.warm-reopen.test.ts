@@ -195,7 +195,7 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
       identity: testIdentity,
       port,
       projectId: 'project-1',
-      filesystem: async (checkout) => (checkout?.kind === 'linked' ? linkedView(checkout.id) : counted),
+      filesystem: async (checkout) => (checkout.kind === 'linked' ? linkedView(checkout.id) : counted),
       onLargeObjects: (report) => {
         reports.push(report);
         answered();

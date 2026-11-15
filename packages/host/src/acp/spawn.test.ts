@@ -232,3 +232,74 @@ describe.skipIf(process.platform === 'win32')('the pinned Claude adapter', () =>
     expect(adapter.stderr()).not.toContain('native binary not found');
   }, 30_000);
 });
+
+describe.skipIf(process.platform === 'win32')('spawnAcpAdapter with a versioned fallback', () => {
+  /**
+   * A home holding one versioned tool that runs the fake agent, as a vendor app bundles its CLI.
+   *
+   * @param root - Home directory.
+   * @param version - Version directory to create.
+   * @returns The tool's absolute path.
+   */
+  const bundledTool = async (root: string, version: string): Promise<string> => {
+    const file = join(root, 'Vendor', version, 'bin', 'tool');
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, `#!/bin/sh\nexec '${process.execPath}' "$@"\n`);
+    await chmod(file, 0o755);
+    return file;
+  };
+
+  const versionedAdapter = (executablePath: string): AcpAdapter => ({
+    id: 'grok',
+    displayName: 'Grok Build',
+    cli: 'tool',
+    args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+    configEnv: [],
+    fallbackExecutables: { [process.platform]: ['~/Vendor/*/bin/tool'] },
+    executablePath,
+    executableSource: 'fallback',
+  });
+
+  it('should locate a vanished * fallback again before it spawns', async () => {
+    const root = await branch();
+    const stale = await bundledTool(root, '1.0.0');
+    await rm(join(root, 'Vendor', '1.0.0'), { recursive: true });
+    const current = await bundledTool(root, '1.1.0');
+
+    const adapter = spawnAcpAdapter({
+      adapter: versionedAdapter(stale),
+      cwd: root,
+      environment: { PATH: '/usr/bin:/bin', HOME: root },
+    });
+    spawned.push(adapter);
+    /* oxlint-disable-next-line typescript/no-deprecated -- the same long-lived connection the run uses. */
+    const connection = new ClientSideConnection(
+      () => ({ sessionUpdate: () => undefined, requestPermission: () => ({ outcome: { outcome: 'cancelled' } }) }),
+      adapter.stream,
+    );
+
+    expect(adapter.child.spawnfile).toBe(current);
+    await expect(
+      connection.initialize({
+        protocolVersion: 1,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+      }),
+    ).resolves.toMatchObject({ protocolVersion: 1 });
+  }, 30_000);
+
+  it('should throw CLI_NOT_FOUND, spawning nothing, when the fallback is gone and nothing replaces it', async () => {
+    const root = await branch();
+    const stale = await bundledTool(root, '1.0.0');
+    await rm(join(root, 'Vendor'), { recursive: true });
+
+    const spawnGone = (): unknown =>
+      spawnAcpAdapter({
+        adapter: versionedAdapter(stale),
+        cwd: root,
+        environment: { PATH: '/usr/bin:/bin', HOME: root },
+      });
+
+    expect(spawnGone).toThrow(/is gone\. The tool CLI was not found on PATH/u);
+    expect(spawnGone).toThrow(expect.objectContaining({ code: 'CLI_NOT_FOUND' }));
+  });
+});

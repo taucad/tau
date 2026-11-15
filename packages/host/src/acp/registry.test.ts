@@ -8,7 +8,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   acpAdapterOverrideVariable,
@@ -19,6 +19,8 @@ import {
   probeAcpAgents,
   resolveAcpAdapters,
 } from '#acp/registry.js';
+import { acpLocalFileSystem } from '#acp/locate.js';
+import type { AcpExecutableFileSystem } from '#acp/locate.js';
 import { acpAdapterEnvironment } from '#acp/spawn.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
@@ -120,6 +122,18 @@ const stubCliDirectory = async (versions: Readonly<Record<string, string>>): Pro
   return directory;
 };
 
+/**
+ * The real file system, confined to one directory, so a CLI installed on the
+ * machine running the suite never answers for a stub.
+ *
+ * @param root - The only directory whose files exist.
+ * @returns The probe resolution reads.
+ */
+const confinedTo = (root: string): AcpExecutableFileSystem => ({
+  isExecutableFile: (path) => path.startsWith(root) && acpLocalFileSystem.isExecutableFile(path),
+  listDirectory: (path) => (path.startsWith(root) ? acpLocalFileSystem.listDirectory(path) : []),
+});
+
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 describe.skipIf(process.platform === 'win32')('executable resolution', () => {
   const resolveFrom = new URL('../../../cli/src/commands/serve.ts', import.meta.url).href;
@@ -164,20 +178,25 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     expect(probed.refused[0]?.message).toContain('2.1.232');
   });
 
-  it('leaves the executable unset when PATH has no such CLI, so the probe refuses it', async () => {
-    const environment = { PATH: await stubCliDirectory({}) };
+  it('leaves the executable unset when no such CLI exists, so the probe refuses it without running anything', async () => {
+    const home = await stubCliDirectory({});
+    const environment = { PATH: home, HOME: home };
+    const fileSystem = confinedTo(home);
     const discovery = resolveAcpAdapters({
       resolveFrom,
       pins: acpAgentProfiles.filter((profile) => profile.id === 'claude'),
       environment,
+      fileSystem,
     });
 
     expect(discovery.agents[0]?.executablePath).toBeUndefined();
+    expect(discovery.agents[0]?.executableSource).toBeUndefined();
     expect(acpAdapterEnvironment(environment, discovery.agents[0] ?? { configEnv: [] })).not.toHaveProperty(
       'CLAUDE_CODE_EXECUTABLE',
     );
-    const probed = await probeAcpAgents(discovery, { environment });
+    const probed = await probeAcpAgents(discovery, { environment, fileSystem });
     expect(probed.refused).toEqual([expect.objectContaining({ id: 'claude', code: 'CLI_NOT_FOUND' })]);
+    expect(probed.refused[0]?.message).toMatch(/not found on PATH \(1 directory\) or at \d+ declared locations?\./u);
   });
 
   describe('app-bundled Codex', () => {
@@ -200,18 +219,28 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
       return { home, bundled };
     };
 
-    it('declares the ChatGPT desktop app bundle, system-wide before per-user, on macOS only', () => {
-      expect(codexProfiles[0]?.fallbackExecutables).toEqual({
-        darwin: [`/${chatGptCodex}`, `~/${chatGptCodex}`],
-      });
+    it('declares the ChatGPT desktop app bundle after the installer and Homebrew, system-wide before per-user', () => {
+      expect(codexProfiles[0]?.fallbackExecutables.darwin).toEqual([
+        '~/.local/bin/codex',
+        '/opt/homebrew/bin/codex',
+        '/usr/local/bin/codex',
+        `/${chatGptCodex}`,
+        `~/${chatGptCodex}`,
+      ]);
     });
 
     it('finds the Codex the ChatGPT desktop app bundles when PATH has none, and runs that file', async () => {
       const { home, bundled } = await bundledCodexHome('0.164.0-alpha.11.1');
       const environment = { PATH: await stubCliDirectory({}), HOME: home };
-      const discovery = resolveAcpAdapters({ resolveFrom, pins: codexProfiles, environment, platform: 'darwin' });
+      const discovery = resolveAcpAdapters({
+        resolveFrom,
+        pins: codexProfiles,
+        environment,
+        platform: 'darwin',
+        fileSystem: confinedTo(home),
+      });
 
-      expect(discovery.agents[0]?.executablePath).toBe(bundled);
+      expect(discovery.agents[0]).toMatchObject({ executablePath: bundled, executableSource: 'fallback' });
       expect(acpAdapterEnvironment(environment, discovery.agents[0] ?? { configEnv: [] })).toMatchObject({
         CODEX_PATH: bundled,
       });
@@ -228,6 +257,8 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
         pins: codexProfiles,
         environment: { PATH: directory, HOME: home },
         platform: 'darwin',
+        /* The PATH stub and the home are siblings in the temporary directory. */
+        fileSystem: confinedTo(tmpdir()),
       });
 
       expect(discovery.agents[0]?.executablePath).toBe(join(directory, 'codex'));
@@ -236,7 +267,13 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     it('still refuses a bundled Codex older than the adapter drives', async () => {
       const { home } = await bundledCodexHome('0.140.0');
       const environment = { PATH: await stubCliDirectory({}), HOME: home };
-      const discovery = resolveAcpAdapters({ resolveFrom, pins: codexProfiles, environment, platform: 'darwin' });
+      const discovery = resolveAcpAdapters({
+        resolveFrom,
+        pins: codexProfiles,
+        environment,
+        platform: 'darwin',
+        fileSystem: confinedTo(home),
+      });
       const probed = await probeAcpAgents(discovery, { environment });
 
       expect(probed.agents).toEqual([]);
@@ -247,10 +284,17 @@ describe.skipIf(process.platform === 'win32')('executable resolution', () => {
     it('ignores the macOS bundle paths on other platforms', async () => {
       const { home } = await bundledCodexHome('0.164.0');
       const environment = { PATH: await stubCliDirectory({}), HOME: home };
-      const discovery = resolveAcpAdapters({ resolveFrom, pins: codexProfiles, environment, platform: 'linux' });
+      const fileSystem = confinedTo(home);
+      const discovery = resolveAcpAdapters({
+        resolveFrom,
+        pins: codexProfiles,
+        environment,
+        platform: 'linux',
+        fileSystem,
+      });
 
       expect(discovery.agents[0]?.executablePath).toBeUndefined();
-      const probed = await probeAcpAgents(discovery, { environment });
+      const probed = await probeAcpAgents(discovery, { environment, platform: 'linux', fileSystem });
       expect(probed.refused).toEqual([expect.objectContaining({ id: 'codex', code: 'CLI_NOT_FOUND' })]);
     });
   });
@@ -388,6 +432,35 @@ describe('discoverAcpAgents', () => {
   });
 });
 
+describe.skipIf(process.platform === 'win32')('discoverAcpAgents for a CLI that did not resolve', () => {
+  it('should not start the model probe', async () => {
+    /* The model probe spawns with this process's environment, so a stub on
+     * this process's PATH records whether it was started even though
+     * discovery's own PATH has no such CLI. */
+    const directory = await stubCliDirectory({});
+    const marker = join(directory, 'model-probe-started');
+    const stub = join(directory, 'tau-unresolved-cli');
+    await writeFile(stub, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+    await chmod(stub, 0o755);
+    vi.stubEnv('PATH', `${directory}:${process.env['PATH'] ?? ''}`);
+    try {
+      const discovery = await discoverAcpAgents({
+        resolveFrom: import.meta.url,
+        pins: [{ id: 'ghost', displayName: 'Ghost', cli: 'tau-unresolved-cli', args: ['acp'], configEnv: [] }],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+        environment: { PATH: await stubCliDirectory({}), HOME: directory },
+        fileSystem: confinedTo(directory),
+        modelProbeTimeout: 2000,
+      });
+
+      expect(discovery.refused).toEqual([expect.objectContaining({ id: 'ghost', code: 'CLI_NOT_FOUND' })]);
+      await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe('externalAgentDescriptors', () => {
   it('is the one shape every tier carries, refusals included', async () => {
     const discovery = await discoverAcpAgents({
@@ -416,6 +489,9 @@ describe('externalAgentDescriptors', () => {
        * and it is named from the profile because resolution knew about it. */
       { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
     ]);
+    /* ACP agent policy rule 9: the profile's update command clears CLI_TOO_OLD. */
+    expect(descriptors[1]).toHaveProperty('fixCommand', 'claude update');
+    expect(descriptors[0]).not.toHaveProperty('fixCommand');
     expect(descriptors[0]?.thoughtLevel?.currentValue).toBe('medium');
     expect(descriptors[0]?.configOptions?.map((option) => option.id)).toEqual(['mode', 'web_search']);
     /* VSC1: every tier parses exactly this — no string element, no extra key. */

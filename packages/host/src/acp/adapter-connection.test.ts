@@ -1,11 +1,13 @@
 import { ChildProcess } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createActor, setup, types } from 'xstate';
+import { createActor, createAsyncLogic, setup, types } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { childEventSchemas } from '#acp/acp-machine-schemas.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 import { describe, expect, it, vi } from 'vitest';
-import { flush } from '@taucad/xstate-testing/clock';
+import { StepClock, flush } from '@taucad/xstate-testing/clock';
+import { createFakeCallbackActors, createFakeParent } from '@taucad/xstate-testing/fakes';
+import { acpSessionMachine } from '#acp/acp-session.machine.js';
 import { createAdapterConnection } from '#acp/adapter-connection.js';
 import { spawnAcpAdapter } from '#acp/spawn.js';
 import { grokPermissionNotification } from '#acp/grok-controls.js';
@@ -86,6 +88,66 @@ describe('ACP adapter connection', () => {
       expect(events.filter((event) => event.type === 'adapterExited')).toHaveLength(1);
     } finally {
       parent.stop();
+    }
+  });
+
+  it('should fail the session with CLI_NOT_FOUND, without looping, when the CLI is gone at spawn', async () => {
+    const gone = Object.assign(new Error('/Applications/Fake.app/fake is gone. The fake CLI was not found.'), {
+      code: 'CLI_NOT_FOUND',
+    });
+    vi.mocked(spawnAcpAdapter).mockImplementation(() => {
+      throw gone;
+    });
+    const parent = createFakeParent();
+    const fakes = createFakeCallbackActors();
+    const actor = createActor(
+      acpSessionMachine.provide({
+        actors: {
+          adapterConnection: createAdapterConnection(),
+          lentTurn: fakes.actor('lentTurn'),
+          publishSkills: createAsyncLogic<readonly string[], undefined>({ run: async () => [] }),
+          persistPresentation: createAsyncLogic<void, unknown>({ run: async () => undefined }),
+        },
+      }),
+      {
+        input: {
+          key: 'fake:chat-1',
+          parentRef: parent.ref,
+          opening: {
+            adapter: {
+              id: 'fake',
+              displayName: 'Fake',
+              configEnv: [],
+              cli: 'fake',
+              args: ['acp'],
+              executablePath: '/Applications/Fake.app/fake',
+              executableSource: 'fallback',
+            },
+            cwd: '/work',
+            mcpServers: [],
+            sessionMessageId: 'session-message',
+            sessionCommitted: false,
+            notices: true,
+          },
+          lend: { requestId: 'run-1:0', prompt: { fresh: [{ type: 'text', text: 'hi' }] } },
+        },
+        clock: new StepClock(),
+      },
+    );
+    try {
+      actor.start();
+      await flush();
+      expect(actor.getSnapshot().status).toBe('done');
+      expect(parent.events).toMatchObject([
+        {
+          type: 'turnEnded',
+          resting: false,
+          outcome: { ok: false, failure: { code: 'CLI_NOT_FOUND', message: gone.message } },
+        },
+        { type: 'closed', failure: { code: 'CLI_NOT_FOUND', message: gone.message } },
+      ]);
+    } finally {
+      actor.stop();
     }
   });
 });

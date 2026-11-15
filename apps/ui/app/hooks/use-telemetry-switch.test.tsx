@@ -116,11 +116,11 @@ describe('useTelemetrySwitch', () => {
     expect(onConsentInputsChanged).toHaveBeenCalledWith(expect.objectContaining({ updatePending: true }));
   });
 
-  it('should disclose the producers the switch does not stop yet', () => {
+  it('should disclose no legacy producer once PR-7 has brought them under the switch', () => {
     const { result } = renderHook(() => useTelemetrySwitch());
 
     const details = result.current.details.join(' ');
-    expect(details).toMatch(/may still be sent while this is off/u);
+    expect(details).not.toMatch(/may still be sent while this is off/u);
     expect(details).toMatch(/tau telemetry off/u);
   });
 });

@@ -55,6 +55,7 @@ const compose = () => {
     }),
     loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
     registerCloseCut: () => () => undefined,
+    registerProducer: () => () => undefined,
     focusedProject: { get: () => undefined, subscribe: () => () => undefined },
     documentVisible: { get: () => true, subscribe: () => () => undefined },
     chatSessions: {

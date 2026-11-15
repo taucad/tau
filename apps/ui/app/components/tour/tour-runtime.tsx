@@ -7,7 +7,6 @@
 import { Fragment, useCallback, useRef, useState } from 'react';
 import { Compass, X } from 'lucide-react';
 import { useActorRef, useSelector } from '@xstate/react';
-import { resolveCameraMapping } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { effectivePreset } from '@taucad/preferences';
 import { Button } from '@taucad/ui/components/button';
 import { CoachMark } from '@taucad/ui/components/coach-mark';
@@ -47,7 +46,6 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { selectTourTip, tourMachine } from '#machines/tour.machine.js';
 import type { TourTip } from '#machines/tour.machine.js';
 import { personRecordStores, deviceRecordStore } from '#preferences/person-record.store.js';
-import { useDeviceRecord } from '#preferences/use-device-record.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
@@ -173,7 +171,6 @@ const useShowMe = (
 
 function TourTipCard({ tip, arrival, hasTestRun, registry, send, fillComposer }: TourTipCardProps): React.JSX.Element {
   const { profile, viewer } = usePersonRecord();
-  const { device } = useDeviceRecord();
   const isViewerControlsEnabled = useFeature('viewerControls');
   const { open: openSettings } = useSettingsDialog();
   const isNarrow = useIsMobile();
@@ -187,7 +184,7 @@ function TourTipCard({ tip, arrival, hasTestRun, registry, send, fillComposer }:
     mode: tip.mode,
     arrival,
     goals: profile.goals,
-    mapping: resolveCameraMapping({ preset: effectivePreset(viewer, profile), inputDevice: device.inputDevice }),
+    mapping: effectivePreset(viewer, profile),
     gizmo: gizmoChoice(viewer, profile),
     formats,
     host: isDesktopTarget() ? 'desktop' : 'browser',

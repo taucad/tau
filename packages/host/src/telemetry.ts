@@ -33,7 +33,7 @@ export type {
   TauTokenRead,
 } from '@taucad/telemetry/node-host';
 export { nodeTelemetryPreference, telemetryConfigFileName } from '@taucad/telemetry/node';
-export type { PreparationStateInput } from '@taucad/telemetry/client';
+export type { PreparationStateInput, ReportingConsent } from '@taucad/telemetry/client';
 export type { TelemetryPreference, TelemetryPreferenceSource } from '@taucad/telemetry/node';
 /* oxlint-enable no-barrel-files/no-barrel-files -- end of the re-exports */
 

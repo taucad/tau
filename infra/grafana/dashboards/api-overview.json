@@ -326,6 +326,179 @@
       ],
       "fieldConfig": { "defaults": { "unit": "none" } },
       "id": 17
+    },
+    {
+      "title": "Email delivery (Resend events)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 142
+      },
+      "panels": [],
+      "id": 18
+    },
+    {
+      "title": "Resend Events by Type",
+      "type": "timeseries",
+      "description": "Verified Resend webhook events by type: sent, delivered, bounced, complained, suppressed, failed and delayed. Sent counts from email.sent, the denominator of the hard-bounce alerts.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 143
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (type) (count_over_time({service_name=~\"$service\"} | event_provider=\"app\" |= \"Resend event email.\" | regexp `Resend event email[.](?P<type>[a-z_]+)` [$__interval]))",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "id": 19
+    },
+    {
+      "title": "Bounces by Type",
+      "type": "timeseries",
+      "description": "email.bounced events by Resend bounce type. Permanent bounces feed the hard-bounce rate alerts (2% and 4% over 7 days).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (bounce_type) (count_over_time({service_name=~\"$service\"} | event_provider=\"app\" |= \"Resend event email.bounced\" | regexp `bounce_type=(?P<bounce_type>[A-Za-z]+)` [$__interval]))",
+          "legendFormat": "{{bounce_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "id": 20
+    },
+    {
+      "title": "Complaints by Kind",
+      "type": "timeseries",
+      "description": "email.complained events (a recipient marked the mail as spam) by email kind. Any complaint fires api-email-complaint.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 151
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (kind) (count_over_time({service_name=~\"$service\"} | event_provider=\"app\" |= \"Resend event email.complained\" | regexp `Resend event email[.]complained kind=(?P<kind>[a-z-]+)` [$__interval]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "id": 21
+    },
+    {
+      "title": "Suppressed by Kind",
+      "type": "timeseries",
+      "description": "email.suppressed events (Resend refused to send to an address on its suppression list) by email kind. An identity kind fires api-email-identity-undelivered.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 151
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (kind) (count_over_time({service_name=~\"$service\"} | event_provider=\"app\" |= \"Resend event email.suppressed\" | regexp `Resend event email[.]suppressed kind=(?P<kind>[a-z-]+)` [$__interval]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "id": 22
     }
   ],
   "schemaVersion": 39

@@ -659,7 +659,6 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
         grid: true,
         axes: true,
         matcap: false,
-        postProcessing: false,
       },
       section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.006, isFlipped: false }] },
     };
@@ -701,7 +700,6 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
             grid: true,
             axes: true,
             matcap: false,
-            postProcessing: false,
           },
           section: { active: true, cuts: [{ kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 0, sweep: 90 }] },
         },

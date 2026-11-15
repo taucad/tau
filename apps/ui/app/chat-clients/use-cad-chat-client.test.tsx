@@ -224,8 +224,8 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => (revisionRoot.connected ? {} : undefined),
 }));
-/* ChatTurnHost reads the usage-metrics preference through react-query; this scope has no query client. */
-vi.mock('#hooks/use-privacy-preferences.js', () => ({ usePrivacyPreferences: () => ({ preferences: undefined }) }));
+/* ChatTurnHost reads the telemetry consent through the session and react-query; this scope has neither. */
+vi.mock('#hooks/use-telemetry-consent.js', () => ({ useTelemetryConsent: () => ({ consent: 'unknown' }) }));
 
 const toastHarness = vi.hoisted(() => ({ error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastHarness }));

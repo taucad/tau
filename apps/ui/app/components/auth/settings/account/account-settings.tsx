@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 
 import { cn } from '@taucad/ui/utils/cn';
 import { UserProfile } from '#components/auth/settings/account/user-profile.js';
+import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 
 export type AccountSettingsProps = {
   className?: string;
@@ -23,6 +24,7 @@ export function AccountSettings({
 
   return (
     <div className={cn('flex w-full flex-col gap-4 md:gap-6', className)} {...props}>
+      <EmailDeliverabilityBanner />
       <UserProfile />
       {plugins.flatMap(
         (plugin) => plugin.accountCards?.map((Card) => <Card key={`${plugin.id}-${Card.name}`} />) ?? [],

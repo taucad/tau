@@ -101,11 +101,13 @@ export const childArguments = (options: {
  * Report the agent capability, including what it deliberately withheld.
  *
  * A refused external agent is a *fact about this machine* (adapter missing, CLI
- * not installed), never an error: the daemon keeps serving Tau's own runs.
+ * not installed), never an error: the daemon keeps serving Tau's own runs. Each
+ * one prints its code and message, and on the next line the command that clears
+ * it when there is one (ACP agent policy rule 6).
  *
  * @param event - The daemon's `agent` ready event.
  */
-const reportAgentReady = (event: Extract<HostDaemonEvent, { readonly type: 'agent' }>): void => {
+export const reportAgentReady = (event: Extract<HostDaemonEvent, { readonly type: 'agent' }>): void => {
   consola.success(`Tau agent channel ready at ${event.url ?? 'unknown'}`);
   const available = (event.externalAgents ?? []).filter((agent) => agent.refusal === undefined);
   if (available.length > 0) {
@@ -117,7 +119,11 @@ const reportAgentReady = (event: Extract<HostDaemonEvent, { readonly type: 'agen
   }
   for (const agent of event.externalAgents ?? []) {
     if (agent.refusal !== undefined) {
-      consola.info(`External agent ${agent.displayName} is unavailable (${agent.refusal}).`);
+      const message = event.externalAgentRefusals?.find((refusal) => refusal.id === agent.id)?.message;
+      const fix = agent.fixCommand === undefined ? '' : `\nFix: ${agent.fixCommand}`;
+      consola.info(
+        `External agent ${agent.displayName} is unavailable (${agent.refusal})${message === undefined ? '.' : `: ${message}`}${fix}`,
+      );
     }
   }
 };
@@ -1177,7 +1183,11 @@ export const serveCommand = defineCommand({
         ...(configuredAgent ? { agent: configuredAgent } : {}),
         ...(runtimeTelemetry === undefined
           ? {}
-          : { observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller) }),
+          : {
+              observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller),
+              /* PR-7 (AR-W6-02): sync attempts under the same rule as the runtime reporter. */
+              syncTelemetryConsent: () => runtimeTelemetry.status().consent,
+            }),
         ...(observeChats === undefined ? {} : { observeChats }),
         onEvent,
       });

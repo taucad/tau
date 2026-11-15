@@ -6,6 +6,14 @@ import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 
+/**
+ * Projects, per signed-in user, whose saved preview the server is known to hold this page session: a create-only
+ * backfill answered (created, or 412 because one exists) or a capture replaced it. The backfill skips them, so a
+ * reopen no longer re-encodes the thumbnail and re-sends a create-only upload that can only answer 412 (Tau #2012).
+ */
+const savedPreviews = new Set<string>();
+const savedPreviewKey = (userId: string, projectId: string): string => `${userId}\u0000${projectId}`;
+
 /** Reuse the existing saved capture; browsing cloud cards never starts a kernel. */
 export const publishCloudProjectPreview = async (input: {
   projectId: string;
@@ -102,8 +110,14 @@ export const usePublishCloudProjectPreview = ({
   );
   const { mutate } = useMutation({
     mutationFn: publishCloudProjectPreview,
-    onSuccess: async () =>
-      queryClient.invalidateQueries({ queryKey: ['cloud-project-preview', userId ?? null, projectId] }),
+    // The user who started the upload, not whoever is signed in when it settles.
+    onMutate: () => ({ userId }),
+    onSuccess: async (_result, input, context) => {
+      if (context.userId) {
+        savedPreviews.add(savedPreviewKey(context.userId, input.projectId));
+      }
+      return queryClient.invalidateQueries({ queryKey: ['cloud-project-preview', userId ?? null, projectId] });
+    },
     onError: (error) => {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
         console.error('Could not save project preview:', error);
@@ -112,6 +126,9 @@ export const usePublishCloudProjectPreview = ({
   });
   useEffect(() => {
     if (!backfill || !enabled || !userId || thumbnail.status !== 'ready' || !thumbnail.url) {
+      return;
+    }
+    if (savedPreviews.has(savedPreviewKey(userId, projectId))) {
       return;
     }
     const controller = new AbortController();

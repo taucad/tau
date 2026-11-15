@@ -36,6 +36,7 @@ import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type {
   ProjectSessionActorRef,
   ProjectSessionFileManagerInput,
+  ProjectSessionFlushKind,
   ProjectSessionMachineEvent,
   ProjectSessionOpenRequest,
 } from '#machines/project-session.machine.js';
@@ -47,6 +48,8 @@ import { createWorkspaceFacade, readied, servicesBound, servicesOf } from '#runt
 import type { FacadeFiles } from '#runtime/file-manager-facade.js';
 import type {
   SessionRevisionsCallback,
+  SessionRevisionsEmitted,
+  SessionRevisionsEvent,
   SessionRevisionsPorts,
   SessionRevisionsWiring,
 } from '#runtime/session-revisions.js';
@@ -57,53 +60,6 @@ import { openSessionFileManager, trackSessionFileManager } from '#runtime/sessio
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';
 import type { ProjectAgentHostRegistration } from '#services/project-agent-host-registration.js';
-
-/**
- * One project session's flush and lease work, supplied by the subtree that
- * owns the project's resources.
- *
- * The registry imports no worker and no port: the project route registers
- * these when its session opens and unregisters when it closes, so `closing`
- * calls the live implementation and does nothing when the subtree never came
- * up. `flushSync` is W13's `awaitSyncSettled` seam through the revision
- * client — never a second copy of it.
- */
-export type ProjectSessionServices = Readonly<{
-  flushProducers: () => Promise<void>;
-  flushSync: (boundMilliseconds: number) => Promise<void>;
-  cancelRuns: (chatIds: readonly string[]) => Promise<void>;
-  closeRuntime: () => Promise<void>;
-}>;
-
-const noServices: ProjectSessionServices = {
-  flushProducers: async () => undefined,
-  flushSync: async () => undefined,
-  cancelRuns: async () => undefined,
-  closeRuntime: async () => undefined,
-};
-
-const services = new Map<string, ProjectSessionServices>();
-
-/**
- * Register the live implementations for one project session.
- *
- * @param projectId - The project whose subtree is registering.
- * @param implementation - What `closing` and `opening.pulling` call.
- * @returns The unregistration, for the subtree's effect cleanup.
- */
-export const registerProjectSessionServices = (
-  projectId: string,
-  implementation: ProjectSessionServices,
-): (() => void) => {
-  services.set(projectId, implementation);
-  return () => {
-    if (services.get(projectId) === implementation) {
-      services.delete(projectId);
-    }
-  };
-};
-
-const servicesFor = (projectId: string): ProjectSessionServices => services.get(projectId) ?? noServices;
 
 // ---------------------------------------------------------------------------
 // The project runtime (A6d)
@@ -146,11 +102,26 @@ export type SessionRuntime = Readonly<{
   /** Whether the device's choices still select the kernel this runtime was built with. */
   kernelIsCurrent: () => boolean;
   /**
-   * Write what the runtime owes before a replacement stops it (A6e, B4): its producers and its project and editor
-   * stores. It closes nothing, asks nothing and keeps no timer. Rejects with every write it could not confirm, and
-   * stops waiting when `gone` aborts.
+   * Write what the runtime owes (A7c, row S6), with no timer (I15): the session's state bounds the wait, and `gone`
+   * aborts it when the child stops. `replace` rejects with every write it could not confirm, or with the abort; `close`
+   * with a producer's refusal, a failed store wait (the abort among them) or the first store write error; `leave` with
+   * a producer's refusal or a failed store wait, not a store write error; `unload` only with a producer's refusal.
+   *
+   * - `close`: refused while an editor's conflict is being recorded; the producers, then both stores. It closes
+   *   nothing: the parameter service closes in the session's next step (`closeParameters`).
+   * - `leave`: the producers, then the editor store (I3).
+   * - `unload`: the producers, then both stores; only a producer's refusal refuses it (I6, D26).
+   * - `replace`: before a replacement stops it (A6e, B4), the producers and both stores together; it closes nothing and
+   *   asks nothing.
    */
-  flush: (gone: AbortSignal) => Promise<void>;
+  flush: (kind: SessionRuntimeFlushKind, gone: AbortSignal) => Promise<void>;
+  /**
+   * Close the parameter service once the close flush has landed (A7c). Rejects, leaving it open, on unsaved drafts or
+   * an incomplete sidecar cleanup.
+   */
+  closeParameters: () => Promise<void>;
+  /** Shut the runtime's kernels down before the agent host goes (`closeProjectRuntime`). Rejects when one refuses. */
+  closeRuntime: () => Promise<void>;
   /** Park or resume the runtime's kernel processes, as the session decides (R3, row S5). */
   park: (parked: boolean) => void;
   /** Ask the editor to ensure the focused chat it deferred again, now that the chats have arrived (row S1). */
@@ -158,6 +129,9 @@ export type SessionRuntime = Readonly<{
   /** Stop the runtime and release what it holds. Calling it twice closes once. */
   close: () => void;
 }>;
+
+/** Which flush a runtime is asked for: the session's (A7c), or its `project` child's before a replacement (A6e). @public */
+export type SessionRuntimeFlushKind = 'close' | 'replace' | ProjectSessionFlushKind;
 
 /** The chat fields of a session's open request. @public */
 export type SessionRuntimeChat = Readonly<{ chatId?: string; createdChatId?: string }>;
@@ -182,6 +156,16 @@ export type SessionRuntimeOpener = Readonly<{
 }>;
 
 type RegionReport = Readonly<{ loaded: boolean; kernelRefusal: string | undefined }>;
+
+/** What the session asks its `project` child (A7c), matched by id (I18). @public */
+export type SessionRuntimeCommand =
+  | Readonly<{ type: 'flushRuntime'; requestId: string; kind: SessionRuntimeFlushKind }>
+  | Readonly<{ type: 'closeParameters'; requestId: string }>
+  | Readonly<{ type: 'closeRuntime'; requestId: string }>;
+
+/** A refusal's message, as the session records it and the quit hold shows it. */
+const failureMessage = (failure: unknown): string =>
+  failure instanceof Error ? failure.message : typeof failure === 'string' ? failure : 'failed';
 
 /**
  * The `project` child: it builds the project runtime once the session has a file manager, owns it for the session's
@@ -236,8 +220,25 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       /* The session's close is under way (A6e): a flush that settles now builds nothing, and the close stops the child.
        * A close step that fails hands `replaceRuntime` back, which lifts the hold. */
       let held = false;
-      /* Aborted when the child stops, so a replacement's flush stops waiting on the runtime it no longer owns. */
+      /* Aborted when the child stops, so a flush (a replacement's, or the session's, A7c) stops waiting on a runtime the
+       * child no longer owns. */
       const gone = new AbortController();
+      /* A7c: answer the session, unless the child stopped meanwhile (a stopped child tells nothing more). */
+      const answer = async (
+        type: 'runtimeFlushSettled' | 'parametersClosed' | 'runtimeClosed',
+        requestId: string,
+        work: (() => Promise<void>) | undefined,
+      ): Promise<void> => {
+        let refusal: string | undefined;
+        try {
+          await work?.();
+        } catch (error) {
+          refusal = failureMessage(error);
+        }
+        if (!stopped) {
+          sendBack({ type, requestId, ...(refusal === undefined ? {} : { error: refusal }) });
+        }
+      };
 
       const observe = (runtime: SessionRuntime): void => {
         const facts = runtime.facts();
@@ -364,7 +365,7 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
         const settle = async (): Promise<void> => {
           const overtaken = (): boolean => stopped || held || current !== superseded;
           try {
-            await superseded.runtime.flush(gone.signal);
+            await superseded.runtime.flush('replace', gone.signal);
           } catch (error) {
             /* A flush cut short by a stop, a close or a newer runtime is a cancellation, not a fault (D23). */
             if (!overtaken()) {
@@ -395,6 +396,29 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
       };
 
       receive((event) => {
+        /* A7c (row S6): the session's close steps, its leave flush and the unload's producer stage, over this runtime. A
+         * child with no runtime yet owes nothing; the session bounds each wait on its clock. */
+        if (event.type === 'flushRuntime') {
+          const { requestId, kind } = event as Extract<SessionRuntimeCommand, { type: 'flushRuntime' }>;
+          const runtime = current?.runtime;
+          // async-iife: bootstrap -- `receive` is synchronous; the flush answers through `sendBack`.
+          void answer('runtimeFlushSettled', requestId, runtime && (async () => runtime.flush(kind, gone.signal)));
+          return;
+        }
+        if (event.type === 'closeParameters') {
+          const { requestId } = event as Extract<SessionRuntimeCommand, { type: 'closeParameters' }>;
+          const runtime = current?.runtime;
+          // async-iife: bootstrap -- `receive` is synchronous; the close answers through `sendBack`.
+          void answer('parametersClosed', requestId, runtime && (async () => runtime.closeParameters()));
+          return;
+        }
+        if (event.type === 'closeRuntime') {
+          const { requestId } = event as Extract<SessionRuntimeCommand, { type: 'closeRuntime' }>;
+          const runtime = current?.runtime;
+          // async-iife: bootstrap -- `receive` is synchronous; the close answers through `sendBack`.
+          void answer('runtimeClosed', requestId, runtime && (async () => runtime.closeRuntime()));
+          return;
+        }
         if (event.type === 'replaceRuntime') {
           held = false;
           replace();
@@ -461,9 +485,23 @@ const runtimeRegionOn = (opener: SessionRuntimeOpener) =>
  * The runtime region of a registry composed with no runtime opener (rows that run the registry alone): no runtime is
  * built, and the region and the chat session are up at once, as the subtree's report made them before A6d.
  */
-const withoutRuntime = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+/* Each command a session sends its `project` child, and the answer it waits for. */
+const runtimeCommandAnswers: ReadonlyMap<string, string> = new Map<SessionRuntimeCommand['type'], string>([
+  ['flushRuntime', 'runtimeFlushSettled'],
+  ['closeParameters', 'parametersClosed'],
+  ['closeRuntime', 'runtimeClosed'],
+]);
+
+const withoutRuntime = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
   sendBack({ type: 'childReady', region: 'runtime' });
   sendBack({ type: 'chatReady' });
+  /* A7c: no runtime owes anything, so every flush and close is answered at once. */
+  receive((event) => {
+    const answer = runtimeCommandAnswers.get(event.type);
+    if (answer !== undefined) {
+      sendBack({ type: answer, requestId: (event as SessionRuntimeCommand).requestId });
+    }
+  });
   return undefined;
 });
 
@@ -645,36 +683,68 @@ export type SessionWiring = Readonly<{
   loadHostConnector: () => Promise<HostConnectorModule>;
   /** Register a close cut at the session stage of `environment`'s sequencer (D26). @returns Its removal. */
   registerCloseCut: (cut: (phase: FlushPhase) => Promise<void>) => () => void;
+  /**
+   * Register a flush at the producer stage of `environment`'s sequencer (A7c, D26): each live session's runtime writes
+   * what it owes there, before any session's close cut. @returns Its removal.
+   */
+  registerProducer: (flush: (phase: FlushPhase) => Promise<void>) => () => void;
   /** The project focus has the person on: the route's focused session (`selectFocusTarget`). */
   focusedProject: SessionsObservable<string | undefined>;
   /** The page is on screen, as `environment` reports it; its listener runs on every report. */
   documentVisible: SessionsObservable<boolean>;
-  /** The chat store: the connector's calls and the chats' revision facts. */
-  chatSessions: HostConnectorChatStore & Pick<ChatSessionStore, 'setRevisionFacts'>;
+  /** The chat store: the connector's calls, the chats' revision facts, and the runs a close stops (A7c). */
+  chatSessions: HostConnectorChatStore & Pick<ChatSessionStore, 'setRevisionFacts' | 'cancelProjectedRun'>;
   /** The device's choices now, read when a chat attaches. */
   choices: () => ProjectChoices;
   /** Open a session file manager's root synchronisation; `gone` aborts when its owner ends. */
   rootSync: (fileManagerRef: FileManagerRef, gone: AbortSignal) => SessionRootSync;
 }>;
 
+/** A lazy child's callback, as its module provides it: the child's input, its `sendBack` and its `receive`. */
+type LazyChildCallback<Input> = (
+  params: Readonly<{
+    input: Input;
+    sendBack: (event: EventObject) => void;
+    receive: (listener: (event: EventObject) => void) => void;
+  }>,
+) => () => void;
+
 /**
  * A child whose callback is in a module loaded on its first start (D5). A failure to load or to start, and a teardown
- * that throws, is reported through the app runtime's one fault hook rather than faulting the session (D23).
+ * that throws, is reported through the app runtime's one fault hook rather than faulting the session (D23). An event
+ * the session sends before the callback runs, or after it failed to, is answered by `unloaded` (A7c): nothing the
+ * module would hold exists yet.
  */
 const lazyChildOn = <Input>(
-  load: () => Promise<(params: Readonly<{ input: Input; sendBack: (event: EventObject) => void }>) => () => void>,
+  load: () => Promise<LazyChildCallback<Input>>,
+  unloaded?: (event: EventObject, sendBack: (event: EventObject) => void) => void,
 ) =>
-  createCallbackLogic<EventObject, Input>(({ input, sendBack }) => {
+  createCallbackLogic<EventObject, Input>(({ input, sendBack, receive }) => {
     const stopped = new AbortController();
     let cleanup: (() => void) | undefined;
+    let listener: ((event: EventObject) => void) | undefined;
+    receive((event) => {
+      if (listener === undefined) {
+        unloaded?.(event, sendBack);
+        return;
+      }
+      listener(event);
+    });
     // async-iife: bootstrap -- `createCallbackLogic` is synchronous; the module loads behind it.
     void (async (): Promise<void> => {
       try {
         const start = await load();
         if (!stopped.signal.aborted) {
-          cleanup = start({ input, sendBack });
+          cleanup = start({
+            input,
+            sendBack,
+            receive: (next) => {
+              listener = next;
+            },
+          });
         }
       } catch (error) {
+        listener = undefined;
         if (!stopped.signal.aborted) {
           reportAppRuntimeFault(error);
         }
@@ -691,6 +761,13 @@ const lazyChildOn = <Input>(
       }
     };
   });
+
+/* A7c: a `revisions` child whose module has not started holds no client, so its sync has nothing to settle. */
+const answerQuiesce = (event: EventObject, sendBack: (event: SessionRevisionsEmitted) => void): void => {
+  if (event.type === 'quiesce') {
+    sendBack({ type: 'syncQuiesced', requestId: (event as SessionRevisionsEvent).requestId });
+  }
+};
 
 /** Load a module once; a failed load is asked again by the next child that starts. */
 const loadOnce = <T>(load: () => Promise<T>): (() => Promise<T>) => {
@@ -726,8 +803,18 @@ const revisionsOn = (wiring: SessionWiring) =>
           reportFault: reportAppRuntimeFault,
         }),
       );
-      return ({ input, sendBack }) => callback({ input, sendBack });
+      return ({ input, sendBack, receive }) =>
+        callback({
+          input,
+          sendBack,
+          receive: (listener) => {
+            receive((event) => {
+              listener(event as SessionRevisionsEvent);
+            });
+          },
+        });
     }),
+    answerQuiesce,
   );
 
 /** The `hostConnector` child (rows S2, S32): one file manager's read connector, published to the chat store. */
@@ -771,11 +858,61 @@ const presenceOn = (wiring: SessionWiring) =>
     };
   });
 
-/* A registry composed without wiring (rows that run the registry alone) starts none of the three. */
+/**
+ * The `unload` child (A7c, D26; the flush-ownership table of plan § 4 A7): registered once at the producer stage of
+ * `environment`'s sequencer for the session's life, with nothing mounted. On `hidden`, and on the producer stage
+ * `beforeunload` runs while a write is owed (D26 as amended), it asks the session to flush what its runtime owes and
+ * settles on the session's answer, so every producer of a live project settles before any session's close cut (I6).
+ * `pagehide` can only offer what `hidden` prepared, so it asks nothing.
+ */
+const unloadOn = (wiring: SessionWiring) =>
+  createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack, receive }) => {
+    const waiting = new Map<string, PromiseWithResolvers<void>>();
+    let asked = 0;
+    receive((event) => {
+      if (event.type !== 'flushSettled') {
+        return;
+      }
+      const { requestId, ok, error } = event as EventObject &
+        Readonly<{ requestId: string; ok: boolean; error?: string }>;
+      const settled = waiting.get(requestId);
+      waiting.delete(requestId);
+      if (ok) {
+        settled?.resolve();
+      } else {
+        settled?.reject(new Error(error ?? 'Project changes are not confirmed saved.'));
+      }
+    });
+    const unregister = wiring.registerProducer(async (phase) => {
+      if (phase !== 'hidden') {
+        return;
+      }
+      asked += 1;
+      const requestId = `unload:${input.projectId}:${String(asked)}`;
+      const settled = Promise.withResolvers<void>();
+      waiting.set(requestId, settled);
+      sendBack({ type: 'flushAsked', requestId, kind: 'unload' });
+      await settled.promise;
+    });
+    return () => {
+      unregister();
+      /* The session answers every flush it was asked before it stops its children; anything left owes nothing now. */
+      for (const settled of waiting.values()) {
+        settled.resolve();
+      }
+      waiting.clear();
+    };
+  });
+
+/* A registry composed without wiring (rows that run the registry alone) starts none of these, and its sessions'
+ * `revisions` child answers a quiesce at once. */
 const unwiredFileManagerChild = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
 /* A14: with no revision client there is no file check to wait for, so it is settled at once. */
-const unwiredRevisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack }) => {
+const unwiredRevisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack, receive }) => {
   sendBack({ type: 'fileCheckChanged', settled: true, judged: false });
+  receive((event) => {
+    answerQuiesce(event, sendBack);
+  });
   return undefined;
 });
 const unwiredPresence = createCallbackLogic<EventObject, { projectId: string }>(() => undefined);
@@ -907,24 +1044,21 @@ const projectSessionOn = ({
 }: SessionsRegistryFiles) =>
   projectSessionMachine.provide({
     actors: {
+      /* A7c (row S6): the chat store stops the runs this window can stop, with nothing mounted. */
       cancelRuns: createAsyncLogic<void, { projectId: string; runs: readonly string[] }>({
         run: async ({ input }) => {
-          await servicesFor(input.projectId).cancelRuns(input.runs);
-        },
-      }),
-      flushProducers: createAsyncLogic<void, { projectId: string }>({
-        run: async ({ input }) => {
-          await servicesFor(input.projectId).flushProducers();
-        },
-      }),
-      flushSync: createAsyncLogic<void, { projectId: string; boundMilliseconds: number }>({
-        run: async ({ input }) => {
-          await servicesFor(input.projectId).flushSync(input.boundMilliseconds);
+          const chatSessions = wiring?.chatSessions;
+          if (chatSessions === undefined) {
+            return;
+          }
+          const outcomes = await Promise.all(input.runs.map(async (chatId) => chatSessions.cancelProjectedRun(chatId)));
+          if (outcomes.includes('continuing')) {
+            throw new Error('A run changed holder and could not be stopped. Review the current Close plan.');
+          }
         },
       }),
       releaseAgentHost: createAsyncLogic<void, { projectId: string }>({
         run: async ({ input }) => {
-          await servicesFor(input.projectId).closeRuntime();
           const registration = agentHostRegistrations.get(input.projectId);
           if (registration !== undefined) {
             const registered = await registration;
@@ -944,6 +1078,8 @@ const projectSessionOn = ({
       revisions: wiring === undefined ? unwiredRevisions : revisionsOn(wiring),
       hostConnector: wiring === undefined ? unwiredFileManagerChild : hostConnectorOn(wiring),
       presence: wiring === undefined ? unwiredPresence : presenceOn(wiring),
+      /* A7c: without wiring nothing registers at the producer stage. */
+      unload: wiring === undefined ? unwiredPresence : unloadOn(wiring),
     },
   });
 

@@ -384,7 +384,7 @@
           "legendFormat": "WS abnormal closes"
         },
         {
-          "expr": "sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\",kernel_status=\"error\"}[5m])) or vector(0)",
+          "expr": "sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"issue|failed|timed-out|terminated|discarded\"}[5m])) or vector(0)",
           "legendFormat": "Kernel errors"
         }
       ],
@@ -464,8 +464,8 @@
       "gridPos": { "h": 7, "w": 8, "x": 16, "y": 30 },
       "targets": [
         {
-          "expr": "sum(rate(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[5m])) by (kernel_status)",
-          "legendFormat": "{{kernel_status}}"
+          "expr": "sum by (tau_runtime_outcome) (rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"succeeded|issue|failed|timed-out|terminated|discarded\"}[5m]))",
+          "legendFormat": "{{tau_runtime_outcome}}"
         }
       ],
       "fieldConfig": {

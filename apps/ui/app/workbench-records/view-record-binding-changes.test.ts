@@ -26,7 +26,6 @@ describe('foreignChanges', () => {
       'setGridVisibility',
       'setAxesVisibility',
       'setMatcapVisibility',
-      'setPostProcessingVisibility',
       'setGridUnit',
       'adoptUpDirection',
       'adoptPinnedMeasurements',
@@ -121,11 +120,11 @@ describe('nextRecord', () => {
     expect(next).toEqual({ ...base, section: { active: true, cuts: [] } });
   });
 
-  it('should keep the ten inheritable leaves exactly as the base holds them (V6)', () => {
+  it('should keep the nine inheritable leaves exactly as the base holds them (V6)', () => {
     const base = record({
       fieldOfView: 40,
       upDirection: 'y',
-      display: { ...record().display, grid: false, postProcessing: true },
+      display: { ...record().display, grid: false, matcap: true },
       grid: { unit: 'in' },
     });
     const { kind: _kind, ...view } = pose;

@@ -2,9 +2,10 @@
  * Runtime telemetry for one page: the browser editor, a shared page, or the desktop renderer (runtime observability
  * PR-3, `host-browser.ts`). One reporter per page; every runtime client the page or its workers open reports into it.
  *
- * - **Who reports** (AR-W4-02, AR-W5-01): a Tau Cloud build (`tauTelemetryHostCloud`), or any build signed in to the
- *   API it is configured for. A reporter sends only to the page's own `TAU_API_URL`, so a self-host build never
- *   reaches Tau Cloud; a deployment that has not answered the entry-free policy probe `on` receives nothing else.
+ * - **Who reports** (AR-W4-02, AR-W5-01): any web build and an official desktop release (`tauTelemetryHostCloud`),
+ *   or any build signed in to the API it is configured for. A reporter sends only to the page's own `TAU_API_URL`, so
+ *   a self-host build never reaches Tau Cloud; a deployment whose policy probe has not answered `on` receives nothing
+ *   else, so the API's `TAU_RUNTIME_TELEMETRY` (unset means off) is the web build's only gate.
  * - **Consent** (AR-W4-03): one most-restrictive-wins rule over GPC, the analytics-cookie decision, the sticky device
  *   preference and, signed in, the account's `allowsUsageMetrics`.
  * - **Identity** (AR-W15-06, AR-W16-07, FR-19): three-state, from the same `useSession` the user menu reads, pinned on
@@ -13,7 +14,7 @@
  * - **Worker facts** (AR-W16-03, AR-W17-02): a client is asked for `facts` only once the policy is `on`; on `off` the
  *   page stops listening and listens again when the cached answer expires (FR-22).
  *
- * The legacy observability middleware is untouched and ungated until PR-7 (AR-W4-13).
+ * PR-7 deleted the legacy observability middleware and its ungated kernel timings (D-T8, AR-W4-13).
  *
  * @module
  */

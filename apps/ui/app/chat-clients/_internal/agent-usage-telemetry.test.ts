@@ -6,6 +6,7 @@ import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import {
   agentIdentityOf,
   createAgentSessionTracker,
+  createAgentUsageTelemetry,
   reportRefusedAgentTurn,
   trackAgentTurn,
 } from '#chat-clients/_internal/agent-usage-telemetry.js';
@@ -663,5 +664,74 @@ describe('agent sessions and refusals', () => {
       { ...codex, outcome: 'refused', errorCode: 'ADMISSION_FAILED' },
       { ...codex, outcome: 'refused', errorCode: 'INSUFFICIENT_CREDIT' },
     ]);
+  });
+});
+
+describe('createAgentUsageTelemetry', () => {
+  const codex = { kind: 'acp', agentId: 'codex', hostId: 'origin' } as const;
+
+  const surface = () => {
+    let projection: ChatProjection = initialChatProjection;
+    let cursor = 0;
+    const listeners = new Set<() => void>();
+    const report = vi.fn<(entry: ClientMetricEntry) => void>();
+    const telemetry = createAgentUsageTelemetry(
+      {
+        getProjection: () => projection,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+      report,
+    );
+    const publish = (runId: string, rows: ReadonlyArray<Record<string, unknown>>): void => {
+      const events = rows.map((row, index) => ({ ...row, runId, sequence: cursor + index }));
+      projection = reduceChatProjection(projection, {
+        type: 'batch',
+        answer: { status: 'batch', cursor, nextCursor: cursor + rows.length, endCursor: cursor + rows.length, events },
+      }).state;
+      cursor += rows.length;
+      for (const listener of listeners) {
+        listener();
+      }
+    };
+    return { telemetry, publish, report };
+  };
+
+  it.each(['denied', 'unknown'] as const)('reports nothing, turn or session, when consent is %s', (consent) => {
+    const { telemetry, publish, report } = surface();
+
+    telemetry.begin(codex, { kernelId: 'replicad', consent }).admitted('run_off');
+    publish('run_off', [lifecycleRow(0, 'admitted', 'run_off'), lifecycleRow(0, 'completed', 'run_off')]);
+    telemetry.begin(codex, { kernelId: 'replicad', consent }).refused(new Error('refused'));
+    telemetry.end();
+
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('reports the turn, its context and its session when consent is granted', () => {
+    const { telemetry, publish, report } = surface();
+
+    telemetry.begin(codex, { kernelId: 'replicad', consent: 'granted' }).admitted('run_on');
+    publish('run_on', [lifecycleRow(0, 'admitted', 'run_on'), lifecycleRow(0, 'completed', 'run_on')]);
+    telemetry.end();
+
+    const entries = report.mock.calls.map(([entry]) => entry);
+    expect(entries.map(({ name }) => name)).toEqual(['agent.session', 'agent.turn', 'agent.session']);
+    const turn = entries[1] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(turn.detail).toMatchObject({ agentId: 'codex', outcome: 'completed', context: { kernelId: 'replicad' } });
+  });
+
+  it('does not end a session opened with consent once a later turn finds it withdrawn', () => {
+    const { telemetry, publish, report } = surface();
+
+    telemetry.begin(codex, { kernelId: 'replicad', consent: 'granted' }).admitted('run_first');
+    publish('run_first', [lifecycleRow(0, 'admitted', 'run_first'), lifecycleRow(0, 'completed', 'run_first')]);
+    report.mockClear();
+    telemetry.begin(codex, { kernelId: 'replicad', consent: 'denied' }).refused(new Error('second'));
+    telemetry.end();
+
+    expect(report).not.toHaveBeenCalled();
   });
 });

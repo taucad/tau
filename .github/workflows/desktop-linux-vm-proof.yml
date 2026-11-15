@@ -45,7 +45,7 @@ jobs:
       - uses: ./.github/actions/setup-nx
         with:
           save-pnpm-store: 'false'
-      - name: Reject hosted qualification outside protected staging
+      - name: Reject hosted qualification outside a protected main dispatch
         env:
           TAU_VM_MODE: qualification
           TAU_VM_DISTRO: ubuntu
@@ -55,7 +55,7 @@ jobs:
             echo '::error::Unprotected hosted qualification was admitted'
             exit 1
           fi
-          grep -F 'Hosted qualification requires protected Linux staging main dispatch' "$RUNNER_TEMP/refusal.log"
+          grep -F 'Hosted qualification requires protected Linux main dispatch' "$RUNNER_TEMP/refusal.log"
       - name: Prove full guest infrastructure and harness tooling without credentials
         env:
           TAU_VM_MODE: tooling

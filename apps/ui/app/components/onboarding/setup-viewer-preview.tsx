@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useState } from 'react';
 import type { ComponentType } from 'react';
-import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
+import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { Loader } from '@taucad/ui/components/loader';
 import { viewerStepCopy } from '#components/onboarding/setup-copy.js';
 import { SetupPreviewFallback } from '#components/onboarding/setup-preview-fallback.js';
@@ -12,11 +12,11 @@ import type { PreviewFallbackReason } from '#telemetry/onboarding-telemetry.js';
 export type SetupViewerPreviewProps = Omit<SetupLivePreviewProps, 'onContextLost'> &
   Readonly<{
     /** The mapping in effect, for the diagram the area falls back to. */
-    mapping: CameraMappingId;
+    mapping: CameraPresetId;
   }>;
 
 /** What the lazily loaded part receives: the preview's props, and the diagram's when its chunk failed. */
-type LoadedPreviewProps = SetupLivePreviewProps & Readonly<{ mapping: CameraMappingId; onRetry: () => void }>;
+type LoadedPreviewProps = SetupLivePreviewProps & Readonly<{ mapping: CameraPresetId; onRetry: () => void }>;
 
 /**
  * The diagram in place of a preview whose chunk did not load, with Try again.

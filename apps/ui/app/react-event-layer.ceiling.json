@@ -72,7 +72,6 @@
   "apps/ui/app/routes/w.$workspace.$project/chat-print-program.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/chat-viewer.tsx": 6,
   "apps/ui/app/routes/w.$workspace.$project/project-command-items.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-route-notices.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-share-action.tsx": 1,

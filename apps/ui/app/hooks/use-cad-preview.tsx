@@ -210,7 +210,6 @@ function CadPreviewPipeline({
       enableGrid: defaultGraphicsSettings.enableGrid,
       enableAxes: defaultGraphicsSettings.enableAxes,
       enableMatcap: defaultGraphicsSettings.enableMatcap,
-      enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
       camera: { cameraFovAngle: initialVerticalFieldOfView },

@@ -118,20 +118,22 @@ export type EnvironmentHostFixture = Readonly<{
 /**
  * Start `environment` over a sequencer.
  *
- * @param options - The sequencer (a fresh one by default), the desktop quit seam, whether to spawn a registry, the
- * page (the browser's by default) and the host's clock.
+ * @param options - The sequencer (a fresh one by default), the desktop quit seam, whether to spawn a registry and its
+ * logic (one with no file manager or runtime by default), the page (the browser's by default) and the host's clock.
  * @returns The fixture.
  */
 export const startEnvironmentHost = ({
   sequencer = createUnloadSequencer(),
   desktopQuit,
   registry = false,
+  sessions = sessionsRegistryLogic,
   readHost = browserEnvironmentHost,
   clock,
 }: Readonly<{
   sequencer?: UnloadSequencer;
   desktopQuit?: EnvironmentDesktopQuit;
   registry?: boolean;
+  sessions?: typeof sessionsMachine;
   readHost?: () => EnvironmentHost | undefined;
 }> &
   Pick<ActorOptions<AnyActorLogic>, 'clock'> = {}): EnvironmentHostFixture => {
@@ -144,7 +146,7 @@ export const startEnvironmentHost = ({
         sequencer,
         ...(desktopQuit === undefined ? {} : { desktopQuit }),
       }),
-      sessions: sessionsRegistryLogic,
+      sessions,
     },
   }).createMachine({
     /* The registry first, as the root spawns it: `environment` takes it as input. */

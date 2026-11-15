@@ -64,7 +64,6 @@ describe('kernel-worker constants', () => {
     // PicoVoxel keeps its default wasm 'auto' (resolved per worker from the isolation snapshot).
     expect(resolvedRuntime.kernels.find((kernel) => kernel.id === 'picovoxel')).not.toHaveProperty('options.wasm');
     expect(resolvedRuntime.middleware.map((middleware) => middleware.id)).toEqual([
-      'observability',
       'parameterFileResolver',
       'parameterUnits',
       'geometryCache',

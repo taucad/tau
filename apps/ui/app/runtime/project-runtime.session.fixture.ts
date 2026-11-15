@@ -42,8 +42,20 @@ export type SessionRuntimeStandIn = SessionRuntime &
     landed: readonly string[];
     /** Run `next` as the flush from now on, after the owed writes land: a row holds or refuses the flush with it. */
     flushWith: (next: () => Promise<void>) => void;
-    /** Every parking signal and focused-chat retry the child sent, in order (A7b). */
+    /** Every parking signal and focused-chat retry the child sent, and every flush and close it asked, in order. */
     signals: readonly string[];
+    /**
+     * Hold every flush and close the session asks, or only those whose signal `only` accepts (`flush:close`, say), until
+     * the row releases them (A7c).
+     */
+    hold: (only?: (signal: string) => boolean) => () => void;
+    /** Hear each flush and close the session asks as it starts, so a row can interleave them with its own steps. */
+    onSignal: (listener: (signal: string) => void) => void;
+    /**
+     * Make every close flush from now on refuse with `reason`, as unsaved parameter drafts do, or stop refusing with
+     * `undefined`; `signal` names another step to refuse instead (`closeRuntime`, say).
+     */
+    refuse: (reason: string | undefined, signal?: string) => void;
   }>;
 
 /** The facts of a runtime whose project loaded and whose editor focused its chat. @public */
@@ -77,6 +89,21 @@ export function openSessionRuntimeStandIn(
   const landed: string[] = [];
   let flushRest: () => Promise<void> = async () => undefined;
   const signals: string[] = [];
+  let held: Promise<void> | undefined;
+  let holds: ((signal: string) => boolean) | undefined;
+  const refusals = new Map<string, string>();
+  let heard: ((signal: string) => void) | undefined;
+  const work = async (signal: string): Promise<void> => {
+    signals.push(signal);
+    heard?.(signal);
+    if (holds?.(signal) ?? true) {
+      await held;
+    }
+    const refusal = refusals.get(signal);
+    if (refusal !== undefined) {
+      throw new Error(refusal);
+    }
+  };
   return {
     input,
     runtimeRef: root,
@@ -86,16 +113,23 @@ export function openSessionRuntimeStandIn(
       chats.push(chat);
     },
     kernelIsCurrent: () => kernelCurrent,
-    flush: async () => {
-      landed.push(...owed.splice(0));
-      await flushRest();
-    },
     park: (parked) => {
       signals.push(parked ? 'parkRuntime' : 'resumeRuntime');
     },
     retryFocusedChat: () => {
       signals.push('retryEnsureFocusedChat');
     },
+    /* A replacement's flush lands what is owed and runs the row's own (A6e); the session's flushes are signals (A7c). */
+    flush: async (kind) => {
+      if (kind === 'replace') {
+        landed.push(...owed.splice(0));
+        await flushRest();
+        return;
+      }
+      await work(`flush:${kind}`);
+    },
+    closeParameters: async () => work('closeParameters'),
+    closeRuntime: async () => work('closeRuntime'),
     close: () => {
       if (closed) {
         return;
@@ -122,6 +156,26 @@ export function openSessionRuntimeStandIn(
       flushRest = next;
     },
     signals,
+    hold: (only) => {
+      const gate = Promise.withResolvers<void>();
+      held = gate.promise;
+      holds = only;
+      return () => {
+        held = undefined;
+        holds = undefined;
+        gate.resolve();
+      };
+    },
+    onSignal: (listener) => {
+      heard = listener;
+    },
+    refuse: (reason, signal = 'flush:close') => {
+      if (reason === undefined) {
+        refusals.delete(signal);
+      } else {
+        refusals.set(signal, reason);
+      }
+    },
   };
 }
 
@@ -129,6 +183,10 @@ export function openSessionRuntimeStandIn(
 export type SessionRuntimeOpenerStandIn = SessionRuntimeOpener &
   Readonly<{
     built: readonly SessionRuntimeStandIn[];
+    /** The latest stand-in built for a project, if any. */
+    latest: (projectId: string) => SessionRuntimeStandIn | undefined;
+    /** Run `prepare` on each stand-in as it is built for `projectId`, before the session hears of it. */
+    onBuilt: (projectId: string, prepare: (standIn: SessionRuntimeStandIn) => void) => void;
     /** Tell every child the device's choices changed. */
     changeChoices: () => void;
   }>;
@@ -142,11 +200,17 @@ export type SessionRuntimeOpenerStandIn = SessionRuntimeOpener &
  */
 export function sessionRuntimeOpenerStandIn(facts: Partial<SessionRuntimeFacts> = {}): SessionRuntimeOpenerStandIn {
   const built: SessionRuntimeStandIn[] = [];
+  const preparers = new Map<string, (standIn: SessionRuntimeStandIn) => void>();
   const choices = new Topic<void>({ name: 'test.sessionRuntime.choices' });
   return {
     built,
+    latest: (projectId) => built.findLast((standIn) => standIn.input.projectId === projectId),
+    onBuilt: (projectId, prepare) => {
+      preparers.set(projectId, prepare);
+    },
     open: async (input) => {
       const standIn = openSessionRuntimeStandIn(input, facts);
+      preparers.get(input.projectId)?.(standIn);
       built.push(standIn);
       return standIn;
     },

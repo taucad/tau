@@ -58,7 +58,6 @@
       "apps/ui/app/runtime/image-runtime.worker.ts",
       "apps/ui/app/runtime/leases.machine.ts",
       "apps/ui/app/runtime/leases.ts",
-      "apps/ui/app/runtime/observability/observability.middleware.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
       "apps/ui/app/runtime/project-library-commands.ts",
@@ -96,8 +95,6 @@
   "counts": {
     "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
     "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx#useFlushOnClose": 1,
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx#waitFor timeout": 5,
     "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1
   }
 }

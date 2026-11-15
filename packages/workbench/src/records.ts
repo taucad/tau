@@ -56,7 +56,32 @@ const sorted = (value: unknown): unknown => {
   return value;
 };
 
-const codec = <Schema extends z.ZodType>(name: string, schema: Schema): WorkbenchRecordCodec<Schema> => ({
+/** Display toggles an earlier Tau wrote that no longer mean anything: post-processing is always on. */
+const retiredDisplayKeys: ReadonlySet<string> = new Set(['postProcessing']);
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** A view's fields without its retired display toggles, so a file an earlier Tau wrote still reads. */
+const withoutRetiredDisplay = (view: unknown): unknown =>
+  isPlainObject(view) && isPlainObject(view['display'])
+    ? {
+        ...view,
+        display: Object.fromEntries(Object.entries(view['display']).filter(([key]) => !retiredDisplayKeys.has(key))),
+      }
+    : view;
+
+/** A named layout with each view's retired display toggles dropped. */
+const namedLayoutWithoutRetiredDisplay = (layout: unknown): unknown =>
+  isPlainObject(layout) && Array.isArray(layout['views'])
+    ? { ...layout, views: layout['views'].map((view) => withoutRetiredDisplay(view)) }
+    : layout;
+
+const codec = <Schema extends z.ZodType>(
+  name: string,
+  schema: Schema,
+  upgrade: (value: unknown) => unknown = (value) => value,
+): WorkbenchRecordCodec<Schema> => ({
   schema,
   read(bytes) {
     const invalid = (detail: string): WorkbenchRecordRead<z.output<Schema>> => ({
@@ -95,7 +120,7 @@ const codec = <Schema extends z.ZodType>(name: string, schema: Schema): Workbenc
     }
     let result: z.ZodSafeParseResult<z.output<Schema>>;
     try {
-      result = schema.safeParse(value);
+      result = schema.safeParse(upgrade(value));
     } catch {
       return invalid('its structure is too deeply nested.');
     }
@@ -122,9 +147,9 @@ const codec = <Schema extends z.ZodType>(name: string, schema: Schema): Workbenc
 /** Strict codecs for the three live records and two future file shapes. @public */
 export const workbenchRecords = {
   layout: codec('layout', workbenchLayoutSchema),
-  view: codec('view', workbenchViewSchema),
+  view: codec('view', workbenchViewSchema, withoutRetiredDisplay),
   entries: codec('entries', workbenchEntriesSchema),
-  namedLayout: codec('named layout', namedLayoutSchema),
+  namedLayout: codec('named layout', namedLayoutSchema, namedLayoutWithoutRetiredDisplay),
   device: codec('device', workbenchDeviceSchema),
 } as const;
 

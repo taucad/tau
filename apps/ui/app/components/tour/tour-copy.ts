@@ -4,7 +4,7 @@
  */
 
 import type { GoalId, TourStepId } from '@taucad/preferences';
-import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
+import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { legendBindings } from '#components/onboarding/setup-model.js';
 import type { LegendBinding } from '#components/onboarding/setup-model.js';
@@ -17,8 +17,8 @@ export type TourCopyInput = Readonly<{
   mode: 'guided' | 'replay';
   arrival: TourCopyArrival;
   goals: readonly GoalId[];
-  /** The mapping the viewer applies: the person's preset, or trackpad gestures on this device. */
-  mapping: CameraMappingId;
+  /** The mapping the viewer applies: the person's mouse preset. */
+  mapping: CameraPresetId;
   /** The gizmo style in effect, or None. */
   gizmo: GizmoChoiceId;
   /** The formats the active entry's kernel writes: the list the Export pane shows. */

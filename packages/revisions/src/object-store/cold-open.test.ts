@@ -133,6 +133,7 @@ type Served = Readonly<{
   fetch: typeof globalThis.fetch;
   catalogueQueries: string[];
   ranges: Array<readonly [number, number]>;
+  rangeCacheModes: Array<RequestCache | undefined>;
   wholePackReads: () => number;
 }>;
 
@@ -269,6 +270,7 @@ const packRangeRefused = (range: string | undefined, size: number): [number, num
 const serve = (hosted: Hosted, behaviour: Behaviour = {}): Served => {
   const catalogueQueries: string[] = [];
   const ranges: Array<readonly [number, number]> = [];
+  const rangeCacheModes: Array<RequestCache | undefined> = [];
   let wholePackReads = 0;
   const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
@@ -324,11 +326,18 @@ const serve = (hosted: Hosted, behaviour: Behaviour = {}): Served => {
         return new Response('Forbidden', { status: 403 });
       }
       ranges.push(allowed);
+      rangeCacheModes.push(init?.cache);
       return new Response(hosted.pack.slice(...allowed), { status: 206 });
     }
     return new Response('Not Found', { status: 404 });
   };
-  return { fetch: fetch as typeof globalThis.fetch, catalogueQueries, ranges, wholePackReads: () => wholePackReads };
+  return {
+    fetch: fetch as typeof globalThis.fetch,
+    catalogueQueries,
+    ranges,
+    rangeCacheModes,
+    wholePackReads: () => wholePackReads,
+  };
 };
 
 const countingCompute = (): ComputeWorker & { indexed: () => number } => {
@@ -400,6 +409,17 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     /* Coalesced: fewer Range requests than objects read. */
     expect(served.ranges.length).toBeLessThan(opened!.report.imported);
     expect(opened!.report.ranges.rangeRequests).toBe(served.ranges.length);
+  });
+
+  it('asks every pack Range past the HTTP cache, so parallel ranges of one pack are not serialised', async () => {
+    // Chrome's HTTP cache holds one cache entry lock per URL, so parallel Range reads of one pack link waited on
+    // each other: 10 in parallel took 2,057 ms against 230 ms uncached (speed phase SP0).
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'no-store');
+    const served = serve(hosted);
+    await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute });
+    expect(served.rangeCacheModes.length).toBeGreaterThan(0);
+    expect(new Set(served.rangeCacheModes)).toEqual(new Set(['no-store']));
   });
 
   it('requests no byte of an ops or chat object when the sync policy names heads and tags', async () => {

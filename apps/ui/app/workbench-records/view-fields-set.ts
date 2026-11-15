@@ -14,7 +14,7 @@ import { personRecordStores } from '#preferences/person-record.store.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 const hasPersonalDefault = (defaults: PersonalViewDefaults, leaf: ViewFieldPath): boolean =>
-  leaf !== 'upDirection' && defaults[leaf] !== undefined;
+  (defaults as Readonly<Partial<Record<ViewFieldPath, unknown>>>)[leaf] !== undefined;
 
 /** The ports the exception rule reads and writes. */
 export type ViewFieldExceptionPorts = Readonly<{

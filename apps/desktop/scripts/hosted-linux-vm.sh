@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Run disposable full Linux guests for infrastructure proof or protected staging qualification.
+# Run disposable full Linux guests for infrastructure proof or protected staging/production qualification.
 # See desktop-release-signing-pipeline/linux-remote-qualification-2026-10-22.md.
 # Required env: TAU_VM_DISTRO (ubuntu, ubuntu2604 or debian), RUNNER_TEMP (disposable CI directory).
-# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging inputs, or clean-host for
+# Optional env: TAU_VM_MODE (proof default, tooling, qualification with protected staging or production inputs, or clean-host for
 #   consumer acceptance from desktop-route-vm-acceptance.yml on a gcp host);
 #   TAU_VM_HOST (qemu default: a nested guest on this runner; gcp: a disposable spot T4 host in Google Cloud
 #   project TAU_GCP_PROJECT, tried in TAU_GCP_ZONES order, reached over an IAP tunnel; tau-cloud stacks/gcp). Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
@@ -19,21 +19,23 @@ case "$mode" in
   qualification)
     [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
        "${GITHUB_REPOSITORY:-}" == taucad/tau && "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux &&
-       "${TAU_QUALIFICATION_CHANNEL:-}" == staging ]] || { printf 'Hosted qualification requires protected Linux staging main dispatch\n' >&2; exit 1; }
+       ( "${TAU_QUALIFICATION_CHANNEL:-}" == staging || "${TAU_QUALIFICATION_CHANNEL:-}" == production ) ]] ||
+      { printf 'Hosted qualification requires protected Linux main dispatch\n' >&2; exit 1; }
     [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
     : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
     ;;
   clean-host)
-    # Consumer ("vm") acceptance: only the protected Linux-scoped staging dispatch of the clean-host workflow, on a
+    # Consumer ("vm") acceptance: only the protected Linux-scoped staging or production (D-H5) dispatch of the clean-host workflow, on a
     # Google Cloud GPU host with stock graphics. The guest adds a standard consumer account that runs the app.
     [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
        "${GITHUB_REPOSITORY:-}" == taucad/tau &&
        "${GITHUB_WORKFLOW_REF:-}" == taucad/tau/.github/workflows/desktop-route-vm-acceptance.yml@refs/heads/main &&
        "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux && "${TAU_DESKTOP_ACCEPTANCE_KIND:-}" == vm &&
-       "${TAU_QUALIFICATION_CHANNEL:-}" == staging && "${TAU_VM_HOST:-}" == gcp &&
+       ( "${TAU_QUALIFICATION_CHANNEL:-}" == staging || "${TAU_QUALIFICATION_CHANNEL:-}" == production ) &&
+       "${TAU_VM_HOST:-}" == gcp &&
        "${TAU_QUALIFICATION_GRAPHICS:-stock}" == stock ]] ||
-      { printf 'Clean-host acceptance requires the protected Linux staging main dispatch on a GPU host\n' >&2; exit 1; }
+      { printf 'Clean-host acceptance requires the protected Linux main dispatch on a GPU host\n' >&2; exit 1; }
     [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
     [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
     : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"

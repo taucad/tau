@@ -19,31 +19,28 @@ vi.mock('@taucad/ui-core/lib/compute-reuse-preference', () => ({
   useComputeReuseMode: () => state.mode,
   setComputeReuseMode: state.set,
 }));
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => (state.projectId ? { projectId: state.projectId } : undefined),
-}));
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () =>
-    state.available
-      ? {
-          fileManagerRef: {
-            getSnapshot: () => ({
-              context: {
-                computeControl: async (_projectId: string, action: 'inspect' | 'clear' | 'collect', input: unknown) => {
-                  let result: unknown;
-                  if (action === 'inspect') {
-                    result = await state.inspect(input);
-                  } else if (action === 'clear') {
-                    result = await state.clear(input);
-                  } else {
-                    result = await state.collect(input);
-                  }
-                  return result;
-                },
-              },
-            }),
-          },
+/* A11: Settings reads the focused session (focus and the registry), not provider ancestry. The file manager is one
+ * stable ref whose control answers from the test's state, so a selector over it settles. */
+const focusedFiles = vi.hoisted(() => {
+  const snapshot = {
+    context: {
+      computeControl: async (_projectId: string, action: 'inspect' | 'clear' | 'collect', input: unknown) => {
+        if (action === 'inspect') {
+          return state.inspect(input);
         }
+        if (action === 'clear') {
+          return state.clear(input);
+        }
+        return state.collect(input);
+      },
+    },
+  };
+  return { getSnapshot: () => snapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
+});
+vi.mock('#routes/w.$workspace.$project/focused-project-view.session.js', () => ({
+  useFocusedProjectSession: () =>
+    state.projectId
+      ? { projectId: state.projectId, runtime: undefined, fileManagerRef: state.available ? focusedFiles : undefined }
       : undefined,
 }));
 vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => undefined }));
@@ -99,6 +96,16 @@ it('disables controls without authority and reports failures and retained clear 
   expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Confirm clear' }));
   expect(await screen.findByRole('status')).toHaveTextContent('Cleared. 11 B still in use.');
+});
+
+it('disables a pending clear confirmation when the compute control goes', () => {
+  const view = render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
+  fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+  expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeEnabled();
+
+  state.available = false;
+  view.rerender(<ComputeReuseSettings />);
+  expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeDisabled();
 });
 
 it('keeps cache controls unavailable without an active project', () => {

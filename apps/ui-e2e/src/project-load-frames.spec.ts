@@ -46,8 +46,8 @@ import {
  * animation frame, so a state painted once is caught.
  *
  * Every row that pins a known defect shows it on every run. Most force it: the workspace chunk or the agent host's
- * script held, or a file-manager worker reply delivered late. U2, U3 and U22 need no forcing: their defect is built
- * into the load on every run. Its title names the defect; its defect assertion (a removed
+ * script held, or a file-manager worker reply delivered late. U2, U3 and U22 needed no forcing: their defect was
+ * built into the load on every run until A11 fixed it. Its title names the defect; its defect assertion (a removed
  * node, a mount count, a frame) names the frame. Each is a plain test that stands as an expected failure until the
  * fixing lane sets `expectedFailure: false`; it is never deleted. A row measures first (seeding, the load, the check
  * that the forcing happened, its preconditions) and asserts after: an error while measuring, in setup or teardown,
@@ -244,7 +244,7 @@ const requireReadDelayed = async (row: string, rule: WorkerReadDelay): Promise<n
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(`U1: the sidebar wrapper is never removed on a ${viewport} reload with the workspace chunk 3 s late`, {
     artifact: `u1-${viewport}`,
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -272,7 +272,7 @@ for (const viewport of ['wide', 'phone'] as const) {
 
   knownDefect(`U2: the sidebar wrapper is not removed after its first mount on a ${viewport} reload`, {
     artifact: `u2-${viewport}`,
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -292,7 +292,7 @@ for (const viewport of ['wide', 'phone'] as const) {
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(`U22: a click on a project row from Home removes the sidebar wrapper zero times at ${viewport} size`, {
     artifact: `u22-${viewport}`,
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects(viewport);
@@ -320,11 +320,17 @@ for (const viewport of ['wide', 'phone'] as const) {
   });
 }
 
+/*
+ * U3 is split (programme-control ruling, section 11, 09:05Z). The asserted row holds A11's acceptance: the server HTML
+ * has the wrapper and the sidebar, the wrapper mounts once, and once each has appeared no frame removes it. A frame
+ * sampled before the document's body reached the shell (a blank first paint of the streamed document) is not a
+ * removal: that is the report-only row below, a question for A15b about streaming and render-blocking order.
+ */
 knownDefect(
-  'U3: a direct load with the sidebar open has the wrapper and sidebar in the server HTML and in every frame',
+  'U3: a direct load with the sidebar open has the wrapper and sidebar in the server HTML, mounts the wrapper once and removes neither once shown',
   {
     artifact: 'u3-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       const { path } = await seedProjects('wide');
@@ -338,19 +344,104 @@ knownDefect(
         ),
       );
       precondition(isOpen, 'U3: the sidebar is not open on the settled page');
-      return { server, record: await keepRecord('u3-wide', { server }) };
+      const record = await keepRecord('u3-wide', { server });
+      precondition(record.wrapperFirstFrame !== undefined, 'U3: the sidebar wrapper never painted');
+      precondition(
+        record.dropped['wrapperAbsentFrames'] === undefined && record.dropped['sidebarAbsentFrames'] === undefined,
+        'U3: the recorder dropped absent frames, so the first shown frame is unknown',
+      );
+      return { server, record };
     },
     assert: ({ server, record }) => {
+      const wrapperShown = record.wrapperFirstFrame!.frame;
+      const sidebarAbsent = new Set(record.sidebarAbsentFrames.map((entry) => entry.frame));
+      let sidebarShown = 1;
+      while (sidebarAbsent.has(sidebarShown)) {
+        sidebarShown += 1;
+      }
+      precondition(sidebarShown <= record.frames, 'U3: no sampled frame showed the sidebar');
+      const wrapperGone = record.wrapperAbsentFrames.filter((entry) => entry.frame > wrapperShown);
+      const sidebarGone = record.sidebarAbsentFrames.filter((entry) => entry.frame > sidebarShown);
       expect(
         {
           serverWrapper: server.wrapper,
           serverSidebar: server.sidebar,
-          wrapperAbsentFrames: record.wrapperAbsentFrames.length,
-          sidebarAbsentFrames: record.sidebarAbsentFrames.length,
+          wrapperMounts: record.wrapperMounts,
+          wrapperRemovedFrames: wrapperGone.length,
+          sidebarRemovedFrames: sidebarGone.length,
         },
-        `U3: the server HTML ${server.wrapper ? 'has' : 'lacks'} [data-slot=sidebar-wrapper] and ${server.sidebar ? 'has' : 'lacks'} [data-slot=sidebar]; the wrapper is absent in ${describeFrames(record.wrapperAbsentFrames) || 'no frame'}, the sidebar in ${describeFrames(record.sidebarAbsentFrames) || 'no frame'}`,
-      ).toEqual({ serverWrapper: true, serverSidebar: true, wrapperAbsentFrames: 0, sidebarAbsentFrames: 0 });
+        `U3: the server HTML ${server.wrapper ? 'has' : 'lacks'} [data-slot=sidebar-wrapper] and ${server.sidebar ? 'has' : 'lacks'} [data-slot=sidebar]; ${record.wrapperMounts} wrapper nodes mounted; after first showing, the wrapper is absent in ${describeFrames(wrapperGone) || 'no frame'}, the sidebar in ${describeFrames(sidebarGone) || 'no frame'}`,
+      ).toEqual({
+        serverWrapper: true,
+        serverSidebar: true,
+        wrapperMounts: 1,
+        wrapperRemovedFrames: 0,
+        sidebarRemovedFrames: 0,
+      });
     },
+  },
+);
+
+/** How many direct loads the U3 first-paint report samples. */
+const firstPaintLoads = 5;
+
+test(
+  'U3 first paint (report-only): counts direct loads whose first sampled frames lack the shell, k of n',
+  /* A report keeps every sample: a retry would replace a run's samples with another run's. */
+  { timeout: loadBudget * (firstPaintLoads + 1), retry: 0 },
+  async () => {
+    const samples: Array<{
+      readonly sample: number;
+      /** Frames before the wrapper first showed, with their times: the shell was not yet in the document. */
+      readonly blankFrames?: ReadonlyArray<{ frame: number; t: number }>;
+      readonly firstPaint?: number;
+      readonly firstContentfulPaint?: number;
+      readonly error?: string;
+    }> = [];
+    /* Written after every sample, so a run that times out still reports the samples it took. */
+    const writeReport = async (): Promise<void> => {
+      const k = samples.filter((entry) => (entry.blankFrames?.length ?? 0) > 0).length;
+      const report = {
+        defect: 'U3 first paint',
+        k,
+        n: samples.length,
+        statement: `U3 first paint: ${k} of ${samples.length} direct loads sampled a frame before the shell was in the document`,
+        samples,
+      };
+      await target.writeArtifact(
+        'project-load-frames/u3-first-paint-report.json',
+        `${JSON.stringify(report, null, 2)}\n`,
+      );
+    };
+    try {
+      await seedProjects('wide');
+    } catch (error) {
+      samples.push({ sample: 0, error: `seeding: ${error instanceof Error ? error.message : String(error)}` });
+      await writeReport();
+      return;
+    }
+    for (let sample = 1; sample <= firstPaintLoads; sample += 1) {
+      try {
+        await target.reload();
+        await settleProject();
+        const record = await keepRecord(`u3-first-paint-${String(sample)}`);
+        if (record.wrapperFirstFrame === undefined || Object.keys(record.dropped).length > 0) {
+          throw new Error(
+            record.wrapperFirstFrame === undefined ? 'the wrapper never painted' : 'the recorder dropped frames',
+          );
+        }
+        const shown = record.wrapperFirstFrame.frame;
+        samples.push({
+          sample,
+          blankFrames: record.wrapperAbsentFrames.filter((entry) => entry.frame < shown),
+          firstPaint: record.firstPaint,
+          firstContentfulPaint: record.firstContentfulPaint,
+        });
+      } catch (error) {
+        samples.push({ sample, error: error instanceof Error ? error.message : String(error) });
+      }
+      await writeReport();
+    }
   },
 );
 
@@ -967,7 +1058,7 @@ knownDefect(
 
 /** The sidebar's resting-width stand-in: a slab with the sidebar's background that is not the sidebar itself. */
 const findSidebarStandIns = (html: Document): string[] =>
-  /* The slab's signature: the sidebar's background with its border, as `workspace-skeleton.tsx` draws it. */
+  /* The slab's signature: the sidebar's background with its border, as `workspace-skeleton.tsx` drew it before A11. */
   [...html.querySelectorAll('[class~="bg-sidebar"][class~="border-sidebar-border"]')]
     /* Not the sidebar, and not a bar fixed to the window's edge (the phone's), which no sidebar width can stand for. */
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))
@@ -975,7 +1066,7 @@ const findSidebarStandIns = (html: Document): string[] =>
 
 knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a project draws no sidebar stand-in', {
   artifact: 'f4-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');

@@ -632,11 +632,47 @@ export const createLargeObjectFill = (
     };
     try {
       fill.fromStore = (await landsFromStore?.(fill.place)) === true;
-      const full = await port.readTree(fill.head, fill.fromStore ? { ...transfer, largeObjects: 'stored' } : transfer);
-      if (!isCurrent(fill)) {
-        return;
+      /*
+       * The placeholders name their objects, so a store that fetches by oid is asked for them at once (Tau
+       * #2013): reading the head's tree first read every blob it holds before the first object was asked for.
+       * A store-landing checkout reads the head with `stored`, which says which objects the store holds whole.
+       */
+      let byOid = !fill.fromStore && port.fetchLargeObjects !== undefined;
+      if (byOid && port.fetchLargeObjects !== undefined) {
+        try {
+          const fetched = await port.fetchLargeObjects(
+            [...fill.wanted].map(([oid, size]) => ({ oid, size })),
+            transfer,
+          );
+          if (!isCurrent(fill)) {
+            return;
+          }
+          for (const [oid, content] of fetched) {
+            if (fill.wanted.has(oid)) {
+              arrive(fill, oid, content);
+            }
+          }
+        } catch (error) {
+          if (!isCurrent(fill)) {
+            return;
+          }
+          /* An object the fetch by oid found missing is looked for in the head's tree, as a fill read it before. */
+          if (!(error instanceof RevisionPortError && error.code === 'MISSING_LARGE_OBJECT')) {
+            throw error;
+          }
+          byOid = false;
+        }
       }
-      arriveFromTree(fill, full);
+      if (!byOid) {
+        const full = await port.readTree(
+          fill.head,
+          fill.fromStore ? { ...transfer, largeObjects: 'stored' } : transfer,
+        );
+        if (!isCurrent(fill)) {
+          return;
+        }
+        arriveFromTree(fill, full);
+      }
       /* A placeholder the head does not name (an undo's, a merge's) is fetched by its own oid. */
       const unnamed = [...fill.wanted].flatMap(([oid, size]) => (fill.arrived.has(oid) ? [] : [{ oid, size }]));
       if (unnamed.length > 0 && port.fetchLargeObjects !== undefined) {

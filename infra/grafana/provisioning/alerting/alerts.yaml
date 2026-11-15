@@ -646,7 +646,7 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: sum by (app, instance, tau_process) (resets(process_uptime{app=~".*",service_name="tau-api"}[30m])) > 2
+              expr: count by (app, instance, tau_process, service_version) (count_over_time(target_info{app=~".*",service_name="tau-api"}[30m])) > 3
               intervalMs: 15000
               maxDataPoints: 20
               refId: process_restarting
@@ -655,7 +655,7 @@ groups:
         for: 0s
         annotations:
           runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
-          summary: 'A Tau process (app or billing worker) restarted more than twice in 30 min: it is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine, before its first pass completes). Reads process_uptime, which exists from the first scrape. A deploy restarts it once.'
+          summary: 'A Tau process (app or billing worker) started more than three times on one image in 30 min: it is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine, before its first pass completes). Reads target_info, one series per process start (process_pid) labelled with the image (service_version), so a deploy starts a new image and is never counted, however often main deploys staging.'
         labels:
           severity: warning
           service: tau-api

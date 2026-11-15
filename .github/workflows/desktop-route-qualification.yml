@@ -150,7 +150,7 @@ jobs:
           TAU_VM_MODE: qualification
           TAU_VM_HOST: ${{ inputs.graphics == 'stock' && 'gcp' || 'qemu' }}
           TAU_GCP_PROJECT: tau-ci
-          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f us-east1-c us-east1-d us-west1-a us-west1-b
+          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f us-east1-c us-east1-d us-west1-a us-west1-b europe-west4-b europe-west4-c europe-west1-b europe-west1-d
           TAU_VM_DISTRO: ${{ matrix.distro || (startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian') }}
         run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Run installed shipping renderer, explicit update and latest-feed update

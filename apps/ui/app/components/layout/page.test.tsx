@@ -139,9 +139,7 @@ vi.mock('@taucad/ui-kit/icons/tau-wordmark', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
 }));
 vi.mock('#components/settings/settings-dialog.js', () => ({
-  /* `ComputeReuseSettings` inside the real dialog reads the project context the
-   * matched route contributes, so the dialog is probed the same way. */
-  SettingsDialog: () => (useContext(RouteProviderContext) ? <span>Settings dialog</span> : undefined),
+  SettingsDialog: () => <span>Settings dialog</span>,
 }));
 
 const { Page } = await import('#components/layout/page.js');
@@ -240,12 +238,12 @@ describe('Page application shell', () => {
     expect(screen.getByText('Project commands').closest('[data-slot=route-provider]')).not.toBeNull();
   });
 
-  it('should render the settings dialog inside the matched routes providers', () => {
+  it('should render the settings dialog outside the matched routes providers, so a waiting route still opens it', () => {
     state.providers = [{ handle: { providers: () => RouteProvider } }];
 
     render(<Page />);
 
-    expect(screen.getByText('Settings dialog').closest('[data-slot=route-provider]')).not.toBeNull();
+    expect(screen.getByText('Settings dialog').closest('[data-slot=route-provider]')).toBeNull();
   });
 
   it('hides the outer sidebar pane on mobile while keeping main content mounted', () => {

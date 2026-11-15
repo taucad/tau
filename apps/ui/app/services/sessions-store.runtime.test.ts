@@ -394,6 +394,32 @@ describe('a change of kernel selection replaces the runtime through the session 
     next.close();
   });
 
+  it('should replace the runtime a new file manager built during the flush when its kernel changes before the flush settles', async () => {
+    const { registry, opener, closes } = harness();
+    await open(registry);
+    const flushing = held();
+    opener.built[0]?.flushWith(flushing.flush);
+
+    opener.built[0]?.supersede();
+    opener.changeChoices();
+    await flush();
+    const next = openSessionFileManagerStandIn(projectId);
+    sessionOf(registry)?.send({ type: 'fileManagerChanged', fileManagerRef: next.fileManagerRef });
+    await flush();
+    /* The runtime built on the new file manager is superseded while runtime 0's flush is still under way. */
+    opener.built[1]?.supersede();
+    opener.changeChoices();
+    await flush();
+    flushing.settle();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(closes).toEqual(['open:0', 'flush:0', 'runtime:0', 'open:1', 'flush:1', 'open:2', 'runtime:1']);
+    expect(selectProjectSessionRuntime(sessionOf(registry)!.getSnapshot())).toBe(opener.built[2]?.runtimeRef);
+    next.close();
+  });
+
   it('should replace the runtime of a session that failed to open on a refused kernel (D21 round 2)', async () => {
     const { registry, opener } = harness({ kernelRefusal: 'Kernel budget reached' });
     await open(registry);

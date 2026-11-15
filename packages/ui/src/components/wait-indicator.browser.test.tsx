@@ -540,3 +540,88 @@ it('should hold a wait that restarted over an undrawn hold 500 ms from the frame
     'the restart held the words from a hold no frame had drawn',
   ).toBeGreaterThanOrEqual(500 - oneFrame);
 });
+
+/** A page with two waiting regions, whose second settles in one task with `milliseconds` of rendering before or after. */
+function twoRegions(
+  phase: number,
+  first: number,
+  second: { active: boolean; startedAt: number },
+  busy: { milliseconds: number; where: 'before' | 'after' },
+): React.JSX.Element {
+  const isBusy = phase === 1;
+  return (
+    <>
+      <WaitIndicator active label='Loading chat' startedAt={first} />
+      {isBusy && busy.where === 'before' ? <Busy milliseconds={busy.milliseconds} /> : null}
+      <div data-region='second'>
+        <WaitIndicator active={second.active} label='Loading history' startedAt={second.startedAt} />
+      </div>
+      {isBusy && busy.where === 'after' ? <Busy milliseconds={busy.milliseconds} /> : null}
+    </>
+  );
+}
+
+const secondStatus = (container: HTMLElement): HTMLElement =>
+  within(container.querySelector<HTMLElement>('[data-region=second]')!).getByRole('status');
+
+it('should not show words no frame drew once a render longer than their minimum has passed', () => {
+  /* The settle reads the timeline its task read first, 1,100 ms into the wait; the render before it runs 700 ms, so by
+     the time any frame could draw the words their minimum is long over. */
+  const startedAt = Number(document.timeline.currentTime) - 1100;
+  const busy = { milliseconds: 700, where: 'before' } as const;
+  const view = render(twoRegions(0, startedAt, { active: true, startedAt }, busy));
+  act(() => {
+    view.rerender(twoRegions(1, startedAt + 1, { active: false, startedAt }, busy));
+  });
+
+  expect(secondStatus(view.container).dataset['state'], 'the words showed after their content arrived').toBe('idle');
+});
+
+it('should hold words a hold drew after the rest of its task for the minimum from their paint through a restart', async () => {
+  /* The second region settles with its reveal due and undrawn, and 300 ms of rendering follow it in the task: the hold
+     draws the words only after that. A restart 250 ms after the paint still owes the minimum. */
+  const startedAt = Number(document.timeline.currentTime) - 1100;
+  const busy = { milliseconds: 300, where: 'after' } as const;
+  const view = render(twoRegions(0, startedAt, { active: true, startedAt }, busy));
+  act(() => {
+    view.rerender(twoRegions(1, startedAt + 1, { active: false, startedAt }, busy));
+  });
+  let shownAt = Number.NaN;
+  requestAnimationFrame(() => {
+    shownAt = performance.now();
+  });
+  await act(async () => {
+    await nextFrame();
+  });
+  await act(async () => {
+    await frameAtOrAfter(shownAt + 250);
+  });
+  const restartedAt = Number(document.timeline.currentTime);
+  act(() => {
+    view.rerender(twoRegions(2, startedAt + 1, { active: true, startedAt: restartedAt }, busy));
+  });
+  act(() => {
+    view.rerender(twoRegions(2, startedAt + 1, { active: false, startedAt: restartedAt }, busy));
+  });
+
+  expect(secondStatus(view.container).dataset['state'], 'the restart hid words that still owed their minimum').toBe(
+    'holding',
+  );
+});
+
+it('should not show words a hidden page never drew when its wait ends', () => {
+  /* A hidden page draws no frames, so a reveal that fell due there was never seen; the content arriving ends the wait
+     with nothing to hold, rather than with words over the content when the page shows again. */
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  try {
+    const startedAt = Number(document.timeline.currentTime) - 1200;
+    const view = render(<WaitIndicator active label='Loading chat' startedAt={startedAt} />);
+    act(() => {
+      view.rerender(<WaitIndicator active={false} label='Loading chat' startedAt={startedAt} />);
+    });
+
+    expect(view.getByRole('status').dataset['state'], 'the words wait to show over the content').toBe('idle');
+  } finally {
+    Reflect.deleteProperty(document, 'visibilityState');
+  }
+});

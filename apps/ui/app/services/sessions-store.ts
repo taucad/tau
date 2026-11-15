@@ -103,7 +103,7 @@ export type SessionRuntime = Readonly<{
   kernelIsCurrent: () => boolean;
   /**
    * Write what the runtime owes (A7c, row S6), with no timer (I15): the session's state bounds the wait, and `gone`
-   * aborts it when the child stops. Rejects with every write it could not confirm.
+   * aborts it when the child stops. `close`, `leave` and `replace` reject with every write they could not confirm.
    *
    * - `close`: refused while an editor's conflict is being recorded; the producers, then both stores. It closes
    *   nothing: the parameter service closes in the session's next step (`closeParameters`).

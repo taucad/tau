@@ -232,10 +232,11 @@ export const sessionRuntimeWork = ({
       }
       if (kind === 'unload') {
         /* The unload asks the stores once every producer settles (A0.2 item 10, S40), as the close does, and a
-         * producer's refusal skips none of them (A7c review round 4). It refuses only on a producer's refusal, as the
-         * persistence guard did. */
+         * producer's refusal skips none of them (A7c review round 4). A store write on `beforeunload` so waits on the
+         * producers' head start; the editor's own save covers it. It refuses only on a producer's refusal, as the
+         * persistence guard did, so a store that fails before it settles refuses nothing (review round 6). */
         const [records] = await Promise.allSettled([producers.flushAll()]);
-        await Promise.all([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
+        await Promise.allSettled([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
         if (records.status === 'rejected') {
           throw records.reason instanceof Error
             ? records.reason

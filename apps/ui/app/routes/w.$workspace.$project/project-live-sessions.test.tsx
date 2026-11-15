@@ -1370,14 +1370,17 @@ describe("each session's unload flush walks the project's producer set (A0.2 ite
     await hide();
     expect(fixtures.order).toContain(`producer:${projectB}`);
     expect(fixtures.order).toContain(`producer:${projectB}:second`);
+    expect(fixtures.order).not.toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
     first.resolve();
     await flushTasks();
+    expect(fixtures.order).not.toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
     second.resolve();
     await flushTasks();
+    expect(fixtures.order).toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).toContain(`editor:${projectB}:flushNow`);
   });
 

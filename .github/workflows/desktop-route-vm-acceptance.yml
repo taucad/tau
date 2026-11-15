@@ -458,7 +458,7 @@ jobs:
           TAU_VM_MODE: clean-host
           TAU_VM_HOST: gcp
           TAU_GCP_PROJECT: tau-ci
-          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f
+          TAU_GCP_ZONES: us-central1-a us-central1-b us-central1-c us-central1-f us-east1-c us-east1-d us-west1-a us-west1-b
           TAU_VM_DISTRO: ${{ matrix.distro }}
         run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Preserve diagnostic observations without private TLS keys or app profile contents

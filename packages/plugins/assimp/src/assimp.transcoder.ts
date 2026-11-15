@@ -13,7 +13,6 @@ type TauAssimpEdge<Edge extends TauAssimpRoute = TauAssimpRoute> = Edge extends 
   ? Readonly<{
       from: Edge['from'];
       to: Edge['to'];
-      fidelity: 'mesh';
       optionsSchema: (typeof assimpEdgeSchemas)[Edge['to']];
       sourceOptions: typeof specNativeGltfSource;
     }>
@@ -30,7 +29,6 @@ const specNativeGltfSource = {
 const toTauEdge = <Edge extends TauAssimpRoute>(edge: Edge): TauAssimpEdge<Edge> =>
   ({
     ...edge,
-    fidelity: 'mesh',
     optionsSchema: assimpEdgeSchemas[edge.to],
     sourceOptions: specNativeGltfSource,
   }) as unknown as TauAssimpEdge<Edge>;

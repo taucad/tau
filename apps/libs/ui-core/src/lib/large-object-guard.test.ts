@@ -178,6 +178,29 @@ describe('the agent tools while large objects download', () => {
     expect(graphics.exportModel).toHaveBeenCalledTimes(1);
     expect(geospec.runTests).toHaveBeenCalledTimes(1);
   });
+
+  /* T6: a kernel that reads only its entry runs while other objects download; a pending path it reads goes through. */
+  it('runs a kernel call whose closure holds no pending object, and stays gated for a failed fill', async () => {
+    let facet: LargeObjectsFacet | undefined = downloading;
+    const kernelClient = mock<RpcRuntimeClient>();
+    const graphics = mock<RpcGraphicsClient>();
+    kernelClient.evaluateModel.mockResolvedValue(mock());
+    graphics.exportModel.mockResolvedValue(mock());
+    const guarded = guardLargeObjectKernel({ kernelClient, graphics }, () => facet);
+    const evaluate: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.scad' };
+    const exported: Parameters<RpcGraphicsClient['exportModel']>[0] = { targetFile: 'main.scad', to: 'stl' };
+
+    await guarded.kernelClient.evaluateModel(evaluate);
+    await guarded.graphics.exportModel(exported);
+    expect(kernelClient.evaluateModel).toHaveBeenCalledWith(evaluate, undefined);
+    expect(graphics.exportModel).toHaveBeenCalledTimes(1);
+
+    const ofPart: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'models/part.step' };
+    await expect(guarded.kernelClient.evaluateModel(ofPart)).resolves.toMatchObject({ retryable: true });
+    facet = { ...downloading, phase: 'failed', error: 'offline' };
+    await expect(guarded.kernelClient.evaluateModel(evaluate)).resolves.toMatchObject({ retryable: true });
+    expect(kernelClient.evaluateModel).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('kernel closure', () => {

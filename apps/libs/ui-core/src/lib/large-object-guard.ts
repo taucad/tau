@@ -215,6 +215,10 @@ export const kernelClosure = (entryPath: string, kernel?: KernelId): KernelClosu
 export const closureHasPending = (closure: KernelClosure, pendingPaths: readonly string[]): boolean =>
   closure === 'workspace' ? pendingPaths.length > 0 : closure.some((path) => pendingPaths.includes(path));
 
+/* The facet a run over this closure waits on: a failed fill always, so its reason and retry reach the caller. */
+const blockingFacet = (facet: LargeObjectsFacet | undefined, closure: KernelClosure): LargeObjectsFacet | undefined =>
+  facet !== undefined && (facet.phase === 'failed' || closureHasPending(closure, facet.paths)) ? facet : undefined;
+
 /**
  * The retryable answer a kernel call gets while any of the checkout's large objects is still to land.
  *
@@ -234,8 +238,8 @@ export const largeObjectsPendingResult = (
 });
 
 /**
- * Kernel clients that run only once every large object of the checkout has landed: the kernel reads the model's files
- * itself, so a placeholder would be read as its pointer.
+ * Kernel clients that run once the large objects of their closure have landed ({@link kernelClosure}), as the viewer
+ * does: an export or capture over an entry, by that entry; GeoSpec, which may run any file, over the whole workspace.
  *
  * @param clients - The evaluate, export, capture and GeoSpec clients.
  * @param largeObjects - The checkout's current large-object facet; `undefined` once everything is local.
@@ -254,7 +258,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           kernelClient: {
             ...kernelClient,
             evaluateModel: async (input, context) => {
-              const facet = largeObjects();
+              const facet = blockingFacet(largeObjects(), kernelClosure(input.targetFile));
               return facet === undefined
                 ? kernelClient.evaluateModel(input, context)
                 : largeObjectsPendingResult(facet);
@@ -267,7 +271,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           graphics: {
             ...graphics,
             exportModel: async (...parameters) => {
-              const facet = largeObjects();
+              const facet = blockingFacet(largeObjects(), kernelClosure(parameters[0].targetFile));
               return facet === undefined ? graphics.exportModel(...parameters) : largeObjectsPendingResult(facet);
             },
           } satisfies RpcGraphicsClient,
@@ -278,7 +282,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           images: {
             ...images,
             captureImages: async (input, context) => {
-              const facet = largeObjects();
+              const facet = blockingFacet(largeObjects(), kernelClosure(input.targetFile));
               return facet === undefined ? images.captureImages(input, context) : largeObjectsPendingResult(facet);
             },
           } satisfies RpcImageClient,
@@ -289,7 +293,7 @@ export const guardLargeObjectKernel = <Clients extends KernelClients>(
           geospec: {
             ...geospec,
             runTests: async (input, context) => {
-              const facet = largeObjects();
+              const facet = blockingFacet(largeObjects(), 'workspace');
               return facet === undefined ? geospec.runTests(input, context) : largeObjectsPendingResult(facet);
             },
           } satisfies RpcGeoSpecClient,

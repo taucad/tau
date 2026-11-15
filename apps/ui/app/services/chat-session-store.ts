@@ -740,7 +740,19 @@ export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
       get: () => string | undefined;
       subscribe: (listener: () => void) => () => void;
     }>;
+    /**
+     * Every live project's session, as the registry holds them (A7c): each run reports to the project that ran it (R2),
+     * and a session that joins late is told which of its chats already have a run in flight, so `busy` still counts
+     * them. The chats' machines are roots this store owns (PV-S5, L3 D10).
+     */
+    projectSessions?: Readonly<{
+      get: () => LiveProjectSessions;
+      subscribe: (listener: () => void) => () => void;
+    }>;
   }>;
+
+/** The live project sessions by project id, as the sessions registry holds them (A7c). @public */
+export type LiveProjectSessions = Readonly<Record<string, ProjectSessionActorRef>>;
 
 /** The revision facts one project's chats show (the project's route reports them). @public */
 export type ChatRevisionFacts = Readonly<{
@@ -974,7 +986,7 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const { chatSession, dependencies, files, focusedProject, ...rootOptions } = options;
+    const { chatSession, dependencies, files, focusedProject, projectSessions, ...rootOptions } = options;
     if (dependencies !== undefined) {
       this.#deps = { ...this.#deps, ...dependencies };
     }
@@ -992,6 +1004,23 @@ export class ChatSessionStore {
         actors: { admitTurn: chatTurnAdmission, lookUpModelAttempt: modelAttemptLookup },
       });
     this.#rootOptions = rootOptions;
+    if (projectSessions !== undefined) {
+      const follow = (): void => {
+        const live = projectSessions.get();
+        for (const projectId of [...this.#projectSessions.keys()]) {
+          if (live[projectId] === undefined) {
+            this.#bindProjectSession(projectId, undefined);
+          }
+        }
+        for (const [projectId, ref] of Object.entries(live)) {
+          if (this.#projectSessions.get(projectId) !== ref) {
+            this.#bindProjectSession(projectId, ref);
+          }
+        }
+      };
+      follow();
+      projectSessions.subscribe(follow);
+    }
     if (focusedProject !== undefined) {
       let focused = focusedProject.get();
       this.#bindFocusedProject(focused);
@@ -2077,19 +2106,8 @@ export class ChatSessionStore {
   // Internals
   // -------------------------------------------------------------------------
 
-  /**
-   * Register one live project's session, or forget it when it closes.
-   *
-   * Every live project's binding calls this, not only the focused one, so a
-   * run reports to the project that ran it (R2). The chats' machines are roots
-   * this store owns (PV-S5, L3 D10); a session that registers late is told which
-   * of its chats already have a run in flight, so `busy` still counts them.
-   *
-   * @param projectId - The project this session is for.
-   * @param ref - The live session, or `undefined` when it closes.
-   * @public
-   */
-  public setProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
+  /* Bind one live project's session as the registry reports it, or forget it when it closes (A7c). */
+  #bindProjectSession(projectId: string, ref: ProjectSessionActorRef | undefined): void {
     if (ref === undefined) {
       this.#projectSessions.delete(projectId);
     } else {
@@ -2407,7 +2425,7 @@ export class ChatSessionStore {
     if (projectId === undefined) {
       return;
     }
-    this.setProjectSession(projectId, this.#projectSessions.get(projectId));
+    this.#bindProjectSession(projectId, this.#projectSessions.get(projectId));
   }
 
   async #readForeignSegment(path: string, client = this.#deps.client): Promise<Uint8Array<ArrayBuffer>> {

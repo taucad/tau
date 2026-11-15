@@ -10,7 +10,9 @@ import type { AnyActorRef, AnyEventObject } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
-import { createSessionsRegistryLogic, registerProjectSessionServices } from '#services/sessions-store.js';
+import { createSessionsRegistryLogic } from '#services/sessions-store.js';
+import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -22,16 +24,6 @@ afterEach(() => {
     cleanup();
   }
 });
-const servicesFor = (projectId: string): void => {
-  cleanups.push(
-    registerProjectSessionServices(projectId, {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => undefined,
-      flushSync: async () => undefined,
-      closeRuntime: async () => undefined,
-    }),
-  );
-};
 /** Focus's `open` command, as focus's own `sendTo` hands it to the port. */
 type OpenCommand = Readonly<{ type: 'open'; requestId: string; projectId: string }>;
 const open = (requestId: string, projectId: string): OpenCommand => ({ type: 'open', requestId, projectId });
@@ -67,7 +59,6 @@ it('should an open that displaces the waiting one answers only itself (one slot,
     registry.stop();
   });
   for (const id of ['p1', 'p2', 'p3']) {
-    servicesFor(id);
   }
   port.send(open('r1', 'p1'));
   await flushTasks();
@@ -110,7 +101,6 @@ it('should a queued open that lands waiting is answered when the registry resume
     registry.stop();
   });
   for (const id of ['p1', 'p2']) {
-    servicesFor(id);
   }
   port.send(open('r1', 'p1'));
   await flushTasks();
@@ -167,7 +157,6 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
     registry.stop();
   });
   for (const id of ['p1', 'p2']) {
-    servicesFor(id);
   }
   port.send(open('r1', 'p1'));
   await flushTasks();
@@ -186,10 +175,18 @@ it("should the person's Not now on the budget dialog answers focus's waiting ope
 });
 
 it('should a return to a closing project refused by another close that came back live is answered refused (rule 12)', async () => {
-  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
-    input: { budget: 2 },
-    clock: new StepClock(),
-  }).start();
+  const opener = sessionRuntimeOpenerStandIn();
+  const registry = createActor(
+    createSessionsRegistryLogic({
+      sharedWorker: () => undefined,
+      openRuntime: opener,
+      openFileManager: (id: string) => openSessionFileManagerStandIn(id),
+    }),
+    {
+      input: { budget: 2 },
+      clock: new StepClock(),
+    },
+  ).start();
   const told: Array<{ type: string } & Record<string, unknown>> = [];
   const fakeFocus = mock<AnyActorRef>();
   fakeFocus.send.mockImplementation((event: AnyEventObject) => {
@@ -210,30 +207,18 @@ it('should a return to a closing project refused by another close that came back
     port.stop();
     registry.stop();
   });
-  let refuse: (error: Error) => void = () => undefined;
-  const gateY = new Promise<void>((_resolve, reject) => {
-    refuse = reject;
+  /* px's close never settles, so px stays closing; py's is held until the row refuses it. */
+  opener.onBuilt('px', (standIn) => {
+    standIn.hold();
   });
-  // oxlint-disable-next-line promise/prefer-await-to-then -- the row refuses this close on purpose; mark it handled.
-  gateY.catch(() => undefined);
-  /* A close that never settles: px stays closing. */
-  const gateX = new Promise<void>(() => {
-    /* Never settles. */
+  let refuse: () => void = () => undefined;
+  opener.onBuilt('py', (standIn) => {
+    const release = standIn.hold();
+    refuse = () => {
+      standIn.refuse('producer refused');
+      release();
+    };
   });
-  cleanups.push(
-    registerProjectSessionServices('px', {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => gateX,
-      flushSync: async () => undefined,
-      closeRuntime: async () => undefined,
-    }),
-    registerProjectSessionServices('py', {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => gateY,
-      flushSync: async () => undefined,
-      closeRuntime: async () => undefined,
-    }),
-  );
   port.send(open('r1', 'px'));
   port.send(open('r2', 'py'));
   await flushTasks();
@@ -245,7 +230,7 @@ it('should a return to a closing project refused by another close that came back
   await flushTasks();
   port.send(open('r3', 'px'));
   await flushTasks();
-  refuse(new Error('producer refused'));
+  refuse();
   await flushTasks();
   await flushTasks();
   const settled = told

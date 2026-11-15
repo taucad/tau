@@ -11,6 +11,10 @@ import { createSessionsActor } from '#services/sessions-store.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 const queueMutex = new KeyedMutex<string>();
 vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) => {
@@ -135,7 +139,7 @@ it('should render first held reasoning through production ChatMessage before dur
     return acquired === undefined ? <div /> : <ProductionTranscript />;
   }
   const mounted = render(
-    <ChatSessionStoreProvider>
+    <ChatSessionStoreProvider projectSessions={liveSessions}>
       <TooltipProvider>
         <Transcript />
       </TooltipProvider>
@@ -145,7 +149,7 @@ it('should render first held reasoning through production ChatMessage before dur
   const session = current.get('mounted')!;
   const owner = createActor(projectSessionMachine, { input: { projectId: 'project' } });
   owner.start();
-  current.setProjectSession('project', owner);
+  liveSessions.set('project', owner);
   let rows: unknown[] = [];
   let deliver: (() => void) | undefined;
   const detach = vi.fn();

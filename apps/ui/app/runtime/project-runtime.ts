@@ -1093,6 +1093,11 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
       confirmFlush(async () => flushWorkbenchLayout(layoutRef), 'Pane layout is not confirmed saved.'),
     );
   }
+  /* A7c: the view record sessions' flush is in the set from creation too, so the same flushes settle every view's owed
+   * settings with nothing mounted; `ViewSettingsSyncHost` registered it from an effect before. */
+  if (viewRecordPorts !== undefined) {
+    producers.register(async () => viewRecordPorts.flush());
+  }
   return {
     actor,
     layout: layoutHost,

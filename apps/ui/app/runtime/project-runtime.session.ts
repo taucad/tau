@@ -16,15 +16,22 @@
  *
  * @module
  */
+import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic, AnyActorRef } from 'xstate';
 import type { QueryClient } from '@tanstack/react-query';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
-import { selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { refuseCloseWhileRecording } from '#lib/editor-document-session.js';
 import { inspect as developmentInspect } from '#machines/inspector.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
-import type { SessionRuntime, SessionRuntimeChat, SessionRuntimeFacts } from '#services/sessions-store.js';
+import type {
+  SessionRuntime,
+  SessionRuntimeChat,
+  SessionRuntimeFacts,
+  SessionRuntimeFlushKind,
+} from '#services/sessions-store.js';
 import type { ProjectChoices } from '#runtime/choices.js';
 import { selectProjectKernelSelection } from '#runtime/choices-kernel-selection.js';
 import { createRecordWatch, selectBridgeOpener, servicesBound, servicesOf } from '#runtime/file-manager-facade.js';
@@ -111,6 +118,78 @@ if (hotData !== undefined) {
  */
 export const sessionProjectRuntimeOf = (runtimeRef: AnyActorRef): SessionProjectRuntimeSource | undefined =>
   sessionProjectRuntimes.get(runtimeRef);
+
+/*
+ * Write what one store (the project or the editor machine) holds now and wait, with no timer, until it is idle again
+ * (I15): the session bounds the wait on its clock, and `gone` ends it when the session's child stops.
+ *
+ * @returns The write's error, if the store recorded one.
+ */
+const flushStore = async (store: AnyActorRef, gone: AbortSignal): Promise<unknown> => {
+  store.send({ type: 'flushNow' });
+  const settled = await waitFor(
+    store,
+    (state: { matches: (value: unknown) => boolean }) => state.matches({ ready: { storing: 'idle' } }),
+    { signal: gone },
+  );
+  return (settled as { context: { error?: unknown } }).context.error;
+};
+
+/** What {@link sessionRuntimeWork} works over: the parts of a built project runtime a flush and a close reach. @public */
+export type SessionRuntimeWorkInput = Readonly<{
+  projectId: string;
+  producers: Pick<ProjectRuntime['producers'], 'flushAll'>;
+  /** The runtime's current parameter service, read when the close reaches it. */
+  parameterService: () => Pick<ReturnType<ProjectRuntime['parameterService']['get']>, 'close'>;
+  projectRef: AnyActorRef;
+  editorRef: AnyActorRef;
+}>;
+
+/**
+ * What a session asks of a built project runtime (A7c, row S6): its flushes and its close, over the runtime's producer
+ * set, parameter service and project and editor stores. No React and no timer: the session's states bound each one.
+ *
+ * - `close` (the close step `flushingProducers`): refused while an editor's conflict is being recorded, before anything
+ *   is torn down; then the producers, the parameter service's close, and both stores, whose write errors refuse it.
+ * - `leave` (focus's leave flush, I3): the producers, then the editor store.
+ * - `unload` (the producer stage of `environment`'s sequencer, I6, D26): the producers, then both stores.
+ *
+ * @param input - The project, and the runtime's producer set, parameter service and project and editor stores.
+ * @returns The runtime's flush and its close.
+ * @public
+ */
+export const sessionRuntimeWork = ({
+  projectId,
+  producers,
+  parameterService,
+  projectRef,
+  editorRef,
+}: SessionRuntimeWorkInput): Pick<SessionRuntime, 'flush' | 'closeRuntime'> => {
+  return {
+    flush: async (kind: SessionRuntimeFlushKind, gone: AbortSignal) => {
+      if (kind === 'close') {
+        refuseCloseWhileRecording(projectId);
+      }
+      /* A record refusal keeps the session live, including its parameter editing authority. */
+      await producers.flushAll();
+      if (kind === 'leave') {
+        await flushStore(editorRef, gone);
+        return;
+      }
+      if (kind === 'close') {
+        await parameterService().close();
+      }
+      const errors = await Promise.all([flushStore(projectRef, gone), flushStore(editorRef, gone)]);
+      /* The close refuses on a write it could not confirm; the unload's producer stage waits for the writes, as the
+       * persistence guard did. */
+      const error = errors.find((candidate) => candidate !== undefined);
+      if (kind === 'close' && error !== undefined) {
+        throw error instanceof Error ? error : new Error('Project changes are not confirmed saved.');
+      }
+    },
+    closeRuntime: async () => closeProjectRuntime(projectRef),
+  };
+};
 
 /**
  * Build and start one session's project runtime.
@@ -240,6 +319,13 @@ export function openSessionProjectRuntime(
     retryFocusedChat: () => {
       editorRef.send({ type: 'retryEnsureFocusedChat' });
     },
+    ...sessionRuntimeWork({
+      projectId,
+      producers: runtime.producers,
+      parameterService: () => runtime.parameterService.get(),
+      projectRef: selectProjectRef(runtime.actor.getSnapshot()),
+      editorRef: selectEditorRef(runtime.actor.getSnapshot()),
+    }),
     close: () => {
       if (closed) {
         return;

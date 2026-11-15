@@ -112,6 +112,9 @@
 \* A7b: the store hears the focused project from the app runtime's focus rather than from a setter the
 \* session binding called, and binds that project's chats to its live session again each time focus
 \* arrives there, as the setter did. Admission, delivery, persistence and the queue barrier are unchanged.
+\* A7c: the store binds each live project's session from the registry's live set, which the app runtime hands it,
+\* rather than from a setter the session binding called, so a session is bound with nothing mounted and forgotten
+\* when the registry lets it go. Admission, delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

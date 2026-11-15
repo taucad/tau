@@ -43,6 +43,7 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
+import type { LiveProjectSessions } from '#services/chat-session-store.js';
 import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.js';
 import { createRootFileFacade } from '#runtime/file-manager-facade.js';
 import type { RootFileFacade } from '#runtime/file-manager-facade.js';
@@ -176,10 +177,13 @@ const createChatSessions = (
   library: ProjectLibrary,
   options: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
   focusedProject: SessionsObservable<string | undefined>,
+  projectSessions: SessionsObservable<LiveProjectSessions>,
 ): ChatSessionStore =>
   new ChatSessionStore({
     /* A7b: the store reads the focused project from focus, not from a setter React calls. */
     focusedProject,
+    /* A7c: and every live project's session from the registry, so a run reports to the project that ran it (R2). */
+    projectSessions,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined
@@ -383,7 +387,8 @@ export const createAppRuntime = ({
    * report them once the root exists. The sessions' `presence` and `revisions` children and the chat store read them. */
   const focusedProject = lateObservable<string | undefined>(undefined);
   const documentVisible = lateObservable(false);
-  const chatSessions = createChatSessions(projectLibrary, options, focusedProject);
+  const liveSessions = lateObservable<LiveProjectSessions>({});
+  const chatSessions = createChatSessions(projectLibrary, options, focusedProject, liveSessions);
   composed.chatSessions = chatSessions;
   const unload = createUnloadSequencer();
   /* Focus's five ports (A5b): the library's route access at its epoch, the registry, the leave flush React registers,
@@ -408,6 +413,8 @@ export const createAppRuntime = ({
     loadRevisions: async () => import('#runtime/session-revisions.js'),
     loadHostConnector: async () => import('#runtime/host-connector.js'),
     registerCloseCut: (cut) => unload.register('session', cut),
+    /* A7c: each live session's runtime writes what it owes at the producer stage, before any close cut (D26). */
+    registerProducer: (flush) => unload.register('producer', flush),
     focusedProject,
     documentVisible,
     chatSessions,
@@ -506,6 +513,18 @@ export const createAppRuntime = ({
       focusedProject.set(next);
       focusedProject.notify();
     }
+  });
+  /* A7c: the live sessions reach the chat store as the registry holds them; only a change of the set is told. */
+  const registry = selectSessionsRegistry(runtime.getSnapshot());
+  const followLiveSessions = (refs: LiveProjectSessions): void => {
+    if (refs !== liveSessions.get()) {
+      liveSessions.set(refs);
+      liveSessions.notify();
+    }
+  };
+  followLiveSessions(registry.getSnapshot().context.refs);
+  registry.subscribe((snapshot) => {
+    followLiveSessions(snapshot.context.refs);
   });
   /* Every report of the page reaches the sessions, as every `visibilitychange` reached the binding's listener. */
   documentVisible.set(selectAppEnvironment(runtime.getSnapshot()).visible === true);

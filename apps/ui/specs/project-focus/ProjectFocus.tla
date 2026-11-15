@@ -121,6 +121,11 @@
 \* nothing mounted; the route's binding relays none of them. `selectFocusTarget` moved beside the route
 \* state it reads (`focus.route-state.ts`), so the app runtime reads the focused project with it too. The
 \* sessions' facts were already the registry's in the model (environment here). No action or verdict changes.
+\* A7c: focus's leave flush asks the session (`flushAsked`), whose `project` child flushes the runtime's producers
+\* and editor store, and the port answers with the session's `flushSettled` under the same request id (I18), after
+\* the session's step, so the facts an open it leads to produces still come before that open's answer. A project
+\* with no live session answers ok, and one that leaves the live set before it answers ran its own close flush in
+\* place of the leave flush (`TLeft`). The route's binding registers no leave flush. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

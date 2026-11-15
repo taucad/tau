@@ -148,6 +148,7 @@ const harness = (
     },
     ...options.loads,
     registerCloseCut: () => () => undefined,
+    registerProducer: () => () => undefined,
     focusedProject,
     documentVisible,
     chatSessions: {

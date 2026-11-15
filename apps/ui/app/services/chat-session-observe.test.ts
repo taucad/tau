@@ -6,6 +6,10 @@ import type { ChatSessionDeps } from '#services/chat-session-store.js';
 import { compactRow, lifecycleRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 const unusedHostCommand = async (): Promise<never> => {
   throw new Error('Unexpected host command.');
@@ -19,7 +23,7 @@ describe('ChatSessionStore.observe', () => {
     { ending: 'unreadable', sameTurn: true },
   ] as const) {
     it(`retires the fenced-reader retry when its retained attachment becomes ${ending} ${sameTurn ? 'before' : 'after'} retry scheduling`, async () => {
-      const store = new ChatSessionStore();
+      const store = new ChatSessionStore({ projectSessions: liveSessions });
       const release = store.observe('chat_retry_owner', 'project_1');
       let answer: Parameters<AgentHostClient['subscribe']>[3];
       let endLive: (() => void) | undefined;
@@ -72,7 +76,7 @@ describe('ChatSessionStore.observe', () => {
   }
 
   it('retains live delivery while the existing retry owner recaptures a fenced reader', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const release = store.observe('chat_reader_recovery', 'project_1');
     let answer: Parameters<AgentHostClient['subscribe']>[3];
     let ended: (() => void) | undefined;
@@ -170,7 +174,7 @@ describe('ChatSessionStore.observe', () => {
   });
 
   it('should refuse cross-project acquisition before allocating a retained session', () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const release = store.observe('shared-chat', 'original-project');
     expect(() => store.acquire('shared-chat', 'other-project')).toThrow('already observed');
     expect(store.get('shared-chat')).toBeUndefined();
@@ -181,7 +185,7 @@ describe('ChatSessionStore.observe', () => {
   });
 
   it('should leave the registration probe unowned when a second project observes it', () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const probeChatId = '00000000-0000-4000-8000-000000000000';
     const releaseHome = store.observe(probeChatId, 'proj_home');
     const releaseWorkspace = store.observe(probeChatId, 'proj_workspace');
@@ -193,7 +197,7 @@ describe('ChatSessionStore.observe', () => {
   });
 
   it('answers a reloaded approval from the projected run without acquiring a chat or sending Start', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const release = store.observe('chat_approval', 'project_1');
     const hostCommand = vi.fn(
       async (command: HostCommand): Promise<CommandAnswer> => ({
@@ -261,7 +265,7 @@ describe('ChatSessionStore.observe', () => {
   });
 
   it('classifies unseen projected runs for Close without acquiring an SDK session', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     store.setDependencies({
       getChat: async (chatId: string) => ({ name: `Name ${chatId}` }),
     } as ChatSessionDeps);
@@ -316,7 +320,7 @@ describe('ChatSessionStore.observe', () => {
   });
 
   it('cancels an unopened projected run through its host without acquiring an SDK session', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const release = store.observe('chat_unseen', 'project_1');
     const hostCommand = vi.fn(
       async (command: HostCommand): Promise<CommandAnswer> => ({
@@ -363,7 +367,7 @@ describe('ChatSessionStore.observe', () => {
     release();
   });
   it('retains an unreadable fault without retrying the same log forever', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const release = store.observe('chat_unreadable', 'project_1');
     const connect = vi.fn(async () => ({
       catchUp: writerOwnedCatchUp,
@@ -390,7 +394,7 @@ describe('ChatSessionStore.observe', () => {
     release();
   });
   it('reads every observed chat without acquiring an SDK session and preserves its cursor across connector churn', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const close = vi.fn(async () => undefined);
     const read = vi.fn(
       async ({ chatId, cursor }: { chatId: string; cursor: number }): Promise<ReadAnswer> => ({
@@ -457,7 +461,7 @@ describe('ChatSessionStore.observe', () => {
   });
 
   it('counts a projected run in an unopened chat before project Close', async () => {
-    const store = new ChatSessionStore();
+    const store = new ChatSessionStore({ projectSessions: liveSessions });
     const classification = Promise.withResolvers<'stoppable'>();
     const release = store.observe('chat_unopened', 'project_2');
     const unpublish = store.publishProjectHostConnector(
@@ -505,7 +509,7 @@ describe('ChatSessionStore.observe', () => {
         stoppableRuns = event.stoppableRuns;
       }
     });
-    store.setProjectSession('project_2', {
+    liveSessions.set('project_2', {
       getSnapshot: () => ({ context: { runs, stoppableRuns } }),
       send,
     } as unknown as ProjectSessionActorRef);
@@ -519,7 +523,7 @@ describe('ChatSessionStore.observe', () => {
     await vi.waitFor(() => {
       expect(stoppableRuns).toEqual(['chat_unopened']);
     });
-    store.setProjectSession('project_2', undefined);
+    liveSessions.set('project_2', undefined);
     unpublish();
     release();
   });

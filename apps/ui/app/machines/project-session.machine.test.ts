@@ -14,10 +14,14 @@ import {
   projectSessionMachine,
 } from './project-session.machine.js';
 import type {
+  ProjectSessionFileManagerInput,
   ProjectSessionMachineEvent,
   ProjectSessionOpenRequest,
   ProjectSessionRegion,
 } from './project-session.machine.js';
+
+/** A command the session sends its `project` and `revisions` children, as they read it. */
+type Command = EventObject & Readonly<{ requestId: string; kind?: string }>;
 
 const isMachine = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
@@ -49,19 +53,30 @@ const harness = (options?: {
   readonly readyRegions?: readonly ProjectSessionRegion[];
   readonly parentRef?: AnyActorRef;
   readonly flushProducers?: () => Promise<void>;
-  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseAgentHost';
+  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'closeRuntime' | 'releaseAgentHost';
   readonly inspect?: ReturnType<typeof guardActors>['inspect'];
   readonly request?: ProjectSessionOpenRequest;
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
-  const child = (name: string, region?: ProjectSessionRegion) =>
-    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+  /* A close step's scripted refusal, as its child answers it. */
+  const failure = (step: NonNullable<typeof options>['failCloseStep']): { error?: string } =>
+    options?.failCloseStep === step ? { error: `${step} failed` } : {};
+  const child = (
+    name: string,
+    region?: ProjectSessionRegion,
+    script?: (
+      sendBack: (event: EventObject) => void,
+      receive: (listener: (event: EventObject) => void) => void,
+    ) => void,
+  ) =>
+    createCallbackLogic<EventObject, { projectId: string }>(({ sendBack, receive }) => {
       order.push(`start:${name}`);
       live.add(name);
       if (region !== undefined && (options?.readyRegions ?? regions).includes(region)) {
         sendBack({ type: 'childReady', region });
       }
+      script?.(sendBack, receive);
       return () => {
         order.push(`stop:${name}`);
         live.delete(name);
@@ -77,29 +92,55 @@ const harness = (options?: {
             throw new Error('cancelRuns failed');
           }
         }),
-        flushProducers: fromSafeAsync<void, { projectId: string }>(async () => {
-          order.push('flushProducers');
-          await options?.flushProducers?.();
-          if (options?.failCloseStep === 'flushProducers') {
-            throw new Error('flushProducers failed');
-          }
-        }),
-        flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async () => {
-          order.push('flushSync');
-          if (options?.failCloseStep === 'flushSync') {
-            throw new Error('flushSync failed');
-          }
-        }),
         releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => {
           order.push('releaseAgentHost');
           if (options?.failCloseStep === 'releaseAgentHost') {
             throw new Error('releaseAgentHost failed');
           }
         }),
-        fileManager: child('fileManager', 'views'),
-        project: child('project', 'runtime'),
+        fileManager: child('fileManager', 'views', (sendBack) =>
+          sendBack({ type: 'fileManagerChanged', fileManagerRef: createActor(createCallbackLogic(() => undefined)) }),
+        ),
+        project: child('project', 'runtime', (sendBack, receive) =>
+          receive((received) => {
+            const event = received as Command;
+            if (event.type === 'flushRuntime' && event.kind === 'close') {
+              order.push('flushProducers');
+              void (async () => {
+                await options?.flushProducers?.();
+                sendBack({
+                  type: 'runtimeFlushSettled',
+                  requestId: event.requestId,
+                  ...failure('flushProducers'),
+                });
+              })().catch((error: unknown) => {
+                sendBack({
+                  type: 'runtimeFlushSettled',
+                  requestId: event.requestId,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              });
+            } else if (event.type === 'flushRuntime') {
+              sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
+            } else if (event.type === 'closeRuntime') {
+              order.push('closeRuntime');
+              sendBack({ type: 'runtimeClosed', requestId: event.requestId, ...failure('closeRuntime') });
+            }
+          }),
+        ),
         agentHost: child('agentHost', 'agentHost'),
         compute: child('compute', 'compute'),
+        /* The revision client the file manager's change started: it quiesces the project's sync on the close. */
+        revisions: createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack, receive }) => {
+          receive((received) => {
+            const event = received as Command;
+            if (event.type === 'quiesce') {
+              order.push('flushSync');
+              sendBack({ type: 'syncQuiesced', requestId: event.requestId, ...failure('flushSync') });
+            }
+          });
+        }),
+        hostConnector: createCallbackLogic(() => undefined),
       },
     }),
     {
@@ -425,8 +466,9 @@ describe('projectSessionMachine', () => {
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
-    /* Four regions and the session's presence, and no chat: the store owns each chat's root (PV-S5). */
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(5);
+    /* Four regions, the session's presence and unload registration, the file manager's revision client and connector,
+     * and no chat: the store owns each chat's root (PV-S5). */
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(8);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });
@@ -438,6 +480,7 @@ describe('projectSessionMachine', () => {
       'cancelRuns:chat-1',
       'flushProducers',
       'flushSync',
+      'closeRuntime',
       'releaseAgentHost',
       'stop:project',
       'stop:fileManager',
@@ -560,7 +603,7 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it.each(['cancelRuns', 'flushSync', 'releaseAgentHost'] as const)(
+  it.each(['cancelRuns', 'flushSync', 'closeRuntime', 'releaseAgentHost'] as const)(
     'keeps resources live and reports failure when %s fails',
     async (failCloseStep) => {
       const parent = recordingParent();

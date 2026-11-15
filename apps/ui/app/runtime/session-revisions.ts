@@ -129,8 +129,8 @@ export type SessionRevisionsInput = Readonly<{
   syncProjectRoots: () => Promise<void>;
 }>;
 
-/** `revisions` takes no events. */
-export type SessionRevisionsEvent = Readonly<{ type: 'never' }>;
+/** What the session asks `revisions` (A7c): quiesce the project's sync through W13's seam, answered by id (I18). */
+export type SessionRevisionsEvent = Readonly<{ type: 'quiesce'; requestId: string }>;
 
 /**
  * What `revisions` tells the session: the facts a policy close reads (row S3), and whether the chats arrived (S1).
@@ -139,13 +139,20 @@ export type SessionRevisionsEvent = Readonly<{ type: 'never' }>;
  */
 export type SessionRevisionsEmitted =
   | Readonly<{ type: 'revisionState'; dirty: boolean; pushed: boolean; recording: boolean; pendingCount: number }>
-  | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>;
+  | Readonly<{ type: 'revisionChatsChanged'; ready: boolean }>
+  /** The answer to `quiesce`, with the refusal's message if the client refused (A7c). */
+  | Readonly<{ type: 'syncQuiesced'; requestId: string; error?: string }>;
 
 export type SessionRevisionsLogic = CallbackActorLogic<SessionRevisionsEvent, SessionRevisionsInput>;
 
 /** The callback a `revisions` child runs, for a composition that loads this module lazily (D5). */
 export type SessionRevisionsCallback = (
-  params: Readonly<{ input: SessionRevisionsInput; sendBack: (event: SessionRevisionsEmitted) => void }>,
+  params: Readonly<{
+    input: SessionRevisionsInput;
+    sendBack: (event: SessionRevisionsEmitted) => void;
+    /** Hear what the session asks (A7c). */
+    receive: (listener: (event: SessionRevisionsEvent) => void) => void;
+  }>,
 ) => () => void;
 
 const withdrawnCredential = { kind: 'withdrawn', reason: 'Open this project in Tau to sync with GitHub.' } as const;
@@ -232,7 +239,7 @@ const chatSyncOf = (sync: RevisionStatusProjection['sync']): ChatSyncState =>
 // oxlint-disable-next-line max-lines-per-function -- One lifecycle: every follower shares the client in this closure.
 export const sessionRevisionsCallback =
   (ports: SessionRevisionsPorts): SessionRevisionsCallback =>
-  ({ input, sendBack }) => {
+  ({ input, sendBack, receive }) => {
     const { projectId, workspace, fileManagerRef, syncProjectRoots } = input;
 
     /* What the hook reads in render, kept current by the subscriptions below. */
@@ -501,6 +508,29 @@ export const sessionRevisionsCallback =
       current.send({ command: 'flushKeepalive' });
     };
 
+    /*
+     * A7c (row S6): the session's close step, W13's seam called and never reimplemented. The client this child opened
+     * quiesces (`close` → `pushSettled` or the durable queue write, bounded inside the worker); no client, nothing to
+     * settle. A child stopped meanwhile answers nothing: the session has moved on.
+     */
+    let stopped = false;
+    receive((event) => {
+      const current = client;
+      const settle = async (): Promise<void> => {
+        let error: string | undefined;
+        try {
+          await current?.quiesce();
+        } catch (failure) {
+          error = failure instanceof Error ? failure.message : 'The project could not finish syncing.';
+        }
+        if (!stopped) {
+          sendBack({ type: 'syncQuiesced', requestId: event.requestId, ...(error === undefined ? {} : { error }) });
+        }
+      };
+      // async-iife: bootstrap -- `receive` is synchronous; the answer goes through `sendBack`.
+      void settle();
+    });
+
     /* Each step's release, as it is taken: a start that throws partway releases what it took, then rethrows (D23). */
     let unregisterCut: (() => void) | undefined;
     let unsubscribeFileManager: (() => void) | undefined;
@@ -510,6 +540,7 @@ export const sessionRevisionsCallback =
     let unsubscribeFocus: (() => void) | undefined;
     let unsubscribeRecording: (() => void) | undefined;
     const stop = (): void => {
+      stopped = true;
       if (checkoutLive !== undefined) {
         checkoutLive.current = false;
       }
@@ -597,6 +628,6 @@ export const sessionRevisionsCallback =
  * @public
  */
 export const createSessionRevisionsLogic = (ports: SessionRevisionsPorts): SessionRevisionsLogic =>
-  createCallbackLogic<SessionRevisionsEvent, SessionRevisionsInput>(({ input, sendBack }) =>
-    sessionRevisionsCallback(ports)({ input, sendBack: sendBack as (event: EventObject) => void }),
+  createCallbackLogic<SessionRevisionsEvent, SessionRevisionsInput>(({ input, sendBack, receive }) =>
+    sessionRevisionsCallback(ports)({ input, sendBack: sendBack as (event: EventObject) => void, receive }),
   );

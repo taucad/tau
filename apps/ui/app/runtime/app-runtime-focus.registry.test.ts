@@ -11,7 +11,10 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import type { FocusAccessAnswer } from '#machines/focus.machine.js';
 import { startFocusHost } from '#runtime/app-runtime-focus.fixture.js';
-import { createSessionsRegistryLogic, registerProjectSessionServices } from '#services/sessions-store.js';
+import { createSessionsRegistryLogic } from '#services/sessions-store.js';
+import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -35,6 +38,17 @@ afterEach(() => {
   }
 });
 
+/** A one-project registry whose sessions build their runtime on `opener`, so a row can hold or refuse a close (A7c). */
+const createRegistry = (opener: SessionRuntimeOpenerStandIn) =>
+  createActor(
+    createSessionsRegistryLogic({
+      sharedWorker: () => undefined,
+      openRuntime: opener,
+      openFileManager: (id: string) => openSessionFileManagerStandIn(id),
+    }),
+    { input: { budget: 1 }, clock: new StepClock() },
+  ).start();
+
 const flushTasks = async (turns = 5): Promise<void> => {
   if (turns === 0) {
     return;
@@ -46,10 +60,8 @@ const flushTasks = async (turns = 5): Promise<void> => {
 };
 
 it('should tell focus the victim the open closed before answering the open that closed it (rule 11)', async () => {
-  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
-    input: { budget: 1 },
-    clock: new StepClock(),
-  }).start();
+  const opener = sessionRuntimeOpenerStandIn();
+  const registry = createRegistry(opener);
   const focusEvents: Array<{ type: string; projectId?: string; status?: string; result?: string }> = [];
   const focusRef: { current: unknown } = { current: undefined };
   const host = startFocusHost({
@@ -67,20 +79,11 @@ it('should tell focus the victim the open closed before answering the open that 
     host.stop();
     registry.stop();
   });
+  /* p1's close is slow: its close flush holds until the row releases it, while its leave flush settles at once. */
   let release: () => void = () => undefined;
-  const slow = new Promise<void>((resolve) => {
-    release = resolve;
+  opener.onBuilt('p1', (standIn) => {
+    release = standIn.hold((signal) => signal === 'flush:close');
   });
-  for (const id of ['p1', 'p2']) {
-    cleanups.push(
-      registerProjectSessionServices(id, {
-        cancelRuns: async () => undefined,
-        flushProducers: async () => undefined,
-        flushSync: async () => (id === 'p1' ? slow : undefined),
-        closeRuntime: async () => undefined,
-      }),
-    );
-  }
   const route = (serial: number, projectId: string): void => {
     host.focus.send({
       type: 'routeRequested',
@@ -122,10 +125,8 @@ it('should tell focus the victim the open closed before answering the open that 
 });
 
 it("should keep focus's open waiting through a refused budget close, so the person's choice in the dialog opens it", async () => {
-  const registry = createActor(createSessionsRegistryLogic({ sharedWorker: () => undefined }), {
-    input: { budget: 1 },
-    clock: new StepClock(),
-  }).start();
+  const opener = sessionRuntimeOpenerStandIn();
+  const registry = createRegistry(opener);
   const registryEvents: Array<{ type: string; projectId?: string; reason?: string }> = [];
   registry.system.inspect({
     next: (inspection: InspectionEvent) => {
@@ -143,27 +144,8 @@ it("should keep focus's open waiting through a refused budget close, so the pers
     host.stop();
     registry.stop();
   });
-  let p1Refuses = false;
-  let p1Closes = 0;
-  cleanups.push(
-    registerProjectSessionServices('p1', {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => {
-        p1Closes += 1;
-        if (p1Refuses) {
-          throw new Error('unsaved parameter drafts');
-        }
-      },
-      flushSync: async () => undefined,
-      closeRuntime: async () => undefined,
-    }),
-    registerProjectSessionServices('p2', {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => undefined,
-      flushSync: async () => undefined,
-      closeRuntime: async () => undefined,
-    }),
-  );
+  /* How many times p1's runtime was asked to flush for its close. */
+  const p1Closes = (): number => opener.latest('p1')?.signals.filter((signal) => signal === 'flush:close').length ?? 0;
   const refusals: string[] = [];
   registry.on('budgetRefused', (event) => refusals.push(event.projectId));
   const route = (serial: number, projectId: string): void => {
@@ -183,7 +165,7 @@ it("should keep focus's open waiting through a refused budget close, so the pers
   expect(registry.getSnapshot().context.status['p1']?.state).toBe('live');
 
   /* The ninth open: the budget closes p1 (idle), whose producer refuses, so p1 stays live and the budget refuses p2. */
-  p1Refuses = true;
+  opener.latest('p1')?.refuse('unsaved parameter drafts');
   route(2, 'p2');
   await vi.waitFor(() => {
     expect(refusals).toEqual(['p2']);
@@ -193,11 +175,11 @@ it("should keep focus's open waiting through a refused budget close, so the pers
   /* The refusal is the dialog's to answer: focus's open still waits, and nothing closes p1 behind the person's back. */
   expect(registry.getSnapshot().context.pendingOpen?.projectId).toBe('p2');
   expect(registryEvents.filter((event) => event.type === 'cancelPendingOpen')).toEqual([]);
-  expect(p1Closes).toBe(1);
+  expect(p1Closes()).toBe(1);
   expect(refusals).toEqual(['p2']);
 
   /* The person picks p1 in the dialog, whose drafts are now saved: p1 closes and p2 opens. */
-  p1Refuses = false;
+  opener.latest('p1')?.refuse(undefined);
   registry.send({ type: 'close', projectId: 'p1', reason: 'user' });
   registry.getSnapshot().context.refs['p1']?.send({ type: 'confirmClose' });
   await vi.waitFor(() => {

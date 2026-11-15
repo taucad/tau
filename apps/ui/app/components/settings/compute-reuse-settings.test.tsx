@@ -98,6 +98,16 @@ it('disables controls without authority and reports failures and retained clear 
   expect(await screen.findByRole('status')).toHaveTextContent('Cleared. 11 B still in use.');
 });
 
+it('disables a pending clear confirmation when the compute control goes', () => {
+  const view = render(<ComputeReuseSettings />, { wrapper: TooltipProvider });
+  fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+  expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeEnabled();
+
+  state.available = false;
+  view.rerender(<ComputeReuseSettings />);
+  expect(screen.getByRole('button', { name: 'Confirm clear' })).toBeDisabled();
+});
+
 it('keeps cache controls unavailable without an active project', () => {
   state.projectId = undefined;
   render(<ComputeReuseSettings />, { wrapper: TooltipProvider });

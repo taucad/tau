@@ -57,10 +57,11 @@ export function ComputeReuseSettings(): React.JSX.Element {
     }
     const bridge = desktopBridge();
     const browserControl = computeControl;
-    if (!bridge && !browserControl) {
-      throw new Error('The active project compute authority is unavailable.');
-    }
     try {
+      /* The control can go between a render and a click (the worker was replaced): report it in the status. */
+      if (!bridge && !browserControl) {
+        throw new Error('The active project compute authority is unavailable.');
+      }
       const result = bridge
         ? action === 'inspect'
           ? await bridge.compute.inspect(await desktopProjectRoot(project.projectId))
@@ -161,6 +162,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
           {confirmClear ? (
             <Button
               variant='destructive'
+              disabled={!available}
               onClick={async () => {
                 setConfirmClearProjectId(undefined);
                 return control('clear');

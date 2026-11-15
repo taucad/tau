@@ -285,6 +285,24 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
     expect(treeId).toBe(await compare(second.walking));
   });
 
+  it('should read the checkout when an ignored .gitignore changed between the sessions (I5)', async () => {
+    const { root, session } = await fixture({ ...files(10), 'vendor/.gitignore': '*\n', 'vendor/lib.js': 'lib\n' });
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+    /* The rules file ignores itself, so no captured stat moves, yet `lib.js` is now versioned. */
+    await writeFile(join(root, 'vendor/.gitignore'), '*\n!lib.js\n');
+    await utimes(join(root, 'vendor/.gitignore'), settledTime, new Date(Date.now() - 30_000));
+
+    const second = await session();
+    await second.fillChecked;
+    const treeId = await compare(second.actors);
+
+    expect(treeId).not.toBe(before);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
   it('should read the checkout again when the head moved between the sessions', async () => {
     const { session } = await fixture(files(20));
     const first = await session();

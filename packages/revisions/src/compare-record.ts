@@ -69,7 +69,13 @@ export const compareRecordMaximumFiles = 20_000;
 export const compareRecordPath = (checkoutId: string): string | undefined =>
   /^[\w-]{1,128}$/u.test(checkoutId) ? `.git/tau-compare-${checkoutId}.json` : undefined;
 
-const byPath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+/*
+ * A rules file the rules leave out itself: no captured stat moves when it is
+ * edited, yet the edit can choose other files, so no record keys on its absence.
+ */
+const ignoreRulesFile = /(?:^|\/)\.gitignore$/iu;
+
+const byPath =(left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
 /**
  * The record of one comparison's tree.
@@ -79,7 +85,8 @@ const byPath = (left: string, right: string): number => (left < right ? -1 : lef
  *   the provider reports modes.
  * @param stats - The index's stats once the capture ended, of every versioned path.
  * @param readAt - When each captured file was read, by path: a clock reading taken before the read.
- * @returns The record, or `undefined` when a captured file has no stat or reading to key it on.
+ * @returns The record, or `undefined` when a captured file has no stat or reading to key it on, or an ignored
+ *   path is a `.gitignore`, whose edit no captured stat would show.
  */
 export const compareRecordOf = (
   answer: Readonly<{
@@ -102,7 +109,7 @@ export const compareRecordOf = (
       files.push([path, size, mtimeMs, read]);
     }
   }
-  if (files.length !== readAt.size) {
+  if (files.length !== readAt.size || ignored.some((path) => ignoreRulesFile.test(path))) {
     return undefined;
   }
   return {

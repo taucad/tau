@@ -240,7 +240,7 @@ import {
   recordAnswers,
   serializeCompareRecord,
 } from '#compare-record.js';
-import type { CompareObservation, CompareReading } from '#compare-record.js';
+import type { CompareObservation, CompareReading, CompareRecord } from '#compare-record.js';
 
 /** The head a listing was read under: the paths it tracks are never ignored. */
 type TrackedHead = Readonly<{ revisionId: string; tree: ImmutableRevisionTree }>;
@@ -1183,12 +1183,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       try {
         const place = await placeOf(input.checkoutId);
         return await useFileSystem(place, async (rooted) => {
-          /* A session that has captured nothing yet asks the record an earlier one left first (Tau #2013). */
+          /* A session that has captured nothing yet asks the record an earlier one left first, and once it has
+           * answered, the index's changes since (Tau #2013). */
           if (memos.last === undefined) {
-            const treeId = await recordedComparison(place, rooted).catch(() => undefined);
+            const held = heldAnswers.get(place.id);
+            const treeId = await (
+              held === undefined ? recordedComparison(place, rooted) : answerAgain(place, rooted, held)
+            ).catch(() => undefined);
             if (treeId !== undefined) {
               return { treeId };
             }
+            heldAnswers.delete(place.id);
           }
           const head = await headOf(place);
           const tree = await captureOpened(place, rooted, {
@@ -1406,27 +1411,69 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (record === undefined) {
       return undefined;
     }
+    /* Where the index stands before its compare, so a change the compare finds is named to the next comparison. */
+    const at = await rooted.changedSince?.(Number.MAX_SAFE_INTEGER).catch(() => undefined);
     const now = await observeCheckout(place, rooted, true);
-    if (now === undefined || !recordAnswers(record, now)) {
+    if (now === undefined || !recordAnswers(record, now) || !(await modesHold(rooted, record))) {
       return undefined;
     }
-    /* A mode change moves neither size nor timestamp, so where the provider reports modes each is asked again. */
-    const { getFileMode } = rooted;
-    if ((getFileMode === undefined) !== (record.modes === undefined)) {
-      return undefined;
-    }
-    if (getFileMode !== undefined) {
-      const modes = Object.entries(record.modes ?? {});
-      const moved = await mapConcurrent(modes, captureModeConcurrency, async ([file, mode]) => {
-        const current = await getFileMode.call(rooted, file).catch(() => undefined);
-        return current !== mode;
-      });
-      if (moved.some(Boolean)) {
-        return undefined;
-      }
+    if (at !== undefined) {
+      heldAnswers.set(place.id, { record, epoch: at.epoch, generation: at.generation });
     }
     checkFill(place);
     return record.treeId;
+  };
+  /* A mode change moves neither size nor timestamp, so where the provider reports modes each is asked again. */
+  const modesHold = async (rooted: RevisionFileSystem, record: CompareRecord): Promise<boolean> => {
+    const { getFileMode } = rooted;
+    if ((getFileMode === undefined) !== (record.modes === undefined)) {
+      return false;
+    }
+    if (getFileMode === undefined) {
+      return true;
+    }
+    const moved = await mapConcurrent(Object.entries(record.modes ?? {}), captureModeConcurrency, async ([file, mode]) => {
+      const current = await getFileMode.call(rooted, file).catch(() => undefined);
+      return current !== mode;
+    });
+    return !moved.some(Boolean);
+  };
+  /*
+   * A record that answered, with where the index stood when it did: until the
+   * checkout is captured, a comparison whose index names no change since, under
+   * the same head and ignore rules, answers the same tree id, at the cost of an
+   * index compare, as a capture from the index would (Tau #2013).
+   */
+  const heldAnswers = new Map<string, Readonly<{ record: CompareRecord; epoch: string; generation: number }>>();
+  const answerAgain = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    held: Readonly<{ record: CompareRecord; epoch: string; generation: number }>,
+  ): Promise<string | undefined> => {
+    const { compareIndex, changedSince } = rooted;
+    if (compareIndex === undefined || changedSince === undefined) {
+      return undefined;
+    }
+    const compared = await compareIndex.call(rooted);
+    const changes = await changedSince.call(rooted, held.generation, { epoch: held.epoch, admits: versionedAdmits });
+    if (
+      changes.rescan === true ||
+      changes.entries.length > 0 ||
+      changes.removed.length > 0 ||
+      compared.racy.length > 0
+    ) {
+      return undefined;
+    }
+    const ignores =
+      port.ignoredPaths === undefined ? '' : await port.ignoreContext?.(place.kind === 'live' ? undefined : place.root);
+    if (ignores !== held.record.ignores || (await headOf(place)) !== held.record.head) {
+      return undefined;
+    }
+    if (!(await modesHold(rooted, held.record))) {
+      return undefined;
+    }
+    checkFill(place);
+    return held.record.treeId;
   };
 
   /* An effect timed as one worker span, whether it settles or fails. */

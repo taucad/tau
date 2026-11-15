@@ -135,8 +135,13 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
         return (store.writeFile as (...arguments_: any[]) => Promise<unknown>).call(store, path, ...rest);
       }) as typeof store.writeFile,
     });
+    let statTrees = 0;
     const counted = Object.assign(Object.create(rooted) as RevisionFileSystem, {
       privateStore,
+      statTree: (async (...arguments_: Parameters<NonNullable<RevisionFileSystem['statTree']>>) => {
+        statTrees += 1;
+        return rooted.statTree!(...arguments_);
+      }) as RevisionFileSystem['statTree'],
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
         reads.push(path);
         // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
@@ -174,7 +179,18 @@ const fixture = async (initial: Readonly<Record<string, string>>) => {
       service.dispose();
     };
     cleanups.push(close);
-    return { root, rooted, port, actors, walking, reads, fillChecked, holdRecordWrites, close };
+    return {
+      root,
+      rooted,
+      port,
+      actors,
+      walking,
+      reads,
+      fillChecked,
+      holdRecordWrites,
+      statTrees: () => statTrees,
+      close,
+    };
   };
   return { root, session };
 };
@@ -317,6 +333,30 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
 
     expect(second.reads).toEqual([]);
     expect(treeId).toBe(edited);
+    expect(treeId).toBe(await compare(second.walking));
+  });
+
+  it('should answer the comparisons after a record answered from the index alone, until a file moves', async () => {
+    const { root, session } = await fixture(files(20));
+    const first = await session();
+    await mint(first);
+    const before = await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+    expect(await compare(second.actors)).toBe(before);
+    const listed = second.statTrees();
+    expect(await compare(second.actors)).toBe(before);
+
+    expect(second.statTrees()).toBe(listed);
+    expect(second.reads).toEqual([]);
+
+    await writeFile(join(root, 'dir4/f9.txt'), 'edited after the record answered\n');
+    await utimes(join(root, 'dir4/f9.txt'), settledTime, new Date(Date.now() - 30_000));
+    const treeId = await compare(second.actors);
+
+    expect(treeId).not.toBe(before);
     expect(treeId).toBe(await compare(second.walking));
   });
 

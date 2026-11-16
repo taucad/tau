@@ -1408,7 +1408,8 @@ export class RootedViews {
          * made raises no event of its own. Each directory holding the outermost of them is told to re-list, so
          * every watch at or under it does, failed or not (I7).
          */
-        const arriving = projectIndexes.arrivingIn(root, { recursive: true });
+        /* Only rows not on disk: a placeholder whose pointer landed is a row of its own, replaced as its object lands. */
+        const arriving = projectIndexes.arrivingIn(root, { recursive: true, absent: true });
         this._projectIndexes.endExpectation(root, options);
         const rows = new Set(arriving.map((entry) => entry.path));
         const parents = new Set<string>();

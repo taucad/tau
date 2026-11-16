@@ -909,12 +909,13 @@ export class ProjectIndexes {
    * answers as itself (see {@link ProjectIndexes.markAt}).
    *
    * @param absoluteDirectory - Absolute directory path.
-   * @param options - `recursive` for every arriving entry beneath it, not only its children.
+   * @param options - `recursive` for every arriving entry beneath it, not only its children; `absent` for only those
+   *   the root's index holds nothing at yet (a placeholder whose pointer landed is on disk, though it still arrives).
    * @returns Directory-relative rows, parents before children; empty while no write expects any.
    */
   public arrivingIn(
     absoluteDirectory: string,
-    options?: Readonly<{ recursive?: boolean }>,
+    options?: Readonly<{ recursive?: boolean; absent?: boolean }>,
   ): ReadonlyArray<Readonly<{ path: string; type: 'file' | 'dir'; size: number }>> {
     if (this._expected.size === 0) {
       return [];
@@ -937,6 +938,9 @@ export class ProjectIndexes {
         const last = options?.recursive === true ? segments.length : 1;
         for (let depth = 1; depth <= Math.min(last, segments.length); depth += 1) {
           const relative = segments.slice(0, depth).join('/');
+          if (options?.absent === true && index?.entry(`${prefix}${relative}`) !== undefined) {
+            continue;
+          }
           if (!rows.has(relative)) {
             rows.set(
               relative,

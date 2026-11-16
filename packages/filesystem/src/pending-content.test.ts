@@ -14,6 +14,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import type { DirectoryStatRow, FileSystemProvider } from '#types.js';
+import type { ChangeSet } from '#change-event-bus.js';
 import type { FileStatEntry } from '@taucad/types';
 
 /*
@@ -721,6 +722,60 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
 });
 
 describe('expected entries (D10)', () => {
+  /*
+   * Only a row a listing showed that is not on disk has nothing to replace it. A placeholder whose pointer landed is
+   * on disk, though it waits for its object: ending the write tells no one to re-list for it, and a failed write's
+   * reset reaches no further than the folders of the rows it never landed.
+   */
+  it('should scope the end of a write to the folders of rows it never put on disk', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    const next = encoder.encode(
+      `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize ${String(part.byteLength)}\n`,
+    );
+    const entries = [
+      { path: 'main.scad', size: 27, arriving: false },
+      {
+        path: 'assets/new.step',
+        size: next.byteLength,
+        pending: { oid: 'd'.repeat(64), size: part.byteLength },
+        arriving: true,
+      },
+      { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+    ];
+    const watching = (): Readonly<{ sets: ChangeSet[]; stop: () => void }> => {
+      const sets: ChangeSet[] = [];
+      const stop = view.watchChangeSets!({ paths: [''], recursive: true }, (set) => {
+        sets.push(set);
+      });
+      return { sets, stop };
+    };
+    const settle = async (): Promise<void> =>
+      new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+    /* Every arriving row landed, the placeholder as its pointer: nothing to re-list. */
+    await raw.expectEntries!(entries);
+    await raw.writeFile('assets/new.step', next);
+    await raw.writeFile('lib/deep/axle.scad', encoder.encode('a'.repeat(40)));
+    await settle();
+    const landed = watching();
+    raw.endExpectation!();
+    await settle();
+    landed.stop();
+    expect(landed.sets).toStrictEqual([]);
+
+    /* A failed write: only the folder of the row it never put on disk re-lists, never the root. */
+    await raw.expectEntries!([...entries, { path: 'lib/more/bolt.scad', size: 10, arriving: true }]);
+    await settle();
+    const failed = watching();
+    raw.endExpectation!({ failed: true });
+    await settle();
+    failed.stop();
+    expect(failed.sets.map((set) => set.reset?.prefix)).toStrictEqual(['lib']);
+  });
+
   /*
    * An ended write leaves its arriving rows nothing to replace them: a folder only they made never raises an event of
    * its own. So the end tells every watch under them to re-list, failed or not, and the rows vanish (I7).

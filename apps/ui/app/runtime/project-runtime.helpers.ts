@@ -21,6 +21,8 @@ import { isNotFound } from '@taucad/chat-ui/db/attachment-store';
 import type { QueryClient } from '@tanstack/react-query';
 import type { Chat } from '@taucad/chat';
 import type { ChatStorage } from '#types/storage.types.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
+import { chatsOpen } from '#hooks/use-project-availability.js';
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Parameter operation failed.';
@@ -75,6 +77,26 @@ export const parameterStageForSettlement = ({
     : undefined;
 
 type FocusedChatWorker = Pick<ChatStorage, 'getChatRecordsForResource' | 'createNavigationRepairChat'>;
+
+/**
+ * Whether the focused chat's ensure may make a new chat (SP2h): during a Tau Cloud open once the chats may open
+ * ({@link chatsOpen}: their records landed, the entry closure readable, the open neither failed nor another
+ * account's), never on an empty list read before the remote's chats arrived; otherwise once a Tau remote's chats are
+ * ready.
+ *
+ * @param status - The revision client's projection, `undefined` before its first.
+ * @param isCloudOpenPending - Whether a Tau Cloud open is still owed for the project.
+ * @param canOpen - Whether this account may open the project.
+ * @returns `true` when a chat may be made.
+ */
+export const mayCreateChat = (
+  status: Pick<RevisionStatusProjection, 'sync' | 'remote' | 'readiness'> | undefined,
+  isCloudOpenPending: boolean,
+  canOpen: boolean,
+): boolean =>
+  isCloudOpenPending
+    ? chatsOpen(status, true, canOpen)
+    : status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
 
 export async function ensureFocusedChatForProject({
   projectId,

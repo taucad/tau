@@ -58,7 +58,7 @@ import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { isRecordingEditorConflict, subscribeEditorConflictRecords } from '#lib/editor-document-session.js';
 import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
-import { isFileCheckSettled } from '#hooks/use-project-availability.js';
+import { chatsOpen, isFileCheckSettled } from '#hooks/use-project-availability.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -480,8 +480,9 @@ export const sessionRevisionsCallback =
     const relayFacts = (): void => {
       const status = client?.status();
       relayFileCheck(status);
-      const ready = status?.sync.chats === 'ready';
-      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive. */
+      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive and may open: during a
+       * Tau Cloud open they land beside the apply (SP2h), and a retry before their surface opens would defer again. */
+      const ready = chatsOpen(status, ports.cloudOpen.get(projectId));
       if (ready !== chatsReady) {
         chatsReady = ready;
         sendBack({ type: 'revisionChatsChanged', ready });
@@ -818,8 +819,9 @@ export const sessionRevisionsCallback =
         recording = next;
         relayFacts();
       });
+      /* The open's end changes the file check and whether the chats may open (SP2h); the rest dedupes on the status. */
       unsubscribeCloudOpen = ports.cloudOpen.subscribe(() => {
-        relayFileCheck(client?.status());
+        relayFacts();
       });
     } catch (error) {
       stop();

@@ -1,9 +1,10 @@
 import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
+import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import {
+  chatsOpen,
   modelAvailability,
   pendingOpenReadiness,
   pendingPathSet,
@@ -84,7 +85,7 @@ describe('first-open availability', () => {
     expect(projectAvailability(true, applying, { firstView: { surface: 'viewer', readiness: 'materialized' } })).toBe(
       'ready',
     );
-    /* A surface that names none (chats, agents) still waits for the whole apply. */
+    /* A surface that names none still waits for the whole apply. */
     expect(projectAvailability(true, applying)).toBe('preparing');
   });
   it('keeps the tree waiting until the write has announced its entries, so a listing never misses one (I7)', () => {
@@ -134,6 +135,39 @@ describe('first-open availability', () => {
     );
     /* The next write announces its tree: its own reading opens the view again. */
     expect(projectAvailability(true, status({ state: 'pending', pullPhase: 'applying' }), { firstView })).toBe('ready');
+  });
+  /* SP2h: chats open on their own records, not on the whole apply, and never with a partial history (I7). */
+  it('opens chats once their records land, while the apply still writes the files', () => {
+    const firstView = { surface: 'chats', readiness: 'entryReady' } as const;
+    const writing = (chats: RevisionStatusProjection['sync']['chats']) =>
+      status({ state: 'pending', pullPhase: 'applying', chats });
+    expect(projectAvailability(true, writing('loading'), { firstView })).toBe('preparing');
+    expect(projectAvailability(true, writing('ready'), { firstView })).toBe('ready');
+    expect(projectAvailability(true, writing('disabled'), { firstView })).toBe('ready');
+    expect(projectAvailability(true, writing('failed'), { firstView })).toBe('preparing');
+    /* The apply landed first: the chats still arriving keep their view closed. */
+    expect(
+      projectAvailability(true, status({ pullPhase: 'records', hasAppliedRemote: true, chats: 'loading' }), {
+        firstView,
+      }),
+    ).toBe('preparing');
+    /* The records landed but the entry closure has not: the project's manifest is not readable yet. */
+    expect(
+      projectAvailability(true, writing('ready'), { firstView: { surface: 'chats', readiness: 'treeReady' } }),
+    ).toBe('preparing');
+    /* A failed open never reopens what it left, records or not. */
+    expect(projectAvailability(true, status({ state: 'queued', chats: 'ready' }), { firstView })).toBe('failed');
+  });
+  it('lets chats be created only once they may open', () => {
+    const connected = { kind: 'tau', phase: 'connected' } as const;
+    const open = (sync: Partial<RevisionStatusProjection['sync']>, readiness: ProjectReadiness) =>
+      mock<RevisionStatusProjection>({ ...status(sync), remote: mock(connected), readiness });
+    expect(chatsOpen(open({ pullPhase: 'applying', chats: 'ready' }, 'entryReady'), true)).toBe(true);
+    expect(chatsOpen(open({ pullPhase: 'applying', chats: 'ready' }, 'treeReady'), true)).toBe(false);
+    expect(chatsOpen(open({ pullPhase: 'applying', chats: 'disabled' }, 'entryReady'), true)).toBe(false);
+    expect(chatsOpen(open({ pullPhase: 'applying', chats: 'ready' }, 'entryReady'), true, false)).toBe(false);
+    expect(chatsOpen(open({ chats: 'ready' }, 'connected'), false)).toBe(true);
+    expect(chatsOpen(open({ chats: 'loading' }, 'filled'), false)).toBe(false);
   });
   it('never opens a first view for an account that cannot open the project', () => {
     expect(

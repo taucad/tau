@@ -119,6 +119,9 @@
 \* binding, admission, delivery, persistence and the queue barrier are unchanged.
 \* PR-7: the turn host reads usage-metrics consent from the one telemetry consent rule; it gates only
 \* telemetry, so admission, delivery, persistence and the queue barrier are unchanged.
+\* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
+\* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
+\* delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -54,7 +54,7 @@ import { isKernelAvailable } from '#constants/available-kernel-configurations.js
 import { chatKernelPreference } from '#hooks/chat-kernel-preference.js';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 import { draftMachine } from '#hooks/draft.machine.js';
-import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
+import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';

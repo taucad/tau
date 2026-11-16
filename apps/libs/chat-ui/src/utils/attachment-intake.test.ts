@@ -12,6 +12,21 @@ const webp = new Uint8Array([
 ]);
 const pdf = new TextEncoder().encode('%PDF-1.7\n');
 
+/** A 48×32, 24-bit BMP header: a format Tau does not store but the raster transcoder converts. */
+const bmp = (() => {
+  const bytes = new Uint8Array(58);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x42, 0x4d]);
+  view.setUint32(2, 58, true);
+  view.setUint32(10, 54, true);
+  view.setUint32(14, 40, true);
+  view.setInt32(18, 48, true);
+  view.setInt32(22, 32, true);
+  view.setUint16(26, 1, true);
+  view.setUint16(28, 24, true);
+  return bytes;
+})();
+
 const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
 
 /** A `File` whose `arrayBuffer` is spied on, so a test can prove it was never read. */
@@ -61,7 +76,7 @@ describe('attachment-intake', () => {
     it('should refuse a declared type that cannot hold an attachment without reading it', async () => {
       const file = fileOf(png, 'notes.txt', 'text/plain');
 
-      await expect(readAttachmentFile(file)).resolves.toEqual({ outcome: 'refused', reason: 'unsupported' });
+      await expect(readAttachmentFile(file)).resolves.toEqual({ outcome: 'refused', reason: 'not-an-image' });
       expect(file.arrayBuffer).not.toHaveBeenCalled();
     });
 
@@ -73,20 +88,53 @@ describe('attachment-intake', () => {
       expect(file.arrayBuffer).not.toHaveBeenCalled();
     });
 
-    it('should refuse bytes that are not a stored type, whatever the file claims', async () => {
+    it('should refuse bytes that are not an image, whatever the file claims', async () => {
       await expect(
         readAttachmentFile(fileOf(new TextEncoder().encode('ftyp heic, honest'), 'IMG_0001.jpg', 'image/jpeg')),
-      ).resolves.toEqual({ outcome: 'refused', reason: 'unsupported' });
+      ).resolves.toEqual({ outcome: 'refused', reason: 'not-an-image' });
+    });
+
+    it('should admit an image the host converts under the media type its bytes hold', async () => {
+      await expect(
+        readAttachmentFile(fileOf(bmp, 'scan.jpg', 'image/jpeg'), { transcodeSources: ['jpeg', 'bmp'] }),
+      ).resolves.toEqual({
+        outcome: 'admitted',
+        kind: 'image',
+        mediaType: 'image/bmp',
+        source: `data:image/bmp;base64,${base64(bmp)}`,
+      });
+    });
+
+    it('should refuse an image format the host does not convert, naming the format', async () => {
+      await expect(readAttachmentFile(fileOf(bmp, 'scan.bmp', 'image/bmp'))).resolves.toEqual({
+        outcome: 'refused',
+        reason: 'unsupported-format',
+        format: 'bmp',
+      });
+    });
+
+    it('should refuse an image whose header is damaged as unreadable, naming the format', async () => {
+      await expect(
+        readAttachmentFile(fileOf(bmp.slice(0, 20), 'scan.bmp', 'image/bmp'), { transcodeSources: ['bmp'] }),
+      ).resolves.toEqual({ outcome: 'refused', reason: 'unreadable', format: 'bmp' });
     });
   });
 
   describe('mayHoldAttachment', () => {
-    it('should accept stored types, JPEG aliases and an unknown type, and nothing else', () => {
+    it('should accept stored types, any image type and an unknown type, and nothing else', () => {
       expect(
-        ['image/jpeg', 'image/png', 'application/pdf', 'image/jpg', 'image/pjpeg', '', 'image/heic', 'text/plain'].map(
-          (type) => mayHoldAttachment(type),
-        ),
-      ).toEqual([true, true, true, true, true, true, false, false]);
+        [
+          'image/jpeg',
+          'image/png',
+          'application/pdf',
+          'image/jpg',
+          'image/pjpeg',
+          '',
+          'image/heic',
+          'text/plain',
+          'application/zip',
+        ].map((type) => mayHoldAttachment(type)),
+      ).toEqual([true, true, true, true, true, true, true, false, false]);
     });
   });
 });

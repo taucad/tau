@@ -153,7 +153,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   },
 }));
 
-vi.mock('@taucad/chat-ui/hooks/resize-image.actor', () => ({
+vi.mock('#hooks/attachment-image.actor.js', () => ({
   resizeImageActor: fromSafeAsync<
     { type: 'imageResized'; resized: string },
     { image: string; preserveOriginal: boolean }
@@ -566,7 +566,7 @@ describe('ChatComposerProvider', () => {
       await waitFor(() => {
         expect(harness.toastError).toHaveBeenCalledOnce();
       });
-      expect(harness.toastError).toHaveBeenCalledWith('Failed to process image', expect.any(Object));
+      expect(harness.toastError).toHaveBeenCalledWith("Couldn't attach this image", expect.any(Object));
     });
 
     it('should unsubscribe the toast listener on unmount', async () => {
@@ -1650,7 +1650,7 @@ describe('ActiveChatProvider', () => {
       await waitFor(() => {
         expect(harness.toastError).toHaveBeenCalledOnce();
       });
-      expect(harness.toastError).toHaveBeenCalledWith('Failed to process image', expect.any(Object));
+      expect(harness.toastError).toHaveBeenCalledWith("Couldn't attach this image", expect.any(Object));
     });
 
     // Rewritten (P40): the resized image is stored through the session's real store actor, into the chat's record directory.

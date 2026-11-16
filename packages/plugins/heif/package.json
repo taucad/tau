@@ -55,8 +55,7 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0-beta.0",
-    "zod": "^4.1.0"
+    "@taucad/runtime": "^0.1.0-beta.0"
   },
   "dependencies": {
     "@taucad/image": "workspace:*",
@@ -65,8 +64,7 @@
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
     "@taucad/utils": "workspace:*",
-    "vite": "catalog:",
-    "zod": "catalog:"
+    "vite": "catalog:"
   },
   "taucad": {
     "hostTarget": "browser"

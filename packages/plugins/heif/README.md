@@ -27,10 +27,11 @@ HEIC/HEIF image transcoder for `@taucad/runtime`. It converts HEIC and HEIF stil
 ## Install
 
 ```bash
-npm i @taucad/heif @taucad/runtime zod
+npm i @taucad/heif @taucad/runtime
 ```
 
-`@taucad/runtime` and `zod` are required peers. `@taucad/image` and `libheif-js` are installed as dependencies.
+`@taucad/runtime` is a required peer. `@taucad/image` and `libheif-js` are installed as dependencies; the option
+schemas come from `@taucad/image`, which brings its own `zod` peer.
 
 ## Quick start
 

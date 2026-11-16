@@ -714,17 +714,19 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
 });
 
 /*
- * Expected failure (I6, S26, D26), carried from A7c to lane A7d, which takes the close cut on the next open and
- * flips this row. A7c registers each live session at the unload sequencer's producer stage, which writes what the
- * session owes on `hidden`, and the session stage then takes the close cut. On a reload the cut still never lands:
- * History, re-read for 30 s after the reload, holds only V1 Start. The cut is asynchronous through the revision
- * worker, which goes with the document. The row reads the edit's bytes from storage first, then History, with reads
- * that tolerate a row History re-renders.
+ * I6, S26, D26 (A7d). A7c registers each live session at the unload sequencer's producer stage, which writes what the
+ * session owes, and the session stage then takes the close cut. On a reload that cut cannot land: it is asynchronous
+ * through the revision worker, which goes with the document. So the session stage records the cut as owed, and the
+ * reloaded document's `revisions` child takes it as its first revision act. The row reads the edit's bytes from
+ * storage first, then History, with reads that tolerate a row History re-renders.
  */
-test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision holding the edit is cut on an immediate reload', async ({
+test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is cut after an immediate reload', async ({
   annotate,
 }) => {
-  const { marker } = await editViewArrangeAndReload(false);
+  /* The at-once reload 5a measures: the edit is in the editor's state and owed, so the unload's producer stage writes
+   * it before the document goes, and the close cut has the edit's bytes to take. Row 5d is the path where the edit
+   * itself is lost (its save still in flight), which is lane A7e's, not this row's. */
+  const { marker } = await editViewArrangeAndReload(true);
   /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
   const configs = await configsByName();
   const configA = configs[projectNames.a];
@@ -739,9 +741,9 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision ho
     (text) => text.includes(marker),
     15_000,
   );
-  /* Read, not asserted: inside `test.fails` a failing assertion here would pass the row. Row 5a asserts the stored edit
-   * (`editStored`); this reading says whether the cut had the edit's bytes to take. */
+  /* The cut has the edit's bytes to take: the producer stage wrote them before the document went (row 5a). */
   await annotate(`S26 stored edit before History: ${String(stored.includes(marker))}`);
+  expect(stored, 'S26: the edit is on disk before History is read').toContain(marker);
   await target.click(revisionChip());
   const panel = selectors.getByCss(visibleRevisionsPanel);
   const trailerOf = () => panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });
@@ -772,6 +774,165 @@ test.fails('A0.1 row 5b (I6 / S26 / D26, expected failure): no close revision ho
   /* The defect's own assertion: History's newest entry was cut at close, and it changed the file. */
   expect(trailer, 'I6: the newest History entry is the close cut').toMatch(/Tau-Trigger: close\b/u);
   await target.expectContainingText(panel.getByRole('list', { name: 'Changed files' }), entryPaths.a, 30_000);
+});
+
+/*
+ * S26, D17 (A7d; programme control, 2026-11-15T20:26Z). An edit, Escape and a reload at once, as a person types and
+ * reloads: nothing else is owed, so only the editor document session's own debounced save holds the edit. The row
+ * asserts the edit is on disk and shown after the reload. The reload's own timing is read back from the page's clock.
+ */
+test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload is kept on disk and in the editor', async ({
+  annotate,
+}) => {
+  await openSeed();
+  const marker = `// immediate-reload witness ${Math.random().toString(36).slice(2, 10)}`;
+  await target.expectVisible(revisionChip(), 60_000);
+  await awaitSaved();
+  const source = await openSource();
+  await target.expectContainingText(source, 'makeBaseBox(18', 30_000);
+  await target.click(source);
+  await target.keyboardPress('ControlOrMeta+End');
+  /* The edit and the reload in one page task, once the editor's own document holds the edit: the reload comes inside
+   * the editor's 250 ms save window, with nothing else owed. */
+  const reloadKey = 'a01-row5c-reload';
+  await target
+    .evaluateLocator(
+      source,
+      (element, input) => {
+        const clock = (): number => performance.timeOrigin + performance.now();
+        if (element instanceof HTMLElement) {
+          element.focus();
+          // oxlint-disable-next-line @typescript-eslint/no-deprecated -- the one atomic input path a contenteditable takes
+          document.execCommand('insertText', false, input.text);
+        }
+        const insertedAt = clock();
+        type EditorDom = Element & { cmTile?: { root?: { view?: { state: { doc: { toString(): string } } } } } };
+        const isInState = (): boolean =>
+          (element as EditorDom).cmTile?.root?.view?.state.doc.toString().includes(input.text.trim()) ?? false;
+        const finish = (frames: number): void => {
+          if (!isInState() && frames < 30) {
+            requestAnimationFrame(() => {
+              finish(frames + 1);
+            });
+            return;
+          }
+          sessionStorage.setItem(
+            input.key,
+            JSON.stringify({ insertedAt, reloadAt: clock(), editInState: isInState(), frames }),
+          );
+          location.reload();
+        };
+        finish(0);
+      },
+      { text: `\n${marker}`, key: reloadKey },
+    )
+    .catch(() => undefined);
+  await expect
+    .poll(
+      async () =>
+        target
+          .evaluate((key) => {
+            const stored = sessionStorage.getItem(key);
+            return stored !== null && performance.timeOrigin > (JSON.parse(stored) as { reloadAt: number }).reloadAt;
+          }, reloadKey)
+          .catch(() => false),
+      { timeout: 60_000 },
+    )
+    .toBe(true);
+  const timings = await target.evaluate(
+    (key) =>
+      JSON.parse(sessionStorage.getItem(key) ?? 'null') as {
+        insertedAt: number;
+        reloadAt: number;
+        editInState: boolean;
+        frames: number;
+      },
+    reloadKey,
+  );
+  await target.expectUrl(projectRoute, 60_000);
+  await target.expectVisible(dockTab(entryPaths.a), 60_000);
+
+  /* What storage holds, then what the reloaded editor shows. */
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const storedText = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const reopened = await openSource();
+  await target.expectContainingText(reopened, 'makeBaseBox(18', 60_000);
+  const shownText = await readWithin(
+    async () => (await target.textContent(reopened)) ?? '',
+    (current) => current.includes(marker),
+    15_000,
+  );
+  const reading = {
+    editStored: storedText.includes(marker),
+    editKept: shownText.includes(marker),
+    editToReload: Math.round(timings.reloadAt - timings.insertedAt),
+    editInState: timings.editInState,
+    frames: timings.frames,
+  };
+  await annotate(`S26 edit then immediate reload: ${JSON.stringify(reading)}`);
+  await target.writeArtifact(`a01-row5c-report-${String(Date.now())}.json`, JSON.stringify(reading));
+  /* The edit was in the editor's state when the reload was called, inside the 250 ms window. */
+  expect(timings.editInState).toBe(true);
+  expect(reading.editToReload).toBeLessThan(250);
+  expect(reading, 'S26: the edit is on disk and in the editor after the reload').toMatchObject({
+    editStored: true,
+    editKept: true,
+  });
+});
+
+/*
+ * Expected failure (S26, D17, D26; programme control, 2026-11-15T20:40Z). The arrangement and the view setting go first,
+ * then the edit, Escape and a reload by the harness: the lane record still owes its write, so `beforeunload` runs the
+ * producer stage, which starts the editor's save beside the record writes, and the document goes before that save
+ * answers. The edit is lost from disk and from the editor: 7 of 10 runs on f9a1bd11 (before A7c's `beforeunload`
+ * stage) and 10 of 10 on 648a28ce. A follow-up the programme names owns the fix and flips this row.
+ */
+test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in flight when the document goes is lost', async ({
+  annotate,
+}) => {
+  const { marker } = await editViewArrangeAndReload(false);
+  const configs = await configsByName();
+  const configA = configs[projectNames.a];
+  const storedText = await readWithin(
+    async () => {
+      if (configA === undefined) {
+        return '';
+      }
+      const tree = await readProjectTree(configA);
+      return tree[`/${entryPaths.a}`] ?? '';
+    },
+    (current) => current.includes(marker),
+    15_000,
+  );
+  /* Read, not asserted: inside `test.fails` a failing wait here would pass the row, so a reload or an editor that
+   * never comes back reads as an empty text and fails only the row's own assertion. */
+  const source = await openSource().catch(() => undefined);
+  const shownText =
+    source === undefined
+      ? ''
+      : await readWithin(
+          async () => (await target.textContent(source).catch(() => '')) ?? '',
+          (current) => current.includes('makeBaseBox(18') && current.includes(marker),
+          60_000,
+        );
+  const reading = { editStored: storedText.includes(marker), editKept: shownText.includes(marker) };
+  await annotate(`S26 edit with a save in flight at reload: ${JSON.stringify(reading)}`);
+  await target.writeArtifact(`a01-row5d-report-${String(Date.now())}.json`, JSON.stringify(reading));
+  expect(reading, 'S26: the edit is on disk and in the editor after the reload').toMatchObject({
+    editStored: true,
+    editKept: true,
+  });
 });
 
 /*

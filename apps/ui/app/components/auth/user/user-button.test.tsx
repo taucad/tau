@@ -33,15 +33,15 @@ describe('UserButton', () => {
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
   });
 
-  it('renders the final signed-out row while the session loads, with no skeleton stage (R7)', () => {
+  it('renders avatar and name skeletons while the session loads, never the signed-out row', () => {
     session.isPending = true;
     const pending = renderToString(<UserButton size='sm' />);
     session.isPending = false;
     const signedOut = renderToString(<UserButton size='sm' />);
 
-    expect(pending).toBe(signedOut);
-    expect(pending).toContain('Account');
-    expect(pending).not.toContain('data-slot="skeleton"');
+    expect(pending).not.toBe(signedOut);
+    expect(pending).toContain('data-slot="skeleton"');
+    expect(signedOut).not.toContain('data-slot="skeleton"');
   });
 
   it('names the signed-out way in "Sign in", the word every other sign-in entry uses (I6)', async () => {

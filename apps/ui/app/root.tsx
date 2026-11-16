@@ -13,7 +13,6 @@ import { globalStylesLinks } from '#styles/global.styles.js';
 import { CookieConsentBanner } from '#components/cookie-consent-banner.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
-import { readProjectListCountFromHeader } from '#lib/project-list-shape.lib.js';
 import { readShellRequestHints } from '#lib/shell-request-hints.js';
 import { readLayoutFlagsFromHeader, resolveServerLayoutFlags } from '#flags/layout-flags.js';
 import { isSeededFlagSourceAllowed } from '#flags/remote-flags.js';
@@ -75,8 +74,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     globalPrivacyControl,
     env,
     pathname,
-    // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
-    projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
     // H2: the settled layout-affecting flags, so the server renders, omits or holds a flagged row.
     // A flag no PostHog answer can reach in this page view is known as its default, so nothing is held for it.
     layoutFlags: resolveServerLayoutFlags(

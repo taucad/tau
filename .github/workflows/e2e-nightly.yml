@@ -7,7 +7,8 @@ name: E2E nightly
 # summary ends with the W22 consumer parity table. Each
 # night they run against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
-# nightly, never a merge gate.
+# nightly, never a merge gate. A suite that passes two consecutive nightlies moves to ci.yml's
+# merge-queue lane for good (`test:e2e:queue`, the end-to-end ratchet) and leaves this matrix.
 # `workflow_dispatch` takes an optional commit to run against instead, and `flag_state` runs the
 # browser and desktop suites with every page opened in one of the four onboarding flag states
 # (`TAU_E2E_FLAG_STATE`, `apps/ui-e2e/src/support/flag-state.ts`); the schedule leaves it unset,
@@ -80,6 +81,14 @@ jobs:
           # `metadata.shards` jobs when it declares that count; each job passes
           # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
           suites='[]'
+          # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
+          # `test:e2e:queue` `dependsOn` passed two consecutive nightlies and runs in ci.yml's merge-queue
+          # lane (`e2e-queue`) whenever its project is affected, so it is not run here. It never moves back.
+          pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
+          ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets["test:e2e:queue"].dependsOn // [] | .[]
+            | if type == "string" then "\($project):\(.)" else error("\($project):test:e2e:queue depends on \(tojson), not a target name") end]' \
+            "$RUNNER_TEMP/graph.json")
+          echo "Ratcheted into the merge queue: $ratcheted"
           add_suite() {
             suites=$(jq -c --arg project "$1" --arg target "$2" --argjson shards "$3" \
               '. + [range(1; $shards + 1) as $i | {project: $project, target: $target}
@@ -91,6 +100,9 @@ jobs:
           }
           for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew test:e2e:filesystem-scenarios; do
             for project in $(pnpm nx show projects --with-target "$target" --json | tail -1 | jq -r '.[]'); do
+              if jq -e --arg suite "$project:$target" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
+                continue
+              fi
               shards=$(pnpm nx show project "$project" --json | tail -1 | jq --arg target "$target" '.targets[$target].metadata.shards // 1')
               add_suite "$project" "$target" "$shards"
             done

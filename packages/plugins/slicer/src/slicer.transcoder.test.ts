@@ -87,9 +87,7 @@ describe('slicerTranscoder', () => {
     definition.transcode({ from: 'glb', to: 'gcode.3mf', files: [file], options }, createRuntime(signal), context);
 
   it('should declare one glb → gcode.3mf edge', () => {
-    expect(definition.edges.map(({ from, to, fidelity }) => ({ from, to, fidelity }))).toEqual([
-      { from: 'glb', to: 'gcode.3mf', fidelity: 'mesh' },
-    ]);
+    expect(definition.edges.map(({ from, to }) => ({ from, to }))).toEqual([{ from: 'glb', to: 'gcode.3mf' }]);
   });
 
   describe.each([

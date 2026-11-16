@@ -12,6 +12,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
+import * as Cookies from 'es-cookie';
 import { flush } from '@taucad/xstate-testing/clock';
 import type { Chat } from '@taucad/chat';
 import type { EditorStateInput } from '@taucad/ui-core/types/editor.types';
@@ -25,7 +26,6 @@ import {
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { TestRootFiles } from '#runtime/project-library.fixture.js';
-import { projectListCountCookieName, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
 const worker = vi.hoisted(() => ({
@@ -373,7 +373,7 @@ describe('ProjectLibrary', () => {
     expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([['projects'], ['chats', 'p1']]);
   });
 
-  describe('listing snapshot (A13)', () => {
+  describe('listing', () => {
     const entry = (id: string, lastActivityAt: number, deletedAt?: number) => ({
       projectId: id,
       manifest: { name: `Name ${id}` },
@@ -390,69 +390,22 @@ describe('ProjectLibrary', () => {
 
     afterEach(() => {
       globalThis.localStorage.clear();
-      projectListShapeStore.reset();
     });
 
-    it('should remember a fetched project listing, and one published with setQueryData, with only the count in the cookie', async () => {
-      const queryClient = new QueryClient();
-      const library = createLibrary(queryClient);
+    it('should clear the project listing snapshot an earlier build left on the device when it starts', () => {
+      globalThis.localStorage.setItem('tau-project-listing', '{"v":1,"projects":[{"name":"Secret"}]}');
+      globalThis.localStorage.setItem('tau-project-list-count', '{"count":2}');
+      Cookies.set('tau-project-count', '2', { path: '/' });
+      const library = createLibrary(new QueryClient());
+
       library.start();
 
-      await queryClient.query({
-        queryKey: ['projects'],
-        queryFn: async () => listing(entry('older', 1), entry('newer', 9), entry('trashed', 5, 6)),
-      });
-      expect(library.listingSnapshot.get()).toEqual({
-        count: 2,
-        projects: [
-          {
-            id: 'newer',
-            name: 'Name newer',
-            lastActivityAt: 9,
-            slugs: { workspaceSlug: 'home', projectSlug: 'newer' },
-            place: { kind: 'home' },
-          },
-          {
-            id: 'older',
-            name: 'Name older',
-            lastActivityAt: 1,
-            slugs: { workspaceSlug: 'home', projectSlug: 'older' },
-            place: { kind: 'home' },
-          },
-        ],
-      });
-      expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
-      expect(document.cookie).not.toContain('Name');
-
-      /* A workspace connect or disconnect publishes its listing without a fetch. */
-      queryClient.setQueryData(['projects'], listing(entry('other', 3)));
-      expect(library.listingSnapshot.get()?.projects?.map((project) => project.id)).toEqual(['other']);
+      expect(globalThis.localStorage.getItem('tau-project-listing')).toBeNull();
+      expect(globalThis.localStorage.getItem('tau-project-list-count')).toBeNull();
+      expect(Cookies.get('tau-project-count')).toBeUndefined();
     });
 
-    it("should remember a project's chat listing, live and owned chats only, and nothing once stopped", async () => {
-      const queryClient = new QueryClient();
-      const library = createLibrary(queryClient);
-      library.start();
-      queryClient.setQueryData(['projects'], listing(entry('p1', 1)));
-
-      queryClient.setQueryData(
-        ['chats', 'p1', 'records', 'source', { includeDeleted: false }],
-        [
-          { id: 'c1', resourceId: 'p1', name: 'One', createdAt: 1, updatedAt: 1 },
-          { id: 'c2', resourceId: 'p1', name: 'Two', createdAt: 2, updatedAt: 2, deletedAt: 3 },
-        ],
-      );
-      expect(library.listingSnapshot.get()?.projects?.[0]).toMatchObject({
-        chatCount: 1,
-        chats: [{ id: 'c1', name: 'One', createdAt: 1, updatedAt: 1 }],
-      });
-
-      library.stop();
-      queryClient.setQueryData(['projects'], listing(entry('after-stop', 1)));
-      expect(library.listingSnapshot.get()?.projects?.map((project) => project.id)).toEqual(['p1']);
-    });
-
-    /* D9: the listing query is the library's own; the snapshot above remembers what it lands. */
+    /* D9: the listing query is the library's own. */
     it('should list every project, deleted ones included, through its listing query (A4b)', async () => {
       const library = createLibrary(new QueryClient());
       const listed = listing(entry('older', 1), entry('trashed', 5, 6)) as unknown as Awaited<

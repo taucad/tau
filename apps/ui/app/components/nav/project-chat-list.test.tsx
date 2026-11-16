@@ -7,7 +7,6 @@ import type { useChats } from '#hooks/use-chats.js';
 import type { useChatRecords } from '#hooks/use-chat-records.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
-import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
 
 const cloudOpening = vi.hoisted(() => ({ pending: false, loadingChats: false }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({
@@ -77,7 +76,6 @@ vi.mock('react-router', () => ({
   useLocation: () => ({ search }),
   useNavigate: () => mockNavigate,
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
-  /* No root loader: the remembered shape is this device's own snapshot. */
   useRouteLoaderData: () => undefined,
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
@@ -630,109 +628,34 @@ describe('ProjectChatList', () => {
     expect(screen.queryAllByText('Earlier')).toHaveLength(1);
   });
 
-  // ── Known defects (A0.9): expected failures until their fixing lane flips them ──
-
-  describe('remembered chat count', () => {
-    /*
-     * The remembered input is the listing snapshot (loading-states blueprint,
-     * A13), seeded through its own writer: the project row, then the chat
-     * listing it remembers.
-     */
-    const rememberChats = (projectId: string, chats: readonly ChatRecord[]): void => {
-      projectListShapeStore.remember(
-        projectListShapeOf([{ id: projectId, name: project.name, lastActivityAt: 1, slugs: project.slugs }]),
-      );
-      projectListShapeStore.rememberChats(projectId, chats);
-      projectListShapeStore.reset();
-    };
-    const rememberChatCount = (projectId: string, count: number): void => {
-      rememberChats(
-        projectId,
-        Array.from({ length: count }, (_, index) => chat(index + 1)),
-      );
-    };
-
-    /** The sidebar rows the project's chat list draws: placeholders, chats and labels alike. */
+  describe('loading', () => {
+    /** The sidebar rows the project's chat list draws: skeletons, chats and labels alike. */
     const chatListRowCount = (): number => document.querySelectorAll(`#project-chats-${project.id} > li`).length;
 
-    beforeEach(() => {
-      globalThis.localStorage.clear();
-      projectListShapeStore.reset();
-    });
-
-    /* C8: remembered chats are real links under the labels their own times give, with no stand-in row. */
-    it('C8: with a remembered listing the loading list has real chat links under their day labels', () => {
-      rememberChats(project.id, [
-        { ...chat(1), name: 'Earlier chat', recencyAt: 1 },
-        { ...chat(2), name: 'Today chat', recencyAt: Date.now() },
-      ]);
-      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
-      render(<ProjectChatList project={project} isProjectActive={false} />);
-
-      expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Today chat', 'Earlier chat']);
-      expect(screen.getByText('Today')).toBeInTheDocument();
-      expect(screen.getByText('Earlier')).toBeInTheDocument();
-      expect(screen.queryAllByTestId('skeleton')).toHaveLength(0);
-    });
-
-    /* The accessibility line (programme-control ruling, 2026-11-14T01:20Z): busy while the listing is pending, rows or not. */
-    it('C8: with remembered chats the loading list is busy until the chat listing answers', () => {
-      rememberChats(project.id, [chat(1), chat(2)]);
+    it('draws three generic skeleton rows and is busy until the chat listing answers', () => {
       mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
       const view = render(<ProjectChatList project={project} isProjectActive={false} />);
 
-      expect(screen.getAllByRole('link')).toHaveLength(2);
+      expect(screen.getAllByTestId('project-chat-skeleton')).toHaveLength(3);
+      expect(chatListRowCount()).toBe(3);
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.queryByText('No chats yet')).not.toBeInTheDocument();
       expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
 
       mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [chat(1), chat(2)] });
       view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(screen.queryAllByTestId('project-chat-skeleton')).toHaveLength(0);
+      expect(screen.getAllByRole('link')).toHaveLength(2);
       expect(document.querySelector(`#project-chats-${project.id}`)).not.toHaveAttribute('aria-busy');
     });
 
-    it('C8: with nothing remembered the loading list has no row and is busy', () => {
-      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+    it('draws no skeleton rows over chats already listed during a refresh', () => {
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [chat(1)], isLoading: true });
       render(<ProjectChatList project={project} isProjectActive={false} />);
 
-      expect(chatListRowCount()).toBe(0);
-      expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
+      expect(screen.queryAllByTestId('project-chat-skeleton')).toHaveLength(0);
+      expect(screen.getAllByRole('link')).toHaveLength(1);
     });
-
-    /* A legacy record's recency is its own field: its remembered row sits where the listing puts it (round 2). */
-    it('U6: a legacy chat keeps its group and place when the chat list resolves', () => {
-      const now = Date.now();
-      const legacy = { ...chat(1) };
-      Reflect.set(legacy, 'lastUserActivityAt', now);
-      const listed = [legacy, { ...chat(2), recencyAt: now }, { ...chat(3), recencyAt: now }];
-      rememberChats(project.id, listed);
-      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
-      const view = render(<ProjectChatList project={project} isProjectActive={false} />);
-      const loadingRows = chatListRowCount();
-      const loadingNames = screen.getAllByRole('link').map((link) => link.textContent);
-
-      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: listed });
-      view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
-
-      expect(chatListRowCount()).toBe(loadingRows);
-      expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(loadingNames);
-    });
-
-    it.each([5, 1])(
-      'U6: chat row count is equal before and after the chat list resolves with %i remembered',
-      (count) => {
-        rememberChatCount(project.id, count);
-        mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
-        const view = render(<ProjectChatList project={project} isProjectActive={false} />);
-        const loadingRows = chatListRowCount();
-
-        mockUseChatRecords.mockReturnValue({
-          ...defaultChatsResult,
-          chats: Array.from({ length: count }, (_, index) => chat(index + 1)),
-        });
-        view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
-
-        expect(chatListRowCount()).toBe(count);
-        expect(loadingRows).toBe(chatListRowCount());
-      },
-    );
   });
 });

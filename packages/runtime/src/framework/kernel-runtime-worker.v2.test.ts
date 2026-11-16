@@ -902,7 +902,7 @@ describe('v2 kernel boundary with the current client', () => {
       id: 'required-collision',
       name: 'Required collision',
       version: '1.0.0',
-      edges: [{ from: 'txt', to: 'csv', fidelity: 'mesh', optionsSchema: z.object({ delimiter: z.string() }) }],
+      edges: [{ from: 'txt', to: 'csv', optionsSchema: z.object({ delimiter: z.string() }) }],
       async initialize() {
         return {};
       },
@@ -1420,7 +1420,7 @@ describe('v2 kernel boundary with the current client', () => {
       id: 'txt-csv',
       name: 'Text to CSV',
       version: '1.0.0',
-      edges: [{ from: 'txt', to: 'csv', fidelity: 'mesh', optionsSchema: z.object({ edge: z.boolean() }) }],
+      edges: [{ from: 'txt', to: 'csv', optionsSchema: z.object({ edge: z.boolean() }) }],
       async initialize() {
         return {};
       },

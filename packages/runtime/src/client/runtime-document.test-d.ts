@@ -188,7 +188,6 @@ const realTranscoder = defineTranscoder({
     {
       from: 'csv',
       to: 'pdf',
-      fidelity: 'mesh',
       optionsSchema: z.object({ delimiter: z.number().default(9), layout: z.enum(['portrait', 'landscape']) }),
       content: ['includeTopology'],
     },

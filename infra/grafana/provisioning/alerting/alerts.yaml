@@ -1643,7 +1643,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: 'sum by (kind) (count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.complained" | regexp `Resend event email[.]complained kind=(?P<kind>[a-z-]+)` [1h]))'
+              expr: 'sum by (kind) (count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.complained kind=" | regexp `Resend event email[.]complained kind=(?P<kind>[a-z-]+)` [1h]))'
               intervalMs: 15000
               maxDataPoints: 43200
               queryType: range
@@ -1698,7 +1698,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: '(sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) / sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent" [7d])) > 0.02) and (sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) >= 5)'
+              expr: '(sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced kind=" |= "bounce_type=Permanent" [7d])) / sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent kind=" [7d])) > 0.02) and (sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced kind=" |= "bounce_type=Permanent" [7d])) >= 5)'
               intervalMs: 15000
               maxDataPoints: 43200
               queryType: range
@@ -1753,7 +1753,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: '(sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) / sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent" [7d])) > 0.04) and (sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced" |= "bounce_type=Permanent" [7d])) >= 10)'
+              expr: '(sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced kind=" |= "bounce_type=Permanent" [7d])) / sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent kind=" [7d])) > 0.04) and (sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.bounced kind=" |= "bounce_type=Permanent" [7d])) >= 10)'
               intervalMs: 15000
               maxDataPoints: 43200
               queryType: range
@@ -1863,7 +1863,7 @@ groups:
               to: 0
             datasourceUid: loki
             model:
-              expr: 'sum(count_over_time({service_name="tau-api"} | event_provider="app" |~ "Sent .* via Resend" [6h])) unless sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent" [6h]))'
+              expr: 'sum(count_over_time({service_name="tau-api"} | event_provider="app" |~ "Sent .* via Resend" [6h])) unless sum(count_over_time({service_name="tau-api"} | event_provider="app" |= "Resend event email.sent kind=" [6h]))'
               intervalMs: 15000
               maxDataPoints: 43200
               queryType: range

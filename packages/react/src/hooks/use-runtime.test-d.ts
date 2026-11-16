@@ -70,7 +70,6 @@ const boardPdf = defineTranscoder({
     {
       from: 'csv',
       to: 'pdf',
-      fidelity: 'mesh',
       optionsSchema: z.object({ layout: z.enum(['portrait', 'landscape']) }),
       sourceOptions: { delimiter: ',' },
       content: ['includeTopology'],

@@ -9,7 +9,7 @@
  */
 
 import type { z } from 'zod';
-import type { ExportFidelity, ExportFile } from '@taucad/types';
+import type { ExportFile } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
@@ -34,6 +34,10 @@ import { validateRuntimeContentDeclarations } from '#types/runtime-content.types
  * values flow into {@link TranscodeInput} via the `Edges` generic on
  * {@link TranscoderDefinition}, eliminating the need for `as` casts inside `transcode`.
  *
+ * An edge declares no fidelity: the runtime derives each transcoded export route's
+ * fidelity from the two format names, `'brep'` only when both `from` and `to` are
+ * exact B-rep formats (see `lookupExportFidelity`), otherwise `'mesh'`.
+ *
  * @template From - Source format identifier (literal when declared with `as const`)
  * @template To - Target format identifier (literal when declared with `as const`)
  * @template Schema - Zod schema for per-edge options, or `undefined` when no options are accepted
@@ -46,7 +50,6 @@ export type TranscoderEdge<
 > = {
   from: From;
   to: To;
-  fidelity: ExportFidelity;
   optionsSchema?: Schema;
   /** Final content properties this edge preserves or consumes. */
   content?: RuntimeContentDeclaration;

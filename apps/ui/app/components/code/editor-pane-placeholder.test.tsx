@@ -35,10 +35,10 @@ describe('EditorPanePlaceholder', () => {
     expect(gutter?.textContent).toBe('1\n2\n3›');
   });
 
-  it('shows only the editor background before the read, with no Skeleton line (C12)', () => {
+  it('draws skeleton code lines before the read', () => {
     const { container } = render(<EditorPanePlaceholder label='Loading main.ts' />);
 
-    expect(container.querySelectorAll('[data-slot="skeleton"]'), 'Skeleton lines in the code pane').toHaveLength(0);
+    expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(12);
     const pane = screen.getByRole('group', { name: 'Loading main.ts' });
     expect(pane).toHaveAttribute('aria-busy', 'true');
     expect(pane.querySelector('[data-slot="editor-pane-text"]')).toBeNull();

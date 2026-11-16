@@ -525,6 +525,45 @@ describe('Page scroll restoration', () => {
     }
   });
 
+  /* Review round 2 (A15b2): the route content sits in the shell's frame host, a `display: contents` box, so the hold
+   * watches the content inside it, not the host. */
+  it("should watch the route content's own box through the shell's frame host", () => {
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public observe(element: Element): void {
+          observed.push(element);
+        }
+        public disconnect(): void {
+          // Nothing to release.
+        }
+      },
+    );
+    const style = document.createElement('style');
+    style.textContent = '.contents { display: contents; }';
+    document.head.append(style);
+    try {
+      state.enableOverflowY = true;
+      state.locationKey = 'community';
+      state.pathname = '/community';
+      const { rerender } = render(<Page />);
+      scrollTo(900);
+      state.locationKey = 'example';
+      state.navigationType = 'PUSH';
+      rerender(<Page />);
+      state.locationKey = 'community';
+      state.navigationType = 'POP';
+      rerender(<Page />);
+
+      expect(observed).toContain(screen.getByText('Page content'));
+      expect(observed.some((element) => element.classList.contains('contents'))).toBe(false);
+    } finally {
+      style.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('should keep the offset when a filter or dialog replaces the entry on the same page', () => {
     state.enableOverflowY = true;
     state.locationKey = 'community';

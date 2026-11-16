@@ -92,9 +92,18 @@ const holdScrollPosition = (scroller: HTMLElement, top: number, onRelease: () =>
     scroller.scrollTop = top;
   });
   observer.observe(scroller);
-  for (const child of scroller.children) {
-    observer.observe(child);
-  }
+  /* The content's boxes: a `display: contents` host (the shell's workspace frame host, A15b2) has none, so its
+   * children are observed in its place. */
+  const observeBoxes = (parent: Element): void => {
+    for (const child of parent.children) {
+      if (getComputedStyle(child).display === 'contents') {
+        observeBoxes(child);
+      } else {
+        observer.observe(child);
+      }
+    }
+  };
+  observeBoxes(scroller);
   const release = (): void => {
     observer.disconnect();
     clearTimeout(holdTimeout);
@@ -672,7 +681,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     return (
       <Compose components={Providers}>
         {desktopDragBand}
-        {enableOverflowY ? (
+        {routeEnablesOverflowY ? (
           <div ref={pageScrollRef} className='h-dvh overflow-y-auto' onScroll={handlePageScroll}>
             <Outlet />
           </div>

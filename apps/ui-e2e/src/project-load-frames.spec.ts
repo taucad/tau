@@ -825,6 +825,8 @@ const boxChanges = (entries: readonly ProjectLoadRegionEntry[]): string[] => {
 
 /** The persistent workspace frame A15b adds (blueprint: `R/workspace-frame*`, "the workspace-frame element"). */
 const workspaceFrame = '[data-slot="workspace-frame"]';
+/** The frame's lanes layer, which a pending frame shows over the hidden page being left (A15b2). */
+const frameLanes = '[data-slot="workspace-frame-lanes"]';
 /** The chat lane, by the history region it holds. */
 const chatLane = '[data-slot="floating-panel"]:has([role="region"][aria-label="Chat history"])';
 /** The entry chunk every page loads first: holding it holds hydration. */
@@ -1120,7 +1122,7 @@ knownDefect(
     expectedFailure: false,
     budget: loadBudget,
     measure: async (): Promise<DestinationFrameLoad> => {
-      await seedProjects('wide', { regions: { workspaceFrame } });
+      await seedProjects('wide', { regions: { workspaceFrame, frameLanes } });
       await target.navigate('/');
       await target.expectVisible(composer, 60_000);
       await target.delay(settleWindow);
@@ -1168,6 +1170,8 @@ knownDefect(
     assert: ({ record, click, pushAt }) => {
       const drawn = regionsOf(record, 'workspaceFrame').filter((entry) => entry.present && entry.t >= click.t);
       const frame = drawn[0];
+      /* The lanes as they stand in the frame's first frame: shown, not hidden with the page being left. */
+      const lanes = regionsOf(record, 'frameLanes').findLast((entry) => frame !== undefined && entry.t <= frame.t);
       /* A15b2 review: drawn ahead of the route, the frame is already the destination's, one node in its final box, on
        * screen, so the route's commit moves and replaces nothing. */
       const settled = drawn.at(-1);
@@ -1184,13 +1188,14 @@ knownDefect(
           pushWithin: pushAt !== undefined && pushAt - click.t <= acknowledgeMilliseconds,
           frameWithin: frame !== undefined && frame.t - click.t <= acknowledgeMilliseconds,
           frameVisible: frame?.visible === true,
+          lanesVisible: lanes?.present === true && lanes.visible,
           frameMoves: moved.map(
             (entry) =>
               `${describeFrame(entry)}: node ${entry.node} ${entry.x},${entry.y} ${entry.width}x${entry.height}`,
           ),
         },
         `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}, settling at ${settled === undefined ? 'none' : `node ${settled.node} ${settled.x},${settled.y} ${settled.width}x${settled.height}`}`,
-        { pushWithin: true, frameWithin: true, frameVisible: true, frameMoves: [] },
+        { pushWithin: true, frameWithin: true, frameVisible: true, lanesVisible: true, frameMoves: [] },
       );
     },
   },

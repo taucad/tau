@@ -12,7 +12,7 @@
     "self-host": {
       "project": {
         "brotliBytes": 2941434,
-        "requests": 400,
+        "requests": 403,
         "largestChunkBrotliBytes": 228591,
         "knownHeavy": {
           "editor": "PL5: the code viewer of the workbench dock",
@@ -22,7 +22,7 @@
       },
       "home": {
         "brotliBytes": 1253988,
-        "requests": 282,
+        "requests": 286,
         "largestChunkBrotliBytes": 137775,
         "knownHeavy": {}
       }
@@ -30,7 +30,7 @@
     "cloud": {
       "project": {
         "brotliBytes": 2966650,
-        "requests": 415,
+        "requests": 418,
         "largestChunkBrotliBytes": 229666,
         "knownHeavy": {
           "editor": "PL5: the code viewer of the workbench dock",
@@ -40,7 +40,7 @@
       },
       "home": {
         "brotliBytes": 1276255,
-        "requests": 296,
+        "requests": 300,
         "largestChunkBrotliBytes": 137886,
         "knownHeavy": {}
       }

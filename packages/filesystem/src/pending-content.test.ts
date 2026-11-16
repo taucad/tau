@@ -348,16 +348,36 @@ describe('marked placeholders (D9)', () => {
   });
 
   /* An outside rewrite at the pointer's size keeps the stat until a read or the next capture sees it (documented). */
-  it('should end a mark whose file a read finds rewritten to another pointer, asking the source nothing', async () => {
+  /* The stat before the read said pending: the read refuses as pending too, and only then is the file its text. */
+  it('should end a mark whose file a read finds rewritten to another pointer, refusing that read, asking the source nothing', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);
     service.setPendingObjectSource(source);
     const view = service.createRootedFileSystem(route);
     const other = encoder.encode(new TextDecoder().decode(pointer).replace(oid, 'e'.repeat(64)));
     expect(other.byteLength).toBe(pointer.byteLength);
     await memory.writeFile('gear/models/part.step', other);
-    expect(await view.readFile('models/part.step')).toStrictEqual(other);
+    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+    await expect(view.readFile('models/part.step')).rejects.toBeInstanceOf(PendingContentError);
     expect(source).not.toHaveBeenCalled();
     expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
+    expect(await view.readFile('models/part.step')).toStrictEqual(other);
+  });
+
+  /* While a tree write's entries are live the revision layer is about to say what the file is: nothing is ended. */
+  it('should refuse a marked file rewritten to another pointer while a tree write is live, keeping its mark', async () => {
+    service.setPendingObjectSource(async () => part);
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([
+      { path: 'main.scad', size: 27, arriving: false },
+      { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
+    ]);
+    const other = encoder.encode(new TextDecoder().decode(pointer).replace(oid, 'e'.repeat(64)));
+    await memory.writeFile('gear/models/part.step', other);
+    await expect(view.readFile('models/part.step')).rejects.toBeInstanceOf(PendingContentError);
+    await expect(view.readFile('models/part.step')).rejects.toBeInstanceOf(PendingContentError);
+    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+    raw.endExpectation!();
   });
 
   it('should end a mark the source says is no placeholder, so the next stat is the pointer', async () => {

@@ -618,6 +618,25 @@ export class ProjectIndexes {
   }
 
   /**
+   * Whether a path's root is declared and no tree write's entries are live over it: its marks alone are its word.
+   *
+   * @param absolutePath - Absolute file path.
+   * @returns `true` when a read may end a mark it finds stale.
+   */
+  public declaredAt(absolutePath: string): boolean {
+    const normalized = normalizePath(absolutePath);
+    if (this._unknownAt(normalized)) {
+      return false;
+    }
+    for (const root of this._expected.keys()) {
+      if (relativeTo(root, normalized) !== undefined) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * End one file's pending entry in every index that holds it: a read found it no placeholder.
    *
    * @param absolutePath - Absolute file path.

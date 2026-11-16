@@ -188,6 +188,8 @@ export type MarkAnswer = PendingObject | 'unknown' | undefined;
 export type PendingMarks = Readonly<{
   pendingAt: (authorityPath: string, size?: number) => PendingObject | undefined;
   endPending: (authorityPath: string) => void;
+  /** Whether a path's root is declared with no tree write live over it, so its marks alone are the root's word. */
+  declaredAt: (authorityPath: string) => boolean;
   /** What a file answers, waiting only for itself while its root is held (see {@link untilDeclared}). */
   settleMarks: (file: SettledFile, signal?: AbortSignal) => Promise<MarkAnswer>;
 }>;
@@ -197,9 +199,11 @@ export type PendingMarks = Readonly<{
  * answer. A marked file reads through to its object; anything else is the
  * bytes it holds, an unmarked pointer among them, and no source is asked about
  * it: an outside edit is the revision layer's next capture to declare. A
- * marked file whose bytes are not the pointer its mark names (rewritten from
- * outside at the pointer's size), or that the source says is no placeholder,
- * loses its mark, so the next stat answers as this read did.
+ * marked file whose bytes are no pointer (rewritten from outside at the
+ * pointer's size), or that the source says is no placeholder, loses its mark,
+ * so the next stat answers as this read did. One whose bytes are another
+ * pointer refuses as pending, and loses its mark only in a declared root with
+ * no tree write live over it.
  *
  * @param marks - The index's marks.
  * @param source - The host's source.
@@ -240,10 +244,21 @@ export const readAsMarked = async (
   if (marked === undefined) {
     return bytes;
   }
-  if (object?.oid !== marked.oid || object.size !== marked.size) {
+  if (object === undefined) {
     /* Rewritten from outside since it was marked, at the pointer's size: no longer the placeholder it was declared. */
     marks.endPending(at.authorityPath);
     return bytes;
+  }
+  if (object.oid !== marked.oid || object.size !== marked.size) {
+    /*
+     * Another pointer than its mark names: the stat before this read said pending, so this read refuses as pending
+     * too, never answering pointer text (I7). Only a declared root with no tree write live over it ends the mark,
+     * so the next stat and read answer the text alike; otherwise the revision layer is still to say what it is.
+     */
+    if (marks.declaredAt(at.authorityPath)) {
+      marks.endPending(at.authorityPath);
+    }
+    throw new PendingContentError(at.path, object);
   }
   const answered = await readThroughPending(
     source,

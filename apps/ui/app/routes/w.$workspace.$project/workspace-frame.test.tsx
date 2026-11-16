@@ -238,13 +238,14 @@ describe('WorkspaceFrame', () => {
     const phone = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]')!;
     const part = (name: string): string => phone.querySelector<HTMLElement>(`[data-frame-part=${name}]`)!.className;
 
-    /* The top bar keeps its box in the column, so the viewer's box below it never moves. */
-    expect(part('top-bar')).toContain(
-      '[[data-slot=workspace-frame]:has([data-slot=mobile-project-top-bar])_&]:invisible',
+    /* Every part waits for the workspace's restored layout; the top bar keeps its box in the column, so the viewer's
+     * box below it never moves, and the viewer's box also waits for the live stage. */
+    expect(part('top-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:invisible');
+    expect(part('viewer')).toContain(
+      '[[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden',
     );
-    expect(part('viewer')).toContain('[[data-slot=workspace-frame]:has([data-slot=viewer-stage])_&]:hidden');
     expect(part('sheet')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
-    expect(part('tab-bar')).toContain('[[data-slot=workspace-frame]:has(nav[aria-label=Workbench])_&]:hidden');
+    expect(part('tab-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
     expect(phone.className).toContain('[[data-slot=workspace-frame]:has([data-slot=project-route-notice])_&]:hidden');
     expect(phone.className).toContain('md:hidden');
   });

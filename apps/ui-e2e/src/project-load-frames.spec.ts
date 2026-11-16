@@ -1172,18 +1172,19 @@ knownDefect(
 );
 
 /**
- * The phone frame's four parts (blueprint P-h), whatever draws them: the phone workspace's own, or, until each
- * arrives, the workspace frame's part in its box (A15c). This is the rows' contract with the frame, as
- * `workspaceLanes` is at wide size: each part of the phone frame carries `data-frame-part` inside
- * `[data-slot="workspace-frame-phone"]`. The recorder keeps the first visible match, so a part that gave way to the
- * live one is not read.
+ * The phone frame's four parts (blueprint P-h), whatever draws them: the workspace frame's part in its box until the
+ * phone workspace has restored its layout (A15c), then the phone workspace's own. This is the rows' contract with the
+ * frame, as `workspaceLanes` is at wide size: each part of the phone frame carries `data-frame-part` inside
+ * `[data-slot="workspace-frame-phone"]`, and hands over on `[data-mobile-workspace="ready"]` (the viewer's box once the
+ * live stage is drawn as well). Each frame part's selector stops matching at its hand-over, so from then on only the
+ * live part is read, its box, its skeletons and its animations.
  */
-/** The phone workspace's own sheet, once it is drawn. */
 const livePhoneSheet = '[role="dialog"]:has([aria-label="Drawer height"])';
-const phoneFramePart = (part: string): string => `[data-slot="workspace-frame-phone"] [data-frame-part="${part}"]`;
+const phoneFramePart = (part: string, handedOver = '[data-mobile-workspace="ready"]'): string =>
+  `[data-slot="workspace-frame"]:not(:has(${handedOver})) [data-slot="workspace-frame-phone"] [data-frame-part="${part}"]`;
 const phoneFrameRegions = {
   topBar: `[data-slot="mobile-project-top-bar"], ${phoneFramePart('top-bar')}`,
-  viewer: `[data-slot="viewer-stage"], ${phoneFramePart('viewer')}`,
+  viewer: `[data-slot="viewer-stage"], ${phoneFramePart('viewer', '[data-mobile-workspace="ready"] [data-slot="viewer-stage"]')}`,
   sheet: `${livePhoneSheet}, ${phoneFramePart('sheet')}`,
   tabBar: `nav[aria-label="Workbench"], ${phoneFramePart('tab-bar')}`,
 } as const;

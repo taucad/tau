@@ -486,6 +486,7 @@ function useChatCue(): MobileWorkbenchDestinationCue | undefined {
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const {
     isEditorReady,
+    isLayoutRestored,
     activeTab,
     handleTabChange,
     drawerOpen,
@@ -613,9 +614,12 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   return (
     <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
       <div
-        /* The phone frame's sheet gives way to the live one once the restored tab is known (A15c, `PhoneFrame`). */
-        data-mobile-workspace={isEditorReady ? 'ready' : 'opening'}
+        /* Until the stored layout is read the surface is the default, not this project's: the phone frame stands in for
+         * the workspace, which is drawn but not shown, and gives way to it in the commit the layout is restored
+         * (A15c, `PhoneFrame`). */
+        data-mobile-workspace={isLayoutRestored ? 'ready' : 'opening'}
         className={cn(
+          'data-[mobile-workspace=opening]:invisible',
           // --nav-height is the height of the navigation tabs
           'absolute inset-0 flex size-full flex-col overflow-hidden',
           mobileWorkbenchNavigationHeight,

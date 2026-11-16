@@ -176,10 +176,11 @@ function WorkspaceFrameLanes(): React.JSX.Element {
  * The phone frame (blueprint P-h, § Editor frame, phone; A15c): the top bar with its controls' places, the viewer's
  * box, the sheet at the detent this project's sheet opens at, and the tab bar with the remembered destination
  * selected, each at the box the phone workspace draws it in, read from the frame hint's variables with the default
- * (the model, the sheet closed) as each fallback. Nothing in it stands for content, and nothing in it moves: on
- * arrival each part gives way to the live one in the same box, in the commit the live one is drawn — the top bar and
- * the tab bar when theirs mount, the viewer's box when the viewer stage does, and the sheet once the workspace has
- * restored its tab (`data-mobile-workspace=ready`), since the live sheet is drawn in a portal outside the frame.
+ * (the model, the sheet closed) as each fallback. Nothing in it stands for content, and nothing in it moves. The phone
+ * workspace mounts hidden until its stored layout is read (`data-mobile-workspace=ready`); in that commit the top
+ * bar, the sheet and the tab bar give way to the live ones in the same boxes, and the viewer's box gives way once the
+ * live viewer stage is drawn too. The live sheet is drawn in a portal outside the frame, so the hand-over is the
+ * workspace's attribute, not the live part's presence.
  *
  * It is inert and hidden from assistive technology: the route's busy state is the gates' `WorkspaceOpening`. A
  * failure or a notice that stands in the workspace's place shows alone, as on a wide screen.
@@ -201,7 +202,7 @@ function PhoneFrame(): React.JSX.Element {
     >
       <div
         data-frame-part='top-bar'
-        className='flex h-12 shrink-0 items-center gap-0.5 border-b bg-background px-1 [[data-slot=workspace-frame]:has([data-slot=mobile-project-top-bar])_&]:invisible'
+        className='flex h-12 shrink-0 items-center gap-0.5 border-b bg-background px-1 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:invisible'
       >
         <span className='flex size-10 shrink-0 items-center justify-center'>
           <PanelLeft aria-hidden className='size-5' />
@@ -215,7 +216,7 @@ function PhoneFrame(): React.JSX.Element {
       <div className='relative min-h-0 flex-1 pb-[max(var(--frame-sheet-height,0px),var(--nav-offset))]'>
         <div
           data-frame-part='viewer'
-          className='size-full [[data-slot=workspace-frame]:has([data-slot=viewer-stage])_&]:hidden'
+          className='size-full [[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden'
         />
       </div>
       <div
@@ -231,7 +232,7 @@ function PhoneFrame(): React.JSX.Element {
           <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
         </div>
       </div>
-      <MobileWorkbenchNavigationFrame className='fixed inset-x-0 bottom-0 [[data-slot=workspace-frame]:has(nav[aria-label=Workbench])_&]:hidden' />
+      <MobileWorkbenchNavigationFrame className='fixed inset-x-0 bottom-0 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden' />
     </div>
   );
 }

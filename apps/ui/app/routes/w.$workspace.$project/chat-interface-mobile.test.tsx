@@ -51,6 +51,7 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
     const { generation } = state;
     return {
       isEditorReady: isEditorReady === 'true',
+      isLayoutRestored: isEditorReady === 'true',
       activeTab,
       handleTabChange: selectSurface,
       drawerOpen: drawerOpen === 'true',
@@ -223,6 +224,7 @@ afterEach(() => {
   state.row = { attention: 0, conflicted: false, settings: 0, failed: 0 };
   state.isEditorReady = true;
   state.listeners.clear();
+  globalThis.history.replaceState(null, '', '/');
   state.generation += 1;
   vi.unstubAllGlobals();
   terminal.mounted.mockClear();
@@ -1219,6 +1221,8 @@ describe('ChatInterfaceMobile on load', () => {
 
     expect(readPhoneFrameHint('home/one')).toBeUndefined();
     expect(workspace()).toHaveAttribute('data-mobile-workspace', 'opening');
+    /* Drawn at the default surface but not shown: the phone frame stands in until the stored layout is read. */
+    expect(workspace().className).toContain('data-[mobile-workspace=opening]:invisible');
 
     act(() => {
       state.isEditorReady = true;
@@ -1231,6 +1235,5 @@ describe('ChatInterfaceMobile on load', () => {
       selectSurface('editor');
     });
     expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'editor', snap: 1 });
-    globalThis.history.replaceState(null, '', '/');
   });
 });

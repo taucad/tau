@@ -133,20 +133,21 @@ const isPhoneFrameHint = (value: unknown): value is PhoneFrameHint => {
 };
 
 /**
- * A stored entry the writer may keep: an object with a numeric `usedAt`, and a valid wide layout, a valid phone
- * layout or both; a shape that is present must be valid.
+ * The part of a stored entry the writer may keep: its numeric `usedAt` and each of its shapes that is valid, so a
+ * shape this build cannot read (another build's surface, say) never costs the entry its other shape. Undefined when
+ * no shape is valid.
  */
-const isFrameHintEntry = (value: unknown): value is FrameHintEntry => {
+const keptEntry = (value: unknown): FrameHintEntry | undefined => {
   if (typeof value !== 'object' || value === null) {
-    return false;
+    return undefined;
   }
   const { usedAt, wide, phone } = value as Record<string, unknown>;
-  return (
-    typeof usedAt === 'number' &&
-    (wide !== undefined || phone !== undefined) &&
-    (wide === undefined || isWideFrameHint(wide)) &&
-    (phone === undefined || isPhoneFrameHint(phone))
-  );
+  const isWide = isWideFrameHint(wide);
+  const isPhone = isPhoneFrameHint(phone);
+  if (typeof usedAt !== 'number' || (!isWide && !isPhone)) {
+    return undefined;
+  }
+  return { usedAt, ...(isWide ? { wide } : {}), ...(isPhone ? { phone } : {}) };
 };
 
 /** The lane that keeps its place beside the viewer below the compact width (`resolveCompactAuxiliary`). */
@@ -287,8 +288,8 @@ const writeEntry = ({
 }>): void => {
   const record = readRecord();
   const previous = record?.projects[key];
-  /* A malformed stored entry for this key compares as no entry, so the write replaces it. */
-  const kept = isFrameHintEntry(previous) ? previous : undefined;
+  /* A malformed stored entry for this key keeps only its valid shape, or compares as no entry. */
+  const kept = keptEntry(previous);
   if (kept !== undefined && isUnchanged(kept) && now - kept.usedAt < 60_000) {
     return;
   }
@@ -298,9 +299,13 @@ const writeEntry = ({
     ...(kept?.phone === undefined ? {} : { phone: kept.phone }),
     ...shape,
   };
-  /* A malformed entry is dropped here, as the readers ignore it, rather than failing the write. */
+  /* A malformed entry or shape is dropped here, as the readers ignore it, rather than failing the write. */
   const others = Object.entries((record?.projects ?? {}) as Record<string, unknown>)
-    .filter((other): other is [string, FrameHintEntry] => other[0] !== key && isFrameHintEntry(other[1]))
+    .filter(([other]) => other !== key)
+    .flatMap(([other, value]): Array<[string, FrameHintEntry]> => {
+      const entry = keptEntry(value);
+      return entry === undefined ? [] : [[other, entry]];
+    })
     .toSorted(([, left], [, right]) => right.usedAt - left.usedAt)
     .slice(0, frameHintProjectLimit - 1);
   const next: FrameHintRecord = { v: 1, projects: Object.fromEntries([[key, entry], ...others]) };

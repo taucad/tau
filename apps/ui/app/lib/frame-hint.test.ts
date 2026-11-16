@@ -259,4 +259,23 @@ describe('frame hint', () => {
     expect(runPhoneScriptAt('/w/home/one')).toEqual({});
     expect(runScriptAt('/w/home/one')).toEqual(frameHintVariables(workbenchClosed));
   });
+
+  it("keeps another project's valid wide layout when its phone layout is one this build cannot read", () => {
+    globalThis.localStorage.setItem(
+      frameHintStorageKey,
+      JSON.stringify({
+        v: 1,
+        projects: {
+          'home/two': { usedAt: 1, wide: workbenchClosed, phone: { tab: 'gallery', snap: 0.5 } },
+          'home/one': { usedAt: 1, wide: workbenchClosed, phone: { tab: 'chat', snap: 0.7 } },
+        },
+      }),
+    );
+    writePhoneFrameHint('home/three', 'chat');
+    writePhoneFrameHint('home/one', 'parameters');
+
+    expect(readWideFrameHint('home/two')).toEqual(workbenchClosed);
+    expect(readWideFrameHint('home/one')).toEqual(workbenchClosed);
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'parameters', snap: 0.5 });
+  });
 });

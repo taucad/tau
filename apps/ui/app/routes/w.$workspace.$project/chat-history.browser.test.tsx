@@ -104,7 +104,6 @@ vi.doMock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({ Chat
 vi.doMock('#routes/w.$workspace.$project/chat-error.js', () => ({ ChatError: () => null }));
 // A settled chat has no activity cue; the row measures the trays, not the activity line.
 vi.doMock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({ ChatMessagePlanning: () => null }));
-vi.doMock('#components/chat/chat-auto-kernel-row.js', () => ({ ChatAutoKernelRow: () => null }));
 vi.doMock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));
 vi.doMock('#components/chat/chat-question-queue.js', () => ({ ChatQuestionQueue: () => null }));
 vi.doMock('#components/chat/chat-questions-context.js', () => ({

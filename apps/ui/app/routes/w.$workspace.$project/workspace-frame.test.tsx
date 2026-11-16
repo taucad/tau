@@ -261,7 +261,7 @@ describe('WorkspaceFrame', () => {
 
     expect(frame).toHaveAttribute('data-workspace-pending');
     expect(frame.className).toContain(
-      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone]):not([data-slot=workspace-frame-composer])]:invisible',
     );
     expect(frame.querySelector(':scope > [data-slot=workspace-frame-lanes]')).not.toBeNull();
     expect(frame.querySelector(':scope > [data-slot=workspace-frame-phone]')).not.toBeNull();
@@ -310,6 +310,10 @@ describe('WorkspaceFrame', () => {
     expect(screen.getByRole('textbox', { name: 'Chat message' })).toBeInTheDocument();
     expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/two' })).toBe(true);
     expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/one' })).toBe(false);
+    /* The pending rule hides the page being left, never the destination's composer box. */
+    const frame = document.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame.className).toContain(':not([data-slot=workspace-frame-composer])]:invisible');
   });
 
   // ── A15c: the phone frame (blueprint P-h; C6) ──

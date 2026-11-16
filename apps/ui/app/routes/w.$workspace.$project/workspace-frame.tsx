@@ -131,9 +131,9 @@ export function WorkspaceFrame({
       data-workspace-pending={isPending || undefined}
       className={cn(
         'size-full bg-background md:relative md:isolate',
-        /* A15b2: drawn ahead of the route, the frame's layers (the lanes, the phone frame) show alone; the page being
-         * left stays in place, unseen, until the route's commit replaces it. */
-        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+        /* A15b2: drawn ahead of the route, the frame's layers (the lanes, the phone frame, the destination's composer
+         * box) show alone; the page being left stays in place, unseen, until the route's commit replaces it. */
+        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone]):not([data-slot=workspace-frame-composer])]:invisible',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
         /* Literal for Tailwind: the desktop workspace's `data-chat-lane`. The composer box stays past the lanes'

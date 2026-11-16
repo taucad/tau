@@ -191,7 +191,7 @@ describe('BillableModelInvocationService', () => {
       const routes = [
         ['openai-gpt-6-sol', 'openai-responses', 'max_output_tokens'],
         ['anthropic-claude-opus-5', 'anthropic', 'max_tokens'],
-        ['google-gemini-3.1-pro', 'openai-completions', 'max_completion_tokens'],
+        ['google-gemini-4-hydrogen', 'openai-completions', 'max_completion_tokens'],
       ] as const;
       for (const [model, wire, field] of routes) {
         const resolved = resolver.resolve({
@@ -236,11 +236,9 @@ describe('BillableModelInvocationService', () => {
         ['openai-gpt-5.6-terra', 'gpt-5.6-terra', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-5.6-luna', 'gpt-5.6-luna', 'openai-responses', 'max_output_tokens'],
         ['openai-gpt-5.5', 'gpt-5.5', 'openai-responses', 'max_output_tokens'],
-        ['google-gemini-3.1-pro', 'gemini-3.1-pro-preview-customtools', 'openai-completions', 'max_completion_tokens'],
-        ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
-        ['google-gemini-3.8-flash', 'gemini-3.8-flash', 'openai-completions', 'max_completion_tokens'],
-        ['google-gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'openai-completions', 'max_completion_tokens'],
-        ['google-gemini-3.5-flash', 'gemini-3.5-flash', 'openai-completions', 'max_completion_tokens'],
+        ['google-gemini-4-argon', 'gemini-4-argon', 'openai-completions', 'max_completion_tokens'],
+        ['google-gemini-4-carbon', 'gemini-4-carbon', 'openai-completions', 'max_completion_tokens'],
+        ['google-gemini-4-hydrogen', 'gemini-4-hydrogen', 'openai-completions', 'max_completion_tokens'],
         ['together-kimi-k3.1-pro', 'moonshotai/Kimi-K3.1-Pro', 'openai-completions', 'max_tokens'],
         ['together-glm-5.3', 'zai-org/GLM-5.3', 'openai-completions', 'max_tokens'],
         ['together-glm-5.3-flash', 'zai-org/GLM-5.3-Flash', 'openai-completions', 'max_tokens'],
@@ -380,7 +378,7 @@ describe('BillableModelInvocationService', () => {
       attempt: { version: 1, key: 'attempt-vertex-completions' },
       providerWire: 'openai-completions',
       body: {
-        model: 'google-gemini-3.8-flash',
+        model: 'google-gemini-4-hydrogen',
         messages: [{ role: 'user', content: 'fixture' }],
         stream: true,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact OpenAI Completions wire key.
@@ -397,7 +395,7 @@ describe('BillableModelInvocationService', () => {
     );
     const vertexBody = fetchOnce.mock.lastCall?.[1]?.body;
     expect(typeof vertexBody).toBe('string');
-    expect(vertexBody).toContain('"model":"google/gemini-3.8-flash"');
+    expect(vertexBody).toContain('"model":"google/gemini-4-hydrogen"');
   });
 
   it('returns an existing attempt without issuing a promotion or calling a provider', async () => {
@@ -434,8 +432,8 @@ describe('BillableModelInvocationService', () => {
    * it must still reach the admission and error-rate series, labelled only by funded routes. */
   it.each([
     {
-      model: 'google-gemini-3.5-flash',
-      labels: { 'gen_ai.provider.name': 'vertexai', 'gen_ai.request.model': 'gemini-3.5-flash' },
+      model: 'google-gemini-4-hydrogen',
+      labels: { 'gen_ai.provider.name': 'vertexai', 'gen_ai.request.model': 'gemini-4-hydrogen' },
       warned: true,
     },
     { model: 'not-a-funded-route', labels: { 'gen_ai.provider.name': 'other' }, warned: false },

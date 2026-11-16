@@ -525,7 +525,7 @@ describe('supplier model id wires', () => {
   const together = { id: 'moonshotai/Kimi-K3.1-Pro', displayName: 'Kimi K3.1 Pro', providerId: 'together' };
 
   it('should accept every financial identity and a namespaced supplier model id', () => {
-    for (const id of ['claude-opus-5-5', 'gpt-5.6-luna', 'gemini-3.5-flash', 'a:b_c', together.id, 'a/b/c']) {
+    for (const id of ['claude-opus-5-5', 'gpt-5.6-luna', 'gemini-4-hydrogen', 'a:b_c', together.id, 'a/b/c']) {
       expect(supplierModelIdSchema.parse(id)).toBe(id);
     }
   });

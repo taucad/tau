@@ -182,6 +182,31 @@ describe('WorkspaceFrame', () => {
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
   });
 
+  /* A15b2 (F11): drawn for a project the route has not committed, the frame's layers show and the page being left is
+   * hidden in place, so nothing of it shows over the lanes or the phone frame. */
+  it('hides every child but the lanes and the phone frame while the route is pending', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const view = render(
+      <WorkspaceFrame isPending>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame.className).toContain(
+      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+    );
+    expect(frame.querySelector(':scope > [data-slot=workspace-frame-lanes]')).not.toBeNull();
+    expect(frame.querySelector(':scope > [data-slot=workspace-frame-phone]')).not.toBeNull();
+    view.rerender(
+      <WorkspaceFrame>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    expect(frame).not.toHaveAttribute('data-workspace-pending');
+  });
+
   // ── A15c: the phone frame (blueprint P-h; C6) ──
 
   /*

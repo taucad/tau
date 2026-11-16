@@ -333,6 +333,30 @@ describe('ChatInterfaceDesktop', () => {
     expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-workspace-lanes', 'ready');
   });
 
+  /* Review (r4586677545): the frame's composer box stays, over the chat lane, until a composer adopts its input; the
+   * live layout says when the chat lane is closed, where no composer can take it, so the box hides there. */
+  it('marks whether the live chat lane is shown once the lanes are ready, and not before', async () => {
+    const unrevealed = renderDesktop();
+    await screen.findByTestId('chat-lane');
+    expect(document.querySelector('[data-project-workspace]')).not.toHaveAttribute('data-chat-lane');
+    unrevealed.unmount();
+
+    splitView.laysOut = true;
+    renderDesktop();
+    await screen.findByTestId('chat-lane');
+
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-chat-lane', 'shown');
+  });
+
+  it('marks the live chat lane hidden when it is closed', async () => {
+    splitView.laysOut = true;
+    desktopLayout.chatOpen = false;
+    renderDesktop();
+    await screen.findByTestId('allotment');
+
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-chat-lane', 'hidden');
+  });
+
   it('holds the panes unrendered until the split view has laid them out', async () => {
     renderDesktop();
     const lanes = await screen.findByTestId('allotment');

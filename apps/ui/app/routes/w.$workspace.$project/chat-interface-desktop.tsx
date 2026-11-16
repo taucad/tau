@@ -203,6 +203,9 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           data-project-workspace
           data-compact={isCompact}
           data-workspace-lanes={areLanesReady ? 'ready' : undefined}
+          /* Once laid out, whether the live chat lane is shown: where it is not, the frame's composer box, which stays
+           * until a composer adopts its input, hides and keeps the text (PL6). */
+          data-chat-lane={areLanesReady ? (chatVisible ? 'shown' : 'hidden') : undefined}
         >
           {isClient && isEditorReady ? (
             <div className='absolute top-1 right-1 z-10 flex gap-1'>

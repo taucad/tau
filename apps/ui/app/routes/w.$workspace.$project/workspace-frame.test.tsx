@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
+import { handOffStore, resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
 import { writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
@@ -210,16 +210,32 @@ describe('WorkspaceFrame', () => {
     expect(input).toBeLessThan(html.indexOf(`id="${workspaceFrameEndId}"`));
   });
 
-  /* The input hides with the lanes: at the reveal, and under a failure in the workspace's place. */
-  it('hides the composer box with the lanes once they are ready, and under a failure', () => {
+  /* Review (r4586677545): the lanes can be laid out while the chat lane shows a gate's status instead of the composer
+   * (chats loading, sync off, a failed load). The input must stay to be seen and edited until a composer adopts it, so
+   * the box leaves on the composer's adoption, not on the lanes' layout. */
+  it('keeps the composer box once the lanes are ready, and drops it when the composer adopts', () => {
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.className).not.toContain('[data-workspace-lanes=ready])>[data-slot=workspace-frame-composer]');
+    screen.getByRole('textbox', { name: 'Chat message' }).focus();
+    act(() => {
+      handOffStore.adopt({ surface: 'project-composer', scope: 'home/one' });
+    });
+
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(frame.querySelector('[data-slot=workspace-frame-composer] .rounded-2xl')).toBeNull();
+  });
+
+  /* Where no composer can take the text, the box hides and the text stays in the store for a later adoption: a
+   * failure in the workspace's place, or the chat lane closed in the live layout. */
+  it('hides the composer box, keeping its text, under a failure or while the live chat lane is closed', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
-      '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-composer]]:hidden',
-    );
-    expect(frame.className).toContain(
       '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
     );
+    expect(frame.className).toContain('[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden');
+    expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/one' })).toBe(true);
   });
 
   it('serves no input when this project remembers its chat lane closed', () => {

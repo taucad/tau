@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { HandOffSlot } from '#components/hand-off/hand-off-slot.js';
-import { handOffRevealContext, resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
+import {
+  handOffRevealContext,
+  resetHandOffStoreForTest,
+  useHandOffAdopted,
+} from '#components/hand-off/hand-off-store.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 
 /* PL6: the project composer adopts the native input the workspace placeholder served (P4). */
@@ -204,11 +208,22 @@ describe('ChatTextarea hand-off (PL6)', () => {
       const host = document.createElement('div');
       document.body.append(host);
       const root = createRoot(host);
+      /* The frame's composer box, which leaves on the adoption (review r4586677545): it must leave in the same commit. */
+      function FrameBox(): React.JSX.Element {
+        return useHandOffAdopted(target) ? <i>no box</i> : <b>frame box</b>;
+      }
+      const page = (isShown: boolean): React.JSX.Element => (
+        <>
+          <FrameBox />
+          {composer(isShown)}
+        </>
+      );
       act(() => {
-        root.render(composer(false));
+        root.render(page(false));
       });
 
       expect(mocks.desktopMounts).toEqual([]);
+      expect(host).toHaveTextContent('frame box');
       expect(within(placeholder.container).getByRole('textbox')).toBe(input);
       typeInto(placeholder.container, 'Make a hinge.');
 
@@ -218,9 +233,10 @@ describe('ChatTextarea hand-off (PL6)', () => {
       (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
       try {
         flushSync(() => {
-          root.render(composer(true));
+          root.render(page(true));
         });
         expect(mocks.desktopMounts).toEqual([expect.objectContaining({ text: 'Make a hinge.', edited: true })]);
+        expect(host).toHaveTextContent('no box');
         expect(placeholder.container.querySelector('textarea')).toBeNull();
       } finally {
         (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previous;

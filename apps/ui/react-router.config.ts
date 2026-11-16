@@ -37,9 +37,13 @@ export default {
    * "optimized dependencies changed. reloading" full page reload: a cold dev server reloaded
    * open pages eight times during e2e-nightly's development tier (2026-11-12).
    * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
+   *
+   * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
+   * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
+   * reads the `url` argument.
    */
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
-  future: { unstable_optimizeDeps: true },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *

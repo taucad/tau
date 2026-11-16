@@ -61,6 +61,7 @@ import type { AppendFence, Changeset, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSetWatchRequest, WatchRegistry } from '#watch-registry.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
 import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
+import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import {
@@ -501,7 +502,19 @@ export class RootedViews {
         ? storedHashFiles
         : async (paths: readonly string[]): Promise<Record<string, string>> => {
             await projectIndexes.ready(root);
-            const marks = paths.map((path) => projectIndexes.pendingAt(resolveLocal(path).authorityPath));
+            /* A mark answers only while the file is still its pointer's size: a stat says so, from metadata alone. */
+            const marks = await mapConcurrent(paths, statConcurrency, async (path) => {
+              const at = resolveLocal(path);
+              if (projectIndexes.pendingAt(at.authorityPath) === undefined) {
+                return undefined;
+              }
+              try {
+                const head = await at.resolution.provider.stat(at.resolution.path);
+                return head.type === 'file' ? projectIndexes.pendingAt(at.authorityPath, head.size) : undefined;
+              } catch {
+                return undefined;
+              }
+            });
             const rest = paths.filter((_, index) => marks[index] === undefined);
             const digests = rest.length === 0 ? {} : await storedHashFiles(rest);
             return Object.fromEntries(paths.map((path, index) => [path, marks[index]?.oid ?? digests[path]!]));

@@ -326,6 +326,15 @@ describe('marked placeholders (D9)', () => {
     expect(plain).not.toHaveProperty('pending');
   });
 
+  /* A file rewritten from outside since it was marked is not the pointer the mark names: its digest is its own. */
+  it('should digest a marked file the oid only while it is still the size of its pointer', async () => {
+    const view = service.createRootedFileSystem(route);
+    expect(await view.hashFiles!(['models/part.step'])).toStrictEqual({ 'models/part.step': oid });
+    await memory.writeFile('gear/models/part.step', 'rewritten from outside\n');
+    const rewritten = await view.hashFiles!(['models/part.step']);
+    expect(rewritten['models/part.step']).not.toBe(oid);
+  });
+
   it('should end a mark the source says is no placeholder, so the next stat is the pointer', async () => {
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = service.createRootedFileSystem(route);

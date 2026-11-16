@@ -40,8 +40,17 @@ export type FillPath = string | Readonly<{ path: string; oid: string; size: numb
 
 const pathOf = (entry: FillPath): string => (typeof entry === 'string' ? entry : entry.path);
 
+/** A path a flush dropped: what it held, and the attributes files on its way, as that flush read them. */
+type Dropped = Readonly<{ content: Uint8Array<ArrayBuffer> | undefined; attributes: string }>;
+
 /** What one checkout path holds, read raw. @internal */
 export type FillPathContent = Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>;
+
+/* The attributes files on one path's way as a read found them, as one comparable text: absent ones are empty. */
+const attributesSignature = (read: ReadonlyMap<string, FillPathContent>, path: string): string =>
+  attributesPathsOn(path)
+    .map((each) => `${each}\u0000${new TextDecoder().decode(read.get(each)?.content ?? new Uint8Array())}`)
+    .join('\u0000');
 
 /* The attributes files git reads for one path: the root's and each folder's on its way. */
 const attributesPathsOn = (path: string): string[] => {
@@ -74,12 +83,19 @@ type Fill = {
   readonly promoted: Set<string>;
   /**
    * Paths a flush dropped since the fill last looked at the whole checkout, with what each held then (`undefined`:
-   * nothing). The look tracks such a path again only when it holds something else now, so a flush and the look
-   * that disagree over one path end, one look per run-out, instead of finding it again and again.
+   * nothing) and the attributes files on its way as the flush read them. The look tracks such a path again only
+   * when either changed since, so a flush and the look that disagree over one path end, one look per run-out,
+   * instead of finding it again and again, while a path whose attributes changed back is filled.
    */
-  readonly dropped: Map<string, Uint8Array<ArrayBuffer> | undefined>;
-  /** A closing look is running: the fill's placeholders may have run out, but it is not done until the look says so. */
-  looking: boolean;
+  readonly dropped: Map<string, Dropped>;
+  /**
+   * A whole-checkout look is owed: the fill's own placeholders ran out (or the fill failed) and no look has answered
+   * since. The fill is never done while one is owed; a look that fails leaves it owed, and the next flush, the run's
+   * end or its retry looks again (D10, I7).
+   */
+  lookOwed: boolean;
+  /** Runs under way: a timed flush whose look failed leaves it to a running one, and starts one when none runs. */
+  runs: number;
   /** Woken on every arrival, flush, report and end, so a read or `materialize` waiting on this fill re-checks (D9). */
   readonly waiters: Set<() => void>;
   readonly totalObjects: number;
@@ -364,7 +380,7 @@ export const createLargeObjectFill = (
     if (!isCurrent(fill)) {
       return;
     }
-    const done = fill.pending.size === 0 && !fill.looking;
+    const done = fill.pending.size === 0 && !fill.lookOwed;
     if (done) {
       fills.delete(fill.place.id);
       retire(fill);
@@ -418,14 +434,9 @@ export const createLargeObjectFill = (
   };
 
   /* What a path holds, as a placeholder this fill can fill: the one it was written with, or any pointer to a wanted object. */
-  const placeholderAt = (
-    fill: Fill,
-    known: Placeholder | undefined,
-    content: Uint8Array<ArrayBuffer>,
-  ): Placeholder | undefined => {
-    if (known !== undefined && equalBytes(content, known.pointer)) {
-      return known;
-    }
+  /* What a path holds, as a placeholder this fill can fill: a pointer to a wanted object, read from the bytes
+   * themselves every time, so nothing but a pointer (an emptied file, a person's text) is ever written over. */
+  const placeholderAt = (fill: Fill, content: Uint8Array<ArrayBuffer>): Placeholder | undefined => {
     const pointer = readLfsPointer(content);
     return pointer === undefined || !fill.wanted.has(pointer.oid)
       ? undefined
@@ -490,10 +501,10 @@ export const createLargeObjectFill = (
     const sourced = new Map<string, Readonly<{ oid: string; size: number }>>();
     for (const { path, known, bytes } of batch) {
       const held = current.get(path);
-      const placeholder = held === undefined || !tracked(path) ? undefined : placeholderAt(fill, known, held.content);
+      const placeholder = held === undefined || !tracked(path) ? undefined : placeholderAt(fill, held.content);
       if (held === undefined || placeholder === undefined) {
         gone.push(path);
-        fill.dropped.set(path, held?.content);
+        fill.dropped.set(path, { content: held?.content, attributes: attributesSignature(current, path) });
         continue;
       }
       if (placeholder.oid !== known.oid) {
@@ -551,6 +562,10 @@ export const createLargeObjectFill = (
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);
     }
+    /* The fill's own placeholders ran out: the whole checkout is looked at before it can be done. */
+    if (fill.pending.size === 0 && filled.length + gone.length > 0) {
+      fill.lookOwed = true;
+    }
     /* Counted again from what is still owed, not decremented by what was written: an object whose
      * placeholder is gone or already real would otherwise stay counted, and every later arrival
      * would flush at once. */
@@ -568,27 +583,35 @@ export const createLargeObjectFill = (
   const reconcile = async (fill: Fill): Promise<boolean> => {
     /* What it speaks for: a path a reader named while it looked is the reader's word, kept for the next flush. */
     const looked = [...fill.pending.keys()];
-    fill.looking = true;
-    let found: Awaited<ReturnType<typeof findPlaceholders>>;
-    try {
-      found = await findPlaceholders(fill.place);
-    } finally {
-      fill.looking = false;
-    }
+    /* Owed until it answers: a look that throws leaves it owed, and the fill is not done meanwhile. */
+    fill.lookOwed = true;
+    const found = await findPlaceholders(fill.place);
+    /* A path a flush dropped that holds the same bytes again is suppressed only while the attributes on its way
+     * are those that flush read: changed since, the flush decides it again. */
+    const same = [...found].flatMap(([path, placeholder]) => {
+      const dropped = fill.dropped.get(path);
+      return dropped?.content !== undefined && equalBytes(dropped.content, placeholder.pointer) ? [path] : [];
+    });
+    const attributes =
+      same.length === 0
+        ? new Map<string, FillPathContent>()
+        : await readPaths(fill.place, [...new Set(same.flatMap((path) => attributesPathsOn(path)))]);
     if (!isCurrent(fill)) {
       return false;
     }
     for (const path of looked) {
       fill.pending.delete(path);
     }
+    const unchanged = new Set(
+      same.filter((path) => fill.dropped.get(path)?.attributes === attributesSignature(attributes, path)),
+    );
     for (const [path, placeholder] of found) {
-      const dropped = fill.dropped.get(path);
-      const again = fill.dropped.has(path) && dropped !== undefined && equalBytes(dropped, placeholder.pointer);
-      if (fill.wanted.has(placeholder.oid) && !again) {
+      if (fill.wanted.has(placeholder.oid) && !unchanged.has(path)) {
         fill.pending.set(path, placeholder);
       }
     }
     fill.dropped.clear();
+    fill.lookOwed = false;
     fill.unflushedBytes = unflushedOf(fill);
     wake(fill);
     return fill.unflushedBytes > 0;
@@ -605,7 +628,6 @@ export const createLargeObjectFill = (
       return false;
     }
     let more = false;
-    const owed = fill.pending.size > 0;
     const swept = await workerTimings.span('fill.flush', async () =>
       withCheckoutFence(fill.place.id, async () => {
         /* A tree write that held the fence meanwhile replaced this fill: what it would write is not the checkout's now. */
@@ -633,7 +655,7 @@ export const createLargeObjectFill = (
       return false;
     }
     /* Only the flush that filled or dropped the last of them looks: one look each time they run out. */
-    if (owed && fill.pending.size === 0 && isCurrent(fill)) {
+    if (fill.lookOwed && fill.pending.size === 0 && isCurrent(fill)) {
       more = await reconcile(fill);
     }
     return more;
@@ -687,7 +709,11 @@ export const createLargeObjectFill = (
         try {
           more = await flush(fill);
         } catch {
-          /* The run's final flush writes whatever this one could not. */
+          /* The run's final flush writes whatever this one could not. A look it owed and could not make is made
+           * by the run: a running one at its end, else one started now, which fails and backs off if it throws. */
+          if (fill.lookOwed && isCurrent(fill) && fill.runs === 0 && fill.error === undefined) {
+            fill.running = run(fill);
+          }
         } finally {
           fill.flushRunning = false;
         }
@@ -762,6 +788,14 @@ export const createLargeObjectFill = (
   };
 
   const run = async (fill: Fill): Promise<void> => {
+    fill.runs += 1;
+    try {
+      await attempt(fill);
+    } finally {
+      fill.runs -= 1;
+    }
+  };
+  const attempt = async (fill: Fill): Promise<void> => {
     fill.error = undefined;
     tell(fill);
     const transfer = {
@@ -788,13 +822,12 @@ export const createLargeObjectFill = (
        * #2013): reading the head's tree first read every blob it holds before the first object was asked for.
        * A store-landing checkout reads the head with `stored`, which says which objects the store holds whole.
        */
-      let byOid = !fill.fromStore && port.fetchLargeObjects !== undefined;
+      /* Only what has not arrived: a retry keeps what an earlier attempt brought, and asks for nothing when all is here. */
+      const owedObjects = [...fill.wanted].flatMap(([oid, size]) => (fill.arrived.has(oid) ? [] : [{ oid, size }]));
+      let byOid = owedObjects.length > 0 && !fill.fromStore && port.fetchLargeObjects !== undefined;
       if (byOid && port.fetchLargeObjects !== undefined) {
         try {
-          const fetched = await port.fetchLargeObjects(
-            [...fill.wanted].map(([oid, size]) => ({ oid, size })),
-            transfer,
-          );
+          const fetched = await port.fetchLargeObjects(owedObjects, transfer);
           if (!isCurrent(fill)) {
             return;
           }
@@ -814,7 +847,7 @@ export const createLargeObjectFill = (
           byOid = false;
         }
       }
-      if (!byOid) {
+      if (!byOid && owedObjects.length > 0) {
         const full = await port.readTree(
           fill.head,
           fill.fromStore ? { ...transfer, largeObjects: 'stored' } : transfer,
@@ -871,6 +904,16 @@ export const createLargeObjectFill = (
           return;
         }
       }
+      /* A look a flush owed and could not make (it threw) is made here, in turn; one that throws again fails the
+       * run, which tries again later, so the fill is never done without it. */
+      if (fill.lookOwed && fill.pending.size === 0) {
+        if (await inTurn(fill, async () => reconcile(fill))) {
+          await flushAll(fill);
+        }
+        if (!isCurrent(fill)) {
+          return;
+        }
+      }
       /* A placeholder neither the head nor the store delivered is still owed: the fill fails, never reads done (D10). */
       if ([...fill.pending.values()].some(({ oid }) => !fill.arrived.has(oid))) {
         throw new RevisionPortError('MISSING_LARGE_OBJECT', 'A large object this checkout holds could not be fetched.');
@@ -885,7 +928,7 @@ export const createLargeObjectFill = (
       await flushAll(fill).catch(() => undefined);
       if (
         isCurrent(fill) &&
-        fill.pending.size > 0 &&
+        (fill.pending.size > 0 || fill.lookOwed) &&
         (await inTurn(fill, async () => reconcile(fill)).catch(() => false))
       ) {
         await flushAll(fill).catch(() => undefined);
@@ -961,7 +1004,8 @@ export const createLargeObjectFill = (
       /* A refill keeps what open files asked for. */
       promoted: new Set([...(previous?.promoted ?? [])].filter((oid) => wanted.has(oid))),
       dropped: new Map(),
-      looking: false,
+      lookOwed: false,
+      runs: 0,
       waiters: new Set(),
       totalObjects: wanted.size,
       totalBytes: [...wanted.values()].reduce((sum, size) => sum + size, 0),

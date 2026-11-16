@@ -104,8 +104,14 @@ const setup = (
   let looks = 0;
   /* What ran when, so a test can tell a look from a write that overlapped it. */
   const events: string[] = [];
+  /* Whole-checkout looks still to throw, as a look over an index that cannot open does. */
+  let failingLooks = 0;
   const placeholders = async (): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
     looks += 1;
+    if (failingLooks > 0) {
+      failingLooks -= 1;
+      throw new Error('The checkout could not be listed.');
+    }
     events.push('look');
     /* A look takes a while, as one over a real checkout does. */
     await new Promise((resolve) => {
@@ -224,6 +230,9 @@ const setup = (
     },
     mostWriting: () => mostWriting,
     events,
+    failLooks: (count: number) => {
+      failingLooks = count;
+    },
     holdFence: (): (() => void) => {
       const held = Promise.withResolvers<void>();
       fence = held.promise;
@@ -695,6 +704,101 @@ describe('large-object fill', () => {
     );
     expect(harness.events).toContain('look');
     expect(overlapped).toBe(false);
+  });
+
+  /* CodeRabbit on #2357: a path tracked from a reader's word is written only while it still holds a pointer. */
+  it('leaves a path a reader named alone once an editor emptied it, before its object landed', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/copy.step', harness.files.get('models/b.step')!);
+    const { oid, size } = pointerOf(parts['models/b.step']).pointer;
+    const writing = harness.fill.written(place.id, [{ path: 'models/copy.step', oid, size }]);
+    /* The person saves the file empty before the object arrives. */
+    harness.files.set('models/copy.step', new Uint8Array());
+    harness.land('models/b.step');
+    await expect(writing).resolves.toBe('written');
+    expect(harness.files.get('models/copy.step')?.byteLength).toBe(0);
+    expect(harness.text('models/b.step')).toBe('solid bb');
+    harness.land('models/a.step');
+    harness.finish(harness.fullTree());
+    await done;
+  });
+
+  /* CodeRabbit on #2357: a closing look that throws is owed, never skipped; the fill is not done without it. */
+  it('looks again when its closing look throws, and is never done with a moved placeholder unfilled', async () => {
+    const harness = setup({ retryMilliseconds: [1] });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/moved.step', harness.files.get('models/a.step')!);
+    harness.files.delete('models/a.step');
+    harness.failLooks(2);
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.text('models/moved.step')).toBe('solid a');
+    });
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    /* No report said done while the moved placeholder was still a pointer. */
+    const doneAt = harness.reports.findIndex((report) => report.facet === undefined);
+    expect(doneAt).toBe(harness.reports.length - 1);
+  });
+
+  /* A look that keeps throwing fails the fill, which backs off: never done, and never a tight loop of looks. */
+  it('reports a fill whose closing look keeps throwing as failed, and looks a bounded number of times', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.failLooks(Number.POSITIVE_INFINITY);
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toMatchObject({ phase: 'failed' });
+    });
+    const looks = harness.looks();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(harness.looks()).toBe(looks);
+    expect(looks).toBeLessThanOrEqual(5);
+    expect(harness.reports.some((report) => report.facet === undefined)).toBe(false);
+  });
+
+  /* CodeRabbit on #2357: a path dropped under other attributes is filled once they track it again. */
+  it('fills a path a flush dropped as untracked once its attributes track it again before the closing look', async () => {
+    const harness = setup({ flushMilliseconds: 60_000, flushBytes: 1 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/.gitattributes', encoder.encode('*.step -filter\n'));
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.captures()).toBe(1);
+    });
+    expect(harness.text('models/a.step')).not.toBe('solid a');
+    /* The person undoes the attributes change. */
+    harness.files.delete('models/.gitattributes');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.text('models/a.step')).toBe('solid a');
+    expect(harness.text('models/b.step')).toBe('solid bb');
   });
 
   it('runs one timed flush at a time, flushing again after a slow one instead of queueing behind it', async () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createModelCatalogCache } from '#lib/model-catalog.server.js';
+import { createModelCatalogCache, prefetchModelCatalog, prefetchShellModelCatalog } from '#lib/model-catalog.server.js';
 import { catalogFreshness } from '#lib/model-catalog.js';
 import type { Model } from '#lib/model-catalog.js';
 
@@ -77,5 +77,28 @@ describe('createModelCatalogCache', () => {
     time += 30_000;
     await expect(read()).resolves.toEqual({ models: catalog, fetchedAt: time });
     expect(console.warn).toHaveBeenCalledWith('The model catalog prefetch failed: The model catalog answered 502.');
+  });
+});
+
+describe('prefetchShellModelCatalog', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should bake the catalog a function document carries, stamped at time 0 rather than by the build clock', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json(catalog, { status: 200 }));
+    const before = Date.now();
+    const shell = await prefetchShellModelCatalog();
+    const document = await prefetchModelCatalog();
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(shell?.queries).toHaveLength(1);
+    expect(shell?.queries[0]?.state.data).toEqual(catalog);
+    expect(shell?.queries[0]?.state.dataUpdatedAt).toBe(0);
+    expect(document?.queries[0]?.state.data).toEqual(catalog);
+    // A function document is stamped with the server's fetch time, so the browser keeps a fresh copy.
+    expect(document?.queries[0]?.state.dataUpdatedAt).toBeGreaterThanOrEqual(before);
   });
 });

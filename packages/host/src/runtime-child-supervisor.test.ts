@@ -134,6 +134,18 @@ describe('runtime child control frames', () => {
     await child.close();
   });
 
+  it.each([
+    ['the formats its ready message names', ['avif,gif'], ['avif', 'gif']],
+    ['none for a child that names none', [], []],
+  ] as const)('reports as transcode sources %s', async (_label, extra, expected) => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-sources-'));
+    const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));
+    const child = await startRuntimeChild({ modulePath, args: [join(temporaryDirectory, 'messages.jsonl'), ...extra] });
+
+    expect(child.transcodeSources).toEqual(expected);
+    await child.close();
+  });
+
   it('settles close only after closed, once the child has exited and its private directory is removed', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-close-'));
     const modulePath = fileURLToPath(new URL('fixtures/message-echo-child.mjs', import.meta.url));

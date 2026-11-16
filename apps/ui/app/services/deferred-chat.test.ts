@@ -45,6 +45,31 @@ const deferredChat = () => {
   return { chat, load, sdk, built, requests, createChatInstance };
 };
 
+/** A deferred chat whose first SDK load fails and whose second lands; each built chat's sends resolve. */
+const failingOnceChat = (chatId: string) => {
+  const built: SdkChat[] = [];
+  const loader = vi
+    .fn<() => Promise<ChatSdk>>()
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockResolvedValueOnce({
+      ...chatSdk,
+      createChatInstance: (options) => {
+        const created = chatSdk.createChatInstance(options);
+        vi.spyOn(created, 'sendMessage').mockResolvedValue(undefined);
+        built.push(created);
+        return created;
+      },
+    });
+  const chat = new DeferredChat({
+    chatId,
+    transport: new BrowserPlacementChatTransport<MyUIMessage>(),
+    sdk: { load: loader, peek: () => undefined },
+    onFinish: () => undefined,
+    onError: () => undefined,
+  });
+  return { chat, built, loader };
+};
+
 describe('DeferredChat', () => {
   describe('before the SDK loads', () => {
     it('should read as an unstarted chat and hold the messages the store writes', () => {
@@ -245,6 +270,37 @@ describe('DeferredChat', () => {
       expect(loader).toHaveBeenCalledTimes(2);
       expect(built[0]!.sendMessage).toHaveBeenCalledWith(retried);
       expect(chat.fault).toBe(failure);
+    });
+
+    it('should load again on the next request when nothing cleared the error, as the SDK sends after a failure', async () => {
+      const { chat, built, loader } = failingOnceChat('chat_3');
+
+      await expect(chat.sendMessage(userMessage('m10', 'first'))).rejects.toThrow('offline');
+      expect(chat.status).toBe('error');
+
+      const retried = userMessage('m11', 'again');
+      await chat.sendMessage(retried);
+
+      expect(loader).toHaveBeenCalledTimes(2);
+      expect(built[0]!.sendMessage).toHaveBeenCalledWith(retried);
+      expect(chat.status).toBe('ready');
+    });
+
+    it('should give the reloaded chat the messages written last, not those before the failed request', async () => {
+      const { chat, built } = failingOnceChat('chat_4');
+      chat.messages = [userMessage('m12', 'before')];
+
+      const sent = chat.sendMessage(userMessage('m13', 'send'));
+      const latest = [userMessage('m14', 'latest')];
+      chat.messages = latest;
+      await expect(sent).rejects.toThrow('offline');
+      chat.clearError();
+      chat.load();
+
+      await vi.waitFor(() => {
+        expect(chat.phase).toBe('loaded');
+      });
+      expect(built[0]!.messages).toEqual(latest);
     });
   });
 });

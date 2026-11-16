@@ -555,7 +555,12 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     expect(ignoreStat).toMatchObject({ size: 130 });
     expect(ignoreStat).not.toHaveProperty('pending');
     expect(partStat).toMatchObject({ size: part.byteLength, pending: true });
-    expect((parts as DirectoryStatRow[]).every((row) => !('pending' in row))).toBe(true);
+    /* The landed files are themselves; the rest of the tree is listed as arriving (I7), not missing. */
+    const landed = new Set(Array.from({ length: 20 }, (_, at) => `p${String(at)}.scad`));
+    expect(
+      (parts as DirectoryStatRow[]).filter((row) => landed.has(row.name)).every((row) => !('pending' in row)),
+    ).toBe(true);
+    expect((parts as DirectoryStatRow[]).filter((row) => 'pending' in row)).toHaveLength(1980);
     expect(await view.readFile('.gitignore')).toStrictEqual(ignore);
     /* No first-view answer waited for the capture's declaration. */
     expect(declare).not.toHaveBeenCalled();
@@ -736,6 +741,51 @@ describe('expected entries (D10)', () => {
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
     raw.endExpectation!();
     expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
+  });
+
+  /*
+   * STO-25: a first view opens once the entry closure lands, before the rest of the tree has. A listing then shows
+   * every entry the write announced: one it has yet to land is a pending row at the size the tree gives it, never
+   * missing and never an empty folder (I7), and a folder only arriving entries make lists them before it exists.
+   */
+  it('should list a tree write’s entries it has yet to land as pending rows, never as missing (I7)', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([
+      { path: 'tau.json', size: 2, arriving: true },
+      { path: 'main.scad', size: 27, arriving: false },
+      { path: 'lib/gear.scad', size: 300, arriving: true },
+      { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+      { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
+      { path: 'models/new.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: true },
+    ]);
+    await raw.writeFile('tau.json', '{}');
+    const byName = (rows: readonly DirectoryStatRow[]): Record<string, DirectoryStatRow> =>
+      Object.fromEntries(rows.map((row) => [row.name, row]));
+    const top = byName(await view.readdirWithStats!(''));
+    expect(Object.keys(top).toSorted()).toStrictEqual(['lib', 'main.scad', 'models', 'tau.json']);
+    expect(top['tau.json']).not.toHaveProperty('pending');
+    expect(top['lib']).toMatchObject({ type: 'dir' });
+    /* A folder nothing has landed in yet lists what will arrive in it. */
+    const lib = byName(await view.readdirWithStats!('lib'));
+    expect(lib['gear.scad']).toMatchObject({ type: 'file', size: 300, pending: true });
+    expect(lib['gear.scad']).not.toHaveProperty('contentKind');
+    expect(lib['deep']).toMatchObject({ type: 'dir' });
+    const models = byName(await view.readdirWithStats!('models'));
+    /* A placeholder still to land is its object's size, as a landed one is. */
+    expect(models['new.step']).toMatchObject({ size: part.byteLength, pending: true });
+    expect(models['part.step']).toMatchObject({ size: part.byteLength, pending: true });
+    const tree = await view.statTree!('');
+    expect(tree.find((row) => row.path === 'lib/deep/axle.scad')).toMatchObject({ size: 40, pending: true });
+    /* The raw view, the revision layer's own, sees only what is on disk. */
+    const onDisk = await raw.readdirWithStats!('');
+    expect(onDisk.map((row) => row.name).toSorted()).toStrictEqual(['main.scad', 'models', 'tau.json']);
+    /* Landed, a row is the file on disk; once the write ends, nothing is listed that it did not land. */
+    await raw.writeFile('lib/gear.scad', encoder.encode('g'.repeat(300)));
+    expect(byName(await view.readdirWithStats!('lib'))['gear.scad']).not.toHaveProperty('pending');
+    raw.endExpectation!({ failed: true });
+    expect(Object.keys(byName(await view.readdirWithStats!('lib')))).toStrictEqual(['gear.scad']);
+    await expect(view.readdirWithStats!('lib/deep')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 

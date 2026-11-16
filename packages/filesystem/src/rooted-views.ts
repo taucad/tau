@@ -611,12 +611,40 @@ export class RootedViews {
       const { resolution } = resolveLocal(path);
       return resolution.provider.readdir(resolution.path);
     };
+    /*
+     * What a tree write has yet to land under a directory (D10, I7): a listing shows each such entry as a pending row
+     * at the size the tree gives it, never missing, and a folder only such entries make lists before it exists. Read
+     * before the provider's listing, so an entry that lands in between is the row on disk; the raw view sees the disk.
+     */
+    const arrivingIn = (authorityPath: string, recursive?: boolean): ReturnType<ProjectIndexes['arrivingIn']> =>
+      raw ? [] : projectIndexes.arrivingIn(authorityPath, { recursive });
+    const isMissing = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === 'ENOENT';
     const readdirWithStats = captured.provider.readdirWithStats
       ? async (path: string): Promise<DirectoryStatRow[]> => {
           const { authorityPath, resolution } = resolveLocal(path);
-          const rows = await resolution.provider.readdirWithStats!(resolution.path);
+          const arriving = arrivingIn(authorityPath);
+          let rows: DirectoryStatRow[];
+          try {
+            rows = await resolution.provider.readdirWithStats!(resolution.path);
+          } catch (error) {
+            if (arriving.length === 0 || !isMissing(error)) {
+              throw error;
+            }
+            rows = [];
+          }
           const parent = authorityPath === '/' ? '' : authorityPath;
-          return listed(rows, (row) => `${parent}/${row.name}`);
+          const answered = await listed(rows, (row) => `${parent}/${row.name}`);
+          const names = new Set(answered.map((row) => row.name));
+          for (const entry of arriving) {
+            if (!names.has(entry.path)) {
+              answered.push(
+                entry.type === 'dir'
+                  ? { name: entry.path, type: 'dir', size: 0, mtimeMs: 0 }
+                  : { name: entry.path, type: 'file', size: entry.size, mtimeMs: 0, pending: true },
+              );
+            }
+          }
+          return answered;
         }
       : undefined;
     const stat = async (path: string): Promise<FileStat> => {
@@ -1028,14 +1056,38 @@ export class RootedViews {
       path: string,
       options?: { admits?: IndexAdmits; signal?: AbortSignal },
     ): Promise<FileStatEntry[]> => {
-      const { localPath } = resolveLocal(path);
+      const { localPath, authorityPath } = resolveLocal(path);
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return listed(
+      const arriving = arrivingIn(authorityPath, true);
+      const answered = await listed(
         index.statTree(localPath, { ...options, asObjects: !raw }),
         (row) => resolveLocal(joinRelativePath(localPath, row.path)).authorityPath,
       );
+      if (arriving.length === 0) {
+        return answered;
+      }
+      const admits = options?.admits;
+      const paths = new Set(answered.map((row) => row.path));
+      const admitted = new Set(arriving.flatMap((entry) => (entry.type === 'dir' ? [] : [entry.path])));
+      for (const entry of arriving) {
+        /* A folder the mask refuses refuses everything beneath it, as the index's own walk prunes it. */
+        if (admits !== undefined && !admits(entry.path, entry.type)) {
+          for (const file of admitted) {
+            if (file === entry.path || file.startsWith(`${entry.path}/`)) {
+              admitted.delete(file);
+            }
+          }
+        }
+      }
+      for (const entry of arriving) {
+        if (entry.type === 'file' && admitted.has(entry.path) && !paths.has(entry.path)) {
+          const name = entry.path.slice(entry.path.lastIndexOf('/') + 1);
+          answered.push({ path: entry.path, name, type: 'file', size: entry.size, mtimeMs: 0, pending: true });
+        }
+      }
+      return answered;
     };
     const facts = async (
       paths: readonly string[],

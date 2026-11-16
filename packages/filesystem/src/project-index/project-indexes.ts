@@ -903,6 +903,55 @@ export class ProjectIndexes {
   }
 
   /**
+   * The entries a tree write landing under a directory has yet to put there (D10, I7), so a listing shows what will
+   * arrive rather than an empty or missing one: each file at the size the tree gives it (a placeholder's object's
+   * size), and each folder only such files make. Only paths the write still has to land count; whatever is on disk
+   * answers as itself (see {@link ProjectIndexes.markAt}).
+   *
+   * @param absoluteDirectory - Absolute directory path.
+   * @param options - `recursive` for every arriving entry beneath it, not only its children.
+   * @returns Directory-relative rows, parents before children; empty while no write expects any.
+   */
+  public arrivingIn(
+    absoluteDirectory: string,
+    options?: Readonly<{ recursive?: boolean }>,
+  ): ReadonlyArray<Readonly<{ path: string; type: 'file' | 'dir'; size: number }>> {
+    if (this._expected.size === 0) {
+      return [];
+    }
+    const directory = normalizePath(absoluteDirectory);
+    const rows = new Map<string, Readonly<{ path: string; type: 'file' | 'dir'; size: number }>>();
+    for (const [root, expected] of this._expected) {
+      const under = relativeTo(root, directory);
+      if (under === undefined) {
+        continue;
+      }
+      /* Once the root's index knows the tree, it says what has landed; before, the write said what it would land. */
+      const index = this._states.get(root)?.index;
+      const prefix = under === '' ? '' : `${under}/`;
+      for (const [path, answer] of expected) {
+        if (!path.startsWith(prefix) || !(index?.expecting === true ? index.arriving(path) : answer.arriving)) {
+          continue;
+        }
+        const segments = path.slice(prefix.length).split('/');
+        const last = options?.recursive === true ? segments.length : 1;
+        for (let depth = 1; depth <= Math.min(last, segments.length); depth += 1) {
+          const relative = segments.slice(0, depth).join('/');
+          if (!rows.has(relative)) {
+            rows.set(
+              relative,
+              depth === segments.length
+                ? { path: relative, type: 'file', size: answer.pending?.size ?? answer.size }
+                : { path: relative, type: 'dir', size: 0 },
+            );
+          }
+        }
+      }
+    }
+    return [...rows.values()].toSorted((left, right) => left.path.localeCompare(right.path));
+  }
+
+  /**
    * End a root's expectation: its tree write is over.
    *
    * @param root - Absolute root.

@@ -1,13 +1,17 @@
 import { useMemo } from 'react';
 import type { Ref, UIEventHandler } from 'react';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 
+/* Ragged code-shaped line lengths, as fractions of the pane. */
+const skeletonLineWidths = ['42%', '68%', '55%', '30%', '0%', '61%', '74%', '48%', '36%', '0%', '58%', '44%'] as const;
+
 /**
- * What an editor pane shows until its editor can mount, in the editor's own place: the editor's background, and as
- * soon as the file is read, the file's own text, read-only, in the editor's font, size, line height and content padding,
- * beside gutters of the editor's widths. The editor then mounts over the same box with its first line where this one
- * was (loading states UX blueprint, P-i). It draws nothing that stands for text it does not have.
+ * What an editor pane shows until its editor can mount, in the editor's own place: skeleton lines on the editor's
+ * background until the file is read, then the file's own text, read-only, in the editor's font, size, line height and
+ * content padding, beside gutters of the editor's widths. The editor then mounts over the same box with its first line
+ * where this one was.
  *
  * The metrics follow `code-editor-view.client.tsx`: 14 px (16 px on a phone) at line height 1.5, a line-number gutter
  * at least 4ch wide with `var(--spacing)` either side, the fold gutter as wide as its closed marker plus 2 px, a
@@ -55,7 +59,19 @@ export function EditorPanePlaceholder({
       data-slot='editor-pane-placeholder'
       className={cn('relative size-full overflow-hidden bg-background', className)}
     >
-      {text === undefined ? null : (
+      {text === undefined ? (
+        /* Before the file is read: faint code-shaped lines where the text will be. */
+        <div aria-hidden='true' data-testid='editor-pane-skeleton' className='flex flex-col gap-2 py-1.5 pr-6 pl-16'>
+          {skeletonLineWidths.map((width, index) => (
+            <Skeleton
+              // oxlint-disable-next-line react/no-array-index-key -- static decorative list
+              key={index}
+              className={cn('h-3 shrink-0 rounded-sm', width === '0%' && 'invisible')}
+              style={{ width }}
+            />
+          ))}
+        </div>
+      ) : (
         <div
           data-slot='editor-pane-scroller'
           className={cn(

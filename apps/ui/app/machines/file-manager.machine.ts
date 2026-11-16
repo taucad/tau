@@ -42,7 +42,7 @@ import {
   formatWorkerErrorEnvelope,
   isWorkerErrorEnvelope,
   toWorkerError,
-} from '#machines/file-manager-worker-error.js';
+} from '@taucad/files-ui/machines/file-manager-worker-error';
 
 const fileCacheMaxEntries = 500;
 const fileCacheMaxTotalBytes = 128 * 1024 * 1024;

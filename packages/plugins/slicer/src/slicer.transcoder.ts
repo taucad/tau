@@ -19,7 +19,7 @@ import { ServiceEngineError, sliceWithService } from '#service-engine.js';
 import { resolveSlicerOptions, slicerOptionsSchema } from '#slicer-options.js';
 import type { ResolvedSlicerOptions } from '#slicer-options.js';
 
-const edges = [{ from: 'glb', to: 'gcode.3mf', fidelity: 'mesh', optionsSchema: slicerOptionsSchema }] as const;
+const edges = [{ from: 'glb', to: 'gcode.3mf', optionsSchema: slicerOptionsSchema }] as const;
 
 // ponytail: an X1C with one AMS prints at most four filaments. Its external spool cannot join an AMS
 // print, and Tau's AMS mapping addresses trays only. Ceiling: more AMS units (up to 16 trays); pass the

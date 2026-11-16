@@ -48,6 +48,25 @@ const harnessTags = (url: URL): Readonly<Record<string, string>> => {
 };
 
 /**
+ * The page a request is for. `handleError` only ever gets the raw request, so a client navigation's error arrives on
+ * `/<path>.data?_routes=…` (`/_root.data` or `/_.data` for `/`); it reports under the page's URL, as the document's
+ * does, so both group on one URL and a harness data request keeps its `e2e_run` tag (B4).
+ *
+ * @param request - The request React Router handed over.
+ * @returns Its URL without the single-fetch suffix and `_routes` parameter.
+ */
+const pageUrl = (request: Request): URL => {
+  const url = new URL(request.url);
+  if (url.pathname === '/_root.data' || url.pathname.endsWith('/_.data')) {
+    url.pathname = url.pathname.slice(0, url.pathname.lastIndexOf('/') + 1);
+  } else if (url.pathname.endsWith('.data')) {
+    url.pathname = url.pathname.slice(0, -'.data'.length);
+  }
+  url.searchParams.delete('_routes');
+  return url;
+};
+
+/**
  * Scrub a server event as the browser's are: the URL without its query string, fragment or invitation tokens, no
  * header but `User-Agent`, no cookies, body or user, and no invitation token anywhere in the event text.
  *
@@ -131,7 +150,7 @@ export const reportSsrError = (error: unknown, { request, routeId, status, chann
   if (!dsn || request.signal.aborted) {
     return;
   }
-  const url = new URL(request.url);
+  const url = pageUrl(request);
   const userAgent = request.headers.get('user-agent');
   const send = async (): Promise<void> => {
     try {

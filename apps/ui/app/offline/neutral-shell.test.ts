@@ -10,6 +10,8 @@ import { expect, it, vi } from 'vitest';
 import type * as EnvironmentConfig from '#environment.config.js';
 import { loader, shouldRevalidate } from '#root.js';
 import { meta } from '#routes/usage/route.js';
+import { mock } from 'vitest-mock-extended';
+import type { AppLoadContext } from 'react-router';
 
 vi.mock('#environment.config.js', async (loadOriginal) => ({
   ...(await loadOriginal<typeof EnvironmentConfig>()),
@@ -30,7 +32,7 @@ vi.mock('#environment.config.js', async (loadOriginal) => ({
 type LoaderArguments = Parameters<typeof loader>[0];
 
 /** The root loader never reads its router context. */
-const emptyContext = {};
+const emptyContext = mock<AppLoadContext>();
 
 const callLoader = async (cookie: string): ReturnType<typeof loader> => {
   const url = new URL('https://tau.new/usage');

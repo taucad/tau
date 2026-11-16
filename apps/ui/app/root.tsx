@@ -1,4 +1,4 @@
-import type { LinksFunction, LoaderFunctionArgs, MetaFunction, ShouldRevalidateFunction } from 'react-router';
+import type { LinksFunction, MetaFunction, ShouldRevalidateFunction } from 'react-router';
 import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
@@ -15,6 +15,7 @@ import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 import { prefetchModelCatalog } from '#lib/model-catalog.server.js';
 import { timeModelCatalogRead } from '#lib/server-timing.server.js';
+import type { Route } from './+types/root.js';
 
 // Every route mounts the palette items, so the example catalog loads on its own
 // chunk instead of joining each route's entry.
@@ -53,15 +54,14 @@ export const meta: MetaFunction = () => [
 ];
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
-export async function loader({ request, context }: LoaderFunctionArgs) {
-  throwRedirectIfSubdomain(request, 'www');
+export async function loader({ url, context }: Route.LoaderArgs) {
+  /* B4: `url` is the page's URL; `request.url` is `/<path>.data?_routes=…` on a client navigation or revalidation. */
+  throwRedirectIfSubdomain(url, 'www');
   /* P2: nothing here reads the visitor. Theme, sidebar, project count, flags, preferences and consent are client facts
    * (`#lib/client-facts`), applied before first paint by the head script, so the document is the same for everyone. */
   /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document. */
   /* LB0a: how the catalog cache was found and how long it was waited on go out in the document's `Server-Timing`. */
-  const queries = isOfflineShellPath(new URL(request.url).pathname)
-    ? undefined
-    : timeModelCatalogRead(context, prefetchModelCatalog);
+  const queries = isOfflineShellPath(url.pathname) ? undefined : timeModelCatalogRead(context, prefetchModelCatalog);
   return {
     env: await getClientEnvironment(),
     queries: await queries,

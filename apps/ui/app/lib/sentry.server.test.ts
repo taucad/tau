@@ -168,6 +168,21 @@ describe('reportSsrError', () => {
     expect(Object.keys(mocks.captured[0]?.event.request?.headers ?? {})).toEqual(['User-Agent']);
   });
 
+  it.each([
+    ['https://taucad.dev/w/home/p.data?_routes=root,routes/w', 'https://taucad.dev/w/home/p'],
+    ['https://taucad.dev/_root.data?_routes=routes/_index', 'https://taucad.dev/'],
+    ['https://taucad.dev/_.data?_routes=routes/_index', 'https://taucad.dev/'],
+    ['https://taucad.dev/docs/_.data', 'https://taucad.dev/docs/'],
+    ['https://taucad.dev/w/home/p?tab=files', 'https://taucad.dev/w/home/p?tab=files'],
+  ])('should report %s under the page it is for, %s', async (requestUrl, pageUrl) => {
+    const { reportSsrError } = await loadReporter();
+
+    reportSsrError(new Error('loader'), { request: new Request(requestUrl), status: 500, channel: 'handle-error' });
+    await settle();
+
+    expect(mocks.captured[0]?.event.request?.url).toBe(pageUrl);
+  });
+
   it('should tag a staging harness request with its e2e_run, and nothing else from the query', async () => {
     mocks.harnessEnabled = true;
     const { reportSsrError } = await loadReporter();

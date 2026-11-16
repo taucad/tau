@@ -2917,7 +2917,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       console.warn('[revisions] checkouts could not be listed for their large objects', error);
       /* The project directory is a checkout whatever the store answers: it is let go of, unless declared. */
       await releaseUndeclared(
-        Object.freeze<Checkout>({ id: 'live', projectId, root: `/projects/${projectId}`, kind: 'live' }),
+        Object.freeze<Checkout>({
+          id: 'live',
+          projectId,
+          root: `/projects/${projectId}`,
+          kind: 'live',
+          branch: undefined,
+          baseRevisionId: undefined,
+        }),
       );
     }
   })();

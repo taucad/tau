@@ -15,6 +15,8 @@ import { createSessionsActor } from '#services/sessions-store.js';
 import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 
 const navigate = vi.fn();
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
@@ -163,6 +165,15 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/* A frame's handover, constant so the provider's value is not built in render. */
+const servedHandover = {
+  pending: undefined,
+  release: vi.fn(),
+  claim: (_projectId: string) => () => undefined,
+  taken: vi.fn(),
+  decline: vi.fn(),
+} satisfies EarlyInputHandover;
+
 describe('ProjectRouteNotice', () => {
   // ── The copy table ─────────────────────────────────────────────────────────
 
@@ -209,6 +220,21 @@ describe('ProjectRouteNotice', () => {
     expect(skeleton).toHaveAccessibleName('Opening project');
     expect(skeleton).toHaveAttribute('data-testid', 'workspace-opening');
     expect(screen.queryByRole('button', { name: 'Toggle Sidebar' })).not.toBeInTheDocument();
+  });
+
+  /* A15d review round 5: a titled notice holds no composer, so it declines the served input; the opening keeps it. */
+  it.each([
+    { state: { kind: 'trashed', projectId, project } as const, declines: true },
+    { state: { kind: 'missing', slugs: undefined } as const, declines: true },
+    { state: { kind: 'resolving' } as const, declines: false },
+  ])('should decline the served composer for a $state.kind notice: $declines', ({ state, declines }) => {
+    render(
+      <EarlyInputHandoverContext.Provider value={servedHandover}>
+        <ProjectRouteNotice state={state} />
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(servedHandover.decline).toHaveBeenCalledTimes(declines ? 1 : 0);
+    servedHandover.decline.mockClear();
   });
 
   it.each(closeReasons)('should describe a %s close', (reason, description) => {

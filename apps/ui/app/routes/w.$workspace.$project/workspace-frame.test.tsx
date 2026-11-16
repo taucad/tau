@@ -6,6 +6,8 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeWideFrameHint } from '#lib/frame-hint.js';
 import { writeDraftHint } from '#lib/frame-hint-draft.js';
+import { ProjectRouteStateContext } from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
@@ -196,19 +198,22 @@ describe('WorkspaceFrame served composer', () => {
     handover = useContext(EarlyInputHandoverContext);
     return <p>content</p>;
   };
+  let routeState: ProjectRouteState | undefined;
   const served = (url: string, isDrawn = true): React.JSX.Element => (
-    <MemoryRouter initialEntries={[url]}>
-      <Routes>
-        <Route
-          path='/w/:workspace/:project'
-          element={
-            <WorkspaceFrame isDrawn={isDrawn}>
-              <Consumer />
-            </WorkspaceFrame>
-          }
-        />
-      </Routes>
-    </MemoryRouter>
+    <ProjectRouteStateContext.Provider value={routeState}>
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isDrawn={isDrawn}>
+                <Consumer />
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </ProjectRouteStateContext.Provider>
   );
 
   /** Serve the frame, run its inline script where it was served, and hydrate it. */
@@ -250,6 +255,7 @@ describe('WorkspaceFrame served composer', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     handover = undefined;
+    routeState = undefined;
   });
 
   afterEach(() => {
@@ -431,6 +437,29 @@ describe('WorkspaceFrame served composer', () => {
         handover?.claim('p2');
       });
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+      expect(handover?.pending).toBeUndefined();
+    } finally {
+      await done();
+    }
+  });
+
+  /* Review round 5: the route's resolved project binds the input, even before any composer calls. */
+  it('ends the served input when the route resolves another project, before any composer calls', async () => {
+    routeState = { kind: 'unavailable', projectId: 'p1' };
+    const { container, rerender, done } = await serveAndHydrate('/w/home/one', (input) => {
+      input.value = 'add fillets';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    try {
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
+      routeState = { kind: 'unavailable', projectId: 'p2' };
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+      act(() => {
+        handover?.release('p2');
+        handover?.claim('p2');
+      });
       expect(handover?.pending).toBeUndefined();
     } finally {
       await done();

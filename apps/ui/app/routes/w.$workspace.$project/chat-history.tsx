@@ -1,3 +1,5 @@
+import { frameHintKey } from '#lib/frame-hint.js';
+import { DeclineServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -138,18 +140,20 @@ const virtuosoComponents = {
 type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: boolean }>;
 
 /**
- * Whether the page is still on the URL its document loaded: the route open the document began with, whose waits are
- * timed from navigation start (0). A client navigation since then has its own start.
+ * Whether the page is still on the project its document loaded: the route open the document began with, whose waits
+ * are timed from navigation start (0). A client navigation to another project has its own start.
  *
- * @returns `true` while the document's own URL is the current one.
+ * @returns `true` while the document's own project is the current one.
  */
 const isDocumentOpen = (): boolean => {
   const [entry] = globalThis.performance.getEntriesByType('navigation');
   if (entry === undefined) {
     return false;
   }
-  const opened = new URL(entry.name);
-  return opened.pathname === globalThis.location.pathname && opened.search === globalThis.location.search;
+  /* The project, not the exact URL: the route rewrites the URL it opened with (`?chat=`, canonical slugs) before the
+   * transcript waits. */
+  const opened = frameHintKey(new URL(entry.name).pathname);
+  return opened !== undefined && opened === frameHintKey(globalThis.location.pathname);
 };
 
 const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<TranscriptWait, 'active'> => {
@@ -200,6 +204,8 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
       <FloatingPanelContent className='min-h-0 overflow-hidden'>
         <ArchivedChats key={projectId} />
       </FloatingPanelContent>
+      {/* The archive holds no composer, nor does a closed lane: the served input over the lane goes. */}
+      <DeclineServedComposer />
     </FloatingPanel>
   ) : isExpanded ? (
     <ExpandedChatHistory
@@ -208,7 +214,9 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
       setIsExpanded={setIsExpanded}
       formattedKeyCombination={formattedKeyCombination}
     />
-  ) : null;
+  ) : (
+    <DeclineServedComposer />
+  );
 });
 
 const ExpandedChatHistory = memo(function ({

@@ -114,7 +114,7 @@ export const ChatTextareaSubmitButton = memo(function ({
           className={cn(
             chatComposerActionButtonClassName,
             'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
-            '[[data-queued-send]_&]:opacity-100',
+            '[[data-queued-send]_&]:opacity-100 [[data-early-text]_&]:opacity-100',
           )}
           // Only when set: an explicit `undefined` would replace the tooltip's own description.
           {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
@@ -168,7 +168,7 @@ export function ServedSendButton({ isEmpty }: { readonly isEmpty: boolean }): Re
       className={cn(
         chatComposerActionButtonClassName,
         'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
-        '[[data-queued-send]_&]:opacity-100',
+        '[[data-queued-send]_&]:opacity-100 [[data-early-text]_&]:opacity-100',
       )}
     >
       <span className='contents [[data-queued-send]_&]:hidden'>

@@ -492,6 +492,23 @@ describe('Home early input: queued send and stored draft (C10)', () => {
     },
   );
 
+  /* Review round 5: Send is drawn for the text the input holds from the first frame, painted or typed. */
+  it('should mark the box as holding text from the paint, and follow edits', () => {
+    writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
+    const { content } = adopting();
+    const { container, input } = serve(content);
+    try {
+      const box = input.closest('[data-early-text]');
+      expect(box).not.toBeNull();
+      type(input, '  ');
+      expect(container.querySelector('[data-early-text]')).toBeNull();
+      type(input, 'A hinge');
+      expect(container.querySelector('[data-early-text]')).not.toBeNull();
+    } finally {
+      container.remove();
+    }
+  });
+
   it('should keep an early edit over the stored draft', async () => {
     writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
     const { content, adopted } = adopting();

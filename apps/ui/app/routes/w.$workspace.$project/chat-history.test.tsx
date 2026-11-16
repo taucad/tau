@@ -12,6 +12,17 @@ import type {
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
+
+/* A frame's handover, constant so the provider's value is not built in render. */
+const servedHandover = {
+  pending: undefined,
+  release: vi.fn(),
+  claim: (_projectId: string) => () => undefined,
+  taken: vi.fn(),
+  decline: vi.fn(),
+} satisfies EarlyInputHandover;
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -330,6 +341,22 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     capturedTextarea.onSubmit = undefined;
     capturedTextarea.className = undefined;
     setMockMessages([]);
+    archiveOpen = false;
+  });
+
+  /* A15d review round 5: a lane with no composer (the archive, a closed lane) declines the frame's served input. */
+  it.each([
+    { name: 'the archive', archive: true, isExpanded: true },
+    { name: 'a closed lane', archive: false, isExpanded: false },
+  ])('declines the served composer for $name', ({ archive, isExpanded }) => {
+    archiveOpen = archive;
+    servedHandover.decline.mockClear();
+    render(
+      <EarlyInputHandoverContext.Provider value={servedHandover}>
+        <ChatHistory isExpanded={isExpanded} />
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(servedHandover.decline).toHaveBeenCalledOnce();
     archiveOpen = false;
   });
 
@@ -798,21 +825,30 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    globalThis.history.replaceState(null, '', '/');
   });
 
-  it("shows 'Loading chat' in the header's trailing slot only from 1,000 ms after navigation for the open's own load", () => {
-    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry(location.href)]);
-    vi.spyOn(performance, 'now').mockReturnValue(400);
-    renderOverDeferredTranscript(history);
+  it.each([
+    { opened: '/w/acme/bracket', current: '/w/acme/bracket' },
+    /* The route rewrites the URL it opened with before the transcript waits (review round 5). */
+    { opened: '/w/acme/bracket', current: '/w/acme/bracket?chat=chat-1' },
+  ])(
+    "shows 'Loading chat' in the header's indicator slot (D14) only from 1,000 ms after navigation for the open's own load, opened at $opened, now at $current",
+    ({ opened, current }) => {
+      globalThis.history.replaceState(null, '', current);
+      vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry(`http://localhost${opened}`)]);
+      vi.spyOn(performance, 'now').mockReturnValue(400);
+      renderOverDeferredTranscript(history);
 
-    const indicator = headerIndicator();
-    expect(indicator).toHaveAttribute('data-state', 'waiting');
-    expect(indicator).toHaveTextContent('Loading chat…');
-    /* 600 ms left of the 1,000 ms, counted from navigation start, not from this mount. */
-    expect(revealDelay()).toBe(600);
-    /* A route open is announced once, by the route: the slot is seen, not live. */
-    expect(indicator).not.toHaveAttribute('role', 'status');
-  });
+      const indicator = headerIndicator();
+      expect(indicator).toHaveAttribute('data-state', 'waiting');
+      expect(indicator).toHaveTextContent('Loading chat…');
+      /* 600 ms left of the 1,000 ms, counted from navigation start, not from this mount. */
+      expect(revealDelay()).toBe(600);
+      /* A route open is announced once, by the route: the slot is seen, not live. */
+      expect(indicator).not.toHaveAttribute('role', 'status');
+    },
+  );
 
   it('times a load that starts after the open from its own start', () => {
     vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/elsewhere')]);

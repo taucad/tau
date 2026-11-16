@@ -5,6 +5,8 @@ import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { readDraftHint } from '#lib/frame-hint-draft.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput, EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 
 const mocks = vi.hoisted(() => {
   const cadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
@@ -25,6 +27,7 @@ const mocks = vi.hoisted(() => {
     logicOptions: undefined as { readonly isSubmitDisabled?: boolean } | undefined,
     runElsewhere: undefined as { readonly runId: string } | undefined,
     inputText: '',
+    earlyInput: undefined as unknown,
     activeChatId: undefined as string | undefined,
   };
 });
@@ -59,10 +62,13 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
   ChatTextareaDesktop: ({
     onScreenshotAction,
     actionItems,
+    earlyInput,
   }: {
     readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
     readonly actionItems: ContextSuggestionItem[];
+    readonly earlyInput?: unknown;
   }) => {
+    mocks.earlyInput = earlyInput;
     mocks.onScreenshotAction = onScreenshotAction;
     mocks.actionItems = actionItems;
     return null;
@@ -240,5 +246,52 @@ describe('ChatTextarea draft hint', () => {
     globalThis.history.replaceState(null, '', '/');
     mocks.inputText = '';
     mocks.activeChatId = undefined;
+  });
+});
+
+/* A15d review round 5: the main composer claims the frame's input for its project and keeps it once taken. */
+describe('ChatTextarea frame early input', () => {
+  const input: EarlyChatInput = {
+    text: 'abc',
+    edited: true,
+    focused: true,
+    focusUnclaimed: false,
+    start: 3,
+    end: 3,
+    direction: 'none',
+    queuedSend: true,
+    prefilled: false,
+  };
+  const handoverWith = (
+    pending: EarlyChatInput | undefined,
+    claim: EarlyInputHandover['claim'],
+  ): EarlyInputHandover => ({
+    pending,
+    release: vi.fn(),
+    claim,
+    taken: vi.fn(),
+    decline: vi.fn(),
+  });
+
+  it('claims for its project, takes the pending input, and keeps it after the frame forgets it', () => {
+    const unclaim = vi.fn();
+    const claim = vi.fn((_projectId: string) => unclaim);
+    const pending = handoverWith(input, claim);
+    const view = render(
+      <EarlyInputHandoverContext.Provider value={pending}>
+        <ChatTextarea onSubmit={vi.fn()} />
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(claim).toHaveBeenCalledWith('project');
+    expect(mocks.earlyInput).toBe(input);
+    const forgotten = handoverWith(undefined, claim);
+    view.rerender(
+      <EarlyInputHandoverContext.Provider value={forgotten}>
+        <ChatTextarea onSubmit={vi.fn()} />
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(mocks.earlyInput).toBe(input);
+    view.unmount();
+    expect(unclaim).toHaveBeenCalled();
   });
 });

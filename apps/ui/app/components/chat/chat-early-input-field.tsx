@@ -48,6 +48,10 @@ export type EarlyTextarea = HTMLTextAreaElement & { tauEarlyDraft?: EarlyInputSt
 /** The attribute the served composer carries while a send is queued; the send button shows its pending state. */
 export const queuedSendAttribute = 'data-queued-send';
 
+/** The attribute the served composer carries while its input holds text (typed or painted), so Send is not drawn as
+ * refusing in the first frame of a painted draft and then changed at hydration. */
+export const earlyTextAttribute = 'data-early-text';
+
 /** What a queued send's status says, before and after adoption. */
 export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
 
@@ -65,7 +69,8 @@ export const earlyInputScript =
   `const state=input.tauEarlyDraft={edited:false,composing:false,queued:false,prefill:''};` +
   `if(input.value===''){const t=(${draftHintReaderSource})(location);if(t!==''){input.value=t;state.prefill=t}}` +
   `const st=box.querySelector('[data-slot=queued-send-status]');const q=(v)=>{state.queued=v;if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:'';if(v){box.setAttribute(${JSON.stringify(queuedSendAttribute)},'')}else{box.removeAttribute(${JSON.stringify(queuedSendAttribute)})}};` +
-  `input.addEventListener('input',()=>{state.edited=true;if(state.queued)q(false)});` +
+  `const tx=()=>{if(input.value.trim()===''){box.removeAttribute(${JSON.stringify(earlyTextAttribute)})}else{box.setAttribute(${JSON.stringify(earlyTextAttribute)},'')}};tx();` +
+  `input.addEventListener('input',()=>{state.edited=true;tx();if(state.queued)q(false)});` +
   `input.addEventListener('keydown',(e)=>{if(e.key==='Escape'){if(state.queued)q(false);return}` +
   `if(e.key!=='Enter'||e.shiftKey||e.altKey||e.ctrlKey||e.metaKey||e.isComposing||e.keyCode===229||state.composing)return;` +
   /* A touch keyboard's return starts a new line, as in the rich composer (Q15): only Send sends there. */

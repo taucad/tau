@@ -96,7 +96,7 @@ export function projectAvailability(
    * that landed, has a tree whose arriving rows the listing shows.
    */
   const writing = status?.sync.pullPhase === 'applying' && !failed;
-  if (firstView !== undefined && firstViewOpens(firstView, status) && (writing || applied)) {
+  if (firstView !== undefined && !failed && firstViewOpens(firstView, status) && (writing || applied)) {
     return 'ready';
   }
   if (applied) {

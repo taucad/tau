@@ -129,6 +129,8 @@ export function ChatTurnHost(): ReactNode {
           execution.kind === 'tau'
             ? ((await awaitContextPayload()) ?? turnAgent.contextPayload)
             : turnAgent.contextPayload;
+        /* A host that unmounted during the catalog wait admits nothing for a closed chat. */
+        mountedRef.current?.signal.throwIfAborted();
         const admittedAgent =
           contextPayload === turnAgent.contextPayload ? turnAgent : { ...turnAgent, contextPayload };
         /* The chat owns what it ran on from its first turn, so a later default

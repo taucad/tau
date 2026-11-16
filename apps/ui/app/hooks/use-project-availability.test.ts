@@ -121,6 +121,15 @@ describe('first-open availability', () => {
       );
     }
   });
+  /* A retry that fails after the checkout applied keeps hasAppliedRemote: the failure still wins over a first view. */
+  it('never opens a first view over a failed retry once the checkout had applied', () => {
+    const failedAfterApply = status({ state: 'queued', reason: 'offline', hasAppliedRemote: true, chats: 'ready' });
+    for (const surface of ['tree', 'chats'] as const) {
+      expect(projectAvailability(true, failedAfterApply, { firstView: { surface, readiness: 'filled' } })).not.toBe(
+        'ready',
+      );
+    }
+  });
   /*
    * A failed write's tree keeps the readiness it reached (it never steps back within one tree), but its end took its
    * arriving rows away. A retry fetching before the next write announces its tree must not reopen that partial tree.

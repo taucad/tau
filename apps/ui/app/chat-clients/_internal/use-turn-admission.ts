@@ -19,6 +19,7 @@ import {
   tauCloudIntent,
 } from '#lib/tau-cloud-intent.js';
 import { peekRevisionClient, subscribeRevisionClients } from '#services/revision-client-registry.js';
+import { subscribeRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import { isFailedOpen } from '#hooks/use-project-availability.js';
 
@@ -78,6 +79,8 @@ const awaitCloudOpenWritten = async (projectId: string, signal?: AbortSignal): P
   };
   const stopIntent = tauCloudIntent.subscribe(check);
   const stopClients = subscribeRevisionClients(check);
+  /* An account switch can refuse the open before any client exists. */
+  const stopSession = subscribeRevisionSessionUser(check);
   signal?.addEventListener('abort', check);
   try {
     check();
@@ -85,6 +88,7 @@ const awaitCloudOpenWritten = async (projectId: string, signal?: AbortSignal): P
   } finally {
     stopIntent();
     stopClients();
+    stopSession();
     stopStatus?.();
     signal?.removeEventListener('abort', check);
   }

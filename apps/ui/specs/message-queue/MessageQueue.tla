@@ -141,7 +141,8 @@
 \* SP2h (chats before the whole download): the chats and the composer open once their records land, before a Tau
 \* Cloud open has written the files. A turn this document hosts waits inside its admission, as it already waits for
 \* the host probe, until the open's intent clears; the wait ends in a placement refusal when the open fails or this
-\* account may not continue it, and with the stop's reason on Stop or the turn host's unmount. The composer disables
+\* account may not continue it (re-read on an account switch), and with the stop's reason on Stop or the turn
+\* host's unmount, which is checked again after the catalog wait. The composer disables
 \* send meanwhile. Admission still decides once, so delivery order, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,

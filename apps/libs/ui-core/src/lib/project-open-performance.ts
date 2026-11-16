@@ -1,6 +1,10 @@
 import { randomUuid } from '@taucad/utils/id';
 
-/** User Timing phases shared by the project-opening measurement contract, each measured as `tau.load.<phase>`. */
+/**
+ * User Timing phases shared by the project-opening measurement contract, each measured as `tau.load.<phase>`.
+ * `input.accepted` (progressive loading PL6) runs from navigation start to the first frame in which a native input
+ * that a rich surface later adopts could take text: the "first input accepted" mark of the load gate.
+ */
 export type ProjectOpenPhase =
   | 'document'
   | 'bootstrap'
@@ -8,6 +12,7 @@ export type ProjectOpenPhase =
   | 'route.commit'
   | 'shell.useful'
   | 'input.ready'
+  | 'input.accepted'
   | 'storage.resolve'
   | 'worker.boot'
   | 'worker.connect'
@@ -114,6 +119,7 @@ const phaseNames = new Set<ProjectOpenPhase>([
   'route.commit',
   'shell.useful',
   'input.ready',
+  'input.accepted',
   'storage.resolve',
   'worker.boot',
   'worker.connect',

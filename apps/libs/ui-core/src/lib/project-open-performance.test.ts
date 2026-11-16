@@ -213,6 +213,20 @@ describe('deployed project-open performance recorder', () => {
     });
   });
 
+  /* PL6: "first input accepted" is its own mark, from navigation start to the first frame a native input can take text. */
+  it('should record the first input accepted as a span from navigation start', () => {
+    const { measure } = stubDeployedPage();
+
+    pageProjectOpenPerformance().record('input.accepted', { start: 0, end: 312, outcome: 'ok' });
+
+    expect(measure.mock.calls.map(([name]) => name)).toEqual(['tau.load.input.accepted']);
+    expect(measure.mock.calls[0]?.[1]).toMatchObject({
+      start: 0,
+      end: 312,
+      detail: { phase: 'input.accepted', start: 0, duration: 312, outcome: 'ok' },
+    });
+  });
+
   it('should send nothing over the network', async () => {
     const { network } = stubDeployedPage();
 

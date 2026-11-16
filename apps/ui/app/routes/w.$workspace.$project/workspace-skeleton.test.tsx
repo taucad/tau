@@ -1,4 +1,5 @@
-import { render } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { useProjects } from '#hooks/use-projects.js';
@@ -33,6 +34,7 @@ const workbenchOpenProject = {
 };
 
 const { WorkspaceSkeleton } = await import('#routes/w.$workspace.$project/workspace-skeleton.js');
+const { resetHandOffStoreForTest } = await import('#components/hand-off/hand-off-store.js');
 
 const renderForProject = (url: string): HTMLElement => {
   render(
@@ -52,6 +54,46 @@ describe('WorkspaceSkeleton', () => {
     vi.clearAllMocks();
     globalThis.localStorage.clear();
     mockUseProjects.mockReturnValue({ projects: [workbenchClosedProject], isLoading: false, error: undefined });
+    resetHandOffStoreForTest();
+  });
+
+  /* PL6: the project's composer takes text from first paint, in the frame where the live composer rests. */
+  it('should serve a native composer input in the chat lane, reachable and drawn at once', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <WorkspaceSkeleton />
+      </MemoryRouter>,
+    );
+    const input = within(container).getByRole('textbox', { name: 'Chat message' });
+    const frame = within(container).getByTestId('chat-pane-skeleton-composer');
+
+    expect(frame).toContainElement(input);
+    expect(input.closest('[aria-hidden="true"]')).toBeNull();
+    /* The served document is inside the blink, where the stand-ins wait: the composer's frame must not. */
+    expect(frame.closest('.animate-in')).toBeNull();
+    expect(container.querySelector('[data-testid="chat-pane-skeleton-loading"] > [aria-hidden="true"]')).toHaveClass(
+      'animate-in',
+      '[animation-delay:300ms]',
+    );
+  });
+
+  it('should offer the composer input once, across the placeholders of one load', () => {
+    const view = render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <WorkspaceSkeleton />
+      </MemoryRouter>,
+    );
+    const input = screen.getByRole('textbox', { name: 'Chat message' });
+    view.rerender(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <section>
+          <WorkspaceSkeleton />
+        </section>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Chat message' })).toBe(input);
   });
 
   // ── Known defects (A0.9): expected failures until follow-up A15 flips them ──

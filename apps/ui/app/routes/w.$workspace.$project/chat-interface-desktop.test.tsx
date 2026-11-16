@@ -235,9 +235,11 @@ describe('ChatInterfaceDesktop', () => {
     const workbenchLane = skeleton.querySelector('.border-l');
     expect(workbenchLane).toHaveClass('@min-[1120px]:flex');
     expect(compactWorkspaceWidth).toBe(1120);
-    /* The frame paints at once; its lanes wait out a blink, so a warm load never flashes them. */
+    /* The frame paints at once; its stand-in lanes wait out a blink, so a warm load never flashes them. The chat
+     * lane's composer frame does not wait: it takes text from first paint (PL6). */
     expect(skeleton).toHaveClass('bg-background');
-    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).toHaveClass(
+    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).not.toHaveClass('animate-in');
+    expect(workbenchLane).toHaveClass(
       'animate-in',
       'fade-in',
       'fill-mode-both',
@@ -255,7 +257,7 @@ describe('ChatInterfaceDesktop', () => {
     renderDesktop();
 
     const skeleton = await screen.findByRole('status', { name: 'Opening project' });
-    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).not.toHaveClass('animate-in');
+    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"] > .border-l')).not.toHaveClass('animate-in');
     clock.mockRestore();
   });
 

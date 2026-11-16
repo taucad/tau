@@ -131,6 +131,10 @@
 \* it, and settles every queued send as failed when the load fails. Once loaded, a send runs synchronously as
 \* before. Delivery order, admission, persistence and the queue barrier are unchanged, so no action or verdict
 \* changes.
+\* PL6 (hand-off contract): the project composer adopts the native input the workspace placeholder served, moving
+\* its edit into the draft before the editor renders, and an Enter pressed there is one submit through the
+\* composer's existing Enter path once the editor holds the text. Submit, admission, delivery and the queue keep
+\* the same paths and guards. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

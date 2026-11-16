@@ -538,12 +538,26 @@ export const ChatTextareaDesktop = memo(function ({
       const from = position(earlyInput.start);
       const to = position(earlyInput.end);
       editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
+      /* The native input kept its caret in view; the editor shares its metrics, so keeping the caret in view keeps
+       * the person's place in a draft longer than the box (P4: scroll position). */
+      editor.commands.scrollIntoView();
     } else {
       editor.commands.setTextSelection(editor.state.doc.content.size);
     }
     // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
     editor.view.focus();
   }, [editor, earlyInput, enableAutoFocus]);
+
+  /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
+   * text. An edit after that Enter had already cancelled it (`submitQueued` is false then). */
+  const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
+  useEffect(() => {
+    if (!editor || !queuedSubmitRef.current) {
+      return;
+    }
+    queuedSubmitRef.current = false;
+    void submitWithDictation();
+  }, [editor, submitWithDictation]);
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.

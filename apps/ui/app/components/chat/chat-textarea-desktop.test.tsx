@@ -486,6 +486,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         start: 0,
         end: 0,
         direction: 'none',
+        scrollTop: 0,
+        submitQueued: false,
       },
     });
     // No waiting: a frame's delay is where typed keys were lost.
@@ -510,6 +512,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           start: 0,
           end: 0,
           direction: 'none',
+          scrollTop: 0,
+          submitQueued: false,
         },
       });
       const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
@@ -518,6 +522,40 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     } finally {
       other.remove();
     }
+  });
+
+  /* P4: Enter in the native input before the editor existed is one send, made once it holds the adopted text. */
+  it('should send a submit queued in the native input once, after adoption', async () => {
+    const submit = vi.fn(async () => undefined);
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    const view = renderComposer('Make a bracket.', codexSession, {
+      handleSubmit: submit,
+      earlyInput: {
+        text: 'Make a bracket.',
+        edited: true,
+        focused: true,
+        focusUnclaimed: false,
+        start: 15,
+        end: 15,
+        direction: 'none',
+        scrollTop: 0,
+        submitQueued: true,
+      },
+    });
+    await vi.waitFor(() => {
+      expect(submit).toHaveBeenCalledOnce();
+    });
+    view.rerenderWith(codexSession);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(submit).toHaveBeenCalledOnce();
   });
 
   it('should not draw a focus outline when the native input was not focused', () => {
@@ -530,6 +568,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         start: 0,
         end: 0,
         direction: 'none',
+        scrollTop: 0,
+        submitQueued: false,
       },
     });
     const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;

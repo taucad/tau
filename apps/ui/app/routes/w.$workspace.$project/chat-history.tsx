@@ -367,6 +367,8 @@ const ExpandedChatHistory = memo(function ({
                 enableMobileCollapse={isMobile}
                 mode='main'
                 enableAutoFocus={false}
+                /* The workspace placeholder served this composer's native input; adopt it (PL6). */
+                handOffSurface='project-composer'
                 onSubmit={onSubmit}
               />
             </div>

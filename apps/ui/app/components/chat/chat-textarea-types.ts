@@ -18,6 +18,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { HandOffSurface } from '#components/hand-off/hand-off-store.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
@@ -149,6 +150,12 @@ export type ChatTextareaProperties = {
    * where this component owns it and so has to be loaded before anything can be typed.
    */
   readonly adoptedEarlyInput?: EarlyChatInput;
+  /**
+   * The hand-off surface whose native input this composer adopts on mount (progressive loading P4): the project's
+   * placeholder serves one, and its text, caret, focus and a queued send come here. Ignored with either arrangement
+   * above.
+   */
+  readonly handOffSurface?: HandOffSurface;
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;

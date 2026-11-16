@@ -3,6 +3,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
+import { ProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 
 const { chatWidth, workbenchWidth } = defaultPanelState.desktopLayout;
 
@@ -39,6 +40,10 @@ const holdOnServer = (): boolean => true;
  * is the right colour from the first frame in either theme. The hold is spent
  * once per load rather than once per mount — see `isWithinRevealDelay`.
  *
+ * The exception is the chat lane's composer (PL6): it holds a native input that takes text from first paint, which
+ * the live composer adopts, so the lane and its composer frame are drawn at once and only the stand-in header,
+ * messages and other lanes wait out the blink.
+ *
  * Which arrangement shows is CSS, not a hook: this renders before hydration,
  * where no measured width exists yet and a JavaScript guess paints the wrong
  * layout first. The workbench lane hides at the width the live layout drops it
@@ -52,6 +57,10 @@ const holdOnServer = (): boolean => true;
  */
 export function WorkspaceSkeleton(): React.JSX.Element {
   const isDelayed = useSyncExternalStore(subscribeToNothing, isWithinRevealDelay, holdOnServer);
+  /* The stand-ins ease in after a blink; the chat lane and its composer frame do not, because the composer takes text
+   * from first paint (PL6) and a person cannot be asked to type into something not yet drawn. */
+  const entrance =
+    isDelayed && 'animate-in duration-300 fill-mode-both [animation-delay:300ms] fade-in motion-reduce:animate-none';
 
   return (
     <div
@@ -61,22 +70,19 @@ export function WorkspaceSkeleton(): React.JSX.Element {
       data-testid='workspace-skeleton'
       className='@container size-full bg-background max-md:absolute max-md:inset-0'
     >
-      <div
-        aria-hidden='true'
-        data-slot='workspace-skeleton-lanes'
-        className={cn(
-          'flex size-full',
-          isDelayed &&
-            'animate-in duration-300 fill-mode-both [animation-delay:300ms] fade-in motion-reduce:animate-none',
-        )}
-      >
+      <div data-slot='workspace-skeleton-lanes' className='flex size-full'>
         <div className='hidden h-full shrink-0 border-r border-border md:block' style={{ width: chatWidth }}>
-          <ChatPaneSkeleton variant='loading' />
+          <ChatPaneSkeleton
+            variant='loading'
+            composer={<ProjectComposerHandOff />}
+            decorationClassName={cn(entrance)}
+          />
         </div>
-        <div className='h-full min-w-0 flex-1' />
+        <div aria-hidden='true' className='h-full min-w-0 flex-1' />
         <div
+          aria-hidden='true'
           /* 1120px is `compactWorkspaceWidth` in `chat-interface-desktop.tsx`; Tailwind needs the literal. */
-          className='hidden h-full shrink-0 flex-col border-l border-border @min-[1120px]:flex'
+          className={cn('hidden h-full shrink-0 flex-col border-l border-border @min-[1120px]:flex', entrance)}
           style={{ width: workbenchWidth }}
         >
           <div className='flex h-9 shrink-0 items-center gap-2 px-3'>
@@ -85,7 +91,13 @@ export function WorkspaceSkeleton(): React.JSX.Element {
           </div>
           <div className='min-h-0 flex-1' />
         </div>
-        <div className='fixed right-0 bottom-0 left-0 z-50 flex h-11 items-center gap-1 rounded-t-xl border-t bg-sidebar px-2 md:hidden'>
+        <div
+          aria-hidden='true'
+          className={cn(
+            'fixed right-0 bottom-0 left-0 z-50 flex h-11 items-center gap-1 rounded-t-xl border-t bg-sidebar px-2 md:hidden',
+            entrance,
+          )}
+        >
           {Array.from({ length: 5 }, (_, index) => (
             <Skeleton key={index} className='h-6 flex-1' />
           ))}

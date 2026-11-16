@@ -946,13 +946,19 @@ describe("a capture declares the checkout's placeholders to its index (D9)", () 
   });
 
   /* A start that cannot look leaves nothing waiting on a word it will not give (I7 is kept by the reads, not the hold). */
-  it.each(['listing', 'head'] as const)(
-    'should let go of the checkout when the start’s fill check cannot read the %s',
-    async (failing) => {
+  it.each([
+    /* No checkout is known: the project directory is let go of. */
+    ['listing', 'release'],
+    /* The placeholders are looked at before the head, so the checkout is declared before the head fails. */
+    ['head', 'declare'],
+  ] as const)(
+    'should let go of or declare the checkout when the start’s fill check cannot read the %s',
+    async (failing, word) => {
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const at = await fixture(files(3), { backend: 'memory', raw: true, failing });
+      /* Well inside the stall bound: nothing waits on the word. */
       await expect.poll(() => at.declarations.length > 0, { timeout: 5000 }).toBe(true);
-      expect(['declare', 'release']).toContain(at.declarations[0]);
+      expect(at.declarations).toStrictEqual([word]);
     },
   );
 

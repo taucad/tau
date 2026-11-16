@@ -19,8 +19,12 @@ const call = async (registry: ToolRegistry, name: string, input: JsonValue) =>
   registry.invoke({ toolCallId: `scripted-${name}`, toolName: name, input, signal: new AbortController().signal });
 
 const scripted =
-  (file: L2ModelFile): L2Agent =>
+  (file: L2ModelFile, library?: L2ModelFile): L2Agent =>
   async ({ registry }) => {
+    if (library !== undefined) {
+      const used = await call(registry, toolName.createFile, { targetFile: library.path, content: library.source });
+      expect(used.isError, JSON.stringify(used.content)).toBe(false);
+    }
     const written = await call(registry, toolName.createFile, { targetFile: file.path, content: file.source });
     expect(written.isError, JSON.stringify(written.content)).toBe(false);
     const evaluated = await call(registry, toolName.evaluateModel, { targetFile: file.path });
@@ -31,13 +35,13 @@ describe('the L2 runner on tau mcp', () => {
   it.each(l2Tasks.map((task) => [task.id, task] as const))(
     'should pass the %s reference and fail the wrong model',
     async (_id, task) => {
-      const reference = await runL2Task({ task, agent: scripted(task.reference) });
+      const reference = await runL2Task({ task, agent: scripted(task.reference, task.library) });
       console.info('[l2-runner] reference', JSON.stringify(reference));
       expect(reference).toMatchObject({ passed: true, entryPath: task.reference.path, kernel: task.reference.kernel });
       expect(reference.acceptable).toBe(true);
       expect(reference.failures).toEqual([]);
 
-      const wrong = await runL2Task({ task, agent: scripted(task.wrong) });
+      const wrong = await runL2Task({ task, agent: scripted(task.wrong, task.library) });
       console.info('[l2-runner] wrong', JSON.stringify(wrong));
       expect(wrong.passed).toBe(false);
       expect(wrong.failures.length).toBeGreaterThan(0);
@@ -69,6 +73,53 @@ describe('the L2 runner on tau mcp', () => {
       },
     });
     expect(verdict).toMatchObject({ passed: true, entryPath: model.path, kernel: model.kernel });
+  });
+
+  describe('a suite that loads the library before the entry', () => {
+    const task = l2Tasks.find(({ library }) => library !== undefined)!;
+    const library = task.library!;
+    const suitePath = 'comb.geospec.ts';
+    /* The turn's own suite: the library's tooth first, then the comb, as the task asks. */
+    const suite = [
+      "import { describe, expectGeo, it } from 'geospec';",
+      "import { loadModel } from 'geospec/model';",
+      '',
+      "describe('comb', () => {",
+      "  it('has one tooth', async () => {",
+      `    expectGeo(await loadModel({ file: ${JSON.stringify(library.path)} })).toHaveBoundingBox({ size: { x: 4, y: 4, z: 15 }, tolerance: 0.3 });`,
+      '  });',
+      "  it('has the comb', async () => {",
+      `    expectGeo(await loadModel({ file: ${JSON.stringify(task.reference.path)} })).toHaveBoundingBox(${JSON.stringify(task.oracle.boundingBox)});`,
+      '  });',
+      '});',
+      '',
+    ].join('\n');
+    const checking =
+      (renderEntryFirst: boolean): L2Agent =>
+      async ({ registry }) => {
+        await Promise.all(
+          [library, task.reference, { path: suitePath, source: suite }].map(async (file) =>
+            call(registry, toolName.createFile, { targetFile: file.path, content: file.source }),
+          ),
+        );
+        if (renderEntryFirst) {
+          const evaluated = await call(registry, toolName.evaluateModel, { targetFile: task.reference.path });
+          expect(evaluated.isError, JSON.stringify(evaluated.content)).toBe(false);
+        }
+        const tested = await call(registry, toolName.testModel, { files: [suitePath] });
+        expect(tested.isError, JSON.stringify(tested.content)).toBe(false);
+      };
+
+    it('should judge the library when the turn checks it before rendering the entry', async () => {
+      const verdict = await runL2Task({ task, agent: checking(false) });
+      expect(verdict).toMatchObject({ passed: false, entryPath: library.path });
+      expect(verdict.failures.length).toBeGreaterThan(0);
+    });
+
+    it('should judge the entry when the turn renders it before checking the library', async () => {
+      const verdict = await runL2Task({ task, agent: checking(true) });
+      expect(verdict).toMatchObject({ passed: true, entryPath: task.reference.path, kernel: task.reference.kernel });
+    });
   });
 });
 

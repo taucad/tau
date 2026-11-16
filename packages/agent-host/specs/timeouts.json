@@ -1114,6 +1114,14 @@
       "owner": "viewer memory"
     },
     {
+      "id": "AI1",
+      "bound": "Composer attachment worker idle release (60 s after the last conversion)",
+      "site": "apps/ui/app/services/attachment-image.service.ts",
+      "token": "this.idleTimer = setTimeout(",
+      "class": "Debounce",
+      "owner": "composer-image-format-support WP5"
+    },
+    {
       "id": "M12",
       "bound": "object store whole-pack cache idle expiry (wholePackIdle, 2 s)",
       "site": "packages/revisions/src/object-store/object-store.ts",

@@ -36,8 +36,7 @@ export const assertQualificationConsumerScope = (options: {
           ? 'linux'
           : undefined;
   // D-H5: production clean-host evidence exists only for the Mac and Linux platform scopes.
-  const channelAdmitted =
-    options.channel === 'staging' || (options.channel === 'production' && expected !== 'windows');
+  const channelAdmitted = options.channel === 'staging' || (options.channel === 'production' && expected !== 'windows');
   if (!expected || options.scope !== expected || !channelAdmitted) {
     throw new Error('Consumer acceptance requires its staging platform scope (or Mac/Linux production)');
   }

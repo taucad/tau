@@ -9,13 +9,25 @@ const getThemeButton = (name = /^(?:light|dark|black|high contrast|system)$/i): 
 const getThemeOption = (name: RegExp): Locator => selectors.getByRole('option', { name });
 const getSettingsDialog = (): Locator => selectors.getByRole('dialog', { name: /^settings$/i });
 
-async function waitForThemeCookie(expected: 'present' | 'absent'): Promise<void> {
-  await expect
-    .poll(async () => {
-      const cookies = await target.cookies();
-      return cookies.some((cookie) => cookie.name === 'tau-theme');
-    })
-    .toBe(expected === 'present');
+/** The theme choice in the client-facts record (P2): `system` once settled, `undefined` before the first load stores it. */
+async function storedTheme(): Promise<string | undefined> {
+  return target.evaluate(() => {
+    try {
+      return (JSON.parse(localStorage.getItem('tau-client-facts') ?? '{}') as { theme?: string }).theme;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+async function waitForStoredTheme(expected: string): Promise<void> {
+  await expect.poll(storedTheme).toBe(expected);
+}
+
+/** The theme never rides a request: no `tau-theme` cookie is ever set. */
+async function expectNoThemeCookie(): Promise<void> {
+  const cookies = await target.cookies();
+  expect(cookies.some((cookie) => cookie.name === 'tau-theme')).toBe(false);
 }
 
 async function expectNoLegacyThemeCookie(): Promise<void> {
@@ -35,7 +47,8 @@ test.describe('theme persistence and accessibility media', () => {
 
     await selectTheme(/^light/i);
     await target.expectClass(getHtml(), /\blight\b/);
-    await waitForThemeCookie('present');
+    await waitForStoredTheme('light');
+    await expectNoThemeCookie();
 
     await target.reload();
 
@@ -52,7 +65,7 @@ test.describe('theme persistence and accessibility media', () => {
     try {
       await selectTheme(/^high contrast/i);
       await target.expectClass(getHtml(), /\bdark\b.*\bhigh-contrast\b/);
-      await waitForThemeCookie('present');
+      await waitForStoredTheme('high-contrast');
       await target.waitFor(
         () =>
           document.documentElement.classList.contains('dark') &&
@@ -76,10 +89,10 @@ test.describe('theme persistence and accessibility media', () => {
     await target.navigate('/?settings=general');
 
     await selectTheme(/^high contrast/i);
-    await waitForThemeCookie('present');
+    await waitForStoredTheme('high-contrast');
     await selectTheme(/^system/i);
     await target.expectClass(getHtml(), /\bdark\b/);
-    await waitForThemeCookie('absent');
+    await waitForStoredTheme('system');
 
     await target.reload();
 
@@ -104,7 +117,9 @@ test.describe('theme persistence and accessibility media', () => {
     );
     expect(enhancedBorder).not.toBe(initialBorder);
     await target.expectClass(getHtml(), /\blight\b/);
-    await waitForThemeCookie('absent');
+    // The one-time cookie migration settles a visitor with no choice as System; contrast is never stored.
+    await waitForStoredTheme('system');
+    await expectNoThemeCookie();
   });
 
   test('should preserve Black canvas under the increased-contrast preference', async () => {

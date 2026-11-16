@@ -161,6 +161,30 @@ export function bindViewerPanelEntry(
   return mainEntryPath;
 }
 
+/**
+ * The entry of a panel that has none in its params. Once the model's files have settled, or from the view's own record,
+ * it is bound as {@link bindViewerPanelEntry} binds it. While the files are checked a view with no recorded entry
+ * follows main without being bound to it: main can still change, and the record is not written in the middle of the
+ * tree write (A15e).
+ *
+ * @param panel - The panel.
+ * @param facts - What the adapter reads: whether geometry is admitted, the view records and main.
+ * @param options - Writes main into the view's record when it binds.
+ * @returns The entry the view shows, if any.
+ */
+function resolveViewerPanelEntry(
+  panel: DockviewApi['panels'][number],
+  facts: Pick<ViewerAdapterFacts, 'admitsGeometry' | 'viewRecords' | 'mainEntryPath'>,
+  { persistMainEntry }: Readonly<{ persistMainEntry: ((entryPath: string) => void) | undefined }>,
+): string | undefined {
+  const record = facts.viewRecords.get(panel.id);
+  if (!facts.admitsGeometry && !record?.entryPath) {
+    // An entry-less project's main is `''`: no entry, so no view stands in as main's.
+    return facts.mainEntryPath === '' ? undefined : facts.mainEntryPath;
+  }
+  return bindViewerPanelEntry(panel, { record, mainEntryPath: facts.mainEntryPath, persistMainEntry });
+}
+
 /** Give an empty dock a group, so its watermark has somewhere to show. */
 export function ensureViewerGroup(api: DockviewApi): void {
   if (api.groups.length === 0) {
@@ -210,8 +234,16 @@ export type ViewerAdapterLayoutPort = Readonly<{
 
 /** What the page's React tree owns and the adapter reads: fed as a value on every commit that changes it. */
 export type ViewerAdapterFacts = Readonly<{
-  /** The project machine is ready and the model may be shown: demand is admitted only then. */
-  admitsDemand: boolean;
+  /**
+   * The project machine is ready: each visible view gets its graphics and its entry, so the viewer stage and its canvas
+   * mount once, during a file check too (A15e).
+   */
+  admitsView: boolean;
+  /**
+   * The model may be shown as well (its files have settled): only then does a view get its geometry unit and its demand,
+   * so the kernel never runs over files still being checked or downloaded (blueprint P-j).
+   */
+  admitsGeometry: boolean;
   mainEntryPath: string | undefined;
   viewRecords: ReadonlyMap<string, WorkbenchView>;
   entriesRecord: WorkbenchEntries | undefined;
@@ -444,7 +476,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
 
     const admit = (panel: Panel): void => {
       const current = facts.get();
-      if (!current.admitsDemand || !isViewerPanelParameters(panel.params)) {
+      if (!current.admitsView || !isViewerPanelParameters(panel.params)) {
         return;
       }
       const viewId = panel.id;
@@ -465,9 +497,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       }
       const entryPath =
         panel.params.entryPath ??
-        bindViewerPanelEntry(panel, {
-          record: current.viewRecords.get(viewId),
-          mainEntryPath: current.mainEntryPath,
+        resolveViewerPanelEntry(panel, current, {
           persistMainEntry: isEditor
             ? (path) => {
                 void facts.get().viewCommands.edit(viewId, keepDurableEntry(path));
@@ -475,6 +505,9 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
             : undefined,
         });
       current.setViewEntryPath(viewId, entryPath ?? null);
+      if (!current.admitsGeometry) {
+        return;
+      }
       if (entryPath && admittedGeometry.get(viewId) !== entryPath) {
         admittedGeometry.set(viewId, entryPath);
         project.send({

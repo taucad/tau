@@ -16,6 +16,7 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
+import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
 import { resolveTauBuildRelease, resolveTauCloudBuildEnabled } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
@@ -29,6 +30,8 @@ import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.j
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config lives outside app aliases.
+import { createServerOutputAssets } from './server-output-assets.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -477,6 +480,9 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   },
 });
 
+/** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
+const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
+
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
@@ -590,8 +596,15 @@ export default defineConfig(({ command, mode }) => {
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
+      // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
+      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
       createSentryReleaseRecordPlugin(buildId),
+      /*
+       * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical
+       * budget check (`scripts/check-critical-budget.mts`) can attribute a route's interactive bytes to modules.
+       */
+      moduleIdManifest({ outFile: criticalModuleIdsPath, root: path.resolve(__dirname, '../..') }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm

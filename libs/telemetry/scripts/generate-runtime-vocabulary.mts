@@ -34,13 +34,25 @@ const documentation: Readonly<Record<keyof RuntimeRegistryVocabulary, string>> =
   jobCodes: 'Job store and job provider refusal codes.',
 };
 
+/** One-line comments written above a value, kept here so regeneration never drops them. */
+const valueNotes: Partial<Record<keyof RuntimeRegistryVocabulary, ReadonlyMap<string, string>>> = {
+  kernelIssueCodes: new Map([
+    [
+      'TESSELLATION_DOWNGRADED',
+      'Retired (kernel budget program D9): no kernel emits it; older clients may still report it.',
+    ],
+  ]),
+};
+
 const vocabulary = await deriveRuntimeVocabulary();
-const blocks = Object.entries(vocabulary).map(
-  ([key, values]) =>
-    `/** ${documentation[key as keyof RuntimeRegistryVocabulary]} @public */\nexport const ${key} = [\n${values
-      .map((value) => `  '${value}',`)
-      .join('\n')}\n] as const;`,
-);
+const blocks = Object.entries(vocabulary).map(([key, values]) => {
+  const notes = valueNotes[key as keyof RuntimeRegistryVocabulary];
+  const lines = values.flatMap((value) => {
+    const note = notes?.get(value);
+    return [...(note === undefined ? [] : [`  // ${note}`]), `  '${value}',`];
+  });
+  return `/** ${documentation[key as keyof RuntimeRegistryVocabulary]} @public */\nexport const ${key} = [\n${lines.join('\n')}\n] as const;`;
+});
 writeFileSync(
   target,
   [

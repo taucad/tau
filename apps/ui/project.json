@@ -203,6 +203,65 @@
         "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts"
       }
     },
+    "check-critical-budget": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Critical-path budget gate (progressive loading guard G3 and shell invariant 7): measures each route class's interactive tier in the web client build (brotli bytes, requests, largest chunk) against critical-budget.json, names any heavy module family (AI SDK, three.js, kernels, editor, telemetry) among the tier's module ids, and fails when a document may preload a kernel, wasm or worker asset. Reads the module-id manifest `ui:build` writes to build/client-module-ids.json. CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-critical-budget.mts",
+        "{projectRoot}/scripts/critical-path.mts",
+        "{projectRoot}/critical-budget.json",
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**}"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-critical-budget.mts"
+      }
+    },
+    "size": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "SSR bundle budget (SSR bundle policy): fails when the web build's server output (`du -sk build/server`, after ui:build moved the server source maps out) or its index.js exceeds the budget in scripts/check-ssr-bundle-budget.mts, or when a server file deep-imports @react-three/drei/core. Re-based in RR0 on the output check-server-output keeps clean. CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-ssr-bundle-budget.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/server/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-ssr-bundle-budget.mts"
+      }
+    },
+    "check-server-output": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8): fails when a server output holds a .wasm file, a worker bundle or a file also in its client/assets. Checks the web build (ssr: true, so build/server must exist), the desktop renderer build and the `tau serve` build (both ssr: false, so React Router 7 deletes build/server; one left behind is checked). The docs site has its own docs:check-server-output. CI's build lane runs it whenever this app is affected; build and build:desktop are already in that lane, build:serve is added by this target."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-server-output.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/{server,client/assets}/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build"
+      }
+    },
     "build:serve": {
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
@@ -530,7 +589,7 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
     },
     "formal:wide": {
       "executor": "nx:run-commands",

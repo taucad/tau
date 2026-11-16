@@ -357,9 +357,7 @@ describe('Page header contract', () => {
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
     ).toBe('calc(var(--sidebar-panel-width) - 1px)');
-    expect(container.querySelector('header > div')).toHaveClass(
-      'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
-    );
+    expect(container.querySelector('header > div')).toHaveClass('md:sidebar-closed:ml-(--titlebar-controls-width)');
   });
 
   it('should update occupied header width and traffic-light inset on native fullscreen transitions', () => {

@@ -4,13 +4,8 @@ import { themeSchema } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 
 /**
- * Theme preference cookie, reading half.
- *
- * Isomorphic because the web root loader imports it while the client also
- * shares its schema. The desktop root has no loader and does not import this.
- *
- * `createCookie` is framework core with no server-only dependency; the
- * `Set-Cookie` half of the flow stays in `theme-cookie.server.ts`.
+ * The theme cookie from before the client-facts record, reading half. Only the one-time migration route reads it
+ * (`routes/action.migrate-theme.ts`); the theme itself is a client fact (`#lib/client-facts`).
  */
 export const createThemeCookie = (requestUrl: string): ReturnType<typeof createCookie> =>
   createCookie(`${metaConfig.cookiePrefix}theme`, {

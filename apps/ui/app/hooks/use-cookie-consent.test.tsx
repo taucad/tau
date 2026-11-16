@@ -2,48 +2,37 @@
 import * as Cookies from 'es-cookie';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type * as ReactRouter from 'react-router';
+import { renderToString } from 'react-dom/server';
+import { createElement } from 'react';
 import { consentCookieName } from '@taucad/consent';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
-import { readConsentStatus, readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
-import { resetRequestGlobalPrivacyControl } from '@taucad/ui-core/lib/global-privacy-control.lib';
-
-type LoaderData = { consentStatus: string; globalPrivacyControl: boolean };
-
-const loader = vi.hoisted((): { data: LoaderData } => ({
-  data: { consentStatus: 'unknown', globalPrivacyControl: false },
-}));
-
-vi.mock('react-router', async (loadOriginal) => ({
-  ...(await loadOriginal<typeof ReactRouter>()),
-  useRouteLoaderData: () => loader.data,
-}));
+import { readConsentStatus } from '#lib/cookie-consent.lib.js';
 
 const accepted = JSON.stringify({ status: 'accepted', version: 1 });
 const declined = JSON.stringify({ status: 'declined', version: 1 });
 
 afterEach(() => {
   Cookies.remove(consentCookieName);
-  loader.data = { consentStatus: 'unknown', globalPrivacyControl: false };
-  resetRequestGlobalPrivacyControl();
   Object.defineProperty(navigator, 'globalPrivacyControl', { configurable: true, value: false });
   Object.defineProperty(globalThis, 'cookieStore', { configurable: true, value: undefined });
 });
 
 describe('cookie consent', () => {
   it('should resolve absent, malformed, current, and legacy decisions', () => {
-    expect(readConsentStatusFromHeader(undefined, false)).toBe('unknown');
-    expect(readConsentStatusFromHeader(`${consentCookieName}=%7Bbroken`, false)).toBe('unknown');
-    expect(
-      readConsentStatusFromHeader(
-        `${consentCookieName}=${encodeURIComponent(JSON.stringify({ status: 'accepted', version: 1 }))}`,
-        false,
-      ),
-    ).toBe('accepted');
-    expect(readConsentStatusFromHeader(`${consentCookieName}=%22granted%22`, false)).toBe('accepted');
-    expect(readConsentStatusFromHeader(`${consentCookieName}=%22denied%22`, false)).toBe('declined');
-    expect(readConsentStatusFromHeader(`${consentCookieName}=%22accepted%22`, false)).toBe('accepted');
-    expect(readConsentStatusFromHeader(`${consentCookieName}=%22declined%22`, false)).toBe('declined');
+    expect(readConsentStatus()).toBe('unknown');
+    Cookies.set(consentCookieName, '{broken');
+    expect(readConsentStatus()).toBe('unknown');
+    Cookies.set(consentCookieName, accepted);
+    expect(readConsentStatus()).toBe('accepted');
+    for (const [legacy, status] of [
+      ['"granted"', 'accepted'],
+      ['"denied"', 'declined'],
+      ['"accepted"', 'accepted'],
+      ['"declined"', 'declined'],
+    ] as const) {
+      Cookies.set(consentCookieName, legacy);
+      expect(readConsentStatus()).toBe(status);
+    }
   });
 
   it('should make GPC a hard declined state', () => {
@@ -51,17 +40,13 @@ describe('cookie consent', () => {
     Cookies.set(consentCookieName, JSON.stringify({ status: 'accepted', version: 1 }));
 
     expect(readConsentStatus()).toBe('declined');
-    expect(readConsentStatusFromHeader(`${consentCookieName}=%22granted%22`, true)).toBe('declined');
   });
 
-  it('should keep a request-header-only GPC signal authoritative after hydration', () => {
+  it('should render unknown on the server whatever the cookie says, so the document admits no analytics', () => {
     Cookies.set(consentCookieName, accepted);
-    loader.data = { consentStatus: 'declined', globalPrivacyControl: true };
+    const probe = (): React.JSX.Element => createElement('span', null, useCookieConsent());
 
-    const { result } = renderHook(() => useCookieConsent());
-
-    expect(result.current).toBe('declined');
-    expect(readConsentStatus()).toBe('declined');
+    expect(renderToString(createElement(probe))).toContain('unknown');
   });
 
   it('should notice a decision the marketing site broadcasts', async () => {

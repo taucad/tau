@@ -305,8 +305,12 @@ export const ChatTextareaDesktop = memo(function ({
 
   /* Texts the editor reported that no render has shown back yet; see the rehydration below. */
   const unconfirmedTextsRef = useRef<string[]>([]);
+  /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
+   * text and sending is permitted (below). Any edit cancels it, as one in the native input would. */
+  const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
+      queuedSubmitRef.current = false;
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
@@ -548,12 +552,9 @@ export const ChatTextareaDesktop = memo(function ({
     editor.view.focus();
   }, [editor, earlyInput, enableAutoFocus]);
 
-  /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
-   * text. An edit after that Enter had already cancelled it (`submitQueued` is false then). The send waits, still
-   * queued, while sending is not permitted; an edit made in the editor meanwhile cancels it as one in the native input
-   * would. It carries the editor's text, since the draft this composer was rendered with can still be the previous
-   * one. */
-  const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
+  /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
+   * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
+   * draft this composer was rendered with can still be the previous one. */
   const isQueuedSubmitPermitted =
     sendRefusalOf({ sendBlockReason, isSubmitting, isAttaching, isSubmitDisabled, isEmpty: false }) === undefined;
   useEffect(() => {
@@ -562,11 +563,8 @@ export const ChatTextareaDesktop = memo(function ({
     }
     queuedSubmitRef.current = false;
     const content = extractContent(editor);
-    if (content.text !== earlyInput?.text) {
-      return;
-    }
     void submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
-  }, [editor, earlyInput, isQueuedSubmitPermitted, submitWithReferences]);
+  }, [editor, isQueuedSubmitPermitted, submitWithReferences]);
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.

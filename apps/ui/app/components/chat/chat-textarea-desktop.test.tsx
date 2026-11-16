@@ -583,6 +583,32 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
     });
 
+    /* Any edit after the Enter cancels it, as in the native input: an edit undone back to the same text included. */
+    it('should drop the queued send after an edit, even one undone back to the queued text', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+      expect(editor).toBeDefined();
+      act(() => {
+        editor!.commands.insertContent('!');
+      });
+      act(() => {
+        editor!.commands.undo();
+      });
+      expect(editor!.getText()).toBe('Make a bracket.');
+
+      view.rerenderWith(codexSession, undefined, false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(submit).not.toHaveBeenCalled();
+    });
+
     /* A send that is not permitted yet stays queued; the gesture is spent only when it is sent. */
     it('should keep the send queued while sending is not permitted, then send once', async () => {
       const submit = vi.fn(async (_text?: string) => undefined);

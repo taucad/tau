@@ -1,0 +1,7 @@
+[
+  {
+    "name": "total (ESM JS) — measured 4.49 kB brotli on 2026-11-16 (HEIF transcoder: admission, libheif glue loader and RGBA copy, and the bundled @taucad/utils image probe; libheif-js and the raster encoders stay external and lazy, unmeasured here)",
+    "path": "dist/**/*.mjs",
+    "limit": "5 kB"
+  }
+]

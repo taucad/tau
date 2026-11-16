@@ -4466,6 +4466,9 @@ importers:
       '@taucad/grammars':
         specifier: workspace:*
         version: link:../../libs/grammars
+      '@taucad/heif':
+        specifier: workspace:*
+        version: link:../../packages/plugins/heif
       '@taucad/image':
         specifier: workspace:*
         version: link:../../packages/plugins/image

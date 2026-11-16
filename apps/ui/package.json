@@ -61,6 +61,7 @@
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/heif": "workspace:*",
     "@taucad/grammars": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",

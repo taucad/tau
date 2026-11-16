@@ -4,6 +4,7 @@ import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
+import { heif } from '@taucad/heif';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
@@ -70,6 +71,8 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     gltf(),
     brep(),
     image(),
+    // HEIC/HEIF stills to JPEG, PNG and WebP (operator ruling O1); libheif loads only for a HEIC source.
+    heif(),
     slicer(),
     assimp({ preset: 'all' }),
     replicad({

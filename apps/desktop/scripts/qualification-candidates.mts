@@ -35,8 +35,10 @@ export const assertQualificationConsumerScope = (options: {
         : options.route === 'linux-apt' || options.route === 'linux-appimage'
           ? 'linux'
           : undefined;
-  if (!expected || options.scope !== expected || options.channel !== 'staging') {
-    throw new Error('Consumer acceptance requires its staging platform scope');
+  // D-H5: production clean-host evidence exists only for the Mac and Linux platform scopes.
+  const channelAdmitted = options.channel === 'staging' || (options.channel === 'production' && expected !== 'windows');
+  if (!expected || options.scope !== expected || !channelAdmitted) {
+    throw new Error('Consumer acceptance requires its staging platform scope (or Mac/Linux production)');
   }
 };
 

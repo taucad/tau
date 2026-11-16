@@ -187,7 +187,8 @@ const anthropicOutputConfigSchema = z.object({ effort: z.enum(['low', 'medium', 
 const anthropicEffortMessageSchema = z
   .object({ role: z.literal('system'), content: z.array(z.never()).max(0), output_config: anthropicOutputConfigSchema })
   .strict();
-const responseReasoningEffortSchema = z.enum(['none', 'low', 'medium', 'high', 'xhigh']);
+/** OpenAI's Responses levels; `max` is model-dependent (GPT-6.1 Terra) and the provider refuses it elsewhere. */
+const responseReasoningEffortSchema = z.enum(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 const responseConfigurationUpdateSchema = z
   .object({
     type: z.literal('configuration_update'),
@@ -201,7 +202,7 @@ const googleReasoningConfigSchema = z
         thinking_config: z
           .object({
             include_thoughts: z.literal(true),
-            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH', 'XHIGH']),
           })
           .strict(),
         thought_tag_marker: z.literal('think'),

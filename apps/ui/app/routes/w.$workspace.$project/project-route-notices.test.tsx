@@ -17,7 +17,10 @@ import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.sessi
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
 const navigate = vi.fn();
-vi.mock('react-router', () => ({ useNavigate: () => navigate }));
+vi.mock('react-router', () => ({
+  useNavigate: () => navigate,
+  useParams: () => ({ workspace: 'home', project: 'one' }),
+}));
 
 const send = vi.fn();
 const focusSend = vi.fn();

@@ -13,6 +13,7 @@ import { WorkbenchToggle } from '#routes/w.$workspace.$project/workbench-toggle.
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { handOffRevealContext } from '#components/hand-off/hand-off-store.js';
 import { frameHintKey, writeWideFrameHint } from '#lib/frame-hint.js';
 import { ChatContextInsertionProvider } from '@taucad/chat-ui/components/chat-context-insertion';
 import { useSidebar } from '#components/ui/sidebar.js';
@@ -190,6 +191,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     [editorRef],
   );
 
+  const areLanesReady = isClient && isEditorReady && areLanesLaidOut;
+
   return (
     <ChatContextInsertionProvider>
       <WorkspaceLanesContext.Provider value={lanes}>
@@ -199,7 +202,10 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           className='relative size-full overflow-hidden'
           data-project-workspace
           data-compact={isCompact}
-          data-workspace-lanes={isClient && isEditorReady && areLanesLaidOut ? 'ready' : undefined}
+          data-workspace-lanes={areLanesReady ? 'ready' : undefined}
+          /* Once laid out, whether the live chat lane is shown: where it is not, the frame's composer box, which stays
+           * until a composer adopts its input, hides and keeps the text (PL6). */
+          data-chat-lane={areLanesReady ? (chatVisible ? 'shown' : 'hidden') : undefined}
         >
           {isClient && isEditorReady ? (
             <div className='absolute top-1 right-1 z-10 flex gap-1'>
@@ -213,77 +219,81 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           ) : null}
           {/* Until the editor state has loaded and the focused chat exists, this
               draws nothing: the workspace frame's lanes show beneath. */}
-          <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
-            {isClient && isEditorReady ? (
-              <Allotment
-                ref={lanesRef}
-                paneLabels={['Chat', 'Viewer', 'Workbench']}
-                separator={false}
-                proportionalLayout={false}
-                /* No entrance: the panes take the frame's boxes in place (U9). */
-                className={cn(
-                  'size-full [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border',
-                  !areLanesLaidOut && '[&_.split-view-container]:[content-visibility:hidden]',
-                )}
-                onChange={handleLanesChange}
-                onDragEnd={persistWidths}
-              >
-                <Allotment.Pane
-                  key='chat'
-                  minSize={panelMinSizeChat}
-                  preferredSize={desktopLayout.chatWidth}
-                  priority={LayoutPriority.Low}
-                  visible={chatVisible}
+          {/* The composer adopts the frame's native input (PL6) in the commit that reveals the panes: before it they
+              are unrendered, and the frame's input is the one to type in. */}
+          <handOffRevealContext.Provider value={areLanesReady}>
+            <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
+              {isClient && isEditorReady ? (
+                <Allotment
+                  ref={lanesRef}
+                  paneLabels={['Chat', 'Viewer', 'Workbench']}
+                  separator={false}
+                  proportionalLayout={false}
+                  /* No entrance: the panes take the frame's boxes in place (U9). */
+                  className={cn(
+                    'size-full [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border',
+                    !areLanesLaidOut && '[&_.split-view-container]:[content-visibility:hidden]',
+                  )}
+                  onChange={handleLanesChange}
+                  onDragEnd={persistWidths}
                 >
-                  <ChatHistoryGate>
-                    <ChatHistory
-                      /* The chat lane toggle leads the header on the pixel it holds at the head of the
+                  <Allotment.Pane
+                    key='chat'
+                    minSize={panelMinSizeChat}
+                    preferredSize={desktopLayout.chatWidth}
+                    priority={LayoutPriority.Low}
+                    visible={chatVisible}
+                  >
+                    <ChatHistoryGate>
+                      <ChatHistory
+                        /* The chat lane toggle leads the header on the pixel it holds at the head of the
                        viewer's tab bar while the lane is closed: one step in from the lane's edge, or
                        straight after the host's controls. */
-                      className={cn(
-                        sidebarOpen
-                          ? '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-1'
-                          : '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
-                      )}
-                      isExpanded={desktopLayout.chatOpen}
-                      setIsExpanded={(value) => {
-                        setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
-                      }}
-                    />
-                  </ChatHistoryGate>
-                </Allotment.Pane>
+                        className={cn(
+                          sidebarOpen
+                            ? '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-1'
+                            : '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-(--titlebar-controls-width) [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+                        )}
+                        isExpanded={desktopLayout.chatOpen}
+                        setIsExpanded={(value) => {
+                          setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
+                        }}
+                      />
+                    </ChatHistoryGate>
+                  </Allotment.Pane>
 
-                <Allotment.Pane
-                  key='viewer'
-                  minSize={isTight ? panelMinSizeViewerTight : panelMinSizeViewer}
-                  priority={LayoutPriority.High}
-                >
-                  <div
-                    className={cn(
-                      '@container/viewer relative size-full overflow-hidden',
-                      !sidebarOpen && !chatVisible && topLeftTabBarInset,
-                    )}
+                  <Allotment.Pane
+                    key='viewer'
+                    minSize={isTight ? panelMinSizeViewerTight : panelMinSizeViewer}
+                    priority={LayoutPriority.High}
                   >
-                    <ViewerDockview />
-                    <ProjectManifestIssueBanner />
-                    <ProjectUnavailableOverlay />
-                  </div>
-                </Allotment.Pane>
+                    <div
+                      className={cn(
+                        '@container/viewer relative size-full overflow-hidden',
+                        !sidebarOpen && !chatVisible && topLeftTabBarInset,
+                      )}
+                    >
+                      <ViewerDockview />
+                      <ProjectManifestIssueBanner />
+                      <ProjectUnavailableOverlay />
+                    </div>
+                  </Allotment.Pane>
 
-                <Allotment.Pane
-                  key='workbench'
-                  minSize={panelMinSizeWorkbench}
-                  preferredSize={desktopLayout.workbenchWidth}
-                  priority={LayoutPriority.Low}
-                  visible={workbenchVisible}
-                >
-                  <WorkbenchDockview onApiChange={setWorkbenchApi} />
-                </Allotment.Pane>
-              </Allotment>
-            ) : (
-              <WorkspaceOpening />
-            )}
-          </ChatInterfaceSessionGate>
+                  <Allotment.Pane
+                    key='workbench'
+                    minSize={panelMinSizeWorkbench}
+                    preferredSize={desktopLayout.workbenchWidth}
+                    priority={LayoutPriority.Low}
+                    visible={workbenchVisible}
+                  >
+                    <WorkbenchDockview onApiChange={setWorkbenchApi} />
+                  </Allotment.Pane>
+                </Allotment>
+              ) : (
+                <WorkspaceOpening />
+              )}
+            </ChatInterfaceSessionGate>
+          </handOffRevealContext.Provider>
         </div>
       </WorkspaceLanesContext.Provider>
     </ChatContextInsertionProvider>

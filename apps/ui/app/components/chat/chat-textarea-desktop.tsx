@@ -17,7 +17,7 @@ import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
-import type { AcpSessionData } from '@taucad/chat';
+import type { AcpSessionData, CadAgentExecution } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -207,6 +207,23 @@ const sendRefusalOf = (input: {
 };
 
 /**
+ * Whether a send queued in the native input (P4) may go now: Send would send, and the chat has an agent to send with.
+ * A first visit has no Tau model until the catalog answers, and a send made then is refused. It also waits for
+ * dictation to end, since only Send stops a recording and sends its words.
+ *
+ * @returns Whether the queued send may go.
+ */
+const isQueuedSendPermitted = (
+  input: Omit<Parameters<typeof sendRefusalOf>[0], 'isEmpty'> & {
+    readonly execution: CadAgentExecution;
+    readonly dictationPhase: string;
+  },
+): boolean =>
+  input.dictationPhase === 'idle' &&
+  (input.execution.kind !== 'tau' || input.execution.model !== '') &&
+  sendRefusalOf({ ...input, isEmpty: false }) === undefined;
+
+/**
  * The chat composer, on every device (C11): the Tiptap rich text editor with
  * inline context chips via @-mentions, slash commands, drag-drop from dockview
  * tabs, and one bar of controls.
@@ -305,8 +322,12 @@ export const ChatTextareaDesktop = memo(function ({
 
   /* Texts the editor reported that no render has shown back yet; see the rehydration below. */
   const unconfirmedTextsRef = useRef<string[]>([]);
+  /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
+   * text and sending is permitted (below). Any edit cancels it, as one in the native input would. */
+  const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
+      queuedSubmitRef.current = false;
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
@@ -328,9 +349,16 @@ export const ChatTextareaDesktop = memo(function ({
       .insertContent({ type: 'text', text: separator + text })
       .run();
   }, []);
-  const { draftActorRef } = useChatComposer();
+  const {
+    draftActorRef,
+    execution: { execution },
+  } = useChatComposer();
   const latestDraftOwner = useRef(draftActorRef);
   useLayoutEffect(() => {
+    /* Another chat's draft, in the same mounted composer: an Enter queued for the previous chat is not for this one. */
+    if (latestDraftOwner.current !== draftActorRef) {
+      queuedSubmitRef.current = false;
+    }
     latestDraftOwner.current = draftActorRef;
   }, [draftActorRef]);
   const dictation = useDictation(insertTranscript, draftActorRef);
@@ -538,12 +566,35 @@ export const ChatTextareaDesktop = memo(function ({
       const from = position(earlyInput.start);
       const to = position(earlyInput.end);
       editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
+      /* The native input kept its caret in view; the editor shares its metrics, so keeping the caret in view keeps
+       * the person's place in a draft longer than the box (P4: scroll position). */
+      editor.commands.scrollIntoView();
     } else {
       editor.commands.setTextSelection(editor.state.doc.content.size);
     }
     // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
     editor.view.focus();
   }, [editor, earlyInput, enableAutoFocus]);
+
+  /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
+   * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
+   * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
+  const isQueuedSubmitPermitted = isQueuedSendPermitted({
+    dictationPhase: dictation.phase,
+    sendBlockReason,
+    isSubmitting,
+    isAttaching,
+    isSubmitDisabled,
+    execution,
+  });
+  useEffect(() => {
+    if (!editor || !queuedSubmitRef.current || !isQueuedSubmitPermitted) {
+      return;
+    }
+    queuedSubmitRef.current = false;
+    const content = extractContent(editor);
+    void submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
+  }, [editor, isQueuedSubmitPermitted, submitWithReferences]);
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.

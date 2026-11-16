@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
+import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import {
   resolveKernel,
@@ -374,6 +375,36 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     });
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  /* A child acts on the values this hook returns in its own effects, which run before this hook's: the submit it
+   * makes as soon as sending is permitted must see the state it was rendered with (P4: a queued submit). */
+  it('should accept a submit made from a child effect in the render that permits it', async () => {
+    const onSubmit = vi.fn(async () => undefined);
+    function Sender({
+      submit,
+      isDisabled,
+    }: {
+      readonly submit: () => Promise<void>;
+      readonly isDisabled: boolean;
+    }): React.ReactNode {
+      useEffect(() => {
+        if (!isDisabled) {
+          void submit();
+        }
+      }, [isDisabled, submit]);
+      return undefined;
+    }
+    function Composer({ isDisabled }: { readonly isDisabled: boolean }): React.JSX.Element {
+      const logic = useChatTextareaLogic({ ref: undefined, onSubmit, isSubmitDisabled: isDisabled });
+      return <Sender submit={logic.handleSubmit} isDisabled={logic.isSubmitDisabled} />;
+    }
+    const view = render(<Composer isDisabled />);
+    expect(onSubmit).not.toHaveBeenCalled();
+    view.rerender(<Composer isDisabled={false} />);
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledOnce();
+    });
   });
 
   it('should block Send with the reason when a PDF is in the draft and the model reads only text and images', async () => {

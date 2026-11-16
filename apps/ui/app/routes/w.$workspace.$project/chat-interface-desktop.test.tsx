@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -32,13 +32,21 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
   ...(await importOriginal<typeof ProjectWorkspaceContext>()),
   useProjectWorkspace: () => ({ setChatOpen: vi.fn(), setWorkbenchOpen }),
 }));
-vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
-  ChatHistory: ({ className }: { readonly className?: string }) => (
-    <div className={className} data-testid='chat-lane'>
-      <textarea aria-label='Chat message' />
-    </div>
-  ),
-}));
+vi.mock('#routes/w.$workspace.$project/chat-history.js', async () => {
+  const { useContext } = await import('react');
+  const { handOffRevealContext } = await import('#components/hand-off/hand-off-store.js');
+  return {
+    ChatHistory: function ChatHistory({ className }: { readonly className?: string }) {
+      /* Whether the composer may adopt the frame's native input yet (PL6). */
+      const isRevealed = useContext(handOffRevealContext);
+      return (
+        <div className={className} data-testid='chat-lane' data-hand-off-revealed={String(isRevealed)}>
+          <textarea aria-label='Chat message' />
+        </div>
+      );
+    },
+  };
+});
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -311,6 +319,44 @@ describe('ChatInterfaceDesktop', () => {
     );
   });
 
+  /* PL6: the composer mounts in the unrendered panes, so it adopts the frame's native input only in the commit that
+   * marks the lanes ready and reveals them. */
+  it("lets the composer adopt the frame's native input only once the lanes are ready", async () => {
+    const unrevealed = renderDesktop();
+    expect(await screen.findByTestId('chat-lane')).toHaveAttribute('data-hand-off-revealed', 'false');
+    unrevealed.unmount();
+
+    splitView.laysOut = true;
+    renderDesktop();
+
+    expect(await screen.findByTestId('chat-lane')).toHaveAttribute('data-hand-off-revealed', 'true');
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-workspace-lanes', 'ready');
+  });
+
+  /* Review (r4586677545): the frame's composer box stays, over the chat lane, until a composer adopts its input; the
+   * live layout says when the chat lane is closed, where no composer can take it, so the box hides there. */
+  it('marks whether the live chat lane is shown once the lanes are ready, and not before', async () => {
+    const unrevealed = renderDesktop();
+    await screen.findByTestId('chat-lane');
+    expect(document.querySelector('[data-project-workspace]')).not.toHaveAttribute('data-chat-lane');
+    unrevealed.unmount();
+
+    splitView.laysOut = true;
+    renderDesktop();
+    await screen.findByTestId('chat-lane');
+
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-chat-lane', 'shown');
+  });
+
+  it('marks the live chat lane hidden when it is closed', async () => {
+    splitView.laysOut = true;
+    desktopLayout.chatOpen = false;
+    renderDesktop();
+    await screen.findByTestId('allotment');
+
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-chat-lane', 'hidden');
+  });
+
   it('holds the panes unrendered until the split view has laid them out', async () => {
     renderDesktop();
     const lanes = await screen.findByTestId('allotment');
@@ -327,7 +373,10 @@ describe('ChatInterfaceDesktop', () => {
       renderDesktop();
       await screen.findByTestId('allotment');
 
-      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
+      /* The live composer's, not the frame's, which the mocked composer never adopts. */
+      expect(document.activeElement).toBe(
+        within(screen.getByTestId('chat-lane')).getByRole('textbox', { name: 'Chat message' }),
+      );
     } finally {
       globalThis.history.replaceState(null, '');
     }
@@ -345,7 +394,10 @@ describe('ChatInterfaceDesktop', () => {
       renderDesktop();
       await screen.findByTestId('allotment');
 
-      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
+      /* The live composer's, not the frame's, which the mocked composer never adopts. */
+      expect(document.activeElement).toBe(
+        within(screen.getByTestId('chat-lane')).getByRole('textbox', { name: 'Chat message' }),
+      );
     } finally {
       globalThis.history.replaceState(null, '');
       navigating.remove();

@@ -4984,7 +4984,11 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
   /* The checkout on `main`, the part still its placeholder. */
   await filesystem.writeFile('c.txt', 'ours\n');
   await filesystem.mkdir('models', { recursive: true });
-  await filesystem.writeFile('models/part.step', lfsPointerFor(new TextEncoder().encode(part)).bytes);
+  const { pointer: partPointer, bytes: partPointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+  await filesystem.writeFile('models/part.step', partPointerBytes);
+  /* The fill the merge's capture starts never delivers: the object is not on the device and no remote serves it,
+   * so the only writer of the part is the hook below, and nothing races it. */
+  await filesystem.unlink(`.git/${lfsObjectPath(partPointer.oid)}`);
   /* The fill lands the part after the merge captured the checkout and before its write. */
   const onApplyingTree = vi.fn(
     (..._parameters: unknown[]) =>

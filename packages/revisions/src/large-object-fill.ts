@@ -78,6 +78,8 @@ type Fill = {
    * that disagree over one path end, one look per run-out, instead of finding it again and again.
    */
   readonly dropped: Map<string, Uint8Array<ArrayBuffer> | undefined>;
+  /** A closing look is running: the fill's placeholders may have run out, but it is not done until the look says so. */
+  looking: boolean;
   /** Woken on every arrival, flush, report and end, so a read or `materialize` waiting on this fill re-checks (D9). */
   readonly waiters: Set<() => void>;
   readonly totalObjects: number;
@@ -286,6 +288,10 @@ export const createLargeObjectFill = (
     return undefined;
   };
 
+  /* Whether a flush can write an object now: its bytes are in hand, or the host's store holds it whole (W11.3). */
+  const isHere = (fill: Fill, oid: string): boolean =>
+    fill.landed.has(oid) || (fill.fromStore && fill.arrived.has(oid));
+
   const wake = (fill: Fill): void => {
     /* A waiter that settles removes itself; a Set visits each remaining one once. */
     for (const waiter of fill.waiters) {
@@ -358,7 +364,7 @@ export const createLargeObjectFill = (
     if (!isCurrent(fill)) {
       return;
     }
-    const done = fill.pending.size === 0;
+    const done = fill.pending.size === 0 && !fill.looking;
     if (done) {
       fills.delete(fill.place.id);
       retire(fill);
@@ -398,7 +404,7 @@ export const createLargeObjectFill = (
       const oid = fill.pending.get(path)?.oid;
       if (oid !== undefined) {
         fill.promoted.add(oid);
-        landed ||= fill.landed.has(oid);
+        landed ||= isHere(fill, oid);
       }
     }
     if (landed) {
@@ -493,7 +499,7 @@ export const createLargeObjectFill = (
       if (placeholder.oid !== known.oid) {
         /* Written meanwhile with a pointer to another wanted object: tracked as that one, for the next flush. */
         fill.pending.set(path, placeholder);
-        more ||= fill.landed.has(placeholder.oid) || (fill.fromStore && fill.arrived.has(placeholder.oid));
+        more ||= isHere(fill, placeholder.oid);
         continue;
       }
       filled.push(path);
@@ -560,11 +566,21 @@ export const createLargeObjectFill = (
    * replaced is no longer counted as owed. Answers whether arrived objects were found for the next flush.
    */
   const reconcile = async (fill: Fill): Promise<boolean> => {
-    const found = await findPlaceholders(fill.place);
+    /* What it speaks for: a path a reader named while it looked is the reader's word, kept for the next flush. */
+    const looked = [...fill.pending.keys()];
+    fill.looking = true;
+    let found: Awaited<ReturnType<typeof findPlaceholders>>;
+    try {
+      found = await findPlaceholders(fill.place);
+    } finally {
+      fill.looking = false;
+    }
     if (!isCurrent(fill)) {
       return false;
     }
-    fill.pending.clear();
+    for (const path of looked) {
+      fill.pending.delete(path);
+    }
     for (const [path, placeholder] of found) {
       const dropped = fill.dropped.get(path);
       const again = fill.dropped.has(path) && dropped !== undefined && equalBytes(dropped, placeholder.pointer);
@@ -686,7 +702,7 @@ export const createLargeObjectFill = (
 
   /* Whether an object an open file waits for has landed and is not written yet. */
   const owesPromoted = (fill: Fill): boolean =>
-    [...fill.pending.values()].some(({ oid }) => fill.promoted.has(oid) && fill.landed.has(oid));
+    [...fill.pending.values()].some(({ oid }) => fill.promoted.has(oid) && isHere(fill, oid));
 
   /* A flush at once, unless one is writing: that one's end starts the next at once instead. */
   const flushSoon = (fill: Fill): void => {
@@ -945,6 +961,7 @@ export const createLargeObjectFill = (
       /* A refill keeps what open files asked for. */
       promoted: new Set([...(previous?.promoted ?? [])].filter((oid) => wanted.has(oid))),
       dropped: new Map(),
+      looking: false,
       waiters: new Set(),
       totalObjects: wanted.size,
       totalBytes: [...wanted.values()].reduce((sum, size) => sum + size, 0),

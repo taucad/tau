@@ -42,6 +42,8 @@ const setup = (
     plainFiles?: number;
     /* Files the checkout-wide look leaves out (as it leaves out an ignored file) while a path read still sees them. */
     unlooked?: readonly string[];
+    /* The checkout lands objects from the host's store (W11.3): a flush names each by its oid. */
+    fromStore?: boolean;
   }> = {},
 ) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([
@@ -100,8 +102,16 @@ const setup = (
   /* Flushes that read the checkout, and looks for every placeholder it holds. */
   let sweeps = 0;
   let looks = 0;
+  /* What ran when, so a test can tell a look from a write that overlapped it. */
+  const events: string[] = [];
   const placeholders = async (): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
     looks += 1;
+    events.push('look');
+    /* A look takes a while, as one over a real checkout does. */
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    events.push('looked');
     return largeObjectPlaceholders(
       new ImmutableRevisionTree(
         [...files]
@@ -127,23 +137,33 @@ const setup = (
   let gate: Promise<void> = Promise.resolve();
   let writing = 0;
   let mostWriting = 0;
-  const materializeTree = vi.fn(async (_place: Checkout, target: ImmutableRevisionTree, _materialization?: unknown) => {
-    writing += 1;
-    mostWriting = Math.max(mostWriting, writing);
-    try {
-      await gate;
-    } finally {
-      writing -= 1;
-    }
-    if (conflicts > 0) {
-      conflicts -= 1;
-      throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while they were written.');
-    }
-    for (const { path, content } of target.entries()) {
-      pathsWritten += 1;
-      files.set(path, content);
-    }
-  });
+  const materializeTree = vi.fn(
+    async (
+      _place: Checkout,
+      target: ImmutableRevisionTree,
+      materialization?: Readonly<{ largeObjects?: ReadonlyMap<string, Readonly<{ oid: string }>> }>,
+    ) => {
+      events.push('write');
+      writing += 1;
+      mostWriting = Math.max(mostWriting, writing);
+      try {
+        await gate;
+      } finally {
+        writing -= 1;
+      }
+      if (conflicts > 0) {
+        conflicts -= 1;
+        throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while they were written.');
+      }
+      for (const { path, content } of target.entries()) {
+        pathsWritten += 1;
+        const object = materialization?.largeObjects?.get(path)?.oid;
+        const stored = Object.values(parts).find((part) => pointerOf(part).pointer.oid === object);
+        files.set(path, stored === undefined ? content : encoder.encode(stored));
+      }
+      events.push('wrote');
+    },
+  );
   const declareFilled = vi.fn(async (_place: Checkout, _paths: readonly string[]) => undefined);
   const fill = createLargeObjectFill({
     port: options.byOid === true ? { readTree, fetchLargeObjects } : { readTree },
@@ -155,6 +175,7 @@ const setup = (
       return operation();
     },
     materializeTree,
+    ...(options.fromStore === true ? { landsFromStore: async () => true } : {}),
     report: (report) => reports.push(report),
     flushMilliseconds: options.flushMilliseconds ?? 1,
     reportMilliseconds: 1,
@@ -202,6 +223,7 @@ const setup = (
       };
     },
     mostWriting: () => mostWriting,
+    events,
     holdFence: (): (() => void) => {
       const held = Promise.withResolvers<void>();
       fence = held.promise;
@@ -615,6 +637,64 @@ describe('large-object fill', () => {
     harness.finish(harness.fullTree());
     await done;
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* W11.3: an object the host's store holds is here as much as one in hand: a reader's path is written at once. */
+  it('writes a path a reader waits on at once when its object is in the host store, not at the next timer', async () => {
+    const harness = setup({ fromStore: true, flushMilliseconds: 60_000 });
+    /* Every write conflicts, so the run's own flushes leave both objects for a timer a minute away. */
+    harness.conflictNext(3);
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.finish(
+      new ImmutableRevisionTree(
+        Object.values(parts).map((part, index) => [`p${String(index)}`, pointerOf(part).bytes]),
+      ),
+    );
+    await done;
+    expect(harness.text('models/a.step')).not.toBe('solid a');
+    await expect(harness.fill.written(place.id, ['models/a.step'], { stall: 1000 })).resolves.toBe('written');
+    expect(harness.text('models/a.step')).toBe('solid a');
+  });
+
+  /* The failure path's look rewrites what the fill tracks: it waits its turn behind a flush that is writing. */
+  it('looks after a failed transfer only once no flush is writing', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    const release = harness.holdWrites();
+    harness.fail(new Error('offline'));
+    /* The run's last flush is writing `a`; `b` lands now and an open file asks for it, which queues a flush. */
+    await vi.waitFor(() => {
+      expect(harness.materializeTree).toHaveBeenCalledTimes(1);
+    });
+    harness.land('models/b.step');
+    harness.fill.prioritize(place.id, ['models/b.step']);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    release();
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    /* No look began while a write was under way, nor a write while a look ran. */
+    const overlapped = harness.events.some(
+      (event, index) =>
+        (event === 'look' &&
+          harness.events.slice(0, index).filter((each) => each === 'write').length >
+            harness.events.slice(0, index).filter((each) => each === 'wrote').length) ||
+        (event === 'write' &&
+          harness.events.slice(0, index).filter((each) => each === 'look').length >
+            harness.events.slice(0, index).filter((each) => each === 'looked').length),
+    );
+    expect(harness.events).toContain('look');
+    expect(overlapped).toBe(false);
   });
 
   it('runs one timed flush at a time, flushing again after a slow one instead of queueing behind it', async () => {

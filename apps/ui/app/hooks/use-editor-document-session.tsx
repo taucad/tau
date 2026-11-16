@@ -10,6 +10,7 @@ import { readLfsPointer } from '@taucad/revisions';
 import {
   EditorDocumentSession,
   editorConflictRecordsSettled,
+  editorTextDebts,
   isRecordingEditorConflict,
 } from '#lib/editor-document-session.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
@@ -39,6 +40,7 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     const next = new EditorDocumentSession({
       contentService,
       projectId,
+      textDebts: editorTextDebts,
       recordEditorConflict: async (input) => {
         const { worker } = fileManagerRef.getSnapshot().context;
         if (!worker) {
@@ -54,13 +56,18 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     const flush = (): void => {
       next.flushSaves();
     };
+    /* The page going cannot await the write: whatever it has not confirmed is recorded for the next open (A7e). */
+    const flushAndRecord = (): void => {
+      next.flushSaves();
+      next.recordOwedText();
+    };
     const flushWhenHidden = (): void => {
       if (document.visibilityState === 'hidden') {
         next.flushSaves();
       }
     };
     globalThis.addEventListener('blur', flush);
-    globalThis.addEventListener('pagehide', flush);
+    globalThis.addEventListener('pagehide', flushAndRecord);
     document.addEventListener('visibilitychange', flushWhenHidden);
     editorRef.send({
       type: 'registerMaterialiseModel',
@@ -70,7 +77,7 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     });
     return () => {
       globalThis.removeEventListener('blur', flush);
-      globalThis.removeEventListener('pagehide', flush);
+      globalThis.removeEventListener('pagehide', flushAndRecord);
       document.removeEventListener('visibilitychange', flushWhenHidden);
       editorRef.send({ type: 'registerMaterialiseModel', materialiseModel: undefined });
       next.dispose();

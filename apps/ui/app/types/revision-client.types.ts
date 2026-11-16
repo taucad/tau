@@ -10,7 +10,11 @@ import type {
   RevisionTag,
 } from '@taucad/revisions';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
+import type {
+  CheckoutCutsOutcome,
+  EditorConflictInput,
+  EditorConflictOutcome,
+} from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
   WorkerRevisionCommand,
@@ -131,8 +135,11 @@ export type RevisionClient = Readonly<{
    * by `syncQuiesceMilliseconds` on the far side. The `hidden` unload registrant
    * awaits it so `pagehide`'s keepalive POST carries *this* close revision
    * rather than the previous push's pack.
+   *
+   * It answers what the cut came to (A7e): `recorded`, `nothingToRecord`, or `refused` when some bytes stayed
+   * unrecorded. A host that answers nothing (one that does not wait for its cut) is taken as `refused`.
    */
-  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<CheckoutCutsOutcome>;
   /**
    * Make these paths of the selected checkout physical files, their large objects fetched
    * first (D9). Rejects with code `PENDING` for one whose object could not be

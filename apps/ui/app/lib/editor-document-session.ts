@@ -10,6 +10,8 @@ import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisio
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { Topic } from '@taucad/events';
 import { assertRootedPath } from '@taucad/utils/path';
+import { randomUuid } from '@taucad/utils/id';
+import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import { URI } from 'vscode-uri';
 import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 import { EditorDocument } from '#lib/editor-document.js';
@@ -98,6 +100,199 @@ function holdEditorConflictRecord(projectId: string): () => void {
   };
 }
 
+/** Who a project's unconfirmed editor text belongs to (A7e, B7): the session's workspace and the person it records as. */
+export type EditorTextScope = Readonly<{ workspace: string; actorId: string }>;
+
+/**
+ * Text a document had not confirmed on disk when its page went (A7e). `base` is the base64 of the bytes it was edited
+ * over, which the replay's checked save is made against; `at` is when it was written, for the store's bounds.
+ */
+export type OwedEditorText = Readonly<{ token: string; path: string; base: string; text: string; at: number }>;
+
+/**
+ * Where owed editor text is kept: storage that outlives the document and is written synchronously, because `pagehide`
+ * cannot await. Records are read and cleared under one scope and project only. `clear` without a token removes the
+ * path's record whatever it carries; with one, only while it still carries it.
+ */
+export type EditorTextDebtPort = Readonly<{
+  list: (place: EditorTextPlace) => readonly OwedEditorText[];
+  write: (place: EditorTextPlace, record: OwedEditorText) => void;
+  clear: (place: EditorTextPlace, path: string, token?: string) => void;
+}>;
+
+/** One project's owed text under one scope: the only records a session reads or clears. */
+export type EditorTextPlace = Readonly<{ scope: EditorTextScope; projectId: string }>;
+
+/** The `localStorage` key prefix of owed editor text; the workspace, project, person and path follow it. */
+export const editorTextDebtStorageKeyPrefix = 'tau-editor-text-owed:';
+/** At most this many records are kept: a write past it drops the oldest (A7e, 22:19Z). */
+export const editorTextDebtLimit = 64;
+/** A record older than this is dropped when its scope is read. */
+export const editorTextDebtMaxAgeMilliseconds = 30 * 24 * 60 * 60 * 1000;
+
+const textScopes = new Map<string, EditorTextScope>();
+const replayingProjects = new Map<string, number>();
+const owedTextChanges = new Topic<void>({ name: 'EditorDocumentSession.owedText' });
+
+const scopeHead = ({ scope, projectId }: EditorTextPlace): string =>
+  `${editorTextDebtStorageKeyPrefix}${JSON.stringify([scope.workspace, projectId, scope.actorId]).slice(0, -1)},`;
+const owedTextKey = ({ scope, projectId }: EditorTextPlace, path: string): string =>
+  `${editorTextDebtStorageKeyPrefix}${JSON.stringify([scope.workspace, projectId, scope.actorId, path])}`;
+
+const owedTextOf = (value: string | undefined): OwedEditorText | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return undefined;
+    }
+    const { token, path, base, text, at } = parsed as Partial<Record<keyof OwedEditorText, unknown>>;
+    return typeof token === 'string' &&
+      typeof path === 'string' &&
+      typeof base === 'string' &&
+      typeof text === 'string' &&
+      typeof at === 'number'
+      ? { token, path, base, text, at }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const owedTextKeys = (storage: Storage): string[] => {
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(editorTextDebtStorageKeyPrefix) === true) {
+      keys.push(key);
+    }
+  }
+  return keys;
+};
+
+/* Keep the store within its limit: the oldest records go first, and one that cannot be read is oldest. */
+const boundOwedText = (storage: Storage): void => {
+  const keys = owedTextKeys(storage);
+  if (keys.length <= editorTextDebtLimit) {
+    return;
+  }
+  const byAge = keys
+    .map((key) => ({ key, at: owedTextOf(storage.getItem(key) ?? undefined)?.at ?? 0 }))
+    .sort((left, right) => left.at - right.at);
+  for (const { key } of byAge.slice(0, keys.length - editorTextDebtLimit)) {
+    storage.removeItem(key);
+  }
+};
+
+/**
+ * The real store, over `localStorage`. Every call is caught: a store that refuses (quota, a denied origin, a private
+ * window) leaves the editor as it was before A7e, never a fault on the unload path.
+ */
+export const editorTextDebts: EditorTextDebtPort = {
+  list: (place) => {
+    try {
+      const head = scopeHead(place);
+      const now = Date.now();
+      const records: OwedEditorText[] = [];
+      for (const key of owedTextKeys(localStorage)) {
+        if (!key.startsWith(head)) {
+          continue;
+        }
+        const record = owedTextOf(localStorage.getItem(key) ?? undefined);
+        if (record === undefined || now - record.at > editorTextDebtMaxAgeMilliseconds) {
+          localStorage.removeItem(key);
+          continue;
+        }
+        records.push(record);
+      }
+      return records;
+    } catch {
+      return [];
+    }
+  },
+  write: (place, record) => {
+    try {
+      localStorage.setItem(owedTextKey(place, record.path), JSON.stringify(record));
+      boundOwedText(localStorage);
+    } catch {
+      /* Refused: the text stays where it was before A7e, on its way to disk or lost with the page. */
+    }
+    owedTextChanges.emit();
+  },
+  clear: (place, path, token) => {
+    try {
+      const key = owedTextKey(place, path);
+      if (token !== undefined && owedTextOf(localStorage.getItem(key) ?? undefined)?.token !== token) {
+        return;
+      }
+      localStorage.removeItem(key);
+    } catch {
+      /* The record stays; a later replay finds its text on disk and clears it. */
+    }
+    owedTextChanges.emit();
+  },
+};
+
+/**
+ * Publish who a project's editor text belongs to, or withdraw it (A7e). The project's `revisions` child publishes the
+ * workspace of its open request and the person it records as; only a session under a published scope records or
+ * replays text.
+ *
+ * @param projectId - The project.
+ * @param scope - The scope, or `undefined` to withdraw it.
+ */
+export function setEditorTextScope(projectId: string, scope: EditorTextScope | undefined): void {
+  const current = textScopes.get(projectId);
+  if (current?.workspace === scope?.workspace && current?.actorId === scope?.actorId) {
+    return;
+  }
+  if (scope === undefined) {
+    textScopes.delete(projectId);
+  } else {
+    textScopes.set(projectId, scope);
+  }
+  owedTextChanges.emit();
+}
+
+export function getEditorTextScope(projectId: string): EditorTextScope | undefined {
+  return textScopes.get(projectId);
+}
+
+/**
+ * Whether the project still owes editor text under its published scope: a record is stored, or a replay is running.
+ * The `revisions` child waits on it before taking an owed close cut, so the cut holds the replayed text (A7e, 21:08Z
+ * condition 4). A record whose editor never mounts this document keeps both debts for a later open.
+ *
+ * @param projectId - The project.
+ */
+export function isOwingEditorText(projectId: string): boolean {
+  if ((replayingProjects.get(projectId) ?? 0) > 0) {
+    return true;
+  }
+  const scope = textScopes.get(projectId);
+  return scope !== undefined && editorTextDebts.list({ scope, projectId }).length > 0;
+}
+
+export function subscribeOwedEditorText(listener: () => void): () => void {
+  return owedTextChanges.subscribe(listener);
+}
+
+function holdReplay(projectId: string): () => void {
+  replayingProjects.set(projectId, (replayingProjects.get(projectId) ?? 0) + 1);
+  owedTextChanges.emit();
+  return () => {
+    const remaining = (replayingProjects.get(projectId) ?? 1) - 1;
+    if (remaining === 0) {
+      replayingProjects.delete(projectId);
+    } else {
+      replayingProjects.set(projectId, remaining);
+    }
+    owedTextChanges.emit();
+  };
+}
+
 function sameBytes(left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean {
   return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 }
@@ -125,6 +320,8 @@ export type EditorDocumentSessionConfig = Readonly<{
   contentService: FileContentService;
   projectId: string;
   recordEditorConflict?: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
+  /** Where unconfirmed text is recorded at `pagehide` and replayed from (A7e); absent, nothing is. */
+  textDebts?: EditorTextDebtPort;
 }>;
 
 /** Project-scoped bridge between versioned documents and the filesystem content authority. */
@@ -143,6 +340,12 @@ export class EditorDocumentSession {
   readonly #scheduled = new Map<string, ScheduledSave>();
   /** Read-only library declaration text by path, most recently opened last. */
   readonly #declarations = new Map<string, string>();
+  readonly #textDebts: EditorTextDebtPort | undefined;
+  /** A replay under way for a path, settled once the document holds what the replay decided (A7e). */
+  readonly #replays = new Map<string, Promise<void>>();
+  /** The records this session took up or wrote, so each is replayed once and its own is cleared on a confirmed save. */
+  readonly #replayedTokens = new Set<string>();
+  readonly #ownTokens = new Map<string, string>();
   readonly #subscriptions: Array<() => void>;
   #projectId: string;
   #epoch = 0;
@@ -152,6 +355,7 @@ export class EditorDocumentSession {
     this.#contentService = config.contentService;
     this.#projectId = config.projectId;
     this.#recordEditorConflict = config.recordEditorConflict;
+    this.#textDebts = config.textDebts;
     this.#subscriptions = [
       config.contentService.onDidContentChange((event) => {
         this.applyContentChange(event);
@@ -163,7 +367,12 @@ export class EditorDocumentSession {
       config.contentService.addEditorSaveFlusher(() => {
         this.flushSaves();
       }),
+      /* A scope published, or a record written, is taken up at once (A7e). */
+      subscribeOwedEditorText(() => {
+        this.#replayOwed();
+      }),
     ];
+    this.#replayOwed();
   }
 
   public get(path: string): EditorDocument | undefined {
@@ -235,6 +444,12 @@ export class EditorDocumentSession {
     }
     if (isVirtualDeclarationPath(key)) {
       return undefined;
+    }
+    /* A replay of owed text for this path decides what the document holds first (A7e). */
+    const replay = this.#replays.get(key);
+    if (replay !== undefined) {
+      await replay;
+      return this.getOrEnsureDocument(key);
     }
     const epoch = this.#epoch;
     const result = await this.#contentService.resolve(key);
@@ -367,6 +582,35 @@ export class EditorDocumentSession {
     return state.settled;
   }
 
+  /**
+   * Record every document's text not confirmed on disk, under the project's published scope (A7e). Called from the
+   * page's `pagehide`, after `flushSaves`: synchronous, and it never throws, so a store that refuses leaves today's
+   * behaviour. A clean document records nothing.
+   */
+  public recordOwedText(): void {
+    try {
+      const debts = this.#textDebts;
+      const scope = getEditorTextScope(this.#projectId);
+      if (debts === undefined || scope === undefined || this.#disposed) {
+        return;
+      }
+      for (const [path, document] of this.#documents) {
+        const base = this.#bases.get(path);
+        if (this.#declarations.has(path) || base === undefined || sameBytes(base, encoder.encode(document.text))) {
+          continue;
+        }
+        const token = randomUuid();
+        debts.write(
+          { scope, projectId: this.#projectId },
+          { token, path, base: uint8ArrayToBase64(base), text: document.text, at: Date.now() },
+        );
+        this.#ownTokens.set(path, token);
+      }
+    } catch {
+      /* Today's behaviour: the text is on its way to disk, or goes with the page. */
+    }
+  }
+
   public setProjectSession(projectId: string): void {
     /* Text still in the window belongs to the old session's files: it is written there now. */
     this.flushSaves();
@@ -488,6 +732,131 @@ export class EditorDocumentSession {
     }
   }
 
+  /* A record this session wrote is settled by its own confirmed save (A7e). */
+  #clearOwnRecord(path: string): void {
+    const token = this.#ownTokens.get(path);
+    const scope = getEditorTextScope(this.#projectId);
+    if (token === undefined || scope === undefined) {
+      return;
+    }
+    this.#ownTokens.delete(path);
+    this.#textDebts?.clear({ scope, projectId: this.#projectId }, path, token);
+  }
+
+  /* Take up every record under the published scope not yet taken up (A7e). */
+  #replayOwed(): void {
+    const debts = this.#textDebts;
+    const scope = getEditorTextScope(this.#projectId);
+    if (debts === undefined || scope === undefined || this.#disposed) {
+      return;
+    }
+    const place = { scope, projectId: this.#projectId };
+    for (const record of debts.list(place)) {
+      if (
+        this.#replayedTokens.has(record.token) ||
+        [...this.#ownTokens.values()].includes(record.token) ||
+        this.#replays.has(record.path)
+      ) {
+        continue;
+      }
+      this.#replayedTokens.add(record.token);
+      const ready = Promise.withResolvers<void>();
+      this.#replays.set(record.path, ready.promise);
+      /* The document holds what the replay decided: a pane waiting on the path goes on. */
+      const decided = (): void => {
+        if (this.#replays.get(record.path) === ready.promise) {
+          this.#replays.delete(record.path);
+        }
+        ready.resolve();
+      };
+      const release = holdReplay(this.#projectId);
+      // async-iife: bootstrap -- a replay runs beside the event that took it up; it never rejects.
+      void (async (): Promise<void> => {
+        try {
+          await this.#replayOne({ debts, place, record, decided });
+        } finally {
+          decided();
+          release();
+        }
+      })();
+    }
+  }
+
+  /**
+   * Replay one record (A7e, 21:08Z condition 3): text already on disk is cleared; over its recorded base, the document
+   * takes the text and the checked save is made against that base; anything else (a moved base, a file gone or no
+   * longer text, a document typed in since) goes into the conflict record, never onto the file. A replay that cannot
+   * finish keeps the record for a later open.
+   */
+  async #replayOne({
+    debts,
+    place,
+    record,
+    decided,
+  }: Readonly<{
+    debts: EditorTextDebtPort;
+    place: EditorTextPlace;
+    record: OwedEditorText;
+    decided: () => void;
+  }>): Promise<void> {
+    const { projectId } = place;
+    const epoch = this.#epoch;
+    const live = (): boolean => !this.#disposed && epoch === this.#epoch;
+    try {
+      const path = assertRootedPath(record.path);
+      const base = base64ToUint8Array(record.base);
+      const result = await this.#contentService.resolve(path);
+      if (!live()) {
+        return;
+      }
+      if (result.kind === 'text' && sameBytes(result.content, encoder.encode(record.text))) {
+        debts.clear(place, path, record.token);
+        return;
+      }
+      if (result.kind === 'loading' || result.kind === 'error') {
+        return;
+      }
+      const document = this.#documents.get(path);
+      const documentBase = this.#bases.get(path);
+      const untouched =
+        document === undefined ||
+        (documentBase !== undefined && sameBytes(documentBase, base) && document.text === decodeTextFile(base));
+      const busy = this.#saves.has(path) || this.#scheduled.has(path) || this.#rebases.has(path);
+      if (result.kind === 'text' && sameBytes(result.content, base) && untouched && !busy) {
+        if (document === undefined) {
+          this.#documents.set(path, new EditorDocument(path, record.text));
+          if (!this.#holds.has(path)) {
+            this.#background.set(path, Date.now());
+          }
+        } else {
+          document.adopt(record.text, this.#holds.has(path));
+        }
+        this.#bases.set(path, result.content);
+        const saved = this.save(path);
+        decided();
+        await saved;
+        if (live()) {
+          debts.clear(place, path, record.token);
+        }
+        return;
+      }
+      decided();
+      const recordConflict = this.#recordEditorConflict;
+      if (recordConflict === undefined) {
+        return;
+      }
+      const release = holdEditorConflictRecord(projectId);
+      try {
+        await recordConflict({ path, base: decodeTextFile(base), mine: record.text });
+        debts.clear(place, path, record.token);
+      } finally {
+        release();
+      }
+    } catch {
+      /* Kept: the text is replayed by a later open. */
+    }
+  }
+
   #flushScheduled(scheduled: ScheduledSave): void {
     clearTimeout(scheduled.timer);
     let path: string | undefined;
@@ -560,6 +929,7 @@ export class EditorDocumentSession {
       }
       if (failure === undefined) {
         this.#saves.delete(path);
+        this.#clearOwnRecord(path);
         const saved = this.#contentService.peekOutcome(path);
         if (saved.kind === 'text') {
           this.#bases.set(path, saved.content);

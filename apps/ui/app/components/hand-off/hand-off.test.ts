@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import {
   captureHandOff,
   handOffScript,
@@ -71,6 +71,80 @@ const drawn = (): DOMRectList => {
   return Object.assign(rects, { item: (index: number) => rects[index] ?? null });
 };
 
+/* A resize observer the test fires by hand, standing in for the layout drawing an input it hid. */
+const resizeObservers = new Set<{ readonly fire: () => void }>();
+const stubResizeObserver = (): void => {
+  class FakeResizeObserver {
+    readonly #callback: ResizeObserverCallback;
+    readonly #entry = {
+      fire: (): void => {
+        this.#callback([], this as unknown as ResizeObserver);
+      },
+    };
+    public constructor(callback: ResizeObserverCallback) {
+      this.#callback = callback;
+    }
+    public observe(): void {
+      resizeObservers.add(this.#entry);
+    }
+    public unobserve(): void {
+      resizeObservers.delete(this.#entry);
+    }
+    public disconnect(): void {
+      resizeObservers.delete(this.#entry);
+    }
+  }
+  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  /* A served script runs in the document's own global, which has no resize observer of its own: give it the fake. */
+  const realm = document.createElement('script');
+  realm.textContent = 'document.tauScriptGlobal = globalThis';
+  document.body.append(realm);
+  const scriptGlobal = Reflect.get(document, 'tauScriptGlobal') as Record<string, unknown>;
+  Reflect.set(scriptGlobal, 'ResizeObserver', FakeResizeObserver);
+  onTestFinished(() => {
+    Reflect.deleteProperty(scriptGlobal, 'ResizeObserver');
+    Reflect.deleteProperty(document, 'tauScriptGlobal');
+  });
+};
+const fireResize = (): void => {
+  for (const observer of resizeObservers) {
+    observer.fire();
+  }
+};
+
+/* A performance observer the test feeds by hand, since the jsdom timeline keeps no marks to observe. */
+const markObservers = new Set<(names: readonly string[]) => void>();
+const stubPerformanceObserver = (): void => {
+  class FakePerformanceObserver {
+    public static readonly supportedEntryTypes = ['mark'];
+    readonly #listener: (names: readonly string[]) => void;
+    public constructor(callback: PerformanceObserverCallback) {
+      this.#listener = (names) => {
+        const entries = names.map((name) => ({ name, entryType: 'mark' }));
+        callback(
+          {
+            getEntries: () => entries,
+            getEntriesByName: (name: string) => entries.filter((entry) => entry.name === name),
+          } as unknown as PerformanceObserverEntryList,
+          this as unknown as PerformanceObserver,
+        );
+      };
+    }
+    public observe(): void {
+      markObservers.add(this.#listener);
+    }
+    public disconnect(): void {
+      markObservers.delete(this.#listener);
+    }
+  }
+  vi.stubGlobal('PerformanceObserver', FakePerformanceObserver);
+};
+const observeMark = (name: string): void => {
+  for (const listener of markObservers) {
+    listener([name]);
+  }
+};
+
 const nextFrame = async (): Promise<void> =>
   new Promise<void>((resolve) => {
     requestAnimationFrame(() => {
@@ -107,6 +181,8 @@ describe('hand-off contract (P4)', () => {
     stubTimeline();
     record.mockClear();
     resetInputAcceptedForTest();
+    resizeObservers.clear();
+    markObservers.clear();
   });
   afterEach(() => {
     document.body.replaceChildren();
@@ -315,6 +391,55 @@ describe('hand-off contract (P4)', () => {
 
     expect(hidden.tauHandOff?.acceptedAt).toBeUndefined();
     expect(performance.getEntriesByName(inputAcceptedMarkName, 'mark')).toHaveLength(0);
+  });
+
+  /* An input served hidden (a phone's chat lane) and shown later takes text from then: that frame is the mark. */
+  it.each([
+    ['created by the bundle', (): HandOffElement => createTracked({ queueSubmit: false })],
+    ['served with its script', (): HandOffElement => serveWithScript({ queueSubmit: false })],
+  ])('should mark the frame a hidden input %s is first drawn', async (_name, create) => {
+    stubResizeObserver();
+    const rects = vi.spyOn(HTMLElement.prototype, 'getClientRects');
+    const input = create();
+    await nextFrame();
+    expect(input.tauHandOff?.acceptedAt).toBeUndefined();
+
+    rects.mockReturnValue(drawn());
+    fireResize();
+
+    expect(input.tauHandOff?.acceptedAt).toEqual(expect.any(Number));
+    expect(resizeObservers.size).toBe(0);
+  });
+
+  /* The bundle can look before the mark exists, and the mark can come much later (an input shown later). */
+  it('should record the measure when the mark is left after the bundle looked', () => {
+    stubPerformanceObserver();
+    recordInputAccepted();
+    expect(record).not.toHaveBeenCalled();
+
+    performance.mark(inputAcceptedMarkName, { startTime: 300 });
+    observeMark(inputAcceptedMarkName);
+
+    expect(record).toHaveBeenCalledExactlyOnceWith('input.accepted', { start: 0, end: 300, outcome: 'ok' });
+    expect(markObservers.size).toBe(0);
+  });
+
+  /* Without an observable timeline, each call that finds no mark looks once more two frames later. */
+  it('should look again after a later call when the timeline cannot be observed', async () => {
+    vi.stubGlobal('PerformanceObserver', undefined);
+    recordInputAccepted();
+    await nextFrame();
+    await nextFrame();
+    await nextFrame();
+    expect(record).not.toHaveBeenCalled();
+
+    recordInputAccepted();
+    performance.mark(inputAcceptedMarkName, { startTime: 400 });
+    await nextFrame();
+    await nextFrame();
+    await nextFrame();
+
+    expect(record).toHaveBeenCalledExactlyOnceWith('input.accepted', { start: 0, end: 400, outcome: 'ok' });
   });
 
   it('should record tau.load.input.accepted once, from navigation start to the mark', () => {

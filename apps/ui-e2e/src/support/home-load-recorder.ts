@@ -1475,14 +1475,26 @@ export type FirstInputAccepted = {
   readonly firstContentfulPaint?: number;
 };
 
+/** How long the bundle's measure may trail the composer it records, before it is read as missing. Milliseconds. */
+const inputAcceptedMeasureTimeout = 10_000;
+
 /**
  * Read the current document's "first input accepted" mark and measure, beside its first contentful paint. Milliseconds
- * from navigation start. The mark needs no bundle; the measure needs the bundle to have seen the input.
+ * from navigation start. The mark needs no bundle; the measure needs the bundle to have seen the input, and it can
+ * land a frame or more after the composer shows, so the read waits for it, bounded, and then reads whatever is there:
+ * a measure still missing then fails the caller's assertion, not this wait.
  *
  * @returns What the page recorded.
  */
-export const readFirstInputAccepted = async (): Promise<FirstInputAccepted> =>
-  target.evaluate(() => {
+export const readFirstInputAccepted = async (): Promise<FirstInputAccepted> => {
+  try {
+    await target.waitFor(() => performance.getEntriesByName('tau.load.input.accepted', 'measure').length > 0, null, {
+      timeout: inputAcceptedMeasureTimeout,
+    });
+  } catch {
+    // Read what was recorded; the caller's assertion names what is missing.
+  }
+  return target.evaluate(() => {
     const [mark] = performance.getEntriesByName('tau.input.accepted', 'mark');
     const [measure] = performance.getEntriesByName('tau.load.input.accepted', 'measure') as PerformanceMeasure[];
     const [paint] = performance.getEntriesByName('first-contentful-paint', 'paint');
@@ -1500,6 +1512,7 @@ export const readFirstInputAccepted = async (): Promise<FirstInputAccepted> =>
       firstContentfulPaint: paint?.startTime,
     };
   });
+};
 
 /**
  * Open `path` without waiting for its load and act on its served input before hydration (A15 frame rows).

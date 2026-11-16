@@ -72,7 +72,8 @@ const scriptBody = (target: string, queueSubmit: boolean): string =>
   (queueSubmit
     ? `input.addEventListener('keydown',(event)=>{if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.keyCode===229||(typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches))return;event.preventDefault();state.submitQueued=input.value.trim()!==''});`
     : '') +
-  `requestAnimationFrame(()=>{if(input.getClientRects().length===0)return;const time=performance.now();state.acceptedAt=time;try{if(performance.getEntriesByName('${inputAcceptedMarkName}','mark').length===0)performance.mark('${inputAcceptedMarkName}',{startTime:time})}catch{}})}catch{}})()`;
+  `const mark=()=>{if(input.getClientRects().length===0)return false;const time=performance.now();state.acceptedAt=time;try{if(performance.getEntriesByName('${inputAcceptedMarkName}','mark').length===0)performance.mark('${inputAcceptedMarkName}',{startTime:time})}catch{}return true};` +
+  `requestAnimationFrame(()=>{try{if(mark()||typeof ResizeObserver!=='function')return;const observer=new ResizeObserver(()=>{if(mark())observer.disconnect()});observer.observe(input)}catch{}})}catch{}})()`;
 
 /**
  * The inline script served right after a native input. It has no interpolated input: its source is fixed per target
@@ -95,27 +96,47 @@ const isCoarsePointer = (): boolean =>
   typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(pointer: coarse)').matches;
 
 /**
- * Leave the first-input mark at the frame after now, unless a native input already left it this document or the
- * layout does not draw this one.
+ * Keep the time the input can take text, and leave the first-input mark then unless a native input already left it
+ * this document. An input the layout does not draw (a lane hidden at this width) takes no text: it marks nothing.
  *
  * @param element - The native input.
  * @param state - The input's record, which keeps the time too.
+ * @returns Whether the input was drawn.
+ */
+const markAccepted = (element: HTMLElement, state: HandOffState): boolean => {
+  if (element.getClientRects().length === 0) {
+    return false;
+  }
+  const time = performance.now();
+  state.acceptedAt = time;
+  try {
+    if (performance.getEntriesByName(inputAcceptedMarkName, 'mark').length === 0) {
+      performance.mark(inputAcceptedMarkName, { startTime: time });
+    }
+  } catch {
+    // A timeline that refuses the mark leaves the input working.
+  }
+  return true;
+};
+
+/**
+ * Mark at the frame after now, or, for an input not drawn then, at the first layout that draws it (a hidden lane
+ * shown later takes text from then).
+ *
+ * @param element - The native input.
+ * @param state - The input's record.
  */
 const markAcceptedNextFrame = (element: HTMLElement, state: HandOffState): void => {
   requestAnimationFrame(() => {
-    /* An input the layout does not draw (a lane hidden at this width) takes no text: it marks nothing. */
-    if (element.getClientRects().length === 0) {
+    if (markAccepted(element, state) || typeof ResizeObserver !== 'function') {
       return;
     }
-    const time = performance.now();
-    state.acceptedAt = time;
-    try {
-      if (performance.getEntriesByName(inputAcceptedMarkName, 'mark').length === 0) {
-        performance.mark(inputAcceptedMarkName, { startTime: time });
+    const observer = new ResizeObserver(() => {
+      if (markAccepted(element, state)) {
+        observer.disconnect();
       }
-    } catch {
-      // A timeline that refuses the mark leaves the input working.
-    }
+    });
+    observer.observe(element);
   });
 };
 
@@ -201,7 +222,8 @@ export const captureHandOff = (element: HandOffElement, focusedHint?: boolean): 
 };
 
 let inputAcceptedRecorded = false;
-let inputAcceptedRetry = false;
+/** A wait for the mark is under way: an observer of the timeline, or one look two frames on. */
+let inputAcceptedWaiting = false;
 
 const tryRecordInputAccepted = (): boolean => {
   if (inputAcceptedRecorded) {
@@ -221,17 +243,45 @@ const tryRecordInputAccepted = (): boolean => {
 };
 
 /**
+ * Record once the mark is left: observe the timeline for it, where the browser lets marks be observed.
+ *
+ * @returns Whether the timeline is being observed.
+ */
+const recordWhenMarked = (): boolean => {
+  try {
+    if (typeof PerformanceObserver !== 'function' || !PerformanceObserver.supportedEntryTypes.includes('mark')) {
+      return false;
+    }
+    const observer = new PerformanceObserver((entries) => {
+      if (entries.getEntriesByName(inputAcceptedMarkName).length > 0 && tryRecordInputAccepted()) {
+        observer.disconnect();
+        inputAcceptedWaiting = false;
+      }
+    });
+    observer.observe({ type: 'mark', buffered: true });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Record `tau.load.input.accepted` from navigation start to the first-input mark, once per document. Called by each
- * surface's bundle side when it first sees its native input. A bundle that runs before the input's first frame has
- * no mark to read yet, so it looks once more two frames later.
+ * surface's bundle side when it first sees its native input. A bundle that runs before the mark exists — before the
+ * input's first frame, or while the layout does not draw it — records when the mark is left; where the timeline
+ * cannot be observed, it looks once more two frames later, and a later call looks again.
  */
 export const recordInputAccepted = (): void => {
-  if (tryRecordInputAccepted() || inputAcceptedRetry) {
+  if (tryRecordInputAccepted() || inputAcceptedWaiting) {
     return;
   }
-  inputAcceptedRetry = true;
+  inputAcceptedWaiting = true;
+  if (recordWhenMarked()) {
+    return;
+  }
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      inputAcceptedWaiting = false;
       tryRecordInputAccepted();
     });
   });
@@ -240,5 +290,5 @@ export const recordInputAccepted = (): void => {
 /** Test seam: let the next {@link recordInputAccepted} record again. */
 export const resetInputAcceptedForTest = (): void => {
   inputAcceptedRecorded = false;
-  inputAcceptedRetry = false;
+  inputAcceptedWaiting = false;
 };

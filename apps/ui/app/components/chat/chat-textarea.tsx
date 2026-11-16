@@ -8,7 +8,7 @@ import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
-import type { HandOffSurface } from '#components/hand-off/hand-off-store.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
@@ -35,10 +35,10 @@ import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.
 
 /** The surface to adopt: none when a host above already owns the native input (`adoptedEarlyInput`, `enableEarlyInput`). */
 const handOffTarget = (
-  surface: HandOffSurface | undefined,
+  target: HandOffTarget | undefined,
   adoptedEarlyInput: EarlyChatInput | undefined,
   enableEarlyInput: boolean,
-): HandOffSurface | undefined => (adoptedEarlyInput === undefined && !enableEarlyInput ? surface : undefined);
+): HandOffTarget | undefined => (adoptedEarlyInput === undefined && !enableEarlyInput ? target : undefined);
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -55,7 +55,7 @@ export const ChatTextarea = memo(function ({
   enableAutoFocus = true,
   enableEarlyInput = false,
   adoptedEarlyInput,
-  handOffSurface,
+  handOff: handOffTargetProperty,
   onEscapePressed,
   onBlur,
   className,
@@ -119,7 +119,7 @@ export const ChatTextarea = memo(function ({
     [draftActorRef],
   );
   const handOff = useHandOffAdoption(
-    handOffTarget(handOffSurface, adoptedEarlyInput, enableEarlyInput),
+    handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),
     handleHandOffAdopted,
   );
   const logic = useChatTextareaLogic({
@@ -432,7 +432,7 @@ export const ChatTextarea = memo(function ({
    * component owns the native input and has already handed its edit over, which is how a route can
    * accept text without this module in its bundle; `enableEarlyInput` means this component owns it,
    * which needs the module first; neither means there is no early input to carry. */
-  /* A fourth: a placeholder above served the native input (`handOffSurface`) and this composer adopted it. Until the
+  /* A fourth: a placeholder above served the native input (`handOff`) and this composer adopted it. Until the
    * adoption attempt has run, or while a composition in it is open, the native input is still the thing to type in. */
   const adopted = adoptedEarlyInput ?? (handOff.kind === 'done' ? handOff.snapshot : undefined);
   if (adopted) {

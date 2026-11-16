@@ -20,7 +20,7 @@ function Rich(): React.JSX.Element {
 }
 
 function Adopter(): React.ReactNode {
-  const adoption = useHandOffAdoption('project-composer', noteAdopted);
+  const adoption = useHandOffAdoption({ surface: 'project-composer', scope: 'home/one' }, noteAdopted);
   return adoption.kind === 'waiting' ? null : <Rich />;
 }
 
@@ -28,7 +28,7 @@ describeHandOffContract('Slot-hosted surface', {
   content: (adopterLoaded) => (
     <>
       <section aria-label='Placeholder'>
-        <HandOffSlot surface='project-composer' label='Chat message' placeholder='Ask Tau' />
+        <HandOffSlot surface='project-composer' scope='home/one' label='Chat message' placeholder='Ask Tau' />
       </section>
       {adopterLoaded ? <Adopter /> : null}
     </>

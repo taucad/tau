@@ -17,6 +17,7 @@ import {
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { useTourAnchors } from '#components/tour/tour-anchors.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import type { ChatTranscriptState } from '#services/chat-session-store.js';
@@ -188,6 +189,7 @@ const ExpandedChatHistory = memo(function ({
   const isMobile = useIsMobile();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  const composerHandOff = useProjectComposerHandOff();
   /* The product tour points at the composer; the region is also the foot of the chat lane, where a tip about a
    * transcript row that has scrolled away is placed. */
   const composerAnchor = useTourAnchors('composer', 'chat-lane');
@@ -368,7 +370,7 @@ const ExpandedChatHistory = memo(function ({
                 mode='main'
                 enableAutoFocus={false}
                 /* The workspace placeholder served this composer's native input; adopt it (PL6). */
-                handOffSurface='project-composer'
+                handOff={composerHandOff}
                 onSubmit={onSubmit}
               />
             </div>

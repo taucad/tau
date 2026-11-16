@@ -385,13 +385,19 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       isFocused?: boolean;
       earlyInput?: EarlyChatInput;
       setDraftText?: (text: string) => void;
+      isSubmitDisabled?: boolean;
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
-    const element = (session: AcpSessionData, text = inputText): React.JSX.Element => (
+    const element = (
+      session: AcpSessionData,
+      text = inputText,
+      isSubmitDisabled = options.isSubmitDisabled,
+    ): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
           earlyInput={options.earlyInput}
+          isSubmitDisabled={isSubmitDisabled}
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
           enableMobileCollapse={options.enableMobileCollapse}
@@ -436,8 +442,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const view = render(element(acpSessionData));
     return {
       ...view,
-      rerenderWith: (session: AcpSessionData, text?: string): void => {
-        view.rerender(element(session, text));
+      rerenderWith: (session: AcpSessionData, text?: string, isSubmitDisabled?: boolean): void => {
+        view.rerender(element(session, text, isSubmitDisabled));
       },
     };
   };
@@ -525,37 +531,81 @@ describe('ChatTextareaDesktop draft rehydration', () => {
   });
 
   /* P4: Enter in the native input before the editor existed is one send, made once it holds the adopted text. */
-  it('should send a submit queued in the native input once, after adoption', async () => {
-    const submit = vi.fn(async () => undefined);
-    const createRange = document.createRange.bind(document);
-    vi.spyOn(document, 'createRange').mockImplementation(() =>
-      Object.assign(createRange(), {
-        getClientRects: () => [],
-        getBoundingClientRect: () => new DOMRect(),
-      }),
-    );
-    const view = renderComposer('Make a bracket.', codexSession, {
-      handleSubmit: submit,
-      earlyInput: {
-        text: 'Make a bracket.',
-        edited: true,
-        focused: true,
-        focusUnclaimed: false,
-        start: 15,
-        end: 15,
-        direction: 'none',
-        scrollTop: 0,
-        submitQueued: true,
-      },
+  describe('a submit queued in the native input', () => {
+    const queued = (text: string): EarlyChatInput => ({
+      text,
+      edited: true,
+      focused: true,
+      focusUnclaimed: false,
+      start: text.length,
+      end: text.length,
+      direction: 'none',
+      scrollTop: 0,
+      submitQueued: true,
     });
-    await vi.waitFor(() => {
+    beforeEach(() => {
+      const createRange = document.createRange.bind(document);
+      vi.spyOn(document, 'createRange').mockImplementation(() =>
+        Object.assign(createRange(), {
+          getClientRects: () => [],
+          getBoundingClientRect: () => new DOMRect(),
+        }),
+      );
+    });
+
+    it('should send once, after adoption', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      view.rerenderWith(codexSession);
+      await act(async () => {
+        await Promise.resolve();
+      });
       expect(submit).toHaveBeenCalledOnce();
     });
-    view.rerenderWith(codexSession);
-    await act(async () => {
-      await Promise.resolve();
+
+    /* The draft the composer last knew can still be the previous one when the queued send runs: the adopted text
+     * travels with the send instead of being read back from the parent. */
+    it('should send the adopted text, not the previous draft', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      renderComposer('An older draft.', codexSession, {
+        handleSubmit: submit,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
     });
-    expect(submit).toHaveBeenCalledOnce();
+
+    /* A send that is not permitted yet stays queued; the gesture is spent only when it is sent. */
+    it('should keep the send queued while sending is not permitted, then send once', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).not.toHaveBeenCalled();
+      view.rerenderWith(codexSession, undefined, false);
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
+      view.rerenderWith(codexSession, undefined, false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).toHaveBeenCalledOnce();
+    });
   });
 
   it('should not draw a focus outline when the native input was not focused', () => {

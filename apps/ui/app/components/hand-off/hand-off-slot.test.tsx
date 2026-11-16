@@ -13,12 +13,23 @@ vi.mock('#components/hand-off/hand-off.js', async (importOriginal) => ({
   recordInputAccepted,
 }));
 
-const slot = <HandOffSlot surface='project-composer' label='Chat message' placeholder='Ask Tau' />;
+/** The project the slots belong to. */
+const target = { surface: 'project-composer', scope: 'home/one' } as const;
 
 /** Two different parents, so swapping them remounts the slot as the workspace's successive skeletons do. */
-function Stage({ phase }: { readonly phase: 'first' | 'second' | 'both' | 'none' }): React.JSX.Element {
+function Stage({
+  phase,
+  scope = target.scope,
+  placeholder = 'Ask Tau',
+}: {
+  readonly phase: 'first' | 'second' | 'both' | 'none';
+  readonly scope?: string;
+  readonly placeholder?: string;
+}): React.JSX.Element {
+  const slot = <HandOffSlot surface='project-composer' scope={scope} label='Chat message' placeholder={placeholder} />;
   return (
     <>
+      <button type='button'>Elsewhere</button>
       {phase === 'first' || phase === 'both' ? <section aria-label='first'>{slot}</section> : null}
       {phase === 'second' || phase === 'both' ? <article aria-label='second'>{slot}</article> : null}
     </>
@@ -138,6 +149,66 @@ describe('HandOffSlot', () => {
     expect(input.tauHandOff).toMatchObject({ edited: true });
   });
 
+  /* Text typed for one project is never offered in another's placeholder after a client navigation. */
+  it("should start a new input for another project's placeholder, and drop the unadopted one", () => {
+    const { rerender, container } = render(<Stage phase='first' scope='home/one' />);
+    const first = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    typeInto(first, 'For project one');
+
+    rerender(<Stage phase='second' scope='home/two' />);
+
+    const second = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    expect(second).not.toBe(first);
+    expect(second.value).toBe('');
+    expect(container.querySelectorAll('textarea')).toHaveLength(1);
+  });
+
+  it('should empty the input when the same placeholder turns to another project', () => {
+    const { rerender, container } = render(<Stage phase='first' scope='home/one' />);
+    const first = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    typeInto(first, 'For project one');
+
+    rerender(<Stage phase='first' scope='home/two' />);
+
+    const second = within(container).getByRole<HandOffElement>('textbox');
+    expect(second.value).toBe('');
+    typeInto(second, 'b');
+    expect(second.tauHandOff).toMatchObject({ edited: true });
+  });
+
+  /* The placeholder's copy can change while the input is retained: the one element takes it, and keeps the text. */
+  it('should keep the retained input when its placeholder text changes', () => {
+    const { rerender, container } = render(<Stage phase='first' />);
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    input.focus();
+    typeInto(input, 'kept');
+
+    rerender(<Stage phase='first' placeholder='Ask Tau anything' />);
+
+    expect(within(container).getByRole('textbox')).toBe(input);
+    expect(input).toHaveAttribute('placeholder', 'Ask Tau anything');
+    expect(input.value).toBe('kept');
+    expect(input).toHaveFocus();
+  });
+
+  /* A remount puts the caret and scroll back, but never takes focus from a control the person moved to meanwhile. */
+  it('should not take focus back from a control focused while no placeholder stood', () => {
+    const { rerender, container } = render(<Stage phase='first' />);
+    const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
+    input.focus();
+    typeInto(input, 'Make a hinge');
+    input.setSelectionRange(5, 5);
+
+    rerender(<Stage phase='none' />);
+    const elsewhere = within(container).getByRole('button', { name: 'Elsewhere' });
+    elsewhere.focus();
+    rerender(<Stage phase='second' />);
+
+    expect(within(container).getByRole('textbox')).toBe(input);
+    expect(elsewhere).toHaveFocus();
+    expect([input.selectionStart, input.selectionEnd]).toEqual([5, 5]);
+  });
+
   /* P4 failure: if the adopter never arrives the native input keeps working, through every placeholder. */
   it('should stay usable while no adopter arrives', () => {
     const { rerender, container } = render(<Stage phase='first' />);
@@ -165,7 +236,7 @@ describe('useHandOffAdoption', () => {
     typeInto(input, 'Make a bracket.');
     const onAdopted = vi.fn();
 
-    const { result } = renderHook(() => useHandOffAdoption('project-composer', onAdopted));
+    const { result } = renderHook(() => useHandOffAdoption(target, onAdopted));
 
     expect(result.current).toMatchObject({
       kind: 'done',
@@ -176,15 +247,27 @@ describe('useHandOffAdoption', () => {
     view.rerender(<Stage phase='second' />);
     expect(view.container.querySelector('textarea')).toBeNull();
     /* A later adopter, such as the composer of the next chat, gets nothing old. */
-    const later = renderHook(() => useHandOffAdoption('project-composer', onAdopted));
+    const later = renderHook(() => useHandOffAdoption(target, onAdopted));
     expect(later.result.current).toEqual({ kind: 'done', snapshot: undefined });
     expect(onAdopted).toHaveBeenCalledOnce();
+  });
+
+  /* The composer of another project never takes this project's text. */
+  it("should hand nothing to another project's adopter", () => {
+    const view = render(<Stage phase='first' />);
+    typeInto(within(view.container).getByRole<HandOffElement>('textbox'), 'For project one');
+    const onAdopted = vi.fn();
+
+    const { result } = renderHook(() => useHandOffAdoption({ ...target, scope: 'home/two' }, onAdopted));
+
+    expect(result.current).toEqual({ kind: 'done', snapshot: undefined });
+    expect(onAdopted).not.toHaveBeenCalled();
   });
 
   it('should adopt nothing when no native input was ever served', () => {
     const onAdopted = vi.fn();
 
-    const { result } = renderHook(() => useHandOffAdoption('project-composer', onAdopted));
+    const { result } = renderHook(() => useHandOffAdoption(target, onAdopted));
 
     expect(result.current).toEqual({ kind: 'done', snapshot: undefined });
     expect(onAdopted).not.toHaveBeenCalled();
@@ -209,7 +292,7 @@ describe('useHandOffAdoption', () => {
     input.dispatchEvent(new InputEvent('input', { isComposing: true }));
     const onAdopted = vi.fn();
 
-    const { result } = renderHook(() => useHandOffAdoption('project-composer', onAdopted));
+    const { result } = renderHook(() => useHandOffAdoption(target, onAdopted));
 
     expect(result.current).toEqual({ kind: 'waiting' });
     expect(within(view.container).getByRole('textbox')).toBe(input);
@@ -230,7 +313,7 @@ describe('useHandOffAdoption', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
     vi.unstubAllGlobals();
 
-    const { result } = renderHook(() => useHandOffAdoption('project-composer', vi.fn()));
+    const { result } = renderHook(() => useHandOffAdoption(target, vi.fn()));
 
     expect(result.current).toMatchObject({ kind: 'done', snapshot: { submitQueued: true } });
   });

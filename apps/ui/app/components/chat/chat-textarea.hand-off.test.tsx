@@ -95,7 +95,8 @@ vi.mock('#services/headless-capture.js', () => ({
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 
-const slot = <HandOffSlot surface='project-composer' label='Chat message' placeholder='Ask Tau' />;
+const target = { surface: 'project-composer', scope: 'home/one' } as const;
+const slot = <HandOffSlot surface='project-composer' scope='home/one' label='Chat message' placeholder='Ask Tau' />;
 
 describe('ChatTextarea hand-off (PL6)', () => {
   beforeEach(() => {
@@ -112,7 +113,7 @@ describe('ChatTextarea hand-off (PL6)', () => {
     input.dispatchEvent(new InputEvent('input', { bubbles: true }));
     input.setSelectionRange(4, 4);
 
-    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOffSurface='project-composer' />);
+    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
 
     expect(mocks.send).toHaveBeenCalledExactlyOnceWith({
       type: 'setDraftText',
@@ -133,7 +134,7 @@ describe('ChatTextarea hand-off (PL6)', () => {
     input.dispatchEvent(new CompositionEvent('compositionstart'));
     input.value = 'に';
 
-    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOffSurface='project-composer' />);
+    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
 
     expect(screen.getByText('Composer skeleton')).toBeInTheDocument();
     expect(mocks.desktopMounts).toEqual([]);
@@ -149,18 +150,31 @@ describe('ChatTextarea hand-off (PL6)', () => {
   it('should leave the draft alone when the native input was never edited', () => {
     render(<section aria-label='Placeholder'>{slot}</section>);
 
-    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOffSurface='project-composer' />);
+    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
 
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.desktopMounts).toEqual([expect.objectContaining({ edited: false })]);
+  });
+
+  /* A client navigation before adoption: the next project's composer never takes the last project's text. */
+  it("should not adopt another project's native input", () => {
+    const placeholder = render(<section aria-label='Placeholder'>{slot}</section>);
+    const input = within(placeholder.container).getByRole<HTMLTextAreaElement>('textbox');
+    input.value = 'For project one';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+
+    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={{ ...target, scope: 'home/two' }} />);
+
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.desktopMounts).toEqual([undefined]);
   });
 
   it('should adopt nothing without a surface, or once the surface has been adopted', () => {
     render(<section aria-label='Placeholder'>{slot}</section>);
 
     render(<ChatTextarea mode='edit' onSubmit={vi.fn()} />);
-    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOffSurface='project-composer' />);
-    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOffSurface='project-composer' />);
+    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
+    render(<ChatTextarea mode='main' onSubmit={vi.fn()} handOff={target} />);
 
     expect(mocks.desktopMounts).toEqual([undefined, expect.objectContaining({ edited: false }), undefined]);
   });

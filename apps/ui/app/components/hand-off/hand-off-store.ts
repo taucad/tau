@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   captureHandOff,
   installHandOffTracker,
@@ -28,6 +28,12 @@ export const handOffSurfaces = {
 /** A surface name. */
 export type HandOffSurface = keyof typeof handOffSurfaces;
 
+/**
+ * A surface for one owner, such as one project: text served for one scope is never offered to another's placeholder
+ * or adopter, so a client navigation before adoption starts over instead of carrying the text across.
+ */
+export type HandOffTarget = { readonly surface: HandOffSurface; readonly scope: string };
+
 /** What an adoption attempt found. */
 export type HandOffAdoption =
   | { readonly kind: 'none' }
@@ -43,6 +49,8 @@ type Place = {
 };
 
 type Entry = {
+  /** Whom the element's text was typed for. */
+  scope: string | undefined;
   element: HandOffElement | undefined;
   /** Mounted slots, oldest first; the element lives in the last. */
   hosts: HTMLElement[];
@@ -54,6 +62,7 @@ type Entry = {
 };
 
 const createEntry = (): Entry => ({
+  scope: undefined,
   element: undefined,
   hosts: [],
   place: undefined,
@@ -70,14 +79,18 @@ const readPlace = (element: HandOffElement): Place => ({
   scrollTop: element.scrollTop,
 });
 
-/** Put the person back where they were: caret, scroll and, if it had it, focus, without scrolling the page. */
+/**
+ * Put the person back where they were: caret and scroll always, and focus, without scrolling the page, only when it
+ * had it and nothing else took it meanwhile.
+ */
 const restorePlace = (element: HandOffElement, place: Place | undefined): void => {
   if (place === undefined) {
     return;
   }
   element.setSelectionRange(place.start, place.end, place.direction);
   element.scrollTop = place.scrollTop;
-  if (place.focused && document.activeElement !== element) {
+  const active = document.activeElement;
+  if (place.focused && (active === null || active === document.body)) {
     element.focus({ preventScroll: true });
   }
 };
@@ -103,9 +116,9 @@ const placeInto = (entry: Entry, element: HandOffElement, host: HTMLElement): vo
  * @returns The store.
  */
 export const createHandOffStore = (): {
-  attach: (surface: HandOffSurface, host: HTMLElement) => void;
+  attach: (target: HandOffTarget, host: HTMLElement) => void;
   detach: (surface: HandOffSurface, host: HTMLElement) => void;
-  adopt: (surface: HandOffSurface) => HandOffAdoption;
+  adopt: (target: HandOffTarget) => HandOffAdoption;
   isAdopted: (surface: HandOffSurface) => boolean;
   version: (surface: HandOffSurface) => number;
   subscribe: (surface: HandOffSurface, listener: () => void) => () => void;
@@ -128,11 +141,32 @@ export const createHandOffStore = (): {
   };
 
   return {
-    /** A slot mounted: the first one's input becomes the surface's, every later one receives it. */
-    attach: (surface, host) => {
+    /**
+     * A slot mounted: the first one's input becomes the surface's, every later one for the same scope receives it.
+     * A slot for another scope drops the unadopted input and starts over with its own.
+     */
+    attach: ({ surface, scope }, host) => {
       const entry = entryOf(surface);
       if (entry.adopted) {
         return;
+      }
+      if (entry.scope !== scope) {
+        const previous = entry.element;
+        if (previous !== undefined && host.contains(previous)) {
+          /* The same slot, now for another scope: an empty input with the same attributes takes the old one's place
+           * (a clone would copy the value). */
+          const fresh = document.createElement('textarea');
+          for (const attribute of previous.attributes) {
+            fresh.setAttribute(attribute.name, attribute.value);
+          }
+          previous.replaceWith(fresh);
+        } else {
+          previous?.remove();
+        }
+        entry.scope = scope;
+        entry.element = undefined;
+        entry.hosts = [];
+        entry.place = undefined;
       }
       entry.hosts.push(host);
       if (entry.element === undefined) {
@@ -168,10 +202,10 @@ export const createHandOffStore = (): {
         placeInto(entry, element, remaining);
       }
     },
-    adopt: (surface) => {
+    adopt: ({ surface, scope }) => {
       const entry = entryOf(surface);
       const { element } = entry;
-      if (entry.adopted || element === undefined) {
+      if (entry.adopted || element === undefined || entry.scope !== scope) {
         return { kind: 'none' };
       }
       if (isHandOffComposing(element)) {
@@ -230,21 +264,23 @@ const noVersion = (): number => 0;
 const noSubscription = (): (() => void) => () => undefined;
 
 /**
- * Adopt a surface's native input when the rich surface mounts.
+ * Adopt a surface's native input, served for the same scope, when the rich surface mounts.
  *
  * The attempt runs in a layout effect and its result re-renders before the browser paints or delivers another key,
  * so the snapshot and the rich surface's first commit are one step: nothing typed between them is lost. While a
  * composition is open the state stays `waiting`, and the attempt runs again when it closes.
  *
- * @param surface - The surface to adopt, or undefined for a mount that adopts nothing.
+ * @param target - The surface and scope to adopt, or undefined for a mount that adopts nothing.
  * @param onAdopted - Called once with the snapshot, before the rich surface renders it; it moves the text into its
  *   owner.
  * @returns The adoption state.
  */
 export function useHandOffAdoption(
-  surface: HandOffSurface | undefined,
+  target: HandOffTarget | undefined,
   onAdopted: (snapshot: HandOffSnapshot) => void,
 ): HandOffAdoptionState {
+  const surface = target?.surface;
+  const scope = target?.scope;
   const subscribe = useCallback(
     (listener: () => void) => (surface === undefined ? noSubscription() : handOffStore.subscribe(surface, listener)),
     [surface],
@@ -258,11 +294,14 @@ export function useHandOffAdoption(
     surface === undefined ? { kind: 'done', snapshot: undefined } : { kind: 'waiting' },
   );
   const isWaiting = state.kind === 'waiting';
+  /* The store's version this mount last tried at: a closed composition bumps it, and the attempt runs again. */
+  const attemptedVersion = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
-    if (!isWaiting || surface === undefined) {
+    if (!isWaiting || surface === undefined || scope === undefined || attemptedVersion.current === version) {
       return;
     }
-    const adoption = handOffStore.adopt(surface);
+    attemptedVersion.current = version;
+    const adoption = handOffStore.adopt({ surface, scope });
     if (adoption.kind === 'pending') {
       return;
     }
@@ -271,6 +310,6 @@ export function useHandOffAdoption(
     }
     // oxlint-disable-next-line react/set-state-in-effect -- A layout-effect update renders before paint, so the snapshot and the rich surface commit as one step.
     setState({ kind: 'done', snapshot: adoption.kind === 'adopted' ? adoption.snapshot : undefined });
-  }, [isWaiting, surface, version, onAdopted]);
+  }, [isWaiting, surface, scope, version, onAdopted]);
   return state;
 }

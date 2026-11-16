@@ -549,15 +549,24 @@ export const ChatTextareaDesktop = memo(function ({
   }, [editor, earlyInput, enableAutoFocus]);
 
   /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
-   * text. An edit after that Enter had already cancelled it (`submitQueued` is false then). */
+   * text. An edit after that Enter had already cancelled it (`submitQueued` is false then). The send waits, still
+   * queued, while sending is not permitted; an edit made in the editor meanwhile cancels it as one in the native input
+   * would. It carries the editor's text, since the draft this composer was rendered with can still be the previous
+   * one. */
   const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
+  const isQueuedSubmitPermitted =
+    sendRefusalOf({ sendBlockReason, isSubmitting, isAttaching, isSubmitDisabled, isEmpty: false }) === undefined;
   useEffect(() => {
-    if (!editor || !queuedSubmitRef.current) {
+    if (!editor || !queuedSubmitRef.current || !isQueuedSubmitPermitted) {
       return;
     }
     queuedSubmitRef.current = false;
-    void submitWithDictation();
-  }, [editor, submitWithDictation]);
+    const content = extractContent(editor);
+    if (content.text !== earlyInput?.text) {
+      return;
+    }
+    void submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
+  }, [editor, earlyInput, isQueuedSubmitPermitted, submitWithReferences]);
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.

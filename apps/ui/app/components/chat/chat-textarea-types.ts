@@ -1,5 +1,5 @@
 import type { CadReference } from '@taucad/chat/references';
-import { useState, useRef, useEffect, useCallback, useImperativeHandle, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useImperativeHandle, useLayoutEffect, useMemo } from 'react';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
@@ -18,7 +18,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-import type { HandOffSurface } from '#components/hand-off/hand-off-store.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
@@ -152,10 +152,10 @@ export type ChatTextareaProperties = {
   readonly adoptedEarlyInput?: EarlyChatInput;
   /**
    * The hand-off surface whose native input this composer adopts on mount (progressive loading P4): the project's
-   * placeholder serves one, and its text, caret, focus and a queued send come here. Ignored with either arrangement
-   * above.
+   * placeholder serves one, and its text, caret, focus and a queued send come here. Only an input served for the same
+   * scope (the project) is adopted. Ignored with either arrangement above.
    */
-  readonly handOffSurface?: HandOffSurface;
+  readonly handOff?: HandOffTarget;
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
@@ -448,7 +448,9 @@ export function useChatTextareaLogic({
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
   const resumeRef = useRef(canResume ? resume : undefined);
-  useEffect(() => {
+  /* A layout effect, so a child's effect that submits in the render that permits it (P4's queued submit) reads that
+   * render's state: passive effects run child first. */
+  useLayoutEffect(() => {
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;
     sendBlockReasonRef.current = sendBlockReason;

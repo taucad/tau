@@ -135,6 +135,9 @@
 \* its edit into the draft before the editor renders, and an Enter pressed there is one submit through the
 \* composer's existing Enter path once the editor holds the text. Submit, admission, delivery and the queue keep
 \* the same paths and guards. No action or verdict changes.
+\* PL6 review: the composer adopts only an input its own project's placeholder served, and the queued submit waits,
+\* still queued, until the composer's guards permit a send, then carries the editor's text through the same submit.
+\* The composer's guard refs update in a layout effect. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -933,6 +933,23 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     expect(revealDelay()).toBe(300);
   });
 
+  /* Review round 14: a replace keeps the document's entry, so the settled open must end on its own. */
+  it("times a lane remounted over a loading chat after the open's transcript settled from its own start", () => {
+    const clock = freshPerformanceClock();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    const open = renderOverDeferredTranscript(history, clock);
+    act(() => {
+      publishChatState({ messages: history, transcript: 'loaded' });
+    });
+    open.unmount();
+    vi.spyOn(performance, 'now').mockReturnValue(9000);
+    renderOverDeferredTranscript(history, clock);
+
+    expect(revealDelay()).toBe(1000);
+  });
+
   it('times a load that starts after the open from its own start', () => {
     vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/elsewhere')]);
     vi.spyOn(performance, 'now').mockReturnValue(5000);

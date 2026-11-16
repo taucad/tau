@@ -180,9 +180,9 @@ const isOnDocumentProject = (): boolean => {
 };
 
 /**
- * The wait clocks whose document open is over: a lane on the document's project unmounted after the page left that
- * project, so a lane mounted on it again (a return from Home or another project) is a later wait, timed from its own
- * start. Keyed by clock, which is the document's performance clock in the application.
+ * The wait clocks whose document open is over: a lane held a settled transcript, or a lane on the document's project
+ * unmounted after the page left that project, so a lane mounted loading again (a return from Home or another project,
+ * the lane reopened over another chat) is a later wait, timed from its own start. Keyed by clock, which is the document's performance clock in the application.
  */
 const endedDocumentOpens = new WeakSet<WaitClock>();
 
@@ -225,6 +225,13 @@ function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'>
     },
     [clock],
   );
+  /* So does a transcript a lane holds settled: a lane mounted loading later on the same entry (the lane reopened over
+   * another chat, a replace to it) is a later wait, timed from its own start. */
+  useEffect(() => {
+    if (!active) {
+      endedDocumentOpens.add(clock);
+    }
+  }, [active, clock]);
   let current = tracked;
   if (tracked.active !== active) {
     current = active ? { active, ...startTranscriptWait(clock, false) } : { ...tracked, active };

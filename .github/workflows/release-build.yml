@@ -1345,8 +1345,10 @@ jobs:
     concurrency:
       group: desktop-promotion-${{ needs.resolve.outputs.channel }}
       cancel-in-progress: false
+    # The one production desktop step that reaches users, so the release-manager approval is here and nowhere else in
+    # this workflow (approvals audit R3): `desktop-ota-promotion` admits only `desktop@*` tags.
     environment:
-      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
+      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop-ota-promotion' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

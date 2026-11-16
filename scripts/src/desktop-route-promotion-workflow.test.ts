@@ -225,7 +225,19 @@ describe('desktop installer publication channel gates', () => {
         { event: 'workflow_dispatch', channel: 'production', operation: 'promote-routes' },
         { production: 'true' },
       ),
-    ).toEqual(['desktop-installers-production']);
+    ).toEqual(['desktop-promotion-production']);
+  });
+
+  // Approvals audit R2: candidate signing (`desktop-installers-production`) is unreviewed, so no publication run may use it.
+  it('should promote production only in the reviewed promotion environment', () => {
+    const selected = everyRun.flatMap((run) => environments(run, { staging: 'true', production: 'true' }));
+    expect(selected).not.toContain('desktop-installers-production');
+    expect(
+      environments(
+        { event: 'workflow_dispatch', channel: 'production', operation: 'renew-routes' },
+        { production: 'true' },
+      ),
+    ).toEqual(['desktop-installer-renewal-production']);
   });
 
   it('should run only from main', () => {

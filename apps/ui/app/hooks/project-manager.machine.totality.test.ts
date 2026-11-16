@@ -31,10 +31,8 @@ import {
 } from '#hooks/project-manager.machine.js';
 import type { ProjectManagerEvent } from '#hooks/project-manager.machine.js';
 
-vi.mock('#hooks/object-store.worker.js?worker', () => ({
-  default: class MockWorker {
-    public terminate = vi.fn();
-  },
+vi.mock('#hooks/object-store-worker.js', () => ({
+  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
 
 /** One or more samples of every event type; the mapped type fails to compile when the union gains a type. */

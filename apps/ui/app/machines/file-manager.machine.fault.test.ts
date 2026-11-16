@@ -21,14 +21,15 @@ vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
   },
 }));
 
-vi.mock('#machines/file-manager.worker.js?worker', () => ({
-  default: class MockWorker {
+vi.mock('#machines/file-manager-worker.js', () => {
+  class MockWorker {
     public terminate = vi.fn();
     public postMessage = vi.fn();
     public addEventListener = vi.fn();
     public removeEventListener = vi.fn();
-  },
-}));
+  }
+  return { createFileManagerWorker: () => new MockWorker() };
+});
 
 afterEach(() => {
   faults.reported.length = 0;

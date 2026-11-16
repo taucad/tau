@@ -1395,7 +1395,31 @@ export class RootedViews {
           paths.map((path) => resolveLocal(path).localPath),
         ),
       endExpectation: (options?: Readonly<{ failed?: boolean }>): void => {
+        /*
+         * The rows a listing showed arriving have nothing to replace them once the write ends: a folder only they
+         * made raises no event of its own. Each directory holding the outermost of them is told to re-list, so
+         * every watch at or under it does, failed or not (I7).
+         */
+        const arriving = projectIndexes.arrivingIn(root, { recursive: true });
         this._projectIndexes.endExpectation(root, options);
+        const rows = new Set(arriving.map((entry) => entry.path));
+        const parents = new Set<string>();
+        for (const { path } of arriving) {
+          const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+          if (!rows.has(parent)) {
+            parents.add(parent);
+          }
+        }
+        this._pipeline.emitChangeEvents(
+          [...parents].map((parent) => {
+            const at = resolveLocal(parent);
+            return {
+              event: { type: 'directoryChanged', path: at.authorityPath, backend: at.resolution.backend },
+              operations: [{ path: at.authorityPath, resolution: at.resolution }],
+            };
+          }),
+          mutationContext,
+        );
       },
       facts,
       compareIndex,

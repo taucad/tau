@@ -718,6 +718,36 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
 });
 
 describe('expected entries (D10)', () => {
+  /*
+   * An ended write leaves its arriving rows nothing to replace them: a folder only they made never raises an event of
+   * its own. So the end tells every watch under them to re-list, failed or not, and the rows vanish (I7).
+   */
+  it.each([
+    ['failed', { failed: true }],
+    ['landed', undefined],
+  ] as const)(
+    'should tell every watch under a %s write’s arriving rows to re-list when it ends',
+    async (_case, options) => {
+      const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+      const view = service.createRootedFileSystem(route);
+      await raw.expectEntries!([
+        { path: 'main.scad', size: 27, arriving: false },
+        { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+      ]);
+      const seen: string[] = [];
+      const stop = view.watch({ paths: ['lib/deep'], recursive: false }, (event) => {
+        seen.push(event.type);
+      });
+      raw.endExpectation!(options);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      stop();
+      expect(seen.length).toBeGreaterThan(0);
+      await expect(view.readdirWithStats!('lib')).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
   it('should know a tree write’s entries in a cold root’s index and answer when they have landed', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);
     service.setPendingObjectSource(source);

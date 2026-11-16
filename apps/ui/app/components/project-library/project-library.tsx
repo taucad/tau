@@ -11,7 +11,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import type { ColumnDef, VisibilityState, SortingState } from '@tanstack/react-table';
+import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -19,6 +19,7 @@ import type { PendingProjectRecovery } from '#types/pending-project-operation.ty
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import {
   DataTable,
   DataTableSearch,
@@ -38,7 +39,6 @@ import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
-import { useProjectListShape } from '#hooks/use-project-list-shape.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {
   AlertDialog,
@@ -55,7 +55,6 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { isFunction } from '@taucad/ui-core/utils/function.utils';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
-import { ProjectActionMenu } from '#components/project-library/project-cloud-delete.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
@@ -69,7 +68,6 @@ import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
-import { indicatorDelayMilliseconds } from '@taucad/ui/utils/wait-timing';
 import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
@@ -96,7 +94,6 @@ import {
   useMaterializeCloudProjects,
 } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
-import type { RememberedPlace, RememberedProject } from '#lib/project-list-shape.lib.js';
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -207,23 +204,6 @@ export function NewProjectLink({
   );
 }
 
-/**
- * The last listing's count (R5), which the server also read from its cookie, and on the client the projects the
- * listing snapshot remembered (A15g). The Trash is a different list, so it keeps the unknown shape.
- *
- * @param isShowingDeleted - Whether the library shows the Trash.
- * @returns The count to reserve, or `undefined` when unknown, and the remembered projects, when the snapshot has them.
- */
-function useRememberedLibrary(isShowingDeleted: boolean): {
-  readonly count: number | undefined;
-  readonly projects: readonly RememberedProject[] | undefined;
-} {
-  const rememberedShape = useProjectListShape();
-  return isShowingDeleted
-    ? { count: undefined, projects: undefined }
-    : { count: rememberedShape?.count, projects: rememberedShape?.projects };
-}
-
 export function ProjectLibrary({
   headingLevel = 1,
   emptyContent,
@@ -263,7 +243,6 @@ export function ProjectLibrary({
     updateName,
     isLoading,
   } = useProjects({ includeDeleted: showDeleted });
-  const { count: rememberedCount, projects: rememberedProjects } = useRememberedLibrary(showDeleted);
   const degradedProjects = projects.filter(
     (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
   );
@@ -279,9 +258,9 @@ export function ProjectLibrary({
   } = useCloudProjects();
   const auth = useResolvedAuth();
   const rows = toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted });
-  /* P-g: the wait for the listing is the header's trailing slot, shown after 1,000 ms, over remembered cards or the
-     empty frames alike; the grid itself is busy for as long. */
-  const isAwaitingListing = isLoading && projects.length === 0 && (rows.length > 0 || rememberedCount !== 0);
+  /* Until the local listing answers, the grid draws skeleton cards, which say the wait; the header's slot is
+     Tau Cloud's alone. */
+  const isAwaitingListing = isLoading && projects.length === 0;
   /* Read before the host's empty-content return below, so the hooks run in one order. */
   const phoneTopBar = usePhoneTopBar();
   const isHeaderInPhoneBar = phoneTopBar.hasTitle && phoneTopBar.hasAction;
@@ -326,22 +305,12 @@ export function ProjectLibrary({
     /* A Retry pressed during a wait, slow or not, starts a wait of its own, timed and announced from the press. */
     setCloudWait({ startedAt: cloudRetriedAt, isAnnounced: true, retriedAt: cloudRetriedAt, followsFailure: true });
   }
-  /* When the local listing's wait handed the slot to a running Tau Cloud wait, so a shown indicator stays shown. */
-  const [wasAwaitingListing, setWasAwaitingListing] = useState(isAwaitingListing);
-  const [listingHandoverAt, setListingHandoverAt] = useState<number>();
-  if (wasAwaitingListing !== isAwaitingListing) {
-    setWasAwaitingListing(isAwaitingListing);
-    if (!isAwaitingListing && isAwaitingCloud) {
-      setListingHandoverAt(waitClock.now());
-    }
-  } else if (!isAwaitingCloud && listingHandoverAt !== undefined) {
-    setListingHandoverAt(undefined);
-  }
-  const cloudShownFrom = shownFromOf({ wait: cloudWait, listingHandoverAt });
+  /* A Tau Cloud wait is timed from its own start, also when it began under the skeleton grid. */
+  const cloudShownFrom = cloudWait?.startedAt ?? 0;
   /* The slot's one Retry shows beside the first wait's slow words at the slow mark, as the indicator's own would. */
   /* Active once the wait's start is recorded, so this render, which may still be recording it, times nothing from 0. */
   const { timing: cloudWaitTiming } = useWaitClock({
-    /* The listing's own wait holds the slot until it answers, so the Retry is timed from when it can show. */
+    /* The skeleton grid holds the wait until the local listing answers, so the Retry is timed from when it can show. */
     active: isAwaitingCloud && cloudWait !== undefined && !isAwaitingListing,
     startedAt: cloudShownFrom,
   });
@@ -632,8 +601,8 @@ export function ProjectLibrary({
 
   const isCatalogUnavailable = !showDeleted && auth === 'authed' && (cloudPending || isCloudFailed);
   /* A host with its own empty content (Home) shows it in place of an empty section. The section stays
-     whenever it has something to say: the Trash, a failure, a repair, or Tau Cloud still listing. An
-     unknown count counts as empty, so a first visit does not paint cards that then vanish. */
+     whenever it has something to say: the Trash, a failure, a repair, Tau Cloud still listing, or the
+     local listing still loading (its skeleton cards). */
   const hasNotice = Boolean(listingError) || workspaceBindingRepairs.length + conflicts.length + recoveries.length > 0;
   if (
     emptyContent !== undefined &&
@@ -641,7 +610,7 @@ export function ProjectLibrary({
     !showDeleted &&
     !isCatalogUnavailable &&
     !hasNotice &&
-    (!isLoading || (rememberedCount ?? 0) === 0)
+    !isLoading
   ) {
     return emptyContent;
   }
@@ -655,8 +624,8 @@ export function ProjectLibrary({
   }
   /* The slot takes the header row's spare width and clips there, so its words never wrap the row (P-k's slot rule). */
   const statusSlot = (
-    /* The listing's own wait keeps the slot while it runs: until it answers, there are no projects on this device to
-       speak of, and its slow words and Retry stay reachable. */
+    /* The local listing's wait is the grid's skeleton cards; the slot waits for it to answer before speaking for
+       Tau Cloud. */
     <LibraryStatusSlot
       notice={shownCloudNotice}
       /* A Retry's wait is announced by the slot's status region, there before the press, so the words are heard. */
@@ -691,20 +660,13 @@ export function ProjectLibrary({
     >
       <WaitIndicator
         className='min-w-0 justify-end overflow-hidden'
-        /* The sidebar's Recents label announces the local listing's wait, and the slot's status region a Retry's (one
-           announcement per group); the indicator announces any other Tau Cloud wait, once its words are revealed. */
-        live={!isAwaitingListing && cloudWait?.isAnnounced !== true}
-        active={isAwaitingListing || isAwaitingCloud}
-        startedAt={isAwaitingListing ? 0 : cloudShownFrom}
-        label={isAwaitingListing ? 'Loading projects' : 'Loading Tau Cloud projects'}
-        slowLabel={isAwaitingListing ? 'Still loading projects' : 'Still loading Tau Cloud projects'}
-        onRetry={
-          isAwaitingListing
-            ? () => {
-                void retry();
-              }
-            : undefined
-        }
+        /* The slot's status region announces a Retry's wait (one announcement per group); the indicator announces any
+           other Tau Cloud wait, once its words are revealed. */
+        live={cloudWait?.isAnnounced !== true}
+        active={!isAwaitingListing && isAwaitingCloud}
+        startedAt={cloudShownFrom}
+        label='Loading Tau Cloud projects'
+        slowLabel='Still loading Tau Cloud projects'
       />
     </LibraryStatusSlot>
   );
@@ -907,8 +869,6 @@ export function ProjectLibrary({
           isShowingDeleted={showDeleted}
           onShowDeletedChange={handleToggleDeleted}
           isLoading={isLoading && projects.length === 0}
-          rememberedCount={rememberedCount}
-          rememberedProjects={rememberedProjects}
           viewMode={viewMode}
           actions={actions}
           onOpenCloudProject={handleOpenCloudProject}
@@ -978,10 +938,6 @@ type UnifiedProjectListProps = {
   readonly isShowingDeleted: boolean;
   readonly onShowDeletedChange: (isShowing: boolean) => void;
   readonly isLoading: boolean;
-  /** The last listing's count (R5): how many cards to reserve while loading, `0` for the empty state. */
-  readonly rememberedCount?: number;
-  /** The projects the listing snapshot remembered (A15g): the cards drawn while loading, by name. */
-  readonly rememberedProjects?: readonly RememberedProject[];
   readonly rows: LibraryRow[];
   readonly viewMode: 'grid' | 'table';
   readonly actions: ProjectActions;
@@ -1009,100 +965,55 @@ const defaultPageSize = 20;
 const minimumPageSize = defaultPageSize;
 const pageSizeOptions = [minimumPageSize, 50, 100, 150, 200];
 
+/** Skeleton cards drawn while the first listing is pending: two rows at the widest grid, whatever the device has. */
+const skeletonCardCount = 10;
+
 /**
- * What the list draws before and after its rows arrive (R5, R12, R14).
+ * What the list draws before and after its rows arrive (R12, R14).
  *
- * @param input - The list's row counts, loading state, remembered count and page size.
- * @returns Whether the list is empty, still awaiting rows, how many cards to reserve, and whether it pages.
+ * @param input - The list's row counts and loading state.
+ * @returns Whether the list is empty, still awaiting rows, and whether it pages.
  */
 function projectListLayout({
   rowCount,
   filteredRowCount,
   isLoading,
-  rememberedCount,
-  pageSize,
 }: {
   readonly rowCount: number;
   readonly filteredRowCount: number;
   readonly isLoading: boolean;
-  readonly rememberedCount: number | undefined;
-  readonly pageSize: number;
-}): { isEmpty: boolean; isAwaitingRows: boolean; placeholderCount: number; isPaged: boolean } {
-  const isEmpty = rowCount === 0 && (!isLoading || rememberedCount === 0);
-  const isAwaitingRows = isLoading && !isEmpty;
-  /* R14: paging is offered only when the list is longer than the smallest page, and is
-     reserved with the grid from the remembered count rather than appearing after it. */
-  const pagedCount = isAwaitingRows ? (rememberedCount ?? 0) : filteredRowCount;
+}): { isEmpty: boolean; isAwaitingRows: boolean; isPaged: boolean } {
+  const isEmpty = rowCount === 0 && !isLoading;
+  const isAwaitingRows = isLoading;
+  /* R14: paging is offered only when the list is longer than the smallest page. */
   return {
     isEmpty,
     isAwaitingRows,
-    placeholderCount: Math.min(rememberedCount ?? defaultPageSize, pageSize),
-    isPaged: pagedCount > minimumPageSize,
+    isPaged: !isAwaitingRows && filteredRowCount > minimumPageSize,
   };
 }
 
-/** The columns a remembered card is sorted and searched by, as the list's own columns define them. */
-const rememberedColumns: Array<ColumnDef<RememberedProject & { readonly description?: string }>> = [
-  { accessorKey: 'name', enableSorting: true },
-  { accessorKey: 'description' },
-  { accessorKey: 'lastActivityAt', sortingFn: 'datetime' },
-];
-
 /**
- * The remembered cards a loading grid draws (P-g): the snapshot's projects through a table with the list's own sort,
- * search and page size, so an accurate snapshot moves nothing when the listing answers. The snapshot holds no
- * description, so a search or sort on it alone is settled by the listing.
+ * One loading card: the card's own frame with skeletons where its media, name, location and Open button sit.
  *
- * @param input - The remembered projects, the list's sorting and search, and its page size.
- * @returns The first page of remembered cards.
+ * @returns The skeleton card, hidden from assistive technology.
  */
-function useRememberedCards({
-  projects,
-  sorting,
-  globalFilter,
-  pageSize,
-}: {
-  readonly projects: readonly RememberedProject[] | undefined;
-  readonly sorting: SortingState;
-  readonly globalFilter: string | undefined;
-  readonly pageSize: number;
-}): RememberedProject[] | undefined {
-  'use no memo';
-
-  const data = useMemo(() => [...(projects ?? [])], [projects]);
-  // oxlint-disable-next-line react/incompatible-library -- Opted out of the compiler, as the list's own table is.
-  const table = useReactTable({
-    data,
-    columns: rememberedColumns,
-    getRowId: (row) => row.id,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    state: { sorting, globalFilter, pagination: { pageIndex: 0, pageSize } },
-  });
-  return projects === undefined ? undefined : table.getRowModel().rows.map((row) => row.original);
-}
-
-/**
- * The room one card takes while nothing about it is known (P-g, the server render and the hydration frame): a card's
- * box at its real height, drawn invisible, so the grid region has the height the count gives and no card shape is
- * painted. The remembered or listed card that follows arrives into the room without moving anything.
- *
- * @returns The invisible room, hidden from assistive technology.
- */
-function ProjectCardRoom(): React.JSX.Element {
+function ProjectCardSkeleton(): React.JSX.Element {
   return (
-    <Card aria-hidden className='invisible relative flex h-full flex-col overflow-hidden pt-0'>
-      <div className='relative aspect-4/3 h-fit w-full bg-muted' />
+    <Card
+      aria-hidden
+      data-testid='project-card-skeleton'
+      className='relative flex h-full flex-col overflow-hidden pt-0'
+    >
+      <Skeleton className='aspect-4/3 w-full rounded-none' />
       <CardHeader>
-        <div className='flex flex-col py-1'>
-          <div className='h-7' />
-          <div className='h-4' />
+        <div className='flex flex-col gap-1 py-1'>
+          <Skeleton className='h-6 w-3/4' />
+          <Skeleton className='h-3 w-1/2' />
         </div>
       </CardHeader>
       <CardFooter className='mt-auto'>
-        <div className='h-8' />
+        <Skeleton className='h-8 w-20' />
       </CardFooter>
     </Card>
   );
@@ -1141,29 +1052,6 @@ type CloudWait = Readonly<{
   /** Whether it followed a failure, whose Retry it keeps in view. */
   followsFailure: boolean;
 }>;
-
-/**
- * When the slot times a Tau Cloud wait from: its start, or, for a first wait that took over a shown local listing wait
- * (shown from 1,000 ms), early enough that it counts as already shown, so the slot does not blink empty at the hand-over.
- *
- * @param state - The Tau Cloud wait and when the local listing's wait handed the slot over, if it did.
- * @returns The start on the wait clock's timeline, or 0 when no wait runs. Milliseconds.
- */
-function shownFromOf({
-  wait,
-  listingHandoverAt,
-}: {
-  readonly wait: CloudWait | undefined;
-  readonly listingHandoverAt: number | undefined;
-}): number {
-  if (wait === undefined) {
-    return 0;
-  }
-  if (wait.isAnnounced || listingHandoverAt === undefined || listingHandoverAt < indicatorDelayMilliseconds) {
-    return wait.startedAt;
-  }
-  return Math.min(wait.startedAt, listingHandoverAt - indicatorDelayMilliseconds);
-}
 
 /** Tau Cloud's Retry in the slot: shown, or, for the first wait, revealed at its slow mark (`slowDelay`). */
 type CloudRetry = Readonly<{ slowDelay?: string }>;
@@ -1299,8 +1187,6 @@ function UnifiedProjectList({
   isShowingDeleted,
   onShowDeletedChange,
   isLoading,
-  rememberedCount,
-  rememberedProjects,
   emptyTitleLevel,
 }: UnifiedProjectListProps) {
   'use no memo';
@@ -1353,17 +1239,13 @@ function UnifiedProjectList({
   });
 
   /* R12: an empty library keeps its controls row where the list's controls sit, and says
-     so in one line; the hero above is the way to start. R5: a remembered empty list is
-     known before the worker lists, so the server renders this state up front. */
-  const { isEmpty, isAwaitingRows, placeholderCount, isPaged } = projectListLayout({
+     so in one line; the hero above is the way to start. */
+  const { isEmpty, isAwaitingRows, isPaged } = projectListLayout({
     rowCount: rows.length,
     filteredRowCount: table.getFilteredRowModel().rows.length,
     isLoading,
-    rememberedCount,
-    pageSize,
   });
   const selectedCount = table.getFilteredSelectedRowModel().rows.length;
-  const rememberedCards = useRememberedCards({ projects: rememberedProjects, sorting, globalFilter, pageSize });
 
   return (
     <div className='space-y-4'>
@@ -1418,33 +1300,12 @@ function UnifiedProjectList({
         // Table View
         <DataTable table={table} columns={columns} />
       ) : isAwaitingRows ? (
-        /* P-g: the remembered cards are the same list and cards the listing then fills, reconciled by id in place;
-           with only a count, the grid holds the room for that many cards and draws none. */
         <ul aria-label='Projects' aria-busy='true' className={projectGridClassName}>
-          {/* One flat list, as the listed grid's, so its items are the ones the listing keeps. The snapshot keeps at
-              most 100 projects; an unfiltered page longer than that keeps the count's height with room. */}
-          {[
-            ...(rememberedCards ?? []).map((project) => (
-              <li key={project.id}>
-                <ProjectLibraryCard project={project} actions={actions} />
-              </li>
-            )),
-            ...Array.from(
-              {
-                length:
-                  rememberedCards === undefined
-                    ? placeholderCount
-                    : globalFilter
-                      ? 0
-                      : Math.max(placeholderCount - rememberedCards.length, 0),
-              },
-              (_, index) => (
-                <li key={`room-${String(index)}`} aria-hidden>
-                  <ProjectCardRoom />
-                </li>
-              ),
-            ),
-          ]}
+          {Array.from({ length: skeletonCardCount }, (_, index) => (
+            <li key={index} aria-hidden>
+              <ProjectCardSkeleton />
+            </li>
+          ))}
         </ul>
       ) : (
         // Grid View
@@ -1472,22 +1333,16 @@ function UnifiedProjectList({
         </ul>
       )}
 
-      {isPaged ? (
-        isAwaitingRows ? (
-          <div aria-hidden data-testid='project-pagination-placeholder' className='h-8' />
-        ) : (
-          <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' />
-        )
-      ) : null}
+      {isPaged ? <DataTablePagination table={table} pageSizeOptions={pageSizeOptions} itemName='project' /> : null}
     </div>
   );
 }
 
-/** A listed project's card, or one the listing snapshot remembered before the listing answered (A15g). */
+/** A listed project's card. */
 type ListedCardProject = ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
 
 type ProjectLibraryCardProps = {
-  readonly project: ListedCardProject | RememberedProject;
+  readonly project: ListedCardProject;
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   /** Whether any card is selected, so every card shows its checkbox (R13). */
@@ -1496,35 +1351,27 @@ type ProjectLibraryCardProps = {
 };
 
 /**
- * Where a card's project lives, as its location row draws it: the place's icon and full label, and the slugs. A
- * remembered card takes the place the snapshot kept; one kept before places were remembered names its slugs only.
+ * Where a card's project lives, as its location row draws it: the place's icon and full label, and the slugs.
  *
- * @param project - The listed or remembered project.
- * @returns The location row's icon, when the place is known, its label and its slug path.
+ * @param project - The listed project.
+ * @returns The location row's icon, its label and its slug path.
  */
-function cardLocation(project: ListedCardProject | RememberedProject): {
-  readonly LocationIcon: LucideIcon | undefined;
+function cardLocation(project: ListedCardProject): {
+  readonly LocationIcon: LucideIcon;
   readonly label: string;
   readonly slugPath: string;
 } {
-  const listed = 'locator' in project ? project : undefined;
   const slugPath = project.slugs
     ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
-    : listed
-      ? projectSlugOf(listed.locator)
-      : '';
-  const place: RememberedPlace | undefined =
-    'locator' in project
-      ? project.locator.backend === 'webaccess'
-        ? { kind: 'workspace', workspaceName: project.workspaceName }
-        : { kind: 'home' }
-      : project.place;
-  if (place === undefined) {
-    return { LocationIcon: undefined, label: slugPath, slugPath };
-  }
+    : projectSlugOf(project.locator);
+  const isWorkspace = project.locator.backend === 'webaccess';
   return {
-    LocationIcon: place.kind === 'workspace' ? FolderOpen : House,
-    label: projectLocationFullLabel(projectLocationDescriptor(place)),
+    LocationIcon: isWorkspace ? FolderOpen : House,
+    label: projectLocationFullLabel(
+      projectLocationDescriptor(
+        isWorkspace ? { kind: 'workspace', workspaceName: project.workspaceName } : { kind: 'home' },
+      ),
+    ),
     slugPath,
   };
 }
@@ -1543,16 +1390,12 @@ export function ProjectLibraryCard({
   const [showPreview, setShowPreview] = useState(false);
   const thumbnail = useProjectThumbnail(project.id);
   const thumbnailSource = thumbnail.url;
-  /* A15g: a remembered card is the same card before the listing confirms it. It names, places and links its project;
-     its controls keep their resting look but take no input (`inert`) until the listing answers. */
-  const listed = 'locator' in project ? project : undefined;
-  const mainFile = listed?.assets.main?.entryPath;
+  const mainFile = project.assets.main?.entryPath;
   const { LocationIcon, label: locationLabel, slugPath } = cardLocation(project);
-  const isInert = listed === undefined;
 
   return (
     <ProjectCard
-      {...(listed?.cloud?.cloudState === 'deleting'
+      {...(project.cloud?.cloudState === 'deleting'
         ? { onOpen: () => undefined, isOpening: true }
         : { to: projectUrl, isOpening })}
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
@@ -1561,7 +1404,6 @@ export function ProjectLibraryCard({
       {/* R13: selection is a mode, not resting chrome: the checkbox shows when the card is
           reached (hover or focus), on coarse pointers, and on every card once one is selected. */}
       <div
-        inert={isInert}
         className={cn(
           'absolute top-2 left-2 z-20',
           !isSelecting &&
@@ -1593,7 +1435,6 @@ export function ProjectLibraryCard({
       <ProjectCardMedia
         thumbnailSource={thumbnailSource}
         isThumbnailPending={thumbnail.status === 'registering' || thumbnail.status === 'pending'}
-        isPreviewInert={isInert}
         isPreviewVisible={showPreview}
         onPreviewVisibilityChange={setShowPreview}
       >
@@ -1613,7 +1454,7 @@ export function ProjectLibraryCard({
       </ProjectCardMedia>
       <CardHeader>
         <div className='relative z-20 -mx-2 flex flex-1 flex-col items-start justify-start overflow-hidden py-1'>
-          <div inert={isInert} className='contents'>
+          <div className='contents'>
             <InlineTextEditor
               ref={nameEditor}
               ariaLabel='Project name'
@@ -1629,11 +1470,11 @@ export function ProjectLibraryCard({
                 role='group'
                 aria-label={`Location: ${locationLabel}`}
               >
-                {LocationIcon === undefined ? null : <LocationIcon className='size-3 shrink-0' />}
+                <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
-                {listed?.cloud?.cloudState === 'deleting' ? (
+                {project.cloud?.cloudState === 'deleting' ? (
                   <span role='status'>Deleting from Tau Cloud…</span>
-                ) : listed?.onCloud === true ? (
+                ) : project.onCloud === true ? (
                   <OnTauCloudMark />
                 ) : undefined}
               </div>
@@ -1650,16 +1491,12 @@ export function ProjectLibraryCard({
           </span>
         </Button>
 
-        <div inert={isInert} className='relative z-20'>
-          {listed ? (
-            <ProjectActionDropdown
-              project={listed}
-              actions={actions}
-              onRename={() => nameEditor.current?.startEditing()}
-            />
-          ) : (
-            <ProjectActionMenu name={project.name} />
-          )}
+        <div className='relative z-20'>
+          <ProjectActionDropdown
+            project={project}
+            actions={actions}
+            onRename={() => nameEditor.current?.startEditing()}
+          />
         </div>
       </CardFooter>
     </ProjectCard>

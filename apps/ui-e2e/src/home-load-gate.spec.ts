@@ -266,13 +266,13 @@ const measureReturningReload = async ({
 
 for (const viewport of ['wide', 'phone'] as const) {
   knownDefect(
-    `H1: Home shows no skeleton after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
+    `H1: Home draws its generic skeletons from the first frame after hydration for a returning visitor on a ${viewport} viewport, with the project listing 3 s late`,
     {
       artifact: `h1-${viewport}`,
       expectedFailure: false,
       budget: homeBudget,
       measure: async () => {
-        const { record } = await measureReturningReload({
+        const { record, since } = await measureReturningReload({
           viewport,
           delays: [projectListingRead],
           label: `h1-${viewport}`,
@@ -282,15 +282,16 @@ for (const viewport of ['wide', 'phone'] as const) {
           record.dropped['skeletonFrames'] === undefined,
           'H1: the record dropped skeleton frames past its frame limit',
         );
-        return record;
+        return { record, answeredAt: since + projectListingRead.milliseconds };
       },
-      assert: (record) => {
+      assert: ({ record, answeredAt }) => {
         const hydrated = record.hydratedFirstFrame!;
-        const after = record.skeletonFrames.filter((frame) => frame.frame >= hydrated.frame);
+        /* The listing is late, so the sidebar rows and the grid hold skeletons from hydration until it answers. */
+        const waiting = record.skeletonFrames.filter((frame) => frame.frame >= hydrated.frame && frame.t < answeredAt);
         expect(
-          after.map((frame) => `frame ${frame.frame} (${frame.t} ms): ${frame.count}`).slice(0, 5),
-          `H1: hydrated by frame ${hydrated.frame} (${hydrated.t} ms), then [data-slot=skeleton] blocks in ${after.length} frames`,
-        ).toEqual([]);
+          waiting.length > 0 && waiting[0]!.frame === hydrated.frame,
+          `H1: hydrated by frame ${hydrated.frame} (${hydrated.t} ms); the listing answered at ${answeredAt} ms; skeleton blocks first showed in ${waiting[0] === undefined ? 'no frame' : `frame ${waiting[0].frame} (${waiting[0].t} ms)`} before it`,
+        ).toBe(true);
       },
     },
   );
@@ -443,26 +444,22 @@ const describeEntry = (entry: ProjectLoadRegionEntry): string =>
   entry.present
     ? `frame ${entry.frame} (${entry.t} ms): node ${entry.node} at ${entry.x},${entry.y} ${entry.width}x${entry.height}${entry.skeletons > 0 ? `, ${entry.skeletons} skeletons` : ''}${entry.text === '' ? '' : ` "${entry.text.slice(0, 40)}"`}`
     : `frame ${entry.frame} (${entry.t} ms): absent`;
-/** The region's state in a frame: its last change at or before that frame. */
-const regionAt = (entries: readonly ProjectLoadRegionEntry[], frame: number): ProjectLoadRegionEntry | undefined =>
-  entries.findLast((entry) => entry.frame <= frame);
-
-/** Home's project grid: the list, or its loading stand-in. */
-const projectGrid = 'ul[aria-label="Projects"], [role="status"][aria-label="Loading projects"]';
+/** Home's project grid: the list of cards, or of card skeletons while the listing is pending. */
+const projectGrid = 'ul[aria-label="Projects"]';
 const homeRegions = {
-  firstCard: 'ul[aria-label="Projects"] [data-slot="card"]',
+  firstCard: 'ul[aria-label="Projects"] [data-slot="card"]:not([data-testid="project-card-skeleton"])',
   grid: projectGrid,
-  recentsIndicator: '[data-slot="sidebar"] [data-slot="wait-indicator-body"]',
+  sidebarSkeleton: '[data-testid="project-navigation-skeleton"]',
 } as const;
 
 knownDefect(
-  'H-b (A13, A15g): a returning reload of Home with the project listing 3 s late shows the seeded rows and cards from the first frame after hydration, with no skeleton in any frame',
+  'H-b (skeleton restoration): a returning reload of Home with the project listing 3 s late paints no project row or card before the listing answers, then paints the seeded rows and cards',
   {
     artifact: 'h-b-wide',
     expectedFailure: false,
     budget: homeBudget,
     measure: async () => {
-      const { record } = await measureReturningReload({
+      const { record, since } = await measureReturningReload({
         viewport: 'wide',
         delays: [projectListingRead],
         label: 'h-b-wide',
@@ -470,37 +467,28 @@ knownDefect(
       });
       precondition(record.hydratedFirstFrame !== undefined, 'H-b: the rich composer never mounted');
       precondition(record.projectRows.length > 0, 'H-b: the sidebar drew no project row');
-      precondition(
-        record.dropped['skeletonFrames'] === undefined,
-        'H-b: the record dropped skeleton frames past its frame limit',
-      );
-      return record;
+      return { record, answeredAt: since + projectListingRead.milliseconds };
     },
-    assert: (record) => {
-      const hydrated = record.hydratedFirstFrame!;
-      const rows = new Set(
-        record.projectRows.filter((entry) => entry.frame <= hydrated.frame).map((entry) => entry.row),
-      );
-      const card = regionAt(regionsOf(record, 'firstCard'), hydrated.frame);
-      /* The rows the loaded sidebar draws: it pages, so not every seeded project has a row. */
-      const drawnRows = [...new Set(record.projectRows.map((entry) => entry.row))];
+    assert: ({ record, answeredAt }) => {
+      /* No listing is remembered across loads: rows and cards come from the listing, never before it. */
+      const earlyRows = record.projectRows.filter((entry) => entry.t < answeredAt);
+      const cards = regionsOf(record, 'firstCard').filter((entry) => entry.present);
+      const earlyCards = cards.filter((entry) => entry.t < answeredAt);
       expectMeasured(
         {
-          missingRows: drawnRows.filter((name) => !rows.has(name)),
-          firstCardNamed: card?.present === true && seededProjects.some((name) => card.text.includes(name)),
-          skeletonFrames: record.skeletonFrames
-            .slice(0, 3)
-            .map((entry) => `frame ${entry.frame} (${entry.t} ms): ${entry.count}`),
+          earlyRows: earlyRows.slice(0, 3).map((entry) => `${entry.row} at ${entry.t} ms`),
+          earlyCards: earlyCards.slice(0, 3).map((entry) => describeEntry(entry)),
+          cardNamed: cards.some((entry) => seededProjects.some((name) => entry.text.includes(name))),
         },
-        `H-b: hydrated by frame ${hydrated.frame} (${hydrated.t} ms); the first card then: ${card === undefined ? 'absent' : describeEntry(card)}; ${record.skeletonFrames.length} frames had skeleton blocks`,
-        { missingRows: [], firstCardNamed: true, skeletonFrames: [] },
+        `H-b: the listing answered at ${answeredAt} ms; ${earlyRows.length} row frames and ${earlyCards.length} card frames came before it`,
+        { earlyRows: [], earlyCards: [], cardNamed: true },
       );
     },
   },
 );
 
 knownDefect(
-  'H-c (A13, A15g): with nothing remembered and the project listing 3 s late, Home draws no skeleton, its Recents indicator shows from 1,000 ms, and the grid is busy',
+  'H-c (skeleton restoration): with nothing remembered and the project listing 3 s late, Home draws sidebar row skeletons and a busy grid of card skeletons until the listing answers',
   {
     artifact: 'h-c-wide',
     expectedFailure: false,
@@ -511,7 +499,7 @@ knownDefect(
         delays: [projectListingRead],
         label: 'h-c-wide',
         regions: homeRegions,
-        /* Nothing remembered: the page's local storage is emptied, so no listing it kept can paint first. */
+        /* Nothing remembered: the page's local storage is emptied, including any legacy listing keys. */
         prepare: async () => {
           await target.evaluate(() => {
             localStorage.clear();
@@ -523,21 +511,19 @@ knownDefect(
         record.projectRows.every((entry) => entry.t >= answeredAt),
         `H-c: a project row drew before the listing was answered at ${answeredAt} ms, so something was remembered`,
       );
-      return record;
+      return { record, answeredAt };
     },
-    assert: (record) => {
-      const firstShown = regionsOf(record, 'recentsIndicator').find(
-        (entry) => entry.present && entry.visible && entry.text !== '',
-      );
+    assert: ({ record, answeredAt }) => {
+      const waiting = (entry: { readonly t: number; readonly present: boolean }) =>
+        entry.present && entry.t < answeredAt;
       expectMeasured(
         {
-          skeletonFrames: record.skeletonFrames.length,
-          indicatorShown: firstShown !== undefined,
-          indicatorEarly: firstShown !== undefined && firstShown.t < 1000,
-          gridBusy: regionsOf(record, 'grid').some((entry) => entry.present && entry.busy),
+          skeletonFrames: record.skeletonFrames.some((entry) => entry.t < answeredAt),
+          sidebarSkeleton: regionsOf(record, 'sidebarSkeleton').some((entry) => waiting(entry)),
+          gridBusy: regionsOf(record, 'grid').some((entry) => waiting(entry) && entry.busy),
         },
-        `H-c: ${record.skeletonFrames.length} frames had skeleton blocks; the Recents indicator first showed ${firstShown === undefined ? 'never' : `at ${firstShown.t} ms`}`,
-        { skeletonFrames: 0, indicatorShown: true, indicatorEarly: false, gridBusy: true },
+        `H-c: the listing answered at ${answeredAt} ms; ${record.skeletonFrames.length} frames had skeleton blocks`,
+        { skeletonFrames: true, sidebarSkeleton: true, gridBusy: true },
       );
     },
   },

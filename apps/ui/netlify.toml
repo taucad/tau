@@ -125,6 +125,38 @@ to = "https://docs.tau.new/llms.mdx/:splat"
 status = 301
 force = true
 
+# Static shells (progressive loading PL3). Every `/w/:workspace/:project` document is the
+# prerendered `build/client/w/__shell/__shell/index.html`, served by the CDN. Netlify runs
+# functions before redirects, so the React Router function excludes exactly these URLs
+# (`excludedPaths` in vite.config.ts); `.data` requests, `/preview` and every other `/w/…`
+# shape stay on it. The shell's headers are the static ones below and `_headers`, which
+# match a function document's (scripts/check-static-shells.mts). Generated from
+# app/lib/route-classes.ts; app/lib/route-classes.test.ts fails when this block drifts.
+# BEGIN static shell routing
+[[redirects]]
+from = "https://www.tau.new/w/*"
+to = "https://tau.new/w/:splat"
+status = 301
+force = true
+
+[[redirects]]
+from = "/w/:workspace/:project"
+to = "/w/__shell/__shell/index.html"
+status = 200
+force = false
+
+[[redirects]]
+from = "/w/:workspace/:project/"
+to = "/w/__shell/__shell/index.html"
+status = 200
+force = false
+
+[[headers]]
+for = "/w/*"
+[headers.values]
+Set-Cookie = "tau_skew=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"
+# END static shell routing
+
 [[headers]]
 for = "/*"
 [headers.values]
@@ -143,8 +175,10 @@ Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(),
 Cross-Origin-Opener-Policy = "same-origin"
 Cross-Origin-Resource-Policy = "same-origin"
 Cross-Origin-Embedder-Policy = "require-corp"
-# JavaScript Profiling
-Document-Policy = "js-profiling"
+# Document-Policy (`js-profiling`) is not set here: like the CSP below it differs per site.
+# Function documents send it off the production origin only (OQ-P11), so the build writes it
+# into staging's `_headers` and never into production's
+# (scripts/write-content-security-policy-headers.mts).
 # Content Security Policy (CSP), report-only. It is not set here: this file is
 # shared by both sites, which both deploy the production context, so it cannot
 # name only one environment's hosts. Each build writes its site's policy into

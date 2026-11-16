@@ -15,6 +15,7 @@ const baseConfig: UserConfig = {
     'src/worktree-database.utils.ts',
     'src/keyed-mutex.utils.ts',
     'src/image-probe.ts',
+    'src/attachment-media.ts',
   ],
   sourcemap: false,
   clean: ['dist'],

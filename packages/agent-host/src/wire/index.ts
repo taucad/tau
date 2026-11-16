@@ -17,8 +17,30 @@ export {
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
 export { agentWireLimits } from '#wire/limits.js';
-export { attachmentMedia, isAttachmentMediaType, sniffAttachmentMediaType } from '#wire/attachment-media.js';
-export type { AttachmentMediaType } from '#wire/attachment-media.js';
+export {
+  attachmentImageBackground,
+  attachmentImageLimits,
+  normalizeImageAttachment,
+  sniffAttachmentMediaType,
+} from '#wire/attachment-media.js';
+export type {
+  AttachmentRefusalReason,
+  AttachmentTranscodeInput,
+  AttachmentTranscodePort,
+  NormalizedImageAttachment,
+  NormalizeImageAttachmentInput,
+} from '#wire/attachment-media.js';
+// The stored-media table and its pure helpers live in the bundled `@taucad/utils/attachment-media`, so a package that
+// needs only the table does not depend on this one (I2).
+export {
+  attachmentExtensionOf,
+  attachmentExtensions,
+  attachmentImageMediaTypes,
+  attachmentMedia,
+  attachmentMediaTypes,
+  isAttachmentMediaType,
+} from '@taucad/utils/attachment-media';
+export type { AttachmentImageMediaType, AttachmentMediaType } from '@taucad/utils/attachment-media';
 export {
   providerPermissionSchema,
   providerPermissionObservationSchema,

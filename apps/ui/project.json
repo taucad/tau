@@ -215,13 +215,45 @@
         "{projectRoot}/scripts/critical-path.mts",
         "{projectRoot}/critical-budget.json",
         {
-          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**}"
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
         }
       ],
       "outputs": [],
       "options": {
         "cwd": ".",
         "command": "node apps/ui/scripts/check-critical-budget.mts"
+      }
+    },
+    "check-static-shells": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Static-shell gate (progressive loading PL3, shell invariants 1, 2, 5 and 6): for each static-shell class of app/lib/route-classes.ts, renders the shell through the web server build for two different visitors a day apart and requires the prerendered bytes, the function's own document for a real URL of the class, the build id /health/build answers, the function document's isolation, CSP, reporting and document policies on the static headers (netlify.toml and the _headers the build writes), and no rendered placeholder. Runs with the build's environment (TAU_API_URL, TAU_WEBSOCKET_URL, TAU_FRONTEND_URL, as ci.yml sets them workflow-wide). CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-static-shells.mts",
+        "{projectRoot}/scripts/write-content-security-policy-headers.mts",
+        "{projectRoot}/app/lib/route-classes.ts",
+        "{projectRoot}/app/lib/content-security-policy.server.ts",
+        "{projectRoot}/netlify.toml",
+        {
+          "env": "TAU_API_URL"
+        },
+        {
+          "env": "TAU_WEBSOCKET_URL"
+        },
+        {
+          "env": "TAU_FRONTEND_URL"
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{server/**,client/**/*.html}"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-static-shells.mts"
       }
     },
     "size": {

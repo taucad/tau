@@ -67,4 +67,27 @@ describe('chatTurnAdmission', () => {
     });
     actor.stop();
   });
+
+  /* SP2h review: a turn held while a cloud open writes the files ends when its dispatch stops. */
+  it('should hand the admission its dispatch’s stop', async () => {
+    const signals: AbortSignal[] = [];
+    publishChatTurnAdmission('chat-stopped-admission', async (_gesture, signal) => {
+      if (signal !== undefined) {
+        signals.push(signal);
+      }
+      return new Promise<ChatTurn>(() => {
+        /* Never settles: the stop is what the test watches. */
+      });
+    });
+    const actor = createActor(chatTurnAdmission, {
+      input: { chatId: 'chat-stopped-admission', gesture: { kind: 'regenerate' } },
+    });
+    actor.start();
+    await vi.waitFor(() => {
+      expect(signals).toHaveLength(1);
+    });
+    expect(signals[0]?.aborted).toBe(false);
+    actor.stop();
+    expect(signals[0]?.aborted).toBe(true);
+  });
 });

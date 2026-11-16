@@ -949,6 +949,39 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     session.stop();
   });
 
+  /* SP2h: during a Tau Cloud open the chats land beside the apply; a deferred chat is retried once they may open. */
+  it('S1: should tell the session the chats arrived during a cloud open only once the chats may open', async () => {
+    const { client, received, session } = await startSession({ isCloudOpen: true });
+    const remote: RevisionStatusProjection['remote'] = {
+      ...revisionStatusHarness.status.remote,
+      kind: 'tau',
+      phase: 'connected',
+    };
+    const sync: RevisionStatusProjection['sync'] = {
+      ...revisionStatusHarness.status.sync,
+      state: 'pending',
+      pullPhase: 'applying',
+      hasAppliedRemote: false,
+      chats: 'ready',
+    };
+    client.setStatus({ remote, sync, readiness: 'treeReady' });
+    expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([]);
+    client.setStatus({ remote, sync, readiness: 'entryReady' });
+    expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([
+      { type: 'revisionChatsChanged', ready: true },
+    ]);
+    session.stop();
+  });
+
+  it('S1: should tell the session the chats may open when chat sync is off', async () => {
+    const { client, received, session } = await startSession();
+    client.setStatus({ sync: { ...revisionStatusHarness.status.sync, chats: 'disabled' } });
+    expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([
+      { type: 'revisionChatsChanged', ready: true },
+    ]);
+    session.stop();
+  });
+
   /* A14: the session's file check, which focus's open waits for (U13, U20). */
   const fileChecks = (received: readonly SessionRevisionsEmitted[]) =>
     received.filter((event) => event.type === 'fileCheckChanged');

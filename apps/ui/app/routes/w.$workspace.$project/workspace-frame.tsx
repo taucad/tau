@@ -144,6 +144,8 @@ export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): R
       /* The chat pane's slot, so the lane inherits the chat pane's chrome wherever it stands in for it. */
       data-slot='floating-panel'
       data-testid='chat-lane-frame'
+      /* A named busy state is a status, so its label is exposed rather than dropped from a generic element. */
+      role={busyLabel === undefined ? undefined : 'status'}
       aria-busy={busyLabel === undefined ? undefined : true}
       aria-label={busyLabel}
     >

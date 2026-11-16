@@ -106,6 +106,7 @@ describe('ChatLaneFrame', () => {
     expect(placeholder).toBeDefined();
     expect(placeholder.getAttribute('aria-busy')).toBe('true');
     expect(placeholder.getAttribute('aria-label')).toContain('Preparing');
+    expect(screen.getByRole('status', { name: /Preparing chat session/u })).toBe(placeholder);
   });
 
   it('carries the floating-panel data-slot so it inherits chat-pane chrome', () => {

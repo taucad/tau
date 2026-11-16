@@ -134,6 +134,20 @@ describe('frame hint', () => {
     expect(Object.keys(stored.projects).toSorted()).toEqual(['home/one', 'home/y']);
   });
 
+  /* PR review: a malformed entry under the key being written must not throw before the write. */
+  it.each([
+    ['a null layout', { usedAt: 1, wide: null }],
+    ['a layout that is not an object', { usedAt: 1, wide: 3 }],
+    ['an entry that is not an object', 'x'],
+  ])("replaces the written key's own malformed entry holding %s", (_name, malformed) => {
+    globalThis.localStorage.setItem(frameHintStorageKey, JSON.stringify({ v: 1, projects: { 'home/one': malformed } }));
+
+    expect(() => {
+      writeWideFrameHint('home/one', workbenchClosed);
+    }).not.toThrow();
+    expect(readWideFrameHint('home/one')).toEqual(workbenchClosed);
+  });
+
   it('reads back what it wrote, as the same object until the record changes', () => {
     writeWideFrameHint('home/one', workbenchClosed);
     const first = readWideFrameHint('home/one');

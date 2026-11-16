@@ -70,7 +70,14 @@ const recordFirstPaint = (): void => {
       samples.push(next);
     }
   };
-  new MutationObserver(sample).observe(document, { subtree: true, childList: true, characterData: true });
+  /* The reveal is an attribute change on the desktop container (`data-workspace-lanes`), which hides the lanes. */
+  new MutationObserver(sample).observe(document, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['data-workspace-lanes'],
+  });
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.name.includes('cdn.jsdelivr.net')) {

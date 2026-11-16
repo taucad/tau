@@ -186,7 +186,8 @@ const sameWide = (left: WideFrameHint | undefined, right: WideFrameHint): boolea
 export const writeWideFrameHint = (key: string, wide: WideFrameHint, now: number = Date.now()): void => {
   const record = readRecord();
   const previous = record?.projects[key];
-  if (sameWide(previous?.wide, wide) && previous !== undefined && now - previous.usedAt < 60_000) {
+  /* A malformed stored entry for this key compares as no entry, so the write replaces it. */
+  if (isFrameHintEntry(previous) && sameWide(previous.wide, wide) && now - previous.usedAt < 60_000) {
     return;
   }
   const entry: FrameHintEntry = {

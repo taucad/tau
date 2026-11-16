@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import type { ProviderMessage } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -44,6 +45,12 @@ const createStore = (
   });
   return store;
 };
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('ChatSessionStore with the pinned real SDK', () => {
   it.each(['running', 'paused'] as const)(

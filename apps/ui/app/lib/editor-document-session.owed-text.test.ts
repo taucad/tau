@@ -88,6 +88,13 @@ async function closeWithUnsavedEdit(
   expect(pending).toBeInstanceOf(Promise);
 }
 
+/** One turn of the event loop, so every settled promise has run its continuations. */
+async function macrotask(): Promise<void> {
+  const turn = Promise.withResolvers<void>();
+  setTimeout(turn.resolve, 0);
+  await turn.promise;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
@@ -261,7 +268,11 @@ describe('EditorDocumentSession owed text (A7e)', () => {
 
     await closeWithUnsavedEdit('p-typed', debts);
     const typedContent = service('one\n');
-    const record = vi.fn(async (): Promise<EditorConflictOutcome> => recorded);
+    /* As the real record answers: nothing to record while disk still holds the base. */
+    const disk = { text: 'one\n' };
+    const record = vi.fn(
+      async (): Promise<EditorConflictOutcome> => (disk.text === 'one\n' ? { status: 'unchanged' } : recorded),
+    );
     const typedSession = new EditorDocumentSession({
       contentService: typedContent,
       projectId: 'p-typed',
@@ -276,24 +287,49 @@ describe('EditorDocumentSession owed text (A7e)', () => {
     });
     expect(typedSession.get('main.ts')?.text).toBe('new\n');
     expect(typedContent.saveEditor).not.toHaveBeenCalled();
+    /* Unchanged is no record of the text: it is kept until the pane's own save lands. */
+    await vi.waitFor(() => {
+      expect(isRecordingEditorConflict('p-typed')).toBe(false);
+    });
+    expect(debts.list({ scope: ada, projectId: 'p-typed' })).toHaveLength(1);
+    disk.text = 'new\n';
+    typedContent.resolve.mockResolvedValue(outcome('new\n'));
+    typedContent.peekOutcome.mockReturnValue(outcome('new\n'));
+    await typedSession.save('main.ts');
+    await vi.waitFor(() => {
+      expect(record).toHaveBeenCalledTimes(2);
+    });
+    await vi.waitFor(() => {
+      expect(debts.list({ scope: ada, projectId: 'p-typed' })).toEqual([]);
+    });
+    expect(typedSession.get('main.ts')?.text).toBe('new\n');
     typedSession.dispose();
     setEditorTextScope('p-typed', undefined);
   });
 
   it('should keep the record when the replay cannot land, for a later open', async () => {
-    const debts = createDebts();
-    await closeWithUnsavedEdit('p-fail', debts);
+    /* The real store, so the project's owing reads the record this row keeps. */
+    await closeWithUnsavedEdit('p-fail', editorTextDebts);
     const content = service('one\n');
-    content.saveEditor.mockRejectedValue(new Error('disk full'));
+    const failed = Promise.withResolvers<void>();
+    content.saveEditor.mockImplementation(async () => {
+      failed.resolve();
+      throw new Error('disk full');
+    });
     setEditorTextScope('p-fail', ada);
-    const session = new EditorDocumentSession({ contentService: content, projectId: 'p-fail', textDebts: debts });
-    await vi.waitFor(() => {
-      expect(content.saveEditor).toHaveBeenCalled();
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-fail',
+      textDebts: editorTextDebts,
     });
+    await failed.promise;
     await vi.waitFor(() => {
-      expect(isOwingEditorText('p-fail')).toBe(false);
+      expect(session.get('main.ts')?.text).toBe('mine\n');
     });
-    expect(debts.list({ scope: ada, projectId: 'p-fail' })).toHaveLength(1);
+    await macrotask();
+    expect(editorTextDebts.list({ scope: ada, projectId: 'p-fail' })).toHaveLength(1);
+    /* Kept, it still owes: the owed close cut waits for a later open. */
+    expect(isOwingEditorText('p-fail')).toBe(true);
     session.dispose();
     setEditorTextScope('p-fail', undefined);
   });
@@ -335,5 +371,64 @@ describe('EditorDocumentSession owed text (A7e)', () => {
     setEditorTextScope('p-owing', bea);
     expect(isOwingEditorText('p-owing')).toBe(false);
     setEditorTextScope('p-owing', undefined);
+  });
+
+  it('should not replay its own record as the page goes, even when the store signals the write', async () => {
+    const content = service('one\n');
+    content.saveEditor.mockReturnValue(Promise.withResolvers<void>().promise);
+    const record = vi.fn(async (): Promise<EditorConflictOutcome> => recorded);
+    setEditorTextScope('p-own', ada);
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-own',
+      textDebts: editorTextDebts,
+      recordEditorConflict: record,
+    });
+    await session.acquire('main.ts');
+    session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
+    const pending = session.save('main.ts');
+    session.flushSaves();
+    const reads = content.resolve.mock.calls.length;
+    session.recordOwedText();
+    await macrotask();
+    expect(record).not.toHaveBeenCalled();
+    expect(content.resolve.mock.calls.length).toBe(reads);
+    expect(editorTextDebts.list({ scope: ada, projectId: 'p-own' })).toHaveLength(1);
+    expect(isOwingEditorText('p-own')).toBe(true);
+    session.dispose();
+    setEditorTextScope('p-own', undefined);
+    expect(pending).toBeInstanceOf(Promise);
+  });
+
+  it('should stop owing for a replay that never settles once its session goes', async () => {
+    const debts = createDebts();
+    await closeWithUnsavedEdit('p-stuck', debts);
+    const content = service('one\n');
+    content.resolve.mockReturnValue(Promise.withResolvers<FileContentResult>().promise);
+    setEditorTextScope('p-stuck', ada);
+    const session = new EditorDocumentSession({ contentService: content, projectId: 'p-stuck', textDebts: debts });
+    expect(isOwingEditorText('p-stuck')).toBe(true);
+    session.dispose();
+    expect(isOwingEditorText('p-stuck')).toBe(false);
+    expect(debts.list({ scope: ada, projectId: 'p-stuck' })).toHaveLength(1);
+    setEditorTextScope('p-stuck', undefined);
+  });
+
+  it('should not adopt a replay once the person it was taken up for is no longer the one recording', async () => {
+    const debts = createDebts();
+    await closeWithUnsavedEdit('p-swap', debts);
+    const content = service('one\n');
+    const read = Promise.withResolvers<FileContentResult>();
+    content.resolve.mockReturnValueOnce(read.promise);
+    setEditorTextScope('p-swap', ada);
+    const session = new EditorDocumentSession({ contentService: content, projectId: 'p-swap', textDebts: debts });
+    setEditorTextScope('p-swap', bea);
+    read.resolve(outcome('one\n'));
+    const opened = await session.acquire('main.ts');
+    expect(opened?.text).toBe('one\n');
+    expect(content.saveEditor).not.toHaveBeenCalled();
+    expect(debts.list({ scope: ada, projectId: 'p-swap' })).toHaveLength(1);
+    session.dispose();
+    setEditorTextScope('p-swap', undefined);
   });
 });

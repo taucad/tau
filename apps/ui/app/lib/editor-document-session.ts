@@ -346,6 +346,10 @@ export class EditorDocumentSession {
   /** The records this session took up or wrote, so each is replayed once and its own is cleared on a confirmed save. */
   readonly #replayedTokens = new Set<string>();
   readonly #ownTokens = new Map<string, string>();
+  /* Releases of the replays this session holds open, let go when the session's documents go. */
+  readonly #replayHolds = new Map<string, () => void>();
+  /* Records whose conflict record found nothing to record against yet: taken up again after a confirmed save. */
+  readonly #retryAfterSave = new Set<string>();
   readonly #subscriptions: Array<() => void>;
   #projectId: string;
   #epoch = 0;
@@ -600,11 +604,12 @@ export class EditorDocumentSession {
           continue;
         }
         const token = randomUuid();
+        /* Known as its own before the write: the store's change signal runs this session's replay at once. */
+        this.#ownTokens.set(path, token);
         debts.write(
           { scope, projectId: this.#projectId },
           { token, path, base: uint8ArrayToBase64(base), text: document.text, at: Date.now() },
         );
-        this.#ownTokens.set(path, token);
       }
     } catch {
       /* Today's behaviour: the text is on its way to disk, or goes with the page. */
@@ -615,6 +620,12 @@ export class EditorDocumentSession {
     /* Text still in the window belongs to the old session's files: it is written there now. */
     this.flushSaves();
     this.#epoch += 1;
+    /* A replay of the old session no longer decides anything: it stops owing. */
+    for (const release of this.#replayHolds.values()) {
+      release();
+    }
+    this.#replayedTokens.clear();
+    this.#retryAfterSave.clear();
     this.#projectId = projectId;
     this.#documents.clear();
     this.#declarations.clear();
@@ -743,6 +754,18 @@ export class EditorDocumentSession {
     this.#textDebts?.clear({ scope, projectId: this.#projectId }, path, token);
   }
 
+  /* A confirmed save moved disk off a base the conflict record could not record against: take those up again. */
+  #retryOwed(): void {
+    if (this.#retryAfterSave.size === 0) {
+      return;
+    }
+    for (const token of this.#retryAfterSave) {
+      this.#replayedTokens.delete(token);
+    }
+    this.#retryAfterSave.clear();
+    this.#replayOwed();
+  }
+
   /* Take up every record under the published scope not yet taken up (A7e). */
   #replayOwed(): void {
     const debts = this.#textDebts;
@@ -769,7 +792,14 @@ export class EditorDocumentSession {
         }
         ready.resolve();
       };
-      const release = holdReplay(this.#projectId);
+      const hold = holdReplay(this.#projectId);
+      const release = (): void => {
+        if (this.#replayHolds.get(record.token) === release) {
+          this.#replayHolds.delete(record.token);
+          hold();
+        }
+      };
+      this.#replayHolds.set(record.token, release);
       // async-iife: bootstrap -- a replay runs beside the event that took it up; it never rejects.
       void (async (): Promise<void> => {
         try {
@@ -799,9 +829,18 @@ export class EditorDocumentSession {
     record: OwedEditorText;
     decided: () => void;
   }>): Promise<void> {
-    const { projectId } = place;
+    const { projectId, scope } = place;
     const epoch = this.#epoch;
-    const live = (): boolean => !this.#disposed && epoch === this.#epoch;
+    /* Only for the session and the person it was taken up under (B7). */
+    const live = (): boolean => {
+      const current = getEditorTextScope(projectId);
+      return (
+        !this.#disposed &&
+        epoch === this.#epoch &&
+        current?.workspace === scope.workspace &&
+        current.actorId === scope.actorId
+      );
+    };
     try {
       const path = assertRootedPath(record.path);
       const base = base64ToUint8Array(record.base);
@@ -845,10 +884,21 @@ export class EditorDocumentSession {
       if (recordConflict === undefined) {
         return;
       }
+      if (!live()) {
+        return;
+      }
       const release = holdEditorConflictRecord(projectId);
       try {
-        await recordConflict({ path, base: decodeTextFile(base), mine: record.text });
-        debts.clear(place, path, record.token);
+        const outcome = await recordConflict({ path, base: decodeTextFile(base), mine: record.text });
+        if (outcome.status === 'recorded') {
+          debts.clear(place, path, record.token);
+        } else {
+          /*
+           * Disk still holds the base, so there was nothing to record it against: the pane's own text has not
+           * landed yet. Kept, and taken up again once a save of this session is confirmed.
+           */
+          this.#retryAfterSave.add(record.token);
+        }
       } finally {
         release();
       }
@@ -930,6 +980,7 @@ export class EditorDocumentSession {
       if (failure === undefined) {
         this.#saves.delete(path);
         this.#clearOwnRecord(path);
+        this.#retryOwed();
         const saved = this.#contentService.peekOutcome(path);
         if (saved.kind === 'text') {
           this.#bases.set(path, saved.content);

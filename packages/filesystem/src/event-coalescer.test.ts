@@ -41,6 +41,38 @@ describe('coalesceChangeEvents (pure)', () => {
     );
   });
 
+  it('should leave every file path a batch of writes, deletes and moves touched in its final state', () => {
+    const presence = (sequence: readonly PathChangeEvent[]): Map<string, boolean> => {
+      const state = new Map<string, boolean>();
+      for (const event of sequence) {
+        if (event.type === 'fileRenamed') {
+          state.set(event.oldPath, false);
+          state.set(event.newPath, true);
+        } else if (event.type === 'fileWritten' || event.type === 'fileDeleted') {
+          state.set(event.path, event.type === 'fileWritten');
+        }
+      }
+      return state;
+    };
+    const path = fc.constantFrom('/a', '/b', '/c', '/d/e');
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.oneof(
+            path.map((at) => written(at)),
+            path.map((at) => deleted(at)),
+            fc.tuple(path, path).map(([from, to]) => renamed(from, to)),
+          ),
+          { minLength: 1, maxLength: 40 },
+        ),
+        (events) => {
+          const valid = events.filter((event) => event.type !== 'fileRenamed' || event.oldPath !== event.newPath);
+          expect(presence(coalesceChangeEvents(valid))).toEqual(presence(valid));
+        },
+      ),
+    );
+  });
+
   it('should pass through single events unchanged', () => {
     const events = [written('/a.txt')];
     expect(coalesceChangeEvents(events)).toEqual(events);
@@ -110,6 +142,42 @@ describe('coalesceChangeEvents (pure)', () => {
       return paths;
     });
     expect(allPaths).toContain('/b');
+  });
+
+  /*
+   * STO-25 SP2g: a revision write replaces a file in four facts — stage a
+   * sibling, move the file aside, publish the sibling over it, drop the backup.
+   * One window nets them to what an observer can tell: the staged copy moved
+   * onto the file, and the backup is gone.
+   */
+  it('should net a replacement’s four facts to the publish and the backup’s removal', () => {
+    const staged = '/p/.part.scad.tau-staged.1.tmp';
+    const backup = '/p/.part.scad.tau-backup.1.tmp';
+    const events = [written(staged), renamed('/p/part.scad', backup), renamed(staged, '/p/part.scad'), deleted(backup)];
+    expect(coalesceChangeEvents(events)).toEqual([renamed(staged, '/p/part.scad'), deleted(backup)]);
+  });
+
+  it('should keep a move away from a path nothing re-creates, and its arrival', () => {
+    expect(coalesceChangeEvents([renamed('/a', '/b'), written('/c')])).toEqual([renamed('/a', '/b'), written('/c')]);
+    expect(coalesceChangeEvents([renamed('/a', '/b'), written('/b')])).toEqual([renamed('/a', '/b'), written('/b')]);
+  });
+
+  it('should keep the arrival of a move whose source is written again', () => {
+    const events = [renamed('/a', '/b'), written('/a')];
+    expect(coalesceChangeEvents(events)).toEqual([written('/b'), written('/a')]);
+  });
+
+  it('should keep the final write to a path written, moved away and written again', () => {
+    const events = [written('/a'), renamed('/a', '/b'), written('/a')];
+    expect(coalesceChangeEvents(events)).toEqual([written('/b'), written('/a')]);
+  });
+
+  it('should carry the origin of a move it nets to an arrival', () => {
+    const moved = renamed('/a', '/b');
+    tagEventOrigin(moved, 'port-1');
+    const [arrival] = coalesceChangeEvents([moved, written('/a')]);
+    expect(arrival).toEqual(written('/b'));
+    expect(getEventOrigin(arrival!)).toBe('port-1');
   });
 
   it('should deduplicate repeated writes to the same path', () => {

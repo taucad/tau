@@ -334,6 +334,7 @@ Coalescing requirements:
 - Delete followed by write collapses to change.
 - A typed ancestor-directory delete or rename resets exact descendant watches instead of guessing child facts.
 - Rename preserves both old/new path invalidation semantics.
+- A file moved away from a path the same window writes or moves onto again is told as its arrival at the target, and a write to a path the window then moves away, with nothing after, is told by the move: a revision write's replacement (stage, move aside, publish, drop the backup) crosses as the publish and the backup's removal, and the replaced path never reads as gone.
 - Coalescing must clone a survivor before changing hidden origin metadata; subscriptions never mutate one shared event.
 
 ### Rule 22: Kernel path is direct and low-latency

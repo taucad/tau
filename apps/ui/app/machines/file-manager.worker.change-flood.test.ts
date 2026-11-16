@@ -386,6 +386,8 @@ describe('a tree write across the worker boundary (STO-25 SP2g)', () => {
         ),
       );
       expect(delta.busFacts).toBeGreaterThanOrEqual(count);
+      /* A replaced file crosses as its publish and its backup's removal, not its four protocol facts. */
+      expect(delta.fileChangedFacts).toBeLessThanOrEqual(2 * count);
       /* Past the window's bound the loss is scoped to the folders written, never a backend swap (Rule 24). */
       expect(delta.backendChanged).toBe(0);
       expect(fixture.read).not.toContain('main.scad');

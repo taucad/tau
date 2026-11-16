@@ -195,6 +195,13 @@ export class EventCoalescer {
 /**
  * Apply coalescing rules to a batch of events.
  *
+ * A file moved away from a path the batch later writes or moves onto again is
+ * only its arrival at the target: the move-aside of a revision write's
+ * replacement, whose path the publish refills. A write to a path the batch
+ * then moves away, with nothing after, is told by the move alone. So a
+ * replacement's four facts (stage, move aside, publish, drop the backup) net to
+ * the publish and the backup's removal (STO-25 SP2g).
+ *
  * Same originator across a merged path sequence preserves the tag via
  * {@link tagEventOrigin}; mixed originators (including untagged mixed with
  * tagged) leave the cloned survivor untagged so every bridge port receives
@@ -212,8 +219,29 @@ export function coalesceChangeEvents(events: PathChangeEvent[]): PathChangeEvent
   const indexedEvents: Array<{ index: number; event: PathChangeEvent }> = [];
   const renamedFromPaths = new Set<string>();
   const pathHistory = new Map<string, Array<{ index: number; event: PathChangeEvent }>>();
-
+  /* Per file path, the last fact that puts a file there and the last move away from it. */
+  const lastArrival = new Map<string, number>();
+  const lastMoveAway = new Map<string, number>();
   for (const [index, event] of events.entries()) {
+    if (event.type === 'fileWritten') {
+      lastArrival.set(event.path, index);
+    } else if (event.type === 'fileRenamed') {
+      lastArrival.set(event.newPath, index);
+      lastMoveAway.set(event.oldPath, index);
+    }
+  }
+
+  for (const [index, original] of events.entries()) {
+    let event = original;
+    if (event.type === 'fileRenamed' && (lastArrival.get(event.oldPath) ?? -1) > index) {
+      const { newPath, backend, target } = event;
+      event = { type: 'fileWritten', path: newPath, backend, ...(target === undefined ? {} : { target }) };
+      copyEventAuthorities(original, event);
+      const origin = getEventOrigin(original);
+      if (origin !== undefined) {
+        tagEventOrigin(event, origin);
+      }
+    }
     if (event.type === 'directoryChanged') {
       indexedEvents.push({ index, event });
       continue;
@@ -243,6 +271,10 @@ export function coalesceChangeEvents(events: PathChangeEvent[]): PathChangeEvent
     }
 
     if (collapsed.type === 'fileDeleted' && renamedFromPaths.has(path)) {
+      continue;
+    }
+    /* Written, then moved away with nothing after: the move says it all. */
+    if (collapsed.type === 'fileWritten' && history.at(-1)!.index < (lastMoveAway.get(path) ?? -1)) {
       continue;
     }
 

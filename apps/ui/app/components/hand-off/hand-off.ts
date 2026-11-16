@@ -17,7 +17,8 @@ import { draftHintReaderSource } from '#lib/frame-hint-draft.js';
  * ({@link earlyTextAttribute}), writes {@link queuedSendStatus} into the box's status slot, and cancels the send on
  * Escape as on an edit. A box that also carries {@link draftHintAttribute} has the served input paint the stored draft
  * (the draft hint) into an empty input before first paint, as prefilled text rather than an edit; only the served
- * script paints, since an input the bundle creates is past first paint. Outside such a box the recorder is unchanged.
+ * script paints, since an input the bundle creates is past first paint. Outside such a box Escape still cancels a
+ * queued send, and nothing is drawn.
  *
  * This module imports only the timing recorder and the draft hint's reader, so a route can serve the native input
  * without the rich surface.

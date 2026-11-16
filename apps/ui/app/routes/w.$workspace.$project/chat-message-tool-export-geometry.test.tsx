@@ -67,7 +67,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: () => null,
 }));
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }));
-vi.mock('#utils/export-formats.utils.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/utils/export-formats.utils', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   deriveAvailableFormats: () => [
     { format: 'glb', fidelity: 'mesh', direct: true },

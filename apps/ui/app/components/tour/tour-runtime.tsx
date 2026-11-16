@@ -49,7 +49,7 @@ import { personRecordStores, deviceRecordStore } from '#preferences/person-recor
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
-import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
+import { deriveAvailableFormats } from '@taucad/files-ui/utils/export-formats.utils';
 
 const sameTip = (left: TourTip | undefined, right: TourTip | undefined): boolean =>
   left?.step === right?.step &&

@@ -54,6 +54,14 @@ import { useProjectRouteState } from '#routes/w.$workspace.$project/project-rout
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 
+/** The build target `@taucad/*` libraries resolve; the app's own reads still follow `TAU_TARGET`. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
+
 const {
   workerFrames,
   workerRef,
@@ -461,7 +469,7 @@ vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
 /* The checkout routes are storage, and storage is a leaf here: what S48(14) is
  * about is the workbench following the selection, not where the route table is
  * persisted. */
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getProjectRootConfigs: async () => ({
     projects: [{ projectId: 'unused', providerBasePath: 'projects/unused' }],
@@ -1990,6 +1998,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
 describe('sessions composition — the desktop quit hold (S48(17))', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    buildTarget.desktop = false;
     delete (globalThis as { tau?: unknown }).tau;
     flushProducers.mockReset();
     for (const stop of stops.splice(0)) {
@@ -2031,6 +2040,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('should refuse quit for blocked workbench intent and wait for its repaired checked write', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
@@ -2122,6 +2132,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
    */
   it('should flush every producer before it closes a session or answers main', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const order: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
@@ -2165,6 +2176,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('answers a quit ask buffered before the renderer mounted', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const answers: string[] = [];
     let ready = false;
     (globalThis as { tau?: unknown }).tau = {
@@ -2213,6 +2225,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('paints what is being waited for, and Quit anyway answers main', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {
@@ -2277,6 +2290,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
 
   it('shows a failed producer flush, keeps sessions live, then retries before answering quit', async () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const asks: Array<() => void> = [];
     const answers: string[] = [];
     (globalThis as { tau?: unknown }).tau = {

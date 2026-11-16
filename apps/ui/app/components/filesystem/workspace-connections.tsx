@@ -11,14 +11,14 @@ import {
   listWorkspaces,
   requestHandlePermission,
   subscribeProjectRootConfigurationChanges,
-} from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
-import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
 import {
   isWorkspaceIdentityConflictError,
   workspaceIdentityConflictCopy,
 } from '@taucad/ui-core/filesystem/workspace-errors';
-import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { directoryPicker, webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
 import { toast } from '@taucad/ui/components/sonner';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';

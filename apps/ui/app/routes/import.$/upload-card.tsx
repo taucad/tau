@@ -6,7 +6,7 @@ import { importFileAcceptString, supportedKernelExtensions } from '#routes/impor
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { isZipFile } from '@taucad/ui-core/utils/file-reader.utils';
-import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.constants';
 
 type UploadCardProperties = {
   readonly onFilesSelected: (files: FileList | File[]) => void;

@@ -45,7 +45,8 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 ## Project notes
 
-- Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib; `use-file-manager`, the file-manager machine and worker, `handle-store` and `desktop-bridge` stay in `apps/ui` until `lib/build-target` (`import.meta.env.TAU_TARGET`) and `#package.json` have a seam.
+- Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib.
+- Read the build target from `@taucad/ui-core/lib/build-target` (a `tau-desktop` condition); tests `vi.mock` it.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts`/`.tsx` source.
 - `filesystem/home-opfs-probe.ts` starts `home-opfs-probe.worker.ts` with `new Worker(new URL(...))`; `apps/ui/vite.config.ts` admits it through its `../libs/*/src/**/*.worker.ts` optimizer entry.
 - `apps/ui/vite.config.ts` applies the React Compiler to `src/**`, and `apps/ui/app/styles/global.css` scans it with `@source`, as when these files lived in `apps/ui/app`.

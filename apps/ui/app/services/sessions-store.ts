@@ -24,7 +24,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, EventObject } from 'xstate';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { liveProjectBudgetFor, sessionsMachine } from '#machines/sessions.machine.js';
 import { isMemoryConstrainedDevice } from '@taucad/ui-core/lib/device-memory-class';
 import type {

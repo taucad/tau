@@ -56,7 +56,7 @@ import {
 } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { isRecordingEditorConflict, subscribeEditorConflictRecords } from '#lib/editor-document-session.js';
-import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
+import { getProjectRootConfigs, setCheckoutRootConfigs } from '@taucad/files-ui/filesystem/handle-store';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { isFileCheckSettled } from '#hooks/use-project-availability.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';

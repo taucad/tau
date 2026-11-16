@@ -75,7 +75,7 @@ vi.mock('#hooks/use-cad.js', () => ({
       : defaultValue,
 }));
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopNativeKernels: () => mockNativeKernels.current,
 }));
 

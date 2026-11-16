@@ -27,7 +27,7 @@ import type {
   BambuStudioSelection,
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
-import { isDesktopTarget as isDesktopBuildTarget } from '#lib/build-target.js';
+import { isDesktopTarget as isDesktopBuildTarget } from '@taucad/ui-core/lib/build-target';
 
 /**
  * The `window.tau` object the preload script installs on the desktop build:
@@ -196,7 +196,7 @@ const bindingAnswerSchema = z.discriminatedUnion('status', [
 
 /** Keep the native app icon aligned with Tau's resolved local theme. */
 export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
-  if (!isDesktopBuildTarget()) {
+  if (!isDesktopBuildTarget) {
     return;
   }
   (globalThis as { tau?: DesktopShell }).tau?.appIcon.setTheme(theme);
@@ -204,11 +204,11 @@ export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
 
 /** Native window state; viewer-only DOM fullscreen does not change application chrome. */
 export const isDesktopFullscreen = (): boolean =>
-  isDesktopBuildTarget() && ((globalThis as { tau?: DesktopShell }).tau?.window?.isFullscreen() ?? false);
+  isDesktopBuildTarget && ((globalThis as { tau?: DesktopShell }).tau?.window?.isFullscreen() ?? false);
 
 /** Subscribe to the native window's snapshot; browser builds have no native window. */
 export const onDesktopFullscreenChange = (listener: () => void): (() => void) => {
-  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  const shell = isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.window?.onFullscreenChange(listener) ?? ((): void => undefined);
 };
 
@@ -223,13 +223,13 @@ export const onDesktopFullscreenChange = (listener: () => void): (() => void) =>
  * @public
  */
 export const onDesktopQuitRequested = (handler: (attemptId: string) => void): (() => void) => {
-  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  const shell = isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.quit?.onAsk(handler) ?? ((): void => undefined);
 };
 
 /** Tell main every session has closed, or that the person cut it short. @public */
 export const reportDesktopQuiesced = (attemptId: string, forced: boolean): void => {
-  if (!isDesktopBuildTarget()) {
+  if (!isDesktopBuildTarget) {
     return;
   }
   (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced(attemptId, forced);
@@ -386,12 +386,11 @@ export type DesktopBridge = {
 /**
  * True on the Electron renderer build.
  *
- * Delegates to `#lib/build-target.js` so exactly one module reads the define.
- * The previous bracket read (`import.meta.env['TAU_TARGET']`) was never
- * substituted by Vite's textual `define`, so it evaluated to `undefined` at
- * runtime and left every desktop branch in the web bundle.
+ * Bound from `@taucad/ui-core/lib/build-target`, which the desktop build
+ * resolves to its `tau-desktop` variant: a literal the bundler inlines, so every
+ * desktop branch folds out of the web bundle.
  */
-export const isDesktopTarget = isDesktopBuildTarget();
+export const isDesktopTarget: boolean = isDesktopBuildTarget;
 
 /**
  * Build the typed Bambu Studio surface over preload's plain calls.
@@ -535,7 +534,7 @@ export const nodeHomeRoot = (): string => {
 
 /** Machine navigation preserves the live document and its project sessions. */
 export const onDesktopMachineNavigation = (handler: (route: string) => void): (() => void) => {
-  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  const shell = isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.quit?.onNavigate(handler) ?? ((): void => undefined);
 };
 
@@ -546,14 +545,14 @@ export const onDesktopMachineNavigation = (handler: (route: string) => void): ((
  * @returns Unsubscribe; a no-op off the desktop build.
  */
 export const onDesktopHostHandOff = (handler: (handOff: DesktopHostHandOff) => void): (() => void) => {
-  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  const shell = isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   return shell?.hostHandOff?.onHandOff(handler) ?? ((): void => undefined);
 };
 
 /** Native kernels are prepared only by the desktop's main process, never in a web session. */
 export const desktopNativeKernels = (): DesktopNativeKernelBridge | undefined =>
-  isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau?.nativeKernels : undefined;
+  isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau?.nativeKernels : undefined;
 
 /** Updates are available only through the desktop preload, never in a web session. */
 export const desktopUpdates = (): DesktopUpdateBridge | undefined =>
-  isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau?.updates : undefined;
+  isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau?.updates : undefined;

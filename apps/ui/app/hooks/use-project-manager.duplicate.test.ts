@@ -79,7 +79,7 @@ const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') =>
 const mockGetProjectCreationLocation = vi.fn();
 const mockSetProjectCreationLocation = vi.fn();
 const mockRequestHomeStoragePersistence = vi.fn(async () => undefined);
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   requestHomeStoragePersistence: mockRequestHomeStoragePersistence,
   pinHomeStorageBackend: mockPinHomeStorageBackend,
   getHomeStorageBackend: vi.fn(async () => 'opfs'),
@@ -95,7 +95,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
   subscribeProjectRootConfigurationChanges: vi.fn(() => vi.fn()),
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
     available: true,

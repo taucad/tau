@@ -25,8 +25,8 @@ import {
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
 import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
-import { getWorkspace, listWorkspaces, requestHandlePermission } from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import { getWorkspace, listWorkspaces, requestHandlePermission } from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {
@@ -36,7 +36,7 @@ import {
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
-import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Label } from '@taucad/ui/components/label';
 import { useProjectManager } from '#hooks/use-project-manager.js';

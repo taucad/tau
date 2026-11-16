@@ -18,8 +18,8 @@ import { sessionRuntimeWork } from '#runtime/project-runtime.session.js';
 import type { SessionRuntimeStandIn } from '#runtime/project-runtime.session.fixture.js';
 import type { AnyActorRef } from 'xstate';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
-import type * as HandleStoreModule from '#filesystem/handle-store.js';
-import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
+import type * as HandleStoreModule from '@taucad/files-ui/filesystem/handle-store';
+import type * as DesktopBridgeModule from '@taucad/files-ui/filesystem/desktop-bridge';
 import type * as NoticesModule from '#routes/w.$workspace.$project/project-route-notices.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
@@ -230,7 +230,7 @@ const sessionsActor = createSessionsActor({
 
 /** The desktop shell's bridge, when a row stands in for the desktop app; otherwise the web build's none. */
 let desktopShellBridge: unknown;
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', async (importOriginal) => {
   const actual = await importOriginal<typeof DesktopBridgeModule>();
   return { ...actual, desktopBridge: () => desktopShellBridge ?? actual.desktopBridge() };
 });
@@ -251,7 +251,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
 vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<typeof HandleStoreModule>()),
   getProjectFileSystemConfig: async (projectId: string) => ({
     projectId,

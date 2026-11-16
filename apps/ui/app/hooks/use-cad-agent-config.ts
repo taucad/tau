@@ -11,7 +11,7 @@ import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isBrowserAgentHostProviderKind, probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import {

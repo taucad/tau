@@ -4,7 +4,7 @@ import { z } from 'zod';
 // The desktop SPA drops the `action.set-theme` route (SPA mode bans server
 // `action` exports), so the preference is stored locally instead.
 import { isDesktopTarget } from '#lib/build-target.js';
-import { setDesktopAppIconTheme } from '#filesystem/desktop-bridge.js';
+import { setDesktopAppIconTheme } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Preserve the existing enum-style public API with erasable object syntax. */
 export const Theme = {

@@ -3,7 +3,8 @@
  * Home root the file-manager worker mounts.
  *
  * The bridge is stubbed on `globalThis` the way the preload installs it, and
- * `TAU_TARGET` is stubbed the way the desktop build defines it.
+ * `@taucad/ui-core/lib/build-target` is mocked to the variant the desktop build
+ * resolves by its `tau-desktop` condition.
  */
 
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
@@ -14,6 +15,14 @@ import type * as HandleStore from '#filesystem/handle-store.js';
 import type * as BrowserConstants from '#constants/browser.constants.js';
 import { fileManagerWorkerName, homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 
+/** The build target the modules under test resolve; each case sets it before loading them. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
+
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 
 const grantedPaths = new Set<string>();
@@ -21,7 +30,7 @@ const grantedPaths = new Set<string>();
 const selectDirectory = vi.fn(async () => '/Users/tester/Projects');
 
 const installDesktopBridge = (): void => {
-  vi.stubEnv('TAU_TARGET', 'desktop');
+  buildTarget.desktop = true;
   vi.stubGlobal('tau', {
     nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
     dialog: { selectDirectory },
@@ -53,7 +62,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
+  buildTarget.desktop = false;
   vi.resetModules();
 });
 
@@ -69,11 +78,11 @@ describe('desktop node Home', () => {
     vi.resetModules();
     // The OPFS probe needs a Storage Manager jsdom does not have; the branch
     // under test is the one before it.
-    vi.doMock('@taucad/files-ui/filesystem/home-opfs-probe', () => ({ probeHomeOpfs: async () => false }));
+    vi.doMock('#filesystem/home-opfs-probe.js', () => ({ probeHomeOpfs: async () => false }));
     const { handleStore } = await loadModules();
 
     await expect(handleStore.getHomeStorageBackend()).resolves.toBe('indexeddb');
-    vi.doUnmock('@taucad/files-ui/filesystem/home-opfs-probe');
+    vi.doUnmock('#filesystem/home-opfs-probe.js');
   });
 
   it('publishes the node Home root with its absolute host path', async () => {
@@ -116,14 +125,14 @@ describe('desktop node Home', () => {
     // Preload installs `window.tau` through `contextBridge`, but nothing about
     // Home's backend may depend on the bridge being there: ruling C1 says the
     // desktop data path is node-backed — the build target decides, not a probe.
-    vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const { handleStore } = await loadModules();
 
     await expect(handleStore.getHomeStorageBackend()).resolves.toBe('node');
   });
 
   it('refuses to durably pin Home to a browser engine on the desktop build', async () => {
-    vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
     const { handleStore } = await loadModules();
 
     await expect(handleStore.pinHomeStorageBackend('opfs')).rejects.toThrow(/desktop/i);

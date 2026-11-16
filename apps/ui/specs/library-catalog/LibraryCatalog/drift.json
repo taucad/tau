@@ -117,16 +117,16 @@
     "writeStopEnded"
   ],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "37bd3b63f8a57d3d03806e29103349c96a45795a62e72afb6bb0697a6d744dcb",
+    "apps/ui/app/hooks/use-project-manager.tsx": "44bec3a7c238cd824661c721ad1d534f95057e3cf352a79f05ba76c9e679e098",
     "apps/ui/app/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
     "apps/ui/app/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
     "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/ui/app/runtime/project-library-commands.ts": "039b70ca792c6de893953f8ec5c2b3c77f22d813afb45252be62eb4760ebd9ec",
-    "apps/ui/app/runtime/project-library-workspace.ts": "e255564cc91fe1f4b0f27009c71354404683d75e5653adb022ab2e2e0857aaf5",
-    "apps/ui/app/runtime/project-library.ts": "4a427ba45ba8b1e080d0522c2910346d4aa7acccdbfa74e8f70ad38163124a59"
+    "apps/ui/app/runtime/project-library-commands.ts": "c99ca9df92433ba35bc73bc305d956fc8dfc06c45467abed2cc2493fee2a335b",
+    "apps/ui/app/runtime/project-library-workspace.ts": "f7483d7cd3a87ac2640fcac9ff5aa6b41f5781a8dff60ade8fe4ea2ecbeea67d",
+    "apps/ui/app/runtime/project-library.ts": "93860e4634f939ab7442d8ca1cda3ea3195e29f99292c59829d901d726a8e2a0"
   },
   "specs": {
-    "LibraryCatalog.tla": "e8d9e281d3cae7323561d4227cf9bbf00e44389210eca8585c90c27aeea2fded"
+    "LibraryCatalog.tla": "2fe59579887e81f741cf6f4e58b7a3802012765dd2e79646791367215f98aca7"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

@@ -57,7 +57,7 @@ import type { PartialDeep } from 'type-fest';
 import type * as CadMachineModule from '#machines/cad.machine.js';
 import type * as ParameterSetServiceModule from '@taucad/ui-core/services/parameter-set-service';
 
-vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({ isBrowser: true }));
 /* Every parameter service the runtime builds, each with a spied close; `decorate` lets a row stand in for its reads. */
 const services = vi.hoisted(() => ({
   built: [] as Array<ParameterSetService & { close: ReturnType<typeof vi.fn> }>,

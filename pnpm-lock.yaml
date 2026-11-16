@@ -3598,6 +3598,21 @@ importers:
 
   apps/libs/files-ui:
     dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../../packages/agent-host
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../../libs/events
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../../packages/filesystem
+      '@taucad/fs-client':
+        specifier: workspace:*
+        version: link:../fs-client
+      '@taucad/slicer':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/slicer
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -3632,6 +3647,9 @@ importers:
       '@testing-library/user-event':
         specifier: ^14.6.1
         version: 14.6.7(@testing-library/dom@10.4.2)
+      fake-indexeddb:
+        specifier: 'catalog:'
+        version: 6.2.5
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -3641,6 +3659,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/fs-client:
     dependencies:

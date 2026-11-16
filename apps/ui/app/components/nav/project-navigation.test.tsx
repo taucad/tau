@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
+import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { mock } from 'vitest-mock-extended';
 import { toast } from '@taucad/ui/components/sonner';
 import type { ReactNode } from 'react';
@@ -21,7 +21,7 @@ const mockInvalidateQueries = vi.fn();
 let bridge: DesktopBridge | undefined;
 const mockOpenDirectory = vi.fn(async (_path: string) => undefined);
 const mockWorkspaceRoot = vi.fn(async (_projectId: string) => '/picked/Two space');
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => bridge }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: () => bridge }));
 vi.mock('#lib/agent-host-placement.js', () => ({ desktopWorkspaceRoot: async (id: string) => mockWorkspaceRoot(id) }));
 let pathname = '/';
 let search = '';

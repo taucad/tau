@@ -30,7 +30,7 @@ import type {
   BambuStudioSelection,
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { observedSlots, toolheadOf } from '#components/print/machine-facts.js';
 import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 

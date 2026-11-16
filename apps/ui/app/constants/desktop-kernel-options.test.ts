@@ -12,7 +12,15 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as DesktopKernelOptions from '#constants/desktop-kernel-options.js';
-import type * as HandleStore from '#filesystem/handle-store.js';
+import type * as HandleStore from '@taucad/files-ui/filesystem/handle-store';
+
+/** The build target `@taucad/*` libraries resolve; the app's own reads still follow `TAU_TARGET`. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
 
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
@@ -48,6 +56,7 @@ const requestServicesPort = vi.fn();
  */
 const installDesktopBridge = (options: { services?: boolean } = {}): void => {
   vi.stubEnv('TAU_TARGET', 'desktop');
+  buildTarget.desktop = true;
   const relayTag = 'tau:services-port';
   requestServicesPort.mockImplementation((requestId: string) => {
     if (!options.services) {
@@ -79,7 +88,7 @@ const loadModules = async (): Promise<{
   globalThis.indexedDB = new IDBFactory();
   return {
     desktop: await import('#constants/desktop-kernel-options.js'),
-    handleStore: await import('#filesystem/handle-store.js'),
+    handleStore: await import('@taucad/files-ui/filesystem/handle-store'),
   };
 };
 
@@ -91,6 +100,7 @@ const moduleGraphTimeout = 30_000;
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  buildTarget.desktop = false;
   vi.resetModules();
   requestRuntimePort.mockReset();
   requestServicesPort.mockReset();

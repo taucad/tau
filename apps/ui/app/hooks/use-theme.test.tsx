@@ -5,7 +5,7 @@ import { buildClientThemeCode, Theme, ThemeProvider, useTheme } from '#hooks/use
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 
 const setDesktopAppIconTheme = vi.hoisted(() => vi.fn());
-vi.mock('#filesystem/desktop-bridge.js', () => ({ setDesktopAppIconTheme }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ setDesktopAppIconTheme }));
 
 const localThemeStore = new Map<string, string>();
 const localStorageStub = {

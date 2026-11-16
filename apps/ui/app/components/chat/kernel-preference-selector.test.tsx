@@ -20,7 +20,7 @@ const flags = vi.hoisted(() => ({ zooCloudDispatch: false }));
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: (flag: string) => flag === 'zooCloudDispatch' && flags.zooCloudDispatch,
 }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => undefined }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: () => undefined }));
 const toastInfo = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { info: toastInfo } }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => entitlementsFromTier('pro') }));

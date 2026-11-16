@@ -1,7 +1,7 @@
 import { idPrefix } from '@taucad/types/constants';
 import type { WorkspaceDirectoryRequiredCode } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { isDesktopTarget } from '#lib/build-target.js';
+import { isDesktopTarget } from '@taucad/ui-core/lib/build-target';
 
 export type ProjectLocationDisplay =
   | { readonly kind: 'home' }
@@ -42,7 +42,7 @@ export const projectLocationDescriptor = (location: ProjectLocationDisplay): Pro
     return { label: 'Temporary', detail: 'cleared when this session ends' };
   }
   /* Desktop's Home is a folder in Tau's app data; the web's lives in browser storage. */
-  return { label: 'Home', detail: isDesktopTarget() ? 'on your computer' : 'in this browser' };
+  return { label: 'Home', detail: isDesktopTarget ? 'on your computer' : 'in this browser' };
 };
 
 export const projectLocationFullLabel = (descriptor: ProjectLocationDescriptor): string =>

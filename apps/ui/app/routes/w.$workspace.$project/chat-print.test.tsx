@@ -110,7 +110,7 @@ vi.mock('@taucad/viewer/parameters/parameters', async (importOriginal) => {
   const fixtures = await import('#routes/w.$workspace.$project/chat-print.fixture.js');
   return fixtures.parametersMock(await importOriginal());
 });
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => {
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', async (importOriginal) => {
   const [actual, fixtures] = await Promise.all([
     importOriginal<Record<string, unknown>>(),
     import('#routes/w.$workspace.$project/chat-print.fixture.js'),

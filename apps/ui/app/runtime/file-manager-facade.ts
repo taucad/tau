@@ -29,7 +29,7 @@ import {
   getProjectRootConfigs,
   restoreWorkspaceHandle as restoreStoredWorkspaceHandle,
   updateWorkspaceHandle,
-} from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy, FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { FileManagerSnapshot } from '#runtime/file-manager-host.wait.js';
 import { recordConnectionsOf } from '#runtime/file-manager-record-connections.js';

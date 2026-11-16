@@ -75,7 +75,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     workspace: { syncProjectRoots: bridgeHarness.syncProjectRoots },
   }),
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => ({
     projectId: 'project-test',
     backend: 'indexeddb',

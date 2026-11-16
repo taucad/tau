@@ -13,7 +13,7 @@ import { revisionClients } from '#services/revision-client-registry.js';
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { Topic } from '@taucad/events';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type {
   GitRemoteCredential,
   PublishDraft,

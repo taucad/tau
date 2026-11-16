@@ -537,7 +537,7 @@ vi.mock('#services/agent-host-client.js', () => ({
 vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getProjectFileSystemConfig: async (projectId: string) => ({
     projectId,

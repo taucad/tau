@@ -294,7 +294,7 @@ Code and docs citing the old numbers resolve here:
 
 ## References
 
-- Implementation: `packages/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts,workspace-file-service.ts}`, `packages/filesystem/src/backend/direct-idb-provider.ts`, `apps/ui/app/filesystem/{handle-store.ts,workspace-errors.ts}`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
+- Implementation: `packages/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts,workspace-file-service.ts}`, `packages/filesystem/src/backend/direct-idb-provider.ts`, `apps/libs/files-ui/src/filesystem/handle-store.ts`, `apps/libs/ui-core/src/filesystem/workspace-errors.ts`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
 - Research: `docs/research/headless-thumbnail-rendering-architecture-v4.md` (Finding 5, R3)
 - Research: `docs/research/runtime-model-load-project-root-regression-v3.md` (rooted runtime filesystem boundary)
 - Research: `docs/research/workspace-naming-and-storage-backend-abstraction.md` (Home identity and engine pinning)

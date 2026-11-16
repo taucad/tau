@@ -24,11 +24,11 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     writeFile: mocks.writeFile,
   }),
 }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => mocks.bridge,
   nodeHomeRoot: () => '/Users/tester/Tau/home',
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => ({ backend: 'node', providerBasePath: 'project-1' }),
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mocks.error } }));

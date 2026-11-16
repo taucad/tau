@@ -16,7 +16,7 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import type { AnyEventObject, EventObject } from 'xstate';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import type { HomeStorageBackend } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-store';
 import { noAnalytics } from '#runtime/app-runtime.js';
 import {
   createFileManagerHost,

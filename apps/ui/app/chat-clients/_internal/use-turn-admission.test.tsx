@@ -8,6 +8,7 @@ import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js'
 const harness = vi.hoisted(() => {
   const state: { catalog: ModelCatalog } = { catalog: { status: 'loading' } };
   return Object.assign(state, {
+    cloudOpenPending: false,
     creditPreflight: vi.fn(),
     awaitAvailability: vi.fn(async () => ({ status: 'available', durability: 'exclusive-append' })),
   });
@@ -22,6 +23,7 @@ vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => har
 vi.mock('#hooks/active-chat-provider.js', () => ({ useActiveChatSession: () => ({ activeChatId: 'chat_1' }) }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => ({ get: () => undefined }) }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_1' }) }));
+vi.mock('#lib/tau-cloud-intent.js', () => ({ isCloudProjectPending: () => harness.cloudOpenPending }));
 vi.mock('#lib/agent-host-placement.js', () => ({
   daemonPlacementOf: (execution: { hostId?: string }) => execution.hostId,
   /* The web build: an external agent pinned to Tau Desktop has nowhere to run here. */
@@ -50,9 +52,23 @@ const admit = async (execution: CadAgentExecution) => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  harness.cloudOpenPending = false;
 });
 
 describe('useTurnAdmission', () => {
+  /* SP2h: chats open while the files still arrive; a turn in this document's checkout waits for the whole apply. */
+  it('should refuse a browser-hosted turn while a Tau Cloud open is still writing the files', async () => {
+    harness.cloudOpenPending = true;
+    harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.8')] };
+    await expect(admit(opus)).rejects.toMatchObject({
+      code: 'CHAT_PLACEMENT_UNAVAILABLE',
+      message: expect.stringContaining('still arriving') as unknown as string,
+    });
+    expect(harness.awaitAvailability).not.toHaveBeenCalled();
+    /* A daemon runs on its own tree, which this open is not writing. */
+    await expect(admit({ kind: 'acp', hostId: 'origin', agentId: 'codex' })).resolves.toEqual({ hostId: 'origin' });
+  });
+
   it('should refuse a Tau turn with a readable reason when the model catalog cannot be reached', async () => {
     harness.catalog = { status: 'unavailable' };
     await expect(admit(opus)).rejects.toMatchObject({

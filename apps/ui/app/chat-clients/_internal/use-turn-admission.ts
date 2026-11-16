@@ -12,6 +12,7 @@ import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-p
 import { useModels } from '#hooks/use-models.js';
 import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { randomUuid } from '@taucad/utils/id';
+import { isCloudProjectPending } from '#lib/tau-cloud-intent.js';
 
 /**
  * This document's resident agent host, as a CAD turn's execution target names it. The host places the turn itself,
@@ -58,6 +59,18 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
         throw Object.assign(new Error(unplaceable), { code: 'CHAT_PLACEMENT_UNAVAILABLE' });
       }
       const daemonHostId = daemonPlacementOf(turnExecution);
+      /*
+       * SP2h: a project's chats open while a Tau Cloud open is still writing its files, but a turn this document hosts
+       * runs in that checkout. Its reads would find files that have not landed, and a write to one would make the
+       * apply's own write of it refuse. It waits for the whole apply, as the chats did before; a daemon runs on its
+       * own tree, which this open is not writing.
+       */
+      if (daemonHostId === undefined && isCloudProjectPending(projectId)) {
+        throw Object.assign(
+          new Error('This project’s files are still arriving. The agent can start once they have all landed.'),
+          { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
+        );
+      }
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,
       // ahead of the probe), and an answered "unavailable" must refuse with its

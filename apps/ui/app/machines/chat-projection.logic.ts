@@ -688,12 +688,16 @@ const foldRunViews = (
     const projectedBlockKeys = message?.role === 'assistant' ? [...changes.keys] : undefined;
     const removedBlock = changes.removed;
     // A replacement can rewrite any envelope, including removing parts. Rebuild only that envelope's owned range;
-    // ordinary checkpoints on the newest message keep their append-only chunk path.
+    // ordinary checkpoints on the newest message keep their append-only chunk path. That path extends the range to
+    // the new tail, so it holds only while the range still ends there: chunks a row without an envelope appended
+    // since (an interrupt's request, a step boundary) are not this message's, and a later rewrite of a range that
+    // had absorbed them cut an approval's opening out of the stream while its answer stayed.
     const rewriteMessage =
       messageRange !== undefined &&
       message !== undefined &&
       (sealedSegment !== undefined ||
         messageRange !== messageSource?.messages?.at(-1) ||
+        messageRange.to !== messageSource.chunks.length ||
         correctedIds.size > 0 ||
         removedBlock ||
         previous?.terminal === 'completed');

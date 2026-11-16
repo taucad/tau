@@ -1,5 +1,6 @@
 /**
- * How the chat store describes a failed presentation (a run watch or a transcript read), and whether it is retried.
+ * How the chat store logs its diagnostics, describes a failed presentation (a run watch or a transcript read), and
+ * whether it is retried.
  *
  * @module
  */
@@ -58,15 +59,27 @@ export const presentationErrorFacts = (
 };
 
 /**
- * Log one presentation diagnostic with its facts as JSON text: the desktop forwards a renderer warning as the
+ * Log one chat store diagnostic with its facts as JSON text: the desktop forwards a renderer console line as the
  * console's flattened text, where an object argument reads only `[object Object]`.
+ *
+ * @param level - The console level.
+ * @param label - The diagnostic's fixed label.
+ * @param facts - Its facts, JSON-safe.
+ * @public
+ */
+export const logFacts = (level: 'info' | 'warn', label: string, facts: Readonly<Record<string, unknown>>): void => {
+  console[level](label, JSON.stringify(facts));
+};
+
+/**
+ * Log one presentation diagnostic at warning level ({@link logFacts}).
  *
  * @param label - The diagnostic's fixed label.
  * @param facts - Its facts.
  * @public
  */
 export const warnPresentation = (label: string, facts: Readonly<Record<string, unknown>>): void => {
-  console.warn(label, JSON.stringify(facts));
+  logFacts('warn', label, facts);
 };
 
 /** Channel and host closes that end one connection while the owner, and the run, carry on. */

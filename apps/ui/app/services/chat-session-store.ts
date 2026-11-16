@@ -140,6 +140,7 @@ import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-m
 import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
 import {
   isTransientPresentationFailure,
+  logFacts,
   presentationErrorFacts,
   warnPresentation,
 } from '#services/chat-presentation-diagnostics.js';
@@ -190,7 +191,11 @@ export type StopOrigin = 'stop-button' | 'stop-shortcut' | 'close-chat' | 'new-t
 
 /* Renderer console reaches the desktop log, where it lines up with the ledger's cancel row by command id. */
 const logStop = (command: HostCommand, origin: StopOrigin | undefined): void => {
-  console.info('[ChatSessionStore] host cancel', { ...command.payload, commandId: command.commandId, origin });
+  logFacts('info', '[ChatSessionStore] host cancel', {
+    ...command.payload,
+    commandId: command.commandId,
+    ...(origin === undefined ? {} : { origin }),
+  });
 };
 
 export type ChatSessionDeps = {
@@ -1614,7 +1619,10 @@ export class ChatSessionStore {
       await waitFor(session.persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat, { signal });
     } catch (error) {
       if (!signal.aborted) {
-        console.warn('[ChatSessionStore] handoff metadata could not be prepared', { chatId, error });
+        logFacts('warn', '[ChatSessionStore] handoff metadata could not be prepared', {
+          chatId,
+          ...presentationErrorFacts(error),
+        });
       }
       return;
     }

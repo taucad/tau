@@ -78,6 +78,24 @@ const createHost = () => {
         append(lifecycleRow(rows.length, 'running'));
       });
     }
+    if (command.type === 'cancel') {
+      /* The host settles the open request as cancelled ahead of the run's own terminal row. */
+      const open = rows.findLast((row) => row['type'] === 'interrupt.recorded' && row['phase'] === 'requested');
+      queueMicrotask(() => {
+        if (open !== undefined) {
+          append(
+            logRow(rows.length, {
+              type: 'interrupt.recorded',
+              interruptId: open['interruptId'],
+              phase: 'resolved',
+              reason: 'cancelled',
+              payload: { outcome: 'cancelled' },
+            }),
+          );
+        }
+        append({ ...lifecycleRow(rows.length, 'cancelled'), detail: { code: 'USER_STOPPED', message: 'Stopped' } });
+      });
+    }
     return { commandId: command.commandId, generation: 0, status: 'applied', effect: 'durable', cursor: rows.length };
   });
   const connect = async () => {
@@ -303,6 +321,82 @@ describe('ChatSessionStore approval cycles with the pinned real SDK', () => {
         errorCode: 'PEER_GONE',
         errorMessage: 'Channel closed',
         retry: 1,
+      });
+    } finally {
+      unpublish();
+      unobserve();
+      store.release('chat');
+    }
+  });
+
+  it('should stop a run paused on an approval, offering Stop until the host settles it as cancelled', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const host = createHost();
+    const store = createStore();
+    host.rows.push(
+      {
+        ...lifecycleRow(0, 'admitted'),
+        admission: { kind: 'tau', turnId: 'u', message: { id: 'u', role: 'user', content: 'Write the file' } },
+      },
+      lifecycleRow(1, 'running'),
+    );
+    const { chat } = store.acquire('chat', 'project');
+    const unobserve = store.observe('chat', 'project');
+    const unpublish = store.publishProjectHostConnector('project', host.connect);
+    const session = store.get('chat')!;
+    /* What the composer offers Stop on (`useChatTextareaLogic`'s `canStop`) beside a streaming status. */
+    const stopOffered = (): boolean =>
+      session.stateActorRef.getSnapshot().context.pendingApprovalCount > 0 || store.isStopping('chat');
+    try {
+      await vi.waitFor(() => {
+        expect(['submitted', 'streaming']).toContain(chat.status);
+      });
+      host.append(
+        logRow(host.rows.length, {
+          type: 'message.appended',
+          message: { id: 'input-1', role: 'tool-input', toolCallId: 'call-1', toolName: 'Write', content: {} },
+        }),
+        logRow(host.rows.length + 1, {
+          type: 'interrupt.recorded',
+          interruptId: 'interrupt-1',
+          phase: 'requested',
+          reason: 'approval',
+          payload: {
+            kind: 'approval',
+            prompt: 'Write main.geospec.ts?',
+            agentId: 'claude',
+            context: { toolCall: { toolCallId: 'toolu_1', title: 'Write main.geospec.ts' }, options: claudeOptions },
+          },
+        }),
+        lifecycleRow(host.rows.length + 2, 'paused'),
+      );
+      await vi.waitFor(() => {
+        expect(store.getProjection('chat')?.ledger.runs['run_1']?.lifecycle).toBe('paused');
+        // The SDK stream closed with the pause: the status alone would offer Send.
+        expect(chat.status).toBe('ready');
+        expect(stopOffered()).toBe(true);
+      });
+
+      store.stopRun('chat', 'stop-button');
+      expect(stopOffered()).toBe(true);
+      await vi.waitFor(() => {
+        expect(store.getProjection('chat')?.ledger.runs['run_1']?.lifecycle).toBe('cancelled');
+        expect(store.isStopping('chat')).toBe(false);
+      });
+      expect(stopOffered()).toBe(false);
+      expect(Projection.selectOpenApprovals(store.getProjection('chat')!)).toEqual([]);
+      expect(pendingAgentHostApprovals(chat.messages)).toEqual([]);
+      expect(chat.status).toBe('ready');
+      const cancels = host.hostCommand.mock.calls.filter(([command]) => command.type === 'cancel');
+      expect(cancels.map(([command]) => command.payload)).toEqual([{ chatId: 'chat', runId: 'run_1' }]);
+      // The cancel's facts are logged as JSON text, which the desktop log keeps whole.
+      const logged = info.mock.calls.find(([label]) => label === '[ChatSessionStore] host cancel');
+      expect(typeof logged?.[1]).toBe('string');
+      expect(JSON.parse(logged![1] as string)).toEqual({
+        chatId: 'chat',
+        runId: 'run_1',
+        commandId: cancels[0]![0].commandId,
+        origin: 'stop-button',
       });
     } finally {
       unpublish();

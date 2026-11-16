@@ -5468,12 +5468,11 @@ describe('ChatSessionStore', () => {
       const cancel = hostCommand.mock.calls[0]?.[0];
       expect(cancel?.type).toBe('cancel');
       /* The host labels every cancel USER_STOPPED; only this line says which gesture sent it. */
-      expect(info).toHaveBeenCalledWith('[ChatSessionStore] host cancel', {
-        chatId,
-        runId,
-        commandId: cancel?.commandId,
-        origin: 'stop-button',
-      });
+      // As JSON text: the desktop log flattens an object argument to `[object Object]`.
+      expect(info).toHaveBeenCalledWith(
+        '[ChatSessionStore] host cancel',
+        JSON.stringify({ chatId, runId, commandId: cancel?.commandId, origin: 'stop-button' }),
+      );
       info.mockRestore();
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 

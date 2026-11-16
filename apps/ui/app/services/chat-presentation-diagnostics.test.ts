@@ -4,6 +4,7 @@ import { UIMessageStreamError } from 'ai';
 import { ChannelClosedError } from '@taucad/agent-host/channel-client';
 import {
   isTransientPresentationFailure,
+  logFacts,
   presentationErrorFacts,
   warnPresentation,
 } from '#services/chat-presentation-diagnostics.js';
@@ -64,6 +65,35 @@ describe('warnPresentation', () => {
       '{"runId":"run_1","errorCode":"PEER_GONE"}',
     );
     expect(warn.mock.calls[0]?.map(String).join(' ')).not.toContain('[object Object]');
+  });
+});
+
+describe('logFacts', () => {
+  it('should log a host cancel at info level as JSON text, which a flattened console line keeps', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    logFacts('info', '[ChatSessionStore] host cancel', {
+      chatId: 'chat',
+      runId: 'run_1',
+      commandId: 'req_1',
+      origin: 'stop-button',
+    });
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      '[ChatSessionStore] host cancel',
+      '{"chatId":"chat","runId":"run_1","commandId":"req_1","origin":"stop-button"}',
+    );
+    expect(info.mock.calls[0]?.map(String).join(' ')).not.toContain('[object Object]');
+  });
+
+  it('should log a failure at warning level with its facts, never the raw error object', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    logFacts('warn', '[ChatSessionStore] handoff metadata could not be prepared', {
+      chatId: 'chat',
+      ...presentationErrorFacts(new ChannelClosedError({ origin: 'remote', code: 'PEER_GONE' })),
+    });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      '[ChatSessionStore] handoff metadata could not be prepared',
+      '{"chatId":"chat","errorName":"ChannelClosedError","errorCode":"PEER_GONE","errorMessage":"Channel closed"}',
+    );
   });
 });
 

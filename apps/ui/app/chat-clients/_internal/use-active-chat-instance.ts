@@ -1,5 +1,4 @@
-import type { Chat } from '@ai-sdk/react';
-import type { MyUIMessage } from '@taucad/chat';
+import type { ChatView } from '#services/deferred-chat.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 
 /**
@@ -17,4 +16,4 @@ import { useActiveChatSession } from '#hooks/active-chat-provider.js';
  * @internal
  */
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal, scoped to chat-clients
-export const useActiveChatInstance = (): Chat<MyUIMessage> => useActiveChatSession().chat;
+export const useActiveChatInstance = (): ChatView => useActiveChatSession().chat;

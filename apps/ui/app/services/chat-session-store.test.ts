@@ -2,7 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
@@ -392,6 +393,12 @@ function publishAdmission(
     request: await request(gesture),
   }));
 }
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   // An SDK watch requires a visible admitted input; lifecycle-only logs cannot

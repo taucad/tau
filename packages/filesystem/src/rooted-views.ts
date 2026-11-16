@@ -241,11 +241,6 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      */
     releaseDeclaration?(): void;
     /**
-     * Say that the revision layer will declare this root (D9). Making its raw view already says so; this repeats it,
-     * and holds nothing a release, a declaration or the bound has ended. Heard only from a raw view.
-     */
-    awaitDeclaration?(): void;
-    /**
      * Which of these files the root's index holds as pending entries: the
      * placeholders the revision layer declared, as a non-raw view's stat
      * answers them (D9). Reads no bytes.
@@ -1306,12 +1301,6 @@ export class RootedViews {
           new Map([...declared].map(([path, placeholder]) => [local(path), placeholder])),
           paths?.map((path) => local(path)),
         );
-      },
-      awaitDeclaration: (): void => {
-        assertCurrent();
-        if (raw) {
-          this._projectIndexes.awaitDeclaration(root, this._pendingStallMilliseconds);
-        }
       },
       releaseDeclaration: (): void => {
         assertCurrent();

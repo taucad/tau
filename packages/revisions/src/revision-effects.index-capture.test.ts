@@ -111,9 +111,6 @@ const fixture = async (
   /* Every capture read, counted; and the index's answers, replaceable per test. */
   const counted = (): RevisionFileSystem =>
     Object.assign(Object.create(rooted) as RevisionFileSystem, {
-      awaitDeclaration: () => {
-        declarations.push('await');
-      },
       releaseDeclaration: () => {
         declarations.push('release');
         rooted.releaseDeclaration?.();

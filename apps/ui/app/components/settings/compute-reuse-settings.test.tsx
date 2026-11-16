@@ -43,7 +43,7 @@ vi.mock('#routes/w.$workspace.$project/focused-project-view.session.js', () => (
       ? { projectId: state.projectId, runtime: undefined, fileManagerRef: state.available ? focusedFiles : undefined }
       : undefined,
 }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => undefined }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: () => undefined }));
 
 const { ComputeReuseSettings } = await import('./compute-reuse-settings.js');
 

@@ -125,6 +125,11 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
+    "target": "packages/plugins/heif/src/fixtures/small.heic",
+    "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-picogk-kinematics.spec.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"

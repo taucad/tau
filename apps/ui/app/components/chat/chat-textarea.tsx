@@ -7,6 +7,9 @@ import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
+import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
 import { useProject } from '#hooks/use-project.js';
@@ -24,11 +27,21 @@ import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
 import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { CadAgentExecution } from '@taucad/chat';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+
+/** The surface to adopt: none when a host above already owns the native input (`adoptedEarlyInput`, `enableEarlyInput`). */
+const handOffTarget = (
+  target: HandOffTarget | undefined,
+  adoptedEarlyInput: EarlyChatInput | undefined,
+  enableEarlyInput: boolean,
+): HandOffTarget | undefined => (adoptedEarlyInput === undefined && !enableEarlyInput ? target : undefined);
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -39,12 +52,24 @@ import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.
  * as props to keep the memo'd desktop component free of internal subscription hooks,
  * preventing re-render cascades through Radix UI's composeRefs.
  */
+/**
+ * Whether a turn this composer sends would run in a checkout a Tau Cloud open is still writing (SP2h): the chats open
+ * before the files land, and such a turn waits for them, as its admission refuses it. A daemon runs on its own tree.
+ *
+ * @param projectId - The composer's project, if any.
+ * @param execution - The execution the send would run.
+ * @returns `true` while the send must wait.
+ */
+const useTurnFilesArriving = (projectId: string | undefined, execution: CadAgentExecution): boolean =>
+  useTauCloudIntent(projectId ?? '') === 'open' && daemonPlacementOf(execution) === undefined;
+
 export const ChatTextarea = memo(function ({
   ref,
   onSubmit,
   enableAutoFocus = true,
   enableEarlyInput = false,
   adoptedEarlyInput,
+  handOff: handOffTargetProperty,
   onEscapePressed,
   onBlur,
   className,
@@ -95,7 +120,28 @@ export const ChatTextarea = memo(function ({
   }, [onBlur]);
 
   /* Another device is running this chat (XD3): its host would refuse the send, so the composer holds it. */
-  const { runElsewhere } = useChatComposer();
+  const {
+    runElsewhere,
+    draftActorRef,
+    execution: { execution: composerExecution },
+  } = useChatComposer();
+  const projectContext = useProject({ enableNoContext: true });
+  const filesArriving = useTurnFilesArriving(projectContext?.projectId, composerExecution);
+
+  /* P4: a placeholder served a native input for this composer; its edit enters the draft before the editor renders
+   * it, so the draft's own text never overwrites what the person typed. */
+  const handleHandOffAdopted = useCallback(
+    (snapshot: HandOffSnapshot): void => {
+      if (snapshot.edited) {
+        draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
+      }
+    },
+    [draftActorRef],
+  );
+  const handOff = useHandOffAdoption(
+    handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),
+    handleHandOffAdopted,
+  );
   const logic = useChatTextareaLogic({
     ref,
     onSubmit,
@@ -103,12 +149,11 @@ export const ChatTextarea = memo(function ({
     onEscapePressed,
     onBlur: handleBlur,
     mode,
-    isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined,
+    isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined || filesArriving,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
 
-  const projectContext = useProject({ enableNoContext: true });
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
   const { chats } = useChatRecords(projectContext?.projectId ?? '');
@@ -406,8 +451,14 @@ export const ChatTextarea = memo(function ({
    * component owns the native input and has already handed its edit over, which is how a route can
    * accept text without this module in its bundle; `enableEarlyInput` means this component owns it,
    * which needs the module first; neither means there is no early input to carry. */
-  if (adoptedEarlyInput) {
-    return <>{content(adoptedEarlyInput)}</>;
+  /* A fourth: a placeholder above served the native input (`handOff`) and this composer adopted it. Until the
+   * adoption attempt has run, or while a composition in it is open, the native input is still the thing to type in. */
+  const adopted = adoptedEarlyInput ?? (handOff.kind === 'done' ? handOff.snapshot : undefined);
+  if (adopted) {
+    return <>{content(adopted)}</>;
+  }
+  if (handOff.kind === 'waiting') {
+    return skeleton;
   }
   return enableEarlyInput ? (
     <ChatEarlyInput className={className}>{content}</ChatEarlyInput>

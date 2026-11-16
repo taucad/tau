@@ -32,7 +32,7 @@ import type { SessionRevisionsCallback, SessionRevisionsPorts } from '#runtime/s
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 import { isFileCheckSettled } from '#hooks/use-project-availability.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
-import type * as HandleStoreModule from '#filesystem/handle-store.js';
+import type * as HandleStoreModule from '@taucad/files-ui/filesystem/handle-store';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
 import type * as WorkspaceFrameModule from '#routes/w.$workspace.$project/workspace-frame.js';
@@ -329,7 +329,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
 vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<typeof HandleStoreModule>()),
   getProjectFileSystemConfig: async (projectId: string) => ({
     projectId,

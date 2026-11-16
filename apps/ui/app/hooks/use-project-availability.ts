@@ -35,10 +35,23 @@ export type FirstView = Readonly<{ surface: ReadinessSurface; readiness: Project
  * project's `tau.json` is readable.
  *
  * @param view - The surface and the open's readiness.
+ * @param status - The revision client's projection: a chat view's records.
  * @returns `true` once the surface may open.
  */
-const firstViewOpens = (view: FirstView): boolean =>
-  readyFor(view.surface, view.readiness) && reachesReadiness(view.readiness, 'entryReady');
+const firstViewOpens = (view: FirstView, status: Pick<RevisionStatusProjection, 'sync'> | undefined): boolean =>
+  readyFor(view.surface, view.readiness) &&
+  reachesReadiness(view.readiness, 'entryReady') &&
+  /* Chats open on their own records too (SP2h), never on a partial history (I7). */
+  (view.surface !== 'chats' || chatsLanded(status));
+
+/**
+ * Whether the chats' records have all landed: projected, or chat sync is off and none is coming.
+ *
+ * @param status - The revision client's projection.
+ * @returns `true` once no chat history is still arriving.
+ */
+export const chatsLanded = (status: Pick<RevisionStatusProjection, 'sync'> | undefined): boolean =>
+  status?.sync.chats === 'ready' || status?.sync.chats === 'disabled';
 
 /**
  * Whether the open's pull failed, was abandoned, conflicted, or its remote needs reconnecting.
@@ -46,7 +59,7 @@ const firstViewOpens = (view: FirstView): boolean =>
  * @param status - The revision client's projection.
  * @returns `true` when the open cannot go on by itself.
  */
-const isFailedOpen = (status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined): boolean =>
+export const isFailedOpen = (status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined): boolean =>
   status?.sync.state === 'failed' ||
   status?.sync.state === 'queued' ||
   status?.sync.state === 'conflicted' ||
@@ -82,8 +95,8 @@ export function projectAvailability(
    * and so does the retry that follows until its own write announces the next tree. Only a write running now, or one
    * that landed, has a tree whose arriving rows the listing shows.
    */
-  const writing = status?.sync.pullPhase === 'applying' && !failed;
-  if (firstView !== undefined && firstViewOpens(firstView) && (writing || applied)) {
+  const hasTree = !failed && (status?.sync.pullPhase === 'applying' || applied);
+  if (firstView !== undefined && hasTree && firstViewOpens(firstView, status)) {
     return 'ready';
   }
   if (applied) {
@@ -99,6 +112,30 @@ export function projectAvailability(
     return 'downloading';
   }
   return failed ? 'failed' : 'connecting';
+}
+
+/**
+ * Whether a project's chats may open and a new one be made (SP2h): their records have landed and, while a Tau Cloud
+ * open is owed, the chats surface may open on this tab's own readiness. Read outside React by the focused chat's
+ * ensure and the session's retry of a deferred one, so both decide as the chat pane does.
+ *
+ * @param status - The revision client's projection.
+ * @param isPending - Whether a Tau Cloud open is still owed for the project.
+ * @param canOpen - Whether this account may open the project.
+ * @returns `true` once the chats may open.
+ */
+export function chatsOpen(
+  status: Pick<RevisionStatusProjection, 'sync' | 'remote' | 'readiness'> | undefined,
+  isPending: boolean,
+  canOpen = true,
+): boolean {
+  return (
+    chatsLanded(status) &&
+    projectAvailability(isPending, status, {
+      canOpen,
+      firstView: { surface: 'chats', readiness: ownOpenReadiness(status) },
+    }) === 'ready'
+  );
 }
 
 /**
@@ -291,12 +328,22 @@ export function useLargeObjects(): LargeObjectsFacet | undefined {
 /**
  * The surfaces that wait on readiness, and the state each opens at (D10).
  *
- * The tree opens once the tree is known; the editor and viewer once the entry
- * closure is readable; search, export, the LSP workspace, a revision cut and a
+ * The tree opens once the tree is known; the editor, viewer and chats once the
+ * entry closure is readable (chats once their records land too); search, export, the LSP workspace, a revision cut and a
  * model render need every authored file. A render then waits only on the large
  * objects of its own closure ({@link modelAvailability}, T6).
  */
-export type ReadinessSurface = 'tree' | 'absence' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
+export type ReadinessSurface =
+  | 'tree'
+  | 'absence'
+  | 'editor'
+  | 'viewer'
+  | 'chats'
+  | 'search'
+  | 'export'
+  | 'lsp'
+  | 'cut'
+  | 'model';
 
 /** {@link ReadinessSurface} to the readiness state it needs. */
 export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadiness>> = {
@@ -305,6 +352,8 @@ export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadines
   absence: 'materialized',
   editor: 'entryReady',
   viewer: 'entryReady',
+  /* With their records landed ({@link chatsOpen}): the manifest a chat reads is the entry closure's. */
+  chats: 'entryReady',
   search: 'materialized',
   export: 'materialized',
   lsp: 'materialized',

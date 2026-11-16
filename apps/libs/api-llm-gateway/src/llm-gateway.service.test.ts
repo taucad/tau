@@ -103,7 +103,7 @@ describe('LlmGatewayService', () => {
 
     const relaying = service.relay({
       provider: 'openai-completions',
-      body: { model: 'google-gemini-3.8-flash' },
+      body: { model: 'google-gemini-4-hydrogen' },
       principalId: 'user',
       attemptId: 'attempt',
       reply,

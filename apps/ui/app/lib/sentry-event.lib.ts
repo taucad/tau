@@ -7,6 +7,7 @@ import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails, withoutUserWhenAnonymous } from '#lib/error-details.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
+import { decorateForGraphicsContextUnavailable } from '#lib/graphics-context-failure.lib.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
@@ -387,8 +388,11 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
     ...(fingerprint === undefined ? {} : { fingerprint: [...fingerprint] }),
   };
   // Given the processor's context and the reporter's details, decorated as the SDK's own events are (principle 7).
-  const withContext = decorateForNetworkFailure(
-    withoutUserWhenAnonymous(applyTauEventContext(applyErrorDetails(plain, error)), error),
+  const withContext = decorateForGraphicsContextUnavailable(
+    decorateForNetworkFailure(
+      withoutUserWhenAnonymous(applyTauEventContext(applyErrorDetails(plain, error)), error),
+      error,
+    ),
     error,
   );
   const event = scrubSentryEvent(

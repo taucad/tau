@@ -1,3 +1,4 @@
+import { cloudOpenAccountReason } from '#lib/tau-cloud-intent.js';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
@@ -30,7 +31,7 @@ const messages = {
   preparing: ['Preparing project files', 'Getting your downloaded files ready to use.'],
   offline: ['Connect to download this project', 'This project is not on this device yet. Reconnect, then try again.'],
   failed: ['Couldn’t download this project', 'The download did not finish. Try again to continue.'],
-  account: ['Sign in to continue', 'Use the account that opened this project from Tau Cloud.'],
+  account: ['Sign in to continue', cloudOpenAccountReason],
   ready: ['Project files ready', ''],
 } satisfies Record<ProjectAvailability, readonly [string, string]>;
 

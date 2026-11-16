@@ -2837,7 +2837,7 @@ describe('admission without supplier state', () => {
 describe('post-hoc supplier metering', () => {
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map(
-      ['anthropic-claude-haiku-5.5', 'openai-gpt-5.6-luna', 'google-gemini-3.5-flash', 'together-glm-5.3'].map(
+      ['anthropic-claude-haiku-5.5', 'openai-gpt-5.6-luna', 'google-gemini-4-hydrogen', 'together-glm-5.3'].map(
         (routeId) => [
           routeId,
           {
@@ -2938,12 +2938,12 @@ describe('post-hoc supplier metering', () => {
       supplierCostPicoUsd: 795_000_000n,
     },
     {
-      // $1.50, $0.15 and $9 per million; no cache write meter.
-      routeId: 'google-gemini-3.5-flash',
+      // $1.50, $0.075 and $7.50 per million; no cache write meter.
+      routeId: 'google-gemini-4-hydrogen',
       providerWire: 'openai-completions',
       body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },
       cacheWriteTier: 'none',
-      supplierCostPicoUsd: 5_400_000_000n,
+      supplierCostPicoUsd: 4_650_000_000n,
     },
     {
       // $1.40, $0.26 and $4.40 per million: a route that carried no valuation before.
@@ -2999,7 +2999,7 @@ describe('post-hoc supplier metering', () => {
 
   it('should leave a cut stream with partial meters unpriced as dimension_mismatch without changing its charge', async () => {
     const { admitted, identity } = await admitOnRoute({
-      routeId: 'google-gemini-3.5-flash',
+      routeId: 'google-gemini-4-hydrogen',
       providerWire: 'openai-completions',
       // eslint-disable-next-line @typescript-eslint/naming-convention -- native completions ceiling field
       body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },

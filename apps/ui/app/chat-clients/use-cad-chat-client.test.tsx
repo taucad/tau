@@ -202,7 +202,7 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   openAgentHostChannel: browserHostHarness.openAgentHostChannel,
   unplaceableExecutionReason: () => undefined,
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => ({
     projectId: 'proj_test',
     backend: 'indexeddb',

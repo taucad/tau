@@ -5,7 +5,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatPermissionModeControl } from '#components/chat/chat-permission-mode-control.js';
 import { bypassConfirmation } from '#components/chat/permission-mode-copy.js';
-import type { DesktopPermissions, PermissionMode } from '#filesystem/desktop-permissions.js';
+import type { DesktopPermissions, PermissionMode } from '@taucad/files-ui/filesystem/desktop-permissions';
 
 /* The cmdk list scrolls the active option into view; jsdom has no layout. */
 Element.prototype.scrollIntoView = vi.fn();
@@ -24,8 +24,8 @@ const state = vi.hoisted(() => {
   return initial;
 });
 
-vi.mock('#filesystem/desktop-permissions.js', () => ({ desktopPermissions: () => state.bridge }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({ isDesktopTarget: true }));
+vi.mock('@taucad/files-ui/filesystem/desktop-permissions', () => ({ desktopPermissions: () => state.bridge }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ isDesktopTarget: true }));
 vi.mock('#lib/agent-host-placement.js', () => ({
   agentPlacementOf: (execution: { hostId?: string }) => (execution.hostId === 'desktop' ? 'desktop' : 'cloud'),
   desktopWorkspaceRoot: async (projectId: string) => `/home/me/Tau/${projectId}`,

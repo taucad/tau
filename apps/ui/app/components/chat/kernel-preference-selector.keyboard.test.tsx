@@ -18,7 +18,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   }),
 }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => undefined }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: () => undefined }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { info: vi.fn() } }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => entitlementsFromTier('pro') }));
 vi.mock('#hooks/use-settings-dialog.js', () => ({

@@ -64,10 +64,10 @@ import {
   subscribeOwedEditorText,
 } from '#lib/editor-document-session.js';
 import type { EditorTextScope } from '#lib/editor-document-session.js';
-import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
+import { getProjectRootConfigs, setCheckoutRootConfigs } from '@taucad/files-ui/filesystem/handle-store';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
-import { isFileCheckSettled } from '#hooks/use-project-availability.js';
-import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
+import { chatsOpen, isFileCheckSettled } from '#hooks/use-project-availability.js';
+import { canOpenCloudProject, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
@@ -137,6 +137,8 @@ export type SessionRevisionsCloseDebtPort = Readonly<{
 export type SessionRevisionsCloudOpenPort = Readonly<{
   get: (projectId: string) => boolean;
   subscribe: (listener: () => void) => () => void;
+  /** Whether this account may continue the project's open (SP2h); absent, it may. */
+  canOpen?: (projectId: string) => boolean;
 }>;
 
 /**
@@ -340,7 +342,11 @@ export const createSessionRevisionsPorts = (
   recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
   closeDebt: sessionRevisionsCloseDebt,
   editorText: { setScope: setEditorTextScope, owing: isOwingEditorText, subscribe: subscribeOwedEditorText },
-  cloudOpen: { get: (projectId) => tauCloudIntent.get(projectId) === 'open', subscribe: tauCloudIntent.subscribe },
+  cloudOpen: {
+    get: (projectId) => tauCloudIntent.get(projectId) === 'open',
+    subscribe: tauCloudIntent.subscribe,
+    canOpen: canOpenCloudProject,
+  },
 });
 
 /**
@@ -555,8 +561,9 @@ export const sessionRevisionsCallback =
     const relayFacts = (): void => {
       const status = client?.status();
       relayFileCheck(status);
-      const ready = status?.sync.chats === 'ready';
-      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive. */
+      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive and may open: during a
+       * Tau Cloud open they land beside the apply (SP2h), and a retry before their surface opens would defer again. */
+      const ready = chatsOpen(status, ports.cloudOpen.get(projectId), ports.cloudOpen.canOpen?.(projectId) ?? true);
       if (ready !== chatsReady) {
         chatsReady = ready;
         sendBack({ type: 'revisionChatsChanged', ready });
@@ -882,6 +889,8 @@ export const sessionRevisionsCallback =
         salt = saltOf();
         requestSalt();
         sendActorIfChanged();
+        /* Whether this account may open the project, and so whether its chats may (SP2h), follows the user. */
+        relayFacts();
       });
       unsubscribeAnonymity = ports.anonymity.subscribe(() => {
         anonymous = ports.anonymity.get(workspace);
@@ -911,8 +920,9 @@ export const sessionRevisionsCallback =
         payDebt();
       });
       unsubscribeEditorText = ports.editorText.subscribe(payDebt);
+      /* The open's end changes the file check and whether the chats may open (SP2h); the rest dedupes on the status. */
       unsubscribeCloudOpen = ports.cloudOpen.subscribe(() => {
-        relayFileCheck(client?.status());
+        relayFacts();
       });
     } catch (error) {
       stop();

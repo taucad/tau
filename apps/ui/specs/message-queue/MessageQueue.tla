@@ -131,6 +131,13 @@
 \* it, and settles every queued send as failed when the load fails. Once loaded, a send runs synchronously as
 \* before. Delivery order, admission, persistence and the queue barrier are unchanged, so no action or verdict
 \* changes.
+\* PL6 (hand-off contract): the project composer adopts the native input the workspace placeholder served, moving
+\* its edit into the draft before the editor renders, and an Enter pressed there is one submit through the
+\* composer's existing Enter path once the editor holds the text. Submit, admission, delivery and the queue keep
+\* the same paths and guards. No action or verdict changes.
+\* PL6 review: the composer adopts only an input its own project's placeholder served, and the queued submit waits,
+\* still queued, until the composer's guards permit a send, then carries the editor's text through the same submit.
+\* The composer's guard refs update in a layout effect. No action or verdict changes.
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.
@@ -138,6 +145,12 @@
 \* summary of that directory or any ancestor (the project root included), as the coalescer now delivers scoped
 \* `directoryChanged` resets; a refold only re-reads segments, so admission, delivery, persistence and the queue
 \* barrier are unchanged.
+\* SP2h (chats before the whole download): the chats and the composer open once their records land, before a Tau
+\* Cloud open has written the files. A turn this document hosts waits inside its admission, as it already waits for
+\* the host probe, until the open's intent clears; the wait ends in a placement refusal when the open fails or this
+\* account may not continue it (re-read on an account switch), and with the stop's reason on Stop or the turn
+\* host's unmount, which is checked again after the catalog wait. The composer disables
+\* send meanwhile. Admission still decides once, so delivery order, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

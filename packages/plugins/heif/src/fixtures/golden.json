@@ -1,0 +1,89 @@
+{
+  "cases": [
+    {
+      "fixture": "small.heic",
+      "from": "heic",
+      "to": "jpeg",
+      "options": {},
+      "sha256": "0e19fc1686c9c2d8f8292bdd136bf91fa83f76d1775263492952f890abd8effa",
+      "width": 1200,
+      "height": 800,
+      "bytes": 22952
+    },
+    {
+      "fixture": "small.heic",
+      "from": "heic",
+      "to": "png",
+      "options": {},
+      "sha256": "9b19c1e225f36d0da09c1bd457adca1f7acc9983da73527338febefa45632ba1",
+      "width": 1200,
+      "height": 800,
+      "bytes": 69278
+    },
+    {
+      "fixture": "small.heic",
+      "from": "heic",
+      "to": "webp",
+      "options": {},
+      "sha256": "b953e3d41e4148d162146e0d36819e9c6355ffbfd4e47aa44dcceb16948718cb",
+      "width": 1200,
+      "height": 800,
+      "bytes": 7538
+    },
+    {
+      "fixture": "heic-rot6.heic",
+      "from": "heic",
+      "to": "jpeg",
+      "options": {},
+      "sha256": "f28dbf7fe43936ec87694ebb1024bdd20b77a1fbed8f5ed388f91a51ff2f0df4",
+      "width": 800,
+      "height": 1200,
+      "bytes": 22813
+    },
+    {
+      "fixture": "heic-rot6.heic",
+      "from": "heic",
+      "to": "png",
+      "options": {},
+      "sha256": "7e073b26104cd8a67a0d63e26f87526c7ffca6513430c2af9023564be534bc5c",
+      "width": 800,
+      "height": 1200,
+      "bytes": 60256
+    },
+    {
+      "fixture": "heic-rot6.heic",
+      "from": "heic",
+      "to": "webp",
+      "options": {},
+      "sha256": "b70c25ed598b4a3e876e1909d7bda8f91ff7185afd4a9a4772f95ab8d83006a2",
+      "width": 800,
+      "height": 1200,
+      "bytes": 7298
+    },
+    {
+      "fixture": "small.heic",
+      "from": "heic",
+      "to": "jpeg",
+      "options": {
+        "maxEdge": 600
+      },
+      "sha256": "f1bd6cc87bdb765e0b8e95943135745fa7cd15ae130d273a1b0bf2c4836dc966",
+      "width": 600,
+      "height": 400,
+      "bytes": 11071
+    },
+    {
+      "fixture": "heic-rot6.heic",
+      "from": "heif",
+      "to": "jpeg",
+      "options": {
+        "maxEdge": 300,
+        "quality": 0.7
+      },
+      "sha256": "e8c645da6f46227c4db32b0cd18de669a75da0e80c51a63dd5fd85eef22b1325",
+      "width": 200,
+      "height": 300,
+      "bytes": 3157
+    }
+  ]
+}

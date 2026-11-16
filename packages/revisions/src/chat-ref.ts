@@ -1054,6 +1054,11 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       ],
       signal: input.signal,
     });
+    /* Stopped once its files are written: they are on disk, so the chat is announced before the stop is honoured; a
+     * later pull finds it current and would never announce it (SP2h review). */
+    if (input.signal?.aborted === true && entries.some((entry) => entry[2])) {
+      input.onWritten?.(chatId);
+    }
     input.signal?.throwIfAborted();
     /* Each other device's segment here after the pull, as its record names it (round 19). */
     const segments = entries.flatMap(([path, size]) =>

@@ -7,7 +7,7 @@ import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
-import type { WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
+import type { WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';

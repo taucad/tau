@@ -43,15 +43,15 @@ import type {
   WorkspaceConnectionServices,
   WorkspaceConnectionState,
 } from '#hooks/workspace-connection.machine.js';
-import type { DirectoryPick } from '#constants/browser.constants.js';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
   createNodeWorkspace,
   createWorkspace,
   isNodeWorkspace,
   subscribeProjectRootConfigurationChanges,
-} from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { createLibraryDiscovery, selectEpochCurrent } from '#machines/library-discovery.machine.js';

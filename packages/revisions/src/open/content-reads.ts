@@ -9,7 +9,7 @@
  * the explicit form, for a consumer that needs the physical file.
  */
 import { readLfsPointer } from '#lfs.js';
-import type { FillWait, LargeObjectLook } from '#large-object-fill.js';
+import type { FillPath, FillWait, LargeObjectLook } from '#large-object-fill.js';
 import type { Checkout } from '#revision-port.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 import { generatedGitattributesPath, placeholderPathMatcher } from '#workspace-config.js';
@@ -95,7 +95,7 @@ export type ContentReadsDependencies = Readonly<{
     arrival: (checkoutId: string, oid: string, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer> | undefined>;
     written: (
       checkoutId: string,
-      paths: readonly string[],
+      paths: readonly FillPath[],
       wait?: FillWait,
     ) => Promise<'written' | 'failed' | 'stalled' | 'idle'>;
     /** Move these paths to the front of a running fill's queue. */
@@ -277,15 +277,12 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     let left = await placeholders(place, paths);
     /* A few rounds, not a loop: an idle checkout is started, and a writer that put a new pointer down meanwhile gets one more. */
     for (let round = 0; round < materializeRounds && left.length > 0; round += 1) {
+      /* Each with the object it names, so a placeholder the fill has not tracked at that path is written too. */
       // oxlint-disable-next-line no-await-in-loop -- one wait per round.
-      const answer = await fill.written(
-        place.id,
-        left.map(({ path }) => path),
-        {
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
-          stall: options.stallMilliseconds ?? defaultStallMilliseconds,
-        },
-      );
+      const answer = await fill.written(place.id, left, {
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        stall: options.stallMilliseconds ?? defaultStallMilliseconds,
+      });
       if (answer === 'failed' || answer === 'stalled') {
         break;
       }

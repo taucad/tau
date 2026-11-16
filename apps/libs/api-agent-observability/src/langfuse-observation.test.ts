@@ -595,12 +595,12 @@ describe('langfuseObservation v5: host labels on every row (LW17, LI10)', () => 
       );
     };
 
-    const tool = await labelled({ host: 'cli', kernel: 'replicad', model: 'google-gemini-3.8-flash' });
+    const tool = await labelled({ host: 'cli', kernel: 'replicad', model: 'google-gemini-4-hydrogen' });
     expect(attribute(tool, 'langfuse.trace.tags')).toEqual([
       'plan:pro',
       'host:daemon',
       'kernel:replicad',
-      'model:google-gemini-3.8-flash',
+      'model:google-gemini-4-hydrogen',
     ]);
     expect(traceMetadata(tool, 'kernel')).toBe('replicad');
     expect(attribute(await labelled({ host: 'browser', kernel: null, model: null }), 'langfuse.trace.tags')).toEqual([

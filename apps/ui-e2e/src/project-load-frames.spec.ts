@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
+import { axeAudit } from '#support/page-audit.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
   ShownSpan,
@@ -28,6 +29,7 @@ import {
   holdRequestsUntilReleased,
   releaseHeldRequests,
   readProjectLoad,
+  readFirstInputAccepted,
   firstDelayedRead,
   readLaneBordersNow,
   readWorkerDeliveries,
@@ -76,6 +78,8 @@ const projectNames = { a: 'Project Navigation A', b: 'Project Navigation B' } as
 const usage = { inputTokens: 12, outputTokens: 6 };
 const finalReply = 'The task list is up to date.';
 const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
+/** The destination composer's native input that the frame's composer box serves (PL6). */
+const servedComposerInput = '[data-slot="workspace-frame-composer"] textarea[aria-label="Chat message"]';
 const traySummary = selectors.getByRole('button', { name: /^Tasks: 0 of 2 done/u });
 
 const cookieValue = (value: unknown): string => encodeURIComponent(JSON.stringify(value));
@@ -440,6 +444,130 @@ test(
       }
       await writeReport();
     }
+  },
+);
+
+/*
+ * PL6 (progressive loading, OD1): a project URL's placeholder serves the composer's native input, so the gate's first
+ * mark, "first input accepted", is set on a direct load, before the workspace is live, and the bundle reports it as
+ * `tau.load.input.accepted`. Its distance from first contentful paint is kept as evidence (G5), not asserted: the
+ * project document is not held for first paint.
+ */
+test('should mark the first input accepted on a direct project load', { timeout: loadBudget }, async () => {
+  const { path } = await seedProjects('wide');
+  await target.navigate(path);
+  await settleProject();
+  const accepted = await readFirstInputAccepted();
+  await target.writeArtifact(
+    'project-load-frames/first-input-accepted-wide.json',
+    `${JSON.stringify(accepted, null, 2)}\n`,
+  );
+
+  expect(accepted.mark, 'the served recorder left no first-input mark').toEqual(expect.any(Number));
+  expect(accepted.measure).toEqual({ start: 0, end: accepted.mark, phase: 'input.accepted' });
+});
+
+/*
+ * PL6 on A15b's frame: the composer's native input stands in the frame's chat-lane composer box, the one part of the
+ * frame exposed to assistive technology, and the live composer adopts it when the panes are revealed. Before the
+ * reveal and after it the page has exactly one textbox, and the frame breaks no axe rule (a focusable input under
+ * `aria-hidden` would).
+ */
+test(
+  'should expose exactly one composer textbox before the workspace is revealed and one after',
+  { timeout: loadBudget },
+  async () => {
+    await seedProjects('wide');
+    await holdRequestsUntilReleased(workspaceChunk);
+    await target.reload();
+    const textboxes = selectors.getByRole('textbox');
+    await target.expectVisible(selectors.getByRole('textbox', { name: 'Chat message' }), 60_000);
+    await target.expectCount(textboxes, 1);
+    const before = await axeAudit({ selector: '[data-slot="workspace-frame"]' });
+    await releaseHeldRequests();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+    await target.expectCount(textboxes, 1);
+    await target.expectCount(selectors.getByCss('[data-slot="workspace-frame"] textarea'), 0);
+    const after = await axeAudit({ selector: '[data-slot="workspace-frame"]' });
+    await target.writeArtifact(
+      'project-load-frames/composer-textbox-axe.json',
+      `${JSON.stringify({ before: before.violations, after: after.violations }, null, 2)}\n`,
+    );
+
+    expect(before.violations, 'the frame before the reveal').toEqual([]);
+    expect(after.violations, 'the frame after the reveal').toEqual([]);
+  },
+);
+
+/*
+ * PL6 on A15b2's pending frame: a click on a project row from Home draws the destination's frame ahead of the route
+ * while the page being left is hidden. The frame's composer box is exempt from that hiding, so the destination's native
+ * input is on screen and takes typing during the wait, and the live composer adopts the text when the panes are revealed.
+ */
+test(
+  'should take typing in the destination composer while a click from Home waits for the workspace',
+  { timeout: loadBudget },
+  async () => {
+    await seedProjects('wide');
+    await target.navigate('/');
+    await target.expectVisible(composer, 60_000);
+    await target.delay(settleWindow);
+    await holdRequestsUntilReleased(workspaceChunk);
+    /* The pending window is the router's transition, tens of milliseconds: each animation frame of it is sampled in the
+     * page, where the served input must be on screen and focusable. */
+    await target.evaluate((selector) => {
+      const record = globalThis as typeof globalThis & {
+        __pendingComposer?: Array<{ visible: boolean; focused: boolean }>;
+      };
+      record.__pendingComposer = [];
+      const sample = (): void => {
+        if (document.querySelector('[data-workspace-pending]') !== null) {
+          const input = document.querySelector<HTMLTextAreaElement>(selector);
+          input?.focus();
+          record.__pendingComposer!.push({
+            visible: input?.checkVisibility({ visibilityProperty: true }) ?? false,
+            focused: input !== null && document.activeElement === input,
+          });
+        }
+        if (record.__pendingComposer!.length < 600) {
+          requestAnimationFrame(sample);
+        }
+      };
+      requestAnimationFrame(sample);
+    }, servedComposerInput);
+    const row = selectors.getByRole('link', { name: projectNames.a }).first();
+    await target.expectVisible(row, 60_000);
+    await target.click(row);
+    const served = selectors.getByCss(servedComposerInput);
+    await target.expectVisible(served, 60_000);
+    const pendingFrames = await target.evaluate(
+      () =>
+        (globalThis as typeof globalThis & { __pendingComposer?: Array<{ visible: boolean; focused: boolean }> })
+          .__pendingComposer ?? [],
+    );
+    precondition(pendingFrames.length > 0, 'PL6: no frame was drawn pending after the click from Home');
+    /* The workspace chunk is still held, so the served input is the one the pending frames showed. */
+    await target.type(served, 'Hold the bracket');
+    const typed = await target.evaluate((selector) => {
+      const input = document.querySelector<HTMLTextAreaElement>(selector);
+      return { visible: input?.checkVisibility({ visibilityProperty: true }) ?? false, value: input?.value ?? '' };
+    }, servedComposerInput);
+    await releaseHeldRequests();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+    const adopted = await target.textContent(selectors.getByCss(richComposer));
+    await target.writeArtifact(
+      'project-load-frames/pending-composer-typing-wide.json',
+      `${JSON.stringify({ pendingFrames, typed, adopted }, null, 2)}\n`,
+    );
+
+    expect(
+      pendingFrames.filter((frame) => !frame.visible || !frame.focused),
+      `the served input in the ${pendingFrames.length} pending frames`,
+    ).toEqual([]);
+    expect(typed, 'the served input before the reveal').toEqual({ visible: true, value: 'Hold the bracket' });
+    expect(adopted, 'the live composer after the reveal').toContain('Hold the bracket');
   },
 );
 
@@ -1360,7 +1488,7 @@ knownDefect(
   'F7 (A15d): text typed at first paint on a project URL, with the entry chunk held until the typing is done, is in the composer after hydration with its caret and focus, and the composer never moved',
   {
     artifact: 'f7-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       const { path } = await seedProjects('wide');

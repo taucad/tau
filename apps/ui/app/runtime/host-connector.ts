@@ -32,9 +32,9 @@ import type { KernelId } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { ENV } from '#environment.config.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { dialExecutionHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { readRootedBridgeCapabilities } from '#providers/chat-workspace-authority-provider.js';
 import {

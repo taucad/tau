@@ -8,13 +8,21 @@ import {
   projectLocationFullLabel,
 } from '#utils/project-creation-location.utils.js';
 
+/** The build target the modules under test resolve; each case sets it before loading them. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
+
 describe('project creation location utilities', () => {
   afterEach(() => {
-    vi.unstubAllEnvs();
+    buildTarget.desktop = false;
   });
 
   it('places Home on your computer in the desktop app, where it is a folder on disk', () => {
-    vi.stubEnv('TAU_TARGET', 'desktop');
+    buildTarget.desktop = true;
 
     expect(projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }))).toBe('Home on your computer');
   });

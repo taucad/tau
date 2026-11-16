@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { workspaceMarkerPath, workspaceMarkerSchemaUrl } from '@taucad/types';
-import { metaConfig } from '#constants/meta.constants.js';
+import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import type * as HandleStore from '#filesystem/handle-store.js';
 
 // ===========================================================================
@@ -156,7 +156,7 @@ const loadStore = async (legacyConfigs: readonly LegacyProjectConfig[] = []): Pr
   globalThis.indexedDB = new IDBFactory();
   if (legacyConfigs.length > 0) {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 3);
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`, 3);
       request.addEventListener('upgradeneeded', () => {
         request.result.createObjectStore('configs', { keyPath: 'projectId' });
       });
@@ -240,7 +240,7 @@ const stubLocks = (): void => {
 /** Direct database access, standing in for rows written by another tab or an older build. */
 const withRawDb = async <T>(operation: (db: IDBDatabase) => Promise<T>): Promise<T> => {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 4);
+    const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`, 4);
     request.addEventListener('success', () => {
       resolve(request.result);
     });
@@ -723,7 +723,7 @@ describe('Home storage backend', () => {
     // Another tab holding an older version open never yields, so the upgrade stays blocked. The open must
     // settle: an unsettled promise leaves the app on the "Opening Home" shell for as long as that tab lives.
     const older = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 3);
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`, 3);
       request.addEventListener('upgradeneeded', () => {
         request.result.createObjectStore('meta', { keyPath: 'key' });
       });
@@ -749,7 +749,7 @@ describe('Home storage backend', () => {
 
     // The store now holds the database open. A newer build in another tab must still be able to upgrade.
     const upgraded = await new Promise<IDBDatabase | 'blocked'>((resolve, reject) => {
-      const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 5);
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`, 5);
       request.addEventListener('blocked', () => {
         resolve('blocked');
       });
@@ -1438,7 +1438,7 @@ describe('project creation location preference', () => {
 describe('project-root configuration broadcasts', () => {
   it('does not broadcast preference-only writes', async () => {
     const { setProjectCreationLocation } = await loadStore();
-    const channel = new BroadcastChannel(`${metaConfig.databasePrefix}project-root-configuration`);
+    const channel = new BroadcastChannel(`${appMetaConfig.databasePrefix}project-root-configuration`);
     await new Promise((resolve) => {
       setTimeout(resolve, 150);
     });
@@ -1456,7 +1456,7 @@ describe('project-root configuration broadcasts', () => {
 
   it('coalesces a burst of durable writes into one cross-tab notification', async () => {
     const { setProjectFileSystemConfig } = await loadStore();
-    const channel = new BroadcastChannel(`${metaConfig.databasePrefix}project-root-configuration`);
+    const channel = new BroadcastChannel(`${appMetaConfig.databasePrefix}project-root-configuration`);
     // Let notifications still pending from earlier tests in this file drain.
     await new Promise((resolve) => {
       setTimeout(resolve, 150);
@@ -1489,7 +1489,7 @@ describe('project-root configuration broadcasts', () => {
   it('broadcasts successful disconnects and restores but not no-ops', async () => {
     const { createWorkspace, disconnectWorkspace, restoreWorkspaceHandle } = await loadStore();
     const workspace = await createWorkspace(makeHandle('Workshop'));
-    const channel = new BroadcastChannel(`${metaConfig.databasePrefix}project-root-configuration`);
+    const channel = new BroadcastChannel(`${appMetaConfig.databasePrefix}project-root-configuration`);
     await new Promise((resolve) => {
       setTimeout(resolve, 100);
     });

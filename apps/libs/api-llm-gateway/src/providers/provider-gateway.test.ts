@@ -16,7 +16,7 @@ const pdfDataUrl = 'data:application/pdf;base64,JVBERg==';
 describe('vertexUpstreamBody', () => {
   it('should send a Vertex PDF as an image_url data URI', () => {
     const body = {
-      model: 'google/gemini-3.8-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [
         {
           role: 'user',
@@ -29,7 +29,7 @@ describe('vertexUpstreamBody', () => {
     };
 
     expect(vertexUpstreamBody(body)).toEqual({
-      model: 'google/gemini-3.8-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [
         {
           role: 'user',
@@ -105,7 +105,7 @@ describe('Vertex self-signed access token', () => {
       executeGatewayProviderRequest({
         config: config(),
         providerId: 'vertexai',
-        body: { model: 'google/gemini-3.8-flash', messages: [] },
+        body: { model: 'google/gemini-4-hydrogen', messages: [] },
         headers: {},
         signal: new AbortController().signal,
         fetch: fetchOnce,
@@ -129,7 +129,7 @@ describe('Vertex self-signed access token', () => {
     const failure = executeGatewayProviderRequest({
       config: config('fixture-not-a-key'),
       providerId: 'vertexai',
-      body: { model: 'google/gemini-3.8-flash', messages: [] },
+      body: { model: 'google/gemini-4-hydrogen', messages: [] },
       headers: {},
       signal: new AbortController().signal,
       fetch: fetchOnce,

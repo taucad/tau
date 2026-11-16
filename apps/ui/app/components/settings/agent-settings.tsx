@@ -6,7 +6,7 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
-import { desktopPermissions } from '#filesystem/desktop-permissions.js';
+import { desktopPermissions } from '@taucad/files-ui/filesystem/desktop-permissions';
 import { SetupAnswersRow } from '#components/settings/setup-answers-row.js';
 import { setupAnswersCopy } from '#components/settings/setup-answers-copy.js';
 import { useFeature } from '#flags/use-feature.js';

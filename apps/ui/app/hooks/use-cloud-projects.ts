@@ -18,7 +18,7 @@ import { Topic } from '@taucad/events';
 import type { RemoteFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { ENV } from '#environment.config.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
+import { parseProjectCreationLocation } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import { getRevisionSessionUser, useRevisionSessionUser } from '#lib/revision-actor.js';

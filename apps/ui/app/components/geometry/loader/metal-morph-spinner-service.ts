@@ -1,4 +1,5 @@
-import { isWebGpuCanvasLossFailure, startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
+import { isGraphicsContextUnavailableError } from '@taucad/viewer/graphics/graphics-backend';
+import { startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
 import { metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
@@ -135,6 +136,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
   let isLooping = false;
   let sourceSize = minimumSourceSize;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let hasLoggedStartFailure = false;
 
   const activeCount = (): number => {
     let count = 0;
@@ -299,9 +301,12 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       try {
         await created.ready;
       } catch (error) {
-        if (isWebGpuCanvasLossFailure(backend)) {
-          // The start that follows replaces it on a fresh canvas.
-          created.dispose();
+        // A failed renderer is released, never kept: a canvas loss is replaced on a fresh canvas by the start that
+        // follows, and any other failure leaves the spinners on their stand-ins until the next subscriber asks again.
+        created.dispose();
+        if (controller === created) {
+          controller = undefined;
+          source = undefined;
         }
         throw error;
       }
@@ -316,6 +321,27 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       await creation;
     } finally {
       creation = undefined;
+    }
+  };
+
+  /**
+   * {@link ensureController} for a caller that cannot act on its failure. The spinners keep their stand-ins, which is
+   * the whole fallback a decorative spinner needs, so the failure is logged once, never left as an unhandled rejection.
+   * A browser without a WebGL 2 context is expected (hardware acceleration off), so it is a warning.
+   */
+  const startQuietly = async (isWarming = false): Promise<void> => {
+    try {
+      await ensureController(isWarming);
+    } catch (error) {
+      if (hasLoggedStartFailure) {
+        return;
+      }
+      hasLoggedStartFailure = true;
+      if (isGraphicsContextUnavailableError(error)) {
+        console.warn('Metal morph spinner unavailable: no WebGL 2 context', { error });
+        return;
+      }
+      console.error('Metal morph spinner failed to start', { error });
     }
   };
 
@@ -335,7 +361,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         applySourceSize();
         refreshPlayback();
       } else {
-        void ensureController();
+        void startQuietly();
       }
       return () => {
         registrations.delete(registration);
@@ -354,7 +380,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       theme = next;
       controller?.setTheme(next);
       clearIdleTimer();
-      await ensureController(true);
+      await startQuietly(true);
       if (registrations.size === 0) {
         // Nothing has subscribed, so nothing will release this renderer; hold it on the same idle delay.
         idleTimer = setTimeout(disposeController, idleDisposeDelay);

@@ -1,7 +1,8 @@
-import { render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { handOffStore, resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
 import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
@@ -52,6 +53,7 @@ const lane = (frame: HTMLElement, name: string): HTMLElement =>
 describe('WorkspaceFrame', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
+    resetHandOffStoreForTest();
   });
 
   afterEach(() => {
@@ -182,6 +184,70 @@ describe('WorkspaceFrame', () => {
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
   });
 
+  // ── PL6: the project composer's native input, in the frame's chat lane ──
+
+  /* The chat lane's composer box takes text from first paint; the live composer adopts it at the reveal. Only that box
+   * is exposed and takes pointer events: the lanes stay decorative. */
+  it("serves the composer's native input in the chat lane's composer box, the one exposed part of the frame", () => {
+    const frame = renderFrame('/w/home/one');
+
+    const input = screen.getByRole('textbox', { name: 'Chat message' });
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+    expect(input.closest('[aria-hidden=true]')).toBeNull();
+    expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
+    expect(frame.querySelector('[data-slot=workspace-frame-lanes] textarea')).toBeNull();
+    /* Above the content, at the chat lane's place and width, and only its box takes pointer events. */
+    const layer = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-composer]');
+    expect(layer).toHaveClass('pointer-events-none', 'z-10');
+    expect(layer?.firstElementChild?.className).toContain('w-(--frame-chat-width,320px)');
+    expect(layer?.firstElementChild?.className).toContain('[display:var(--frame-chat-display,flex)]');
+    expect(input.closest('.pointer-events-auto')).not.toBeNull();
+  });
+
+  it('serves the input on the server, before the render-blocking marker, so it takes text at first paint', () => {
+    const html = renderToString(frameAt('/w/home/one'));
+
+    const input = html.indexOf('aria-label="Chat message"');
+    expect(input).toBeGreaterThan(-1);
+    expect(input).toBeLessThan(html.indexOf(`id="${workspaceFrameEndId}"`));
+  });
+
+  /* Review (r4586677545): the lanes can be laid out while the chat lane shows a gate's status instead of the composer
+   * (chats loading, sync off, a failed load). The input must stay to be seen and edited until a composer adopts it, so
+   * the box leaves on the composer's adoption, not on the lanes' layout. */
+  it('keeps the composer box once the lanes are ready, and drops it when the composer adopts', () => {
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.className).not.toContain('[data-workspace-lanes=ready])>[data-slot=workspace-frame-composer]');
+    screen.getByRole('textbox', { name: 'Chat message' }).focus();
+    act(() => {
+      handOffStore.adopt({ surface: 'project-composer', scope: 'home/one' });
+    });
+
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(frame.querySelector('[data-slot=workspace-frame-composer] .rounded-2xl')).toBeNull();
+  });
+
+  /* Where no composer can take the text, the box hides and the text stays in the store for a later adoption: a
+   * failure in the workspace's place, or the chat lane closed in the live layout. */
+  it('hides the composer box, keeping its text, under a failure or while the live chat lane is closed', () => {
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.className).toContain(
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+    );
+    expect(frame.className).toContain('[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden');
+    expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/one' })).toBe(true);
+  });
+
+  it('serves no input when this project remembers its chat lane closed', () => {
+    writeWideFrameHint('home/one', { ...workbenchOpen, chatOpen: false });
+    renderFrame('/w/home/one');
+
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.querySelector('[data-slot=workspace-frame] textarea')).toBeNull();
+  });
+
   /* A15b2 (F11): drawn for a project the route has not committed, the frame's layers show and the page being left is
    * hidden in place, so nothing of it shows over the lanes or the phone frame. */
   it('hides every child but the lanes and the phone frame while the route is pending', () => {
@@ -195,7 +261,7 @@ describe('WorkspaceFrame', () => {
 
     expect(frame).toHaveAttribute('data-workspace-pending');
     expect(frame.className).toContain(
-      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone]):not([data-slot=workspace-frame-composer])]:invisible',
     );
     expect(frame.querySelector(':scope > [data-slot=workspace-frame-lanes]')).not.toBeNull();
     expect(frame.querySelector(':scope > [data-slot=workspace-frame-phone]')).not.toBeNull();
@@ -220,6 +286,34 @@ describe('WorkspaceFrame', () => {
     const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
 
     expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('none');
+  });
+
+  /* PL6 on A15b2: drawn ahead of the route, the composer box serves the destination's input, not the route's (still
+   * the page being left's), so the destination's composer is the one that adopts it. */
+  it("serves the destination's composer input while the route is still the page being left's", () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Chat message' })).toBeInTheDocument();
+    expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/two' })).toBe(true);
+    expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/one' })).toBe(false);
+    /* The pending rule hides the page being left, never the destination's composer box. */
+    const frame = document.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame.className).toContain(':not([data-slot=workspace-frame-composer])]:invisible');
   });
 
   // ── A15c: the phone frame (blueprint P-h; C6) ──

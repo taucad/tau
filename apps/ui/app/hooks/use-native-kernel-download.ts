@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KernelIssue } from '@taucad/runtime';
 import { unpreparedKernelOf } from '@taucad/workbench-panes/shell/viewer-issues';
 import type { DesktopKernelPreparation } from '@taucad/types/desktop-native-kernels';
-import { desktopNativeKernels } from '#filesystem/desktop-bridge.js';
+import { desktopNativeKernels } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 /** A native kernel the desktop is downloading for the viewed model, or could not download. */
 export type NativeKernelDownload =

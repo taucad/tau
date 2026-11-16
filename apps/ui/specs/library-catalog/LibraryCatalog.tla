@@ -92,6 +92,8 @@
 \* correspondence changes.
 \* DC-10 files-ui (2026-11-16): `ProjectLibrary` and its workspace commands take the `WorkspaceTelemetry`
 \* type from `@taucad/files-ui`; only the type import moved. No action or correspondence changes.
+\* DC-10 files-ui slice 3 (2026-11-16): `handle-store`, `orphaned-project-route` and `browser.constants` moved
+\* to `@taucad/files-ui`; the four sources only re-point their imports. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

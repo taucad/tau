@@ -81,7 +81,10 @@ import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
-import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
+import {
+  projectLocationDescriptor,
+  projectLocationFullLabel,
+} from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudListingState, CloudProject } from '#hooks/use-cloud-projects.js';

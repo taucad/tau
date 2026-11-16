@@ -1505,6 +1505,65 @@ jobs:
           cache-from: type=gha,scope=host-deps
           cache-to: type=gha,scope=host-deps,mode=max,ignore-error=true
 
+  # Writes the macOS pnpm store and pinned Node.js caches (`setup-nx`) the macOS rows read. Those
+  # rows run only in the merge queue, where a saved cache is scoped to the queue's ref and reaches
+  # no later run, and a push reuses the queue's verdict and skips them, so before this job no
+  # `main` run ever saved a macOS store: every MAC-A, MAC-X and native darwin job installed cold
+  # (5–11 minutes on `macos-26-intel`), and the cold install is where the Intel jobs hung in
+  # setup until their timeout. A store saved on `main` is readable by the queue and pull requests,
+  # like `api-docker-cache` above. It runs only when an install input changed since the previous
+  # `main` commit, so most pushes start no macOS runner, and after the required gate (X11).
+  macos-dependency-inputs:
+    name: macOS dependency cache inputs
+    runs-on: ubuntu-latest
+    needs: [affected]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.inputs.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check whether the install inputs changed
+        id: inputs
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$BEFORE"
+          git cat-file -e "$base^{commit}" 2>/dev/null || base=HEAD~1
+          if git diff --quiet "$base" HEAD -- pnpm-lock.yaml pnpm-workspace.yaml .github/actions/setup-nx/action.yml .github/workflows/ci.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo 'Install inputs unchanged; the macOS stores saved for an earlier main commit still apply.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  macos-dependency-cache:
+    name: macOS dependency cache (${{ matrix.runner }})
+    needs: [macos-dependency-inputs]
+    if: ${{ !cancelled() && needs.macos-dependency-inputs.outputs.changed == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'true'
+
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest

@@ -22,6 +22,7 @@ const sync = vi.hoisted(() => {
   };
   return { current: initial };
 });
+const editorSend = vi.hoisted(() => vi.fn());
 const readiness = vi.hoisted(() => ({ current: undefined as ProjectReadiness | undefined }));
 
 const actorStub = vi.hoisted(() => {
@@ -52,7 +53,7 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectId: 'project-1',
     projectRef: actorStub,
-    editorRef: { ...actorStub, send: vi.fn() },
+    editorRef: { ...actorStub, send: editorSend },
     viewRecords: new Map(),
     changeEntryPaths: async () => true,
   }),
@@ -211,6 +212,26 @@ describe('the Files tree while the open pull is running', () => {
     const row = screen.getByRole('treeitem', { name: new RegExp(entry.name, 'u') });
     fireEvent.doubleClick(row.querySelector('[style]') ?? row);
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  });
+
+  /* An arriving file is read-only only until it lands: opening it must not pin its editor read-only for good. */
+  it('should open an arriving file as an ordinary file, so its editor is writable once it lands', () => {
+    pending.current = true;
+    sync.current = { ...facet('pending'), pullPhase: 'applying' };
+    readiness.current = 'entryReady';
+    const arriving: [string, FileEntry] = [
+      'gear.scad',
+      { path: 'gear.scad', name: 'gear.scad', type: 'file', size: 300, mtimeMs: 0, isLoaded: false, pending: true },
+    ];
+    tree.current = new Map<string, FileEntry>([arrived, arriving]);
+    editorSend.mockClear();
+
+    renderTree();
+    const row = screen.getByRole('treeitem', { name: /gear\.scad/u });
+    fireEvent.click(row.querySelector('[style]') ?? row);
+
+    expect(editorSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'openFile', path: 'gear.scad' }));
+    expect(editorSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'openFile', readOnly: true }));
   });
 
   it('should keep the tree waiting until the write has announced its entries', () => {

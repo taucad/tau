@@ -161,6 +161,11 @@ type RowPresentation = FileProvenanceLabel & {
    * and read-only until it lands.
    */
   readonly isArriving?: boolean;
+  /**
+   * Whether a file opens read-only, where it differs from `readOnly`: an arriving file is read-only in the tree only
+   * until it lands, so it opens as its source says, and its pane waits for its bytes.
+   */
+  readonly opensReadOnly?: boolean;
 };
 
 /** The shared read-only refusal copy, read once so the call site is not a pseudo-constructor. */
@@ -230,7 +235,9 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
   const presentation = new Map<string, RowPresentation>();
   for (const [path, label] of labels) {
     /* Not on disk yet: nothing may rename, move, delete or make anything inside it until it lands. */
-    const arriving = isArrivingEntry(fileTreeMap.get(path)!) ? { isArriving: true, readOnly: true } : {};
+    const arriving = isArrivingEntry(fileTreeMap.get(path)!)
+      ? { isArriving: true, readOnly: true, opensReadOnly: label.readOnly }
+      : {};
     if (!label.readOnly) {
       presentation.set(path, { ...label, isSubtreeRoot: true, ...arriving });
       continue;
@@ -568,6 +575,14 @@ export const ChatEditorFileTree = memo(function ({
   );
   /** The user's access is `source !== 'project'` (ruling P10), never `agentAccess`. */
   const isReadOnlyPath = useCallback((path: string): boolean => presentationFor(path).readOnly, [presentationFor]);
+  /** Whether a file opens read-only: an arriving one opens as its source says, writable once it lands. */
+  const opensReadOnlyPath = useCallback(
+    (path: string): boolean => {
+      const presentation = presentationFor(path);
+      return presentation.opensReadOnly ?? presentation.readOnly;
+    },
+    [presentationFor],
+  );
 
   const fileTree = useMemo((): FileItem[] => {
     if (fileTreeMap.size === 0) {
@@ -955,7 +970,7 @@ export const ChatEditorFileTree = memo(function ({
     onPrimaryAction(item) {
       if (!item.isFolder()) {
         const path = item.getId();
-        requestOpenFile(path, readOnly || isReadOnlyPath(path));
+        requestOpenFile(path, readOnly || opensReadOnlyPath(path));
       }
     },
     hotkeys: {
@@ -1381,9 +1396,9 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleOpenInEditor = useCallback(
     (path: string) => {
-      requestOpenFile(path, isReadOnlyPath(path));
+      requestOpenFile(path, opensReadOnlyPath(path));
     },
-    [isReadOnlyPath, requestOpenFile],
+    [opensReadOnlyPath, requestOpenFile],
   );
 
   const handleOpenInViewer = useCallback(

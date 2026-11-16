@@ -957,7 +957,7 @@ export const ChatTextareaBar = memo(function ({
 }): React.JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
   useBarCollapse(barRef);
-  const { targets: placements } = useAgentHostPlacements();
+  const { targets: placements, refresh: refreshPlacements } = useAgentHostPlacements();
   const { execution } = useChatComposer().execution;
   const discoveredAgent =
     execution.kind === 'acp'
@@ -1022,6 +1022,7 @@ export const ChatTextareaBar = memo(function ({
             agentConfig={agentConfig}
             placements={placements}
             focusEditor={focusEditor}
+            onOpen={refreshPlacements}
             enableShortcut={ownsShortcuts}
           />
         </div>

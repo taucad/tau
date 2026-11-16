@@ -36,10 +36,8 @@ const files = vi.hoisted(() => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ ...files, workerChangeChannel: undefined }),
 }));
-vi.mock('#hooks/object-store.worker.js?worker', () => ({
-  default: class MockWorker {
-    public terminate = vi.fn();
-  },
+vi.mock('#hooks/object-store-worker.js', () => ({
+  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: async () => undefined }));
 

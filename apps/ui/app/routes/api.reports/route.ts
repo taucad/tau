@@ -134,6 +134,7 @@ export const browserReports = async (
   if (reports === undefined) {
     return new Response(null, { status: 400 });
   }
+  // `request.url` for its origin only; a resource route is requested directly, never as `.data` (B4).
   const { origin } = new URL(request.url);
   const ours = reports.filter((report) => isFromOrigin(report, origin));
 

@@ -44,22 +44,25 @@ export function cdnBackedSsrRouteHeaders(tag: CacheTagValue, ttl: CdnBackedSsrTt
  * Redirects requests from a subdomain to the apex domain if the subdomain matches.
  * Throws a redirect Response if the subdomain matches, otherwise does nothing.
  *
- * @param request - The incoming request object
+ * Takes the loader's `url` argument, not `request.url`: a client navigation's request is
+ * `<path>.data?_routes=…`, which must not become the redirect target (blueprint B4).
+ *
+ * @param url - The page URL the loader serves (its `url` argument)
  * @param subdomain - The subdomain to redirect from (e.g., 'www')
  * @param statusCode - HTTP status code for the redirect (default: 301 permanent)
  * @throws {Response} Redirect response if subdomain matches
  *
  * @example
  * // In a loader, redirect www.example.com to example.com
- * throwRedirectIfSubdomain(request, 'www');
+ * throwRedirectIfSubdomain(url, 'www');
  */
-export function throwRedirectIfSubdomain(request: Request, subdomain: string, statusCode = 301): void {
-  const url = new URL(request.url);
+export function throwRedirectIfSubdomain(url: URL, subdomain: string, statusCode = 301): void {
   const hostnameParts = url.hostname.split('.');
 
   if (hostnameParts[0] === subdomain) {
-    url.hostname = hostnameParts.slice(1).join('.');
+    const target = new URL(url);
+    target.hostname = hostnameParts.slice(1).join('.');
     // oxlint-disable-next-line @typescript-eslint/only-throw-error -- React Router pattern: throwing Response is valid
-    throw redirect(url.toString(), statusCode);
+    throw redirect(target.toString(), statusCode);
   }
 }

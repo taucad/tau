@@ -1,7 +1,8 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
+import { Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
+import { DataBrowserRouter } from '#test-utils/data-memory-router.js';
 import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -1519,7 +1520,7 @@ const navigateTo = async (target: string, options?: NavigateOptions): Promise<vo
  */
 const renderHost = (initialEntry: string, shell?: React.ReactNode): ReturnType<typeof render> =>
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <DataBrowserRouter initialEntry={initialEntry}>
       <RouterProbe />
       <SessionsProvider actor={sessionsActor} focus={focusHost}>
         <routeModule.ProjectSessionsHost>
@@ -1538,7 +1539,7 @@ const renderHost = (initialEntry: string, shell?: React.ReactNode): ReturnType<t
           </Routes>
         </routeModule.ProjectSessionsHost>
       </SessionsProvider>
-    </MemoryRouter>,
+    </DataBrowserRouter>,
   );
 
 const providerRequestsOf = (projectId: string) =>
@@ -2447,7 +2448,7 @@ describe('project route shell identity (A0.7)', () => {
     listing.set([listed(projectA, 'ws', 'alpha')]);
     sharedWorkerState = 'pending';
     const tree = (): React.JSX.Element => (
-      <MemoryRouter initialEntries={['/w/ws/alpha']}>
+      <DataBrowserRouter initialEntry='/w/ws/alpha'>
         <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <routeModule.ProjectSessionsHost>
             <ShellMarker />
@@ -2463,7 +2464,7 @@ describe('project route shell identity (A0.7)', () => {
             </Routes>
           </routeModule.ProjectSessionsHost>
         </SessionsProvider>
-      </MemoryRouter>
+      </DataBrowserRouter>
     );
     const view = render(tree());
     await flushTasks();

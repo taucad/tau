@@ -9,9 +9,13 @@ import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { agentJob, createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { agentApprovalToolName } from '@taucad/chat-ui/services/agent-host-event-projection';
+import { initialChatProjection, reduceChatProjection, selectOpenApprovals } from '#machines/chat-projection.logic.js';
+import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 
 const respondToToolApproval = vi.fn(async () => undefined);
 let messages: readonly MyUIMessage[] = [];
+let projection: ChatProjection | undefined;
 let isDebug = false;
 vi.mock('#flags/use-feature.js', () => ({ useFeature: (flag: string) => flag === 'machines' || isDebug }));
 let activeExecution: CombinedChatState['activeExecution'];
@@ -19,7 +23,7 @@ let machines: RuntimeTransportFacet<MachineClient> = { available: false, reason:
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: <T,>(selector: (state: CombinedChatState) => T): T =>
-    selector({ messages, activeExecution } as CombinedChatState),
+    selector({ messages, activeExecution, projection } as CombinedChatState),
 }));
 vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({ respondToToolApproval }),
@@ -30,7 +34,8 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
-const { ChatApprovalBanner, pendingAgentHostApprovals } = await import('#components/chat/chat-approval-banner.js');
+const { ChatApprovalBanner, pendingAgentHostApprovals, pendingApprovals } =
+  await import('#components/chat/chat-approval-banner.js');
 
 const approvalMessage = (
   input: Record<string, unknown>,
@@ -113,11 +118,78 @@ describe('pendingAgentHostApprovals', () => {
   });
 });
 
+/** A caught-up log whose run paused on `interruptId`, after `resolved` earlier requests were answered. */
+const pausedProjection = (interruptId: string, resolved: readonly string[] = []): ChatProjection => {
+  const request = (sequence: number, id: string): Record<string, unknown> =>
+    logRow(sequence, {
+      type: 'interrupt.recorded',
+      interruptId: id,
+      phase: 'requested',
+      reason: 'approval',
+      payload: {
+        kind: 'approval',
+        prompt: `Allow ${id}?`,
+        agentId: 'claude',
+        context: { toolCall: { toolCallId: `toolu-${id}`, title: `Write ${id}` }, options: pendingInput.options },
+      },
+    });
+  const rows: Array<Record<string, unknown>> = [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')];
+  for (const id of resolved) {
+    rows.push(request(rows.length, id), lifecycleRow(rows.length + 1, 'paused'));
+    rows.push(
+      logRow(rows.length, {
+        type: 'interrupt.recorded',
+        interruptId: id,
+        phase: 'resolved',
+        reason: 'approved',
+        payload: { outcome: 'approved', optionId: 'allow' },
+      }),
+      lifecycleRow(rows.length + 1, 'running'),
+    );
+  }
+  rows.push(request(rows.length, interruptId), lifecycleRow(rows.length + 1, 'paused'));
+  return reduceChatProjection(initialChatProjection, {
+    type: 'batch',
+    answer: { status: 'batch', cursor: 0, nextCursor: rows.length, endCursor: rows.length, events: rows },
+  }).state;
+};
+
+describe('pendingApprovals', () => {
+  it('draws the open interrupt from the host log when the transcript shows none', () => {
+    const open = selectOpenApprovals(pausedProjection('interrupt-7', ['interrupt-1', 'interrupt-6']));
+    expect(pendingApprovals([], open)).toEqual([
+      expect.objectContaining({
+        messageId: 'run_1',
+        approvalId: 'interrupt-7',
+        interruptId: 'interrupt-7',
+        prompt: 'Allow interrupt-7?',
+        agentId: 'claude',
+        options: pendingInput.options,
+      }),
+    ]);
+  });
+
+  it('keeps the transcript card and adds no copy of an interrupt it already shows', () => {
+    const open = selectOpenApprovals(pausedProjection('interrupt-1'));
+    const transcript = pendingAgentHostApprovals([approvalMessage(pendingInput)]);
+    expect(pendingApprovals([approvalMessage(pendingInput)], open)).toEqual(transcript);
+  });
+
+  it('reads nothing from a log that has not caught up, whose interrupt may be answered further on', () => {
+    const caughtUp = pausedProjection('interrupt-1');
+    const behind = { ...caughtUp, endCursor: caughtUp.endCursor + 2 };
+    expect(selectOpenApprovals(behind)).toEqual([]);
+    expect(selectOpenApprovals(caughtUp)).toHaveLength(1);
+    expect(selectOpenApprovals(caughtUp)).toBe(selectOpenApprovals(caughtUp));
+  });
+});
+
 describe('ChatApprovalBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isDebug = false;
     messages = [];
+    projection = undefined;
     activeExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
     machines = { available: false, reason: 'unsupported' };
   });
@@ -126,6 +198,16 @@ describe('ChatApprovalBanner', () => {
     const { container } = render(<ChatApprovalBanner />);
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('answers the interrupt a paused run holds even when its transcript has not rebuilt', async () => {
+    projection = pausedProjection('interrupt-7', ['interrupt-6']);
+
+    render(<ChatApprovalBanner />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Allow' }));
+
+    expect(screen.getByText('Write interrupt-7')).toBeInTheDocument();
+    expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-7', true, { optionId: 'allow' });
   });
 
   it('names the agent, the prompt and the options the host recorded', () => {

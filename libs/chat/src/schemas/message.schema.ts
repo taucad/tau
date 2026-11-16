@@ -1,5 +1,4 @@
-import { isStaticToolUIPart, safeValidateUIMessages } from 'ai';
-import type { SafeValidateUIMessagesResult } from 'ai';
+import type { SafeValidateUIMessagesResult, isStaticToolUIPart } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
 import {
@@ -198,10 +197,13 @@ const withMessageInputPath = (error: z.ZodError, messageIndex: number, partIndex
     })),
   );
 
-const validateStaticToolLifecycleInputs = (messages: MyUIMessage[]): z.ZodError | undefined => {
+const validateStaticToolLifecycleInputs = (
+  messages: MyUIMessage[],
+  isStaticToolPart: typeof isStaticToolUIPart,
+): z.ZodError | undefined => {
   for (const [messageIndex, message] of messages.entries()) {
     for (const [partIndex, part] of message.parts.entries()) {
-      if (!isStaticToolUIPart(part)) {
+      if (!isStaticToolPart(part)) {
         continue;
       }
       const inputSchema = getToolInputSchema(part.type);
@@ -264,13 +266,17 @@ const validateStaticToolNames = (messages: unknown): z.ZodError | undefined => {
   return undefined;
 };
 
-/** Validates and normalizes Tau UI messages through the installed AI SDK. @public */
+/**
+ * Validates and normalizes Tau UI messages through the installed AI SDK. The SDK loads with the first validation,
+ * so a page that reads a chat record does not carry it before then (progressive loading PL1). @public
+ */
 export const safeValidateUiMessages = async (messages: unknown): Promise<SafeValidateUIMessagesResult<MyUIMessage>> => {
   const staticToolError = validateStaticToolNames(messages);
   if (staticToolError) {
     return { success: false, error: staticToolError };
   }
 
+  const { isStaticToolUIPart: isStaticToolPart, safeValidateUIMessages } = await import('ai');
   const result = await safeValidateUIMessages<MyUIMessage>({
     messages: normalizeToolLifecycleParts(messages),
     metadataSchema: messageMetadataSchema.optional(),
@@ -281,7 +287,8 @@ export const safeValidateUiMessages = async (messages: unknown): Promise<SafeVal
     return result;
   }
 
-  const extensionError = validateStaticToolLifecycleInputs(result.data) ?? validateCommonReasoningMetadata(result.data);
+  const extensionError =
+    validateStaticToolLifecycleInputs(result.data, isStaticToolPart) ?? validateCommonReasoningMetadata(result.data);
   return extensionError ? { success: false, error: extensionError } : result;
 };
 

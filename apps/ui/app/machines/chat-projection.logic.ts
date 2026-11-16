@@ -12,8 +12,8 @@
  */
 
 import { createLogic } from 'xstate';
-import { createUIMessageStream, readUIMessageStream } from 'ai';
 import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import {
   agentLogEventSchema,
   emptyChatLedger,
@@ -1467,6 +1467,16 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       if (view.chunks.length === 0) {
         return undefined;
       }
+      /* PL1: the SDK's stream processor loads with the first transcript, not with the page. A failed load is not
+       * this run's answer, so it is not kept: the next materialization loads again. */
+      let sdk: Awaited<ReturnType<typeof loadChatSdk>>;
+      try {
+        sdk = await loadChatSdk();
+      } catch (error) {
+        messagesByChunks.delete(view.chunks);
+        throw error;
+      }
+      const { createUIMessageStream, readUIMessageStream } = sdk;
       const [last] = chunksSince(view.chunks, view.chunks.length - 1);
       let eligible = false;
       if (last?.type === 'finish' && last.messageMetadata !== undefined && last.messageMetadata !== null) {

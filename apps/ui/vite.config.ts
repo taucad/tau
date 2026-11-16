@@ -30,6 +30,8 @@ import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.j
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config lives outside app aliases.
+import { createServerOutputAssets } from './server-output-assets.vite-plugin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -626,6 +628,8 @@ export default defineConfig(({ command, mode }) => {
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
+      // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
+      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
       createSentryReleaseRecordPlugin(buildId),
       /*

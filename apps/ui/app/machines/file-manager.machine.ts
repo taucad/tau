@@ -7,7 +7,7 @@ import type * as FileSystemBridgeModule from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
-import FileManagerWorker from '#machines/file-manager.worker.js?worker';
+import { createFileManagerWorker } from '#machines/file-manager-worker.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import {
@@ -290,7 +290,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     if (!worker) {
       const homeBackend = await getHomeStorageBackend();
       worker = reportWorkerFailures(
-        new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
+        createFileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
         'file-manager',
       );
       // A node-backed Home needs its provider host before the worker can mount

@@ -21,10 +21,8 @@ import type { ChatStorage } from '#types/storage.types.js';
 /** The chats each record client's store holds; a client with none holds no chats. */
 const stores = vi.hoisted(() => new WeakMap<WeakKey, readonly unknown[]>());
 
-vi.mock('#hooks/object-store.worker.js?worker', () => ({
-  default: class MockWorker {
-    public terminate = vi.fn();
-  },
+vi.mock('#hooks/object-store-worker.js', () => ({
+  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
 
 vi.mock('comlink', () => ({ wrap: vi.fn(() => ({})) }));

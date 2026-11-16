@@ -30,20 +30,25 @@ const pointer = encoder.encode(
 );
 
 let service: WorkspaceFileService;
+const scope = { backend: 'memory', storageRootKey: 'memory:pending-mirror' } as const;
 
-beforeEach(async () => {
-  const providerRegistry = new ProviderRegistry();
-  const scope = { backend: 'memory', storageRootKey: 'memory:pending-mirror' } as const;
+/* One authority over a registry's provider, as a page or a host process opens it: a reload is another over the same. */
+const serviceOver = async (providerRegistry: ProviderRegistry): Promise<WorkspaceFileService> => {
   const provider = await providerRegistry.getProvider(scope);
   const mountTable = new MountTable();
   mountTable.mount('/', provider, { class: 'authored', ...scope });
-  service = new WorkspaceFileService({
+  const opened = new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),
     eventBus: new ChangeEventBus(),
     mountTable,
   });
-  await service.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'mirror' }], roots: [] });
+  await opened.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'mirror' }], roots: [] });
+  return opened;
+};
+
+beforeEach(async () => {
+  service = await serviceOver(new ProviderRegistry());
   await service.writeFile(`${route}/main.py`, 'import build123d\n');
   await service.writeFile(`${route}/models/part.step`, pointer);
 });
@@ -122,6 +127,109 @@ describe('a workspace mirror over pending large objects', () => {
         'models/part.step',
       ]);
       expect(new Uint8Array(await readFile(join(mirror.workspacePath, 'fixtures/pointer.txt')))).toStrictEqual(pointer);
+      expect(new Uint8Array(await readFile(join(mirror.workspacePath, 'models/part.step')))).toStrictEqual(part);
+    } finally {
+      await mirror.cleanup();
+    }
+  });
+});
+
+/*
+ * A reload: the page or host opens the project again, and the kernel mirrors it before the revision layer has said a
+ * word, and before the root's index is open. A file the size of a pointer is answered only once its marks are known:
+ * from a snapshot the revision layer declared, at once, or from the revision layer's first word on the root it mounts.
+ */
+describe('a workspace mirror on a cold reload', () => {
+  const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
+
+  /* Reload the project and mirror it at once, the revision layer's view made first when `mounted`. */
+  const mirrorReloaded = async (
+    providerRegistry: ProviderRegistry,
+    mounted: boolean,
+  ): Promise<WorkspaceFileService> => {
+    const reloaded = await serviceOver(providerRegistry);
+    const asked: string[] = [];
+    reloaded.setPendingObjectSource(async (request) => {
+      asked.push(request.path);
+      return part;
+    });
+    if (mounted) {
+      reloaded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    }
+    const filesystem = kernelFileSystemOver(reloaded.createRootedFileSystem(route));
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-reload-mirror-', displayName: 'Test' });
+    try {
+      await expect(mirror.sync(filesystem)).resolves.toStrictEqual([
+        'main.py',
+        'models/part.step',
+        'notes/pointer.txt',
+      ]);
+      expect(new Uint8Array(await readFile(join(mirror.workspacePath, 'models/part.step')))).toStrictEqual(part);
+      /* A pointer the revision layer never declared is the text it is, held for nothing. */
+      expect(new Uint8Array(await readFile(join(mirror.workspacePath, 'notes/pointer.txt')))).toStrictEqual(pointer);
+      expect(asked).toStrictEqual(['models/part.step']);
+    } finally {
+      await mirror.cleanup();
+    }
+    return reloaded;
+  };
+
+  it('should mirror a placeholder as its object from the declared snapshot, holding nothing for the revision layer', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const provider = await providerRegistry.getProvider(scope);
+    /* A durable provider whose mtime keys facts: the root keeps a snapshot of its index, marks and all. */
+    Object.defineProperty(provider, 'capabilities', {
+      value: { ...provider.capabilities, persistent: true, trustworthyMtime: true },
+    });
+    const before = await serviceOver(providerRegistry);
+    await before.writeFile(`${route}/main.py`, 'import build123d\n');
+    await before.writeFile(`${route}/models/part.step`, pointer);
+    await before.writeFile(`${route}/notes/pointer.txt`, pointer);
+    await before.createRootedFileSystem(route, undefined, { placeholders: 'raw' }).declarePending!(
+      new Map([['models/part.step', placeholder]]),
+    );
+    await expect
+      .poll(
+        async () =>
+          provider.readFile('mirror/.tau/index/snapshot.json').then(
+            (bytes) => bytes.byteLength,
+            () => 0,
+          ),
+        {
+          timeout: 10_000,
+        },
+      )
+      .toBeGreaterThan(0);
+
+    const reloads: WorkspaceFileService[] = [];
+    try {
+      /* Before the revision layer mounts the root, and as it does: the snapshot it declared answers at once. */
+      for (const mounted of [false, true]) {
+        // oxlint-disable-next-line no-await-in-loop -- one reload after another, over the same provider.
+        reloads.push(await mirrorReloaded(providerRegistry, mounted));
+      }
+    } finally {
+      /* The registry's provider, which every reload shares, goes with the first to be disposed. */
+      for (const reloaded of reloads) {
+        reloaded.dispose();
+      }
+      before.dispose();
+    }
+  }, 20_000);
+
+  it('should mirror a placeholder as its object when the revision layer mounts the root before it declares it', async () => {
+    service.setPendingObjectSource(async () => part);
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const filesystem = kernelFileSystemOver(service.createRootedFileSystem(route));
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mounted-mirror-', displayName: 'Test' });
+    try {
+      const syncing = mirror.sync(filesystem);
+      /* The revision layer's first capture: it declares the root a moment later. */
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      await raw.declarePending!(new Map([['models/part.step', placeholder]]));
+      await expect(syncing).resolves.toStrictEqual(['main.py', 'models/part.step']);
       expect(new Uint8Array(await readFile(join(mirror.workspacePath, 'models/part.step')))).toStrictEqual(part);
     } finally {
       await mirror.cleanup();

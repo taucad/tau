@@ -31,7 +31,8 @@ import type {
 } from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexVector } from '#project-index/index-snapshot.js';
-import type { PendingObject } from '#pending-content.js';
+import { mayBePointerSize, pendingStallMilliseconds, untilDeclared } from '#pending-content.js';
+import type { PendingObject, SettledFile } from '#pending-content.js';
 import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
@@ -160,8 +161,13 @@ type RootState = {
  */
 export class ProjectIndexes {
   private readonly _states = new Map<string, RootState>();
-  /** Roots the revision layer said it will declare, until it first does (see `awaitDeclaration`). */
-  private readonly _awaitingDeclaration = new Map<string, Readonly<{ declared: Promise<void>; resolve: () => void }>>();
+  /** Roots the revision layer will declare, held until it first does or the bound passes (see `awaitDeclaration`). */
+  private readonly _holds = new Map<
+    string,
+    Readonly<{ declared: Promise<void>; release: () => void; timer: ReturnType<typeof setTimeout> }>
+  >();
+  /** Roots whose hold ended this session: declared, released or timed out. None is held again until evicted. */
+  private readonly _settled = new Set<string>();
   private readonly _opening = new Map<string, Promise<ProjectIndex>>();
   private readonly _options: ProjectIndexesOptions;
   /** Notices from sibling tabs, joined into every root's vector. */
@@ -481,6 +487,7 @@ export class ProjectIndexes {
           writtenAt: Date.now(),
           entries: state.index.toSnapshot(),
           ...(Object.keys(pending).length === 0 ? {} : { pending }),
+          ...(state.index.declared ? { declared: true } : {}),
           removals: state.index.removalSnapshot(),
         };
       },
@@ -627,40 +634,92 @@ export class ProjectIndexes {
 
   /**
    * Hold every path under one root that may be a placeholder until the revision layer first declares the root: it
-   * owns the root's placeholders, and until its word a file the size of a pointer is unknown (I7). Called by the
-   * revision layer as it starts; a whole declaration of the root, or of a root above it, ends the wait.
+   * owns the root's placeholders, and until its word a file the size of a pointer is unknown (I7). Armed as the
+   * revision layer mounts the root, once per root: a whole declaration of it or of a root above it, a release, an
+   * eviction or the bound ends it, and after that the marks alone answer. A root whose index loaded a declared
+   * snapshot is not held at all.
    *
    * @param root - Absolute root the revision layer will declare.
+   * @param boundMilliseconds - How long the root is held at most; {@link pendingStallMilliseconds} when omitted.
    */
-  public awaitDeclaration(root: string): void {
+  public awaitDeclaration(root: string, boundMilliseconds?: number): void {
     const key = normalizePath(root);
-    if (this._awaitingDeclaration.has(key)) {
+    if (this._holds.has(key) || this._settled.has(key) || this._states.get(key)?.index.declared === true) {
       return;
     }
-    let settle: () => void = () => undefined;
+    let release: () => void = () => undefined;
     const declared = new Promise<void>((resolve) => {
-      settle = resolve;
+      release = resolve;
     });
-    this._awaitingDeclaration.set(key, { declared, resolve: settle });
+    const timer = setTimeout(() => {
+      this._release(key);
+    }, boundMilliseconds ?? pendingStallMilliseconds);
+    /* A hold never keeps a host process alive on its own. */
+    (timer as { unref?: () => void }).unref?.();
+    this._holds.set(key, { declared, release, timer });
   }
 
   /**
-   * The first declaration of a root awaiting one that holds this path (see {@link ProjectIndexes.awaitDeclaration}).
+   * End the hold on one root and every root under it, declared or not: the revision layer let go of it (its first
+   * capture ended, or it unmounted), and what waited answers from the marks it finds.
+   *
+   * @param root - Absolute root.
+   */
+  public releaseDeclaration(root: string): void {
+    const key = normalizePath(root);
+    this._settled.add(key);
+    for (const held of this._holds.keys()) {
+      if (relativeTo(key, held) !== undefined) {
+        this._release(held);
+      }
+    }
+  }
+
+  /**
+   * The first declaration of a root held for one that holds this path (see {@link ProjectIndexes.awaitDeclaration}).
    *
    * @param absolutePath - Absolute path.
-   * @returns The declaration, or `undefined` when no root holding the path awaits one.
+   * @returns The declaration, or `undefined` when no root holding the path is held.
    */
   public declarationAt(absolutePath: string): Promise<void> | undefined {
-    if (this._awaitingDeclaration.size === 0) {
+    if (this._holds.size === 0) {
       return undefined;
     }
     const normalized = normalizePath(absolutePath);
-    for (const [root, { declared }] of this._awaitingDeclaration) {
+    for (const [root, { declared }] of this._holds) {
       if (relativeTo(root, normalized) !== undefined) {
         return declared;
       }
     }
     return undefined;
+  }
+
+  /**
+   * Settle what a file the size of a pointer answers before a non-raw view answers it (D9, I7): a durable root's
+   * index is opened first, so a reload's marks are known before any row is, and a file no mark names under a held
+   * root waits for the revision layer's word. Any other file answers at once.
+   *
+   * @param file - The absolute root the view or mount answers for, the absolute file path, and the file's size as the
+   *   provider stats it.
+   * @param signal - The caller's cancellation.
+   * @throws The signal's reason when the caller stops waiting.
+   */
+  public async settleMarks(file: SettledFile, signal?: AbortSignal): Promise<void> {
+    const { root, authorityPath: absolutePath, size } = file;
+    if (!mayBePointerSize(size)) {
+      return;
+    }
+    if (this._keepsSnapshot(root)) {
+      try {
+        await this.ready(root);
+      } catch {
+        /* No index opens: the marks are what the warm indexes hold. */
+      }
+    }
+    const held = this.declarationAt(absolutePath);
+    if (held !== undefined && this.pendingAt(absolutePath, size) === undefined) {
+      await untilDeclared(held, signal);
+    }
   }
 
   /**
@@ -678,6 +737,21 @@ export class ProjectIndexes {
     paths?: readonly string[],
   ): Promise<void> {
     const key = normalizePath(root);
+    try {
+      await this._declare(key, declared, paths);
+    } finally {
+      /* A whole declaration ends the hold, even one that failed: what waited answers from the marks there are. */
+      if (paths === undefined) {
+        this.releaseDeclaration(key);
+      }
+    }
+  }
+
+  private async _declare(
+    key: string,
+    declared: ReadonlyMap<string, DeclaredPlaceholder>,
+    paths: readonly string[] | undefined,
+  ): Promise<void> {
     await this.ready(key);
     const absolute = (path: string): string => (key === '/' ? `/${path}` : `${key}/${path}`);
     for (const [indexRoot, state] of this._states) {
@@ -696,18 +770,12 @@ export class ProjectIndexes {
           return relative === undefined ? [] : [[relative, placeholder] as const];
         }),
       );
-      state.index.declarePending(
+      const changed = state.index.declarePending(
         translated,
         paths === undefined ? { under: prefix } : { paths: paths.flatMap((path) => inIndex(path) ?? []) },
       );
-      this._schedulePersist(indexRoot);
-    }
-    if (paths === undefined) {
-      for (const [awaiting, { resolve }] of this._awaitingDeclaration) {
-        if (relativeTo(key, awaiting) !== undefined) {
-          this._awaitingDeclaration.delete(awaiting);
-          resolve();
-        }
+      if (changed) {
+        this._schedulePersist(indexRoot);
       }
     }
   }
@@ -844,6 +912,13 @@ export class ProjectIndexes {
         this._states.delete(root);
       }
     }
+    /* An unmounted root is no longer the revision layer's to declare: what waited answers now, and a remount holds again. */
+    this.releaseDeclaration(changed);
+    for (const root of this._settled) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._settled.delete(root);
+      }
+    }
   }
 
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
@@ -856,10 +931,28 @@ export class ProjectIndexes {
     }
     this._states.clear();
     /* Nothing will declare a root now: what waited answers from the marks it finds. */
-    for (const { resolve } of this._awaitingDeclaration.values()) {
-      resolve();
+    this.releaseDeclaration('/');
+    this._settled.clear();
+  }
+
+  /* End one root's hold, for this session: its marks alone answer from here. */
+  private _release(root: string): void {
+    const hold = this._holds.get(root);
+    this._settled.add(root);
+    if (hold !== undefined) {
+      this._holds.delete(root);
+      clearTimeout(hold.timer);
+      hold.release();
     }
-    this._awaitingDeclaration.clear();
+  }
+
+  /* Whether one root keeps a snapshot, so a reload may know marks before anything declares them. */
+  private _keepsSnapshot(root: string): boolean {
+    try {
+      return this._resolve(normalizePath(root)).persist !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -956,6 +1049,7 @@ export class ProjectIndexes {
     const index = usable
       ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, {
           ...(snapshot.pending === undefined ? {} : { pending: snapshot.pending }),
+          ...(snapshot.declared === undefined ? {} : { declared: true }),
           ...(snapshot.removals === undefined ? {} : { removals: snapshot.removals }),
         })
       : new ProjectIndex({
@@ -977,6 +1071,10 @@ export class ProjectIndexes {
     if (this._states.get(root) !== state) {
       /* Evicted while opening: answer this caller, keep nothing. */
       return index;
+    }
+    if (index.declared) {
+      /* The rows held against the provider: the stored marks are the root's word, so nothing waits for it again. */
+      this._release(root);
     }
     if (!usable) {
       /* A first scan may be of a project an import just committed: its first digest request seeds from the record. */

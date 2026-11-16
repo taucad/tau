@@ -53,6 +53,11 @@ export type IndexSnapshot = Readonly<{
    * `pending`; a snapshot without it answers `rescan` for any earlier `since`.
    */
   removals?: RemovalSnapshot;
+  /**
+   * Set once the revision layer has declared the root as a whole (D9): `pending` is then every placeholder the
+   * root held at `vector`, so a reload that validates the rows answers by them at once, holding nothing.
+   */
+  declared?: true;
 }>;
 
 /** How one vector relates to another. @internal */
@@ -170,7 +175,7 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
   if (!isRecord(value) || value['format'] !== snapshotFormat || value['version'] !== snapshotVersion) {
     return undefined;
   }
-  const { vector, rescan, writtenAt, entries, pending, removals } = value;
+  const { vector, rescan, writtenAt, entries, pending, removals, declared } = value;
   if (
     !isRecord(vector) ||
     !isCount(vector['generation']) ||
@@ -183,7 +188,7 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
   ) {
     return undefined;
   }
-  /* A malformed pending entry is dropped, not the map or the snapshot: a read marks it again. */
+  /* A malformed pending entry is dropped, not the map or the snapshot: the next declaration marks it again. */
   const pendingObjects = isRecord(pending)
     ? Object.fromEntries(
         Object.entries(pending).filter(
@@ -202,6 +207,13 @@ export const parseIndexSnapshot = (text: string): IndexSnapshot | undefined => {
     entries,
     ...(pendingObjects === undefined ? {} : { pending: pendingObjects }),
     ...(isRemovals(removals) ? { removals } : {}),
+    /* A dropped mark leaves the stamp unearned: the root waits for the revision layer's word again. */
+    ...(declared === true &&
+    (pendingObjects === undefined
+      ? pending === undefined
+      : isRecord(pending) && Object.keys(pendingObjects).length === Object.keys(pending).length)
+      ? { declared }
+      : {}),
   };
 };
 

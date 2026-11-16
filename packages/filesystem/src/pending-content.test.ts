@@ -7,6 +7,7 @@ import { withReadContentOps } from '#content-ops/read-ops.js';
 import { MountTable } from '#mount-table.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { PendingContentError, pendingObjectOf } from '#pending-content.js';
+import { ProjectIndex } from '#project-index/project-index.js';
 import type { PendingObjectSource } from '#pending-content.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
@@ -363,43 +364,118 @@ describe('marked placeholders (D9)', () => {
  */
 describe('a root awaiting its first declaration (D9, I7)', () => {
   const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
-  const waiting = async (): Promise<'waiting'> =>
+  const waiting = async (milliseconds = 20): Promise<'waiting'> =>
     new Promise((resolve) => {
       setTimeout(() => {
         resolve('waiting');
-      }, 20);
+      }, milliseconds);
     });
 
-  it('should hold a file the size of a pointer until the revision layer declares the root, and no other', async () => {
+  /* Mounting the root is the revision layer's word that it will declare it: no capture has to start first. */
+  it('should hold a file the size of a pointer from the moment the revision layer mounts the root, until it declares it', async () => {
     const cold = await createService(undefined, { declared: false });
     const raw = cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = cold.createRootedFileSystem(route);
-    raw.awaitDeclaration!();
     expect(await view.stat('main.scad')).toMatchObject({ size: 27 });
     const statting = view.stat('models/part.step');
     const listing = view.statTree!('models');
-    expect(await Promise.race([statting, waiting()])).toBe('waiting');
-    expect(await Promise.race([listing, waiting()])).toBe('waiting');
+    const listingRows = view.readdirWithStats!('models');
+    const serviceStat = cold.stat(`${route}/models/part.step`);
+    cold.setPendingObjectSource(async () => part);
+    const reading = view.readFile('models/part.step');
+    for (const held of [statting, listing, listingRows, serviceStat, reading]) {
+      // oxlint-disable-next-line no-await-in-loop -- each is raced in turn against the same short wait.
+      expect(await Promise.race([held, waiting()])).toBe('waiting');
+    }
     /* The raw view, the revision layer's own, is never held. */
     expect(await raw.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
     await raw.declarePending!(new Map([['models/part.step', placeholder]]));
     expect(await statting).toMatchObject({ size: part.byteLength, pending: true });
-    const listed = await listing;
-    expect(listed.find((row) => row.path === 'part.step')).toMatchObject({ size: part.byteLength });
-    /* Declared once, the marks alone answer. */
+    const [tree, rows] = await Promise.all([listing, listingRows]);
+    expect(tree.find((row) => row.path === 'part.step')).toMatchObject({ size: part.byteLength });
+    expect(rows.find((row) => row.name === 'part.step')).toMatchObject({ size: part.byteLength });
+    expect(await serviceStat).toMatchObject({ size: part.byteLength, pending: true });
+    expect(await reading).toStrictEqual(part);
+    /* Declared once, the marks alone answer, and a later view of the revision layer's holds nothing again. */
+    cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     await raw.writeFile('notes/pointer.txt', pointer);
     expect(await view.stat('notes/pointer.txt')).toMatchObject({ size: pointer.byteLength });
     cold.dispose();
   });
 
-  it('should refuse with PENDING, never answering a small file, when the word does not come within the bound', async () => {
-    const bounded = await createService(30, { declared: false });
-    const raw = bounded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+  it('should end the hold once, at the bound, and answer every row from the marks, never refusing a listing', async () => {
+    const bound = 150;
+    const bounded = await createService(bound, { declared: false });
+    bounded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = bounded.createRootedFileSystem(route);
-    raw.awaitDeclaration!();
-    await expect(view.stat('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
-    await expect(view.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+    const started = Date.now();
+    const answers = await Promise.all([
+      view.stat('models/part.step'),
+      view.readdirWithStats!('models'),
+      view.statTree!('models'),
+      view.search!('part'),
+      view.changedSince!(0),
+      view.readFile('models/part.step'),
+    ]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(bound - 10);
+    const [stat, rows, tree, found, changed, bytes] = answers;
+    const asPointer = { size: pointer.byteLength };
+    expect(stat).toMatchObject(asPointer);
+    expect(rows.find((row) => row.name === 'part.step')).toMatchObject(asPointer);
+    expect(tree.find((row) => row.path === 'part.step')).toMatchObject(asPointer);
+    expect(found.find((row) => row.path === 'models/part.step')).toMatchObject(asPointer);
+    expect(changed.entries.find((entry) => entry.path === 'models/part.step')).toMatchObject(asPointer);
+    expect(bytes).toStrictEqual(pointer);
+    /* Once per root: neither a later call nor a later view of the revision layer's waits again. */
+    bounded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    expect(await Promise.race([view.stat('models/part.step'), waiting(bound / 2)])).toMatchObject(asPointer);
     bounded.dispose();
+  });
+
+  it('should end the hold when the declaration fails, so nothing waits on a word that will not come', async () => {
+    const failing = await createService(undefined, { declared: false });
+    const raw = failing.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = failing.createRootedFileSystem(route);
+    const statting = view.stat('models/part.step');
+    expect(await Promise.race([statting, waiting()])).toBe('waiting');
+    vi.spyOn(ProjectIndex.prototype, 'declarePending').mockImplementationOnce(() => {
+      throw new Error('declaration failed');
+    });
+    await expect(raw.declarePending!(new Map([['models/part.step', placeholder]]))).rejects.toThrow(
+      'declaration failed',
+    );
+    expect(await statting).toMatchObject({ size: pointer.byteLength });
+    failing.dispose();
+  });
+
+  it('should end the hold when the revision layer lets go of the root, or the service is disposed', async () => {
+    const released = await createService(undefined, { declared: false });
+    const raw = released.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = released.createRootedFileSystem(route);
+    const statting = view.stat('models/part.step');
+    expect(await Promise.race([statting, waiting()])).toBe('waiting');
+    raw.releaseDeclaration!();
+    expect(await statting).toMatchObject({ size: pointer.byteLength });
+    released.dispose();
+
+    const disposed = await createService(undefined, { declared: false });
+    disposed.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const held = disposed.createRootedFileSystem(route).statTree!('models');
+    expect(await Promise.race([held, waiting()])).toBe('waiting');
+    disposed.dispose();
+    await expect(held).resolves.toBeDefined();
+  });
+
+  it('should stop waiting when the caller aborts, as the caller says', async () => {
+    const aborting = await createService(undefined, { declared: false });
+    aborting.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = aborting.createRootedFileSystem(route);
+    const controller = new AbortController();
+    const listing = view.statTree!('models', { signal: controller.signal });
+    expect(await Promise.race([listing, waiting()])).toBe('waiting');
+    controller.abort(new Error('stopped'));
+    await expect(listing).rejects.toThrow('stopped');
+    aborting.dispose();
   });
 });
 

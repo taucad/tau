@@ -63,22 +63,16 @@ export type PendingObjectSource = (
 export const pendingStallMilliseconds = 60_000;
 
 /**
- * A read of a pending entry whose object could not be had in time; or, with no object, a path that may be one, asked
- * about before the revision layer's first word on its root came (see {@link untilDeclared}).
+ * A read of a pending entry whose object could not be had in time.
  *
  * @public
  */
 export class PendingContentError extends Error {
   public readonly path: string;
-  public readonly object: PendingObject | undefined;
+  public readonly object: PendingObject;
 
-  public constructor(path: string, object: PendingObject | undefined, options?: { cause?: unknown }) {
-    super(
-      object === undefined
-        ? `Whether ${path} is a large object still on its way is not known yet.`
-        : `The large object of ${path} is not on this device yet.`,
-      options,
-    );
+  public constructor(path: string, object: PendingObject, options?: { cause?: unknown }) {
+    super(`The large object of ${path} is not on this device yet.`, options);
     this.name = 'PendingContentError';
     this.path = path;
     this.object = object;
@@ -92,8 +86,8 @@ export class PendingContentError extends Error {
 
 /**
  * Whether a file of this size may be a git-lfs pointer: its spec line, its sha256 line and a size line of 1 to 19
- * digits. Asked only of a root awaiting the revision layer's first word (see {@link untilDeclared}); after it, the
- * marks alone answer.
+ * digits. Only a file this size waits for its root's index and the revision layer's first word (see
+ * {@link untilDeclared}); every other file answers at once.
  *
  * @param size - A file's size.
  * @returns Whether a pointer can be that long.
@@ -102,32 +96,31 @@ export class PendingContentError extends Error {
 export const mayBePointerSize = (size: number): boolean => size >= 126 && size <= 144;
 
 /**
- * Wait for the revision layer's first word on a root it announced, under the read's stall bound: what a path that
- * may be a placeholder answers only after (I7). Refuses with `PENDING` when the word does not come in time.
+ * Wait for the revision layer's first word on a held root: what a path that may be a placeholder answers only after
+ * (I7). The hold itself is bounded, once per root, so this waits for nothing longer than the caller does.
  *
- * @param declared - The root's first declaration.
- * @param path - The path that waits.
- * @param stallMilliseconds - The bound; {@link pendingStallMilliseconds} when omitted.
- * @throws {PendingContentError} When the word does not come within the bound.
+ * @param declared - The root's first declaration, or the end of its hold.
+ * @param signal - The caller's cancellation.
+ * @throws The signal's reason when the caller stops waiting.
  * @internal
  */
-export const untilDeclared = async (
-  declared: Promise<void>,
-  path: string,
-  stallMilliseconds?: number,
-): Promise<void> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<'late'>((resolve) => {
-    timer = setTimeout(() => {
-      resolve('late');
-    }, stallMilliseconds ?? pendingStallMilliseconds);
+export const untilDeclared = async (declared: Promise<void>, signal?: AbortSignal): Promise<void> => {
+  if (signal === undefined) {
+    return declared;
+  }
+  signal.throwIfAborted();
+  let stop: () => void = () => undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    stop = () => {
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- an abort rejects with the caller's own reason.
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', stop, { once: true });
   });
   try {
-    if ((await Promise.race([declared, late])) === 'late') {
-      throw new PendingContentError(path, undefined);
-    }
+    await Promise.race([declared, stopped]);
   } finally {
-    clearTimeout(timer);
+    signal.removeEventListener('abort', stop);
   }
 };
 
@@ -176,12 +169,15 @@ export const asMarkedRow = <Row extends Readonly<{ type: string; size: number }>
   return copy as Row;
 };
 
+/** A file whose marks settle before it is answered: its root, its authority path and its size on disk. @internal */
+export type SettledFile = Readonly<{ root: string; authorityPath: string; size: number }>;
+
 /** The index's marks, as a read answers by them (see {@link readAsMarked}). @internal */
 export type PendingMarks = Readonly<{
   pendingAt: (authorityPath: string, size?: number) => PendingObject | undefined;
   endPending: (authorityPath: string) => void;
-  /** The first declaration of a root awaiting one that holds this path (see {@link untilDeclared}). */
-  declarationAt: (authorityPath: string) => Promise<void> | undefined;
+  /** Settle a file the size of a pointer: its root's index open, and its root's hold over (see {@link untilDeclared}). */
+  settleMarks: (file: SettledFile, signal?: AbortSignal) => Promise<void>;
 }>;
 
 /**
@@ -214,9 +210,8 @@ export const readAsMarked = async (
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const { bytes, signal, stallMilliseconds, ...at } = read;
   const object = pendingObjectOf(bytes);
-  const awaiting = object === undefined ? undefined : marks.declarationAt(at.authorityPath);
-  if (awaiting !== undefined && marks.pendingAt(at.authorityPath, bytes.byteLength) === undefined) {
-    await untilDeclared(awaiting, at.path, stallMilliseconds);
+  if (object !== undefined) {
+    await marks.settleMarks({ root: at.root, authorityPath: at.authorityPath, size: bytes.byteLength }, signal);
   }
   const marked = marks.pendingAt(at.authorityPath, bytes.byteLength);
   if (marked === undefined) {

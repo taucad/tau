@@ -286,17 +286,22 @@ export class ProjectIndex {
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
    * @param stored - What the snapshot kept beside its rows: the pending entries by path (D9), as
-   *   {@link ProjectIndex.pendingSnapshot} gave them, and the removal record (S10), as
-   *   {@link ProjectIndex.removalSnapshot} gave it.
+   *   {@link ProjectIndex.pendingSnapshot} gave them, whether they were declared for the whole root, and the removal
+   *   record (S10), as {@link ProjectIndex.removalSnapshot} gave it.
    * @returns The index.
    */
   public static fromSnapshot(
     rows: readonly SnapshotRow[],
     generation: number,
-    stored?: Readonly<{ pending?: Readonly<Record<string, PendingObject>>; removals?: RemovalSnapshot }>,
+    stored?: Readonly<{
+      pending?: Readonly<Record<string, PendingObject>>;
+      declared?: boolean;
+      removals?: RemovalSnapshot;
+    }>,
   ): ProjectIndex {
-    const { pending, removals } = stored ?? {};
+    const { pending, declared, removals } = stored ?? {};
     const index = new ProjectIndex({ generation, trustworthyMtime: true });
+    index._declared = declared === true;
     /* The snapshot is the writer's state at `generation`, so a `since` it
      * issued up to there is answered here; one past it may name generations
      * the writer issued after storing, which this index issues again: rescan. */
@@ -349,6 +354,8 @@ export class ProjectIndex {
   private readonly _removed = new Map<string, Readonly<{ kind: IndexEntryKind; generation: number }>>();
   /** The record holds every removal after this generation. */
   private _removedFloor: number;
+  /** Whether the revision layer has declared this whole root, so its marks are the whole answer (D9). */
+  private _declared = false;
 
   /**
    * @param options - The generation to continue from, and whether the provider's mtime can key facts.
@@ -381,6 +388,14 @@ export class ProjectIndex {
     const adopted = this._adoptedMtimes;
     this._adoptedMtimes = 0;
     return adopted;
+  }
+
+  /**
+   * Whether the revision layer has declared this whole root (D9): its marks are then every placeholder it holds, and
+   * a snapshot keeps the stamp so a reload answers by them at once.
+   */
+  public get declared(): boolean {
+    return this._declared;
   }
 
   /** Whether an observation of the whole root has completed (a scan, or a load and its compare). */
@@ -893,8 +908,8 @@ export class ProjectIndex {
 
   /**
    * Make one file a pending entry: it holds the pointer of `object`. A write
-   * over it, or an observation that finds its bytes changed, ends it. Not
-   * persisted: the revision layer's first read of the checkout marks it again.
+   * over it, or an observation that finds its bytes changed, ends it. Kept in
+   * the snapshot with every other mark (see {@link ProjectIndex.pendingSnapshot}).
    *
    * @param path - Root-relative file path.
    * @param object - The large object its pointer names.
@@ -926,9 +941,14 @@ export class ProjectIndex {
    * left as it is.
    *
    * @param declared - The placeholders, by root-relative path.
-   * @param scope - The paths the declaration speaks for.
+   * @param scope - The paths the declaration speaks for; `under: ''` speaks for the whole root and stamps it declared.
+   * @returns Whether a mark or the stamp changed.
    */
-  public declarePending(declared: ReadonlyMap<string, DeclaredPlaceholder>, scope: DeclarationScope): void {
+  public declarePending(declared: ReadonlyMap<string, DeclaredPlaceholder>, scope: DeclarationScope): boolean {
+    let changed = 'under' in scope && scope.under === '' && !this._declared;
+    if (changed) {
+      this._declared = true;
+    }
     const spoken =
       'paths' in scope
         ? scope.paths
@@ -940,6 +960,7 @@ export class ProjectIndex {
       if (node?.pending !== undefined && !declared.has(path)) {
         delete node.pending;
         node.generation = this._bump(path);
+        changed = true;
       }
     }
     for (const [path, { object, pointerSize }] of declared) {
@@ -951,8 +972,10 @@ export class ProjectIndex {
       ) {
         node.pending = object;
         node.generation = this._bump(path);
+        changed = true;
       }
     }
+    return changed;
   }
 
   /**

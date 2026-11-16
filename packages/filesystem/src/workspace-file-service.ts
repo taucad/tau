@@ -406,12 +406,17 @@ export class WorkspaceFileService {
     return this._asMarked(path, await provider.lstat(resolvedPath));
   }
 
-  /* A row as a rooted view's stat answers it: a pending entry as its object (D9). */
-  private _asMarked(path: string, row: FileStat): FileStat {
-    return asMarkedRow(
-      row,
-      row.type === 'file' ? this._projectIndexes.pendingAt(resolveAuthorityPath(path), row.size) : undefined,
-    );
+  /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */
+  private async _asMarked(path: string, row: FileStat): Promise<FileStat> {
+    if (row.type !== 'file') {
+      return row;
+    }
+    const canonicalPath = resolveAuthorityPath(path);
+    const root = this._mountTable.resolve(canonicalPath).entry?.prefix;
+    if (root !== undefined && this._projectIndexes.pendingAt(canonicalPath, row.size) === undefined) {
+      await this._projectIndexes.settleMarks({ root, authorityPath: canonicalPath, size: row.size });
+    }
+    return asMarkedRow(row, this._projectIndexes.pendingAt(canonicalPath, row.size));
   }
 
   /**

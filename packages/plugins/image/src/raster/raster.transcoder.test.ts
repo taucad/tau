@@ -20,7 +20,7 @@ const createServices = (): TranscoderServices => ({
 /** A compiler that records every WASM file it is asked for, so a test can prove no codec loaded. */
 const createCompiler = () => {
   const urls: string[] = [];
-  const compile = vi.fn<WasmCompiler>(async (url) => {
+  const compile = vi.fn<WasmCompiler>(async ({ url }) => {
     urls.push(url.replace(/^.*\//u, ''));
     return WebAssembly.compile(await loadWasmBinary(url));
   });
@@ -61,7 +61,7 @@ const outputOf = (result: TranscodeResult) => {
 
 /** Decode a PNG output to RGBA through the transcoder's own PNG decoder. */
 const pixelsOf = async (png: Uint8Array<ArrayBuffer>) =>
-  createRasterContext(async (url) => WebAssembly.compile(await loadWasmBinary(url))).decoders.decodePng(png);
+  createRasterContext(async ({ url }) => WebAssembly.compile(await loadWasmBinary(url))).decoders.decodePng(png);
 
 const pixelAt = (image: { data: Uint8ClampedArray; width: number }, x: number, y: number): number[] => {
   const offset = (y * image.width + x) * 4;

@@ -2,9 +2,10 @@
  * Lazily loaded raster codecs.
  *
  * Every WASM file is an implementation asset with a pinned SHA-256, addressed with `import.meta.resolve` so the
- * runtime's Vite plugin emits it, and compiled with the runtime's streaming helper. Each codec's glue module is
- * imported dynamically on the first image that needs it, so no codec is in the package's static import graph, and
- * the compiled codec is held by the loader that `initialize` returns rather than by this module.
+ * runtime's Vite plugin emits it. On the first image that needs a codec, its glue module is imported and its WASM
+ * file is compiled, so no codec is in the package's static import graph. The raster transcoder fetches each file
+ * through the runtime, which checks it against its digest on that first use. The compiled codec is kept by the
+ * object that `initialize` returns, not by this module.
  */
 
 import { compileWasmStreaming } from '@taucad/runtime/transcoder';
@@ -26,11 +27,43 @@ const webpEncoderUrl = new URL(import.meta.resolve('@jsquash/webp/codec/enc/webp
 const avifDecoderUrl = new URL(import.meta.resolve('@jsquash/avif/codec/dec/avif_dec.wasm')).href;
 const resizeUrl = new URL(import.meta.resolve('@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm')).href;
 
-const pngAsset = {
-  id: 'wasm:squoosh_png_bg',
-  url: pngUrl,
-  sha256: '263d6e658808a74b72a1a99c5cc1d619237e70c150db6e41d5d84d3d117ab9be',
-} as const satisfies RasterCodecAsset;
+const asset = (id: string, url: string, sha256: string): RasterCodecAsset => ({ id, url, sha256 });
+
+const mozjpegEncoderAsset = asset(
+  'wasm:mozjpeg_enc',
+  mozjpegEncoderUrl,
+  '24d4177f1c4963e2058b107189249651c61fdef125570e79b1dfb63c8bb49326',
+);
+const pngAsset = asset(
+  'wasm:squoosh_png_bg',
+  pngUrl,
+  '263d6e658808a74b72a1a99c5cc1d619237e70c150db6e41d5d84d3d117ab9be',
+);
+const webpEncoderAsset = asset(
+  'wasm:webp_enc',
+  webpEncoderUrl,
+  'b6085bb6702f144e9dc6016d58d230b34a84976bf0d080b7390b4b4b137d6ab7',
+);
+const resizeAsset = asset(
+  'wasm:squoosh_resize_bg',
+  resizeUrl,
+  '5b1f702d502c4d0a70b99f78691bd554d566ba95859e4c57af5435955a1d74a5',
+);
+const mozjpegDecoderAsset = asset(
+  'wasm:mozjpeg_dec',
+  mozjpegDecoderUrl,
+  'a7c4b12169817e779ff4af137981393ae924944e167ad1bd95747c9199162d3e',
+);
+const webpDecoderAsset = asset(
+  'wasm:webp_dec',
+  webpDecoderUrl,
+  '30fb52fa2a80166d25ba7debf902218904ba1f05ccce9f959f722beff9e2f344',
+);
+const avifDecoderAsset = asset(
+  'wasm:avif_dec',
+  avifDecoderUrl,
+  '5c35dde23dfd862088a49a6b8a9fe81f9f9a1a46aaa27de7efd7baa7611c4b47',
+);
 
 /**
  * The WASM files {@link createRasterEncoders} loads: MozJPEG and libwebp encoders, the PNG codec and the resizer.
@@ -38,45 +71,25 @@ const pngAsset = {
  * @public
  */
 export const rasterEncoderAssets: readonly RasterCodecAsset[] = [
-  {
-    id: 'wasm:mozjpeg_enc',
-    url: mozjpegEncoderUrl,
-    sha256: '24d4177f1c4963e2058b107189249651c61fdef125570e79b1dfb63c8bb49326',
-  },
+  mozjpegEncoderAsset,
   pngAsset,
-  {
-    id: 'wasm:webp_enc',
-    url: webpEncoderUrl,
-    sha256: 'b6085bb6702f144e9dc6016d58d230b34a84976bf0d080b7390b4b4b137d6ab7',
-  },
-  {
-    id: 'wasm:squoosh_resize_bg',
-    url: resizeUrl,
-    sha256: '5b1f702d502c4d0a70b99f78691bd554d566ba95859e4c57af5435955a1d74a5',
-  },
+  webpEncoderAsset,
+  resizeAsset,
 ];
 
 /** The WASM decoders the raster transcoder loads in addition to {@link rasterEncoderAssets}. */
 export const rasterDecoderAssets: readonly RasterCodecAsset[] = [
-  {
-    id: 'wasm:mozjpeg_dec',
-    url: mozjpegDecoderUrl,
-    sha256: 'a7c4b12169817e779ff4af137981393ae924944e167ad1bd95747c9199162d3e',
-  },
-  {
-    id: 'wasm:webp_dec',
-    url: webpDecoderUrl,
-    sha256: '30fb52fa2a80166d25ba7debf902218904ba1f05ccce9f959f722beff9e2f344',
-  },
-  {
-    id: 'wasm:avif_dec',
-    url: avifDecoderUrl,
-    sha256: '5c35dde23dfd862088a49a6b8a9fe81f9f9a1a46aaa27de7efd7baa7611c4b47',
-  },
+  mozjpegDecoderAsset,
+  webpDecoderAsset,
+  avifDecoderAsset,
 ];
 
-/** Compiles one WASM file; the runtime's streaming helper unless a test supplies another. */
-export type WasmCompiler = (url: string) => Promise<WebAssembly.Module>;
+/**
+ * Compiles one declared WASM file. In the raster transcoder it compiles the bytes the runtime fetched and verified
+ * against the asset's pinned digest; {@link createRasterEncoders} on its own streams the asset's URL.
+ * @public
+ */
+export type WasmCompiler = (asset: RasterCodecAsset) => Promise<WebAssembly.Module>;
 
 type EmscriptenOverrides = {
   readonly noInitialRun: boolean;
@@ -199,19 +212,19 @@ export type RasterEncoders = {
  * compiled once and kept by the returned object. Create it in a transcoder's `initialize` and keep it in the
  * context, so a worker loads each codec at most once.
  *
- * @param compile - Compiles a WASM file by URL. Defaults to the runtime's streaming helper.
+ * @param compile - Compiles a declared WASM file. Defaults to streaming its URL with the runtime's helper.
  * @returns The lazily loading encoders.
  * @public
  */
 export const createRasterEncoders = (
-  compile: WasmCompiler = async (url) => compileWasmStreaming(url),
+  compile: WasmCompiler = async ({ url }) => compileWasmStreaming(url),
 ): RasterEncoders => {
   ensureImageData();
   const jpeg = lazily(async () => {
     const [glue, meta, module] = await Promise.all([
       import('@jsquash/jpeg/codec/enc/mozjpeg_enc.js'),
       import('@jsquash/jpeg/meta.js'),
-      compile(mozjpegEncoderUrl),
+      compile(mozjpegEncoderAsset),
     ]);
     const encoder = await instantiateEmscripten(
       glue.default as unknown as EmscriptenFactory<EmscriptenEncoder<MozjpegEncodeOptions>>,
@@ -223,7 +236,7 @@ export const createRasterEncoders = (
     const [glue, meta, module] = await Promise.all([
       import('@jsquash/webp/codec/enc/webp_enc.js'),
       import('@jsquash/webp/meta.js'),
-      compile(webpEncoderUrl),
+      compile(webpEncoderAsset),
     ]);
     const encoder = await instantiateEmscripten(
       glue.default as unknown as EmscriptenFactory<EmscriptenEncoder<WebpEncodeOptions>>,
@@ -235,7 +248,7 @@ export const createRasterEncoders = (
   const resizer = lazily(async () => {
     const [glue, module] = await Promise.all([
       import('@jsquash/resize/lib/resize/pkg/squoosh_resize.js'),
-      compile(resizeUrl),
+      compile(resizeAsset),
     ]);
     glue.initSync(module);
     return glue;
@@ -284,7 +297,7 @@ export const createRasterEncoders = (
 };
 
 const loadPng = async (compile: WasmCompiler) => {
-  const [glue, module] = await Promise.all([import('@jsquash/png/codec/pkg/squoosh_png.js'), compile(pngUrl)]);
+  const [glue, module] = await Promise.all([import('@jsquash/png/codec/pkg/squoosh_png.js'), compile(pngAsset)]);
   glue.initSync(module);
   return glue;
 };
@@ -307,7 +320,7 @@ export type RasterDecoders = {
 /**
  * Create the decoders. Nothing is loaded until a method is first called.
  *
- * @param compile - Compiles a WASM file by URL.
+ * @param compile - Compiles a declared WASM file.
  * @returns The lazily loading decoders.
  */
 export const createRasterDecoders = (compile: WasmCompiler): RasterDecoders => {
@@ -315,16 +328,22 @@ export const createRasterDecoders = (compile: WasmCompiler): RasterDecoders => {
   const jpeg = lazily(async () => {
     const [glue, module] = await Promise.all([
       import('@jsquash/jpeg/codec/dec/mozjpeg_dec.js'),
-      compile(mozjpegDecoderUrl),
+      compile(mozjpegDecoderAsset),
     ]);
     return instantiateEmscripten(glue.default as unknown as EmscriptenFactory<MozjpegDecoder>, module);
   });
   const webp = lazily(async () => {
-    const [glue, module] = await Promise.all([import('@jsquash/webp/codec/dec/webp_dec.js'), compile(webpDecoderUrl)]);
+    const [glue, module] = await Promise.all([
+      import('@jsquash/webp/codec/dec/webp_dec.js'),
+      compile(webpDecoderAsset),
+    ]);
     return instantiateEmscripten(glue.default as unknown as EmscriptenFactory<WebpDecoder>, module);
   });
   const avif = lazily(async () => {
-    const [glue, module] = await Promise.all([import('@jsquash/avif/codec/dec/avif_dec.js'), compile(avifDecoderUrl)]);
+    const [glue, module] = await Promise.all([
+      import('@jsquash/avif/codec/dec/avif_dec.js'),
+      compile(avifDecoderAsset),
+    ]);
     return instantiateEmscripten(glue.default as unknown as EmscriptenFactory<AvifDecoder>, module);
   });
   const png = lazily(async () => loadPng(compile));

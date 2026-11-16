@@ -12,8 +12,8 @@
 
 import { probeImage } from '@taucad/utils/image-probe';
 import type { ImageProbe } from '@taucad/utils/image-probe';
-import { compileWasmStreaming, defineTranscoder } from '@taucad/runtime/transcoder';
-import type { TranscodeInput, TranscodeResult } from '@taucad/runtime/transcoder';
+import { defineTranscoder } from '@taucad/runtime/transcoder';
+import type { ImplementationAssetLoader, TranscodeInput, TranscodeResult } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
 import type { RasterDecoders, WasmCompiler } from '#raster/raster-codecs.js';
 import {
@@ -193,13 +193,28 @@ type RasterContext = {
 /**
  * Create the per-worker codec context. Exposed for tests that supply their own compiler.
  *
- * @param compile - Compiles a WASM file by URL.
+ * @param compile - Compiles a declared WASM file.
  * @returns Lazily loading decoders and encoders.
  */
 export const createRasterContext = (compile: WasmCompiler): RasterContext => ({
   decoders: createRasterDecoders(compile),
   encoders: createRasterEncoders(compile),
 });
+
+/**
+ * Compile each codec from the bytes the runtime fetched and checked against the asset's pinned digest.
+ *
+ * @param loader - The runtime's implementation asset loader.
+ * @returns A compiler that never compiles unverified bytes.
+ */
+const verifiedCompiler =
+  (loader: ImplementationAssetLoader | undefined): WasmCompiler =>
+  async ({ id }) => {
+    if (loader === undefined) {
+      throw new RasterImageError('decode', 'The raster transcoder needs the runtime to load its codecs');
+    }
+    return WebAssembly.compile(await loader.load(id));
+  };
 
 const implementationAssets = [
   ...rasterDecoderAssets,
@@ -214,10 +229,13 @@ export const rasterTranscoder = defineTranscoder({
   // persisted export caches keep serving the previous bytes. golden.json changes in the same commit.
   version: '1.0.0',
   implementationAssets,
+  // A request needs one decoder and one encoder, so each WASM file is fetched and checked against its digest on the
+  // first image that needs it rather than all seven before the first conversion.
+  implementationAssetLoading: 'on-use',
   edges,
 
-  async initialize() {
-    return createRasterContext(async (url) => compileWasmStreaming(url));
+  async initialize(_options, { implementationAssets: loader }) {
+    return createRasterContext(verifiedCompiler(loader));
   },
 
   async transcode(input, services, context: RasterContext): Promise<TranscodeResult> {

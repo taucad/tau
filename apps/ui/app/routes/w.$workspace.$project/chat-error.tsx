@@ -6,7 +6,7 @@ import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
-import { CodeViewer } from '#components/code/code-viewer.js';
+import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { cn } from '@taucad/ui/utils/cn';
 import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
 import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';

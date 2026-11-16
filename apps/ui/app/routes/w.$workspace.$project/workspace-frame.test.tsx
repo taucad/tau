@@ -279,6 +279,7 @@ describe('WorkspaceFrame served composer', () => {
     try {
       expect(handover?.pending).toBeUndefined();
       act(() => {
+        handover?.claim();
         handover?.release();
       });
       expect(handover?.pending).toMatchObject({
@@ -305,6 +306,7 @@ describe('WorkspaceFrame served composer', () => {
     const { container, done } = await serveAndHydrate('/w/home/one');
     try {
       act(() => {
+        handover?.claim();
         handover?.release();
       });
       expect(handover?.pending).toBeUndefined();
@@ -327,15 +329,47 @@ describe('WorkspaceFrame served composer', () => {
     try {
       expect(state?.composing).toBe(true);
       act(() => {
+        handover?.claim();
         handover?.release();
       });
       expect(handover?.pending).toBeUndefined();
+      /* The input stays on screen through the composition, so it keeps focus and its text. */
+      expect(served!.isConnected).toBe(true);
       await act(async () => {
         served!.value = '日本';
         served!.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
         await Promise.resolve();
       });
       expect(handover?.pending).toMatchObject({ text: '日本', edited: true });
+    } finally {
+      await done();
+    }
+  });
+
+  /* The chat lane can still be loading its history after the reveal (review round 1, defect 2). */
+  it('keeps the served input on screen after the reveal, while the chat history gate still loads, until a composer claims it', async () => {
+    let served: HTMLTextAreaElement | undefined;
+    const { container, done } = await serveAndHydrate('/w/home/one', (input) => {
+      served = input;
+      input.focus();
+      input.value = 'ab';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    try {
+      act(() => {
+        handover?.release();
+      });
+      expect(handover?.pending).toBeUndefined();
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
+      served!.value = 'abc';
+      served!.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      let unclaim: (() => void) | undefined;
+      act(() => {
+        unclaim = handover?.claim();
+      });
+      expect(handover?.pending).toMatchObject({ text: 'abc', edited: true, focused: true });
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+      unclaim?.();
     } finally {
       await done();
     }

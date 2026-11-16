@@ -1,4 +1,14 @@
-import { memo, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -6,11 +16,9 @@ import type { ChatTextareaProperties } from '#components/chat/chat-textarea-type
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput, EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
-import { writeDraftHint } from '#lib/frame-hint-draft.js';
-import type { DraftHintScope } from '#lib/frame-hint-draft.js';
-import { frameHintKey } from '#lib/frame-hint.js';
+import { draftHintScopeOf, writeDraftHint } from '#lib/frame-hint-draft.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
 import { useProject } from '#hooks/use-project.js';
@@ -35,19 +43,27 @@ import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
 /**
- * Which draft hint a main composer mirrors: Home's on `/`, a project's on its route, none elsewhere (another new-project
- * surface, a preview).
+ * The project route's served composer (the workspace frame's) hands its input to the main composer once the lane is
+ * revealed and this composer has claimed it; it is applied once, then the frame forgets it. The input stays this
+ * composer's after that, so a queued send it carries is replayed once the draft holds its text (C10); a composer mounted
+ * later starts without it.
  *
- * @param pathname - The document's path.
- * @param isProjectComposer - Whether the composer belongs to a project.
- * @returns The scope, or undefined.
+ * @param isMain - Whether this is the main composer, the only one the frame hands its input to.
+ * @returns The handed-over input, and the frame's handover.
  */
-const draftHintScopeOf = (pathname: string, isProjectComposer: boolean): DraftHintScope | undefined => {
-  if (!isProjectComposer) {
-    return pathname === '/' ? { kind: 'home' } : undefined;
+const useFrameEarlyInput = (
+  isMain: boolean,
+): { handedOverInput: EarlyChatInput | undefined; earlyInputHandover: EarlyInputHandover | undefined } => {
+  const frameHandover = useContext(EarlyInputHandoverContext);
+  const earlyInputHandover = isMain ? frameHandover : undefined;
+  const [takenInput, setTakenInput] = useState<EarlyChatInput>();
+  const pendingInput = earlyInputHandover?.pending;
+  if (pendingInput !== undefined && pendingInput !== takenInput) {
+    setTakenInput(pendingInput);
   }
-  const key = frameHintKey(pathname);
-  return key === undefined ? undefined : { kind: 'project', key };
+  const claimEarlyInput = earlyInputHandover?.claim;
+  useLayoutEffect(() => claimEarlyInput?.(), [claimEarlyInput]);
+  return { handedOverInput: pendingInput ?? takenInput, earlyInputHandover };
 };
 
 /**
@@ -380,10 +396,7 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  /* The project route's served composer (the workspace frame's) hands its input to the main composer once the lane is
-   * revealed; it is applied once, then the frame forgets it. */
-  const earlyInputHandover = useContext(EarlyInputHandoverContext);
-  const handedOverInput = mode === 'main' ? earlyInputHandover?.pending : undefined;
+  const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(mode === 'main');
 
   const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => void): React.ReactNode => (
     <>

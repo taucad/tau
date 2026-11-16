@@ -603,10 +603,19 @@ describe('ChatTextareaDesktop draft rehydration', () => {
   });
 
   it.each([
-    { name: 'a typed key', init: { key: 'x' } },
-    { name: 'Escape', init: { key: 'Escape' } },
-    { name: 'Backspace', init: { key: 'Backspace' } },
-  ])('should cancel a held queued send on $name', async ({ init }) => {
+    {
+      name: 'an edit to the draft',
+      cancel: (view: ReturnType<typeof renderComposer>): void => {
+        view.rerenderWith(codexSession, 'Make a bracket. Twice', true);
+      },
+    },
+    {
+      name: 'Escape',
+      cancel: (_view: ReturnType<typeof renderComposer>, box: Element): void => {
+        fireEvent.keyDown(box, { key: 'Escape' });
+      },
+    },
+  ])('should cancel a held queued send on $name', async ({ cancel }) => {
     const handleSubmit = vi.fn(asyncNoop);
     const view = renderComposer('Make a bracket.', codexSession, {
       earlyInput: queuedEarlyInput,
@@ -618,11 +627,27 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(queued).not.toBeNull();
       return queued!;
     });
-    fireEvent.keyDown(box, init);
+    cancel(view, box);
     expect(view.container.querySelector('[data-queued-send]')).toBeNull();
     view.rerenderWith(codexSession, 'Make a bracket.', false);
     await Promise.resolve();
     expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  /* The project route hands its input over before the draft holds its text (review round 1, defect 1). */
+  it('should replay a queued send only once the draft holds the handed-over text', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const view = renderComposer('', codexSession, { earlyInput: queuedEarlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+    });
+    view.rerenderWith(codexSession, 'Make a', false);
+    await Promise.resolve();
+    expect(handleSubmit).not.toHaveBeenCalled();
+    view.rerenderWith(codexSession, 'Make a bracket.', false);
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
   });
 
   it('should not send for an early input that queued none', async () => {

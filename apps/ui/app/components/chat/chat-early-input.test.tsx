@@ -21,10 +21,12 @@ const runEarlyScript = (container: HTMLElement): void => {
 };
 
 const send = vi.hoisted(() => vi.fn());
-/* The draft owner's surface the early input reads: its sends, and an empty draft to select from. */
+/* The draft the record holds; empty unless a row loads one. */
+let recordDraftText = '';
+/* The draft owner's surface the early input reads: its sends, and the draft to select from. */
 const draftActorRef = {
   send,
-  getSnapshot: () => ({ context: { draftText: '', draftAttachments: [] } }),
+  getSnapshot: () => ({ context: { draftText: recordDraftText, draftAttachments: [] } }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ draftActorRef }) }));
@@ -32,6 +34,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ dra
 describe('Home early input', () => {
   beforeEach(() => {
     send.mockClear();
+    recordDraftText = '';
   });
 
   it.each([
@@ -440,6 +443,28 @@ describe('Home early input: queued send and stored draft (C10)', () => {
       await done();
     }
   });
+
+  /* The record wins where the two differ (review round 1, defect 7). */
+  it.each([
+    { name: 'the same draft', record: 'A bracket for the shelf', queuedSend: true },
+    { name: 'another draft', record: 'A hinge for the door', queuedSend: false },
+  ])(
+    'should not hydrate a draft the record already holds, $name, and keep Enter only on it',
+    async ({ record, queuedSend }) => {
+      writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
+      recordDraftText = record;
+      const { content, adopted } = adopting();
+      const { container, input } = serve(content);
+      press(input, { key: 'Enter' });
+      const done = await hydrateAndAdopt(container, content);
+      try {
+        expect(adopted()).toMatchObject({ prefilled: true, edited: false, queuedSend });
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        await done();
+      }
+    },
+  );
 
   it('should keep an early edit over the stored draft', async () => {
     writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });

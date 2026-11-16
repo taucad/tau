@@ -120,8 +120,10 @@ export function EarlyComposerField({
 }): React.JSX.Element {
   return (
     <div className={chatComposerShellClassName} data-chat-composer='main'>
+      {/* The served script marks this box with a queued send before React hydrates it. */}
       <div
         className={cn(chatComposerFrameClassName, 'rounded-2xl has-[textarea:focus-visible]:focus-outline', className)}
+        suppressHydrationWarning
       >
         <div className={cn(chatComposerEditorAreaClassName, chatComposerMainEditorAreaClassName)}>
           <textarea
@@ -159,8 +161,14 @@ export function EarlyComposerField({
 export type EarlyInputHandover = Readonly<{
   /** What the served input held when it was handed over, until a composer has taken it; `undefined` otherwise. */
   pending: EarlyChatInput | undefined;
-  /** Hand the served input over now. Called in the commit that reveals the lane; later calls do nothing. */
+  /** The lane is revealed, so a composer in it can take focus. Called in the commit that reveals the lane. */
   release: () => void;
+  /**
+   * A composer is mounted to take the input. The input is handed over once the lane is revealed too.
+   *
+   * @returns The release of the claim, on unmount.
+   */
+  claim: () => () => void;
   /** The composer has taken `pending`: it is not applied again, by this composer or a later one. */
   taken: () => void;
 }>;

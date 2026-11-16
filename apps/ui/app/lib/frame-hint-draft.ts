@@ -11,6 +11,8 @@
  * not mirrored (the record still holds it; the first frame then shows the empty composer, as before).
  */
 
+import { frameHintKey } from '#lib/frame-hint.js';
+
 /** The `localStorage` key holding the draft hint. */
 export const draftHintStorageKey = 'tau-draft-hint';
 
@@ -69,6 +71,22 @@ const readRecord = (): DraftHintRecord | undefined => {
     /* Unreadable storage or a malformed record reads as no record. */
     return undefined;
   }
+};
+
+/**
+ * Which draft hint a main composer mirrors: Home's on `/`, a project's on its route, none elsewhere (another new-project
+ * surface, a preview).
+ *
+ * @param pathname - The document's path.
+ * @param isProjectComposer - Whether the composer belongs to a project.
+ * @returns The scope, or undefined.
+ */
+export const draftHintScopeOf = (pathname: string, isProjectComposer: boolean): DraftHintScope | undefined => {
+  if (!isProjectComposer) {
+    return pathname === '/' ? { kind: 'home' } : undefined;
+  }
+  const key = frameHintKey(pathname);
+  return key === undefined ? undefined : { kind: 'project', key };
 };
 
 /**

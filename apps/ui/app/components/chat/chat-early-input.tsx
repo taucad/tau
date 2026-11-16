@@ -15,7 +15,8 @@ import type { EarlyChatInput, EarlyChatInputBarState, EarlyTextarea } from '#com
  *
  * An edit is handed to the draft owner as an adopted edit. A stored draft the served page painted (and nothing typed)
  * hydrates the draft only while the draft is still empty, as the record's own load does, so the record still wins
- * where the two differ and a draft the record already loaded is kept.
+ * where the two differ and a draft the record already loaded is kept; an Enter pressed on a painted draft the record
+ * does not hold is dropped, so nothing is sent that the composer will not show.
  *
  * `isHostReady` is for a host that loads the rich composer on demand: adoption hands the edit over and
  * replaces this input with `children`, so a host whose children are not loaded yet passes `false`
@@ -41,16 +42,16 @@ export function ChatEarlyInput({
   const [adopted, setAdopted] = useState<EarlyChatInput>();
   const [isEmpty, setIsEmpty] = useState(true);
   const { draftActorRef } = useChatComposer();
-  /* Read in render: a stored draft hydrates only a draft that is still empty (adoption runs in an effect below). */
-  const isDraftEmpty = useSelector(
-    draftActorRef,
-    (state) => state.context.draftText === '' && state.context.draftAttachments.length === 0,
+  /* Read in render: a stored draft hydrates only a draft that is still empty (adoption runs in an effect below), and an
+   * Enter pressed on it is kept only where the draft is that text. `undefined` is an empty draft. */
+  const draftText = useSelector(draftActorRef, (state) =>
+    state.context.draftText === '' && state.context.draftAttachments.length === 0 ? undefined : state.context.draftText,
   );
-  const isDraftEmptyRef = useRef(isDraftEmpty);
+  const draftTextRef = useRef(draftText);
   /* Declared before adoption's effect, so adoption reads this commit's value. */
   useEffect(() => {
-    isDraftEmptyRef.current = isDraftEmpty;
-  }, [isDraftEmpty]);
+    draftTextRef.current = draftText;
+  }, [draftText]);
 
   /* Text typed before hydration is already in the input; the bar reads it once React is here. */
   useEffect(() => {
@@ -72,8 +73,12 @@ export function ChatEarlyInput({
         /* Keys typed before the bundle ran reached no listener: the edit is the only record that home was used. */
         markPageUsed();
         draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
-      } else if (snapshot.prefilled && isDraftEmptyRef.current) {
+      } else if (snapshot.prefilled && draftTextRef.current === undefined) {
         draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(snapshot.text, []) });
+      } else if (snapshot.prefilled && snapshot.queuedSend && draftTextRef.current !== snapshot.text) {
+        /* The record holds another draft, which wins: the Enter was pressed on text the composer will not hold. */
+        setAdopted({ ...snapshot, queuedSend: false });
+        return;
       }
       setAdopted(snapshot);
     };

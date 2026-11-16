@@ -634,6 +634,7 @@ export const ChatTextareaDesktop = memo(function ({
   const queuedSend = useQueuedSend({
     earlyInput,
     isEditorReady: editor !== null,
+    draftText: inputText,
     sendRefusal,
     submit: submitWithDictation,
   });
@@ -686,8 +687,6 @@ export const ChatTextareaDesktop = memo(function ({
         data-collapsed={isCollapsed ? '' : undefined}
         data-queued-send={queuedSend.isQueued ? '' : undefined}
         onKeyDownCapture={queuedSend.cancelOnKey}
-        onPasteCapture={queuedSend.cancel}
-        onDropCapture={queuedSend.cancel}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
         onDragOver={handleDragOver}
@@ -772,35 +771,48 @@ ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
 
 /**
  * A queued send is the person's Enter, pressed before this composer was here (C10, H-f, F7): it is replayed once,
- * through the submit that Enter would have called, after the adopted text is in the draft and once nothing refuses a
- * send (Home's creation location can still be loading). Until then Send shows it as queued; a key that edits the text,
- * a paste, a drop or Escape cancels it, as they do before hydration.
+ * through the submit that Enter would have called, once the draft holds the text it was pressed on and nothing refuses
+ * a send (Home's creation location can still be loading). Until then Send shows it as queued. An edit cancels it, as it
+ * does before hydration: once the draft has held that text, any other text (typed, cut, pasted, dropped, composed or
+ * dictated) is an edit. Escape cancels it too.
  */
 const useQueuedSend = ({
   earlyInput,
   isEditorReady,
+  draftText,
   sendRefusal,
   submit,
 }: {
   readonly earlyInput: EarlyChatInput | undefined;
   readonly isEditorReady: boolean;
+  readonly draftText: string;
   readonly sendRefusal: string | undefined;
   readonly submit: () => Promise<void>;
 }): {
   readonly isQueued: boolean;
-  readonly cancel: () => void;
   readonly cancelOnKey: (event: React.KeyboardEvent) => void;
 } => {
-  /* The early input whose queued send was sent or cancelled. */
+  /* The early input whose queued send was sent or cancelled, and the one whose text the draft has held. */
   const [settled, setSettled] = useState<EarlyChatInput>();
+  const [caughtUp, setCaughtUp] = useState<EarlyChatInput>();
   const sentRef = useRef<EarlyChatInput | undefined>(undefined);
   const submitRef = useRef(submit);
   useLayoutEffect(() => {
     submitRef.current = submit;
   }, [submit]);
-  const isQueued = earlyInput?.queuedSend === true && isEditorReady && settled !== earlyInput;
+  const isPending = earlyInput?.queuedSend === true && isEditorReady && settled !== earlyInput;
+  /* Trimmed: the editor's text of a handed-over edit can differ from the native input's in edge whitespace. */
+  const holdsText = draftText.trim() === earlyInput?.text.trim();
+  /* Information from earlier renders: whether the draft has held the text, and so whether other text is an edit. */
+  if (isPending && holdsText && caughtUp !== earlyInput) {
+    setCaughtUp(earlyInput);
+  }
+  if (isPending && !holdsText && caughtUp === earlyInput) {
+    setSettled(earlyInput);
+  }
+  const isQueued = isPending && !(caughtUp === earlyInput && !holdsText);
   useEffect(() => {
-    if (!isQueued || sendRefusal !== undefined || sentRef.current === earlyInput) {
+    if (!isQueued || !holdsText || sendRefusal !== undefined || sentRef.current === earlyInput) {
       return;
     }
     sentRef.current = earlyInput;
@@ -812,25 +824,16 @@ const useQueuedSend = ({
       }
     };
     void replayEnter();
-  }, [earlyInput, isQueued, sendRefusal]);
-  const cancel = useCallback((): void => {
-    setSettled(earlyInput);
-  }, [earlyInput]);
+  }, [earlyInput, holdsText, isQueued, sendRefusal]);
   const cancelOnKey = useCallback(
     (event: React.KeyboardEvent): void => {
-      const edits =
-        event.key === 'Escape' ||
-        event.key === 'Backspace' ||
-        event.key === 'Delete' ||
-        (event.key === 'Enter' && event.shiftKey) ||
-        (event.key.length === 1 && !event.ctrlKey && !event.metaKey);
-      if (isQueued && edits) {
+      if (isQueued && event.key === 'Escape') {
         setSettled(earlyInput);
       }
     },
     [earlyInput, isQueued],
   );
-  return { isQueued, cancel, cancelOnKey };
+  return { isQueued, cancelOnKey };
 };
 
 /**

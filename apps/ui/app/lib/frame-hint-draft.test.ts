@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   draftHintProjectLimit,
   draftHintReaderSource,
+  draftHintScopeOf,
   draftHintStorageKey,
   draftHintTextLimit,
   readDraftHint,
@@ -116,4 +117,17 @@ describe('draft hint (A15d)', () => {
     const chat = new URL(url, 'http://localhost').searchParams.get('chat');
     expect(entry !== undefined && (chat === null || chat === entry.chatId) ? entry.text : '').toBe(expected);
   });
+
+  it.each([
+    { pathname: '/', isProjectComposer: false, expected: { kind: 'home' } },
+    { pathname: '/settings', isProjectComposer: false, expected: undefined },
+    { pathname: '/w/acme/bracket', isProjectComposer: true, expected: { kind: 'project', key: 'acme/bracket' } },
+    { pathname: '/w/acme/bracket/files', isProjectComposer: true, expected: { kind: 'project', key: 'acme/bracket' } },
+    { pathname: '/', isProjectComposer: true, expected: undefined },
+  ])(
+    'mirrors the main composer on $pathname (project: $isProjectComposer)',
+    ({ pathname, isProjectComposer, expected }) => {
+      expect(draftHintScopeOf(pathname, isProjectComposer)).toEqual(expected);
+    },
+  );
 });

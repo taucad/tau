@@ -355,17 +355,20 @@ const ExpandedChatHistory = memo(function ({
                   />
                 }
               />
-              {/* The header's trailing slot (U7, F6): words from 1,000 ms into the transcript's wait, kept 500 ms. The
-               * feed carries `aria-busy`; a load that is part of the route open is seen, not announced. */}
-              <WaitIndicator
-                active={transcript === 'loading'}
-                label='Loading chat'
-                slowLabel='Still loading chat'
-                startedAt={transcriptWait.startedAt}
-                live={transcriptWait.isGesture}
-                variant='inline'
-                className='shrink-0'
-              />
+              {/* The header's indicator slot (U7, F6): words from 1,000 ms into the transcript's wait, kept 500 ms. The
+               * slot hangs below the header over the empty feed and takes no layout, so no header control moves when
+               * the words appear. The feed carries `aria-busy`; a load that is part of the route open is seen, not
+               * announced. */}
+              <div className='pointer-events-none absolute inset-x-0 top-full z-10 flex justify-center pt-2'>
+                <WaitIndicator
+                  active={transcript === 'loading'}
+                  label='Loading chat'
+                  slowLabel='Still loading chat'
+                  startedAt={transcriptWait.startedAt}
+                  live={transcriptWait.isGesture}
+                  variant='pill'
+                />
+              </div>
             </FloatingPanelContentHeader>
 
             {/* Main chat content area */}

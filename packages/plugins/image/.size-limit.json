@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) — measured 19.9 kB brotli on 2026-11-16 (raster transcoder: admission, codec glue loaders, encode ladder, BMP reader and the bundled @taucad/utils image probe; codecs stay lazy and unmeasured)",
+    "name": "total (ESM JS) — measured 19.9 kB brotli on 2026-11-16 (raster transcoder: admission, codec glue loaders, encode ladder, BMP reader and the bundled @taucad/utils image probe; codecs stay lazy and unmeasured; limit raised from 12 kB to 21.5 kB with operator approval 2026-11-16T01:51Z)",
     "path": "dist/**/*.mjs",
     "limit": "21.5 kB"
   },

@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Tau UI app files feature: file and workspace-directory components, export formats and file-manager helpers that read no app state
+Tau UI app files feature: file and workspace-directory components, the file tree, export formats, workspace telemetry and file-manager helpers that read no app state
 
 - Nx project: `files-ui`
 - Project root: `apps/libs/files-ui`
@@ -46,6 +46,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 - Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib.
+- App services arrive by injection (context, factory argument or worker init message), never by import: `createWorkspaceTelemetry({ analytics, reportFailure })` is bound in `apps/ui/app/utils/workspace-telemetry.utils.ts`.
 - Read the build target from `@taucad/ui-core/lib/build-target` (a `tau-desktop` condition); tests `vi.mock` it.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts`/`.tsx` source.
 - `filesystem/home-opfs-probe.ts` starts `home-opfs-probe.worker.ts` with `new Worker(new URL(...))`; `apps/ui/vite.config.ts` admits it through its `../libs/*/src/**/*.worker.ts` optimizer entry.

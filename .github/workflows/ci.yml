@@ -485,7 +485,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
             typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
-            build) pnpm nx affected -t build size check-desktop-payload --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget --graph="$graph" > /dev/null ;;
             pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
@@ -536,6 +536,11 @@ jobs:
       # so the desktop `package-*` targets that also depend on it never run for it (Brain
       # research/desktop-split-blueprint.md, D-DS2). Its `ui:build:desktop` and
       # `desktop:build` dependencies stay serial here under the same `--parallel=1`.
+      #
+      # It also runs `ui:check-critical-budget`, the critical-path budget (progressive loading
+      # guard G3): each route class's interactive tier in the client build `ui:build` just made,
+      # with no build of its own. Its source guards (G1 lint, G2 graph test) run in the lint and
+      # test lanes.
       - name: Run the lane's tasks
         if: steps.queue.outputs.run-id == ''
         env:
@@ -545,7 +550,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size check-desktop-payload --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget --parallel=1 ;;
             pkgcheck-*)
               # The three package-check shards deal the affected projects with a package
               # check by measured uncached `pkgcheck` seconds, with the test shards' dealer

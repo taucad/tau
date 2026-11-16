@@ -13,6 +13,7 @@ import {
   financialEnvironmentSchema,
   financialIdentitySchema,
   maximumOpenHolds,
+  supplierModelIdSchema,
   unsignedIntegerStringSchema,
   wireBalanceExplanationSchema,
   wireOpenHoldsSchema,
@@ -204,7 +205,11 @@ const parseScalar = (value: unknown, name: string, maximumLength = 256): string 
   return value;
 };
 
-const parseList = (value: unknown, name: string): string[] => {
+const parseList = (
+  value: unknown,
+  name: string,
+  item: { parse: (value: unknown) => string } = financialIdentitySchema,
+): string[] => {
   if (value === undefined) {
     return [];
   }
@@ -213,7 +218,7 @@ const parseList = (value: unknown, name: string): string[] => {
     throw new BadRequestException(`Invalid ${name}`);
   }
   try {
-    return [...new Set(candidate.map((item) => financialIdentitySchema.parse(item)))].sort();
+    return [...new Set(candidate.map((entry) => item.parse(entry)))].sort();
   } catch {
     throw new BadRequestException(`Invalid ${name}`);
   }
@@ -1131,7 +1136,7 @@ export class BillingUsageService {
     if (range !== 'custom' && (startDate ?? endDate)) {
       throw new BadRequestException('Dates require custom range');
     }
-    const models = parseList(raw.models, 'models');
+    const models = parseList(raw.models, 'models', supplierModelIdSchema);
     const projects = parseList(raw.projects, 'projects');
     const activities = parseList(raw.activities, 'activities').map((item) => {
       const parsed = financialActivityKindSchema.safeParse(item);

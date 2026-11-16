@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import * as Cookies from 'es-cookie';
-import { MemoryRouter, RouterProvider, createMemoryRouter, useNavigate } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -10,15 +9,15 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 const mobile = vi.hoisted(() => ({ value: false }));
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mobile.value }));
-vi.mock('#hooks/use-cookie.js', async () => {
-  const React = await import('react');
-  return {
-    useCookie: <Value,>(_name: string, defaultValue: Value) => React.useState(defaultValue),
-  };
-});
-
 const { Sidebar, SidebarProvider, SidebarTrigger, useSidebar } = await import('#components/ui/sidebar.js');
-const { sidebarOpenCookieName } = await import('#lib/shell-request-hints.js');
+const { clientFactsStorageKey, forgetClientFacts, readClientFacts, writeClientFacts } =
+  await import('#lib/client-facts.js');
+
+beforeEach(() => {
+  localStorage.clear();
+  forgetClientFacts();
+  delete document.documentElement.dataset['sidebarClosed'];
+});
 
 const Navigate = () => {
   const navigate = useNavigate();
@@ -212,44 +211,37 @@ describe('SidebarTrigger', () => {
   });
 });
 
-describe('SidebarProvider shell hints', () => {
-  const renderWithRootData = (shellHints: { readonly isSidebarOpen: boolean; readonly platform: 'mac' | 'other' }) => {
-    const router = createMemoryRouter(
-      [
-        {
-          id: 'root',
-          path: '/',
-          element: (
-            <KeyboardProvider>
-              <TooltipProvider>
-                <SidebarProvider>
-                  <SidebarTrigger />
-                </SidebarProvider>
-              </TooltipProvider>
-            </KeyboardProvider>
-          ),
-        },
-      ],
-      { hydrationData: { loaderData: { root: { shellHints } } } },
+describe('SidebarProvider client facts', () => {
+  const renderProvider = () =>
+    render(
+      <MemoryRouter>
+        <KeyboardProvider>
+          <TooltipProvider>
+            <SidebarProvider>
+              <SidebarTrigger />
+            </SidebarProvider>
+          </TooltipProvider>
+        </KeyboardProvider>
+      </MemoryRouter>,
     );
-    return render(<RouterProvider router={router} />);
-  };
 
   beforeEach(() => {
     mobile.value = false;
-    Cookies.remove(sidebarOpenCookieName, { path: '/' });
   });
 
-  it('opens with the state the request carried and mirrors it back into the cookie', async () => {
-    renderWithRootData({ isSidebarOpen: false, platform: 'other' });
+  it('opens with the stored state and keeps the record and <html> in step with each change', async () => {
+    writeClientFacts({ sidebarOpen: false });
+    renderProvider();
 
     const trigger = screen.getByRole('button', { name: 'Toggle Sidebar' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(Cookies.get(sidebarOpenCookieName)).toBe('0');
+    expect(document.documentElement).toHaveAttribute('data-sidebar-closed');
 
     await userEvent.click(trigger);
 
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(Cookies.get(sidebarOpenCookieName)).toBe('1');
+    expect(readClientFacts().sidebarOpen).toBe(true);
+    expect(JSON.parse(localStorage.getItem(clientFactsStorageKey) ?? '{}')).toMatchObject({ v: 1, sidebarOpen: true });
+    expect(document.documentElement).not.toHaveAttribute('data-sidebar-closed');
   });
 });

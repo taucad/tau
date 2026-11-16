@@ -19,7 +19,9 @@
   left: 0;
 }
 
-[data-slot='application-shell'][data-sidebar-open='true']
+/* Before hydration the client facts on `<html>` carry the stored sidebar state (`#lib/client-facts`). */
+:root:not([data-sidebar-closed])
+  [data-slot='application-shell'][data-sidebar-open='true']
   #application-allotment
   > .split-view-container
   > :last-child:not([style]) {
@@ -29,8 +31,18 @@
 [data-slot='application-shell'][data-sidebar-open='false']
   #application-allotment
   > .split-view-container
+  > :first-child:not(:last-child, [style]),
+:root[data-sidebar-closed]
+  [data-slot='application-shell']
+  #application-allotment
+  > .split-view-container
   > :first-child:not(:last-child, [style]) {
   display: none;
+}
+
+/* The web titlebar's closed width, which the shell's inline variable takes once React renders the stored state. */
+:root[data-sidebar-closed] [data-slot='application-shell']:has(> [data-slot='web-titlebar-controls']) {
+  --titlebar-controls-width: calc(var(--spacing) * 10) !important;
 }
 
 /* Match the sidebar's md breakpoint before useIsMobile resolves in the browser. */
@@ -39,7 +51,8 @@
     display: none;
   }
 
-  [data-slot='application-shell'][data-sidebar-open='true']
+  :root:not([data-sidebar-closed])
+    [data-slot='application-shell'][data-sidebar-open='true']
     #application-allotment
     > .split-view-container
     > :last-child:not([style]) {

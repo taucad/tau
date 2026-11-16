@@ -55,7 +55,7 @@ import type {
 } from '#runtime/session-revisions.js';
 import type { HostConnectorCallback, HostConnectorChatStore, HostConnectorPorts } from '#runtime/host-connector.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import { openSessionFileManager, trackSessionFileManager } from '#runtime/session-file-manager.js';
 import type { SessionFileManager, SessionFileManagerPorts } from '#runtime/session-file-manager.js';
 import { registerProjectAgentHost } from '#services/project-agent-host-registration.js';

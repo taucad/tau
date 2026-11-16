@@ -150,7 +150,7 @@ try {
   }
   assert.ok(!('unpacked' in statFile(archive, 'app.js')), 'ordinary JavaScript remains packed');
   assert.ok(
-    !('unpacked' in statFile(archive, 'dist/main/chunks/mozjpeg_enc-Bq3x9_Zk.wasm')),
+    !('unpacked' in statFile(archive, join('dist/main/chunks/mozjpeg_enc-Bq3x9_Zk.wasm'))),
     'other WASM remains packed',
   );
   if (process.platform === 'linux') {

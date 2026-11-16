@@ -6,7 +6,7 @@ import type { ExportFile } from '@taucad/runtime/types';
 import type * as RenderModule from 'nanoraster';
 import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { imageTranscoder } from '#image.transcoder.js';
+import { renderTranscoder } from '#image.transcoder.js';
 import { imageEdgeSchemas } from '#image-export-options.js';
 
 const backendMock = vi.hoisted(() => ({ load: vi.fn() }));
@@ -67,7 +67,7 @@ const glbFile = (bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46])): ExportFile =
 });
 
 describe('image transcoder', () => {
-  const resolveImageDefinition = async () => resolveRuntimePluginDefinition('transcoder', imageTranscoder());
+  const resolveImageDefinition = async () => resolveRuntimePluginDefinition('transcoder', renderTranscoder());
   let imageDefinition: Awaited<ReturnType<typeof resolveImageDefinition>>;
   let context: { renderer: typeof RenderModule; adapter: RenderModule.AdapterInfo | undefined };
   let runtime: TranscoderServices;

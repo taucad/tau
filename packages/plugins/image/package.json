@@ -36,6 +36,7 @@
     ".": "./src/index.ts",
     "./camera": "./src/nanoraster-camera.ts",
     "./label": "./src/label.ts",
+    "./raster": "./src/raster.ts",
     "./svg": "./src/svg.ts",
     "./package.json": "./package.json"
   },
@@ -56,6 +57,11 @@
         "types": "./dist/label.d.mts",
         "import": "./dist/label.mjs",
         "default": "./dist/label.mjs"
+      },
+      "./raster": {
+        "types": "./dist/raster.d.mts",
+        "import": "./dist/raster.mjs",
+        "default": "./dist/raster.mjs"
       },
       "./svg": {
         "types": "./dist/svg.d.mts",
@@ -78,14 +84,24 @@
   "dependencies": {
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
+    "@jsquash/avif": "catalog:",
+    "@jsquash/jpeg": "catalog:",
+    "@jsquash/png": "catalog:",
+    "@jsquash/resize": "catalog:",
+    "@jsquash/webp": "catalog:",
     "@resvg/resvg-wasm": "2.6.2",
     "@taucad/geometry-core": "workspace:*",
+    "jpeg-js": "catalog:",
     "manifold-3d": "catalog:",
-    "nanoraster": "catalog:"
+    "nanoraster": "catalog:",
+    "omggif": "catalog:",
+    "utif2": "catalog:"
   },
   "devDependencies": {
     "@taucad/camera": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "@types/omggif": "catalog:",
     "geist": "catalog:",
     "nanoraster-darwin-arm64": "catalog:",
     "vite": "catalog:",

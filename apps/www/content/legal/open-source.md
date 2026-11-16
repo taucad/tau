@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 903 packages, with the license each declares.
+The web and desktop apps include the following 912 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -131,6 +131,11 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@jscad/modeling](https://github.com/jscad/OpenJSCAD.org) | 2.13.0 | MIT |
 | @jscadui/3mf-export | 0.5.0 | MIT |
 | [@json-structure/sdk](https://github.com/json-structure/sdk) | 0.7.0 | MIT |
+| [@jsquash/avif](https://github.com/jamsinclair/jSquash) | 2.1.1 | Apache-2.0 |
+| [@jsquash/jpeg](https://github.com/jamsinclair/jSquash) | 1.6.0 | Apache-2.0 |
+| [@jsquash/png](https://github.com/jamsinclair/jSquash) | 3.1.1 | Apache-2.0 |
+| @jsquash/resize | 2.1.1 | Apache-2.0 |
+| [@jsquash/webp](https://github.com/jamsinclair/jSquash) | 1.5.0 | Apache-2.0 |
 | [@kittycad/lib](https://github.com/KittyCAD/kittycad.ts) | 2.0.48 | MIT |
 | [@lezer/common](https://code.haverbeke.berlin/lezer/common) | 1.5.4 | MIT |
 | [@lezer/css](https://code.haverbeke.berlin/lezer/css) | 1.3.9 | MIT |
@@ -596,6 +601,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [isomorphic-git](https://github.com/isomorphic-git/isomorphic-git) | 1.38.5 | MIT |
 | [jose](https://github.com/panva/jose) | 6.2.12 | MIT |
 | [joycon](https://github.com/egoist/joycon) | 3.1.1 | MIT |
+| [jpeg-js](https://github.com/eugeneware/jpeg-js) | 0.4.4 | BSD-3-Clause |
 | [js-sdsl](https://github.com/js-sdsl/js-sdsl) | 4.3.0 | MIT |
 | [js-tokens](https://github.com/lydell/js-tokens) | 4.0.0 | MIT |
 | [js-tokens](https://github.com/lydell/js-tokens) | 9.0.1 | MIT |
@@ -697,6 +703,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [object-assign](https://github.com/sindresorhus/object-assign) | 4.1.1 | MIT |
 | [object-inspect](https://github.com/inspect-js/object-inspect) | 1.13.4 | MIT |
 | [occt-import-js](https://github.com/kovacsv/occt-import-js) | 0.0.23 | LGPL-2.1 |
+| [omggif](https://github.com/deanm/omggif) | 1.0.10 | MIT |
 | [on-exit-leak-free](https://github.com/mcollina/on-exit-or-gc) | 2.1.2 | MIT |
 | [on-finished](https://github.com/jshttp/on-finished) | 2.4.1 | MIT |
 | [on-headers](https://github.com/jshttp/on-headers) | 1.1.0 | MIT |
@@ -896,6 +903,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [use-callback-ref](https://github.com/theKashey/use-callback-ref/) | 1.3.3 | MIT |
 | [use-sidecar](https://github.com/theKashey/use-sidecar) | 1.1.3 | MIT |
 | [use-sync-external-store](https://github.com/react/react) | 1.7.0 | MIT |
+| [utif2](https://github.com/photopea/UTIF.js) | 4.1.0 | MIT |
 | [util-deprecate](https://github.com/TooTallNate/util-deprecate) | 1.0.2 | MIT |
 | [utility-types](https://github.com/piotrwitek/utility-types) | 3.11.0 | MIT |
 | [v8-compile-cache-lib](https://github.com/cspotcode/v8-compile-cache-lib) | 3.0.1 | MIT |
@@ -911,6 +919,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [vscode-languageserver-types](https://github.com/Microsoft/vscode-languageserver-node) | 3.18.4 | MIT |
 | [vscode-uri](https://github.com/microsoft/vscode-uri) | 3.1.0 | MIT |
 | [w3c-keyname](https://github.com/marijnh/w3c-keyname) | 2.2.8 | MIT |
+| [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) | 1.10.1 | Apache-2.0 |
 | [web-streams-polyfill](https://github.com/MattiasBuelens/web-streams-polyfill) | 3.3.3 | MIT |
 | webgl-constants | 1.1.1 | Not declared |
 | [webgl-sdf-generator](https://github.com/lojjic/webgl-sdf-generator) | 1.1.1 | MIT |

@@ -445,7 +445,7 @@ const imageRoute = (): ExportRoute => ({
   targetFormat: 'webp',
   kernelId: 'replicad',
   sourceFormat: 'glb',
-  transcoderId: 'image',
+  transcoderId: 'render',
   fidelity: 'mesh',
   exportOptions: {
     schema: {
@@ -1010,7 +1010,7 @@ describe('ChatConverter', () => {
           targetFormat: 'webp',
           kernelId: 'replicad',
           sourceFormat: 'glb',
-          transcoderId: 'image',
+          transcoderId: 'render',
           fidelity: 'mesh',
           exportOptions: { schema: {}, defaults: {} },
           content: {
@@ -1055,7 +1055,7 @@ describe('ChatConverter', () => {
           targetFormat: 'webp',
           kernelId: 'replicad',
           sourceFormat: 'glb',
-          transcoderId: 'image',
+          transcoderId: 'render',
           fidelity: 'mesh',
           exportOptions: {
             schema: { type: 'object', properties: { quality: { type: 'number' } } },

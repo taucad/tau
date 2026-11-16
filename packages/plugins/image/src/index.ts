@@ -2,7 +2,8 @@
 
 export { image, image as plugin } from '#image.plugin.js';
 
-export { imageTranscoder } from '#image.transcoder.js';
+export { renderTranscoder } from '#image.transcoder.js';
+export { rasterTranscoder } from '#raster/raster.transcoder.js';
 export { svgTranscoder } from '#svg.transcoder.js';
 
 export { imageEdgeSchemas } from '#image-export-options.js';

@@ -456,8 +456,8 @@ const edges = [
 
 /** SVG-to-PNG runtime transcoder sharing the direct renderer implementation. @public */
 export const svgTranscoder = defineTranscoder({
-  id: 'svg-image',
-  name: 'SvgImageTranscoder',
+  id: 'svg',
+  name: 'SvgTranscoder',
   version: '1.0.0',
   implementationAssets: [
     { id: 'wasm:resvg', url: resvgWasmUrl, sha256: resvgSha256 },

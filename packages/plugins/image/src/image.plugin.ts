@@ -1,5 +1,6 @@
 import { definePlugin } from '@taucad/runtime/plugin';
-import { imageTranscoder } from '#image.transcoder.js';
+import { renderTranscoder } from '#image.transcoder.js';
+import { rasterTranscoder } from '#raster/raster.transcoder.js';
 import { svgTranscoder } from '#svg.transcoder.js';
 
 /** Canonical `@taucad/image` plugin factory. @public */
@@ -9,11 +10,12 @@ export const image = definePlugin({
   },
 
   transcoders: {
-    export: imageTranscoder,
+    render: renderTranscoder,
     svg: svgTranscoder,
+    raster: rasterTranscoder,
   },
 
   presets: {
-    default: ['transcoders.export', 'transcoders.svg'],
+    default: ['transcoders.render', 'transcoders.svg', 'transcoders.raster'],
   },
 });

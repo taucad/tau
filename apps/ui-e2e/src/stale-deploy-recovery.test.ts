@@ -20,6 +20,11 @@
  * An untouched page reloads into the new deploy on its own; a page the user has
  * worked on is offered the reload and keeps its state until the user takes it.
  *
+ * Project URLs are answered as Netlify answers them (PL3): with the deploy's
+ * prerendered project shell, not a server render. The shell is a build output,
+ * so a page opened from it must carry its own deploy's build id for the guard
+ * to tell that a newer deploy replaced it.
+ *
  * Needs a built UI (`nx run ui:build`). `TAU_E2E_CHROMIUM_EXECUTABLE` points at
  * a Chromium other than Playwright's pinned revision.
  */
@@ -48,6 +53,9 @@ const clientRoot = join(buildRoot, 'client');
 /** Beside `server/`, so the copy resolves the same externals and `../client` assets. */
 const nextServerRoot = join(buildRoot, 'server-next-deploy');
 const deployCookie = 'tau-e2e-deploy';
+/** The project shell the build prerenders (`apps/ui/app/lib/route-classes.ts`), and the URLs Netlify rewrites to it. */
+const projectShellFile = join(clientRoot, 'w/__shell/__shell/index.html');
+const projectUrl = /^\/w\/[^/.]+\/[^/.]+\/?$/u;
 const heldChunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
 /** Milliseconds between the two deploys' build ids. */
 const deployGap = 60_000;
@@ -67,6 +75,15 @@ const readBuildId = (html: string): number => {
     throw new Error('The rendered document publishes no TAU_BUILD_ID.');
   }
   return Number(match[1]);
+};
+
+/** Each deploy's project shell: the prerendered file, and for the next deploy the same file under its build id. */
+const readShells = async (previousBuildId: number, nextBuildId: number): Promise<Record<Deploy, string>> => {
+  const previous = await readFile(projectShellFile, 'utf8');
+  if (readBuildId(previous) !== previousBuildId) {
+    throw new Error('The prerendered project shell carries another build id than the server bundle it was built with.');
+  }
+  return { previous, next: previous.replaceAll(String(previousBuildId), String(nextBuildId)) };
 };
 
 /** Copy the previous deploy's server bundle as the next deploy: the same code under a later build id. */
@@ -103,7 +120,10 @@ type DeployServer = {
   close(): Promise<void>;
 };
 
-const startDeployServer = async (builds: Readonly<Record<Deploy, ServerBuild>>): Promise<DeployServer> => {
+const startDeployServer = async (
+  builds: Readonly<Record<Deploy, ServerBuild>>,
+  shells?: Readonly<Record<Deploy, string>>,
+): Promise<DeployServer> => {
   let live: Deploy = 'previous';
   const documents: Deploy[] = [];
   const held: Array<() => void> = [];
@@ -140,6 +160,14 @@ const startDeployServer = async (builds: Readonly<Record<Deploy, ServerBuild>>):
     if (request.headers['sec-fetch-dest'] === 'document') {
       documents.push(live);
       response.cookie(deployCookie, live, { path: '/' });
+    }
+    if (shells !== undefined && request.method === 'GET' && projectUrl.test(request.path)) {
+      response
+        .status(200)
+        .type('text/html')
+        .set('Cache-Control', 'public, max-age=0, must-revalidate')
+        .send(shells[live]);
+      return;
     }
     void handlers[live](request, response, next);
   });
@@ -196,6 +224,7 @@ const settledState = async (page: Page, nextBuildId: number): Promise<Settled> =
 describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', () => {
   let browser: Browser | undefined;
   let builds: Readonly<Record<Deploy, ServerBuild>> | undefined;
+  let shells: Readonly<Record<Deploy, string>> | undefined;
   let server: DeployServer | undefined;
   let context: BrowserContext | undefined;
   let previousBuildId = 0;
@@ -213,6 +242,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     nextBuildId = previousBuildId + deployGap;
     await createNextDeploy(previousBuildId, nextBuildId);
     builds = { previous: previousBuild, next: await importServerBuild(nextServerRoot) };
+    shells = await readShells(previousBuildId, nextBuildId);
     browser = await chromium.launch({ executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] });
   }, 120_000);
 
@@ -229,11 +259,13 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
   });
 
   /** A fresh browser context on a fresh pair of deploys, with the previous one live. */
-  const open = async (): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
-    if (browser === undefined || builds === undefined) {
+  const open = async (
+    path = '/',
+  ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
+    if (browser === undefined || builds === undefined || shells === undefined) {
       expect.fail('the builds and browser did not start');
     }
-    const live = await startDeployServer(builds);
+    const live = await startDeployServer(builds, shells);
     server = live;
     context = await browser.newContext();
     const page = await context.newPage();
@@ -243,7 +275,7 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
         errors.push(message.text());
       }
     });
-    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await page.goto(`${live.origin}${path}`, { waitUntil: 'commit' });
     await live.heldRequest;
     return { page, live, errors };
   };
@@ -262,6 +294,20 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     expect(live.documents).toStrictEqual(['previous', 'next']);
     // The guard of a completed reload is cleared, so a duplicated tab inherits nothing.
     expect(await page.evaluate(() => globalThis.sessionStorage.getItem('tau-stale-build-reload'))).toBeNull();
+  }, 120_000);
+
+  it('should reload a page opened from the project shell into the new deploy’s shell', async () => {
+    const { page, live, errors } = await open('/w/home/bracket-v2');
+
+    live.deploy();
+
+    expect(await settledState(page, nextBuildId), `module load errors: ${JSON.stringify(errors)}`).toBe(
+      'reloaded into the next deploy',
+    );
+    await page.waitForLoadState('networkidle');
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    expect(new URL(page.url()).pathname).toBe('/w/home/bracket-v2');
   }, 120_000);
 
   it('should offer the reload, never force it, once the user has worked on the page', async () => {

@@ -204,6 +204,7 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionGitOperation,
+  RevisionHead,
   RevisionLogEntry,
   RevisionPort,
   RevisionPushResult,
@@ -1739,6 +1740,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return held;
   };
 
+  /* The project directory as a checkout, at the head it names: the one place a port without checkouts has. */
+  const liveCheckout = (head: RevisionHead | undefined): Checkout =>
+    Object.freeze<Checkout>({
+      id: 'live',
+      projectId,
+      root: `/projects/${projectId}`,
+      kind: 'live',
+      branch: head?.branch,
+      baseRevisionId: head?.head,
+    });
+
   /*
    * Every place this project's files are.
    *
@@ -1758,17 +1770,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (port.listCheckouts !== undefined && descriptor.checkouts) {
       return port.listCheckouts();
     }
-    const head = await port.readHead();
-    return [
-      Object.freeze<Checkout>({
-        id: 'live',
-        projectId,
-        root: `/projects/${projectId}`,
-        kind: 'live',
-        branch: head?.branch,
-        baseRevisionId: head?.head,
-      }),
-    ];
+    return [liveCheckout(await port.readHead())];
   };
 
   const placeOf = async (checkoutId: string): Promise<Checkout> => {
@@ -2549,15 +2551,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const checkouts = await port.listCheckouts();
       return checkouts.find((candidate) => candidate.kind === 'live');
     }
-    const head = await port.readHead();
-    return Object.freeze<Checkout>({
-      id: 'live',
-      projectId,
-      root: `/projects/${projectId}`,
-      kind: 'live',
-      branch: head?.branch,
-      baseRevisionId: head?.head,
-    });
+    return liveCheckout(await port.readHead());
   };
 
   /**
@@ -2922,16 +2916,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     } catch (error) {
       console.warn('[revisions] checkouts could not be listed for their large objects', error);
       /* The project directory is a checkout whatever the store answers: it is let go of, unless declared. */
-      await releaseUndeclared(
-        Object.freeze<Checkout>({
-          id: 'live',
-          projectId,
-          root: `/projects/${projectId}`,
-          kind: 'live',
-          branch: undefined,
-          baseRevisionId: undefined,
-        }),
-      );
+      await releaseUndeclared(liveCheckout(undefined));
     }
   })();
 

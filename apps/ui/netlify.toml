@@ -74,6 +74,11 @@ TAU_WEBSOCKET_URL = "ws://localhost:4001"
 # Marketing site: `netlify/edge-functions/marketing.ts` proxies a full load of
 # `/` and the apps/www pages to the deploy named by the `MARKETING_ORIGIN` site
 # variable (set per site in tau-cloud). Unset, every request reaches the app.
+# A GET or HEAD of `/` with the `tau-entry=app` preference gets the prerendered
+# Home shell (progressive loading PL4): the edge function rewrites it to
+# `/__shell/home/index.html`, where the build moves the prerender of `/`
+# (scripts/place-static-shells.ts), and expires `tau_skew` on it. Nothing else
+# at `/`, and not `/_root.data`, changes delivery.
 
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.
@@ -213,6 +218,7 @@ Reporting-Endpoints = 'default="/api/reports"'
 
 # The apex selects marketing or the app from a presentation cookie. Never reuse
 # one visitor's document for another, or restore stale HTML after switching.
+# The edge function also sets these on every answer at `/`, the Home shell included.
 [[headers]]
 for = "/"
 [headers.values]

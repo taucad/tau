@@ -543,9 +543,20 @@ process.on('unhandledRejection', (reason) => {
   console.error('[desktop] unhandledRejection', reason);
 });
 
+/**
+ * Why this process asked to quit, once it has: the shutdown log names it, so a quit is attributable. A quit that
+ * reaches `before-quit` with none was Electron's own: the Quit menu item or Cmd+Q, the Dock, an Apple Event from
+ * another process, or the session ending.
+ */
+let quitReason: string | undefined;
+const quitFor = (reason: string): void => {
+  quitReason ??= reason;
+  app.quit();
+};
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    app.quit();
+    quitFor('all-windows-closed');
   }
 });
 
@@ -2300,13 +2311,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const shutdown = createShutdownActor({ identity: randomUUID() }, { actors: { shutdownDriver } }).start();
   let shutdownPending: Promise<boolean> | undefined;
   let settleShutdown: ((settled: boolean) => void) | undefined;
-  const prepareToQuit = async (purpose: 'quit' | 'restart'): Promise<boolean> => {
+  const prepareToQuit = async (purpose: 'quit' | 'restart', reason: string): Promise<boolean> => {
     if (shutdownComplete) {
       return true;
     }
     if (shutdownPending) {
       return shutdown.getSnapshot().context.purpose === purpose ? shutdownPending : false;
     }
+    log.log('info', 'main.quit-requested', { purpose, reason });
     quitting = true;
     shutdownPending = new Promise<boolean>((resolve) => {
       settleShutdown = resolve;
@@ -2315,21 +2327,25 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return shutdownPending;
   };
   let pendingQuit: Promise<void> | undefined;
-  const quitWhenReady = async (): Promise<void> => {
+  const quitWhenReady = async (reason: string): Promise<void> => {
     try {
-      if (await prepareToQuit('quit')) {
+      if (await prepareToQuit('quit', reason)) {
         app.quit();
       }
     } finally {
       pendingQuit = undefined;
     }
   };
+  /* The session is ending (logout, restart or shutdown): the quit that follows is the system's, not the person's. */
+  powerMonitor.on('shutdown', () => {
+    quitReason ??= 'system-shutdown';
+  });
   app.on('before-quit', (event) => {
     if (shutdownComplete) {
       return;
     }
     event.preventDefault();
-    pendingQuit ??= quitWhenReady();
+    pendingQuit ??= quitWhenReady(quitReason ?? 'external');
   });
   let qualificationInstall = false;
   if (otaProbe !== undefined || routeQualification !== undefined) {
@@ -2375,7 +2391,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       committed = true;
     };
     try {
-      return (await prepareToQuit('restart')) && committed;
+      return (await prepareToQuit('restart', 'update-install')) && committed;
     } finally {
       installBeforeExit = undefined;
       installFailed = false;
@@ -2390,7 +2406,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     channel: desktopChannel,
     environment,
     autoUpdater,
-    prepareToRestart: async () => prepareToQuit('restart'),
+    prepareToRestart: async () => prepareToQuit('restart', 'update-install'),
     ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
     ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
     ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
@@ -2521,6 +2537,7 @@ if (ownsSingleInstanceLock) {
     app.exit(1);
   });
 } else {
-  app.quit();
+  /* Another process holds this profile's single-instance lock, and has been handed this launch's arguments. */
+  quitFor('instance-lock-held');
 }
 /* oxlint-enable promise/prefer-await-to-then, unicorn/prefer-top-level-await */

@@ -380,6 +380,7 @@ export function ThreeCanvasInstance({
             zoomSpeed={zoomSpeed}
             gizmoContainer={gizmoContainer}
             gizmoStyle={gizmoStyle}
+            orbitStyle={cameraInput?.orbitStyle}
           >
             {children}
           </Scene>

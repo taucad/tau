@@ -66,6 +66,8 @@ const fixture = async (
     failingDeclarations?: boolean;
     /* The repository folds case (`core.ignoreCase`), as a native host's on a case-insensitive disk. */
     ignoreCase?: boolean;
+    /* The start's listing of its checkouts fails, or so does every read of a branch's head. */
+    failing?: 'listing' | 'head';
   }>,
 ) => {
   const backend = options?.backend ?? 'node';
@@ -194,10 +196,19 @@ const fixture = async (
                     ),
               ignoreContext: async () => JSON.stringify(ignored),
             };
-  const port: RevisionPort =
+  const cased: RevisionPort =
     options?.ignoreCase === true
       ? { ...ruled, describe: async () => ({ ...(await ruled.describe()), ignoreCase: true }) }
       : ruled;
+  const refused = async (): Promise<never> => {
+    throw new Error('the store could not be read');
+  };
+  const port: RevisionPort =
+    options?.failing === 'listing'
+      ? { ...cased, listCheckouts: refused, readHead: refused }
+      : options?.failing === 'head'
+        ? { ...cased, readRef: refused, readHead: async () => ({ branch: 'main', head: undefined }) }
+        : cased;
   /* Memory stamps its files now and cannot be told otherwise: the captures read a clock a minute on,
    * so only what a test writes after a capture is racy at the next. */
   const clock =
@@ -931,6 +942,17 @@ describe("a capture declares the checkout's placeholders to its index (D9)", () 
       expect.any(Error),
     );
   });
+
+  /* A start that cannot look leaves nothing waiting on a word it will not give (I7 is kept by the reads, not the hold). */
+  it.each(['listing', 'head'] as const)(
+    'should let go of the checkout when the start’s fill check cannot read the %s',
+    async (failing) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const at = await fixture(files(3), { backend: 'memory', raw: true, failing });
+      await expect.poll(() => at.declarations.length > 0, { timeout: 5000 }).toBe(true);
+      expect(['declare', 'release']).toContain(at.declarations[0]);
+    },
+  );
 
   it('should mark each pointer the attributes track, and no other, and follow the attributes when they change', async () => {
     const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));

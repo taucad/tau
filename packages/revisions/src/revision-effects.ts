@@ -2818,6 +2818,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resumeTimers.add(timer);
     retryTimers.set(place.id, timer);
   };
+  /*
+   * D9: a look that failed before this session ever declared a checkout lets go of it, so no stat waits out the
+   * bound on a word that will not come; its reads still refuse an undeclared pointer (I7).
+   */
+  const releaseUndeclared = async (place: Checkout): Promise<void> => {
+    if (declaredCheckouts.has(place.id)) {
+      return;
+    }
+    try {
+      await useFileSystem(place, async (rooted) => {
+        rooted.releaseDeclaration?.();
+      });
+    } catch {
+      /* A checkout that cannot be opened holds nothing to let go of. */
+    }
+  };
   const checkFill = (place: Checkout): void => {
     if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
       return;
@@ -2830,8 +2846,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       // async-iife: bootstrap -- a background check; a fill's own failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
         try {
-          const head = await headOf(place);
+          /* The placeholders first: they declare the checkout, so a head that cannot be read holds nothing. */
           const placeholders = await placeholdersOf(place, generation);
+          const head = await headOf(place);
           if (fillsStopped || generationOf(place.id) !== generation) {
             return;
           }
@@ -2843,6 +2860,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          await releaseUndeclared(place);
           checkFillLater(place, generation);
         } finally {
           checkingFills.delete(place.id);
@@ -2898,6 +2916,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
     } catch (error) {
       console.warn('[revisions] checkouts could not be listed for their large objects', error);
+      /* The project directory is a checkout whatever the store answers: it is let go of, unless declared. */
+      await releaseUndeclared(
+        Object.freeze<Checkout>({ id: 'live', projectId, root: `/projects/${projectId}`, kind: 'live' }),
+      );
     }
   })();
 

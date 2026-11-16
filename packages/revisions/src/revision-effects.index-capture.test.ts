@@ -911,16 +911,22 @@ describe("a capture declares the checkout's placeholders to its index (D9)", () 
     const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
     const text = new TextDecoder().decode(pointer);
     const at = await fixture(
-      { ...files(5), 'models/part.step': text, 'notes/pointer.txt': text },
+      {
+        ...files(5),
+        'models/part.step': text,
+        'notes/pointer.txt': text,
+        'vendor/.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n',
+        'vendor/blob.bin': text,
+      },
       { backend: 'memory', raw: true },
     );
     await cut(at.actors);
-    expect(await at.rooted.pendingPaths!(['models/part.step', 'notes/pointer.txt', 'dir1/f1.txt'])).toStrictEqual([
-      'models/part.step',
-    ]);
+    expect(
+      await at.rooted.pendingPaths!(['models/part.step', 'notes/pointer.txt', 'vendor/blob.bin', 'dir1/f1.txt']),
+    ).toStrictEqual(['models/part.step', 'vendor/blob.bin']);
     /* The attributes stop tracking the family: the next capture says so, and the mark ends. */
     await at.rooted.writeFile(generatedGitattributesPath, '');
     await cut(at.actors);
-    expect(await at.rooted.pendingPaths!(['models/part.step'])).toStrictEqual([]);
+    expect(await at.rooted.pendingPaths!(['models/part.step', 'vendor/blob.bin'])).toStrictEqual(['vendor/blob.bin']);
   });
 });

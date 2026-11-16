@@ -280,7 +280,7 @@ export const largeObjectThresholdBytes = 1024 * 1024;
  *
  * Decides only which lines a cut adds to Tau's generated attributes block:
  * a path is stored as a pointer when the attributes say so
- * ({@link isTrackedLargeObjectPath}), never because of its family alone.
+ * ({@link placeholderPathMatcher}), never because of its family alone.
  *
  * @param projectRelativePath - Path relative to the project root.
  * @returns Whether the path's extension is a large-object family.
@@ -462,38 +462,36 @@ export const hasGeneratedAttributesBlock = (content: string | undefined): boolea
   generatedAttributesBlock(content) !== undefined;
 
 /**
- * Whether one path's attributes put it on git LFS, by the root attributes file.
+ * Every attributes file among these entries, as text by its path.
  *
- * The whole pointer rule, on both legs and for every repository, as stock Git
- * decides it: a path is stored as a pointer exactly when `.gitattributes` says
- * `filter=lfs` for it (D16). Tau's families table and size threshold decide
- * only which lines a cut adds to Tau's own block (P15), never a pointer
- * directly, so a stock clone smudges every pointer Tau writes.
- *
- * ponytail: only the root file is read here; a cut reads every attributes file
- * in the tree (`cleanLargeObjects`). The checkout-read and adoption seams that
- * call this hold the root file alone.
- *
- * @param projectRelativePath - Path relative to the project root.
- * @param attributes - Root attributes file content, or `undefined` when absent.
- * @returns Whether this path's bytes are an LFS object.
- * @public
+ * @param entries - A tree's entries, or the attributes files read on one path.
+ * @returns The attributes by their own path.
+ * @internal
  */
-export const isTrackedLargeObjectPath = (projectRelativePath: string, attributes: string | undefined): boolean => {
-  /* One entry: every path in a cut asks about the same file. */
-  if (rootMatcher === undefined || rootMatcher.source !== attributes) {
-    rootMatcher = {
-      source: attributes,
-      matches:
-        attributes === undefined
-          ? () => false
-          : repositoryLargeObjectMatcher(new Map([[generatedGitattributesPath, attributes]])),
-    };
-  }
-  return rootMatcher.matches(projectRelativePath);
-};
+export const attributesOf = (
+  entries: Iterable<Readonly<{ path: string; content: Uint8Array<ArrayBuffer> }>>,
+): RepositoryAttributes =>
+  new Map(
+    [...entries].flatMap(({ path, content }) =>
+      isAttributesPath(path) ? [[path, new TextDecoder().decode(content)] as const] : [],
+    ),
+  );
 
-let rootMatcher: Readonly<{ source: string | undefined; matches: (path: string) => boolean }> | undefined;
+/**
+ * The one rule for which pointers are placeholders (D9): a path whose pointer
+ * every attributes file on its way puts on git LFS, as git reads them, a
+ * deeper file over a shallower one ({@link repositoryLargeObjectMatcher}).
+ * The fill, the declaration to the index and the read-through all ask it, so
+ * a pointer under a name no attributes track is a person's text on every leg.
+ *
+ * @param attributes - Every attributes file of the tree, or each one on the path asked about.
+ * @returns Whether a project-relative path's pointer is a placeholder.
+ * @internal
+ */
+export const placeholderPathMatcher = (attributes: RepositoryAttributes): ((path: string) => boolean) => {
+  const matches = repositoryLargeObjectMatcher(attributes);
+  return (path) => !isAttributesPath(path) && matches(path);
+};
 
 /**
  * One `.gitattributes` pattern as a matcher over a path relative to the

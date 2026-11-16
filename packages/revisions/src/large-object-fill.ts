@@ -23,7 +23,7 @@ import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
 import type { LargeObjectsFacet, LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
-import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
+import { attributesOf, placeholderPathMatcher } from '#workspace-config.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 
 /** One placeholder: the pointer bytes on disk and the object they name. */
@@ -116,25 +116,29 @@ const defaultRetryMilliseconds: readonly number[] = [2000, 5000, 15_000, 30_000,
 export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
 
 /**
- * The placeholders a tree holds: every entry that is a pointer.
- *
- * A pointer never reaches a checkout as content — an authored pointer is
- * hydrated on every read — so a pointer in a checkout is a placeholder.
+ * The placeholders a tree holds: every pointer the tree's attributes files
+ * track ({@link placeholderPathMatcher}). A pointer anywhere else is a
+ * person's text: never fetched, never written over.
  *
  * @param tree - A tree read with `largeObjects: 'local'`, or a capture.
  * @returns The placeholders by path.
  */
-export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string, Placeholder> =>
-  new Map(
-    tree.entries().flatMap(({ path, content }) => {
+export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string, Placeholder> => {
+  const entries = tree.entries();
+  const tracked = placeholderPathMatcher(attributesOf(entries));
+  return new Map(
+    entries.flatMap(({ path, content }) => {
       const pointer = readLfsPointer(content);
-      return pointer === undefined ? [] : [[path, { oid: pointer.oid, size: pointer.size, pointer: content }] as const];
+      return pointer === undefined || !tracked(path)
+        ? []
+        : [[path, { oid: pointer.oid, size: pointer.size, pointer: content }] as const];
     }),
   );
+};
 
 /**
- * The placeholders the revision layer declares to a checkout's index (D9): each pointer in the tree that the tree's
- * own attributes track, as a read of the checkout decides it. A pointer anywhere else is a person's text.
+ * The placeholders the revision layer declares to a checkout's index (D9): the tree's
+ * {@link largeObjectPlaceholders}, the rule its fill and read-through use.
  *
  * @param tree - The checkout's tree: a capture, or the tree a write lands.
  * @param except - Paths whose pointer lands as its object (a write's sourced paths).
@@ -143,17 +147,12 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
 export const declaredPlaceholders = (
   tree: ImmutableRevisionTree,
   except?: ReadonlyMap<string, unknown>,
-): Map<string, DeclaredPlaceholder> => {
-  const attributes = tree.get(generatedGitattributesPath);
-  const text = attributes === undefined ? undefined : new TextDecoder().decode(attributes);
-  return new Map(
+): Map<string, DeclaredPlaceholder> =>
+  new Map(
     [...largeObjectPlaceholders(tree)].flatMap(([path, { oid, size, pointer }]) =>
-      path === generatedGitattributesPath || except?.has(path) === true || !isTrackedLargeObjectPath(path, text)
-        ? []
-        : [[path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const],
+      except?.has(path) === true ? [] : [[path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const],
     ),
   );
-};
 
 /**
  * Build the fill over one project's checkout seams.
@@ -392,6 +391,8 @@ export const createLargeObjectFill = (
 
   const sweep = async (fill: Fill): Promise<boolean> => {
     const before = await capture(fill.place);
+    /* Only a pointer the attributes track is a placeholder: a person's pointer text is never filled (D9). */
+    const tracked = placeholderPathMatcher(attributesOf(before.entries()));
     const filled: string[] = [];
     const gone: string[] = [];
     let written = 0;
@@ -400,7 +401,7 @@ export const createLargeObjectFill = (
     const sourced = new Map<string, Readonly<{ oid: string; size: number }>>();
     const entries: RevisionTreeInput[] = before.entries().map(({ path, content, mode }) => {
       const known = fill.pending.get(path);
-      const placeholder = placeholderAt(fill, known, content);
+      const placeholder = tracked(path) ? placeholderAt(fill, known, content) : undefined;
       if (placeholder === undefined) {
         if (known !== undefined) {
           gone.push(path);
@@ -461,7 +462,9 @@ export const createLargeObjectFill = (
           throw error;
         }
         for (const path of filled) {
-          const placeholder = placeholderAt(fill, fill.pending.get(path), before.get(path) ?? new Uint8Array());
+          const placeholder = tracked(path)
+            ? placeholderAt(fill, fill.pending.get(path), before.get(path) ?? new Uint8Array())
+            : undefined;
           if (placeholder !== undefined) {
             fill.pending.set(path, placeholder);
           }

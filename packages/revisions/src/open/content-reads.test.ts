@@ -114,6 +114,18 @@ describe('readContent (D9)', () => {
     expect(await reads.readContent(place, 'notes/pointer.txt')).toStrictEqual({ outcome: 'bytes', data: part });
   });
 
+  /* The one rule fill and declaration use too: a deeper attributes file speaks for its directory, as git reads it. */
+  it('reads a pointer by every attributes file on its path, a nested one among them', async () => {
+    const { reads, files, stored } = setup();
+    stored.set(pointer.oid, part);
+    files.set('vendor/blob.bin', pointerBytes);
+    files.set('vendor/plain.step', pointerBytes);
+    expect(await reads.readContent(place, 'vendor/blob.bin')).toStrictEqual({ outcome: 'bytes', data: pointerBytes });
+    files.set('vendor/.gitattributes', encoder.encode('*.bin filter=lfs diff=lfs merge=lfs -text\n*.step -filter\n'));
+    expect(await reads.readContent(place, 'vendor/blob.bin')).toStrictEqual({ outcome: 'bytes', data: part });
+    expect(await reads.readContent(place, 'vendor/plain.step')).toStrictEqual({ outcome: 'bytes', data: pointerBytes });
+  });
+
   it('serves an object that has landed and is not written yet', async () => {
     const { reads, setLook } = setup();
     setLook({ state: 'filling', bytes: part });

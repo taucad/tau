@@ -12,7 +12,7 @@ import { readLfsPointer } from '#lfs.js';
 import type { FillWait, LargeObjectLook } from '#large-object-fill.js';
 import type { Checkout } from '#revision-port.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
-import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
+import { generatedGitattributesPath, placeholderPathMatcher } from '#workspace-config.js';
 
 /** Why a path's object could not be read as bytes. @public */
 export type PendingReason = 'filling' | 'offline' | 'not-fetched';
@@ -157,19 +157,29 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
     }
   };
 
-  /* A pointer is a placeholder only where the attributes track large objects, as adoption decides: elsewhere it is a person's text. */
+  /*
+   * A pointer is a placeholder only where every attributes file on its path tracks it, by the rule the fill and the
+   * declaration use (`placeholderPathMatcher`): elsewhere it is a person's text.
+   */
   const pointerAt = async (
     place: Checkout,
     path: string,
     read: ReadOutcome,
   ): Promise<ReturnType<typeof readLfsPointer>> => {
     const pointer = read.outcome === 'bytes' ? readLfsPointer(read.data) : undefined;
-    if (pointer === undefined || path === generatedGitattributesPath) {
+    if (pointer === undefined) {
       return undefined;
     }
-    const attributes = await readRaw(place, generatedGitattributesPath);
-    const text = attributes.outcome === 'bytes' ? new TextDecoder().decode(attributes.data) : undefined;
-    return isTrackedLargeObjectPath(path, text) ? pointer : undefined;
+    const segments = path.split('/');
+    const files = segments.map((_, depth) => [...segments.slice(0, depth), generatedGitattributesPath].join('/'));
+    const outcomes = await Promise.all(files.map(async (file) => readRaw(place, file)));
+    const attributes = new Map(
+      files.flatMap((file, index) => {
+        const outcome = outcomes[index]!;
+        return outcome.outcome === 'bytes' ? [[file, new TextDecoder().decode(outcome.data)] as const] : [];
+      }),
+    );
+    return placeholderPathMatcher(attributes)(path) ? pointer : undefined;
   };
 
   const reasonOf = (look: LargeObjectLook | undefined): PendingReason => {

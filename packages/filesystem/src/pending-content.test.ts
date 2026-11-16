@@ -336,6 +336,19 @@ describe('marked placeholders (D9)', () => {
     expect(rewritten['models/part.step']).not.toBe(oid);
   });
 
+  /* An outside rewrite at the pointer's size keeps the stat until a read or the next capture sees it (documented). */
+  it('should end a mark whose file a read finds rewritten to another pointer, asking the source nothing', async () => {
+    const source = vi.fn<PendingObjectSource>(async () => part);
+    service.setPendingObjectSource(source);
+    const view = service.createRootedFileSystem(route);
+    const other = encoder.encode(new TextDecoder().decode(pointer).replace(oid, 'e'.repeat(64)));
+    expect(other.byteLength).toBe(pointer.byteLength);
+    await memory.writeFile('gear/models/part.step', other);
+    expect(await view.readFile('models/part.step')).toStrictEqual(other);
+    expect(source).not.toHaveBeenCalled();
+    expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
+  });
+
   it('should end a mark the source says is no placeholder, so the next stat is the pointer', async () => {
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = service.createRootedFileSystem(route);

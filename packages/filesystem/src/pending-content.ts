@@ -185,8 +185,9 @@ export type PendingMarks = Readonly<{
  * answer. A marked file reads through to its object; anything else is the
  * bytes it holds, an unmarked pointer among them, and no source is asked about
  * it: an outside edit is the revision layer's next capture to declare. A
- * marked file whose bytes are no pointer, or that the source says is no
- * placeholder, loses its mark, so the next stat answers as this read did.
+ * marked file whose bytes are not the pointer its mark names (rewritten from
+ * outside at the pointer's size), or that the source says is no placeholder,
+ * loses its mark, so the next stat answers as this read did.
  *
  * @param marks - The index's marks.
  * @param source - The host's source.
@@ -217,7 +218,8 @@ export const readAsMarked = async (
   if (marked === undefined) {
     return bytes;
   }
-  if (object === undefined) {
+  if (object?.oid !== marked.oid || object.size !== marked.size) {
+    /* Rewritten from outside since it was marked, at the pointer's size: no longer the placeholder it was declared. */
     marks.endPending(at.authorityPath);
     return bytes;
   }

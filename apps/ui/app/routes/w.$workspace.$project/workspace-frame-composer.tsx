@@ -72,6 +72,8 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
    * the route corrects it to the canonical slugs of the same project). */
   const isRevealedRef = useRef(false);
   const claimsRef = useRef(0);
+  /* The chat of the latest claim: a painted draft of another chat is not this composer's draft. */
+  const claimedChatRef = useRef<string | undefined>(undefined);
   const projectRef = useRef<string | undefined>(undefined);
   const isServed = state === 'served';
   const [isEmpty, setIsEmpty] = useState(true);
@@ -90,13 +92,13 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
           'compositionend',
           () => {
             /* Read at `compositionend`, as Chromium has delivered the composition's final input by then. */
-            setState((current) => (current === 'served' ? releasedState(input) : current));
+            setState((current) => (current === 'served' ? releasedState(input, claimedChatRef.current) : current));
           },
           { once: true },
         );
         return;
       }
-      setState(input === null ? 'gone' : releasedState(input));
+      setState(input === null ? 'gone' : releasedState(input, claimedChatRef.current));
     };
     /* Whether a call comes from the project the input was served for: the route's first resolved project, or where
      * the route holds none (a suite with no route state), the first project to call. */
@@ -117,10 +119,11 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
         isRevealedRef.current = true;
         handOver();
       },
-      claim: (projectId) => {
+      claim: (projectId, chatId) => {
         if (!isServedProject(projectId)) {
           return () => undefined;
         }
+        claimedChatRef.current = chatId;
         claimsRef.current += 1;
         handOver();
         return () => {
@@ -151,17 +154,23 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
 
 /**
  * What the served input hands over: its snapshot when it holds anything a composer must take (an edit, a queued send,
- * or focus), otherwise nothing.
+ * a painted draft, or focus), otherwise nothing.
  *
  * @param input - The served input.
+ * @param chatId - The chat of the composer that claimed it, where it has one.
  * @returns The snapshot, or `'gone'`.
  */
-const releasedState = (input: EarlyTextarea): ServedComposerState => {
+const releasedState = (input: EarlyTextarea, chatId: string | undefined): ServedComposerState => {
   const read = readEarlyInput(input);
+  /* A painted draft of another chat (a bare project URL whose focus resolved elsewhere) is not this chat's draft. */
+  const isOtherChat =
+    read.prefilled && read.prefilledChatId !== undefined && chatId !== undefined && read.prefilledChatId !== chatId;
+  const ofChat = isOtherChat ? { ...read, prefilled: false } : read;
   /* An Enter on a painted draft nobody edited is dropped here: the chat's record, which wins, may not hold that text,
    * and it is not read yet (Home checks it, as its record is loaded before adoption). */
-  const snapshot = read.queuedSend && !read.edited ? { ...read, queuedSend: false } : read;
-  return snapshot.edited || snapshot.queuedSend || snapshot.focused ? snapshot : 'gone';
+  const snapshot = ofChat.queuedSend && !ofChat.edited ? { ...ofChat, queuedSend: false } : ofChat;
+  /* A painted draft is handed over focused or not, so the editor holds it in the commit the overlay leaves (P-a). */
+  return snapshot.edited || snapshot.queuedSend || snapshot.focused || snapshot.prefilled ? snapshot : 'gone';
 };
 
 /**

@@ -50,11 +50,13 @@ import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.
  * later starts without it.
  *
  * @param projectId - The project this composer belongs to; none off a project.
+ * @param chatId - The chat this composer belongs to, where it has one.
  * @param isMain - Whether this is the main composer, the only one the frame hands its input to.
  * @returns The handed-over input, and the frame's handover.
  */
 const useFrameEarlyInput = (
   projectId: string | undefined,
+  chatId: string | undefined,
   isMain: boolean,
 ): { handedOverInput: EarlyChatInput | undefined; earlyInputHandover: EarlyInputHandover | undefined } => {
   const frameHandover = useContext(EarlyInputHandoverContext);
@@ -66,8 +68,8 @@ const useFrameEarlyInput = (
   }
   const claimEarlyInput = earlyInputHandover?.claim;
   useLayoutEffect(
-    () => (projectId === undefined ? undefined : claimEarlyInput?.(projectId)),
-    [claimEarlyInput, projectId],
+    () => (projectId === undefined ? undefined : claimEarlyInput?.(projectId, chatId)),
+    [claimEarlyInput, projectId, chatId],
   );
   return { handedOverInput: pendingInput ?? takenInput, earlyInputHandover };
 };
@@ -402,7 +404,11 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(projectContext?.projectId, mode === 'main');
+  const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(
+    projectContext?.projectId,
+    session?.activeChatId,
+    mode === 'main',
+  );
   /* A painted draft nobody edited is the hint's copy of this chat's draft: while the draft holds nothing yet (its record
    * not read), it is the draft, as on Home, so the text does not leave the box and come back when the record lands. The
    * record still wins: `hydrateDraft` leaves an untouched draft open to it. */

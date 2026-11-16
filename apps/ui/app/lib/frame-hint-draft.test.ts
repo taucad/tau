@@ -11,10 +11,10 @@ import {
 import { frameHintKey } from '#lib/frame-hint.js';
 
 /* The script's realm is the document's: it hands the reader over on the document, as the early input's state is. */
-type ReaderDocument = Document & { __tauDraftHintReader?: (where: URL) => string };
+type ReaderDocument = Document & { __tauDraftHintReader?: (where: URL) => { text: string; chatId: string } };
 
 /** The early input script's reader, run as the served page runs it: from a script element's source. */
-const readAsScript = (url: string): string => {
+const readEntryAsScript = (url: string): { text: string; chatId: string } => {
   const script = document.createElement('script');
   script.textContent = `document.__tauDraftHintReader=${draftHintReaderSource}`;
   document.body.append(script);
@@ -23,6 +23,8 @@ const readAsScript = (url: string): string => {
   expect(reader).toBeTypeOf('function');
   return reader!(new URL(url, 'http://localhost'));
 };
+
+const readAsScript = (url: string): string => readEntryAsScript(url).text;
 
 describe('draft hint (A15d)', () => {
   beforeEach(() => {
@@ -116,6 +118,19 @@ describe('draft hint (A15d)', () => {
           : readDraftHint({ kind: 'project', key });
     const chat = new URL(url, 'http://localhost').searchParams.get('chat');
     expect(entry !== undefined && (chat === null || chat === entry.chatId) ? entry.text : '').toBe(expected);
+  });
+
+  it.each([
+    { url: '/', expected: { text: 'Home draft', chatId: '' } },
+    { url: '/w/acme/bracket', expected: { text: 'Fillet it', chatId: 'c1' } },
+    { url: '/w/acme/hinge', expected: { text: 'Hinge it', chatId: '' } },
+    { url: '/w/acme/bracket?chat=c2', expected: { text: '', chatId: '' } },
+  ])('the served reader names the chat a painted draft belongs to, for $url', ({ url, expected }) => {
+    writeDraftHint({ kind: 'home' }, { text: 'Home draft' });
+    writeDraftHint({ kind: 'project', key: 'acme/bracket' }, { text: 'Fillet it', chatId: 'c1' });
+    writeDraftHint({ kind: 'project', key: 'acme/hinge' }, { text: 'Hinge it' });
+
+    expect(readEntryAsScript(url)).toEqual(expected);
   });
 
   it.each([

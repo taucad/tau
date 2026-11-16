@@ -288,7 +288,7 @@ describe('ChatTextarea frame early input', () => {
         <ChatTextarea onSubmit={vi.fn()} />
       </EarlyInputHandoverContext.Provider>,
     );
-    expect(claim).toHaveBeenCalledWith('project');
+    expect(claim).toHaveBeenCalledWith('project', undefined);
     expect(mocks.earlyInput).toBe(input);
     const forgotten = handoverWith(undefined, claim);
     view.rerender(

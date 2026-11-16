@@ -329,6 +329,40 @@ describe('WorkspaceFrame served composer', () => {
     }
   });
 
+  /* Review round 7: a painted draft nobody focused is handed over too, so the editor holds it as the overlay leaves. */
+  it.each([
+    { claimed: 'c1', isPrefilled: true },
+    { claimed: undefined, isPrefilled: true },
+    /* A bare project URL whose focus resolved to another chat: that painted draft is not this chat's. */
+    { claimed: 'c2', isPrefilled: false },
+  ])(
+    'hands over a painted draft nobody focused for its chat, claimed by $claimed',
+    async ({ claimed, isPrefilled }) => {
+      writeDraftHint({ kind: 'project', key: 'home/one' }, { text: 'Fillet it', chatId: 'c1' });
+      const { done } = await serveAndHydrate('/w/home/one');
+      try {
+        act(() => {
+          handover?.claim('p1', claimed);
+          handover?.release('p1');
+        });
+        if (isPrefilled) {
+          expect(handover?.pending).toMatchObject({
+            text: 'Fillet it',
+            prefilled: true,
+            prefilledChatId: 'c1',
+            edited: false,
+            focused: false,
+          });
+        } else {
+          /* Nothing of this chat's to take: the overlay leaves, and the chat's own record shows. */
+          expect(handover?.pending).toBeUndefined();
+        }
+      } finally {
+        await done();
+      }
+    },
+  );
+
   it('waits for an open composition to end before handing over', async () => {
     let state: { composing: boolean } | undefined;
     let served: HTMLTextAreaElement | undefined;

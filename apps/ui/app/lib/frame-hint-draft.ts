@@ -166,16 +166,16 @@ const keptProjects = (
 
 /**
  * The early input script's reader, as source: a function of the document's location that returns the remembered
- * draft's text, or `''`. It reads Home's draft on `/`, and on a project URL the project's draft when the URL names no
+ * draft's text, or `''`, and the chat it belongs to, or `''` (`{text, chatId}`). It reads Home's draft on `/`, and on a project URL the project's draft when the URL names no
  * chat or names the chat the draft belongs to. Every storage call is caught. It derives the key as `frameHintKey`
  * does; the draft-hint test holds the two together.
  */
 export const draftHintReaderSource =
   `(l)=>{try{const r=JSON.parse(localStorage.getItem(${JSON.stringify(draftHintStorageKey)})||'null');` +
-  `if(!r||r.v!==1||typeof r.projects!=='object'||!r.projects)return'';` +
+  `const n={text:'',chatId:''};if(!r||r.v!==1||typeof r.projects!=='object'||!r.projects)return n;` +
   `const ok=(e)=>e&&typeof e.text==='string'&&typeof e.usedAt==='number'?e:undefined;` +
-  `if(l.pathname==='/'){const e=ok(r.home);return e?e.text:''}` +
-  `const m=/^\\/w\\/([^/]+)\\/([^/]+)/.exec(l.pathname);if(!m)return'';` +
-  `const e=ok(r.projects[m[1]+'/'+m[2]]);if(!e)return'';` +
-  `const c=new URLSearchParams(l.search).get('chat');` +
-  `return c===null||c===e.chatId?e.text:''}catch(x){return''}}`;
+  `if(l.pathname==='/'){const e=ok(r.home);return e?{text:e.text,chatId:''}:n}` +
+  `const m=/^\\/w\\/([^/]+)\\/([^/]+)/.exec(l.pathname);if(!m)return n;` +
+  `const e=ok(r.projects[m[1]+'/'+m[2]]);if(!e)return n;` +
+  `const c=new URLSearchParams(l.search).get('chat');const h=typeof e.chatId==='string'?e.chatId:'';` +
+  `return c===null||c===e.chatId?{text:e.text,chatId:h}:n}catch(x){return{text:'',chatId:''}}}`;

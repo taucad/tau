@@ -31,6 +31,8 @@ export type EarlyChatInput = {
   readonly queuedSend: boolean;
   /** The text is the stored draft the served page painted (the draft hint), not an edit. */
   readonly prefilled: boolean;
+  /** The chat a painted draft belongs to, where the hint names one. */
+  readonly prefilledChatId?: string;
 };
 
 /** What the served input's inline script records on the element, before any bundle runs. */
@@ -41,6 +43,8 @@ export type EarlyInputState = {
   queued: boolean;
   /** The stored draft the script painted into the input, or `''`. */
   prefill: string;
+  /** The chat the painted draft belongs to, or `''`. */
+  prefillChat?: string;
 };
 
 export type EarlyTextarea = HTMLTextAreaElement & { tauEarlyDraft?: EarlyInputState };
@@ -71,7 +75,7 @@ export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
 export const earlyInputScript =
   `(()=>{const box=document.currentScript.previousElementSibling;const input=box.querySelector('textarea');` +
   `const state=input.tauEarlyDraft={edited:false,composing:false,queued:false,prefill:''};` +
-  `if(input.value===''){const t=(${draftHintReaderSource})(location);if(t!==''){input.value=t;state.prefill=t}}` +
+  `if(input.value===''){const h=(${draftHintReaderSource})(location);if(h.text!==''){input.value=h.text;state.prefill=h.text;state.prefillChat=h.chatId}}` +
   `const st=box.querySelector('[data-slot=queued-send-status]');const q=(v)=>{state.queued=v;if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:'';if(v){box.setAttribute(${JSON.stringify(queuedSendAttribute)},'')}else{box.removeAttribute(${JSON.stringify(queuedSendAttribute)})}};` +
   `const tx=()=>{if(input.value.trim()===''){box.removeAttribute(${JSON.stringify(earlyTextAttribute)})}else{box.setAttribute(${JSON.stringify(earlyTextAttribute)},'')}};tx();` +
   `input.addEventListener('input',()=>{state.edited=true;tx();if(state.queued)q(false)});` +
@@ -105,6 +109,9 @@ export const readEarlyInput = (input: EarlyTextarea): EarlyChatInput => {
     direction: input.selectionDirection,
     queuedSend: state?.queued === true && input.value.trim() !== '',
     prefilled: isPrefilled,
+    ...(isPrefilled && state?.prefillChat !== undefined && state.prefillChat !== ''
+      ? { prefilledChatId: state.prefillChat }
+      : {}),
   };
 };
 
@@ -195,12 +202,13 @@ export type EarlyInputHandover = Readonly<{
   /** The lane is revealed, so a composer in it can take focus. Called in the commit that reveals the lane. */
   release: (projectId: string) => void;
   /**
-   * A composer is mounted to take the input. The input is handed over once the lane is revealed too. A call from
-   * another project than the first to call ends the input instead.
+   * A composer is mounted to take the input, for its chat where it has one. The input is handed over once the lane is
+   * revealed too. A call from another project than the first to call ends the input instead. A painted draft of
+   * another chat than the claim's is not handed over as that chat's draft.
    *
    * @returns The release of the claim, on unmount.
    */
-  claim: (projectId: string) => () => void;
+  claim: (projectId: string, chatId?: string) => () => void;
   /** The composer has taken `pending`: it is not applied again, by this composer or a later one. */
   taken: () => void;
   /** The lane will hold no composer: the served input is removed, with whatever it holds. */

@@ -630,6 +630,13 @@ describe('overflowLossSignals', () => {
       path: '',
       backend: testBackend,
     });
+    /* The intent is the value's own: a copy across a realm or a later step still resets the port. */
+    expect(
+      scopeEventToRoot(
+        structuredClone(signals.find((event) => 'path' in event && event.path === '/p/x')!),
+        '/p/x/deep',
+      ),
+    ).toEqual({ type: 'directoryChanged', path: '', backend: testBackend });
     /* An ordinary summary above a root still says only that its listing changed. */
     expect(
       scopeEventToRoot({ type: 'directoryChanged', path: '/p/x', backend: testBackend }, '/p/x/deep'),

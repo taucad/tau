@@ -315,17 +315,21 @@ function getEventPath(event: PathChangeEvent): string | undefined {
 /** The paths a fact names that its change leaves unknown: never a copy's untouched source. */
 type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', string>>;
 
-/** The loss signals that stand for a netted removal: a re-list of a whole subtree, ports beneath it included. */
-const subtreeResets = new WeakSet<PathChangeEvent>();
+/**
+ * A re-list of a whole subtree that stands for a directory removal an
+ * overflowed window netted: the directory went and came back within the lost
+ * window. It is a worker-side shape only, never a wire fact, so a copy keeps
+ * it and every consumer has to say what it means: a port rooted beneath it
+ * reads it as its whole-root reset, any other port as `directoryChanged`.
+ * @public
+ */
+export type SubtreeReset = Readonly<{ type: 'subtreeReset'; path: string; backend: PathChangeEvent['backend'] }>;
 
 /**
- * Whether a loss signal re-lists a directory a lost window removed and then
- * filled again, so a port rooted beneath it reads it as its whole-root reset.
- *
- * @param event - A fact.
- * @returns `true` only for such a signal from {@link overflowLossSignals}.
+ * What {@link overflowLossSignals} answers: change facts and {@link SubtreeReset}s.
+ * @public
  */
-export const isSubtreeReset = (event: PathChangeEvent): boolean => subtreeResets.has(event);
+export type LossSignal = PathChangeEvent | SubtreeReset;
 
 /**
  * What a coalescing window that overflowed is replaced with: a
@@ -340,18 +344,18 @@ export const isSubtreeReset = (event: PathChangeEvent): boolean => subtreeResets
  * re-lists: a connection rooted beneath it reads that as its whole-root reset,
  * where an ancestor's re-list says only that the ancestor's listing changed.
  * When the window fills the removed path again, the directory's re-list stands
- * for the removal instead ({@link isSubtreeReset}), so no open file under it
+ * for the removal instead (a {@link SubtreeReset}), so no open file under it
  * reads as gone (I7) while a connection beneath it still resets.
  *
  * @param discarded - The facts the window discarded, in order.
  * @returns The loss signals, in the order their directories first appeared.
  * @public
  */
-export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): PathChangeEvent[] => {
+export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): LossSignal[] => {
   const kept = new Map<string, PathChangeEvent>();
-  const signals = new Map<string, PathChangeEvent>();
+  const signals = new Map<string, LossSignal>();
   /* Directories a netted removal leaves to their re-list, which must still reach every port beneath them. */
-  const subtrees: Array<{ backend: string; path: string }> = [];
+  const subtrees: Array<{ backend: PathChangeEvent['backend']; path: string }> = [];
   const named = (event: PathChangeEvent): string[] => {
     const { path, oldPath, newPath, targetPath } = event as NamedPaths;
     return [path, oldPath, newPath, targetPath].filter((value) => value !== undefined);
@@ -406,9 +410,9 @@ export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): Path
     }
   }
   for (const { backend, path } of subtrees) {
-    const signal = signals.get(`${backend}\0${path}`);
-    if (signal !== undefined) {
-      subtreeResets.add(signal);
+    const key = `${backend}\0${path}`;
+    if (signals.get(key)?.type === 'directoryChanged') {
+      signals.set(key, { type: 'subtreeReset', path, backend });
     }
   }
   return [...[...kept.values()].filter(({ backend }) => !signals.has(backend)), ...signals.values()];
@@ -699,7 +703,9 @@ export class ChangeSetCoalescer {
  * @returns The message to emit.
  * @public
  */
-export const deliveryMessage = (facts: readonly PathChangeEvent[]): ChangeEvent => {
-  const pruned = pruneDirectorySummaries(facts);
+export const deliveryMessage = (facts: readonly LossSignal[]): ChangeEvent => {
+  const pruned = pruneDirectorySummaries(
+    facts.map((fact): PathChangeEvent => (fact.type === 'subtreeReset' ? { ...fact, type: 'directoryChanged' } : fact)),
+  );
   return pruned.length === 1 ? pruned[0]! : { type: 'changeSet', entries: [...pruned] };
 };

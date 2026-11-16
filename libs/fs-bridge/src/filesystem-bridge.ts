@@ -23,6 +23,7 @@ import type {
   ChangeSet,
   ChangeSetWatchRequest,
   FileStat,
+  LossSignal,
   AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   MkdirOptions,
@@ -1154,9 +1155,9 @@ function exposeFileSystemHandlers(
    * fact itself when there is one and as a `changeSet` envelope otherwise, so
    * a peer does one unit of work per changeset instead of one per path.
    */
-  const deliverToHandles = (events: PathChangeEvent[]): void => {
-    const perPort = new Map<MessagePort, PathChangeEvent[]>();
-    const factsFor = (port: MessagePort): PathChangeEvent[] => {
+  const deliverToHandles = (events: readonly LossSignal[]): void => {
+    const perPort = new Map<MessagePort, LossSignal[]>();
+    const factsFor = (port: MessagePort): LossSignal[] => {
       let facts = perPort.get(port);
       if (facts === undefined) {
         facts = [];

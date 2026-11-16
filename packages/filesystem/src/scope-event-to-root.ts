@@ -3,7 +3,7 @@
  * (STO-25 SP2g): the fs bridge scopes every fact it fans out with this.
  */
 
-import { isSubtreeReset } from '#event-coalescer.js';
+import type { LossSignal } from '#event-coalescer.js';
 import type { PathChangeEvent } from '#types.js';
 
 /**
@@ -18,8 +18,7 @@ import type { PathChangeEvent } from '#types.js';
  */
 const rootResetAbove = (event: PathChangeEvent, root: string): PathChangeEvent | undefined => {
   const above = (path: string): boolean => path !== root && (path === '/' || root.startsWith(`${path}/`));
-  return ((event.type === 'directoryDeleted' || (event.type === 'directoryChanged' && isSubtreeReset(event))) &&
-    above(event.path)) ||
+  return (event.type === 'directoryDeleted' && above(event.path)) ||
     (event.type === 'directoryRenamed' && (above(event.oldPath) || above(event.newPath)))
     ? { type: 'directoryChanged', path: '', backend: event.backend }
     : undefined;
@@ -70,10 +69,16 @@ const visibleRelativeToRoot = (
  * @public
  */
 export const scopeEventToRoot = (
-  event: PathChangeEvent,
+  event: LossSignal,
   root: string,
   hidden?: (relativePath: string) => boolean,
 ): PathChangeEvent | undefined => {
+  if (event.type === 'subtreeReset') {
+    /* A netted removal: the whole root beneath it, or a re-list of the directory within it. */
+    const reset = rootResetAbove({ ...event, type: 'directoryDeleted' }, root);
+    const path = reset === undefined ? visibleRelativeToRoot(root, event.path, hidden) : undefined;
+    return reset ?? (path === undefined ? undefined : { type: 'directoryChanged', path, backend: event.backend });
+  }
   if (event.type === 'backendChanged') {
     return event;
   }

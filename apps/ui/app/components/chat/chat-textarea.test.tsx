@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     onEarlyInputAdopted: undefined as (() => boolean) | undefined,
     draftSend: vi.fn(),
     isRecordUnread: true,
+    cloudIntent: undefined as 'open' | undefined,
   };
 });
 
@@ -105,6 +106,7 @@ vi.mock('#hooks/use-project.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ treeService: undefined }) }));
+vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => mocks.cloudIntent }));
 vi.mock('#hooks/use-chat-records.js', () => ({ useChatRecords: () => ({ chats: [] }) }));
 vi.mock('#hooks/use-chat.js', () => ({
   useDraftActions: () => ({ setDraftText: vi.fn(), setEditDraftText: vi.fn() }),
@@ -359,4 +361,19 @@ describe('ChatTextarea frame early input', () => {
       mocks.activeChatId = undefined;
     },
   );
+});
+/* SP2h: the chats open while a Tau Cloud open still writes the files; a turn in this checkout waits for them. */
+describe('ChatTextarea while a Tau Cloud open writes the files', () => {
+  beforeEach(() => {
+    mocks.runElsewhere = undefined;
+    mocks.cloudIntent = undefined;
+  });
+
+  it('should hold a send this document would run until the files have landed', () => {
+    mocks.cloudIntent = 'open';
+
+    render(<ChatTextarea onSubmit={vi.fn()} />);
+
+    expect(mocks.logicOptions?.isSubmitDisabled).toBe(true);
+  });
 });

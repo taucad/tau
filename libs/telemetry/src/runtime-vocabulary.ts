@@ -33,7 +33,7 @@ export const middlewareIds = [
 export const bundlerIds = ['esbuild', 'rolldown'] as const;
 
 /** Transcoder plugin ids (`TranscoderPlugin.id`). @public */
-export const transcoderIds = ['assimp', 'gltf', 'raster', 'render', 'slicer', 'svg'] as const;
+export const transcoderIds = ['assimp', 'gltf', 'heif', 'raster', 'render', 'slicer', 'svg'] as const;
 
 /** Job provider ids (`JobProviderIdentity.id`). @public */
 export const jobProviderIds = ['tau.calculix.container', 'tau.openfoam.container'] as const;
@@ -85,6 +85,8 @@ export const fileFormats = [
   'gif',
   'glb',
   'gltf',
+  'heic',
+  'heif',
   'ifc',
   'iges',
   'igs',
@@ -161,6 +163,12 @@ export const conversionEdges = [
   'gltf→usda',
   'gltf→usdc',
   'gltf→usdz',
+  'heic→jpeg',
+  'heic→png',
+  'heic→webp',
+  'heif→jpeg',
+  'heif→png',
+  'heif→webp',
   'jpeg→jpeg',
   'jpeg→png',
   'jpeg→webp',

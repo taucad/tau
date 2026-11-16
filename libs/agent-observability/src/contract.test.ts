@@ -666,7 +666,7 @@ it("should parse a tool fact's run labels, absent from an older host, and refuse
       },
     },
   });
-  expect(parse(tool({ labels: { host: 'browser', kernel: 'replicad', model: 'google-gemini-3.8-flash' } })).ok).toBe(
+  expect(parse(tool({ labels: { host: 'browser', kernel: 'replicad', model: 'google-gemini-4-hydrogen' } })).ok).toBe(
     true,
   );
   expect(parse(tool({ labels: { host: null, kernel: null, model: null } })).ok).toBe(true);

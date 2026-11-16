@@ -37,6 +37,9 @@ import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
 import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { buildDraftMessage } from '#hooks/draft.machine.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import type { CadAgentExecution } from '@taucad/chat';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
@@ -83,6 +86,17 @@ const useFrameEarlyInput = (
  * as props to keep the memo'd desktop component free of internal subscription hooks,
  * preventing re-render cascades through Radix UI's composeRefs.
  */
+/**
+ * Whether a turn this composer sends would run in a checkout a Tau Cloud open is still writing (SP2h): the chats open
+ * before the files land, and such a turn waits for them, as its admission refuses it. A daemon runs on its own tree.
+ *
+ * @param projectId - The composer's project, if any.
+ * @param execution - The execution the send would run.
+ * @returns `true` while the send must wait.
+ */
+const useTurnFilesArriving = (projectId: string | undefined, execution: CadAgentExecution): boolean =>
+  useTauCloudIntent(projectId ?? '') === 'open' && daemonPlacementOf(execution) === undefined;
+
 export const ChatTextarea = memo(function ({
   ref,
   onSubmit,
@@ -139,7 +153,13 @@ export const ChatTextarea = memo(function ({
   }, [onBlur]);
 
   /* Another device is running this chat (XD3): its host would refuse the send, so the composer holds it. */
-  const { runElsewhere, draftActorRef } = useChatComposer();
+  const {
+    runElsewhere,
+    draftActorRef,
+    execution: { execution: composerExecution },
+  } = useChatComposer();
+  const projectContext = useProject({ enableNoContext: true });
+  const filesArriving = useTurnFilesArriving(projectContext?.projectId, composerExecution);
   const logic = useChatTextareaLogic({
     ref,
     onSubmit,
@@ -147,12 +167,11 @@ export const ChatTextarea = memo(function ({
     onEscapePressed,
     onBlur: handleBlur,
     mode,
-    isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined,
+    isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined || filesArriving,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
 
-  const projectContext = useProject({ enableNoContext: true });
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
   const { chats } = useChatRecords(projectContext?.projectId ?? '');

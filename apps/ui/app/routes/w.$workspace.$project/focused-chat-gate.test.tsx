@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import {
@@ -47,12 +48,13 @@ const buildState = ({
   matches: (target: StateValue) => matchesValue(value, target),
 });
 
-const { mockEditorRefSend, mockState, syncNow, chatSync, projectAvailability } = vi.hoisted(() => ({
+const { mockEditorRefSend, mockState, syncNow, chatSync, availability } = vi.hoisted(() => ({
   mockEditorRefSend: vi.fn(),
   syncNow: vi.fn(),
   chatSync: { state: 'loading' },
-  projectAvailability: { current: 'ready' },
   mockState: { current: undefined as unknown },
+  /* The whole apply's availability, and the chats surface's own (SP2h). */
+  availability: { whole: 'ready', chats: 'ready' },
 }));
 
 /* The placeholder's own reads are its suite's; here it only stands in the lane. */
@@ -62,13 +64,14 @@ vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', () => ({
   ),
 }));
 vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => projectAvailability.current,
+  useProjectAvailability: (surface?: string) => (surface === 'chats' ? availability.chats : availability.whole),
   useModelAvailability: () => 'ready',
   useLargeObjectPending: () => false,
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionStatus: () => ({ sync: { chats: chatSync.state } }),
-  useRevisionCommands: () => ({ syncNow }),
+  useRevisionClient: () => undefined,
+  useRevisionCommands: () => ({ syncNow, connectRemote: vi.fn() }),
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -162,10 +165,35 @@ const handover = {
 
 describe('ChatHistoryGate', () => {
   beforeEach(() => {
-    projectAvailability.current = 'ready';
     chatSync.state = 'loading';
+    availability.whole = 'ready';
+    availability.chats = 'ready';
     syncNow.mockClear();
     mockEditorRefSend.mockClear();
+  });
+
+  /* SP2h: a chat opens on its records while the apply still writes the files. */
+  it('opens the focused chat on the chats surface, before the whole apply lands', () => {
+    chatSync.state = 'ready';
+    availability.whole = 'preparing';
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'chat-123' });
+    const { rerender } = render(
+      <ChatHistoryGate>
+        <div data-testid='chat-pane-child'>chat content</div>
+      </ChatHistoryGate>,
+    );
+    expect(screen.getByTestId('chat-pane-child')).toBeDefined();
+
+    /* Until the chats surface opens, its placeholder speaks: never a partial history (I7). */
+    availability.chats = 'preparing';
+    rerender(
+      <MemoryRouter>
+        <ChatHistoryGate>
+          <div data-testid='chat-pane-child'>chat content</div>
+        </ChatHistoryGate>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
   it('should retry failed chat discovery without hiding available project files', () => {
@@ -220,25 +248,22 @@ describe('ChatHistoryGate', () => {
   });
 
   it.each([
-    { availability: 'failed', declines: true },
-    { availability: 'account', declines: true },
-    { availability: 'offline', declines: true },
-    { availability: 'connecting', declines: false },
-  ] as const)(
-    'declines the served composer while the project is $availability: $declines',
-    ({ availability, declines }) => {
-      projectAvailability.current = availability;
-      handover.decline.mockClear();
-      render(
-        <EarlyInputHandoverContext.Provider value={handover}>
-          <ChatHistoryGate>
-            <div>Chat content</div>
-          </ChatHistoryGate>
-        </EarlyInputHandoverContext.Provider>,
-      );
-      expect(handover.decline).toHaveBeenCalledTimes(declines ? 1 : 0);
-    },
-  );
+    { state: 'failed', declines: true },
+    { state: 'account', declines: true },
+    { state: 'offline', declines: true },
+    { state: 'connecting', declines: false },
+  ] as const)("declines the served composer while the project's chats are $state: $declines", ({ state, declines }) => {
+    availability.chats = state;
+    handover.decline.mockClear();
+    render(
+      <EarlyInputHandoverContext.Provider value={handover}>
+        <ChatHistoryGate>
+          <div>Chat content</div>
+        </ChatHistoryGate>
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(handover.decline).toHaveBeenCalledTimes(declines ? 1 : 0);
+  });
 
   it('renders the error panel when ensure has rejected (focusedChatUnresolved + error)', () => {
     mockState.current = buildState({

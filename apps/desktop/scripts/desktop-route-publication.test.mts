@@ -23,6 +23,7 @@ import {
   createDesktopInstallerCatalog,
   desktopCatalogLanes,
   desktopLaneKeys,
+  desktopLaneManifestKey,
   createDesktopRouteDescriptor,
   desktopManifestDigest,
   qualifyDesktopRoutes,
@@ -898,6 +899,10 @@ assert.deepEqual(desktopLaneKeys('linux'), {
   completion: 'latest/installer-completed-linux.json',
   catalog: 'latest/installers-linux.json',
 });
+// Two platform lanes of one tag are different candidates; their immutable manifests must never share a key.
+assert.equal(desktopLaneManifestKey('desktop@0.4.0', 'all'), 'releases/desktop@0.4.0/desktop-artifacts.json');
+assert.equal(desktopLaneManifestKey('desktop@0.4.0', 'macos'), 'releases/desktop@0.4.0/desktop-artifacts-macos.json');
+assert.equal(desktopLaneManifestKey('desktop@0.4.0', 'linux'), 'releases/desktop@0.4.0/desktop-artifacts-linux.json');
 const linuxOnly = composeDesktopInstallerCatalog('production', { linux: linuxCatalog });
 const composed = composeDesktopInstallerCatalog('production', { linux: linuxCatalog, macos: macProductionCatalog });
 assert.deepEqual(

@@ -178,8 +178,8 @@ describe('billable model request contract', () => {
     {
       name: 'Completions',
       providerKind: 'vertexai',
-      modelId: 'google-gemini-3.5-flash',
-      supplierModelId: 'google/gemini-3.5-flash',
+      modelId: 'google-gemini-4-hydrogen',
+      supplierModelId: 'google/gemini-4-hydrogen',
     },
   ] as const)(
     'accepts genuine installed Pi $name initial and synthetic screenshot-shaped follow-up requests',
@@ -401,7 +401,7 @@ describe('billable model request contract', () => {
     expect(
       safeParseBillableModelRequest(
         {
-          model: 'gemini-3.5-flash',
+          model: 'gemini-4-hydrogen',
           stream: true,
           max_completion_tokens: 16,
           messages: [{ role: 'user', content: 'fixture' }],
@@ -422,7 +422,7 @@ describe('billable model request contract', () => {
       output_config: { effort: 'high' },
     };
     const gemini = {
-      model: 'gemini-3.8-flash',
+      model: 'gemini-4-hydrogen',
       messages: [{ role: 'user', content: 'fixture' }],
       max_completion_tokens: 64,
       stream: true,
@@ -465,6 +465,15 @@ describe('billable model request contract', () => {
       ).toBe(false);
     }
     expect(safeParseBillableModelRequest(gemini, 'openai-completions').success).toBe(true);
+    /* Gemini 4 Hydrogen offers an extra-high level; the boundary admits it and nothing past it. */
+    const withLevel = (thinking_level: string) => ({
+      ...gemini,
+      extra_body: {
+        google: { ...gemini.extra_body.google, thinking_config: { include_thoughts: true, thinking_level } },
+      },
+    });
+    expect(safeParseBillableModelRequest(withLevel('XHIGH'), 'openai-completions').success).toBe(true);
+    expect(safeParseBillableModelRequest(withLevel('MAX'), 'openai-completions').success).toBe(false);
     expect(
       safeParseBillableModelRequest(
         { ...gemini, extra_body: { ...gemini.extra_body, arbitrary_passthrough: true } },
@@ -518,6 +527,17 @@ describe('billable model request contract', () => {
 
     expect(safeParseBillableModelRequest(anthropic, 'anthropic').success).toBe(true);
     expect(safeParseBillableModelRequest(responses, 'openai-responses').success).toBe(true);
+    /* GPT-6.1 Terra's highest level is `max`, in the transcript and on the request alike. */
+    expect(
+      safeParseBillableModelRequest(
+        {
+          ...responses,
+          input: [responses.input[0], { type: 'configuration_update', reasoning: { effort: 'max' } }],
+          reasoning: { effort: 'max', summary: 'auto' },
+        },
+        'openai-responses',
+      ).success,
+    ).toBe(true);
     for (const message of [
       { role: 'system', content: [], output_config: { effort: 'extreme' } },
       { role: 'system', content: [], output_config: {} },
@@ -550,7 +570,7 @@ describe('billable model request contract', () => {
     /* Neither form crosses to a wire that does not define it. */
     expect(
       safeParseBillableModelRequest(
-        { model: 'gemini-3.8-flash', messages: anthropic.messages, max_completion_tokens: 64, stream: true },
+        { model: 'gemini-4-hydrogen', messages: anthropic.messages, max_completion_tokens: 64, stream: true },
         'openai-completions',
       ).success,
     ).toBe(false);
@@ -565,7 +585,7 @@ describe('billable model request contract', () => {
    * gate admits both; `strict: true` selects structured outputs and stays refused. */
   it('admits a Completions function tool with strict absent or false, and refuses strict true', () => {
     const tool = (function_: Record<string, unknown>) => ({
-      model: 'google/gemini-3.5-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [{ role: 'user', content: 'fixture' }],
       stream: true,
       max_completion_tokens: 16,
@@ -579,7 +599,7 @@ describe('billable model request contract', () => {
     expect(
       safeParseBillableModelRequest(
         {
-          model: 'gemini-3.5-flash',
+          model: 'gemini-4-hydrogen',
           stream: true,
           max_completion_tokens: 16,
           messages: [
@@ -602,7 +622,7 @@ describe('billable model request contract', () => {
 
   it('should admit only the bounded Google thought-signature extension for Completions tool calls', () => {
     const body = (extraContent: unknown) => ({
-      model: 'google-gemini-3.5-flash',
+      model: 'google-gemini-4-hydrogen',
       stream: true,
       max_completion_tokens: 16,
       messages: [
@@ -631,7 +651,7 @@ describe('billable model request contract', () => {
         modelId: accepted.model,
         body: accepted,
       }).normalizedRequest.body,
-    ).toEqual({ ...accepted, model: 'google/gemini-3.5-flash' });
+    ).toEqual({ ...accepted, model: 'google/gemini-4-hydrogen' });
     expect(
       safeParseBillableModelRequest(
         body({ google: { thought_signature: 'sentinel', other: true } }),
@@ -660,7 +680,7 @@ describe('billable model request contract', () => {
 
   it('should keep the Google thought signature inside the funded request bound', () => {
     const signed = (signature: string) => ({
-      model: 'google-gemini-3.5-flash',
+      model: 'google-gemini-4-hydrogen',
       stream: true,
       max_completion_tokens: 16,
       messages: [
@@ -679,7 +699,7 @@ describe('billable model request contract', () => {
       ],
     });
     const unsigned = {
-      model: 'google-gemini-3.5-flash',
+      model: 'google-gemini-4-hydrogen',
       stream: true,
       max_completion_tokens: 16,
       messages: [
@@ -703,12 +723,12 @@ describe('billable model request contract', () => {
     const signature = 'sentinel-signature';
     const withSignature = qualify({
       providerKind: 'vertexai',
-      modelId: 'google-gemini-3.5-flash',
+      modelId: 'google-gemini-4-hydrogen',
       body: signed(signature),
     });
     const withoutSignature = qualify({
       providerKind: 'vertexai',
-      modelId: 'google-gemini-3.5-flash',
+      modelId: 'google-gemini-4-hydrogen',
       body: unsigned,
     });
     const inputOf = (qualification: typeof withSignature): bigint =>
@@ -737,7 +757,7 @@ describe('billable model request contract', () => {
     });
     const completions = await capture({
       providerKind: 'vertexai',
-      modelId: 'google-gemini-3.5-flash',
+      modelId: 'google-gemini-4-hydrogen',
       messages: initialMessages,
     });
 
@@ -761,7 +781,7 @@ describe('billable model request contract', () => {
     expect(() =>
       qualify({
         providerKind: 'vertexai',
-        modelId: 'google-gemini-3.5-flash',
+        modelId: 'google-gemini-4-hydrogen',
         body: { ...(completions as Record<string, unknown>), input: [] },
       }),
     ).toThrow();
@@ -791,7 +811,7 @@ const responsesBody = (block: unknown) => ({
   input: [{ role: 'user', content: [{ type: 'input_text', text: 'read it' }, block] }],
 });
 const completionsBody = (block: unknown) => ({
-  model: 'google/gemini-3.5-flash',
+  model: 'google/gemini-4-hydrogen',
   stream: true,
   max_completion_tokens: 16,
   messages: [{ role: 'user', content: [{ type: 'text', text: 'read it' }, block] }],

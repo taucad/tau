@@ -717,6 +717,26 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
+  it('should read every dropped file after the browser empties the live FileList', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    // A live `FileList` the browser empties once the drop handler yields, as Chromium and WebKit do.
+    const liveFiles = ['A.png', 'B.png'].map((n) => makeFile(n));
+
+    await act(async () => {
+      const dropped = result.current.handleDrop(buildDragEvent(liveFiles));
+      liveFiles.length = 0;
+      await dropped;
+    });
+
+    expect(chatActionsMock.addDraftAttachment.mock.calls.map((c) => c[0])).toEqual([
+      'data:image/png;base64,RAW_A.png',
+      'data:image/png;base64,RAW_B.png',
+    ]);
+  });
+
   it('should continue dispatching subsequent images when one FileReader fails mid-batch', async () => {
     readerOutcomes = new Map<string, 'ok' | 'error'>([['B.png', 'error']]);
 

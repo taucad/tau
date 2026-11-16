@@ -49,6 +49,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/filesystem',
   '@taucad/gltf',
   '@taucad/grbl',
+  '@taucad/heif',
   '@taucad/host',
   '@taucad/image',
   '@taucad/jscad',

@@ -154,6 +154,28 @@ export const pendingObjectOf = (bytes: Uint8Array<ArrayBuffer>): PendingObject |
   }
 };
 
+/**
+ * A stat row as its path's mark says (D9): a pending entry is its object's size, `pending`, and none of the pointer's
+ * content facts. Any other row is returned as it is.
+ *
+ * @param row - The provider's row.
+ * @param object - The object the path's mark names, if any.
+ * @returns The row the path answers.
+ * @internal
+ */
+export const asMarkedRow = <Row extends Readonly<{ type: string; size: number }>>(
+  row: Row,
+  object: PendingObject | undefined,
+): Row => {
+  if (object === undefined || row.type !== 'file') {
+    return row;
+  }
+  const copy: Record<string, unknown> = { ...row, size: object.size, pending: true };
+  delete copy['contentKind'];
+  delete copy['lineCount'];
+  return copy as Row;
+};
+
 /** The index's marks, as a read answers by them (see {@link readAsMarked}). @internal */
 export type PendingMarks = Readonly<{
   pendingAt: (authorityPath: string, size?: number) => PendingObject | undefined;

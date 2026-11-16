@@ -65,6 +65,7 @@ import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-u
 import { getEventOrigin } from '#event-origin-registry.js';
 import {
   PendingContentError,
+  asMarkedRow,
   mayBePointerSize,
   pendingObjectOf,
   readAsMarked,
@@ -404,16 +405,8 @@ export class RootedViews {
     const markedAt = (authorityPath: string, size: number): PendingObject | undefined =>
       raw ? undefined : projectIndexes.pendingAt(authorityPath, size);
     /* A row as the path's mark says: a pending entry is its object's size, `pending`, and none of the pointer's facts. */
-    const statOf = <Row extends FileStat>(authorityPath: string, row: Row): Row => {
-      const object = row.type === 'file' ? markedAt(authorityPath, row.size) : undefined;
-      if (object === undefined) {
-        return row;
-      }
-      const copy: Record<string, unknown> = { ...row, size: object.size, pending: true };
-      delete copy['contentKind'];
-      delete copy['lineCount'];
-      return copy as Row;
-    };
+    const statOf = <Row extends FileStat>(authorityPath: string, row: Row): Row =>
+      asMarkedRow(row, row.type === 'file' ? markedAt(authorityPath, row.size) : undefined);
     /*
      * Before the revision layer's first word on a root it announced, a file the size of a pointer that no mark names
      * may be a placeholder: it is held until the word (I7). `rows` are tried lazily, so a listing resolves only the

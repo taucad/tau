@@ -61,7 +61,7 @@ import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPa
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
 import { archive } from '#content-ops/archive.js';
-import { readAsMarked } from '#pending-content.js';
+import { asMarkedRow, readAsMarked } from '#pending-content.js';
 import type { PendingObjectSource } from '#pending-content.js';
 import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
@@ -392,7 +392,7 @@ export class WorkspaceFileService {
    */
   public async stat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return provider.stat(resolvedPath);
+    return this._asMarked(path, await provider.stat(resolvedPath));
   }
 
   /**
@@ -403,7 +403,15 @@ export class WorkspaceFileService {
    */
   public async lstat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return provider.lstat(resolvedPath);
+    return this._asMarked(path, await provider.lstat(resolvedPath));
+  }
+
+  /* A row as a rooted view's stat answers it: a pending entry as its object (D9). */
+  private _asMarked(path: string, row: FileStat): FileStat {
+    return asMarkedRow(
+      row,
+      row.type === 'file' ? this._projectIndexes.pendingAt(resolveAuthorityPath(path), row.size) : undefined,
+    );
   }
 
   /**

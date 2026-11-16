@@ -318,6 +318,14 @@ describe('marked placeholders (D9)', () => {
     });
   });
 
+  /* The service's own stat answers by the same mark a rooted view's does. */
+  it('should stat a declared placeholder as its object through the service too', async () => {
+    expect(await service.stat(`${route}/models/part.step`)).toMatchObject({ size: part.byteLength, pending: true });
+    expect(await service.lstat(`${route}/models/part.step`)).toMatchObject({ size: part.byteLength, pending: true });
+    const plain = await service.stat(`${route}/main.scad`);
+    expect(plain).not.toHaveProperty('pending');
+  });
+
   it('should end a mark the source says is no placeholder, so the next stat is the pointer', async () => {
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = service.createRootedFileSystem(route);

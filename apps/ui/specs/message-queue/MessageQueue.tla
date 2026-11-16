@@ -131,6 +131,10 @@
 \* it, and settles every queued send as failed when the load fails. Once loaded, a send runs synchronously as
 \* before. Delivery order, admission, persistence and the queue barrier are unchanged, so no action or verdict
 \* changes.
+\* A15d (early input): the main composer claims the served project input and, while its record is unread, takes a
+\* painted draft through `hydrateDraft`; an Enter queued before hydration is replayed once through the composer's own
+\* submit, after the draft holds the handed-over text. A send still enters the queue only through that submit, so
+\* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

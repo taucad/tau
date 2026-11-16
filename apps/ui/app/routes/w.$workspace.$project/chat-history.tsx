@@ -147,7 +147,7 @@ type HistoryEntryNavigation = Readonly<{
 
 /**
  * Whether the page is on the history entry its document loaded, as the Navigation API says: a `replaceState` keeps the
- * entry's key, so the route's rewrites (`?chat=`, canonical slugs) leave it the same entry.
+ * entry's key, so the route's rewrites (the chat query, canonical slugs) leave it the same entry.
  *
  * @returns `true` on the document's own entry, `false` on another, `undefined` where the API is missing.
  */
@@ -174,7 +174,7 @@ const isOnDocumentProject = (): boolean => {
   if (entry === undefined) {
     return false;
   }
-  /* Without the Navigation API, the project's path: the `?chat=` rewrite keeps it, a slug correction does not. */
+  /* Without the Navigation API, the project's path: the chat query rewrite keeps it, a slug correction does not. */
   const opened = frameHintKey(new URL(entry.name).pathname);
   return opened !== undefined && opened === frameHintKey(globalThis.location.pathname);
 };

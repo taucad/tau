@@ -6,8 +6,10 @@ import { tauRuntime } from '@taucad/runtime/vite';
 import { uiResolveAlias } from '../../vite.config.js';
 
 /**
- * Composer image conversion in Chromium (blueprint WP5): host parity (b) over the web-worker transport against the
- * raster transcoder's `golden.json`, and the composer's intake and draft image step through the real worker.
+ * Composer image conversion (blueprint WP5): host parity over the web-worker transport against the raster
+ * transcoder's `golden.json`, and the composer's intake and draft image step through the real worker. Host parity
+ * (b) is the `chromium` project, run by `verify-browser` on each pull request; (c) is the `firefox` and `webkit`
+ * projects, run nightly by `test:e2e:attachment-image-engines` under `test:e2e` (e2e-nightly.yml).
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),
@@ -55,8 +57,12 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright({ launchOptions: { channel: 'chromium' } }),
-      instances: [{ browser: 'chromium' }],
+      provider: playwright(),
+      instances: [
+        { browser: 'chromium', name: 'chromium', provider: playwright({ launchOptions: { channel: 'chromium' } }) },
+        { browser: 'firefox', name: 'firefox' },
+        { browser: 'webkit', name: 'webkit' },
+      ],
     },
   },
 });

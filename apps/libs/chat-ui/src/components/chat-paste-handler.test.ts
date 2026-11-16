@@ -1,6 +1,7 @@
 import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '#components/chat-paste-handler.js';
+import type { AttachmentIntakeRefusal } from '#utils/attachment-intake.js';
 
 /** A PNG header: intake labels a pasted file from its bytes, so every image fixture must hold real image bytes. */
 const pngBytes = new Uint8Array([
@@ -16,6 +17,21 @@ const webpBytes = new Uint8Array([
 ]);
 
 const pdfLike = new TextEncoder().encode('%PDF-1.7\n');
+
+/** A 48×32, 24-bit BMP header: a format Tau converts but does not store. */
+const bmpBytes = (() => {
+  const bytes = new Uint8Array(58);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x42, 0x4d]);
+  view.setUint32(2, 58, true);
+  view.setUint32(10, 54, true);
+  view.setUint32(14, 40, true);
+  view.setInt32(18, 48, true);
+  view.setInt32(22, 32, true);
+  view.setUint16(26, 1, true);
+  view.setUint16(28, 24, true);
+  return bytes;
+})();
 
 // The jsdom File has no `arrayBuffer`; every browser the app supports does.
 const makeFile = (name: string, type = 'image/png', bytes: Uint8Array<ArrayBuffer> = pngBytes): File =>
@@ -196,7 +212,7 @@ describe('chat paste image handling', () => {
     await waitFor(() => {
       expect(onImage).toHaveBeenCalledOnce();
     });
-    expect(onImage).toHaveBeenCalledWith('data:image/jpeg;base64,RAW_small.jpg');
+    expect(onImage.mock.calls[0]?.[0]).toBe('data:image/jpeg;base64,RAW_small.jpg');
   });
 
   it('should label a pasted WebP named .jpg as image/webp', async () => {
@@ -209,27 +225,48 @@ describe('chat paste image handling', () => {
     expect(handleClipboardImagePaste({ event, onImage })).toBe(true);
 
     await waitFor(() => {
-      expect(onImage).toHaveBeenCalledWith('data:image/webp;base64,RAW_photo.jpg');
+      expect(onImage.mock.calls[0]?.[0]).toBe('data:image/webp;base64,RAW_photo.jpg');
     });
   });
 
-  it('should refuse a pasted file whose bytes are not a stored image', async () => {
+  it('should refuse a pasted file whose bytes are not an image Tau stores or converts', async () => {
+    const heic = makeFile('photo.heic', 'image/heic', new TextEncoder().encode('not really an image'));
+    const pdf = makeFile('blob', '', pdfLike);
     const event = {
-      clipboardData: makeClipboardData({
-        items: [makeItem(makeFile('photo.heic', 'image/heic')), makeItem(makeFile('blob', '', pdfLike))],
-      }),
+      clipboardData: makeClipboardData({ items: [makeItem(heic), makeItem(pdf)] }),
       preventDefault: vi.fn(),
     };
     const onImage = vi.fn<(dataUrl: string) => void>();
-    const onRefused = vi.fn<(reason: 'unsupported' | 'too-large') => void>();
+    const onRefused = vi.fn<(refusal: AttachmentIntakeRefusal, file: File) => void>();
 
     expect(handleClipboardImagePaste({ event, onImage, onRefused })).toBe(true);
 
     await waitFor(() => {
       expect(onRefused).toHaveBeenCalledTimes(2);
     });
-    expect(onRefused.mock.calls).toEqual([['unsupported'], ['unsupported']]);
+    expect(onRefused.mock.calls).toEqual([
+      [{ outcome: 'refused', reason: 'not-an-image' }, heic],
+      [{ outcome: 'refused', reason: 'not-an-image' }, pdf],
+    ]);
     expect(onImage).not.toHaveBeenCalled();
+  });
+
+  it('should admit a pasted image the host converts, and refuse it by name when it does not', async () => {
+    const bmp = makeFile('scan.bmp', 'image/bmp', bmpBytes);
+    const paste = () => ({
+      clipboardData: makeClipboardData({ items: [makeItem(bmp)] }),
+      preventDefault: vi.fn(),
+    });
+    const onImage = vi.fn<(dataUrl: string, file: File) => void>();
+    const onRefused = vi.fn<(refusal: AttachmentIntakeRefusal, file: File) => void>();
+
+    handleClipboardImagePaste({ event: paste(), onImage, onRefused, loadTranscodeSources: async () => ['bmp'] });
+    handleClipboardImagePaste({ event: paste(), onImage, onRefused });
+
+    await waitFor(() => {
+      expect(onImage).toHaveBeenCalledWith('data:image/bmp;base64,RAW_scan.bmp', bmp);
+      expect(onRefused).toHaveBeenCalledWith({ outcome: 'refused', reason: 'unsupported-format', format: 'bmp' }, bmp);
+    });
   });
 
   it('should leave non-image paste events to the caller fallback', () => {

@@ -6,7 +6,6 @@
  * through `image()`. A format added to the raster transcoder fails here until the desktop list names it.
  */
 import { describe, expect, it } from 'vitest';
-import { image } from '@taucad/image';
 import { deriveTranscodeSources } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { attachmentTranscodeSources as desktopSources } from '#runtime/attachment-transcode-sources.desktop.js';
@@ -17,7 +16,9 @@ describe('desktop attachment transcode sources', () => {
     expect(desktopSources).toEqual(webSources);
   });
 
-  it('should admit only formats the desktop utility converts to jpeg', () => {
+  it('should admit only formats the desktop utility converts to jpeg', async () => {
+    // Dynamic, as the page loads `@taucad/image` lazily (`@nx/enforce-module-boundaries`).
+    const { image } = await import('@taucad/image');
     const utilitySources = deriveTranscodeSources(defineRuntime({ plugins: [image()] }), 'jpeg');
     expect(utilitySources).toEqual(expect.arrayContaining([...desktopSources]));
   });

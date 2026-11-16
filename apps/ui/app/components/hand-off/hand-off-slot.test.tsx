@@ -279,7 +279,7 @@ describe('useHandOffAdoption', () => {
     const { result } = renderHook(() => useHandOffAdoption(undefined, vi.fn()));
 
     expect(result.current).toEqual({ kind: 'done', snapshot: undefined });
-    expect(handOffStore.isAdopted('project-composer')).toBe(false);
+    expect(handOffStore.isAdopted(target)).toBe(false);
   });
 
   /* P4: an open IME composition is never cut; adoption waits for the composition's end, then takes the final text. */
@@ -303,6 +303,57 @@ describe('useHandOffAdoption', () => {
     });
     expect(result.current).toMatchObject({ kind: 'done', snapshot: { text: '日本' } });
     expect(onAdopted).toHaveBeenCalledOnce();
+  });
+
+  /* The browser cannot finish a composition in an input that left the document: adoption takes what it holds. */
+  it('should adopt when the last placeholder leaves while a composition is open', () => {
+    const view = render(<Stage phase='first' />);
+    const input = within(view.container).getByRole<HandOffElement>('textbox');
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart'));
+    input.value = 'に';
+    input.dispatchEvent(new InputEvent('input', { isComposing: true }));
+    const onAdopted = vi.fn();
+    const { result } = renderHook(() => useHandOffAdoption(target, onAdopted));
+    expect(result.current).toEqual({ kind: 'waiting' });
+
+    view.rerender(<Stage phase='none' />);
+
+    expect(result.current).toMatchObject({ kind: 'done', snapshot: { text: 'に' } });
+    expect(onAdopted).toHaveBeenCalledOnce();
+  });
+
+  /* A composer that moves to another project while waiting tries again for that project. */
+  it('should try again for a new scope while waiting', () => {
+    const view = render(<Stage phase='first' />);
+    const input = within(view.container).getByRole<HandOffElement>('textbox');
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart'));
+    const { result, rerender } = renderHook(({ scope }) => useHandOffAdoption({ ...target, scope }, vi.fn()), {
+      initialProps: { scope: target.scope },
+    });
+    expect(result.current).toEqual({ kind: 'waiting' });
+
+    rerender({ scope: 'home/two' });
+
+    expect(result.current).toEqual({ kind: 'done', snapshot: undefined });
+  });
+
+  /* An adoption is for its project: the next project's placeholder serves its own input, and its composer adopts it. */
+  it("should serve another project's placeholder after one project adopted", () => {
+    const view = render(<Stage phase='first' />);
+    typeInto(within(view.container).getByRole<HandOffElement>('textbox'), 'For project one');
+    renderHook(() => useHandOffAdoption(target, vi.fn()));
+    expect(view.container.querySelector('textarea')).toBeNull();
+
+    view.rerender(<Stage phase='second' scope='home/two' />);
+
+    const input = within(view.container).getByRole<HandOffElement>('textbox');
+    expect(input).toHaveValue('');
+    typeInto(input, 'For project two');
+    const onAdopted = vi.fn();
+    const { result } = renderHook(() => useHandOffAdoption({ ...target, scope: 'home/two' }, onAdopted));
+    expect(result.current).toMatchObject({ kind: 'done', snapshot: { text: 'For project two' } });
   });
 
   it('should carry a submit queued before adoption', () => {

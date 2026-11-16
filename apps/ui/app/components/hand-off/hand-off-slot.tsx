@@ -38,7 +38,7 @@ export function HandOffSlot({
   readonly className?: string;
   readonly inputClassName?: string;
 }): React.ReactNode {
-  const adopted = useHandOffAdopted(surface);
+  const adopted = useHandOffAdopted({ surface, scope });
   const hostRef = useRef<HTMLDivElement>(null);
 
   const [markup] = useState(() => ({

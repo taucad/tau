@@ -56,6 +56,7 @@ type Entry = {
   hosts: HTMLElement[];
   /** Where the person was when the element last left the document. */
   place: Place | undefined;
+  /** The adopter of {@link Entry.scope} has taken the input. */
   adopted: boolean;
   version: number;
   listeners: Set<() => void>;
@@ -119,7 +120,7 @@ export const createHandOffStore = (): {
   attach: (target: HandOffTarget, host: HTMLElement) => void;
   detach: (surface: HandOffSurface, host: HTMLElement) => void;
   adopt: (target: HandOffTarget) => HandOffAdoption;
-  isAdopted: (surface: HandOffSurface) => boolean;
+  isAdopted: (target: HandOffTarget) => boolean;
   version: (surface: HandOffSurface) => number;
   subscribe: (surface: HandOffSurface, listener: () => void) => () => void;
   reset: () => void;
@@ -143,11 +144,12 @@ export const createHandOffStore = (): {
   return {
     /**
      * A slot mounted: the first one's input becomes the surface's, every later one for the same scope receives it.
-     * A slot for another scope drops the unadopted input and starts over with its own.
+     * A slot for another scope drops the unadopted input and starts over with its own, even after the last scope's
+     * adoption.
      */
     attach: ({ surface, scope }, host) => {
       const entry = entryOf(surface);
-      if (entry.adopted) {
+      if (entry.scope === scope && entry.adopted) {
         return;
       }
       if (entry.scope !== scope) {
@@ -167,6 +169,10 @@ export const createHandOffStore = (): {
         entry.element = undefined;
         entry.hosts = [];
         entry.place = undefined;
+        if (entry.adopted) {
+          entry.adopted = false;
+          notify(entry);
+        }
       }
       entry.hosts.push(host);
       if (entry.element === undefined) {
@@ -200,6 +206,9 @@ export const createHandOffStore = (): {
       const remaining = entry.hosts.at(-1);
       if (remaining !== undefined) {
         placeInto(entry, element, remaining);
+      } else if (element.tauHandOff?.composing === true) {
+        /* The composition cannot go on outside the document: an adoption waiting on it tries again. */
+        notify(entry);
       }
     },
     adopt: ({ surface, scope }) => {
@@ -219,7 +228,10 @@ export const createHandOffStore = (): {
       notify(entry);
       return { kind: 'adopted', snapshot };
     },
-    isAdopted: (surface) => entryOf(surface).adopted,
+    isAdopted: ({ surface, scope }) => {
+      const entry = entryOf(surface);
+      return entry.adopted && entry.scope === scope;
+    },
     version: (surface) => entryOf(surface).version,
     subscribe: (surface, listener) => {
       const { listeners } = entryOf(surface);
@@ -245,14 +257,15 @@ export const resetHandOffStoreForTest = (): void => {
 const neverAdopted = (): boolean => false;
 
 /**
- * Whether a surface's native input has been adopted, for its slots. The server and the hydrating render say no.
+ * Whether a surface's native input has been adopted for a scope, for its slots. The server and the hydrating render
+ * say no.
  *
- * @param surface - The surface.
- * @returns Whether the adopter has taken it.
+ * @param target - The surface and scope.
+ * @returns Whether the scope's adopter has taken it.
  */
-export function useHandOffAdopted(surface: HandOffSurface): boolean {
+export function useHandOffAdopted({ surface, scope }: HandOffTarget): boolean {
   const subscribe = useCallback((listener: () => void) => handOffStore.subscribe(surface, listener), [surface]);
-  return useSyncExternalStore(subscribe, () => handOffStore.isAdopted(surface), neverAdopted);
+  return useSyncExternalStore(subscribe, () => handOffStore.isAdopted({ surface, scope }), neverAdopted);
 }
 
 /** The adopter's view: still waiting on an open composition, or done with what was handed over, if anything. */
@@ -294,13 +307,19 @@ export function useHandOffAdoption(
     surface === undefined ? { kind: 'done', snapshot: undefined } : { kind: 'waiting' },
   );
   const isWaiting = state.kind === 'waiting';
-  /* The store's version this mount last tried at: a closed composition bumps it, and the attempt runs again. */
-  const attemptedVersion = useRef<number | undefined>(undefined);
+  /* The scope and store version this mount last tried at: a closed composition bumps the version, a move to another
+   * scope changes the scope, and either runs the attempt again. */
+  const lastAttempt = useRef<{ readonly scope: string; readonly version: number } | undefined>(undefined);
   useLayoutEffect(() => {
-    if (!isWaiting || surface === undefined || scope === undefined || attemptedVersion.current === version) {
+    if (
+      !isWaiting ||
+      surface === undefined ||
+      scope === undefined ||
+      (lastAttempt.current?.scope === scope && lastAttempt.current.version === version)
+    ) {
       return;
     }
-    attemptedVersion.current = version;
+    lastAttempt.current = { scope, version };
     const adoption = handOffStore.adopt({ surface, scope });
     if (adoption.kind === 'pending') {
       return;

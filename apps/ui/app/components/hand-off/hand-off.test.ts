@@ -74,11 +74,11 @@ const drawn = (): DOMRectList => {
 /* A resize observer the test fires by hand, standing in for the layout drawing an input it hid. */
 const resizeObservers = new Set<{ readonly fire: () => void }>();
 const stubResizeObserver = (): void => {
-  class FakeResizeObserver {
+  class FakeResizeObserver implements ResizeObserver {
     readonly #callback: ResizeObserverCallback;
     readonly #entry = {
       fire: (): void => {
-        this.#callback([], this as unknown as ResizeObserver);
+        this.#callback([], this);
       },
     };
     public constructor(callback: ResizeObserverCallback) {
@@ -115,20 +115,31 @@ const fireResize = (): void => {
 /* A performance observer the test feeds by hand, since the jsdom timeline keeps no marks to observe. */
 const markObservers = new Set<(names: readonly string[]) => void>();
 const stubPerformanceObserver = (): void => {
-  class FakePerformanceObserver {
+  class FakePerformanceObserver implements PerformanceObserver {
     public static readonly supportedEntryTypes = ['mark'];
     readonly #listener: (names: readonly string[]) => void;
     public constructor(callback: PerformanceObserverCallback) {
       this.#listener = (names) => {
-        const entries = names.map((name) => ({ name, entryType: 'mark' }));
-        callback(
-          {
-            getEntries: () => entries,
-            getEntriesByName: (name: string) => entries.filter((entry) => entry.name === name),
-          } as unknown as PerformanceObserverEntryList,
-          this as unknown as PerformanceObserver,
+        const entries = names.map(
+          (name): PerformanceEntry => ({
+            name,
+            entryType: 'mark',
+            startTime: 0,
+            duration: 0,
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- The DOM's PerformanceEntry names it.
+            toJSON: () => ({ name, entryType: 'mark' }),
+          }),
         );
+        const list: PerformanceObserverEntryList = {
+          getEntries: () => entries,
+          getEntriesByName: (name) => entries.filter((entry) => entry.name === name),
+          getEntriesByType: (type) => entries.filter((entry) => entry.entryType === type),
+        };
+        callback(list, this);
       };
+    }
+    public takeRecords(): PerformanceEntryList {
+      return [];
     }
     public observe(): void {
       markObservers.add(this.#listener);

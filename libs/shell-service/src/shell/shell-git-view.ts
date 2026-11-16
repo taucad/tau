@@ -3,7 +3,8 @@
  * Read-only git for the agent's shell (blueprint E1, A7): a git directory the host writes per launch into the launch's
  * private root, holding only `HEAD`, `refs/heads`, `refs/tags`, `shallow` when present, a copy of the checkout's own
  * index (so `git status` compares against it rather than an empty one), the store's `info/exclude` (Tau's derived
- * ignores) and a fresh `config` with no remote, helper or hook, whose `objects/info/alternates` names the checkout's
+ * ignores) and a fresh `config` with no remote, helper or hook (only git-lfs's own filter when the store uses it, see
+ * `viewConfig`), whose `objects/info/alternates` names the checkout's
  * real object store. The grant compiler makes the view and the object store readable and never writable, and the real
  * `.git` stays otherwise denied. The index holds paths, stat data and object ids; a split or sparse index, one that
  * does not parse, or one over 32 MiB gives no view.
@@ -240,23 +241,47 @@ type FormatSettings = Readonly<{
   refStorage: string | undefined;
   ignoreCase: string | undefined;
   precomposeUnicode: string | undefined;
+  /** Whether the store's LFS filter is exactly the one `git lfs install` writes. */
+  lfsFilter: boolean;
 }>;
 
 /**
+ * The LFS filter commands `git lfs install` writes, byte for byte. The view recognises only these: any other value,
+ * quoted, extended or pointing at another program, is not copied.
+ */
+const lfsInstalled = {
+  clean: 'git-lfs clean -- %f',
+  smudge: 'git-lfs smudge -- %f',
+  process: 'git-lfs filter-process',
+  required: 'true',
+} as const;
+
+/**
  * The format settings of a store's config, and nothing else of it: the file can hold remote addresses with embedded
- * tokens, credential helpers and LFS settings, none of which may reach the view.
+ * tokens, credential helpers and LFS settings, none of which may reach the view. The one other thing read is whether
+ * its LFS filter is the standard one ({@link lfsInstalled}), which the view then writes itself.
  *
  * @param text - The real config.
  * @returns The settings git needs to read the objects and the work tree as the person's git does.
  */
 const formatSettings = (text: string): FormatSettings => {
   const found = new Map<string, string>();
+  const filter = new Map<string, string>();
   let section = '';
   for (const raw of text.split(/\r?\n/u)) {
     const line = raw.replace(/^\s+/u, '');
-    const header = /^\[\s*([A-Za-z0-9.-]+)\s*(?:"[^"]*")?\s*\]/u.exec(line);
+    const header = /^\[\s*([A-Za-z0-9.-]+)\s*(?:"([^"]*)")?\s*\]/u.exec(line);
     if (header !== null) {
-      section = line.includes('"') ? '' : header[1]!.toLowerCase();
+      const name = header[1]!.toLowerCase();
+      /* A subsection name is case-sensitive; `[filter.lfs]` is git's older spelling of `[filter "lfs"]`. */
+      section = header[2] === undefined ? name : name === 'filter' && header[2] === 'lfs' ? 'filter.lfs' : '';
+      continue;
+    }
+    if (section === 'filter.lfs') {
+      const setting = /^([A-Za-z][\w-]*)\s*=\s*(.*?)\s*$/u.exec(line);
+      if (setting !== null) {
+        filter.set(setting[1]!.toLowerCase(), setting[2]!);
+      }
       continue;
     }
     const entry = /^([A-Za-z][\w-]*)\s*=\s*([^\s#;]*)/u.exec(line);
@@ -274,12 +299,51 @@ const formatSettings = (text: string): FormatSettings => {
     refStorage: found.get('extensions.refstorage'),
     ignoreCase: setting('core.ignorecase'),
     precomposeUnicode: setting('core.precomposeunicode'),
+    /* Every filter setting present is the installed one, and the filter that does the work is there. */
+    lfsFilter:
+      filter.size > 0 &&
+      (filter.get('process') === lfsInstalled.process || filter.get('clean') === lfsInstalled.clean) &&
+      [...filter].every(
+        ([name, value]) =>
+          Object.hasOwn(lfsInstalled, name) && lfsInstalled[name as keyof typeof lfsInstalled] === value,
+      ),
   };
 };
 
-/** The view's fresh config: format and filename folding only. No remote, helper, hook, filter or include. */
-const viewConfig = (settings: FormatSettings): string => {
+/** A path as a quoted git config value, or `undefined` when it holds a character a config line cannot carry. */
+const configPath = (path: string): string | undefined =>
+  /[\0\n\r]/u.test(path) ? undefined : `"${path.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`;
+
+/**
+ * The git config section that keeps git-lfs's working copies in a launch's own writable scratch folder. Git-lfs's clean
+ * filter copies each file it hashes into `<lfs.storage>/tmp` before it moves the result into its object folder, and
+ * both shells read a store they cannot write: without this, `git status` exits 128 on any project with a large file
+ * whose index stat data Tau's index refresh zeroed (which it does after every save). The scratch folder goes with the
+ * launch's private roots.
+ *
+ * @param scratch - A folder the launch may write, removed with it.
+ * @returns The `[lfs]` section, or `undefined` when the path cannot be written as a config value.
+ * @public
+ */
+export const shellLfsStorageConfig = (scratch: string): string | undefined => {
+  const value = configPath(join(scratch, 'git-lfs'));
+  return value === undefined ? undefined : `[lfs]\n\tstorage = ${value}\n`;
+};
+
+/**
+ * The view's fresh config: format and filename folding, and, when the store uses Git LFS, the LFS filter and where
+ * git-lfs keeps its copies. No remote, credential helper, hook, smudge command or include.
+ *
+ * The filter is the only command the view names, and only as git-lfs's own fixed `filter-process`, written by Tau rather
+ * than copied, and only when the store's config holds exactly what `git lfs install` writes. Without it git hashes a
+ * large file whole and compares that with the pointer the tree records, so every unchanged large file reads as
+ * modified. It runs inside the same sandbox as anything the agent could run, reads only the work-tree file it is given,
+ * and writes only to the launch's scratch folder (`lfs.storage`), never the real store; it opens no connection to clean
+ * a file. With no scratch folder the view carries neither, as before.
+ */
+const viewConfig = (settings: FormatSettings, lfsStorage: string | undefined): string => {
   const objectFormat = settings.objectFormat === undefined || settings.objectFormat === 'sha1' ? undefined : 'sha256';
+  const lfs = settings.lfsFilter ? lfsStorage : undefined;
   return [
     '[core]',
     `\trepositoryformatversion = ${objectFormat === undefined ? settings.repositoryFormatVersion : '1'}`,
@@ -287,6 +351,14 @@ const viewConfig = (settings: FormatSettings): string => {
     ...(settings.ignoreCase === undefined ? [] : [`\tignorecase = ${settings.ignoreCase}`]),
     ...(settings.precomposeUnicode === undefined ? [] : [`\tprecomposeunicode = ${settings.precomposeUnicode}`]),
     ...(objectFormat === undefined ? [] : ['[extensions]', `\tobjectformat = ${objectFormat}`]),
+    ...(lfs === undefined
+      ? []
+      : [
+          '[filter "lfs"]',
+          `\tprocess = ${lfsInstalled.process}`,
+          `\trequired = ${lfsInstalled.required}`,
+          lfs.replace(/\n$/u, ''),
+        ]),
     '',
   ].join('\n');
 };
@@ -396,10 +468,15 @@ const packedBranchesAndTags = (text: string): string | undefined => {
  *
  * @param checkout - The checkout's real root.
  * @param privateRoot - The launch's private root, which the shell can neither write nor outlive.
+ * @param scratch - A folder in it the launch may write, for git-lfs's copies; without one the view has no LFS filter.
  * @returns The view, or `undefined` when the checkout has no store this can describe exactly.
  * @public
  */
-export const createShellGitView = async (checkout: string, privateRoot: string): Promise<ShellGitView | undefined> => {
+export const createShellGitView = async (
+  checkout: string,
+  privateRoot: string,
+  scratch?: string,
+): Promise<ShellGitView | undefined> => {
   const directories = await gitDirectories(checkout);
   if (directories === undefined) {
     return undefined;
@@ -461,7 +538,10 @@ export const createShellGitView = async (checkout: string, privateRoot: string):
   await mkdir(join(directory, 'refs', 'heads'), { recursive: true });
   await mkdir(join(directory, 'refs', 'tags'), { recursive: true });
   await writeFile(join(directory, 'HEAD'), `${head}\n`);
-  await writeFile(join(directory, 'config'), viewConfig(settings));
+  await writeFile(
+    join(directory, 'config'),
+    viewConfig(settings, scratch === undefined ? undefined : shellLfsStorageConfig(scratch)),
+  );
   await writeFile(join(directory, 'objects', 'info', 'alternates'), `${objects}\n`);
   for (const [name, value] of [...branches, ...tags]) {
     const path = join(directory, ...name.split('/'));
@@ -488,6 +568,66 @@ export const createShellGitView = async (checkout: string, privateRoot: string):
 };
 
 /**
+ * What every launch that reads git carries, the agent's view and the person's Terminal alike: no optional lock, since
+ * neither can write the index `git status` would refresh, and no system-wide config (see {@link shellGitEnvironment}).
+ *
+ * @public
+ */
+export const shellGitReadEnvironment: Readonly<Record<string, string>> = Object.freeze({
+  GIT_OPTIONAL_LOCKS: '0',
+  GIT_CONFIG_NOSYSTEM: '1',
+});
+
+/**
+ * What a Terminal whose store is writable carries: still no system-wide config, and optional locks allowed again, so
+ * `git status` refreshes the index it may now write, as it does in any other terminal.
+ *
+ * @public
+ */
+export const shellGitWriteEnvironment: Readonly<Record<string, string>> = Object.freeze({
+  GIT_CONFIG_NOSYSTEM: '1',
+});
+
+/** The signed-in Tau account a Terminal commits as. @public */
+export type ShellGitAccount = Readonly<{
+  /** The account's user id, which its no-reply address names. */
+  id: string;
+  /** The account's display name; the id stands in when it is absent or empty. */
+  name?: string | undefined;
+}>;
+
+/** The email domain of a Tau no-reply address, `<accountId>@users.noreply.tau.new`, the only address backup accepts. */
+const tauNoreplyDomain = 'users.noreply.tau.new';
+
+/** An account id the server reads back out of a no-reply address: no `@`, space or angle bracket, and no quote. */
+const noreplyLocalPart = /^[^@\s<>"\\]+$/u;
+
+/** A value as a quoted git config value, or `undefined` when it holds a character a config line cannot carry. */
+const configValue = (value: string): string | undefined =>
+  [...value].some((character) => character.codePointAt(0)! < 0x20 || character === '\u007F')
+    ? undefined
+    : `"${value.replaceAll('\\', String.raw`\\`).replaceAll('"', String.raw`\"`)}"`;
+
+/**
+ * The git identity a Terminal session commits as: the person's Tau name and their Tau no-reply address, the address
+ * backup records a commit under. Without an account, or with one whose id or name a config line cannot carry, it
+ * is `undefined`, and git's own "Please tell me who you are" answers a commit.
+ *
+ * @param account - The signed-in account, or `undefined` when signed out.
+ * @returns The `[user]` section, or `undefined`.
+ * @public
+ */
+export const shellGitIdentityConfig = (account: ShellGitAccount | undefined): string | undefined => {
+  if (account === undefined || !noreplyLocalPart.test(account.id)) {
+    return undefined;
+  }
+  const given = account.name?.trim() ?? '';
+  const name = configValue(given === '' ? account.id : given);
+  const email = configValue(`${account.id}@${tauNoreplyDomain}`);
+  return name === undefined || email === undefined ? undefined : `[user]\n\tname = ${name}\n\temail = ${email}\n`;
+};
+
+/**
  * The environment that points git in the shell at a view: its directory and work tree, no optional lock (status must
  * not try to refresh the read-only index copy, and every write fails) and no system-wide config. The machine's system
  * config is not the view's: Xcode's git carries `credential.helper=osxkeychain` in its bundled one, and a distribution's
@@ -501,6 +641,5 @@ export const createShellGitView = async (checkout: string, privateRoot: string):
 export const shellGitEnvironment = (view: ShellGitView): Readonly<Record<string, string>> => ({
   GIT_DIR: view.directory,
   GIT_WORK_TREE: view.workTree,
-  GIT_OPTIONAL_LOCKS: '0',
-  GIT_CONFIG_NOSYSTEM: '1',
+  ...shellGitReadEnvironment,
 });

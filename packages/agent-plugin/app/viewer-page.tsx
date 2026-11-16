@@ -442,7 +442,6 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       enableGrid: defaultGraphicsSettings.enableGrid,
       enableAxes: defaultGraphicsSettings.enableAxes,
       enableMatcap: defaultGraphicsSettings.enableMatcap,
-      enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       /* The sandboxed frame gets WebGL (I6). */
       graphicsBackend: 'webgl',

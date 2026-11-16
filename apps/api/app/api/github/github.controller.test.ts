@@ -5,14 +5,16 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { GithubController } from '#api/github/github.controller.js';
 import { GithubGistController } from '#api/github/github-gist.controller.js';
 import { GithubGistService } from '#api/github/github-gist.service.js';
 import { GithubService } from '#api/github/github.service.js';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSessionLookup } from '@taucad/api-auth/testing';
 import type { Environment } from '@taucad/api-core';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
 import type { DatabaseService } from '@taucad/api-database';
@@ -56,7 +58,7 @@ const withApp = async (
   environment: Partial<Environment>,
   run: (context: {
     app: NestFastifyApplication;
-    auth: ReturnType<typeof mockDeep<Auth>>;
+    getSession: Mock<FakeSessionLookup>;
     github: GithubService;
     gists: ReturnType<typeof mock<GithubGistService>>;
   }) => Promise<void>,
@@ -68,14 +70,14 @@ const withApp = async (
   redis.client.getdel.mockResolvedValue(null);
   const github = new GithubService(config, mockDeep<DatabaseService>(), redis);
   const gists = mock<GithubGistService>();
-  const auth = mockDeep<Auth>();
-  auth.api.getSession.mockResolvedValue(null);
+  const getSession = vi.fn<FakeSessionLookup>();
+  getSession.mockResolvedValue(null);
   const module = await Test.createTestingModule({
     controllers: [GithubController, GithubGistController],
     providers: [
       Reflector,
       AuthGuard,
-      { provide: authInstanceKey, useValue: auth },
+      { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
       { provide: ConfigService, useValue: config },
       { provide: GithubService, useValue: github },
       { provide: GithubGistService, useValue: gists },
@@ -87,7 +89,7 @@ const withApp = async (
   app.enableVersioning({ type: VersioningType.URI });
   try {
     await app.init();
-    await run({ app, auth, github, gists });
+    await run({ app, getSession, github, gists });
   } finally {
     await app.close();
   }
@@ -122,8 +124,8 @@ describe('GithubController over HTTP', () => {
   });
 
   it('should refuse a token request without a repository and operation', async () => {
-    await withApp(configured, async ({ app, auth, github }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession, github }) => {
+      getSession.mockResolvedValue(signedIn);
       const token = vi
         .spyOn(github, 'token')
         .mockResolvedValue({ accessToken: 'app-token', expiresAt: instant.toISOString(), generation: 2 });
@@ -136,8 +138,8 @@ describe('GithubController over HTTP', () => {
   });
 
   it('should answer a signed-in disconnect and attempt cancel with 204 and no body', async () => {
-    await withApp(configured, async ({ app, auth, github }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession, github }) => {
+      getSession.mockResolvedValue(signedIn);
       const remove = vi.spyOn(github, 'remove').mockResolvedValue();
       const cancel = vi.spyOn(github, 'cancel').mockResolvedValue();
       const attemptId = '00000000-0000-4000-8000-000000000001';
@@ -159,8 +161,8 @@ describe('GithubController over HTTP', () => {
   });
 
   it('should answer 503 GITHUB_CONNECTION_UNAVAILABLE for the configuration probe when the App is unconfigured', async () => {
-    await withApp({ TAU_FRONTEND_URL: frontend }, async ({ app, auth }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp({ TAU_FRONTEND_URL: frontend }, async ({ app, getSession }) => {
+      getSession.mockResolvedValue(signedIn);
 
       const response = await app.inject({ method: 'GET', url: '/v1/github/configuration' });
 
@@ -176,8 +178,8 @@ describe('GithubController over HTTP', () => {
     [{ returnTo: '//evil.example' }, 'RETURN_LOCATION_INVALID'],
     [{ returnTo: '/import', completionMode: 'popup' }, 'GITHUB_COMPLETION_MODE_INVALID'],
   ])('should refuse the start body %j with 400 %s', async (payload, code) => {
-    await withApp(configured, async ({ app, auth }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession }) => {
+      getSession.mockResolvedValue(signedIn);
 
       const response = await app.inject({
         method: 'POST',
@@ -194,8 +196,8 @@ describe('GithubController over HTTP', () => {
   it.each([['https://evil.example'], [undefined]])(
     'should refuse a start from origin %s with 400 ORIGIN_INVALID before starting an attempt',
     async (origin) => {
-      await withApp(configured, async ({ app, auth, github }) => {
-        auth.api.getSession.mockResolvedValue(signedIn);
+      await withApp(configured, async ({ app, getSession, github }) => {
+        getSession.mockResolvedValue(signedIn);
         const start = vi.spyOn(github, 'start');
 
         const response = await app.inject({
@@ -212,8 +214,8 @@ describe('GithubController over HTTP', () => {
   );
 
   it('should start a bodiless request with the default return location', async () => {
-    await withApp(configured, async ({ app, auth }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession }) => {
+      getSession.mockResolvedValue(signedIn);
 
       const response = await app.inject({
         method: 'POST',
@@ -243,8 +245,8 @@ describe('GithubController over HTTP', () => {
   });
 
   it('should route the repository and single-branch lookups by stable id', async () => {
-    await withApp(configured, async ({ app, auth, github }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession, github }) => {
+      getSession.mockResolvedValue(signedIn);
       const repository = vi.spyOn(github, 'repository').mockResolvedValue({ id: 7 });
       const branch = vi.spyOn(github, 'branch').mockResolvedValue({ name: 'feature/x', head: 'c'.repeat(40) });
 
@@ -274,8 +276,8 @@ describe('GithubController over HTTP', () => {
     '/v1/github/repositories/7?connectionId=',
     '/v1/github/repositories/7?connectionId=a&connectionId=b',
   ])('should refuse %s without one connection id with 400', async (url) => {
-    await withApp(configured, async ({ app, auth }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession }) => {
+      getSession.mockResolvedValue(signedIn);
 
       const response = await app.inject({ method: 'GET', url });
 
@@ -285,8 +287,8 @@ describe('GithubController over HTTP', () => {
   });
 
   it('should expose the retry estimate of a rate-limited answer to the cross-origin client', async () => {
-    await withApp(configured, async ({ app, auth, github }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession, github }) => {
+      getSession.mockResolvedValue(signedIn);
       vi.spyOn(github, 'installations').mockRejectedValue(
         new HttpException(
           { code: 'GITHUB_RATE_LIMITED', message: 'GitHub rate limit reached.', retryAfterSeconds: 12 },
@@ -326,8 +328,8 @@ describe('GitHub Gist HTTP capability boundary', () => {
   });
 
   it.each([undefined, 'https://untrusted.test'])('should refuse Gist mutations from origin %s', async (origin) => {
-    await withApp(configured, async ({ app, auth, gists }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession, gists }) => {
+      getSession.mockResolvedValue(signedIn);
       const response = await app.inject({
         method: 'POST',
         url: '/v1/github/gists/mutate',
@@ -341,8 +343,8 @@ describe('GitHub Gist HTTP capability boundary', () => {
   });
 
   it('should reject caller credentials and arbitrary provider paths', async () => {
-    await withApp(configured, async ({ app, auth, gists }) => {
-      auth.api.getSession.mockResolvedValue(signedIn);
+    await withApp(configured, async ({ app, getSession, gists }) => {
+      getSession.mockResolvedValue(signedIn);
       const response = await app.inject({
         method: 'POST',
         url: '/v1/github/gists/mutate',
@@ -357,8 +359,8 @@ describe('GitHub Gist HTTP capability boundary', () => {
   it.each([frontend, 'app://tau'])(
     'should route a valid gesture from %s with the authenticated user and no-store',
     async (origin) => {
-      await withApp(configured, async ({ app, auth, gists }) => {
-        auth.api.getSession.mockResolvedValue(signedIn);
+      await withApp(configured, async ({ app, getSession, gists }) => {
+        getSession.mockResolvedValue(signedIn);
         gists.mutate.mockResolvedValue({ id: 'abc', history: [], html_url: 'https://gist.github.com/abc' });
         const response = await app.inject({
           method: 'POST',

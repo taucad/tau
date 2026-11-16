@@ -9,7 +9,7 @@ import { resolveViewSettings, tauViewDefaults, workbenchRecords } from '@taucad/
 import type { WorkbenchView } from '@taucad/workbench';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
-import { deviceRecordStore, personRecordStores } from '#preferences/person-record.store.js';
+import { personRecordStores } from '#preferences/person-record.store.js';
 import { useViewLevels } from '#workbench-records/view-levels.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
@@ -29,7 +29,6 @@ vi.mock('#flags/feature-flags.js', () => ({
 }));
 
 const { ViewerSettings } = await import('#components/settings/viewer/viewer-settings.js');
-const { resetSessionPerspectiveAngleForTesting } = await import('#components/settings/viewer/view-defaults-group.js');
 const { viewerPersonPropertyNames } = await import('#components/settings/viewer/viewer-person-properties.js');
 
 const renderSection = (): ReturnType<typeof render> =>
@@ -41,6 +40,7 @@ const renderSection = (): ReturnType<typeof render> =>
 
 const row = (title: string): HTMLElement => screen.getByRole('group', { name: title });
 const viewDefaults = (): Readonly<Record<string, unknown>> => personRecordStores.viewer.read().viewDefaults;
+const fieldOfView = (): HTMLElement => within(row('Projection')).getByRole('spinbutton', { name: 'Projection' });
 
 /* Radix Select opens from the keyboard in jsdom, which models no pointer capture. */
 const choose = async (label: string, option: string): Promise<void> => {
@@ -62,7 +62,6 @@ beforeEach(() => {
   state.capture.mockReset();
   state.os = 'macos';
   state.viewerControls = true;
-  resetSessionPerspectiveAngleForTesting();
   Element.prototype.scrollIntoView = vi.fn();
 });
 
@@ -71,29 +70,22 @@ afterEach(() => {
 });
 
 describe('View defaults (V4)', () => {
-  it('lists nine rows, one per leaf, and no up axis', () => {
+  it('lists six rows, and no up axis, surfaces, edges or post-processing', () => {
     renderSection();
-    for (const title of [
-      'Projection',
-      'Surfaces',
-      'Edges',
-      'Show gizmo',
-      'Grid',
-      'Axes',
-      'Matcap',
-      'Post-processing',
-      'Grid unit',
-    ]) {
+    for (const title of ['Projection', 'Show gizmo', 'Grid', 'Axes', 'Matcap', 'Grid unit']) {
       expect(row(title)).toBeInTheDocument();
     }
-    expect(screen.queryByRole('group', { name: 'Up axis' })).not.toBeInTheDocument();
+    for (const title of ['Up axis', 'Surfaces', 'Edges', 'Post-processing']) {
+      expect(screen.queryByRole('group', { name: title })).not.toBeInTheDocument();
+    }
   });
 
   it('shows Tau’s values with no dot, and Reset all is disabled while nothing is set', () => {
     renderSection();
     expect(within(row('Grid')).getByRole('switch', { name: 'Grid' })).toBeChecked();
     expect(within(row('Matcap')).getByRole('switch', { name: 'Matcap' })).not.toBeChecked();
-    expect(within(row('Projection')).getByRole('combobox', { name: 'Projection' })).toHaveTextContent('Perspective');
+    expect(fieldOfView()).toHaveAttribute('aria-valuenow', '60');
+    expect(within(row('Projection')).getByText('Field of view')).toBeInTheDocument();
     expect(within(row('Grid unit')).getByRole('combobox', { name: 'Grid unit' })).toHaveTextContent('Millimeter');
     expect(screen.queryByRole('button', { name: 'Reset to Tau default' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reset all' })).toBeDisabled();
@@ -128,18 +120,27 @@ describe('View defaults (V4)', () => {
     expect(screen.getByRole('button', { name: 'Reset all' })).toBeDisabled();
   });
 
-  it('stores 0 for Orthographic, and Perspective restores the session’s last angle, or 60', async () => {
+  it('uses the editor’s field-of-view slider: typing 0 stores orthographic, and arrow keys step the angle', async () => {
     renderSection();
-    await choose('Projection', 'Orthographic');
+    await userEvent.click(fieldOfView());
+    await userEvent.clear(fieldOfView());
+    await userEvent.type(fieldOfView(), '0{Enter}');
     expect(viewDefaults()).toEqual({ fieldOfView: 0 });
-    await choose('Projection', 'Perspective');
-    expect(viewDefaults()).toEqual({ fieldOfView: 60 });
-    act(() => {
-      personRecordStores.viewer.write({ viewDefaults: { fieldOfView: 35 } });
-    });
-    await choose('Projection', 'Orthographic');
-    await choose('Projection', 'Perspective');
-    expect(viewDefaults()).toEqual({ fieldOfView: 35 });
+    expect(within(row('Projection')).getByText('Orthographic')).toBeInTheDocument();
+    await userEvent.click(fieldOfView());
+    await userEvent.keyboard('{ArrowUp}');
+    expect(viewDefaults()).toEqual({ fieldOfView: 1 });
+  });
+
+  it('ignores a typed angle that matches the shown one, and clamps one past 90°', async () => {
+    renderSection();
+    await userEvent.click(fieldOfView());
+    await userEvent.keyboard('{Enter}');
+    expect(viewDefaults()).toEqual({});
+    await userEvent.click(fieldOfView());
+    await userEvent.clear(fieldOfView());
+    await userEvent.type(fieldOfView(), '120{Enter}');
+    expect(viewDefaults()).toEqual({ fieldOfView: 90 });
   });
 
   it('stores a grid unit', async () => {
@@ -198,16 +199,16 @@ describe('View defaults (V4)', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Quota exceeded', 'QuotaExceededError');
     });
-    await userEvent.click(within(row('Edges')).getByRole('switch', { name: 'Edges' }));
+    await userEvent.click(within(row('Grid')).getByRole('switch', { name: 'Grid' }));
     expect(screen.getByRole('status')).toHaveTextContent(
       'Tau could not save this on this device. It applies until you close Tau',
     );
-    expect(within(row('Edges')).getByRole('switch', { name: 'Edges' })).not.toBeChecked();
+    expect(within(row('Grid')).getByRole('switch', { name: 'Grid' })).not.toBeChecked();
     // Nothing is blocked; a later write that saves stores both.
     setItem.mockRestore();
     await userEvent.click(within(row('Axes')).getByRole('switch', { name: 'Axes' }));
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
-    expect(viewDefaults()).toEqual({ 'display.lines': false, 'display.axes': false });
+    expect(viewDefaults()).toEqual({ 'display.grid': false, 'display.axes': false });
   });
 });
 
@@ -290,22 +291,13 @@ describe('Navigation and Gizmo (V2, V3, M2)', () => {
   });
 
   it('names the person properties as setup and analytics do', () => {
-    expect(viewerPersonPropertyNames).toEqual({
-      mousePreset: 'mouse_preset',
-      gizmoStyle: 'gizmo_style',
-      inputDevice: 'input_device',
-    });
+    expect(viewerPersonPropertyNames).toEqual({ mousePreset: 'mouse_preset', gizmoStyle: 'gizmo_style' });
   });
 
-  it('keeps trackpad gestures in this device’s record, with a This device badge', async () => {
+  it('has no trackpad gestures row', () => {
     renderSection();
-    expect(within(row('Trackpad gestures')).getByText('This device')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('switch', { name: 'Trackpad gestures' }));
-    expect(deviceRecordStore.read().inputDevice).toBe('trackpad');
-    expect(personRecordStores.viewer.read().controls).toEqual({});
-    expect(events('$set')).toEqual([personProperties('inputDevice', 'trackpad')]);
-    await userEvent.click(screen.getByRole('switch', { name: 'Trackpad gestures' }));
-    expect(deviceRecordStore.read().inputDevice).toBe('mouse');
+    expect(screen.queryByRole('group', { name: 'Trackpad gestures' })).not.toBeInTheDocument();
+    expect(screen.queryByText('This device')).not.toBeInTheDocument();
   });
 
   it('lists the four gizmo styles with the suggestion marked', async () => {

@@ -120,6 +120,19 @@ describe('summaryGrantOf', () => {
     expect(purposeGrantOf(since(-1, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
     expect(purposeGrantOf(since(Number.NaN, at), { ...subject, receivedAt: at }, 'summary')).toEqual(grant());
   });
+
+  it('should claim the protection the server read for the account, and `unknown` when it names none', () => {
+    const subject = { principal: 'user-a', project: 'project-a' };
+
+    expect(summaryGrantOf({ ...answer(true), protection: 'pro' }, subject)).toEqual(
+      grant({ protection: 'pro', content: {} }),
+    );
+    expect(summaryGrantOf({ ...answer(true), protection: 'free' }, subject)).toEqual(
+      grant({ protection: 'free', content: {} }),
+    );
+    expect(summaryGrantOf(answer(true), subject)).toEqual(grant({ content: {} }));
+    expect(summaryGrantOf({ ...answer(true), protection: 'enterprise' }, subject)).toEqual(grant({ content: {} }));
+  });
 });
 
 describe('the content grant (LW6)', () => {
@@ -253,6 +266,28 @@ describe('createEvidenceReporter', () => {
     await reporter.report([run(0)], () => true);
 
     expect(sent).toHaveLength(1);
+  });
+
+  it('should report a resumed run again once its later attempt ends (LU14)', async () => {
+    /* A failed attempt settles the run; resuming it keeps the run id, and only the later attempt's ending is new. */
+    const { reporter, sent } = setup([grant()]);
+    const failed: ProjectedRun = { ...run(0), termination: 'failed' };
+    const resumed: ProjectedRun = {
+      ...run(0, at + 5000),
+      ending: { source: { chatId: 'chat-1', leaderEpoch: 'epoch-a', sequence: 9 }, at: at + 5000 },
+    };
+
+    await reporter.refresh();
+    await reporter.report([failed], () => true);
+    await reporter.report([failed], () => true);
+    await reporter.report([resumed], () => true);
+    await reporter.report([resumed], () => true);
+
+    expect(sent.map((evidence) => evidence.payload.plane === 'summary' && evidence.payload.fact)).toMatchObject([
+      { kind: 'outcome', termination: 'failed' },
+      { kind: 'outcome', termination: 'completed' },
+    ]);
+    expect(new Set(sent.map((evidence) => evidence.source.digest)).size).toBe(2);
   });
 
   it('should project a run again when its evidence could not be queued', async () => {

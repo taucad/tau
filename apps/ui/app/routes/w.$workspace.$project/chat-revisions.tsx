@@ -116,6 +116,26 @@ const reportSyncSettingError = (error: unknown): void => {
  * @param props - Whether the panel is open, and how to change it.
  * @returns The panel.
  */
+/**
+ * Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one *Loading history…* sentence, never
+ * *No revisions yet*.
+ *
+ * @returns The loading geometry.
+ */
+function HistoryLoading(): React.JSX.Element {
+  return (
+    <div aria-hidden data-testid='history-skeleton' className='flex flex-col gap-2 px-2 py-1'>
+      {[0, 1, 2].map((row) => (
+        <div key={row} className='flex items-center gap-2'>
+          <Skeleton className='size-2 rounded-full' />
+          <Skeleton className='h-4 flex-1' />
+          <Skeleton className='h-4 w-16' />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ChatRevisions({
   isExpanded = true,
   setIsExpanded,
@@ -1465,26 +1485,6 @@ function HistoryList(): React.JSX.Element {
 }
 
 /**
- * Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one
- * *Loading history…* sentence, never *No revisions yet*.
- *
- * @returns The loading geometry.
- */
-function HistoryLoading(): React.JSX.Element {
-  return (
-    <div role='status' aria-label='Loading history' aria-busy='true' className='flex flex-col gap-2 px-2 py-1'>
-      {[0, 1, 2].map((row) => (
-        <div key={row} className='flex items-center gap-2'>
-          <Skeleton aria-hidden className='size-2 rounded-full' />
-          <Skeleton aria-hidden className='h-4 flex-1' />
-          <Skeleton aria-hidden className='h-4 w-16' />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
  * The marker text the worker materialized, by revision and path.
  *
  * *Open* is a request, not a render: `resolution.machine` reads the three terms
@@ -1614,6 +1614,8 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const conflictTexts = useConflictTexts();
   /* M2 (I6): an unlocated line is loading, never an empty History. */
   const isHistoryLoading = isLoading || line.kind === 'unknown';
+  /* Entries already listed are content: the skeleton rows show only while History has none to show. */
+  const isHistoryWaiting = isHistoryLoading && revisions.length === 0;
 
   return (
     <div data-slot='revisions-panel-body' className='@container flex size-full min-h-0 flex-col bg-sidebar'>
@@ -1650,8 +1652,17 @@ export function RevisionsPanelBody(): React.JSX.Element {
           </RevisionRegion>
         )}
 
-        <RevisionRegion id='revision-history-heading' title='History'>
-          {isHistoryLoading && revisions.length === 0 ? (
+        {/* The pane's host (the Workbench tab, the phone surface) is already the History landmark, so this card is a
+            group of that name (#1878 renamed the pane to History). */}
+        <RevisionRegion
+          id='revision-history-heading'
+          title='History'
+          isLandmark={false}
+          /* Loading is not empty (DESIGN, I6, S20): skeleton rows under the strip's one *Loading history…* sentence,
+             never *No history yet*. */
+          isBusy={isHistoryWaiting}
+        >
+          {isHistoryWaiting ? (
             <HistoryLoading />
           ) : revisions.length === 0 ? (
             <PanelEmptyState

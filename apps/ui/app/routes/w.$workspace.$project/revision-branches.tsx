@@ -287,6 +287,16 @@ export function ConflictDecision({
 }
 
 /**
+ * Whether a branch is a conflict line, `conflicts/<branch>/<device>` (D14): the
+ * only ref the audited removal verb takes.
+ *
+ * @param line - The conflict's branch.
+ * @returns Whether it names a conflict line.
+ */
+const isConflictLine = (line: string | undefined): line is `conflicts/${string}` =>
+  line?.startsWith('conflicts/') === true;
+
+/**
  * Another device's conflict, dismissed from Tau Cloud through D24's audited
  * verb (D14), on the conflict card (copy table: *Dismiss this conflict…*, owner
  * only). A conflict is never listed as a branch, so this is its one control. The
@@ -308,7 +318,7 @@ function ConflictDismissal({ conflict }: { readonly conflict: RevisionConflictFa
   /* Only another device's line, and only the owner may remove what Tau Cloud holds (RV-W6 F5). */
   if (
     !conflict.foreign ||
-    line === undefined ||
+    !isConflictLine(line) ||
     line === conflict.into ||
     status?.remote.kind !== 'tau' ||
     status.remote.phase !== 'connected' ||
@@ -327,8 +337,7 @@ function ConflictDismissal({ conflict }: { readonly conflict: RevisionConflictFa
     }
     setRemoval({
       isBusy: false,
-      error: describeRevisionFailure('removeConflictLine', answer.kind === 'refused' ? answer.code : undefined)
-        .description,
+      error: describeRevisionFailure('removeConflictLine', answer.code).description,
     });
   };
   return (

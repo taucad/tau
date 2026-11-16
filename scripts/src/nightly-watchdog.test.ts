@@ -67,6 +67,26 @@ describe('nightly watchdog', () => {
     expect(files).toEqual(expect.arrayContaining(['e2e-nightly.yml', 'formal-nightly.yml', 'nightly-watchdog.yml']));
   });
 
+  describe('drift check (WD-1b)', () => {
+    // `drift-check.yml` waits for every workflow it dispatches and fails on a red one, so its own newest scheduled
+    // run being green and recent covers both "it ran in the last 36 h" and "every dispatch it made is green".
+    it('should watch the drift check as a daily scheduled workflow', async () => {
+      const found = await scheduledWorkflows(resolve(import.meta.dirname, '../../.github/workflows'));
+      const drift = found.find((workflow) => workflow.file === 'drift-check.yml');
+      expect(drift).toMatchObject({ name: 'Drift check', crons: ['17 6 * * *'] });
+      expect(maxAge(drift!.crons)).toBe(36 * 60 * 60 * 1000);
+    });
+
+    it('should report a missing drift run, and a drift run whose dispatch was red', () => {
+      const drift: ScheduledWorkflow = { file: 'drift-check.yml', name: 'Drift check', crons: ['17 6 * * *'] };
+      // Synthetic: the newest drift run is 37 h old, so the check did not run in its window.
+      expect(judge(drift, run('2026-11-07T05:30:00Z', 'completed', 'success'), now).state).toBe('missing');
+      expect(judge(drift, undefined, now).state).toBe('missing');
+      expect(judge(drift, run('2026-11-08T06:20:00Z', 'completed', 'failure'), now).state).toBe('failed');
+      expect(judge(drift, run('2026-11-08T06:20:00Z', 'completed', 'success'), now).state).toBe('ok');
+    });
+  });
+
   describe('candidate shell and packaged gates (WD-1a, WD-1c)', () => {
     const candidate = (number: number, createdAt: string): CandidateRun => ({
       id: number * 10,

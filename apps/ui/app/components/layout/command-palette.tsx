@@ -537,9 +537,10 @@ export function CommandPaletteProvider({ children }: { readonly children: React.
 /**
  * Registers the matched routes' command palette items.
  *
- * These are invisible components, but they read their own route's context — the
- * project items need `ProjectProvider` — so they render inside the composed
- * route providers rather than beside the trigger in the sidebar.
+ * These are invisible components, but they may read their own route's context,
+ * so they render inside the composed route providers rather than beside the
+ * trigger in the sidebar. The focused project's items register from its
+ * `FocusedProjectView` instead (A11).
  * @returns The matched routes' registration components.
  */
 export function RouteCommandPaletteItems(): React.JSX.Element {

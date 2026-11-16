@@ -203,7 +203,19 @@ describe('billing operations worker', () => {
   });
 
   describe('deliverRecoveryNotices', () => {
-    const report = (abandoned: string[]) => ({ processed: ['n-1'], pending: [], failed: ['n-2'], abandoned });
+    const report = (
+      abandoned: string[],
+      undeliverable: Array<{
+        readonly notice: string;
+        readonly accountId: string;
+      }> = [],
+    ) => ({
+      processed: ['n-1'],
+      pending: [],
+      failed: ['n-2'],
+      abandoned,
+      undeliverable,
+    });
 
     it('should raise a billing.alert naming each notice that used its last attempt', async () => {
       const alerts = vi.spyOn(console, 'error').mockImplementation(() => {
@@ -218,7 +230,46 @@ describe('billing operations worker', () => {
 
         expect(payments.deliverRecoveryNotices).toHaveBeenCalledExactlyOnceWith({ environment: 'staging', limit: 100 });
         expect(alerts.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown)).toStrictEqual([
-          { event: 'billing.alert', environment: 'staging', kind: 'recovery_notice_abandoned', notices: ['n-3'] },
+          {
+            event: 'billing.alert',
+            environment: 'staging',
+            kind: 'recovery_notice_abandoned',
+            notices: ['n-3'],
+          },
+        ]);
+      } finally {
+        alerts.mockRestore();
+      }
+    });
+
+    // T9 (email bounce blueprint R10): a notice parked for an undeliverable owner names its account.
+    it('should raise a billing.alert naming each account whose notice could not be delivered', async () => {
+      const alerts = vi.spyOn(console, 'error').mockImplementation(() => {
+        // Test-local stderr sink.
+      });
+      const parked = [
+        { notice: 'n-4', accountId: 'acct_a' },
+        { notice: 'n-5', accountId: 'acct_a' },
+        { notice: 'n-6', accountId: 'acct_b' },
+      ];
+
+      try {
+        await deliverRecoveryNotices({
+          payments: {
+            deliverRecoveryNotices: vi.fn(async () => report([], parked)),
+          },
+          environment: 'staging',
+          limit: 100,
+        });
+
+        expect(alerts.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown)).toStrictEqual([
+          {
+            event: 'billing.alert',
+            environment: 'staging',
+            kind: 'recovery_notice_undeliverable',
+            notices: ['n-4', 'n-5', 'n-6'],
+            accounts: ['acct_a', 'acct_b'],
+          },
         ]);
       } finally {
         alerts.mockRestore();

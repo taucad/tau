@@ -122,6 +122,13 @@ export const externalAgentDescriptorSchema = z.strictObject({
   configOptions: z.array(externalAgentConfigOptionSchema).max(32).optional(),
   /** Present exactly when this agent cannot be started; `models` is then empty. */
   refusal: z.enum(externalAgentRefusalCodes).optional(),
+  /**
+   * The one command that clears `refusal`, resolved by the host for its own
+   * platform and shell from the agent's profile, ready to copy. Absent when no
+   * user command clears the refusal; a surface then shows the reason and the
+   * code alone.
+   */
+  fixCommand: z.string().min(1).max(256).optional(),
 });
 
 /** One agent as every tier carries it (VSC1). @public */

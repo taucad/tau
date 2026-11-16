@@ -20,11 +20,12 @@ export function UserAvatar({ className, user, isPending, fallback }: UserAvatarP
     enabled: !user && !isPending,
   });
 
-  if ((isPending ?? sessionPending) && !user) {
-    return <Skeleton className={cn('size-8 rounded-full', className)} />;
-  }
-
   const resolvedUser = user ?? session?.user;
+
+  /* Until the session names someone, the avatar is a skeleton circle at its final size. */
+  if (!resolvedUser && (isPending ?? sessionPending)) {
+    return <Skeleton aria-hidden className={cn('size-8 shrink-0 rounded-full', className)} />;
+  }
 
   const initials = (resolvedUser?.name ?? resolvedUser?.email)?.slice(0, 2).toUpperCase();
 

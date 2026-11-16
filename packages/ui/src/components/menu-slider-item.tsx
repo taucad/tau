@@ -8,6 +8,8 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '#components/dropdown-menu.js';
+import { useIsDropdownMenuDrawer } from '#hooks/dropdown-menu-drawer.js';
+import { drawerRowAttributes } from '#components/drawer.js';
 import { SliderInput, snapToStep } from '#components/slider-input.js';
 import type { SliderInputProperties } from '#components/slider-input.js';
 import { cn } from '#utils/cn.js';
@@ -220,14 +222,66 @@ const MenuSliderRow = ({ item: Item, ...properties }: MenuSliderRowProperties): 
   );
 };
 
+type DropdownMenuSliderItemProperties = MenuSliderItemAdapterProperties & {
+  /** Start the label where an indicator row's text starts (a radio or checkbox row), as an inset menu item does. */
+  readonly isInset?: boolean;
+};
+
 /**
- * {@link MenuSliderItem} inside a dropdown menu.
+ * A slider row in a responsive menu's phone drawer: a touch row with the drawer's geometry, its slider an inset
+ * surface where a row's highlight would sit, so its label lines up with the other rows' icons and text. The row is not
+ * a menu item (a drawer has no menu), draws no highlight and no divider of its own (its surface frames it), and a drag
+ * on it scrubs the value instead of moving the sheet.
+ */
+const DrawerSliderRow = ({
+  className,
+  isInset = false,
+  ...properties
+}: MenuSliderItemProperties & { readonly isInset?: boolean }): React.JSX.Element => (
+  <div
+    {...drawerRowAttributes}
+    data-vaul-no-drag=''
+    className={cn(
+      'relative flex shrink-0 items-center px-1.5 py-0.5 [--drawer-row-highlight:transparent] before:content-none!',
+      '[--drawer-row-gap:0.75rem] [--drawer-row-icon:1rem] [--drawer-row-inset:1rem]',
+    )}
+  >
+    <MenuSliderItem
+      {...properties}
+      className={cn(
+        'min-h-[calc(var(--spacing-touch-row)-0.25rem)] rounded-md px-2.5 text-sm pointer-coarse:min-h-[calc(var(--spacing-touch-row)-0.25rem)]',
+        "[&_svg:not([class*='size-'])]:size-4",
+        // An indicator row's text starts 2.75rem in; the row's own 0.375rem inset comes first.
+        isInset && 'pl-[2.375rem]',
+        className,
+      )}
+    />
+  </div>
+);
+
+/**
+ * {@link MenuSliderItem} inside a dropdown menu. In a responsive menu's phone drawer it is a touch row instead.
  *
  * @public
  */
-export const DropdownMenuSliderItem = (properties: MenuSliderItemAdapterProperties): React.JSX.Element => (
-  <MenuSliderRow item={DropdownMenuPrimitive.Item} dataSlot='dropdown-menu-slider-item' {...properties} />
-);
+export const DropdownMenuSliderItem = ({
+  isInset = false,
+  ...properties
+}: DropdownMenuSliderItemProperties): React.JSX.Element => {
+  const isInDrawer = useIsDropdownMenuDrawer();
+  if (isInDrawer) {
+    return <DrawerSliderRow dataSlot='dropdown-menu-slider-item' isInset={isInset} {...properties} />;
+  }
+  return (
+    <MenuSliderRow
+      item={DropdownMenuPrimitive.Item}
+      dataSlot='dropdown-menu-slider-item'
+      {...properties}
+      // The menu's inset, as `menuItemVariants({ inset: true })` gives an indicator row.
+      className={cn(isInset && 'pl-8', properties.className)}
+    />
+  );
+};
 
 /**
  * {@link MenuSliderItem} inside a context menu.
@@ -248,7 +302,7 @@ type DropdownMenuSelectItemProperties<T> = {
   readonly getOptionLabel: (option: T) => string;
   readonly renderOption?: (option: T, isSelected: boolean) => React.ReactNode;
   readonly onValueChange?: (value: string) => void;
-  /** The sub-view's title on its Back row; defaults to the row's text. */
+  /** The sub-view's title, which names its group for assistive technology; defaults to the row's text. */
   readonly title?: string;
   /**
    * Whether choosing a value steps back to the menu. Return false to stay on the options. Defaults to stepping back.

@@ -2,15 +2,17 @@ import { setup, types } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { safeDispose } from '@taucad/utils/dispose';
-// oxlint-disable-next-line eslint-plugin-import/no-named-as-default -- web worker default import
-import ObjectStoreWorker from '#hooks/object-store.worker.js?worker';
+import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 type ProjectManagerContext = {
   worker: Worker | undefined;
   wrappedWorker: Remote<ObjectStoreWorkerType> | undefined;
   error: Error | undefined;
+  /** The first defect the root `onError` caught (MC-R12, D23); later ones are its consequences and are not kept. */
+  fault: string | undefined;
 };
 
 type WorkerInitializedEvent = {
@@ -30,7 +32,7 @@ const initializeWorkerActor = fromSafeAsync<WorkerInitializedEvent, { context: P
 
     signal.throwIfAborted();
 
-    const worker = new ObjectStoreWorker();
+    const worker = createObjectStoreWorker();
     const wrappedWorker = wrap<ObjectStoreWorkerType>(worker);
 
     console.debug('[ProjectManager] initializeWorkerActor: success');
@@ -42,7 +44,35 @@ const projectManagerActors = {
   initializeWorkerActor,
 } as const;
 
-type ProjectManagerEvent = { type: 'initialize' } | WorkerInitializedEvent;
+/** Events accepted by projectManagerMachine. @public */
+export type ProjectManagerEvent = { type: 'initialize' } | WorkerInitializedEvent;
+
+/**
+ * The project manager machine's public alphabet: every {@link ProjectManagerEvent} type, in the union's order. The
+ * totality test samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const projectManagerEventTypes = ['initialize', 'workerInitialized'] as const satisfies ReadonlyArray<
+  ProjectManagerEvent['type']
+>;
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline, one pair per
+ * state where no transition takes the event.
+ *
+ * - `initialize` while a worker is being created or is ready: a second start has nothing to restart.
+ * - `workerInitialized` outside `creatingWorker`: the worker's report only lands while its invoke runs.
+ *
+ * @public
+ */
+export const projectManagerIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ['creatingWorker', 'initialize'],
+  ['ready', 'initialize'],
+  ['initializing', 'workerInitialized'],
+  ['ready', 'workerInitialized'],
+  ['error', 'workerInitialized'],
+];
 
 /**
  * Project Manager Machine
@@ -59,10 +89,22 @@ export const projectManagerMachine = setup({
   actors: projectManagerActors,
 }).createMachine({
   id: 'projectManager',
+  /* A defect no transition modelled is recorded and reported once, and the machine stays where it was and keeps
+   * answering (MC-R12, D23, B2). Its host objects in context are accepted debt (D4): the machine is not rewritten. */
+  onError: ({ context, event }, enq) => {
+    if (context.fault !== undefined) {
+      return {};
+    }
+    enq(() => {
+      reportAppRuntimeFault(event.error);
+    });
+    return { context: { fault: faultMessage(event.error, 'project manager fault') } };
+  },
   context: {
     worker: undefined,
     wrappedWorker: undefined,
     error: undefined,
+    fault: undefined,
   },
   initial: 'initializing',
   exit: ({ context }, enq) => {

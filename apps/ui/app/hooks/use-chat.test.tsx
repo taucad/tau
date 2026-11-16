@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { MyUIMessage } from '@taucad/chat';
@@ -17,6 +18,10 @@ import { lifecycleRow, publishLogRows, runningRows, writerOwnedCatchUp } from '#
 import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import { publishChatTurnAdmission, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 const queueMutex = new KeyedMutex<string>();
 vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) => {
@@ -258,7 +263,10 @@ vi.mock('#hooks/use-kernel.js', () => ({
   }),
 }));
 
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
+  await import('#hooks/chat-session-store.fixture.js');
 const { ActiveChatProvider, ChatComposerProvider } = await import('#hooks/active-chat-provider.js');
 const { useChatActions, useChatContext, useChatSelector, useChatById, useDraftActions, useDraftSelector } =
   await import('#hooks/use-chat.js');
@@ -284,7 +292,7 @@ function makeAssistantMessage(id: string, text: string): MyUIMessage {
 const defaultTestChatId = 'chat_test_default';
 
 /**
- * Mounts the full new-architecture stack: `<ChatSessionStoreProvider>`
+ * Mounts the full new-architecture stack: `<ChatSessionStoreProvider projectSessions={liveSessions}>`
  * (singleton vanilla store) → `<ActiveChatProvider>` (per-subtree active
  * chat + draft binding which acquires the session from the store).
  *
@@ -295,7 +303,7 @@ const defaultTestChatId = 'chat_test_default';
 function createWrapper(chatId: string = defaultTestChatId) {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
-      <ChatSessionStoreProvider>
+      <ChatSessionStoreProvider projectSessions={liveSessions}>
         <ActiveChatProvider chatId={chatId} projectId={testProjectId}>
           {children}
         </ActiveChatProvider>
@@ -312,7 +320,7 @@ function createWrapper(chatId: string = defaultTestChatId) {
 function createComposerWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
-      <ChatSessionStoreProvider>
+      <ChatSessionStoreProvider projectSessions={liveSessions}>
         <ChatComposerProvider surface='library'>{children}</ChatComposerProvider>
       </ChatSessionStoreProvider>
     );
@@ -375,18 +383,23 @@ function startTurnOwner(store: ChatSessionStore, chatId: string, admit = testAdm
     }),
   );
   publishLogRows(store, chatId, []);
-  store.setFocusedProject(testProjectId);
-  store.setProjectSession(testProjectId, session);
+  liveSessions.set(testProjectId, session);
   return () => {
     unpublish();
     disconnect();
-    store.setProjectSession(testProjectId, undefined);
+    liveSessions.set(testProjectId, undefined);
     session.stop();
   };
 }
 
 /** Torn down in `afterEach` so one test's project session never binds the next one's chat. */
 let stopTurnOwner: (() => void) | undefined;
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   beforeEach(() => {
@@ -527,7 +540,7 @@ describe('hooks resolution rules', () => {
   it('useChatById reads a non-active chat by explicit id', () => {
     function MultiChatWrapper({ children }: { readonly children: ReactNode }) {
       return (
-        <ChatSessionStoreProvider>
+        <ChatSessionStoreProvider projectSessions={liveSessions}>
           {/* Background session: ActiveChatProvider acquires chat_background from the store. */}
           <ActiveChatProvider chatId='chat_background' projectId={testProjectId}>
             {/* Inner foreground binding: ActiveChatProvider acquires chat_foreground. */}

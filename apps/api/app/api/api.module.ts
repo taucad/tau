@@ -9,6 +9,7 @@ import { HealthModule } from '#api/health/health.module.js';
 import { LlmModule, ModelModule, ProviderModule } from '@taucad/api-llm-gateway';
 import { KernelsModule } from '#api/kernels/kernels.module.js';
 import { PrivacyModule } from '#api/privacy/privacy.module.js';
+import { EmailDeliverabilityApiModule } from '#api/email-deliverability/email-deliverability.module.js';
 import { TelemetryPurposeModule } from '@taucad/api-agent-observability/telemetry-purposes/telemetry-purpose.module';
 import { AgentObservabilityModule } from '@taucad/api-agent-observability/agent-observability.module';
 import { ProjectsModule } from '#api/projects/projects.module.js';
@@ -39,6 +40,7 @@ export class ApiModule {
         ChatModule,
         CollaborationModule,
         DurableEventsModule,
+        EmailDeliverabilityApiModule,
         GitModule,
         GithubModule,
         HealthModule,

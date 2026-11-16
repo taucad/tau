@@ -9,10 +9,28 @@ import * as target from '#support/external-target.js';
  * node-renderer backends through the `?graphicsBackend=` override, reads the generated shader stages, reads a
  * frame back through each backend for a glass-and-spectrum signature (independent of canvas presentation,
  * which headless WebGPU adapters may not provide), samples the presented WebGL canvas, and checks the loop
- * keeps advancing without WebGPU validation noise.
+ * keeps advancing without WebGPU validation noise. A WebGPU request on an adapter that cannot present a WebGPU canvas
+ * falls back to WebGL; the rows that prove WebGPU itself run in the WebGPU hardware qualification tier (see
+ * `presentsWebGpu`).
  */
 
 type LoaderBackend = 'webgl' | 'webgpu';
+
+/**
+ * Whether a WebGPU canvas presents in this run, which it does in the WebGPU hardware qualification tier
+ * (`ui-e2e:test:e2e:webgpu` with `TAU_E2E_WEBGPU_PROFILE=hardware`). On the software adapter the browser destroys the
+ * device at the first presented frame, and the loader starts again on WebGL, as it would for a user on that browser
+ * (`target.presentedGraphicsBackend`). The rows that exist to prove the WebGPU backend run where it presents.
+ */
+const presentsWebGpu = target.presentedGraphicsBackend('webgpu') === 'webgpu';
+
+/** The loader state's name for the backend a canvas that asked for `backend` draws on in this run. */
+const presentedLoaderBackend = (backend: LoaderBackend): LoaderState['backend'] =>
+  target.presentedGraphicsBackend(backend) === 'webgpu' ? 'webgpu' : 'webgl2';
+
+/** `test` for a row that proves `backend` itself: a WebGPU row runs where a WebGPU canvas presents. */
+const backendProofTest = (backend: LoaderBackend): ReturnType<typeof test.runIf> =>
+  test.runIf(backend === 'webgl' || presentsWebGpu);
 
 type LoaderState = Readonly<{
   adaptiveLevel: number;
@@ -246,7 +264,7 @@ const expectNoRendererNoise = async (pageErrorStart: number, consoleStart: numbe
 
 test.describe('glass prism loader', () => {
   for (const backend of ['webgpu', 'webgl'] as const satisfies readonly LoaderBackend[]) {
-    test(`compiles the glass body through Three ${backend}`, async () => {
+    backendProofTest(backend)(`compiles the glass body through Three ${backend}`, async () => {
       const initial = await target.events();
       await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
       const state = await waitForReady();
@@ -268,7 +286,7 @@ test.describe('glass prism loader', () => {
       await expectNoRendererNoise(initial.pageErrors.length, initial.consoleMessages.length);
     });
 
-    test(`renders a glass body and a spectrum through ${backend}`, async () => {
+    backendProofTest(backend)(`renders a glass body and a spectrum through ${backend}`, async () => {
       await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
       const state = await waitForReady();
       expect(state.backend).toBe(backend === 'webgpu' ? 'webgpu' : 'webgl2');
@@ -286,31 +304,37 @@ test.describe('glass prism loader', () => {
       expect(capture.bodyContrast, `${backend}: glass alternates rim, light and clear`).toBeGreaterThan(0.06);
     });
 
-    test(`keeps the transparent canvas clear outside the light sheet through ${backend}`, async () => {
-      await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
-      await waitForReady();
+    backendProofTest(backend)(
+      `keeps the transparent canvas clear outside the light sheet through ${backend}`,
+      async () => {
+        await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
+        await waitForReady();
 
-      const capture = await captureStage(`corners-${backend}`);
-      expect(
-        capture.cornerAlpha,
-        `${backend}: the readback corners must stay clear of the sheet and its halo`,
-      ).toBeLessThan(0.05);
-      if (backend === 'webgl') {
-        // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
-        await target.delay(300);
-        const { png, region } = await screenshotStage(`glass-prism-page-corners-${backend}.png`);
-        const stage = await analyseStage(png, region);
-        // The readback above proves the corners clear; on the presented canvas the spectrum runs to the
-        // edge by design and its halo may brush a corner, so the page-surface check allows for that.
-        expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.15);
-        expect(stage.distinctBuckets, 'the presented canvas must carry the glass and the light').toBeGreaterThan(40);
-        expect(stage.centreContrast, 'the presented canvas must alternate light, rim and clear').toBeGreaterThan(0.06);
-      }
-    });
+        const capture = await captureStage(`corners-${backend}`);
+        expect(
+          capture.cornerAlpha,
+          `${backend}: the readback corners must stay clear of the sheet and its halo`,
+        ).toBeLessThan(0.05);
+        if (backend === 'webgl') {
+          // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
+          await target.delay(300);
+          const { png, region } = await screenshotStage(`glass-prism-page-corners-${backend}.png`);
+          const stage = await analyseStage(png, region);
+          // The readback above proves the corners clear; on the presented canvas the spectrum runs to the
+          // edge by design and its halo may brush a corner, so the page-surface check allows for that.
+          expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.15);
+          expect(stage.distinctBuckets, 'the presented canvas must carry the glass and the light').toBeGreaterThan(40);
+          expect(stage.centreContrast, 'the presented canvas must alternate light, rim and clear').toBeGreaterThan(
+            0.06,
+          );
+        }
+      },
+    );
 
     test(`advances the sequence under the pair rule and holds when paused through ${backend}`, async () => {
       await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
-      await waitForReady();
+      const state = await waitForReady();
+      expect(state.backend).toBe(presentedLoaderBackend(backend));
       await expect
         .poll(async () => readField('transitionCount'), { timeout: sequenceTimeout })
         .toBeGreaterThanOrEqual(2);
@@ -335,6 +359,7 @@ test.describe('glass prism loader', () => {
   test('renders one body of 10,242 vertices with the light sheet traced', async () => {
     await target.navigate('/loader/glass?graphicsBackend=webgpu');
     const state = await waitForReady();
+    expect(state.backend).toBe(presentedLoaderBackend('webgpu'));
     expect(state.vertexCount).toBe(expectedVertexCount);
     // The traced light is bounded: forty rays, seven wavelengths, at most four interactions each.
     expect(state.ribbonCount).toBeGreaterThan(40);
@@ -377,10 +402,11 @@ test.describe('glass prism loader', () => {
         framesPerSecond: state?.framesPerSecond,
       }),
     );
+    expect(state?.backend).toBe(presentedLoaderBackend('webgpu'));
     expect(median, 'median frame interval in milliseconds').toBeLessThan(400);
   });
 
-  test('renders the same resting glass on both backends', async () => {
+  test.runIf(presentsWebGpu)('renders the same resting glass on both backends', async () => {
     await target.emulateReducedMotion('reduce');
     try {
       const webgpu = await captureRestingStage('webgpu');

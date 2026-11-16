@@ -13,7 +13,7 @@ import {
 } from '@taucad/ui/components/dialog';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { projectUrl } from '#utils/project-url.utils.js';

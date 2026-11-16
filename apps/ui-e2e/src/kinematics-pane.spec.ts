@@ -491,6 +491,8 @@ test.describe('Kinematics pane', () => {
       { about: modelY, degrees: -360 / wormGear.wheelTeeth },
       'wheel after one worm turn',
     );
+    // The worm's followers wait in a closed group under it, as the sun's do.
+    await target.click(selectors.getByRole('button', { name: 'Followers of Worm' }));
     await target.expectText(followerRow('wheel'), /×-12°$/u);
     await target.screenshot(selectors.getByCss('body'), 'kinematics-worm-one-turn.png');
   });

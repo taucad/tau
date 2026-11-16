@@ -12,9 +12,6 @@ import { ViewerControls } from '#cad/viewer-controls.jsx';
 
 const mocks = vi.hoisted(() => ({ isMobile: false }));
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
-vi.mock('#cad/grid-control.jsx', () => ({
-  GridSizeIndicator: () => <button type='button' aria-label='Grid 10 mm, units and grid' />,
-}));
 vi.mock('#cad/viewer-settings.jsx', () => ({
   ViewerSettings: () => <button type='button' aria-label='Viewer settings' />,
 }));
@@ -49,6 +46,16 @@ const controlNames = (): string[] =>
     .map((button) => button.getAttribute('aria-label') ?? button.textContent);
 
 const arAction = <button type='button' aria-label='View in your space' />;
+
+describe('ViewerControls controls line', () => {
+  it('starts with Section and holds no grid readout: the grid size and units are in Viewer settings', () => {
+    renderBar();
+    const names = controlNames();
+    expect(names[0]).toBe('Section view');
+    expect(names.filter((name) => /grid|\bmm\b/iu.test(name))).toEqual([]);
+    expect(names.at(-1)).toBe('Viewer settings');
+  });
+});
 
 describe('ViewerControls host action', () => {
   it('shows the host action after Fullscreen in the desktop layout, as an iPad gets it', () => {

@@ -8,9 +8,11 @@
  * optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out); optional TAU_DESKTOP_CHANNEL
  * (production, the default, or staging).
  * Payloads: no native kernel closure ships; the app downloads each one the first time a model needs it (desktop
- * first-use download blueprint, DS-1). git ships on linux-x64 when
- * prepare-git has built it, and
- * never on win32-x64 (prepare-git compiles kernel.org source, which is not how git ships on Windows). PicoGK
+ * first-use download blueprint, DS-1). git ships on linux-x64 when prepare-git has built it, and a linux-x64
+ * --archive (a release) refuses to assemble without an executable git and git-lfs; it never ships on win32-x64
+ * (prepare-git compiles kernel.org source, which is not how git ships on Windows). The Terminal's git store guard
+ * (`tau-store-guard`, `sandbox:build:store-guard`) ships on linux-x64, and a linux-x64 --archive refuses to assemble
+ * without it, since the APT package and the AppImage are built from that archive. PicoGK
  * and the GeoSpec native engine ship on darwin-arm64 only: the desktop enables PicoGK there alone, its voxel
  * natives are built on Darwin arm64 only, and the GeoSpec native assembly is produced for darwin-arm64 only.
  * Each omission is printed before packaging.
@@ -18,12 +20,13 @@
  *   [--archive]
  * Output: <output root>/Tau-<target>/ (the unpacked app); with --archive, after the vendored-licence gate,
  * <output root>/Tau-linux-x64.tar.gz or <output root>/Tau-win32-x64.zip.
- * Exit codes: 0 on an assembled app (and archive); non-zero on a wrong host, missing artifacts or a held licence.
+ * Exit codes: 0 on an assembled app (and archive); non-zero on a wrong host, missing artifacts, a held licence, or a
+ * linux-x64 archive without an executable bundled git and git-lfs, or without the store guard.
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import { access, cp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,9 +36,12 @@ import { packager } from '@electron/packager';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import {
   desktopArchiveCommand,
+  desktopGitPayloadRefusal,
+  desktopStoreGuardRefusal,
   desktopPackageOmissions,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
+import { gitPayloadExecutables } from './git-payload.mjs';
 import { copyTree } from '@taucad/nx/runtime-closure';
 import {
   desktopManifestFields,
@@ -72,11 +78,48 @@ const gitResourceRoot = resolve(desktopRoot, 'resources/git', plan.target);
 /* GPL-2.0 §3(a): the exact source the payload was built from travels with it (`prepare-git.mts`). */
 const gitSourceRoot = resolve(desktopRoot, 'resources/git/SOURCES');
 const shipsGit = plan.gitPayloadSupported && existsSync(gitResourceRoot);
+/* A distribution archive is a release: it ships the payload as macOS does, with both binaries executable. */
+const gitRefusal = desktopGitPayloadRefusal(plan, writesArchive, {
+  ...(await gitPayloadExecutables(resolve(desktopRoot, 'resources/git'), plan.target)),
+  gitResourceRoot,
+});
+if (gitRefusal !== undefined) {
+  throw new Error(gitRefusal);
+}
 if (shipsGit && !existsSync(gitSourceRoot)) {
   throw new Error(`The git payload ships with its source; ${gitSourceRoot} is missing. Run prepare-git again.`);
 }
+/* The Linux Terminal's git store guard (blueprint LP8): APT and AppImage are built from this archive. */
+const storeGuardRoot = resolve(desktopRoot, 'resources/store-guard', plan.target);
+/* A regular file with the access asked for: a directory passes `X_OK` too. */
+const storeGuardFile = async (name: string, mode: number): Promise<boolean> => {
+  const path = resolve(storeGuardRoot, name);
+  const status = await stat(path).catch(() => undefined);
+  return (
+    status?.isFile() === true &&
+    (await access(path, mode).then(
+      () => true,
+      () => false,
+    ))
+  );
+};
+const storeGuard = {
+  executable: await storeGuardFile('tau-store-guard', constants.X_OK),
+  notice: await storeGuardFile('NOTICE', constants.R_OK),
+  storeGuardRoot,
+};
+const storeGuardRefusal = desktopStoreGuardRefusal(plan, writesArchive, storeGuard);
+if (storeGuardRefusal !== undefined) {
+  throw new Error(storeGuardRefusal);
+}
+const shipsStoreGuard = plan.storeGuard && storeGuard.executable && storeGuard.notice;
 console.log(`Tau ${plan.target} leaves out:`);
-for (const omission of desktopPackageOmissions(plan, { git: shipsGit, gitResourceRoot })) {
+for (const omission of desktopPackageOmissions(plan, {
+  git: shipsGit,
+  gitResourceRoot,
+  storeGuard: shipsStoreGuard,
+  storeGuardRoot,
+})) {
   console.log(`  - ${omission}`);
 }
 
@@ -135,6 +178,7 @@ await Promise.all([
         copyTree(gitSourceRoot, resolve(resources, 'git/SOURCES')),
       ]
     : []),
+  ...(shipsStoreGuard ? [copyTree(storeGuardRoot, resolve(resources, 'store-guard', plan.target))] : []),
 ]);
 await rm(stageRoot, { recursive: true, force: true });
 

@@ -36,6 +36,7 @@ const main = async (argv: readonly string[]): Promise<number> => {
       tools: { type: 'string' },
       from: { type: 'string' },
       tier: { type: 'string' },
+      family: { type: 'string' },
       'without-check': { type: 'boolean' },
     },
   });
@@ -60,12 +61,13 @@ const main = async (argv: readonly string[]): Promise<number> => {
     case 'check': {
       const [projectRoot] = positionals;
       if (!projectRoot) {
-        out('usage: formal check --tier pr|nightly|lean <projectRoot>');
+        out('usage: formal check --tier pr|nightly|lean [--family <family>] <projectRoot>');
         return 2;
       }
       return checkProject(context, {
         tier: (values.tier ?? 'pr') as Tier | 'lean',
         projectRoot: path.resolve(context.root, projectRoot),
+        ...(values.family === undefined ? {} : { family: values.family }),
       });
     }
     case 'known': {

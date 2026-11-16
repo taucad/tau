@@ -60,7 +60,7 @@ export type ComboBoxSubView<T> = {
   readonly id: string;
   /** The row's content in the parent list. */
   readonly label: ReactNode;
-  /** The sub-view's name, on its Back row and as the row's accessible text. */
+  /** The sub-view's name: a search term of the row that opens it. Its Back row reads "Back". */
   readonly title: string;
   readonly groupedItems: ReadonlyArray<GroupedItems<T>>;
 };
@@ -750,7 +750,7 @@ function NestedItemList<T>({
                 stack.pop();
               }}
             >
-              <ViewStackBackContent title={view.title} />
+              <ViewStackBackContent />
             </CommandItem>
           </CommandGroup>
         ) : null}

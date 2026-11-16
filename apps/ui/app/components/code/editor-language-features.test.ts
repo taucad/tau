@@ -89,6 +89,40 @@ describe('symbol path reporting', () => {
       view.destroy();
     }
   });
+
+  it('does not report requests that the closed editor left in flight when its service is disposed', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const inFlight: Array<(error: Error) => void> = [];
+    const pending = async <T>(): Promise<T> =>
+      new Promise<T>((_resolve, reject) => {
+        inFlight.push(reject);
+      });
+    const view = new EditorView({
+      parent: document.body,
+      state: EditorState.create({
+        doc: 'gear(teeth)',
+        selection: { anchor: 6 },
+        extensions: [
+          languageFeatureNavigation(),
+          languageFeatures.of({
+            documentSymbols: async () => pending(),
+            occurrences: async () => pending(),
+          }),
+          symbolPathListener.of(() => undefined),
+        ],
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(inFlight).toHaveLength(2);
+    view.destroy();
+    // Disposing the language service with the editor rejects whatever it still had in flight.
+    for (const reject of inFlight) {
+      reject(new Error('TypeScript worker client disposed'));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(console.error).not.toHaveBeenCalled();
+  });
 });
 
 describe('inline rename', () => {

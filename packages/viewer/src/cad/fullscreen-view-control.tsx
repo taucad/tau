@@ -1,6 +1,6 @@
 import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { Maximize, Minimize } from 'lucide-react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
@@ -64,7 +64,7 @@ export function FullscreenViewControl(): React.JSX.Element {
             aria-disabled={isPending}
             onClick={toggleFullscreen}
           >
-            {isFullscreen ? <Minimize className='size-4' /> : <Maximize className='size-4' />}
+            {isFullscreen ? <Minimize2 className='size-4' /> : <Maximize2 className='size-4' />}
           </Button>
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>

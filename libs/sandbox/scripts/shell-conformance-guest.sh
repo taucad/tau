@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Inside a stock guest: install the real APT selector's profiled bwrap, then run the shell conformance targets as an
 # unprivileged user against it. Called over SSH by shell-conformance-vm.sh with the distro as its argument.
-# Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/tau (tracked sources plus,
-# in the full tier only, verified host-built Electron/UI artifacts).
+# Required files: ~/bwrap-fixture/*.deb (staging), ~/bwrap-fixture-production/*.deb, ~/node, ~/store-guard (the
+# host-built tau-store-guard with its NOTICE and manifest), ~/tau (tracked sources plus, in the full tier only,
+# verified host-built Electron/UI artifacts).
 # Required env: GITHUB_SHA/GITHUB_RUN_ID/GITHUB_REPOSITORY, TAU_SHELL_CONFORMANCE_ROW (forwarded identities),
 # TAU_SHELL_TIER (full: every target and the application tier; semantics: the listed projects' targets only, no
 # Electron, xvfb, Vulkan or application tier) and TAU_SHELL_PROJECTS (comma list of the projects whose targets run).
@@ -120,7 +121,25 @@ node --input-type=module -e '
   console.log(JSON.stringify({electron:desktop("electron/package.json").version,nodePty:native("node-pty/package.json").version,openScad:desktop("@taulabs/openrscad-engine/package.json").version}));
 ' > "$evidence/native-package-versions.json"
 
+# The Linux Terminal's git store guard as the package ships it: a static executable the shell rows start under the
+# selector's bwrap (TAU_SHELL_CONFORMANCE_STORE_GUARD), and, in the full tier, the unpackaged app's own resources copy.
+store_guard="$HOME/store-guard/tau-store-guard"
+[[ -x "$store_guard" && -s "$HOME/store-guard/NOTICE" ]]
+"$store_guard" --version > "$evidence/store-guard-version.txt"
+cp "$HOME/store-guard/manifest.json" "$evidence/store-guard-manifest.json"
+{ stat -c '%a %U:%G' /dev/fuse 2>&1 || printf 'absent\n'; } > "$evidence/dev-fuse.txt"
+export TAU_SHELL_CONFORMANCE_STORE_GUARD="$store_guard"
+if [[ "$tier" == full ]]; then
+  mkdir -p apps/desktop/resources/store-guard/linux-x64
+  cp "$HOME"/store-guard/{tau-store-guard,NOTICE,manifest.json} apps/desktop/resources/store-guard/linux-x64/
+fi
+
 status=0
+# The guard's own acceptance (blueprint LP2): workflow, protected writes, git outside mid-session, the bypass shape,
+# the server's death and the cost bound, as this unprivileged user under the selector's bwrap.
+if listed sandbox; then
+  bash libs/sandbox/store-guard/tests/acceptance.sh "$store_guard" "$bwrap" "$evidence/store-guard-acceptance.txt" || status=$?
+fi
 if listed sandbox; then
   NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
     TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-conformance-receipt.json" \
@@ -151,14 +170,15 @@ if listed host; then
   sudo -u tau env PATH="$PATH" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
     GITHUB_SHA="$GITHUB_SHA" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SERVER_URL="$GITHUB_SERVER_URL" \
     TAU_SHELL_CONFORMANCE_ROW="$TAU_SHELL_CONFORMANCE_ROW" NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+    TAU_SHELL_CONFORMANCE_STORE_GUARD="$TAU_SHELL_CONFORMANCE_STORE_GUARD" \
     TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-qualification-receipt.json" \
     pnpm nx run host:test:shell-qualification --skip-nx-cache || status=$?
 fi
 # The desktop Terminal's rows through the services host's terminal concern (W5), with their own receipt.
-if listed desktop; then
+if listed desktop-services-host; then
   NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
     TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-conformance-receipt.json" \
-    pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || status=$?
+    pnpm nx run desktop-services-host:test:terminal-conformance --skip-nx-cache || status=$?
 fi
 # The Terminal concern's own rows over a port into the concern (shell split PR 3), with their own receipt.
 if listed desktop-terminal; then

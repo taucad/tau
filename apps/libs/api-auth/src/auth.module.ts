@@ -11,6 +11,9 @@ import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#auth.con
 import { DatabaseModule, DatabaseService } from '@taucad/api-database';
 import { AuthService } from '#auth.service.js';
 import { BetterAuthService } from '#better-auth.service.js';
+import { hasAuthorizationHeader, SessionResolver } from '#session-resolver.js';
+import { sessionDataNameOf, stripSessionSnapshot } from '#session-snapshot.js';
+import { issuedOversizeSnapshot, sessionCookiePolicy } from '#session-cookie-policy.js';
 import type { Environment } from '@taucad/api-core';
 import { EmailModule, EmailService } from '@taucad/api-email';
 import {
@@ -83,8 +86,9 @@ export class AuthModule implements NestModule, OnModuleInit {
       global: true,
       module: AuthModule,
       imports: [DatabaseModule, EmailModule],
-      providers: [authProvider, BetterAuthService],
-      exports: [authInstanceKey, BetterAuthService],
+      providers: [authProvider, BetterAuthService, SessionResolver],
+      // The instance stays inside this module: Tau code reaches Better Auth through these two only.
+      exports: [SessionResolver, BetterAuthService],
     };
   }
 
@@ -164,6 +168,18 @@ export class AuthModule implements NestModule, OnModuleInit {
         }
       }
 
+      /* Only a cookie GET of get-session itself may read the snapshot. Every other
+       * request, plugin endpoints included, reaches Better Auth without it. The
+       * header is kept when empty, because the origin check runs only when a
+       * cookie header is present. */
+      const sessionDataName = await sessionDataNameOf(this.auth);
+      const hasAuthorization = hasAuthorizationHeader(request.headers);
+      const cachedRead =
+        request.method === 'GET' && !hasAuthorization && url.pathname === `${this.auth.options.basePath}/get-session`;
+      if (!cachedRead && request.headers.cookie !== undefined) {
+        headers.set('cookie', stripSessionSnapshot(request.headers.cookie, sessionDataName));
+      }
+
       const request_ = new Request(url.toString(), {
         method: request.method,
         headers,
@@ -174,7 +190,25 @@ export class AuthModule implements NestModule, OnModuleInit {
 
       void reply.status(response.status);
       // oxlint-disable-next-line unicorn/no-array-for-each -- headers are not iterable
-      response.headers.forEach((value, key) => reply.header(key, value));
+      response.headers.forEach((value, key) => {
+        if (key !== 'set-cookie') {
+          void reply.header(key, value);
+        }
+      });
+      const setCookies = response.headers.getSetCookie();
+      const cache = this.auth.options.session?.cookieCache;
+      for (const entry of sessionCookiePolicy({
+        setCookies,
+        surface: 'auth',
+        hasAuthorization,
+        sessionDataName,
+        maxAgeSeconds: cache?.enabled === true ? (cache.maxAge ?? 0) : 0,
+      })) {
+        void reply.header('set-cookie', entry);
+      }
+      if (issuedOversizeSnapshot(setCookies, sessionDataName)) {
+        this.logger.debug('Dropped an oversize session snapshot');
+      }
 
       const responseText = response.body ? await response.text() : null;
       void reply.send(

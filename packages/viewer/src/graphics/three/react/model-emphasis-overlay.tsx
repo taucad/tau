@@ -80,6 +80,7 @@ type Proxy = Readonly<{
   mask: Mesh;
   visibility: Mesh;
   wash: Mesh;
+  depth: Mesh;
 }>;
 
 type CompositeMaterial =
@@ -90,11 +91,13 @@ export type ModelEmphasisResources = Readonly<{
   backend: ResolvedGraphicsBackend;
   maskTarget: WebGLRenderTarget;
   maskScene: Scene;
-  /** Portalled into the overlay scene: wash proxies then the composite quad. */
+  /** Portalled into the overlay scene: depth prepass and wash proxies, then the composite quad. */
   overlayGroup: Group;
   composite: CompositeMaterial;
   mask: Readonly<Record<ModelEmphasisMaskLayer, Readonly<Record<ModelEmphasisState, MeshBasicMaterial>>>>;
   wash: Readonly<Record<ModelEmphasisState, MeshBasicMaterial>>;
+  /** Depth-only prepass shared by both states, so each pixel takes each state's wash once. */
+  washDepth: MeshBasicMaterial;
   proxies: Proxy[];
   setFrameDepth: (depth: DepthTexture | undefined, isWebGl: boolean) => boolean;
   renderFrameDepth: (renderer: WebGPURenderer) => void;
@@ -174,6 +177,28 @@ function createWashMaterial(state: ModelEmphasisState): MeshBasicMaterial {
   return material;
 }
 
+/**
+ * Depth-only prepass for the washes: the nearest emphasised fragment owns the pixel, so a buried layer closer than
+ * the surface bias (a PCB's mask under its silkscreen) no longer stacks a second wash. The wash's own class and
+ * clip, so both draws of a proxy compile to the same vertex stage and depth and the wash's `LessEqual` ties exactly;
+ * transparent so it sorts into the washes' list, where `renderOrder` draws it first. Single pass: depth needs no
+ * back-then-front split, which would double its draws.
+ */
+function createWashDepthMaterial(): MeshBasicMaterial {
+  const material = new MeshBasicMaterial({
+    transparent: true,
+    colorWrite: false,
+    side: DoubleSide,
+    forceSinglePass: true,
+    depthTest: true,
+    depthWrite: true,
+    toneMapped: false,
+    fog: false,
+  });
+  material.name = 'tau-emphasis-wash-depth';
+  return material;
+}
+
 function createProxy(source: Mesh, material: Material): Mesh {
   const proxy = new Mesh(source.geometry, material);
   proxy.matrixAutoUpdate = false;
@@ -235,7 +260,8 @@ export function createModelEmphasisResources(
     },
   };
   const wash = { hover: createWashMaterial('hover'), selected: createWashMaterial('selected') };
-  for (const material of [mask.coverage.hover, mask.coverage.selected, wash.hover, wash.selected]) {
+  const washDepth = createWashDepthMaterial();
+  for (const material of [mask.coverage.hover, mask.coverage.selected, wash.hover, wash.selected, washDepth]) {
     installSectionClip(material, clip);
   }
   const proxies: Proxy[] = [];
@@ -280,6 +306,7 @@ export function createModelEmphasisResources(
     composite,
     mask,
     wash,
+    washDepth,
     proxies,
     setMaskSize,
     frameSize: maskSize,
@@ -328,6 +355,7 @@ export function createModelEmphasisResources(
         mask.visibility.selected,
         wash.hover,
         wash.selected,
+        washDepth,
       ]) {
         material.dispose();
       }
@@ -336,7 +364,7 @@ export function createModelEmphasisResources(
   };
 }
 
-/** Rebuild the proxy pair per emphasised mesh; called only when the emphasis set changes. */
+/** Rebuild the proxies per emphasised mesh; called only when the emphasis set changes. */
 export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set: ModelEmphasisSet): void {
   if (resources.backend === 'webgpu') {
     const both = set.hover.length > 0 && set.selected.length > 0;
@@ -370,9 +398,11 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
     const mask = createProxy(source, resources.mask.coverage[state]);
     const visibility = createProxy(source, resources.mask.visibility[state]);
     const wash = createProxy(source, resources.wash[state]);
+    const depth = createProxy(source, resources.washDepth);
+    depth.renderOrder = -1;
     resources.maskScene.add(mask, visibility);
-    washGroup.add(wash);
-    resources.proxies.push({ source, state, mask, visibility, wash });
+    washGroup.add(depth, wash);
+    resources.proxies.push({ source, state, mask, visibility, wash, depth });
   };
   for (const source of set.hover) {
     add(source, 'hover');
@@ -388,12 +418,19 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
   }
 }
 
-/** Per-frame CPU work: follow the sources' world transforms. */
+/**
+ * Per-frame CPU work: follow the sources' world transforms. The depth prepass draws only for a source that writes
+ * depth itself; a dimmed (translucent) source does not, and its prepass would hide the grid and axes behind it.
+ */
 export function syncModelEmphasisFrame(resources: ModelEmphasisResources): void {
-  for (const { source, mask, visibility, wash } of resources.proxies) {
+  for (const { source, mask, visibility, wash, depth } of resources.proxies) {
     mask.matrixWorld.copy(source.matrixWorld);
     visibility.matrixWorld.copy(source.matrixWorld);
     wash.matrixWorld.copy(source.matrixWorld);
+    depth.matrixWorld.copy(source.matrixWorld);
+    depth.visible = Array.isArray(source.material)
+      ? source.material.every((material) => material.depthWrite)
+      : source.material.depthWrite;
   }
 }
 

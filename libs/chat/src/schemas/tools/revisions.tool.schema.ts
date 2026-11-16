@@ -36,7 +36,6 @@ const revisionPersonSchema = z.object({
   kind: z.literal('user'),
   id: z.string(),
   name: z.string().optional(),
-  email: z.string().optional(),
   anonymous: z.boolean().optional(),
 });
 

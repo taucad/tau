@@ -1,5 +1,5 @@
 import { Fragment, useId } from 'react';
-import type { DeviceRecord, MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
+import type { MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import {
   effectiveGizmoStyle,
   effectivePreset,
@@ -8,10 +8,8 @@ import {
   mousePresetIds,
   suggestedPreset,
 } from '@taucad/preferences';
-import { resolveCameraMapping } from '@taucad/viewer/graphics/three/controls/camera-presets';
-import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
+import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
-import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import {
   familiarFromText,
@@ -29,10 +27,8 @@ import { resolveViewerCameraInput } from '#routes/w.$workspace.$project/use-view
 export type SetupViewerStepProps = Readonly<{
   profile: PersonProfile;
   viewer: ViewerPreferences;
-  device: DeviceRecord;
   onPresetChange: (preset: MousePresetId) => void;
   onGizmoChange: (choice: GizmoChoiceId) => void;
-  onTrackpadChange: (isTrackpad: boolean) => void;
 }>;
 
 const gizmoChoices: readonly GizmoChoiceId[] = [...gizmoStyleIds, 'none'];
@@ -51,7 +47,7 @@ export function BindingLegend({
   mapping,
   isGizmoShown,
 }: {
-  readonly mapping: CameraMappingId;
+  readonly mapping: CameraPresetId;
   readonly isGizmoShown: boolean;
 }): React.JSX.Element {
   const bindings = legendBindings(mapping);
@@ -96,9 +92,9 @@ export function BindingLegend({
 }
 
 /**
- * Step 3: the mouse preset and gizmo, preselected from the tool answer, the trackpad switch, the
- * binding legend and the preview. Choosing a preset stores `viewer.controls.preset`, a style `viewer.gizmo.style`,
- * None `viewDefaults['display.gizmo'] = false`, and the switch the device's `inputDevice`.
+ * Step 3: the mouse preset and gizmo, preselected from the tool answer, the binding legend and the preview. Choosing
+ * a preset stores `viewer.controls.preset`, a style `viewer.gizmo.style`, and None
+ * `viewDefaults['display.gizmo'] = false`.
  *
  * @param properties - The record and its writers.
  * @returns The step's content.
@@ -106,19 +102,16 @@ export function BindingLegend({
 export function SetupViewerStep({
   profile,
   viewer,
-  device,
   onPresetChange,
   onGizmoChange,
-  onTrackpadChange,
 }: SetupViewerStepProps): React.JSX.Element {
   const id = useId();
   const preset = effectivePreset(viewer, profile);
   const suggestion = suggestedPreset(profile.tool);
   const gizmo = gizmoChoice(viewer, profile);
-  const isTrackpad = device.inputDevice === 'trackpad';
-  const mapping = resolveCameraMapping({ preset, inputDevice: device.inputDevice });
+  const mapping = preset;
   /* The preview moves as every open viewer will: the same resolution the project viewer uses. */
-  const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer, device });
+  const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer });
   return (
     <div className='grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]'>
       <div className='flex min-w-0 flex-col gap-5'>
@@ -151,19 +144,9 @@ export function SetupViewerStep({
             ))}
           </RadioGroup>
           <p className='text-xs text-muted-foreground' data-testid='setup-preset-reason'>
-            {isTrackpad ? viewerStepCopy.trackpadNote : null}
-            {!isTrackpad && preset === suggestion ? presetReason(profile.tool) : null}
-            {!isTrackpad && preset !== suggestion ? familiarFromText(familiarProducts(preset)) : null}
+            {preset === suggestion ? presetReason(profile.tool) : familiarFromText(familiarProducts(preset))}
           </p>
         </fieldset>
-
-        <label className='flex items-center justify-between gap-4'>
-          <span className='flex min-w-0 flex-col gap-0.5'>
-            <span className='text-sm font-medium'>{viewerStepCopy.trackpad}</span>
-            <span className='text-xs text-muted-foreground'>{viewerStepCopy.trackpadHint}</span>
-          </span>
-          <Switch checked={isTrackpad} onCheckedChange={onTrackpadChange} aria-label={viewerStepCopy.trackpad} />
-        </label>
 
         <div className='flex min-w-0 flex-col gap-2'>
           <span id={`${id}-gizmo`} className='text-sm font-medium'>

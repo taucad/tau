@@ -2,7 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
@@ -33,6 +34,8 @@ import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machin
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
+import { focusedProjectStandIn } from '#services/focused-project.fixture.js';
+import type { FocusedProjectStandIn } from '#services/focused-project.fixture.js';
 import {
   chatTurnAdmission,
   publishChatTurnAdmission,
@@ -47,6 +50,11 @@ import {
   runningRows,
   writerOwnedCatchUp,
 } from '#machines/chat-projection.fixture.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+import type { LiveProjectSessions } from '#services/chat-session-store.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -336,8 +344,12 @@ const chatSession = chatSessionMachine.provide({
   actors: { admitTurn: chatTurnAdmission },
 });
 
-function createStore(): StoreType {
-  const store = new ChatSessionStore({ chatSession });
+function createStore(focus?: FocusedProjectStandIn): StoreType {
+  const store = new ChatSessionStore({
+    projectSessions: liveSessions,
+    chatSession,
+    ...(focus === undefined ? {} : { focusedProject: focus }),
+  });
   store.setDependencies(createStubDeps());
   return store;
 }
@@ -352,15 +364,14 @@ const turnOwners: Array<{ stop: () => void }> = [];
  * row that drives a verb — or a seeded first turn — has to give the chat the
  * owner the app gives it.
  *
- * @param store - The store under test.
+ * @param _store - The store under test.
  * @param projectId - The project whose session owns the chat.
  */
-function startTurnOwner(store: StoreType, projectId: string): void {
+function startTurnOwner(_store: StoreType, projectId: string): void {
   const session = createActor(projectSessionMachine, { input: { projectId } });
   session.start();
   turnOwners.push(session);
-  store.setFocusedProject(projectId);
-  store.setProjectSession(projectId, session);
+  liveSessions.set(projectId, session);
 }
 
 /**
@@ -382,6 +393,12 @@ function publishAdmission(
     request: await request(gesture),
   }));
 }
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   // An SDK watch requires a visible admitted input; lifecycle-only logs cannot
@@ -814,7 +831,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           dispose: vi.fn(),
         };
       };
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies({ ...createStubDeps(client), watchRecordFile: watch });
       const capture = Promise.withResolvers<void>();
       let captures = 0;
@@ -908,7 +925,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     );
     const client = createMemoryClient();
     await client.writeFile(path, new TextEncoder().encode(rows));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const hostCommand = vi.fn();
     const unpublish = store.publishProjectHostConnector(
@@ -974,7 +991,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       .split('\n')
       .map((line: string) => JSON.parse(line) as unknown);
     const client = createMemoryClient();
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe(chatId, projectId);
     const session = store.acquire(chatId, projectId);
@@ -1032,7 +1049,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           })
         : undefined,
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1083,7 +1100,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         },
       }),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const unobserve = store.observe(chatId, projectId);
     await store.refreshRemoteSegments(chatId, projectId);
@@ -1175,7 +1192,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           },
         }),
       );
-      const first = new ChatSessionStore({ chatSession });
+      const first = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       first.setDependencies(deps);
       first.acquire('chat_seed_waiting_ack', 'project_seed_waiting_ack');
       await vi.waitFor(() => {
@@ -1189,7 +1206,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           new Uint8Array(),
         );
       }
-      const reloaded = new ChatSessionStore({ chatSession });
+      const reloaded = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       reloaded.setDependencies(deps);
       // A sidebar read before this session exists is not a fresh seed-admission read.
       publishLogRows(reloaded, 'chat_seed_waiting_ack', []);
@@ -1292,7 +1309,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           },
         }),
       );
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies(deps);
       const originalRead = deps.client.readFile.bind(deps.client);
       deps.client.readFile = async (path) => {
@@ -1374,7 +1391,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     let stored = chatRow(chatId, projectId);
     const deps = createStubDeps();
     deps.getChat.mockImplementation(async () => stored);
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1448,7 +1465,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         },
       }),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1491,7 +1508,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await client.writeFile(segmentPath, new TextEncoder().encode(rows));
     const deps = createStubDeps(client);
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1532,7 +1549,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     await client.writeFile(segmentPath, new TextEncoder().encode(rows));
     const deps = createStubDeps(client);
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1614,7 +1631,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
             }
           : manualAnswer.promise,
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1710,7 +1727,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       `/projects/${projectId}/.tau/chats/${chatId}/events.jsonl`,
       new TextEncoder().encode(manualRows.map((row) => JSON.stringify(row)).join('\n')),
     );
-    const reloaded = new ChatSessionStore({ chatSession });
+    const reloaded = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     reloaded.setDependencies(deps);
     const reloadedSession = reloaded.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -1998,6 +2015,62 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
   }
 
+  it('should end a resumed attempt whose running and failed rows fold in one read', async () => {
+    const store = createStore();
+    const chatId = 'chat_retry_folded_end';
+    const projectId = 'project_retry_folded_end';
+    const runId = 'req_retry_folded_end';
+    const command: HostCommand = { type: 'resume', commandId: 'req_resume_folded_end', payload: { chatId, runId } };
+    const hostCommand = vi.fn(
+      async (): Promise<CommandAnswer> => ({
+        commandId: command.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 3,
+      }),
+    );
+    const unpublish = store.publishProjectHostConnector(projectId, async () =>
+      mock<AgentHostClient>({ catchUp: writerOwnedCatchUp, hostCommand, close: vi.fn(async () => undefined) }),
+    );
+    startTurnOwner(store, projectId);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    const refused = { code: 'INVALID_REQUEST', message: 'Refused.', status: 400 };
+    publishLogRows(store, chatId, [
+      ...runningUserRows(runId),
+      logRow(2, { runId, type: 'run.lifecycle', state: 'failed', attempt: 1, detail: refused }),
+    ]);
+    const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
+      runId: undefined,
+      leaseTurnId: undefined,
+      request: { kind: 'continue', command },
+    }));
+    await store.requestTurn(chatId, { kind: 'continue' });
+    expect(hostCommand).toHaveBeenCalledOnce();
+    expect(session.stateActorRef.getSnapshot().matches({ run: 'queued' })).toBe(true);
+
+    /* A refusal ends the resumed attempt at once, so one read answer carries its reopening and its end. */
+    publishLogRows(
+      store,
+      chatId,
+      [
+        logRow(3, { runId, type: 'run.lifecycle', state: 'running', attempt: 2 }),
+        logRow(4, { runId, type: 'run.lifecycle', state: 'failed', attempt: 2, detail: refused }),
+      ],
+      3,
+    );
+
+    await vi.waitFor(() => {
+      expect(session.stateActorRef.getSnapshot().matches({ run: 'failed' })).toBe(true);
+    });
+    unpublishAdmission();
+    unpublish();
+    store.release(chatId);
+  });
+
   it('retires a hydrated legacy connection card after read-only catch-up, fresh output, and reload', async () => {
     const chatId = 'chat_recovered_connection';
     const projectId = 'project_recovered_connection';
@@ -2049,7 +2122,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     });
 
     const open = async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies(deps);
       const session = store.acquire(chatId, projectId);
       await vi.waitFor(() => {
@@ -2093,7 +2166,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         error: { category: errorCategory.generic, title: 'Old fault', message: 'Old channel closed' },
       }),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -2280,42 +2353,67 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
           }
         },
         getSnapshot: () => ({ context: { runs, stoppableRuns } }),
-      } as unknown as Parameters<StoreType['setProjectSession']>[1],
+      } as unknown as LiveProjectSessions[string],
     };
   };
 
   it('projects a run to the chat’s own project, not the focused one', async () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
 
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setFocusedProject('proj_a');
+    liveSessions.set('proj_a', projectA.ref);
+    focus.set('proj_a');
     store.acquire('chat-a', 'proj_a');
     const stopObserving = store.observe('chat-a', 'proj_a');
     publishLogRows(store, 'chat-a', runningRows());
     expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat-a'], stoppableRuns: [] });
 
     /* The person navigates to B while A's run is still going. */
-    store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    liveSessions.set('proj_b', projectB.ref);
+    focus.set('proj_b');
     publishLogRows(store, 'chat-a', [lifecycleRow(2, 'completed')], 2);
 
     expect(projectA.heard.at(-1)).toEqual({ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] });
     expect(projectB.heard).toEqual([]);
     stopObserving();
     store.release('chat-a');
-    store.setProjectSession('proj_a', undefined);
-    store.setProjectSession('proj_b', undefined);
+    liveSessions.set('proj_a', undefined);
+    liveSessions.set('proj_b', undefined);
+  });
+
+  it('should bind the focused project to its live session each time focus arrives there, and only then (A7b)', () => {
+    const focus = focusedProjectStandIn();
+    createStore(focus);
+    const projectA = fakeSession('proj_a');
+    liveSessions.set('proj_a', projectA.ref);
+    /* The session holds runs the store's projection no longer has: arriving there tells it again. */
+    const drift = (): void => {
+      projectA.ref.send({ type: 'projectedRunsChanged', runs: ['stale'], stoppableRuns: [] });
+      projectA.heard.length = 0;
+    };
+    drift();
+
+    focus.set('proj_a');
+    expect(projectA.heard).toEqual([{ type: 'projectedRunsChanged', runs: [], stoppableRuns: [] }]);
+
+    drift();
+    focus.set('proj_a');
+    focus.set(undefined);
+    focus.set('proj_b');
+    expect(projectA.heard).toEqual([]);
+    liveSessions.set('proj_a', undefined);
   });
 
   it('binds a retained project chat to its known owner while another project is focused', () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
+    focus.set('proj_b');
 
     store.acquire('chat-a', 'proj_a');
     store.acquire('chat-a', 'proj_a');
@@ -2324,12 +2422,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect([...store.chatRootsOf('proj_a').keys()]).toEqual(['chat-a']);
     expect(store.chatRootsOf('proj_b').size).toBe(0);
     store.release('chat-a');
-    store.setProjectSession('proj_a', undefined);
-    store.setProjectSession('proj_b', undefined);
+    liveSessions.set('proj_a', undefined);
+    liveSessions.set('proj_b', undefined);
   });
 
   it('binds a chat acquired during a focus switch to its caller’s project before its row loads', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -2340,12 +2439,12 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
+    focus.set('proj_b');
 
-    /* React renders A's new chat before ProjectSessionBinding's focus effect
-     * runs, so focus still says B. The caller names A (PV-S4). */
+    /* React renders A's new chat before focus moves, so focus still says B.
+     * The caller names A (PV-S4). */
     const session = store.acquire('chat_a', 'proj_a');
     const stopObserving = store.observe('chat_a', 'proj_a');
     expect(store.chatRootsOf('proj_a').get('chat_a')).toBe(session.stateActorRef);
@@ -2353,7 +2452,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     await vi.waitFor(() => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a', 'proj_a');
     });
-    store.setFocusedProject('proj_a');
+    focus.set('proj_a');
     resolveLoadedChat({
       id: 'chat_a',
       resourceId: 'proj_a',
@@ -2372,8 +2471,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     expect(projectA.heard).toContainEqual({ type: 'projectedRunsChanged', runs: ['chat_a'], stoppableRuns: [] });
     stopObserving();
     store.release('chat_a');
-    store.setProjectSession('proj_a', undefined);
-    store.setProjectSession('proj_b', undefined);
+    liveSessions.set('proj_a', undefined);
+    liveSessions.set('proj_b', undefined);
   });
 
   it('takes a gesture made before any route effect registered its project, rather than parking it (PV-S5)', () => {
@@ -2389,20 +2488,20 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
   it('keeps the agents pane’s chat machine across a project session re-registration (PV-S5)', () => {
     const store = createStore();
-    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+    liveSessions.set('proj_pane', fakeSession('proj_pane').ref);
     const session = store.acquire('chat_pane', 'proj_pane');
     const machine = session.stateActorRef;
     expect(machine).toBeDefined();
 
     /* The project's route remounts: its binding unregisters and registers a new session. */
-    store.setProjectSession('proj_pane', undefined);
-    store.setProjectSession('proj_pane', fakeSession('proj_pane').ref);
+    liveSessions.set('proj_pane', undefined);
+    liveSessions.set('proj_pane', fakeSession('proj_pane').ref);
 
     /* The pane subscribed to `machine` when the chat joined; it must still be the chat's machine. */
     expect(session.stateActorRef).toBe(machine);
     expect(machine.getSnapshot().status).toBe('active');
     store.release('chat_pane');
-    store.setProjectSession('proj_pane', undefined);
+    liveSessions.set('proj_pane', undefined);
   });
 
   it('forwards its project’s revision facts to a chat, whether it joined before or after them (PV-S5)', () => {
@@ -2429,7 +2528,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('should ignore a delayed hydration after the session is released', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -2439,9 +2539,9 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setDependencies(deps);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
+    focus.set('proj_b');
 
     try {
       const root = store.acquire('chat_delayed_release', 'proj_b').stateActorRef;
@@ -2467,13 +2567,14 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       expect(projectA.heard).toEqual([]);
       expect(projectB.heard).toEqual([]);
     } finally {
-      store.setProjectSession('proj_a', undefined);
-      store.setProjectSession('proj_b', undefined);
+      liveSessions.set('proj_a', undefined);
+      liveSessions.set('proj_b', undefined);
     }
   });
 
   it('should not let a released hydration close a reacquired replacement', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveFirstLoad!: (chat: ChatEntity) => void;
     const firstLoad = new Promise<ChatEntity>((resolve) => {
@@ -2487,9 +2588,9 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     store.setDependencies(deps);
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
+    focus.set('proj_b');
 
     try {
       const released = store.acquire('chat_reacquired', 'proj_b');
@@ -2530,8 +2631,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         createdAt: 0,
         updatedAt: 0,
       });
-      store.setProjectSession('proj_a', undefined);
-      store.setProjectSession('proj_b', undefined);
+      liveSessions.set('proj_a', undefined);
+      liveSessions.set('proj_b', undefined);
     }
   });
 
@@ -2588,7 +2689,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       },
     };
     const client = createAgentHostClient(transport);
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
     store.setDependencies(deps);
@@ -2640,7 +2741,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       const chatId = 'chat_mounted_reset_capture';
       const projectId = 'project_mounted_reset_capture';
       const runId = 'run_mounted_reset_capture';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -2786,7 +2887,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       const chatId = 'chat_zero_generation_reset';
       const projectId = 'project_zero_generation_reset';
       const runId = 'run_zero_generation_reset';
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -2941,7 +3042,7 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const chatId = 'chat_validated_warm_hydration';
     const projectId = 'project_validated_warm_hydration';
     const runId = 'run_validated_warm_hydration';
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps();
     const metadata = Promise.withResolvers<ChatEntity>();
     const validation = Promise.withResolvers<void>();
@@ -3063,7 +3164,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   });
 
   it('keeps an early projected run with its owner through hydration', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const focus = focusedProjectStandIn();
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession, focusedProject: focus });
     const deps = createStubDeps();
     let resolveLoadedChat!: (chat: ChatEntity) => void;
     const loadedChat = new Promise<ChatEntity>((resolve) => {
@@ -3074,9 +3176,9 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
     const projectA = fakeSession('proj_a');
     const projectB = fakeSession('proj_b');
-    store.setProjectSession('proj_a', projectA.ref);
-    store.setProjectSession('proj_b', projectB.ref);
-    store.setFocusedProject('proj_b');
+    liveSessions.set('proj_a', projectA.ref);
+    liveSessions.set('proj_b', projectB.ref);
+    focus.set('proj_b');
     const stopObserving = store.observe('chat_early_settlement', 'proj_a');
 
     try {
@@ -3112,8 +3214,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     } finally {
       stopObserving();
       store.release('chat_early_settlement');
-      store.setProjectSession('proj_a', undefined);
-      store.setProjectSession('proj_b', undefined);
+      liveSessions.set('proj_a', undefined);
+      liveSessions.set('proj_b', undefined);
     }
   });
 });
@@ -3143,7 +3245,7 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
   it('shows an idle chat none of the history its log replays, and counts no run (W0.2)', () => {
     const store = createStore();
     const project = countingProject();
-    store.setProjectSession('proj_history', project.ref);
+    liveSessions.set('proj_history', project.ref);
     const actor = store.acquire('chat_history', 'proj_history').stateActorRef;
 
     publishLogRows(store, 'chat_history', [...runningRows('run_old'), lifecycleRow(2, 'completed', 'run_old')]);
@@ -3151,13 +3253,13 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
     expect(project.heard).toEqual([]);
     store.release('chat_history');
-    store.setProjectSession('proj_history', undefined);
+    liveSessions.set('proj_history', undefined);
   });
 
   it('reports a replayed run only once the replay holds the log to its end', () => {
     const store = createStore();
     const project = countingProject();
-    store.setProjectSession('proj_pages', project.ref);
+    liveSessions.set('proj_pages', project.ref);
     const actor = store.acquire('chat_pages', 'proj_pages').stateActorRef;
     const stopObserving = store.observe('chat_pages', 'proj_pages');
 
@@ -3176,7 +3278,7 @@ describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
     expect(project.heard).toEqual([{ type: 'projectedRunsChanged', runs: ['chat_pages'], stoppableRuns: [] }]);
     stopObserving();
     store.release('chat_pages');
-    store.setProjectSession('proj_pages', undefined);
+    liveSessions.set('proj_pages', undefined);
   });
 });
 
@@ -3209,7 +3311,8 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
   /* A chat-wide record error remains available to the card while attachment
    * is unknown, but it never manufactures a host run for the sidebar. */
   it('leaves a hydrated refusal diagnostic out of the chat run machine', async () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const heard: Array<Record<string, unknown>> = [];
     const projectHeard: Array<{ type: string }> = [];
     const projectRef = {
@@ -3217,10 +3320,10 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
         projectHeard.push(event);
       },
       getSnapshot: () => ({ context: { runs: [] } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    } as unknown as LiveProjectSessions[string];
 
-    store.setFocusedProject('proj_reload');
-    store.setProjectSession('proj_reload', projectRef);
+    focus.set('proj_reload');
+    liveSessions.set('proj_reload', projectRef);
     const session = store.acquire('chat_reloaded', 'proj_reload');
     spyOnSend(session.stateActorRef, (event) => {
       heard.push(event);
@@ -3239,19 +3342,20 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
     /* A refused command has no projected run for the project to count. */
     expect(projectHeard).toEqual([]);
     store.release('chat_reloaded');
-    store.setProjectSession('proj_reload', undefined);
+    liveSessions.set('proj_reload', undefined);
   });
 
   it('leaves a live run alone, replaying nothing over it', async () => {
-    const store = createStore();
+    const focus = focusedProjectStandIn();
+    const store = createStore(focus);
     const heard: Array<Record<string, unknown>> = [];
     const projectRef = {
       send: () => undefined,
       getSnapshot: () => ({ context: { runs: [] } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    } as unknown as LiveProjectSessions[string];
 
-    store.setFocusedProject('proj_live');
-    store.setProjectSession('proj_live', projectRef);
+    focus.set('proj_live');
+    liveSessions.set('proj_live', projectRef);
     const session = store.acquire('chat_streaming', 'proj_live');
     spyOnSend(session.stateActorRef, (event) => {
       heard.push(event);
@@ -3267,7 +3371,7 @@ describe('ChatSessionStore — persisted failure diagnosis (P59)', () => {
 
     expect(heard.filter((event) => event['phase'] === 'failed')).toEqual([]);
     store.release('chat_streaming');
-    store.setProjectSession('proj_live', undefined);
+    liveSessions.set('proj_live', undefined);
   });
 });
 
@@ -3793,7 +3897,7 @@ describe('ChatSessionStore', () => {
 
   it('derives funded operation IDs and tokens from a foreign accepted host log', async () => {
     const client = createMemoryClient();
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe('chat_usage', 'project_1');
     const rows = [
@@ -3853,7 +3957,7 @@ describe('ChatSessionStore', () => {
   });
 
   it('routes accepted user activity through the current dependency set', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps();
     store.setDependencies(deps);
 
@@ -3863,7 +3967,7 @@ describe('ChatSessionStore', () => {
   });
 
   it('acknowledges foreign watches before reading and fences a held read across a burst and final release', async () => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const client = createMemoryClient();
     const path = '/projects/project/.tau/chats/chat_foreign/events/peer.jsonl';
     const bytes = (text: string): Uint8Array<ArrayBuffer> => {
@@ -3944,6 +4048,54 @@ describe('ChatSessionStore', () => {
     unsubscribe();
   });
 
+  it.each([
+    ['a summary of an ancestor', { type: 'change', path: '.tau/chats' }, 2],
+    ['a summary of the project root', { type: 'change', path: '' }, 2],
+    ['a deletion of an ancestor', { type: 'delete', path: '.tau' }, 2],
+    ['a summary of a sibling chat', { type: 'change', path: '.tau/chats/chat_other' }, 1],
+    ['a summary of a sibling whose name shares a prefix', { type: 'change', path: '.tau/chat' }, 1],
+  ] satisfies Array<[string, WatchEvent, number]>)(
+    'refolds a foreign segment directory on %s',
+    async (_case, event, reads) => {
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const client = createMemoryClient();
+      client.files.set(
+        '/projects/project/.tau/chats/chat_foreign/events/peer.jsonl',
+        new TextEncoder().encode(JSON.stringify(lifecycleRow(0, 'running'))),
+      );
+      const readFile = vi.spyOn(client, 'readFile');
+      let listener: ((event: WatchEvent) => void) | undefined;
+      store.setDependencies({
+        ...createStubDeps(client),
+        watchRecordFile: (_directory, callback) => {
+          listener = callback;
+          return {
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              /* Owner-controlled watch. */
+            }),
+            dispose: vi.fn(),
+          };
+        },
+      });
+      const release = store.observe('chat_foreign', 'project');
+      try {
+        await vi.waitFor(() => {
+          expect(readFile).toHaveBeenCalledOnce();
+        });
+        listener?.(event);
+        await settle();
+        await vi.waitFor(() => {
+          expect(readFile).toHaveBeenCalledTimes(reads);
+        });
+        await settle();
+        expect(readFile).toHaveBeenCalledTimes(reads);
+      } finally {
+        release();
+      }
+    },
+  );
+
   it('updates the active tool name from the log when counts stay unchanged (PV-S7)', () => {
     const store = createStore();
     const session = store.acquire('chat_tool_name', 'project_1');
@@ -3988,7 +4140,7 @@ describe('ChatSessionStore', () => {
     const projectId = 'proj_unread';
     const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
     const storeInProject = (): { store: StoreType; deps: StubDeps } => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockImplementation(async (chatId) => chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -4077,6 +4229,30 @@ describe('ChatSessionStore', () => {
       ended(store, 'chat_listed', 'completed');
 
       expect(store.isUnread('chat_listed')).toBe(true);
+    });
+
+    /* D-UI-06: a sidebar row observes its chat's log and never acquires it, so a chat the person is not in is answered
+     * from its observation: its project's record, its log's newest attention row and its receipt. */
+    it('answers unread for a chat the sidebar only observes', async () => {
+      const { store, deps } = storeInProject();
+      await deps.client.writeFile(
+        unreadPath,
+        new TextEncoder().encode(JSON.stringify({ version: 1, unread: { chat_marked: true } })),
+      );
+      // The focused chat's hook opens the project's record (`useFocusedChatReadState`).
+      store.unreadRecordRef(projectId);
+      const unobserveListed = store.observe('chat_listed', projectId);
+      const unobserveMarked = store.observe('chat_marked', projectId);
+      await vi.waitFor(() => {
+        expect(store.hasUnreadMark('chat_marked')).toBe(true);
+      });
+      expect(store.isUnread('chat_marked')).toBe(true);
+
+      ended(store, 'chat_listed', 'completed');
+
+      expect(store.isUnread('chat_listed')).toBe(true);
+      unobserveListed();
+      unobserveMarked();
     });
 
     it('marks a run that ends while its focused view is hidden, and clears it when the person looks', async () => {
@@ -4549,7 +4725,7 @@ describe('ChatSessionStore', () => {
 
   describe('projected empty-cancel draft restore', () => {
     const open = async (chatId: string, projectId: string) => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
       store.setDependencies(deps);
@@ -4792,7 +4968,7 @@ describe('ChatSessionStore', () => {
         await first.store.requestTurn(chatId, queuedGesture('after'));
         first.unpublish();
         first.store.release(chatId);
-        const reopened = new ChatSessionStore({ chatSession });
+        const reopened = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
         reopened.setDependencies(first.deps);
         const session = reopened.acquire(chatId, projectId);
         const unadmit = queueAdmission(chatId);
@@ -5047,7 +5223,7 @@ describe('ChatSessionStore', () => {
       expect(session.messageQueueRef.getSnapshot().context.items[0]?.command).toEqual(original);
       unpublish();
       store.release(chatId);
-      const reopened = new ChatSessionStore({ chatSession });
+      const reopened = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       reopened.setDependencies(deps);
       const restored = reopened.acquire(chatId, projectId);
       const unadmitReopened = queueAdmission(chatId);
@@ -5223,7 +5399,7 @@ describe('ChatSessionStore', () => {
       const chatId = 'queue_tabs';
       const projectId = 'queue_tabs_project';
       const first = await open(chatId, projectId);
-      const second = new ChatSessionStore({ chatSession });
+      const second = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       second.setDependencies(first.deps);
       second.acquire(chatId, projectId);
       const unadmit = queueAdmission(chatId);
@@ -5347,12 +5523,11 @@ describe('ChatSessionStore', () => {
       const cancel = hostCommand.mock.calls[0]?.[0];
       expect(cancel?.type).toBe('cancel');
       /* The host labels every cancel USER_STOPPED; only this line says which gesture sent it. */
-      expect(info).toHaveBeenCalledWith('[ChatSessionStore] host cancel', {
-        chatId,
-        runId,
-        commandId: cancel?.commandId,
-        origin: 'stop-button',
-      });
+      // As JSON text: the desktop log flattens an object argument to `[object Object]`.
+      expect(info).toHaveBeenCalledWith(
+        '[ChatSessionStore] host cancel',
+        JSON.stringify({ chatId, runId, commandId: cancel?.commandId, origin: 'stop-button' }),
+      );
       info.mockRestore();
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
@@ -5412,7 +5587,7 @@ describe('ChatSessionStore', () => {
 
   describe('hydration on acquire', () => {
     it('calls deps.getChat on first acquire so hydration kicks off', async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -5515,7 +5690,7 @@ describe('ChatSessionStore', () => {
     });
 
     it('clears hydrated history only after an authoritative empty host answer', async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       const previous: MyUIMessage = {
         id: 'obsolete-user',
@@ -5534,8 +5709,764 @@ describe('ChatSessionStore', () => {
       store.release('chat_verified_empty');
     });
 
+    it('reports a loading transcript, never an empty one, before the load settles for a chat with history (U7)', async () => {
+      const chatId = 'chat_deferred_transcript';
+      const projectId = 'project_deferred_transcript';
+      const runId = 'run_deferred_transcript';
+      const emptyChatId = 'chat_deferred_transcript_empty';
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      /* I21: A12 makes the session report `transcript: loading | loaded | empty`, and this reads it once it exists.
+       * Until then the session reports only its chat-row load and its messages, and a session out of that load with
+       * no messages is what the lane shows as the empty chat. */
+      type TranscriptState = 'loading' | 'loaded' | 'empty';
+      const reportedTranscript = (session: ReturnType<StoreType['acquire']>): TranscriptState => {
+        const declared = (session as { readonly transcript?: TranscriptState }).transcript;
+        if (declared !== undefined) {
+          return declared;
+        }
+        if (session.persistenceActorRef.getSnapshot().context.isLoadingChat) {
+          return 'loading';
+        }
+        return session.messages.length === 0 ? 'empty' : 'loaded';
+      };
+      const session = store.acquire(chatId, projectId);
+      // Each report with the turns the session held when it made it.
+      const reported: Array<{ readonly transcript: TranscriptState; readonly messages: number }> = [];
+      const reports: TranscriptState[] = [];
+      const record = (): void => {
+        const transcript = reportedTranscript(session);
+        reports.push(transcript);
+        reported.push({ transcript, messages: session.messages.length });
+      };
+      record();
+      const unsubscribeChat = store.subscribeChat(chatId, record);
+      const unsubscribeProjection = store.subscribeProjection(chatId, record);
+      const persistence = session.persistenceActorRef.subscribe(record);
+      try {
+        // The transcript is the host log's, and the row holds its answer back: the load has not settled.
+        await settle();
+        record();
+        expect(reports[0]).toBe('loading');
+        expect(reports).not.toContain('empty');
+
+        publishLogRows(store, chatId, [
+          ...runningRows(runId),
+          logRow(2, {
+            runId,
+            type: 'message.appended',
+            message: { id: 'deferred-reply', role: 'assistant', content: 'The bracket is ready.' },
+          }),
+          lifecycleRow(3, 'completed', runId),
+        ]);
+        await vi.waitFor(() => {
+          expect(reportedTranscript(session)).toBe('loaded');
+        });
+        expect(session.messages.length).toBeGreaterThan(0);
+        // Nor between the host's answer and the turns appearing: never `empty` across the whole load.
+        expect(reports).not.toContain('empty');
+        // And `loaded` only with the turns it loaded: no report leaves `loading` for a blank lane (U19).
+        expect(reported.filter((report) => report.transcript === 'loaded' && report.messages === 0)).toEqual([]);
+
+        // A chat with no history still settles to `empty` once its log answers that it has none.
+        const emptySession = store.acquire(emptyChatId, projectId);
+        try {
+          publishLogPage(store, emptyChatId, [], { cursor: 0, endCursor: 0 });
+          await vi.waitFor(() => {
+            expect(reportedTranscript(emptySession)).toBe('empty');
+          });
+        } finally {
+          store.release(emptyChatId);
+        }
+      } finally {
+        unsubscribeChat();
+        unsubscribeProjection();
+        persistence.unsubscribe();
+        store.release(chatId);
+      }
+    });
+
+    it('serves the remembered composer trays before the transcript loads, and the settled ones after (U10)', async () => {
+      const memory = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const chatId = 'chat_remembered_tray';
+      memory.set(`tau:chat-composer-trays:${chatId}`, 'todo');
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, 'project_tray'));
+      store.setDependencies(deps);
+      try {
+        const session = store.acquire(chatId, 'project_tray');
+        await settle();
+        // Known before the log answers, so the lane can hold the tray's height from its first commit.
+        expect(session.transcript).toBe('loading');
+        expect(session.rememberedComposerTrays).toEqual(['todo']);
+
+        // The log settles with no task list: the tray is released, and the device forgets it.
+        publishLogPage(store, chatId, [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('empty');
+        });
+        expect(session.rememberedComposerTrays).toEqual([]);
+        expect(memory.has(`tau:chat-composer-trays:${chatId}`)).toBe(false);
+      } finally {
+        store.release(chatId);
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('does not go back to loading once a retried read answers, and latches a refused read as settled (I21)', async () => {
+      const projectId = 'project_retried_read';
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const retried = store.acquire('chat_retried_read', projectId);
+      const refused = store.acquire('chat_refused_read', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const record = (): void => {
+        reports.push(retried.transcript);
+      };
+      const unsubscribeChat = store.subscribeChat('chat_retried_read', record);
+      const unsubscribeProjection = store.subscribeProjection('chat_retried_read', record);
+      try {
+        await settle();
+        // A read that is retried has not settled: the chat stays loading through it, never empty then loading.
+        store.receiveHostReadAnswer('chat_retried_read', { status: 'refused', reason: 'owner-fenced' });
+        record();
+        expect(retried.transcript).toBe('loading');
+        publishLogRows(store, 'chat_retried_read', [
+          ...runningRows('run_retried'),
+          logRow(2, {
+            runId: 'run_retried',
+            type: 'message.appended',
+            message: { id: 'retried-reply', role: 'assistant', content: 'Back again.' },
+          }),
+          lifecycleRow(3, 'completed', 'run_retried'),
+        ]);
+        await vi.waitFor(() => {
+          expect(retried.transcript).toBe('loaded');
+        });
+        const left = reports.findIndex((report) => report !== 'loading');
+        expect(reports.slice(left)).not.toContain('loading');
+        expect(reports).not.toContain('empty');
+
+        // Nothing answers a read the host refuses for good: that load has settled, and it stays settled.
+        store.receiveHostReadAnswer('chat_refused_read', { status: 'refused', reason: 'unreadable' });
+        expect(refused.transcript).toBe('empty');
+      } finally {
+        unsubscribeChat();
+        unsubscribeProjection();
+        store.release('chat_retried_read');
+        store.release('chat_refused_read');
+      }
+    });
+
+    it('shows a chat this tab created empty as empty at once, and its turns once the log has them (I21)', async () => {
+      const projectId = 'project_created_empty';
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      store.noteCreatedEmpty('chat_created_empty');
+      const session = store.acquire('chat_created_empty', projectId);
+      // A chat acquired without the note still waits for its log.
+      const other = store.acquire('chat_not_noted', projectId);
+      try {
+        expect(session.transcript).toBe('empty');
+        expect(other.transcript).toBe('loading');
+        publishLogRows(store, 'chat_created_empty', [
+          ...runningRows('run_created'),
+          logRow(2, {
+            runId: 'run_created',
+            type: 'message.appended',
+            message: { id: 'created-reply', role: 'assistant', content: 'Hello.' },
+          }),
+          lifecycleRow(3, 'completed', 'run_created'),
+        ]);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('loaded');
+        });
+      } finally {
+        store.release('chat_created_empty');
+        store.release('chat_not_noted');
+      }
+    });
+
+    it('keeps a chat loading, and its remembered tray, while the history from other devices is still read (I21, U10)', async () => {
+      const projectId = 'project_foreign_pending';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      await client.writeFile(`${eventsOf('chat_foreign_pending')}/other-device.jsonl`, new TextEncoder().encode(rows));
+      const scan = Promise.withResolvers<string[]>();
+      const failedScan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === eventsOf('chat_foreign_pending')) {
+          return scan.promise;
+        }
+        if (path === eventsOf('chat_foreign_unreadable')) {
+          return failedScan.promise;
+        }
+        return readDirectory(path);
+      });
+      const memory = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      memory.set('tau:chat-composer-trays:chat_foreign_pending', 'todo');
+      memory.set('tau:chat-composer-trays:chat_foreign_unreadable', 'todo');
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_foreign_pending', projectId);
+      const unreadable = store.acquire('chat_foreign_unreadable', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const unsubscribe = store.subscribeChat('chat_foreign_pending', () => {
+        reports.push(session.transcript);
+      });
+      try {
+        await settle();
+        // This device's own log answers empty first: the turns that ran elsewhere are still being read.
+        publishLogPage(store, 'chat_foreign_pending', [], { cursor: 0, endCursor: 0 });
+        publishLogPage(store, 'chat_foreign_unreadable', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        expect(session.transcript).toBe('loading');
+        expect(session.rememberedComposerTrays).toEqual(['todo']);
+        expect(memory.get('tau:chat-composer-trays:chat_foreign_pending')).toBe('todo');
+
+        scan.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('loaded');
+        });
+        expect(reports).not.toContain('empty');
+
+        // A scan that fails has settled the load, and nothing was read to forget the tray by.
+        expect(unreadable.transcript).toBe('loading');
+        failedScan.reject(Object.assign(new Error('EIO'), { code: 'EIO' }));
+        await vi.waitFor(() => {
+          expect(unreadable.transcript).toBe('empty');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_foreign_unreadable')).toBe('todo');
+      } finally {
+        unsubscribe();
+        store.release('chat_foreign_pending');
+        store.release('chat_foreign_unreadable');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('settles against the scan of other devices whatever order it ends in, and keeps the tray when it read nothing (I21, U10)', async () => {
+      const projectId = 'project_foreign_order';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      await client.writeFile(`${eventsOf('chat_refused_pending')}/other-device.jsonl`, new TextEncoder().encode(rows));
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === eventsOf('chat_refused_pending')) {
+          return scan.promise;
+        }
+        if (path === eventsOf('chat_scan_failed_first')) {
+          throw Object.assign(new Error('EIO'), { code: 'EIO' });
+        }
+        return readDirectory(path);
+      });
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_scan_failed_first', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const failedFirst = store.acquire('chat_scan_failed_first', projectId);
+      const refused = store.acquire('chat_refused_pending', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const unsubscribe = store.subscribeChat('chat_refused_pending', () => {
+        reports.push(refused.transcript);
+      });
+      try {
+        await settle();
+        // The scan failed before the local log answered: the load settles, and nothing was read to forget the tray by.
+        publishLogPage(store, 'chat_scan_failed_first', [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(failedFirst.transcript).toBe('empty');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_scan_failed_first')).toBe('todo');
+
+        // A refused local read does not show the chat empty while the turns that ran elsewhere are on their way.
+        store.receiveHostReadAnswer('chat_refused_pending', { status: 'refused', reason: 'unreadable' });
+        await settle();
+        expect(refused.transcript).toBe('loading');
+        scan.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(refused.transcript).toBe('loaded');
+        });
+        expect(reports).not.toContain('empty');
+      } finally {
+        unsubscribe();
+        store.release('chat_scan_failed_first');
+        store.release('chat_refused_pending');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('waits for the watched scan of other devices, and keeps the tray when that watch closes unread (I21, U10)', async () => {
+      const projectId = 'project_foreign_watch';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      await client.writeFile(`${eventsOf('chat_watched')}/other-device.jsonl`, new TextEncoder().encode(rows));
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === eventsOf('chat_watched') ? scan.promise : readDirectory(path),
+      );
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path) => ({
+        ready: path === eventsOf('chat_watch_closed') ? Promise.reject(new Error('watch refused')) : Promise.resolve(),
+        closed: new Promise<void>(() => {
+          /* Owner-controlled watch. */
+        }),
+        dispose: vi.fn(),
+      });
+      const memory = new Map<string, string>([
+        ['tau:chat-composer-trays:chat_watched', 'todo'],
+        ['tau:chat-composer-trays:chat_watch_closed', 'todo'],
+      ]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const watched = store.acquire('chat_watched', projectId);
+      const closed = store.acquire('chat_watch_closed', projectId);
+      const reports: Array<ReturnType<StoreType['acquire']>['transcript']> = [];
+      const unsubscribe = store.subscribeChat('chat_watched', () => {
+        reports.push(watched.transcript);
+      });
+      try {
+        await settle();
+        publishLogPage(store, 'chat_watched', [], { cursor: 0, endCursor: 0 });
+        publishLogPage(store, 'chat_watch_closed', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        expect(watched.transcript).toBe('loading');
+        expect(memory.get('tau:chat-composer-trays:chat_watched')).toBe('todo');
+        scan.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(watched.transcript).toBe('loaded');
+        });
+        expect(reports).not.toContain('empty');
+
+        // A watch that closed before it read anything settles the load without forgetting the tray.
+        expect(closed.transcript).toBe('empty');
+        expect(memory.get('tau:chat-composer-trays:chat_watch_closed')).toBe('todo');
+      } finally {
+        unsubscribe();
+        store.release('chat_watched');
+        store.release('chat_watch_closed');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('settles a chat whose read was refused before it was opened, or before it was opened again (I21)', async () => {
+      const projectId = 'project_refused_earlier';
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const stopListed = store.observe('chat_refused_listed', projectId);
+      const stopReopened = store.observe('chat_refused_reopened', projectId);
+      try {
+        await settle();
+        // Refused while only listed in the sidebar, then opened.
+        store.receiveHostReadAnswer('chat_refused_listed', { status: 'refused', reason: 'unreadable' });
+        const listed = store.acquire('chat_refused_listed', projectId);
+        await settle();
+        expect(listed.transcript).toBe('empty');
+
+        // Refused while open, then left and opened again while the sidebar still lists it.
+        const first = store.acquire('chat_refused_reopened', projectId);
+        await settle();
+        store.receiveHostReadAnswer('chat_refused_reopened', { status: 'refused', reason: 'unreadable' });
+        expect(first.transcript).toBe('empty');
+        store.release('chat_refused_reopened');
+        const reopened = store.acquire('chat_refused_reopened', projectId);
+        await settle();
+        expect(reopened.transcript).toBe('empty');
+      } finally {
+        store.release('chat_refused_listed');
+        store.release('chat_refused_reopened');
+        stopListed();
+        stopReopened();
+      }
+    });
+
+    it('settles a listed chat opened, or opened again, after its foreign watch closed (I21)', async () => {
+      const projectId = 'project_listed_watch_closed';
+      const closings = new Map<string, PromiseWithResolvers<void>>();
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path) => {
+        const closing = Promise.withResolvers<void>();
+        closings.set(path, closing);
+        return { ready: Promise.resolve(), closed: closing.promise, dispose: vi.fn() };
+      };
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const stopListed = store.observe('chat_listed_closed', projectId);
+      const stopReopened = store.observe('chat_reopened_closed', projectId);
+      try {
+        // Only listed when its watch closed and its log answered: opening it finds nothing more to wait for.
+        await settle();
+        closings.get(eventsOf('chat_listed_closed'))?.resolve();
+        await settle();
+        publishLogPage(store, 'chat_listed_closed', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        const listed = store.acquire('chat_listed_closed', projectId);
+        await settle();
+        expect(listed.transcript).toBe('empty');
+
+        // Open when its watch closed, then left and opened again while the sidebar still lists it.
+        const first = store.acquire('chat_reopened_closed', projectId);
+        await settle();
+        closings.get(eventsOf('chat_reopened_closed'))?.resolve();
+        await settle();
+        publishLogPage(store, 'chat_reopened_closed', [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(first.transcript).toBe('empty');
+        });
+        store.release('chat_reopened_closed');
+        await settle();
+        const reopened = store.acquire('chat_reopened_closed', projectId);
+        await settle();
+        expect(reopened.transcript).toBe('empty');
+      } finally {
+        store.release('chat_listed_closed');
+        store.release('chat_reopened_closed');
+        stopListed();
+        stopReopened();
+      }
+    });
+
+    it('settles a chat whose foreign watch closed after it read, without forgetting the tray (I21, U10)', async () => {
+      const projectId = 'project_watch_closed_after_read';
+      const closed = Promise.withResolvers<void>();
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = () => ({
+        ready: Promise.resolve(),
+        closed: closed.promise,
+        dispose: vi.fn(),
+      });
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_closed_after_read', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const session = store.acquire('chat_closed_after_read', projectId);
+      try {
+        await settle();
+        // The watch read once, then the connection dropped before the local log answered.
+        closed.resolve();
+        await settle();
+        publishLogPage(store, 'chat_closed_after_read', [], { cursor: 0, endCursor: 0 });
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('empty');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_closed_after_read')).toBe('todo');
+      } finally {
+        store.release('chat_closed_after_read');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('does not settle from a log page that has not caught up when the foreign scan ends (I21, U10)', async () => {
+      const projectId = 'project_partial_page';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_partial_page/events`;
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === events ? scan.promise : readDirectory(path),
+      );
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_partial_page', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_partial_page', projectId);
+      try {
+        await settle();
+        publishLogPage(store, 'chat_partial_page', [], { cursor: 0, endCursor: 0 });
+        await settle();
+        // The log grew: its first page is not its end.
+        publishLogPage(
+          store,
+          'chat_partial_page',
+          [
+            ...runningRows('run_partial'),
+            logRow(2, {
+              runId: 'run_partial',
+              type: 'message.appended',
+              message: { id: 'partial-reply', role: 'assistant', content: 'Part.' },
+            }),
+          ],
+          { cursor: 0, endCursor: 50 },
+        );
+        await settle();
+        scan.resolve([]);
+        await settle();
+        expect(session.transcript).toBe('loading');
+        expect(memory.get('tau:chat-composer-trays:chat_partial_page')).toBe('todo');
+      } finally {
+        store.release('chat_partial_page');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('settles a refused read after a partial page once the foreign scan reads, since nothing will catch it up (I21)', async () => {
+      const projectId = 'project_refused_partial';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_refused_partial/events`;
+      const scan = Promise.withResolvers<string[]>();
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) =>
+        path === events ? scan.promise : readDirectory(path),
+      );
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_refused_partial', projectId);
+      try {
+        await settle();
+        publishLogPage(store, 'chat_refused_partial', [...runningRows('run_refused_partial')], {
+          cursor: 0,
+          endCursor: 50,
+        });
+        await settle();
+        store.receiveHostReadAnswer('chat_refused_partial', { status: 'refused', reason: 'unreadable' });
+        await settle();
+        expect(session.transcript).toBe('loading');
+        scan.resolve([]);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('empty');
+        });
+      } finally {
+        store.release('chat_refused_partial');
+      }
+    });
+
+    it('does not settle a partial page while a watched rescan has failed and may retry (I21)', async () => {
+      const projectId = 'project_rescan_failed';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_rescan_failed/events`;
+      let scans = 0;
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === events) {
+          scans += 1;
+          if (scans === 2) {
+            throw Object.assign(new Error('EIO'), { code: 'EIO' });
+          }
+        }
+        return readDirectory(path);
+      });
+      let notify: ((event: WatchEvent) => void) | undefined;
+      const watch: NonNullable<ChatSessionDeps['watchRecordFile']> = (path, listener) => {
+        if (path === events) {
+          notify = listener;
+        }
+        return {
+          ready: Promise.resolve(),
+          closed: new Promise<void>(() => {
+            /* Owner-controlled watch. */
+          }),
+          dispose: vi.fn(),
+        };
+      };
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies({ ...deps, watchRecordFile: watch });
+      const session = store.acquire('chat_rescan_failed', projectId);
+      try {
+        await settle();
+        notify?.({ type: 'change', path: `${events}/other-device.jsonl` });
+        await settle();
+        expect(scans).toBe(2);
+        publishLogPage(
+          store,
+          'chat_rescan_failed',
+          [
+            ...runningRows('run_rescan_failed'),
+            logRow(2, {
+              runId: 'run_rescan_failed',
+              type: 'message.appended',
+              message: { id: 'rescan-reply', role: 'assistant', content: 'Part.' },
+            }),
+          ],
+          { cursor: 0, endCursor: 50 },
+        );
+        await settle();
+        expect(session.transcript).toBe('loading');
+      } finally {
+        store.release('chat_rescan_failed');
+      }
+    });
+
+    it('remembers trays only from a transcript that holds the local log (U10)', async () => {
+      const projectId = 'project_foreign_only';
+      const client = createMemoryClient();
+      const rows = readFileSync(
+        new URL(
+          '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+          pathToFileURL(import.meta.filename),
+        ),
+        'utf8',
+      );
+      const eventsOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/events`;
+      const scans = new Map<string, PromiseWithResolvers<string[]>>();
+      const foreignChats = ['chat_foreign_refused', 'chat_foreign_unanswered'];
+      await Promise.all(
+        foreignChats.map(async (chatId) =>
+          client.writeFile(`${eventsOf(chatId)}/other-device.jsonl`, new TextEncoder().encode(rows)),
+        ),
+      );
+      for (const chatId of foreignChats) {
+        scans.set(eventsOf(chatId), Promise.withResolvers<string[]>());
+      }
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => scans.get(path)?.promise ?? readDirectory(path));
+      const memory = new Map<string, string>([
+        ['tau:chat-composer-trays:chat_foreign_refused', 'todo'],
+        ['tau:chat-composer-trays:chat_foreign_unanswered', 'todo'],
+      ]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const refused = store.acquire('chat_foreign_refused', projectId);
+      const unanswered = store.acquire('chat_foreign_unanswered', projectId);
+      try {
+        await settle();
+        // This device's log is refused for good: the other device's turns show, but they are not the whole chat.
+        store.receiveHostReadAnswer('chat_foreign_refused', { status: 'refused', reason: 'unreadable' });
+        scans.get(eventsOf('chat_foreign_refused'))?.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(refused.transcript).toBe('loaded');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_foreign_refused')).toBe('todo');
+
+        // This device's log has not answered yet.
+        scans.get(eventsOf('chat_foreign_unanswered'))?.resolve(['other-device.jsonl']);
+        await vi.waitFor(() => {
+          expect(unanswered.transcript).toBe('loaded');
+        });
+        expect(memory.get('tau:chat-composer-trays:chat_foreign_unanswered')).toBe('todo');
+      } finally {
+        store.release('chat_foreign_refused');
+        store.release('chat_foreign_unanswered');
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('keeps the remembered tray when the foreign scan failed, even once local turns show (U10)', async () => {
+      const projectId = 'project_failed_scan_turns';
+      const client = createMemoryClient();
+      const events = `/projects/${projectId}/.tau/chats/chat_failed_scan_turns/events`;
+      const readDirectory = client.readdir.bind(client);
+      vi.spyOn(client, 'readdir').mockImplementation(async (path) => {
+        if (path === events) {
+          throw Object.assign(new Error('EIO'), { code: 'EIO' });
+        }
+        return readDirectory(path);
+      });
+      const memory = new Map<string, string>([['tau:chat-composer-trays:chat_failed_scan_turns', 'todo']]);
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => memory.get(key) ?? null,
+        setItem: (key: string, value: string) => memory.set(key, value),
+        removeItem: (key: string) => memory.delete(key),
+      });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const deps = createStubDeps(client);
+      deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+      store.setDependencies(deps);
+      const session = store.acquire('chat_failed_scan_turns', projectId);
+      try {
+        await settle();
+        publishLogRows(store, 'chat_failed_scan_turns', [
+          ...runningRows('run_failed_scan'),
+          logRow(2, {
+            runId: 'run_failed_scan',
+            type: 'message.appended',
+            message: { id: 'failed-scan-reply', role: 'assistant', content: 'Local.' },
+          }),
+          lifecycleRow(3, 'completed', 'run_failed_scan'),
+        ]);
+        await vi.waitFor(() => {
+          expect(session.transcript).toBe('loaded');
+        });
+        // The task list may live in the history the scan could not read.
+        expect(memory.get('tau:chat-composer-trays:chat_failed_scan_turns')).toBe('todo');
+      } finally {
+        store.release('chat_failed_scan_turns');
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('does not rewrite or replay a log-derived pending tail without a seed intent', async () => {
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       const deps = createStubDeps();
       store.setDependencies(deps);
 
@@ -5603,7 +6534,7 @@ describe('ChatSessionStore — composer records (W7)', () => {
   });
 
   const openStore = (client: MemoryClient, row: ChatEntity = chatRow(chatId, projectId)) => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => (id === row.id ? row : undefined));
     store.setDependencies(deps);
@@ -5701,6 +6632,32 @@ describe('ChatSessionStore — composer records (W7)', () => {
     });
     expect(second.store.isUnread(chatId)).toBe(false);
     second.store.release(chatId);
+  });
+
+  /* D9, PV-S8: a legacy mark on a log with no attention row is not unread once the log is read, yet the record keeps
+   * it and a fresh page answers from it until that page reads the log; viewing the chat removes it. */
+  it('keeps a legacy mark a caught-up log no longer reads as unread until the chat is viewed', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    await client.writeFile(
+      unreadPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, unread: { [chatId]: true } })),
+    );
+    const { store } = openStore(client);
+    store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(store.hasUnreadMark(chatId)).toBe(true);
+    });
+    publishLogRows(store, chatId, []);
+    expect(store.isUnread(chatId)).toBe(false);
+    expect(store.hasUnreadMark(chatId)).toBe(true);
+
+    store.markViewed(chatId);
+    expect(store.hasUnreadMark(chatId)).toBe(false);
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({ version: 1 });
+    });
+    store.release(chatId);
   });
 
   it('should keep multiple queued messages and their promoted attachments across reopen', async () => {
@@ -6014,15 +6971,15 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
 
   /** A store over one device's disk, with a live project session; the store owns the chat's machine (PV-S5). */
   const openStore = (client: MemoryClient) => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     const deps = createStubDeps(client);
     deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
     store.setDependencies(deps);
     const projectRef = {
       send: () => undefined,
       getSnapshot: () => ({ context: { runs: [] } }),
-    } as unknown as Parameters<StoreType['setProjectSession']>[1];
-    store.setProjectSession(projectId, projectRef);
+    } as unknown as LiveProjectSessions[string];
+    liveSessions.set(projectId, projectRef);
     return { store };
   };
 
@@ -6115,7 +7072,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   const placementsPath = `/.tau/composers/chats/${projectId}/placements.json`;
   /* This tab reaches every device-relative placement unless a test says otherwise. */
   const openLoaded = async (deps: ChatSessionDeps, chatId: string) => {
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
@@ -6499,7 +7456,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       let reachable: boolean = knownAtLoad ?? false;
       const probe = Promise.withResolvers<boolean>();
       const listeners = new Set<() => void>();
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies({
         ...deps,
         isPlacementOnThisDevice: async () => (knownAtLoad === undefined ? probe.promise : reachable),
@@ -6717,7 +7674,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const chatId = 'chat_placement_written_elsewhere';
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model });
 
@@ -6732,7 +7689,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const deps = createStubDeps();
     seedPlacement(deps, chatId, 'origin');
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     await store.getChatHostSettings(chatId);
     const reads = vi.spyOn(deps.client, 'readFile');
@@ -6901,7 +7858,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
       new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe(chatId, projectId);
     store.acquire(chatId, projectId);
@@ -6941,7 +7898,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       );
     await client.writeFile(`${events}/pulled-at`, record(60_000));
     const pulls: string[] = [];
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies({
       ...createStubDeps(client),
       pullRemote: async (id) => {
@@ -7000,7 +7957,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
         new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
       );
       const asked: Array<readonly [string, string]> = [];
-      const store = new ChatSessionStore({ chatSession });
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
       store.setDependencies({
         ...createStubDeps(client),
         pullRemote: async (id, chat) => {
@@ -7044,7 +8001,7 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
       new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
     );
-    const store = new ChatSessionStore({ chatSession });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
     store.setDependencies(createStubDeps(client));
     const unobserve = store.observe(chatId, projectId);
     store.acquire(chatId, projectId);
@@ -7102,7 +8059,7 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
 
   const openOnClock = async (chatId: string) => {
     const clock = new StepClock();
-    const store = new ChatSessionStore({ chatSession: chatSessionOnRoute, clock });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession: chatSessionOnRoute, clock });
     store.setDependencies(createStubDeps());
     admitNothing(chatId);
     const session = store.acquire(chatId, `project_${chatId}`);
@@ -7337,7 +8294,7 @@ describe('ChatSessionStore — the chat resumes on its own (audit R5)', () => {
 
   it('should offer the wait of a chat whose log was read before it opened', async () => {
     const clock = new StepClock();
-    const store = new ChatSessionStore({ chatSession: chatSessionOnRoute, clock });
+    const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession: chatSessionOnRoute, clock });
     store.setDependencies(createStubDeps());
     admitNothing('chat_r5_read');
     const releaseObservation = store.observe('chat_r5_read', 'project_r5_read');

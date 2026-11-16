@@ -151,6 +151,11 @@ const verdictRpcNames = new Set<RpcName>([
  * `sourceRevisionSchema`/`writeRevisionSchema` own the exact digest grammar, so
  * re-stating it here would be a second source of truth for the same field. The
  * gate only needs "is there a digest at this path". */
+/** Tests kept inline in a reduced `test_model` result: enough for the host to read the run's check. */
+const compactTestLimit = 200;
+/** The largest `sourceRevisions` a reduced `test_model` result keeps inline; past it the revision is omitted. */
+const compactRevisionBytes = 32 * 1024;
+
 const closureSchema = z.object({ files: z.record(z.string(), z.string()) });
 const provenanceSchema = z.object({
   sourceRevision: closureSchema.optional(),
@@ -585,6 +590,20 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
             const compactReports = (reports: NonNullable<(typeof verdict.passes)[number]['reports']>) =>
               reports.map(({ canonical: _canonical, ...report }) => report);
             const { failures, passes, sourceRevisions, tests, lineage, ...summary } = verdict;
+            const keptTests = (tests ?? [])
+              .slice(0, compactTestLimit)
+              .map(({ id, requirement, targetFile, status, ordinal }) => ({
+                id: id.slice(0, 512),
+                requirement: requirement.slice(0, 512),
+                targetFile,
+                status,
+                ...(ordinal === undefined ? {} : { ordinal }),
+              }));
+            const keptRevisions =
+              sourceRevisions !== undefined &&
+              new TextEncoder().encode(JSON.stringify(sourceRevisions)).byteLength <= compactRevisionBytes
+                ? sourceRevisions
+                : undefined;
             const compact = oversized
               ? {
                   ...summary,
@@ -601,10 +620,16 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
                       targetFile,
                     })),
                   passes: [],
+                  /*
+                   * Each test's status and the digests of the source it ran against stay inline, bounded, so the
+                   * host can still record the run's check (and its `task-success`) from this result.
+                   */
+                  ...(keptTests.length === 0 ? {} : { tests: keptTests }),
+                  ...(keptRevisions === undefined ? {} : { sourceRevisions: keptRevisions }),
                   omittedFailures: failures.length - Math.min(failures.length, 20),
                   omittedPasses: passes.length,
-                  omittedSourceRevisions: sourceRevisions?.length ?? 0,
-                  omittedTests: tests?.length ?? 0,
+                  omittedSourceRevisions: keptRevisions === undefined ? (sourceRevisions?.length ?? 0) : 0,
+                  omittedTests: (tests?.length ?? 0) - keptTests.length,
                   omittedLineage: lineage?.length ?? 0,
                   fullResult,
                 }

@@ -42,7 +42,6 @@ export const graphicsSettingsForView = (
     enableGrid: shown['display.grid'],
     enableAxes: shown['display.axes'],
     enableMatcap: shown['display.matcap'],
-    enablePostProcessing: shown['display.postProcessing'],
     upDirection: shown.upDirection,
     cameraFovAngle: shown.fieldOfView,
     ...(record.camera.kind === 'pose' ? { cameraView: record.camera } : {}),
@@ -75,7 +74,6 @@ export const newViewRecord = (entryPath: string | null, settings?: GraphicsViewS
             grid: settings.enableGrid,
             axes: settings.enableAxes,
             matcap: settings.enableMatcap,
-            postProcessing: settings.enablePostProcessing,
           },
           ...(settings.cameraView ? { camera: { kind: 'pose', ...settings.cameraView } } : {}),
         }
@@ -153,7 +151,6 @@ type GraphicsViewContext = Readonly<{
   enableGrid: boolean;
   enableAxes: boolean;
   enableMatcap: boolean;
-  enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
   displayUnits: Readonly<{ length: Readonly<{ symbol: string }> }>;
   isSectionViewActive: boolean;
@@ -182,7 +179,6 @@ export const viewSettingsOf = (context: GraphicsViewContext, fieldOfView: number
     grid: context.enableGrid,
     axes: context.enableAxes,
     matcap: context.enableMatcap,
-    postProcessing: context.enablePostProcessing,
   },
   grid: { unit: isLengthUnit(context.displayUnits.length.symbol) ? context.displayUnits.length.symbol : 'mm' },
   section: { active: context.isSectionViewActive, cuts: context.sectionCuts.map((cut) => toPersistedSectionCut(cut)) },

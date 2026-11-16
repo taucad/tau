@@ -15,6 +15,10 @@
  * each such candidate must also have a green "Packaged desktop gate" (the `desktop-packaged.yml` call that runs the
  * packaged suite on the candidate commit after the shell gate, DS-3 #1810). Each gate is reported as its own row.
  *
+ * The daily drift check (`drift-check.yml`, Q-7) is watched as any scheduled workflow is (WD-1b): it waits for every
+ * workflow it dispatches and fails on a red one, so its newest scheduled run being green and in the 36-hour window
+ * means it ran and every dispatch it made is green.
+ *
  * Usage: node scripts/src/nightly-watchdog.ts [--summary <file>] [--test-alert]
  * Env: GITHUB_TOKEN, GITHUB_REPOSITORY (`owner/name`), CI_ALERT_WEBHOOK_URL (unset: report only and exit 1 on a
  * problem, so the run itself turns red), GITHUB_SERVER_URL, GITHUB_RUN_ID (for the alert's link).

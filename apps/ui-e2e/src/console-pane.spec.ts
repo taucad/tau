@@ -60,7 +60,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
 
 type ConsoleSurfaceState = {
   readonly bodyBackground: string;
-  readonly bodyToPaneBottomGap: number;
+  readonly bodyToNextUnitGap: number;
   readonly bottomRadius: number;
   readonly filterBackground: string;
   readonly filterHeight: number;
@@ -82,14 +82,21 @@ const readConsoleSurfaceState = async (header: Locator): Promise<ConsoleSurfaceS
     const headerRoot = element.closest<HTMLElement>('[data-slot="paneview-header"]');
     const pane = element.closest<HTMLElement>('.dv-pane');
     const body = pane?.querySelector<HTMLElement>('[data-slot="console-unit-surface"]');
-    const paneBody = body?.closest<HTMLElement>('.dv-pane-body');
+    /* The unit gap is the next header's top margin, or the collection's bottom padding under the last unit, rather
+     * than padding inside each pane body (`paneviewAttachedSurfaceStyleOverrides`). */
+    const collection = pane?.closest<HTMLElement>('[class~="pb-(--pane-unit-gap)"]');
+    const nextUnitEdge = (unitHeader: HTMLElement, root: HTMLElement): number => {
+      const headers = [...root.querySelectorAll<HTMLElement>('[data-slot="paneview-header"]')];
+      const nextHeader = headers[headers.indexOf(unitHeader) + 1];
+      return nextHeader ? nextHeader.getBoundingClientRect().top : root.getBoundingClientRect().bottom;
+    };
     const panel = document.querySelector<HTMLElement>('[data-slot="console-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="console-filter"]');
     const filter = document.querySelector<HTMLInputElement>('[aria-label="Filter logs"]');
     const scroller = body?.querySelector<HTMLElement>('[role="log"]');
     const row = body?.querySelector<HTMLElement>('[data-console-log-row]');
     const footer = body?.querySelector<HTMLElement>('[data-slot="console-scroll-footer"]');
-    if (!headerRoot || !body || !paneBody || !panel || !toolbar || !filter || !scroller || !row || !footer) {
+    if (!headerRoot || !body || !collection || !panel || !toolbar || !filter || !scroller || !row || !footer) {
       throw new Error('Console attached surface was incomplete.');
     }
 
@@ -99,7 +106,7 @@ const readConsoleSurfaceState = async (header: Locator): Promise<ConsoleSurfaceS
     const scrollerStyle = getComputedStyle(scroller);
     return {
       bodyBackground: getComputedStyle(body).backgroundColor,
-      bodyToPaneBottomGap: paneBody.getBoundingClientRect().bottom - bodyBounds.bottom,
+      bodyToNextUnitGap: nextUnitEdge(headerRoot, collection) - bodyBounds.bottom,
       bottomRadius: Number.parseFloat(getComputedStyle(body).borderBottomLeftRadius),
       filterBackground: getComputedStyle(filter).backgroundColor,
       filterHeight: filter.getBoundingClientRect().height,
@@ -147,7 +154,7 @@ test('modernizes Console as a global-filtered multi-unit bottom-following log su
   const lightSurface = await readConsoleSurfaceState(main);
   expect(lightSurface.seamDelta).toBeLessThanOrEqual(1);
   expect(lightSurface.horizontalEdgeDelta).toBeLessThanOrEqual(1);
-  expect(lightSurface.bodyToPaneBottomGap).toBeCloseTo(8, 0);
+  expect(lightSurface.bodyToNextUnitGap).toBeCloseTo(8, 0);
   expect(lightSurface.bottomRadius).toBeGreaterThan(0);
   expect(lightSurface.filterHeight).toBe(28);
   expect(lightSurface.filterToHeaderGap).toBeCloseTo(8, 0);

@@ -33,7 +33,7 @@ import type { AnyActorRef, AnyEventObject, EnqueueObject, SnapshotFrom } from 'x
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import { eventSchemas } from '#machine-schemas.js';
 import type { MachineActors } from '#machine-schemas.js';
-import { isStorageRefusal } from '#refusal-markers.js';
+import { isCommitRefusal, isStorageRefusal } from '#refusal-markers.js';
 import type { RevisionRef, RemoteStorageRefusal } from '#revision-port.js';
 import type {
   SyncFacet,
@@ -480,6 +480,12 @@ export type SyncProjectRecordsActorInput = Readonly<{
   priorEvidenceHead?: string;
   /** When this pull read the remote's refs, on this device's clock: the chats it projects record it (`pullRecordAfter`). */
   pulledAt?: number | undefined;
+  /**
+   * The records may run while the apply writes the checkout (SP2h): a fast-forward whose `tau.json` asks for chats as
+   * the checkout's does. `syncChats` is then the fetch's reading of the applied manifest, since the checkout's may be
+   * mid-write; without it the records wait for the apply and read the manifest it landed.
+   */
+  besideApply?: true;
 }>;
 
 /** Independent completion of optional records after authored integration. @public */
@@ -601,7 +607,15 @@ const codeOf = (error: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined;
 };
 
-const isFatal = (error: unknown): boolean => terminalFailureCodes.has(codeOf(error) ?? '');
+/*
+ * A refused commit stays in every later push of its branch, so the remote
+ * refuses each retry the same way and only the person can clear it: the
+ * refusal is shown once and waits for *Try again*, never replayed on the
+ * backoff.
+ */
+const isFatal = (error: unknown): boolean =>
+  terminalFailureCodes.has(codeOf(error) ?? '') ||
+  (codeOf(error) === 'REMOTE_REJECTED' && error instanceof Error && isCommitRefusal(error.message));
 
 /* A 429's wait, read off the port's error the way `codeOf` reads its code. */
 const retryAfterOf = (error: unknown): number | undefined => {
@@ -1062,6 +1076,27 @@ const failedRecords = (context: SyncMachineContext, error: unknown): readonly Sy
     status: 'rejected',
     reason: error instanceof Error ? error.message : 'Optional records could not be restored.',
   }));
+
+/* The record projection's input, its empty stand-in when the fetch named none. */
+const recordsInputOf = (context: SyncMachineContext): SyncProjectRecordsActorInput =>
+  context.recordProjection ?? { remote: '', fetchRefs: [], refs: [], syncChats: false, syncLargeExports: false };
+
+/* What the record projection settled, whichever state ran it. */
+const recordsSettled = (context: SyncMachineContext, output: SyncProjectRecordsActorOutput): SyncContextPatch => ({
+  ...rememberRecords(context, output.records),
+  chats: output.chats,
+});
+
+/*
+ * Whether the open has only its optional records left: the authored apply has landed, so the deadline fails the
+ * records alone and the person keeps the files (SP2h runs them beside a fast-forward).
+ */
+const onlyRecordsLeft = (value: unknown): boolean => {
+  const childOf = (state: unknown, key: string): unknown =>
+    typeof state === 'object' && state !== null ? Object.getOwnPropertyDescriptor(state, key)?.value : undefined;
+  const opening = childOf(value, 'opening');
+  return opening === 'projectingRecords' || childOf(childOf(opening, 'besideApply'), 'authored') === 'applied';
+};
 
 const rememberFetch = (
   context: SyncMachineContext,
@@ -1673,7 +1708,7 @@ const syncMachineDefinition = setup({
         pullRenderWindow: { context: { withinPullWindow: false } },
         pullDeadline: ({ context, value }, enq) => {
           reportPullAttempt(context, enq, 'retry');
-          if (typeof value !== 'string' && value['opening'] === 'projectingRecords') {
+          if (onlyRecordsLeft(value)) {
             return {
               target: 'recording',
               context: rememberRecords(
@@ -1707,7 +1742,10 @@ const syncMachineDefinition = setup({
               const remembered = rememberFetch(context, enq, event.output);
               switch (event.output.integration) {
                 case 'fastForward': {
-                  return { target: 'fastForwarding', context: remembered };
+                  return {
+                    target: event.output.recordProjection?.besideApply === true ? 'besideApply' : 'fastForwarding',
+                    context: remembered,
+                  };
                 }
                 case 'diverged': {
                   return { target: 'merging', context: remembered };
@@ -1798,23 +1836,64 @@ const syncMachineDefinition = setup({
         projectingRecords: {
           invoke: {
             src: 'projectRecords',
-            input: ({ context }) =>
-              context.recordProjection ?? {
-                remote: context.remote ?? '',
-                fetchRefs: [],
-                refs: [],
-                syncChats: false,
-                syncLargeExports: false,
-              },
-            onDone: ({ context, event }) => ({
-              target: 'done',
-              context: { ...rememberRecords(context, event.output.records), chats: event.output.chats },
-            }),
+            input: ({ context }) => recordsInputOf(context),
+            onDone: ({ context, event }) => ({ target: 'done', context: recordsSettled(context, event.output) }),
             onError: ({ context, event }) => ({
               target: 'done',
               context: rememberRecords(context, failedRecords(context, event.error)),
             }),
           },
+        },
+        /*
+         * A fast-forward whose records write only unversioned paths, disjoint from its own (SP2h): the chats land while
+         * the files are written, so a chat opens on its records and never waits for the whole download. The remote is
+         * applied only once the authored region lands; a failed or held apply ends both, as it always did.
+         */
+        besideApply: {
+          type: 'parallel',
+          states: {
+            authored: {
+              initial: 'fastForwarding',
+              states: {
+                fastForwarding: {
+                  invoke: {
+                    src: 'fastForward',
+                    input: ({ context }) => ({ remote: context.remote ?? '', branch: context.branch }),
+                    onDone: ({ context, event }, enq) => {
+                      if (event.output !== undefined && 'hold' in event.output) {
+                        return heldAt(event.output);
+                      }
+                      reportFastForward(context, enq, event.output);
+                      return { target: 'applied' };
+                    },
+                    onError: ({ event }) => pullFailed(event.error),
+                  },
+                },
+                applied: { type: 'final', entry: () => ({ context: { hasAppliedRemote: true } }) },
+              },
+            },
+            records: {
+              initial: 'projecting',
+              states: {
+                projecting: {
+                  invoke: {
+                    src: 'projectRecords',
+                    input: ({ context }) => recordsInputOf(context),
+                    onDone: ({ context, event }) => ({
+                      target: 'projected',
+                      context: recordsSettled(context, event.output),
+                    }),
+                    onError: ({ context, event }) => ({
+                      target: 'projected',
+                      context: rememberRecords(context, failedRecords(context, event.error)),
+                    }),
+                  },
+                },
+                projected: { type: 'final' },
+              },
+            },
+          },
+          onDone: { target: 'done' },
         },
         done: { type: 'final' },
       },
@@ -2052,6 +2131,11 @@ const syncMachineDefinition = setup({
           const refusedHistory = event.output.refs.find(
             (entry) => entry.status === 'rejected' && entry.name === historyRefOf(context.branch),
           );
+          /* A branch or tag refused for a commit it carries is terminal wherever it
+           * is: every retry offers that ref, and that commit, again. */
+          const commitRefused = event.output.refs.some(
+            (entry) => entry.status === 'rejected' && isHistoryRef(entry.name) && isCommitRefusal(entry.reason),
+          );
           /* The over-quota list is `remote.machine`'s, always (P19, A40): the
            * scheduler forwards it through the parent and keeps no copy. */
           if ((event.output.overQuota ?? []).length > 0 && context.parentRef !== undefined) {
@@ -2100,8 +2184,11 @@ const syncMachineDefinition = setup({
               /* A change made while this push was on the wire is still unsent, from its own moment. */
               unsyncedSince: acknowledged ? context.changedSincePushAt : context.unsyncedSince,
               /* Rule 19: a refused history is terminal, as the thrown class is; a
-               * record's refusal never blocks history, so it keeps retrying. */
-              failure: quota && refusedHistory !== undefined ? 'fatal' : acknowledged ? 'none' : 'retry',
+               * record's refusal never blocks history, so it keeps retrying. A
+               * history refused for a commit it carries is terminal too: every
+               * retry carries that commit again (see `isFatal`). */
+              failure:
+                (refusedHistory !== undefined && quota) || commitRefused ? 'fatal' : acknowledged ? 'none' : 'retry',
               attempt: acknowledged ? 0 : context.attempt + 1,
               retryAfterMilliseconds: undefined,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
@@ -2475,8 +2562,10 @@ const syncMachineDefinition = setup({
               }
               enq(reportConflictLineFailure, 'refused', refused.name, refused.reason);
               const quota = (event.output.overQuota ?? []).length > 0 || isStorageRefusal(refused.reason ?? '');
+              /* A conflict line refused for a commit it carries is terminal, as the thrown form is. */
+              const terminal = quota || isCommitRefusal(refused.reason);
               return {
-                target: sessionPullOf(context) ?? (quota ? 'offered' : 'owed'),
+                target: sessionPullOf(context) ?? (terminal ? 'offered' : 'owed'),
                 context: { leases, attempt: context.attempt + 1, retryAfterMilliseconds: undefined },
               };
             },
@@ -2781,9 +2870,12 @@ export const selectSyncFacet = (
      * reaches the person through `error`. */
     pullPhase: snapshot.matches({ opening: 'fetching' })
       ? 'fetching'
-      : snapshot.matches({ opening: 'fastForwarding' }) || snapshot.matches({ opening: 'merging' })
+      : snapshot.matches({ opening: 'fastForwarding' }) ||
+          snapshot.matches({ opening: 'merging' }) ||
+          snapshot.matches({ opening: { besideApply: { authored: 'fastForwarding' } } })
         ? 'applying'
-        : snapshot.matches({ opening: 'projectingRecords' })
+        : snapshot.matches({ opening: 'projectingRecords' }) ||
+            snapshot.matches({ opening: { besideApply: { authored: 'applied' } } })
           ? 'records'
           : 'idle',
     hasAppliedRemote: snapshot.context.hasAppliedRemote,

@@ -15,11 +15,15 @@ import { util as zodUtility } from 'zod';
 import { encodeBase64 } from '#harness/base64.js';
 import { attachmentPathPattern } from '#log/event-schema.js';
 import type { JsonObject, JsonValue, ProviderMessage } from '#log/event-types.js';
+import { attachmentExtensionOf, attachmentMedia, isAttachmentMediaType } from '@taucad/utils/attachment-media';
+import type { AttachmentMediaType } from '@taucad/utils/attachment-media';
+import { sniffAttachmentMediaType } from '#wire/attachment-media.js';
 
-// JPEG is a machine camera still's encoding (WP5); captures themselves are PNG or WebP.
-const dataUrlPattern = /^data:(image\/(?:png|webp|jpeg));base64,(.+)$/u;
+/* Captures are PNG or WebP and a machine camera still is JPEG (WP5); any stored image type is admitted, so the
+ * stored set has one owner (I2). */
+const dataUrlPattern = /^data:(image\/[\w.+-]+);base64,(.+)$/u;
 
-const extensionOf: Readonly<Record<string, string>> = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
+type InlineCapture = { readonly mediaType: AttachmentMediaType; readonly base64: string };
 
 const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
   Array.from(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes)), (byte) =>
@@ -63,10 +67,18 @@ const isStoredImage = (image: JsonValue): image is JsonObject & { readonly path:
 export const hasStoredScreenshot = (message: ProviderMessage): boolean =>
   screenshotOf(message)?.images.some((image) => isStoredImage(image)) ?? false;
 
-const inlineCapture = (image: JsonValue): RegExpExecArray | undefined =>
-  zodUtility.isObject(image) && typeof image['dataUrl'] === 'string'
-    ? (dataUrlPattern.exec(image['dataUrl']) ?? undefined)
+const inlineCapture = (image: JsonValue): InlineCapture | undefined => {
+  if (!zodUtility.isObject(image) || typeof image['dataUrl'] !== 'string') {
+    return undefined;
+  }
+  const [, mediaType, base64] = dataUrlPattern.exec(image['dataUrl']) ?? [];
+  return mediaType !== undefined &&
+    base64 !== undefined &&
+    isAttachmentMediaType(mediaType) &&
+    attachmentMedia[mediaType].kind === 'image'
+    ? { mediaType, base64 }
     : undefined;
+};
 
 /**
  * Write each inline capture of a screenshot result once and keep only its reference.
@@ -93,10 +105,10 @@ export const storeScreenshotImages = async (
       if (match === undefined || !zodUtility.isObject(image)) {
         return image;
       }
-      const mimeType = match[1]!;
-      const bytes = base64ToUint8Array(match[2]!);
+      const { mediaType: mimeType } = match;
+      const bytes = base64ToUint8Array(match.base64);
       const sha256 = await sha256Hex(bytes);
-      const path = `attachments/${sha256}.${extensionOf[mimeType]!}`;
+      const path = `attachments/${sha256}.${attachmentExtensionOf(mimeType)}`;
       try {
         await write(path, bytes);
       } catch (error) {
@@ -142,7 +154,9 @@ export const restoreScreenshotImages = async (
         absent.push(path);
         return [];
       }
-      return [{ ...facts, dataUrl: `data:${mimeType};base64,${encodeBase64(bytes)}` }];
+      // Labelled from the bytes, as a `file-ref` is (I1); the recorded type only names bytes no probe recognises.
+      const label = sniffAttachmentMediaType(bytes) ?? mimeType;
+      return [{ ...facts, dataUrl: `data:${label};base64,${encodeBase64(bytes)}` }];
     }),
   );
   return { ...screenshot.message, content: { ...screenshot.result, images: images.flat() } };

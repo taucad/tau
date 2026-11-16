@@ -34,7 +34,22 @@ export type ShellFilesystem = Readonly<{
   readOnly?: readonly string[] | undefined;
   denied: readonly string[];
   directories?: readonly string[] | undefined;
+  /**
+   * Git stores inside a writable root that the launch writes through a name guard ({@link ShellGuardedStores}).
+   * Only a `terminal` launch on a provider whose {@link ShellProvider.storeGuard} answers `true` may carry it; any
+   * other provider answers `unsupported: filesystem-mask`. Agent launches never set it.
+   */
+  guardedStores?: ShellGuardedStores | undefined;
 }>;
+
+/**
+ * Git stores the Terminal writes through the provider's store guard (Linux Terminal git parity blueprint, R2): each
+ * store is writable except `protect`, the store policy's top-level names, each with everything under it, which the
+ * guard refuses by name to create, replace, remove, link or modify. Nothing is written into the real store in their
+ * place. Each store is an absolute physical path inside a writable root.
+ * @public
+ */
+export type ShellGuardedStores = Readonly<{ stores: readonly string[]; protect: readonly string[] }>;
 
 /** Durable identity prepared before any command can run. @public */
 export type PreparedShell = Readonly<{ executionId: string }>;
@@ -97,11 +112,19 @@ export type ShellLaunch = Readonly<{
   stdio: ShellStdio;
   /**
    * `zsh` lets the human macOS Terminal's system Zsh read the person's own Zsh startup files (operator ruling
-   * 2026-11-01T18:57Z): the provider reopens exactly those files read-only from the baseline and points `ZDOTDIR` at
-   * the home that holds them. It refuses the field on any other platform, a pipe launch or any executable but
-   * `/bin/zsh`. Agent launches never set it.
+   * 2026-11-01T18:57Z): the provider reopens exactly those files read-only from the baseline. It refuses the field on
+   * any other platform, a pipe launch or any executable but `/bin/zsh`. Agent launches never set it.
+   *
+   * `ZDOTDIR` names a provider-owned folder of wrappers, which read the person's files and then put
+   * {@link ShellLaunch.toolchainBins} back at the front of `path`: as a login shell, `/etc/zprofile`'s `path_helper`
+   * moves the system folders ahead of every inherited entry. The last file leaves `ZDOTDIR` at the person's home.
    */
   startupFiles?: 'zsh' | undefined;
+  /**
+   * With `startupFiles`, the host's toolchain `bin` folders, which stay first on `path` after the person's startup
+   * files. A folder with a character that is unsafe on `path` is left out. Refused without `startupFiles`.
+   */
+  toolchainBins?: readonly string[] | undefined;
   /** Aborting terminates the whole owned process tree; `exited` then settles. */
   signal: AbortSignal;
 }>;
@@ -216,4 +239,10 @@ export type ShellProvider = Readonly<{
   recover: (input: Readonly<{ executionIds: readonly string[] }>) => Promise<readonly ShellRecovery[]>;
   /** Erase a stopped execution's receipt after its private root is deleted and every other hold is released. */
   release: (input: PreparedShell) => Promise<void>;
+  /**
+   * Whether this provider can write a `terminal` launch's git stores through a name guard on this device
+   * ({@link ShellFilesystem.guardedStores}). Answered once per process and cached; absent means never. A host that
+   * hears `false` keeps those stores read-only.
+   */
+  storeGuard?: (() => Promise<boolean>) | undefined;
 }>;

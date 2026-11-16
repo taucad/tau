@@ -142,7 +142,6 @@ const declarationBoundaries: readonly DeclarationBoundary[] = [
           {
             from: 'glb',
             to: 'stl',
-            fidelity: 'mesh',
             ...(value === undefined ? {} : { content: value }),
           },
         ],

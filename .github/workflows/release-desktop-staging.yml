@@ -217,6 +217,26 @@ jobs:
     with:
       ref: ${{ needs.prerelease.outputs.sha }}
 
+  # CI throughput review Q-2: the `benchmark-native` gates (charter D23) pass on the candidate's own commit
+  # before its tag exists, as the shell rows do; they moved here from `native-darwin.yml`'s 15:41 nightly.
+  # They run beside the shell gate and the packaged suite on a macOS runner of their own (about 20 min, under
+  # the packaged suite's wall), so they add no wall time. A red gate means no candidate this time.
+  benchmarks:
+    name: Native benchmark gate
+    needs: [prerelease]
+    if: needs.prerelease.outputs.release == 'true'
+    permissions: # The called workflow's plan job declares these
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/native-darwin.yml
+    with:
+      ref: ${{ needs.prerelease.outputs.sha }}
+      projects: ''
+      benchmarks: true
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
   # Operator decision D-DS1 (b) (desktop split blueprint DS-3): the packaged desktop suite passes on the
   # candidate's own commit after the shell gate and before the tag exists, so a packaged regression is
   # found hours after it merged, never on the merge queue's path. A red suite means no candidate this
@@ -236,8 +256,8 @@ jobs:
 
   tag:
     name: Tag the staging desktop candidate
-    needs: [prerelease, shell, packaged]
-    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success'
+    needs: [prerelease, shell, packaged, benchmarks]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

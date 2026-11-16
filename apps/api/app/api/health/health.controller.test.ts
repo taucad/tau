@@ -103,7 +103,7 @@ describe('HealthController', () => {
       expect(result.error).toStrictEqual({ [indicator]: { status: 'down', message } });
     });
 
-    it('should warn, count and report each down shared dependency without refusing', async () => {
+    it('should warn and count a shared dependency on its first down probe without reporting it', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       vi.spyOn(redisHealth, 'isHealthy').mockResolvedValue({
         redis: { status: 'down', message: 'Connection refused', responseTimeMs: 5 },
@@ -123,7 +123,72 @@ describe('HealthController', () => {
         [1, { 'health.indicator': 'redis' }],
         [1, { 'health.indicator': 's3' }],
       ]);
-      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([[failures[0]], [failures[1]]]);
+      // TAU-API-6: one slow answer from a shared dependency is its tail latency, not an outage.
+      expect(reportReadinessFailure).not.toHaveBeenCalled();
+    });
+
+    it('should report a shared dependency once it is down on two probes in a row', async () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const down = {
+        status: 'down',
+        message: 'Storage readiness timed out after 1500 ms',
+        responseTimeMs: 1500,
+      } as const;
+      vi.spyOn(s3Health, 'isHealthy').mockResolvedValue({ s3: down });
+
+      await controller.checkReady();
+      await controller.checkReady();
+      await controller.checkReady();
+
+      expect(readinessFailureCount).toHaveBeenCalledTimes(3);
+      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([
+        [{ indicator: 's3', message: down.message, responseTimeMs: 1500, consecutiveFailures: 2 }],
+        [{ indicator: 's3', message: down.message, responseTimeMs: 1500, consecutiveFailures: 3 }],
+      ]);
+    });
+
+    it('should start a shared dependency streak again after it answers up', async () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const down = { s3: { status: 'down', message: 'Storage readiness timed out after 1500 ms' } } as const;
+      vi.spyOn(s3Health, 'isHealthy')
+        .mockResolvedValueOnce(down)
+        .mockResolvedValueOnce({ s3: { status: 'up', responseTimeMs: 3 } })
+        .mockResolvedValueOnce(down)
+        .mockResolvedValueOnce({ s3: { status: 'up', responseTimeMs: 3 } })
+        .mockResolvedValueOnce(down);
+      vi.spyOn(redisHealth, 'isHealthy')
+        .mockResolvedValueOnce({ redis: { status: 'up', responseTimeMs: 1 } })
+        .mockResolvedValueOnce({ redis: { status: 'down', message: 'Connection refused' } });
+
+      for (let probe = 0; probe < 5; probe += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- probes are sequential by definition
+        await controller.checkReady();
+      }
+
+      expect(readinessFailureCount).toHaveBeenCalledTimes(4);
+      expect(reportReadinessFailure).not.toHaveBeenCalled();
+    });
+
+    it('should end a shared dependency streak on a probe where only a Machine check is down', async () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const down = { s3: { status: 'down', message: 'Storage readiness timed out after 1500 ms' } } as const;
+      vi.spyOn(s3Health, 'isHealthy')
+        .mockResolvedValueOnce(down)
+        .mockResolvedValueOnce({ s3: { status: 'up', responseTimeMs: 3 } })
+        .mockResolvedValueOnce(down);
+      vi.spyOn(gitToolchainHealth, 'isHealthy')
+        .mockResolvedValueOnce({
+          git: { status: 'up', git: 'git version 2.55.0' },
+        })
+        .mockResolvedValueOnce({ git: { status: 'down', message: 'git is not installed in this image' } });
+
+      await controller.checkReady();
+      await expect(controller.checkReady()).rejects.toBeInstanceOf(ReadinessRefusalException);
+      await controller.checkReady();
+
+      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([
+        [{ indicator: 'git', message: 'git is not installed in this image', consecutiveFailures: 1 }],
+      ]);
     });
 
     it('should refuse when the git toolchain is missing from this Machine', async () => {
@@ -163,7 +228,8 @@ describe('HealthController', () => {
         [1, { 'health.indicator': 'database' }],
         [1, { 'health.indicator': 'git' }],
       ]);
-      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([[failures[0]], [failures[1]]]);
+      // A Machine check refuses at once, so it is reported at once; a shared dependency waits for a second probe.
+      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([[{ ...failures[1], consecutiveFailures: 1 }]]);
     });
 
     it('should not count or report a ready probe', async () => {

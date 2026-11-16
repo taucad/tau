@@ -8,7 +8,7 @@ import { installWebGpuDepthSampling } from '#graphics/three/webgpu-depth-samplin
 import { installWebGlClearState } from '#graphics/three/webgl-clear-state.js';
 import { installWebGpuStencilState } from '#graphics/three/webgpu-stencil-state.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
-import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
+import { GraphicsContextUnavailableError, reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
 
 /**
  * WebGL renderer instantiated by Tau helpers.
@@ -45,7 +45,9 @@ export type RendererInstance = WebGlRenderer | WebGpuRenderer;
  *   fall back to its WebGL 2 backend when no adapter exists; `backend: 'webgl'` pins the WebGL 2 backend through
  *   `forceWebGL`. MSAA and a transparent framebuffer are on; reversed-Z, stencil and log-depth are off because
  *   a single continuously animated object has no depth-fighting risk. `powerPreference` forwards the adapter
- *   hint: spinners ask for the low-power adapter, hero surfaces for the high-performance one.
+ *   hint: spinners ask for the low-power adapter, hero surfaces for the high-performance one. A `presented` WebGPU
+ *   canvas presents one frame before creation resolves, as a viewport's does, and reports a canvas the browser
+ *   cannot present as a canvas loss.
  *
  * @see `docs/policy/graphics-backend-policy.md`
  * @public
@@ -60,6 +62,14 @@ export type RendererUseCase = 'viewport' | 'offscreen' | 'showcase';
 export type ShowcaseRendererTarget = Readonly<{
   canvas: HTMLCanvasElement | OffscreenCanvas;
   powerPreference?: 'high-performance' | 'low-power';
+  /**
+   * The canvas's frames are shown, on the page or copied from it. A presented WebGPU `HTMLCanvasElement` presents one
+   * cleared frame before creation resolves, as a viewport's canvas does: where the browser destroys the device instead
+   * (Chromium on a software adapter), the creation reports a canvas loss and rejects, and the caller starts again on a
+   * fresh canvas, where the backend resolves to WebGL. A renderer that only reads its render targets back leaves it
+   * off.
+   */
+  presented?: boolean;
 }>;
 
 /**
@@ -78,11 +88,74 @@ export type RendererTarget = ShowcaseRendererTarget &
 const isShowcaseTarget = (surface: HTMLCanvasElement | OffscreenCanvas | RendererTarget): surface is RendererTarget =>
   'canvas' in surface;
 
+/**
+ * Whether a showcase renderer on `backend` must present its first frame: a WebGPU document canvas its caller shows.
+ * @param backend - The requested backend.
+ * @param surface - The canvas, or the canvas with its showcase choices.
+ * @returns Whether to run the first-frame check.
+ */
+const presentsShowcaseCanvas = (
+  backend: ResolvedGraphicsBackend,
+  surface: HTMLCanvasElement | OffscreenCanvas | RendererTarget,
+): boolean =>
+  backend === 'webgpu' &&
+  isShowcaseTarget(surface) &&
+  surface.presented === true &&
+  typeof HTMLCanvasElement !== 'undefined' &&
+  surface.canvas instanceof HTMLCanvasElement;
+
 async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
   await renderer.init();
   installWebGpuDepthSampling(renderer);
   installWebGpuStencilState(renderer);
   installWebGlClearState(renderer);
+}
+
+/**
+ * Whether a node renderer's start failed because its WebGL 2 backend got no context. Three's WebGL 2 backend (forced,
+ * or the fallback from a WebGPU start) keeps the `null` that `getContext('webgl2')` answered and then reads extensions
+ * from it, so the start rejects with an unrelated `TypeError` (`reading 'getSupportedExtensions'`).
+ * @param renderer - The node renderer whose start failed.
+ * @returns Whether it ended on a WebGL 2 backend without a context.
+ */
+const lacksWebGlContext = (renderer: WebGpuRenderer): boolean => {
+  // Three owns these properties; the published Backend declaration omits them.
+  const backend = renderer.backend as unknown as Readonly<{ isWebGLBackend?: boolean; gl?: unknown }>;
+  return backend.isWebGLBackend === true && (backend.gl === null || backend.gl === undefined);
+};
+
+/** The start of the messages Three's classic `WebGLRenderer` throws when `getContext('webgl2')` answers `null`. */
+const webGlContextCreationFailure = 'Error creating WebGL context';
+
+/**
+ * Start a node renderer, reporting a WebGL 2 backend that got no context as {@link GraphicsContextUnavailableError}.
+ * @param renderer - The node renderer to start.
+ * @throws {GraphicsContextUnavailableError} When the browser gave its canvas no WebGL 2 context.
+ */
+async function initNodeRenderer(renderer: WebGpuRenderer): Promise<void> {
+  try {
+    await initWebGpuIfNeeded(renderer);
+  } catch (error) {
+    throw lacksWebGlContext(renderer) ? new GraphicsContextUnavailableError({ cause: error }) : error;
+  }
+}
+
+/**
+ * Construct Three's classic `WebGLRenderer`, reporting a canvas that got no WebGL 2 context as
+ * {@link GraphicsContextUnavailableError}.
+ * @param options - Canvas, antialiasing, depth and power choices for the classic pipeline.
+ * @returns A classic renderer holding the canvas's WebGL 2 context.
+ * @throws {GraphicsContextUnavailableError} When the browser gave the canvas no WebGL 2 context.
+ */
+function createClassicWebGlRenderer(options: THREE.WebGLRendererParameters): THREE.WebGLRenderer {
+  try {
+    return new THREE.WebGLRenderer(options);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(webGlContextCreationFailure)) {
+      throw new GraphicsContextUnavailableError({ cause: error });
+    }
+    throw error;
+  }
 }
 
 const destroyAllocatedDevice = (backend: WebGpuRenderer['backend']): void => {
@@ -188,6 +261,34 @@ async function presentFirstCanvasFrame(renderer: WebGpuRenderer): Promise<string
 }
 
 /**
+ * Present the first frame of a WebGPU canvas ({@link presentFirstCanvasFrame}) and release the renderer when it cannot.
+ * A device the browser destroyed is reported as a canvas loss, so every later backend resolution on the page answers
+ * WebGL.
+ * @param renderer - The initialized renderer, on Three's WebGPU backend.
+ * @param requestedBackend - The backend whose device the renderer allocated, released on failure.
+ * @throws {WebGpuInitializationError} When the canvas could not present its first frame.
+ */
+async function requireCanvasPresentation(
+  renderer: WebGpuRenderer,
+  requestedBackend: WebGpuRenderer['backend'],
+): Promise<void> {
+  let lossMessage: string | undefined;
+  try {
+    lossMessage = await presentFirstCanvasFrame(renderer);
+  } catch (error) {
+    renderer.dispose();
+    destroyAllocatedDevice(requestedBackend);
+    throw error;
+  }
+  if (lossMessage !== undefined) {
+    renderer.dispose();
+    destroyAllocatedDevice(requestedBackend);
+    reportWebGpuCanvasLoss();
+    throw new WebGpuInitializationError(`The WebGPU canvas could not present a frame: ${lossMessage}`);
+  }
+}
+
+/**
  * Instantiate a Tau-normalised Three.js renderer for the given GPU backend and UI surface.
  *
  * @param useCase - Viewport, offscreen or showcase preset (see {@link RendererUseCase}).
@@ -247,7 +348,12 @@ export async function createRenderer(
       forceWebGL: backend === 'webgl',
       powerPreference: isShowcaseTarget(surface) ? surface.powerPreference : undefined,
     });
-    await initWebGpuIfNeeded(renderer);
+    await initNodeRenderer(renderer);
+    // A presented showcase canvas meets the viewport's browser limit, and reports it the same way: the caller then
+    // starts again on a fresh canvas, where the backend resolves to WebGL.
+    if (presentsShowcaseCanvas(backend, surface)) {
+      await requireCanvasPresentation(renderer, renderer.backend);
+    }
     return renderer;
   }
 
@@ -283,6 +389,10 @@ export async function createRenderer(
       // Three.dispose() calls init again through setAnimationLoop when init never completed.
       // This factory supplied no external device: release any partially allocated one directly.
       destroyAllocatedDevice(requestedBackend);
+      if (lacksWebGlContext(renderer)) {
+        // Not a WebGPU failure: a WebGL retry would meet the same missing context.
+        throw new GraphicsContextUnavailableError({ cause: error });
+      }
       throw new WebGpuInitializationError(error instanceof Error ? error.message : String(error), { cause: error });
     }
     if (backend === 'webgpu' && renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {
@@ -292,20 +402,7 @@ export async function createRenderer(
     }
 
     if (useCase === 'viewport' && backend === 'webgpu') {
-      let lossMessage: string | undefined;
-      try {
-        lossMessage = await presentFirstCanvasFrame(renderer);
-      } catch (error) {
-        renderer.dispose();
-        destroyAllocatedDevice(requestedBackend);
-        throw error;
-      }
-      if (lossMessage !== undefined) {
-        renderer.dispose();
-        destroyAllocatedDevice(requestedBackend);
-        reportWebGpuCanvasLoss();
-        throw new WebGpuInitializationError(`The WebGPU canvas could not present a frame: ${lossMessage}`);
-      }
+      await requireCanvasPresentation(renderer, requestedBackend);
     }
 
     if (useCase === 'viewport') {
@@ -347,5 +444,5 @@ export async function createRenderer(
     logarithmicDepthBuffer: true,
   } satisfies THREE.WebGLRendererParameters);
 
-  return new THREE.WebGLRenderer(webGlOptions);
+  return createClassicWebGlRenderer(webGlOptions);
 }

@@ -80,10 +80,15 @@ const selectCodex = async (): Promise<void> => {
   const trigger = selectors.getByRole('button', { name: /^Agent and model: /u });
   await target.expectVisible(trigger, 60_000);
   await target.click(trigger);
-  await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
-  const tab = selectors.getByRole('tab', { name: /^Codex/u });
-  await target.expectVisible(tab, 60_000);
-  await target.click(tab);
+  /* The sheet lists agents behind its Agent row (a24159ec91), then the chosen agent's models. The
+   * row appears once the daemon's agents give the chat a choice. */
+  const agentRow = selectors.getByRole('button', { name: /^Agent: .*\. Change$/u });
+  await target.expectVisible(agentRow, 60_000);
+  await target.click(agentRow);
+  const agent = selectors.getByRole('option', { name: /^Codex/u });
+  await target.expectVisible(agent);
+  await target.click(agent);
+  await target.expectVisible(selectors.getByRole('button', { name: 'Back to agents', exact: true }));
   await target.click(selectors.getByRole('option').first());
   /* Choosing a model returns to the sheet, whose Model row now names the agent. */
   await target.expectVisible(selectors.getByRole('button', { name: /^Model: Codex, .+\. Change$/u }), 10_000);
@@ -296,19 +301,16 @@ describe('external agent (AV-5)', () => {
        * page happened to be listening for. */
       await expect.poll(pausedOnApproval, { timeout: 180_000 }).toBe(true);
       await target.expectVisible(banner, 60_000);
-      await target.expectVisible(banner.getByText(/Allow write hello\.txt/u), 30_000);
-      /* The options the host recorded, and the copy bounded by SP-4 Result 3 —
-       * approving is not a promise that Tau gates each action. */
+      /* The agent's own title for the call, not the host's `Allow … with {…}?`
+       * prose, which stays in the log and in Debug (b1f312aca0, #627). */
+      await target.expectVisible(banner.getByText('write hello.txt', { exact: true }), 30_000);
+      /* The options the host recorded. SP-4 Result 3: approving is no promise
+       * that Tau gates each action, so the banner makes none (#627 dropped the
+       * sentence that described the agent's reach). */
       await target.expectVisible(banner.getByRole('button', { name: 'Allow', exact: true }), 10_000);
       await target.expectVisible(banner.getByRole('button', { name: 'Always allow', exact: true }), 10_000);
       await target.expectVisible(banner.getByRole('button', { name: 'Reject', exact: true }), 10_000);
-      await target.expectVisible(
-        banner.getByText(
-          "Approving lets Codex keep working in this chat's tree; Tau does not gate each action it takes there.",
-          { exact: true },
-        ),
-        10_000,
-      );
+      await target.expectHidden(banner.getByText(/Tau does not gate each action/u), 10_000);
 
       /* Reattach: this tab's memory of the run is gone, so a banner that comes
        * back can only have come from the log the daemon still holds. */

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { render, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
@@ -12,6 +13,13 @@ const harness = vi.hoisted(() => ({
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
   },
+  watchRecordFile: vi.fn(() => ({
+    ready: Promise.resolve(),
+    closed: Promise.withResolvers<void>().promise,
+    dispose: () => undefined,
+  })),
+  /** The root file facade the runtime built last: the test's double, which a row may replace. */
+  root: undefined as { replace: (fileManager: unknown) => void } | undefined,
   client: {
     readFile: vi.fn(async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
       throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
@@ -62,22 +70,89 @@ vi.mock('#machines/inspector.js', () => ({
   inspect: undefined,
 }));
 
-vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => harness.projectManager,
+/* Since A3b the library builds its chat store over the root facade's record client: here it is the harness's double. */
+vi.mock('#db/chat-file-storage.js', () => ({
+  createChatFileStore: () => ({
+    ...harness.projectManager,
+    adoptLegacyChatPlacement: async () => undefined,
+    getChatRecordsForResource: async () => [],
+  }),
 }));
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ recordFiles: harness.client }),
+/* The runtime's root file facade, over the harness's doubles: its record client, watch and workspace (A4b). */
+vi.mock('#runtime/file-manager-facade.js', async (importOriginal) => {
+  const { testRootFiles } = await import('#runtime/project-library.fixture.js');
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    createRootFileFacade: () => {
+      const root = testRootFiles(fileManagerOf(harness.client));
+      harness.root = root;
+      return {
+        ...root,
+        workingCopyFiles: { get: () => undefined, subscribe: () => () => undefined },
+        close: () => undefined,
+      };
+    },
+  };
+});
+
+/* A read owner that admits every read at once: no observation runs while the file managers are idle. */
+vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createMetadataReadOwner: (source: unknown) => ({
+    connect: () => () => undefined,
+    hold: () => undefined,
+    ready: () => undefined,
+    fail: () => undefined,
+    read: async <Value,>(operation: (store: unknown) => Promise<Value>) => operation(source),
+    settle: async () => undefined,
+  }),
 }));
+
+/** The root file facade's value over a record client: the parts these rows reach. */
+function fileManagerOf(client: Record<string, unknown>): Record<string, unknown> {
+  return {
+    recordFiles: client,
+    watchRecordFile: harness.watchRecordFile,
+    workspace: {
+      syncProjectRoots: async (): Promise<never> => {
+        throw new Error('not called in this test');
+      },
+    },
+  };
+}
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
+const { createAppRuntime, selectRuntimeChatSessions } = await import('#runtime/app-runtime.js');
+
+type Runtime = ReturnType<typeof createAppRuntime>;
+
+let runtime: Runtime;
 
 function createWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
-    return <ChatSessionStoreProvider>{children}</ChatSessionStoreProvider>;
+    return (
+      <AppRuntimeProvider runtime={runtime}>
+        <ChatSessionStoreProvider>{children}</ChatSessionStoreProvider>
+      </AppRuntimeProvider>
+    );
   };
 }
+
+const settle = async (): Promise<void> => {
+  for (let turn = 0; turn < 5; turn += 1) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- each turn lets one more promise in the chain settle.
+    await Promise.resolve();
+  }
+};
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('ChatSessionStoreProvider', () => {
   beforeEach(() => {
@@ -86,9 +161,13 @@ describe('ChatSessionStoreProvider', () => {
     harness.projectManager.touchChatRecency.mockReset().mockResolvedValue(undefined);
     harness.projectManager.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
     harness.projectManager.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
+    harness.watchRecordFile.mockClear();
+    /* Idle: no file manager connects and no worker starts; the library's ports are what the store calls. */
+    runtime = createAppRuntime({ idleFileManagers: true });
   });
 
   afterEach(() => {
+    runtime.stop();
     vi.restoreAllMocks();
   });
 
@@ -100,7 +179,7 @@ describe('ChatSessionStoreProvider', () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it('returns a stable ChatSessionStore instance across re-renders', () => {
+  it("hands down the runtime's store, the same instance across re-renders", () => {
     const { result, rerender } = renderHook(() => useChatSessionStore(), { wrapper: createWrapper() });
     const first = result.current;
     rerender();
@@ -108,6 +187,7 @@ describe('ChatSessionStoreProvider', () => {
 
     expect(result.current).toBe(first);
     expect(first).toBeInstanceOf(ChatSessionStore);
+    expect(first).toBe(selectRuntimeChatSessions(runtime));
   });
 
   it('exposes the same store to multiple consumers', () => {
@@ -119,11 +199,13 @@ describe('ChatSessionStoreProvider', () => {
     }
 
     render(
-      <ChatSessionStoreProvider>
-        <Probe />
-        <Probe />
-        <Probe />
-      </ChatSessionStoreProvider>,
+      <AppRuntimeProvider runtime={runtime}>
+        <ChatSessionStoreProvider>
+          <Probe />
+          <Probe />
+          <Probe />
+        </ChatSessionStoreProvider>
+      </AppRuntimeProvider>,
     );
 
     expect(captured).toHaveLength(3);
@@ -131,7 +213,18 @@ describe('ChatSessionStoreProvider', () => {
     expect(captured[1]).toBe(captured[2]);
   });
 
-  it('mirrors useProjectManager() closures and the file client into the store via setDependencies', async () => {
+  it('hands down a store a test passes instead of the runtime', () => {
+    const store = new ChatSessionStore();
+    const { result } = renderHook(() => useChatSessionStore(), {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <ChatSessionStoreProvider store={store}>{children}</ChatSessionStoreProvider>
+      ),
+    });
+
+    expect(result.current).toBe(store);
+  });
+
+  it("calls the library's ports and reads records through its file facade, given at construction (A2)", async () => {
     harness.projectManager.getChat.mockResolvedValue({
       id: 'chat_a',
       resourceId: 'proj_a',
@@ -144,20 +237,50 @@ describe('ChatSessionStoreProvider', () => {
     const store = result.current;
 
     // Acquire a session so a hydration call materialises and we can assert
-    // the store invokes the latest mocked closures.
+    // the store invokes the library's ports.
     store.acquire('chat_a', 'proj_a');
-
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settle();
 
     expect(harness.projectManager.getChat).toHaveBeenCalledWith('chat_a', 'proj_a');
-    // The chat's composer record is read through the file manager's client.
+    // The chat's composer record is read through the root's record client.
     await vi.waitFor(() => {
       expect(harness.client.readFile).toHaveBeenCalledWith('/.tau/composers/chats/proj_a/chat_a.json');
     });
 
     await store.touchChatRecency('chat_a', 123);
     expect(harness.projectManager.touchChatRecency).toHaveBeenCalledWith('chat_a', 123);
+  });
+
+  it("delivers a call the store makes with no provider mounted, through the runtime's root facade (A4b)", async () => {
+    const store = selectRuntimeChatSessions(runtime);
+
+    await store.touchChatRecency('chat_a', 7);
+
+    expect(harness.projectManager.touchChatRecency).toHaveBeenCalledExactlyOnceWith('chat_a', 7);
+  });
+
+  it('takes a new record client when the root facade publishes one, as a worker replacement does', async () => {
+    harness.projectManager.getChat.mockResolvedValue({
+      id: 'chat_a',
+      resourceId: 'proj_a',
+      name: '',
+      messages: [],
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    const store = selectRuntimeChatSessions(runtime);
+    store.acquire('chat_a', 'proj_a');
+    await vi.waitFor(() => {
+      expect(harness.client.readFile).toHaveBeenCalled();
+    });
+
+    const replaced = { ...harness.client, readFile: vi.fn(harness.client.readFile) };
+    harness.root!.replace(fileManagerOf(replaced));
+    store.release('chat_a');
+    store.acquire('chat_a', 'proj_a');
+
+    await vi.waitFor(() => {
+      expect(replaced.readFile).toHaveBeenCalledWith('/.tau/composers/chats/proj_a/chat_a.json');
+    });
   });
 });

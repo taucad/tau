@@ -79,8 +79,10 @@ vi.mock('#lib/github-api.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => ({ fileManagerRef: { getSnapshot: () => ({ context: { worker: {} } }) } }),
-  waitForFileManagerServices: async () => undefined,
+  useOptionalFileManager: () => ({
+    fileManagerRef: { getSnapshot: () => ({ context: { worker: {} } }) },
+    whenServicesReady: async () => undefined,
+  }),
 }));
 vi.mock('@taucad/ui-core/machines/import-staging', async (importOriginal) => ({
   ...(await importOriginal<typeof ImportStagingModule>()),

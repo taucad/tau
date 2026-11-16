@@ -149,7 +149,15 @@ export const useFinancialSession = (): FinancialSessionController => {
 export const useOptionalFinancialSession = (): FinancialSessionController | undefined =>
   useContext(FinancialSessionContext);
 
-/** Prevents a newly observed owner scope from rendering until the previous financial scope is purged. */
+/**
+ * Prevents a newly observed identity from rendering until the previous owner's
+ * financial scope is purged. Only a previous owner is gated, for one commit:
+ * owner A to owner B, or an owner to none, remounts the children, which resets
+ * the billing consumers' own React state. A first owner after no identity has
+ * no previous owner's React state to reset by remount, so its children stay
+ * mounted. The layout effect still binds it, which purges billing query state
+ * and other accounts' saved usage and tells the other tabs.
+ */
 export function FinancialSessionScope({
   identity,
   children,
@@ -160,6 +168,7 @@ export function FinancialSessionScope({
   const controller = useFinancialSession();
   const [committed, setCommitted] = useState(identity);
   const changed = !sameIdentity(committed, identity);
+  const gated = changed && committed !== undefined;
   useLayoutEffect(() => {
     controller.bind(identity);
     if (changed) {
@@ -167,7 +176,7 @@ export function FinancialSessionScope({
       setCommitted(identity);
     }
   }, [changed, controller, identity]);
-  return changed ? undefined : children;
+  return gated ? undefined : children;
 }
 
 function sameIdentity(

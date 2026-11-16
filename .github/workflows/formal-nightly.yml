@@ -166,3 +166,45 @@ jobs:
             out/test-results/formal
           if-no-files-found: ignore
           retention-days: 14
+
+  # The wide-bound TLA+ configs (app state orchestration A0.6): each `formal:wide` target (today `ui`'s, the
+  # `nightly`-tier configs under `apps/ui/specs`) runs on the schedule and on a dispatch only. A caller (`ci.yml`
+  # in the merge queue) passes `ref`, so a called run never starts it: the queue runs the sized `pr` configs in
+  # `formal:tla`. The target is not `formal:nightly`, which the queue would run on every landing that affects its
+  # project. Selected by target, not project name (scripts/src/validate-workflows.ts). With no `nightly`-tier
+  # config yet it reports 0 runs and passes.
+  formal-wide:
+    name: Formal wide tier
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !inputs.ref }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Setup formal toolchains
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc,apalache
+
+      - name: Run the wide formal tiers
+        run: pnpm nx run-many -t formal:wide --parallel=1 --outputStyle=stream
+
+      - name: Upload formal reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-nightly-reports-formal-wide
+          path: out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 14

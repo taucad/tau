@@ -34,6 +34,8 @@ import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types'
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
+import { runtimeTranscodePort } from '#acp/media.js';
+import type { AcpAdapterRefusal } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
 import type {
@@ -68,6 +70,7 @@ import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
+import type { ReportingConsent } from '#telemetry.js';
 
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;
@@ -131,6 +134,13 @@ export type HostDaemonEvent =
        * instead of vanishing.
        */
       readonly externalAgents?: readonly ExternalAgentDescriptor[];
+      /**
+       * Why each refused external agent was refused, with the message the
+       * descriptor leaves out because it holds local paths. In-process only,
+       * for the terminal that launched this daemon (`tau serve`); never a wire
+       * field.
+       */
+      readonly externalAgentRefusals?: readonly AcpAdapterRefusal[];
     }
   | {
       readonly type: 'warning';
@@ -319,6 +329,12 @@ export type HostDaemonOptions = {
    * `tau serve` leaves it out.
    */
   readonly observeRuntimeClient?: (client: RuntimeClient, caller: 'agent') => () => void;
+  /**
+   * Sync telemetry consent (runtime observability PR-7, AR-W6-02): the runtime telemetry composition's
+   * `status().consent`, read per settled push or pull. Only `granted` reports; a daemon that leaves it out (every
+   * `tau serve` but the cloud host container) reports no sync attempts.
+   */
+  readonly syncTelemetryConsent?: () => ReportingConsent;
   /**
    * Agent observability (T11): observe the chats the agent's project host leads, given that project's id and its
    * own-row read. It must not throw and never affects a run. The cloud host container composes it from a module its
@@ -1006,6 +1022,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         const { client } = await agentRuntimes.get(root);
         return client;
       },
+      /* Agent media the chat cannot store as sent is converted by the served root's runtime child, started only when
+       * such an image arrives, from the formats that child's runtime reports converting to JPEG (WP6). */
+      mediaTranscoder: async () => {
+        const { child, client } = await agentRuntimes.get(agent.workspaceRoot);
+        return child.transcodeSources.length === 0
+          ? undefined
+          : { transcode: runtimeTranscodePort(client), transcodeSources: child.transcodeSources };
+      },
       /*
        * Where this project's Tau Cloud repository is (C67, P51).
        *
@@ -1016,6 +1040,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        */
       apiBaseUrl: options.relayUrl.origin,
       syncTelemetryPlacement: 'daemon',
+      ...(options.syncTelemetryConsent === undefined ? {} : { syncTelemetryConsent: options.syncTelemetryConsent }),
       via: daemonRevisionVia(),
       ...(agent.revisionActor === undefined ? {} : { revisionActor: agent.revisionActor }),
       ...(observeChats === undefined
@@ -1078,7 +1103,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        * stopped answering over a settlement failure would lose the next turn
        * too. W5 puts `turn.finalized` on the wire for the client. */
       onRevisionEvent: (event) => {
-        if (event.type === 'turn.finalized') {
+        /* An engine failure already reaches the verb that ran it; the daemon has no field reporter to tell. */
+        if (event.type === 'turn.finalized' || event.type === 'revision.engine-failed') {
           return;
         }
         if (event.type === 'revision.unavailable') {
@@ -1171,7 +1197,13 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * outlives every relay reconnect, and `sendControl` is a no-op while the
      * socket is down. */
     agentRunReporter = startRunReporter({ read: project.launcher.read, send: sendControlOrThrow });
-    emit({ type: 'agent', state: 'ready', url: server.url().href, externalAgents });
+    emit({
+      type: 'agent',
+      state: 'ready',
+      url: server.url().href,
+      externalAgents,
+      externalAgentRefusals: discovery.refused,
+    });
     /* A daemon with the agent capability is *useful* the moment this channel
      * answers: pairing, the relay, and the compute child are all downstream of
      * it, and `tau serve --ui` must not block on any of them. */

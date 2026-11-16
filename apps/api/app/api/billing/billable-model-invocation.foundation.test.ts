@@ -30,7 +30,6 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
@@ -55,7 +54,9 @@ import {
 } from '@taucad/api-llm-gateway';
 import { ChatController } from '@taucad/api-chat/chat.controller';
 import { ChatService } from '@taucad/api-chat/chat.service';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HostsService } from '@taucad/api-hosts';
 import { DatabaseService } from '@taucad/api-database';
 import type { MetricsService } from '@taucad/api-observability/metrics';
@@ -904,7 +905,7 @@ describe('funded invocation HTTP boundary', () => {
             return undefined;
           },
         };
-        const auth = mockDeep<Auth>();
+        const getSession = vi.fn<FakeSessionLookup>();
         const sessionFor = (id: string) => {
           const now = new Date('2026-09-05T00:00:00.000Z');
           return {
@@ -929,7 +930,7 @@ describe('funded invocation HTTP boundary', () => {
             },
           };
         };
-        auth.api.getSession.mockResolvedValue(sessionFor(firstOwner.authUserId));
+        getSession.mockResolvedValue(sessionFor(firstOwner.authUserId));
         const databaseService = { database };
         const usage = new BillingUsageService(databaseService, config, ledger);
         const module = await Test.createTestingModule({
@@ -938,7 +939,7 @@ describe('funded invocation HTTP boundary', () => {
             Reflector,
             AuthGuard,
             LlmGatewayAuthGuard,
-            { provide: authInstanceKey, useValue: auth },
+            { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
             { provide: HostsService, useValue: { authenticateDevice: async () => undefined } },
             { provide: ConfigService, useValue: config },
             { provide: DatabaseService, useValue: databaseService },
@@ -1203,7 +1204,7 @@ describe('funded invocation HTTP boundary', () => {
         const ownLookup = await fetch(`${base}/v1/billing/attempts/gateway/${gatewayAttempt}`, { headers });
         expect(ownLookup.status).toBe(200);
         expect((await ownLookup.json()) as { operationId?: string }).toMatchObject({ operationId });
-        auth.api.getSession.mockResolvedValue(sessionFor(secondOwner.authUserId));
+        getSession.mockResolvedValue(sessionFor(secondOwner.authUserId));
         const otherLookup = await fetch(`${base}/v1/billing/attempts/gateway/${gatewayAttempt}`, {
           headers: { 'x-test-owner': secondOwner.authUserId },
         });

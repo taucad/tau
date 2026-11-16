@@ -9,6 +9,7 @@
  */
 import * as Sentry from '@sentry/electron/main';
 import type { ErrorEvent } from '@sentry/electron/main';
+import { revisionEngineFailureSignal } from '#main/desktop-signals.js';
 import type { DesktopSignal } from '#main/desktop-signals.js';
 import { applyRendererGoneSnapshot, snapshotRendererGone } from '#main/renderer-crash-context.js';
 import type { RendererGoneSnapshot } from '#main/renderer-crash-context.js';
@@ -99,4 +100,40 @@ export const reportDesktopSignal = (signal: DesktopSignal | undefined): void => 
     tags: signal.tags,
     ...(signal.contexts === undefined ? {} : { contexts: signal.contexts }),
   });
+};
+
+/** Milliseconds during which one revision-engine failure, by its redacted message, is sent once. */
+export const revisionEngineFailureWindow = 10 * 60_000;
+
+/** When each revision-engine failure was last sent, by its redacted message. */
+const revisionEngineFailuresSent = new Map<string, number>();
+
+/**
+ * Send a revision-engine failure the services utility reported, redacted (`desktop-signals.ts`), once per
+ * {@link revisionEngineFailureWindow} for the same message, so a retrying sync is one event and not a stream.
+ *
+ * @param frame - A services utility frame.
+ * @param now - The clock, for tests.
+ * @returns Whether the frame was a revision-engine failure, sent or not.
+ */
+export const reportRevisionEngineFailure = (frame: unknown, now: number = Date.now()): boolean => {
+  if (typeof frame !== 'object' || frame === null || (frame as { type?: unknown }).type !== 'revision-engine-failed') {
+    return false;
+  }
+  const signal = revisionEngineFailureSignal(frame);
+  if (signal === undefined) {
+    return true;
+  }
+  const sent = revisionEngineFailuresSent.get(signal.message);
+  if (sent !== undefined && now - sent < revisionEngineFailureWindow) {
+    return true;
+  }
+  for (const [message, at] of revisionEngineFailuresSent) {
+    if (now - at >= revisionEngineFailureWindow) {
+      revisionEngineFailuresSent.delete(message);
+    }
+  }
+  revisionEngineFailuresSent.set(signal.message, now);
+  reportDesktopSignal(signal);
+  return true;
 };

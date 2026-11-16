@@ -34,10 +34,19 @@ export type EffectivePurposesAnswer = Readonly<{
   purposes: ReadonlyArray<Readonly<{ purpose: string; allowed: boolean; allowedSince?: number | undefined }>>;
   /** The server's clock when it answered; with the host's receipt time it puts `allowedSince` on the host's clock. */
   answeredAt?: number | undefined;
+  /** The protection the server reads for the account now; a host without it claims `unknown`. */
+  protection?: string | undefined;
 }>;
 
 /** A purpose a host reports under; each is its own plane and grant. @public */
 export type ReportingPurpose = 'summary' | 'feedback';
+
+const isProtection = (value: string | undefined): value is ReportingGrant['protection'] =>
+  value === 'free' || value === 'pro' || value === 'unknown';
+
+/* A protection the server named, or `unknown` for an answer from a server that names none. */
+const protectionOf = (value: string | undefined): ReportingGrant['protection'] =>
+  isProtection(value) ? value : 'unknown';
 
 const isTime = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -83,12 +92,12 @@ export const purposeGrantOf = (
     purpose === 'summary'
       ? answer.purposes.find((candidate) => candidate.purpose === 'content' && candidate.allowed)
       : undefined;
-  /* The answer does not say the account's protection; `unknown` is the strictest claim, and the API only tightens it. */
+  /* The server's own reading of the account's protection, or `unknown`, the strictest claim; the API only tightens it. */
   return {
     principal: subject.principal,
     project: subject.project,
     policyEpoch: answer.epoch,
-    protection: 'unknown',
+    protection: protectionOf(answer.protection),
     ...hostClockSince(state.allowedSince, answer.answeredAt, subject.receivedAt),
     ...(content === undefined
       ? {}
@@ -171,7 +180,14 @@ const sameScope = (left: DeliveryScope | undefined, right: DeliveryScope | undef
 /** How many settled runs a reporter remembers; one it forgot is projected again and the API counts it once. */
 const settledLimit = 4096;
 
-const settledKey = (run: ProjectedRun): string => `${run.chatId}\u0000${run.runId}`;
+/*
+ * A run is settled at its ending row, not for good: a resumed run keeps its id, and the later attempt's ending row
+ * (the highest attempt's terminal) makes it a new report, so its outcome and tools are sent too (LU14).
+ */
+const settledKey = (run: ProjectedRun): string =>
+  [run.chatId, run.runId, run.ending?.source.leaderEpoch ?? '', String(run.ending?.source.sequence ?? '')].join(
+    '\u0000',
+  );
 
 const defaultSchedule = (callback: () => void, milliseconds: number): (() => void) => {
   const handle = setTimeout(callback, milliseconds);

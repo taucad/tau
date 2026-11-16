@@ -171,7 +171,7 @@ describe('model emphasis overlay resources', () => {
     resources.dispose();
   });
 
-  it('proxies each emphasised mesh into both mask layers and the wash group, sharing six materials', () => {
+  it('proxies each emphasised mesh into both mask layers and the wash group, sharing seven materials', () => {
     const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     const hovered = makeSource();
     const selected = makeSource();
@@ -181,20 +181,72 @@ describe('model emphasis overlay resources', () => {
     // One coverage proxy and one visibility proxy per emphasised mesh, drawn in a single pass.
     expect(resources.maskScene.children).toHaveLength(4);
     const washGroup = resources.overlayGroup.children[0] as Group;
-    expect(washGroup.children).toHaveLength(2);
+    expect(washGroup.children).toHaveLength(4);
     const [hoverMask, hoverVisibility, selectedMask] = resources.maskScene.children as Mesh[];
     expect(hoverMask!.material).toBe(resources.mask.coverage.hover);
     expect(hoverVisibility!.material).toBe(resources.mask.visibility.hover);
     expect(selectedMask!.material).toBe(resources.mask.coverage.selected);
     expect(hoverMask!.geometry).toBe(hovered.geometry);
     // The wash never touches the source material, so metalness/maps/vertex colours are irrelevant.
-    expect((washGroup.children[0] as Mesh).material).toBe(resources.wash.hover);
+    expect((washGroup.children[1] as Mesh).material).toBe(resources.wash.hover);
     expect(hovered.material).toBeInstanceOf(MeshStandardMaterial);
     expect(resources.wash.selected.opacity).toBeGreaterThan(resources.wash.hover.opacity);
 
     syncModelEmphasisProxies(resources, emptyModelEmphasisSet);
     expect(resources.maskScene.children).toHaveLength(0);
     expect(resources.proxies).toHaveLength(0);
+    resources.dispose();
+  });
+
+  it('draws one depth-only proxy per emphasised mesh before every wash, so nested layers take one wash', () => {
+    const clip = createSectionClip('webgpu');
+    const resources = createModelEmphasisResources('webgpu', clip);
+    const hovered = [makeSource(), makeSource()];
+    const selected = makeSource();
+    selected.position.set(1, 2, 3);
+    selected.updateMatrixWorld(true);
+
+    syncModelEmphasisProxies(resources, { hover: hovered, selected: [selected] });
+    syncModelEmphasisFrame(resources);
+
+    const proxies = (resources.overlayGroup.children[0] as Group).children as Mesh[];
+    const depth = proxies.filter((proxy) => proxy.material === resources.washDepth);
+    const washes = proxies.filter((proxy) => proxy.material !== resources.washDepth);
+    expect(depth.map((proxy) => proxy.geometry)).toEqual([...hovered, selected].map((source) => source.geometry));
+    expect(washes).toHaveLength(3);
+    expect(Math.max(...depth.map((proxy) => proxy.renderOrder))).toBeLessThan(
+      Math.min(...washes.map((proxy) => proxy.renderOrder)),
+    );
+    expect(depth[2]!.matrixWorld.equals(selected.matrixWorld)).toBe(true);
+    const material = resources.washDepth;
+    // Same class, clip and render list as the wash, so both draws tie exactly under its `LessEqual`.
+    expect(material).toBeInstanceOf(resources.wash.hover.constructor);
+    expect((material as { maskNode?: unknown }).maskNode).toBe(clip.mask);
+    expect([material.colorWrite, material.depthWrite, material.depthTest, material.transparent]).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect([material.side, material.forceSinglePass, material.polygonOffset]).toEqual([DoubleSide, true, false]);
+    const dispose = vi.spyOn(material, 'dispose');
+    resources.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('should skip the depth prepass for a source that does not write depth', () => {
+    const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
+    const opaque = makeSource();
+    const dimmed = makeSource();
+    (dimmed.material as MeshStandardMaterial).depthWrite = false;
+    syncModelEmphasisProxies(resources, { hover: [opaque, dimmed], selected: [] });
+
+    syncModelEmphasisFrame(resources);
+
+    expect(resources.proxies.map((proxy) => proxy.depth.visible)).toEqual([true, false]);
+    (dimmed.material as MeshStandardMaterial).depthWrite = true;
+    syncModelEmphasisFrame(resources);
+    expect(resources.proxies.map((proxy) => proxy.depth.visible)).toEqual([true, true]);
     resources.dispose();
   });
 

@@ -28,7 +28,11 @@ test('Playwright WebKit exposes Home-only creation with no location picker', asy
   expect(homepageConfig.backend).toBe('indexeddb');
   const homepageEvidence = await readIndexedDbProjectEvidence(homepageConfig.providerBasePath);
   expect(homepageEvidence).toBeDefined();
-  expect(JSON.parse(homepageEvidence!.manifestText)).toMatchObject({
+  /* The manifest carries the name; the project's id lives in `.tau/project.json`, as the Chromium rows read it. */
+  const manifest = JSON.parse(homepageEvidence!.manifestText) as { name: string };
+  const identity = JSON.parse(homepageEvidence!.identityText) as { projectId: string };
+  expect(manifest).not.toHaveProperty('id');
+  expect({ id: identity.projectId, name: manifest.name }).toEqual({
     id: homepageConfig.projectId,
     name: 'WebKit Home Project',
   });

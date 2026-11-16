@@ -7,7 +7,7 @@ export const selectControlVariants = cva(
   "grid grid-cols-[minmax(0,1fr)_1rem] items-center gap-1.5 rounded-md border py-1 pr-2 pl-2.5 text-sm whitespace-nowrap outline-none select-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:translate-y-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
   {
     variants: {
-      size: { default: 'h-9', sm: 'h-7' },
+      size: { default: 'h-9', md: 'h-8', sm: 'h-7' },
       part: {
         trigger:
           'w-fit border-input bg-transparent transition-colors focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-feature data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50',

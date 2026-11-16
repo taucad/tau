@@ -224,6 +224,57 @@ describe('auth and onboarding', () => {
     }),
   );
 
+  // Auth session cookie blueprint, case 25 (H4): runs at rollout step 3, when the deployed API has the cookie cache
+  // at 60 s. A credentialed cross-origin fetch must receive and keep the snapshot cookie; no pre-merge test can.
+  it.skipIf(process.env['EXPECT_SESSION_CACHE'] !== '60')(
+    'should keep the session snapshot cookie on a credentialed cross-origin fetch [AU-10 P1]',
+    matrixRow('AU-10', 'P1', async (evidence) => {
+      const account = await createAccount('au10');
+      accounts.push(account);
+      const observed = await withBrowser(account, async ({ context, page }) => {
+        await page.goto(`${baseUrl}/`);
+        // The snapshot from sign-in is older than its 60 s lifetime, so the next read goes to the store and the
+        // response sets a fresh one.
+        await delay(61_000);
+        const fetchStatus = async (): Promise<number> =>
+          z
+            .number()
+            .parse(
+              await page.evaluate(
+                `fetch(${JSON.stringify(`${apiUrl}/v1/billing/entitlements`)}, { credentials: 'include' }).then((response) => response.status)`,
+              ),
+            );
+        const first = await fetchStatus();
+        const cookies = await context.cookies(apiUrl);
+        const snapshot = cookies.find((cookie) => cookie.name.endsWith('tau.session_data'));
+        const second = await fetchStatus();
+        return { first, second, snapshot };
+      });
+      const { snapshot } = observed;
+      evidence.push(
+        `entitlements ${observed.first} then ${observed.second}`,
+        snapshot === undefined
+          ? 'no session_data cookie for the API origin'
+          : `${snapshot.name}: httpOnly ${snapshot.httpOnly}, secure ${snapshot.secure}, sameSite ${snapshot.sameSite}, path ${snapshot.path}, domain ${snapshot.domain}, ${snapshot.value.split('.').length} segments`,
+      );
+      expect(observed.first).toBe(200);
+      expect(observed.second).toBe(200);
+      expect(snapshot).toBeDefined();
+      expect(snapshot?.name).toBe('__Secure-tau.session_data');
+      expect(snapshot?.httpOnly).toBe(true);
+      expect(snapshot?.secure).toBe(true);
+      expect(snapshot?.sameSite).toBe('Lax');
+      expect(snapshot?.path).toBe('/');
+      // Host-only: Playwright reports a host-only cookie's domain without a leading dot.
+      expect(snapshot?.domain).toBe(new URL(apiUrl).hostname);
+      expect(snapshot?.value.split('.')).toHaveLength(5);
+      // Max-Age=60, as an absolute expiry.
+      expect((snapshot?.expires ?? 0) - Date.now() / 1000).toBeGreaterThan(0);
+      expect((snapshot?.expires ?? 0) - Date.now() / 1000).toBeLessThanOrEqual(61);
+      return { outcome: 'pass', evidence };
+    }),
+  );
+
   // Last in this file: the burst fills the sign-in window, and the wait below drains it before the next row signs
   // in (a later file that meets a leftover 429 retries it through api.ts).
   it(

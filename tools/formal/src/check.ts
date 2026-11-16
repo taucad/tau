@@ -214,10 +214,16 @@ const runJobs = async (
 
 export const writeSummary = (
   context: FormalContext,
-  { projectRoot, tier }: { readonly projectRoot: string; readonly tier: string },
+  { projectRoot, tier, family }: { readonly projectRoot: string; readonly tier: string; readonly family?: string },
   report: CheckReport,
 ): string => {
-  const directory = path.join(context.root, 'out/reports/formal', path.relative(context.root, projectRoot), tier);
+  const directory = path.join(
+    context.root,
+    'out/reports/formal',
+    path.relative(context.root, projectRoot),
+    tier,
+    ...(family === undefined ? [] : [family]),
+  );
   mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'summary.json');
   const seconds = report.records.reduce((total, record) => total + record.seconds, 0);
@@ -232,6 +238,13 @@ export type CheckOptions = {
   readonly tier: Tier | 'lean';
   /** Absolute project root. */
   readonly projectRoot: string;
+  /**
+   * One model family: the path of a spec directory relative to `specs/` (`record-sync`). The check reads
+   * only that directory's `expected.json` and writes its summary under `<tier>/<family>/`, so an owner
+   * with several families runs each in a target of its own (`formal:tla:<family>`, formal verification
+   * policy § 6). Without it the check reads every `expected.json` under `specs/`.
+   */
+  readonly family?: string;
   readonly log?: (line: string) => void;
   readonly tools?: LocatedTools;
 };
@@ -295,14 +308,24 @@ const checkLeanProject = (
 /** `formal check --tier pr|nightly|lean <projectRoot>`: SANY, every config and log case of the tier, against `expected.json`. */
 export const checkProject = async (context: FormalContext, options: CheckOptions): Promise<number> => {
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const target = `${path.relative(context.root, options.projectRoot)}:formal:${options.tier === 'pr' ? 'tla' : options.tier}`;
+  const { family } = options;
+  const target = `${path.relative(context.root, options.projectRoot)}:formal:${options.tier === 'pr' ? 'tla' : options.tier}${family === undefined ? '' : `:${family}`}`;
   if (options.tier === 'lean') {
+    if (family !== undefined) {
+      log(`${target}: --family selects a TLA+ family; the lean tier has none`);
+      return 2;
+    }
     return checkLeanProject(context, options, { log, target });
   }
   const { tier } = options;
-  const locations = findExpectedFiles(options.projectRoot).filter((location) => location.file.lean === undefined);
+  const specs = path.join(options.projectRoot, 'specs');
+  const locations = findExpectedFiles(options.projectRoot).filter(
+    (location) =>
+      location.file.lean === undefined &&
+      (family === undefined || path.relative(specs, location.directory).split(path.sep).join('/') === family),
+  );
   if (locations.length === 0) {
-    log(`${target}: no specs/**/expected.json`);
+    log(`${target}: no specs/${family ?? '**'}/expected.json`);
     return 1;
   }
   const tools = options.tools ?? locateTools(context);
@@ -328,7 +351,11 @@ export const checkProject = async (context: FormalContext, options: CheckOptions
     log,
   );
   const report: CheckReport = { records, failures: [...problems, ...failures] };
-  const summary = writeSummary(context, { projectRoot: options.projectRoot, tier: options.tier }, report);
+  const summary = writeSummary(
+    context,
+    { projectRoot: options.projectRoot, tier: options.tier, ...(family === undefined ? {} : { family }) },
+    report,
+  );
   log(`${target}: ${records.length} runs, ${report.failures.length} failures; ${path.relative(context.root, summary)}`);
   return report.failures.length === 0 ? 0 : 1;
 };

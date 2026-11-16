@@ -2,17 +2,26 @@ import { observeHomeProjectSaves } from '#filesystem/observe-home-project-saves.
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
-import type { FileSystemBridgeRootedProxy, FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useActorRef, useSelector } from '@xstate/react';
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
+import { useSelector } from '@xstate/react';
+import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { waitFor } from 'xstate';
-import type { SnapshotFrom } from 'xstate';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
-import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import type {
   BulkMoveEdit,
@@ -21,22 +30,40 @@ import type {
   ScopedStorageClient,
 } from '@taucad/fs-client/file-system-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { createRootedContentClient, rootedPathOf } from '@taucad/fs-client/rooted-content-client';
-import type { RootedContentClient, RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
-import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import { watchByChangeSets } from '@taucad/filesystem';
-import type { MountConfig, WorkspaceMutationError, WorkspaceScope, WatchEvent } from '@taucad/filesystem';
-import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
-import { pathRegistry } from '@taucad/filesystem/path-registry';
+import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
+import { recordConnectionsOf } from '#runtime/file-manager-record-connections.js';
 import {
-  disconnectWorkspace as disconnectStoredWorkspace,
-  getHomeStorageBackend,
-  getProjectRootConfigs,
-  restoreWorkspaceHandle as restoreStoredWorkspaceHandle,
-  setProjectFileSystemConfig,
-  updateWorkspaceHandle,
-} from '#filesystem/handle-store.js';
+  createAuthorityClient,
+  createDuplicateProjectReader,
+  createRecordWatch,
+  createScopedStorage,
+  createWorkspaceFacade,
+  readied,
+  selectActiveWorkspaceId,
+  selectBridgeOpener,
+  selectProxy,
+  servicesBound,
+  servicesOf,
+} from '#runtime/file-manager-facade.js';
+import type { RootFileFacade } from '#runtime/file-manager-facade.js';
+import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
+import type { MountConfig, WorkspaceMutationError, WatchEvent } from '@taucad/filesystem';
+import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
+import { getProjectRootConfigs, setProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
+import {
+  selectRuntimeFileManagerHost,
+  selectRuntimeFiles,
+  selectRuntimeRootFileFacade,
+  selectRuntimeRootFiles,
+} from '#runtime/app-runtime.js';
+import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import { selectHomeBackend, selectHomeBackendFailure, selectSharedWorkerPresent } from '#runtime/file-manager-host.js';
+import type { FileManagerActor, FileManagerSpec } from '#runtime/file-manager-host.js';
+import { awaitFileManager } from '#runtime/file-manager-host.wait.js';
+import type { LeaseEntry } from '#runtime/leases.js';
+import { sessionFileManagerOf } from '#runtime/session-file-manager.js';
+import type { FileManagerOwner } from '#runtime/session-file-manager.js';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -46,135 +73,40 @@ import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-e
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
-import { ENV } from '#environment.config.js';
-
-type FileManagerSnapshot = SnapshotFrom<typeof fileManagerMachine>;
 
 /**
- * Default timeout for {@link waitForFileManagerServices} and the proxy
- * gate inside `useFileManager`. Closes Finding 8 of the explicit-
- * workspace blueprint — without a timeout the hook hangs the whole UI
- * (chat composer, project creation) when the FM machine gets stuck in
- * `connectingWorker`/`initializingServices`. 30s matches the worker
- * boot budget tracked in `runtime-blueprint-v5-implementation-audit`.
+ * Wait for a file manager's content and tree services, up to the ready bound.
+ *
+ * For a caller outside a provider. In the app, a caller uses its scope's `whenServicesReady`, which waits on the
+ * runtime's clock (row S18); this wait runs on `options.clock`, or the default clock without one.
+ *
+ * @param fileManagerRef - The file manager to wait for.
+ * @param options - The bound in milliseconds, and the clock to wait on.
+ * @returns The services.
+ * @throws {FileManagerNotReadyError} When the bound passes first, or the file manager is in `error`.
+ * @public
  */
-type RecordBridgeOpener = (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
-
-function recordConnectionsForIncarnation(fallback: RecordBridgeOpener, ready: () => Promise<unknown>) {
-  let owner: RootedContentOwner<RootedBridgeConsumer> | undefined;
-  let previous: RecordBridgeOpener | undefined;
-  return (opener: RecordBridgeOpener | undefined) => {
-    if (!owner || (previous !== undefined && opener !== previous)) {
-      owner = createRootedContentClient({
-        open: async (root, consumer: RootedBridgeConsumer) => {
-          await ready();
-          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-          const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
-          try {
-            await proxy.ready;
-          } catch (error) {
-            // A failed handshake must not become this root's cached connection.
-            proxy.dispose();
-            throw error;
-          }
-          return {
-            files: proxy,
-            dispose: () => {
-              proxy.dispose();
-            },
-          };
-        },
-      });
-    }
-    previous = opener;
-    return owner;
-  };
-}
-
-export const fileManagerReadyTimeout = 30_000;
-
-/** Live mounts per rooted connection owner, so Strict Mode's disconnect-then-reconnect does not release it. */
-const rootedConnectionMounts = new WeakMap<RootedContentOwner<RootedBridgeConsumer>, number>();
-
-function createErrorAwareWaitPredicate(
-  predicate: (state: FileManagerSnapshot) => boolean,
-): (state: FileManagerSnapshot) => boolean {
-  return (state: FileManagerSnapshot) => {
-    if (state.matches('error')) {
-      return true;
-    }
-
-    return predicate(state);
-  };
-}
-
-function assertNotErrorState(snapshot: FileManagerSnapshot): void {
-  if (snapshot.matches('error')) {
-    throw new FileManagerNotReadyError('machine-error', {
-      cause: snapshot.context.error,
-    });
-  }
-}
-
 export async function waitForFileManagerServices(
   fileManagerRef: FileManagerRef,
   options?: {
     /** Milliseconds. */
     readyTimeout?: number;
+    clock?: ActorOptions<AnyActorLogic>['clock'];
   },
 ): Promise<{
   contentService: FileContentService;
   treeService: FileTreeService;
 }> {
-  const snapshot = fileManagerRef.getSnapshot();
-  const { contentService: content, treeService: tree } = snapshot.context;
-  if (content && tree) {
-    return { contentService: content, treeService: tree };
+  const known = servicesBound(fileManagerRef);
+  if (known !== undefined) {
+    return known;
   }
-
-  const settled = await waitForWithTimeout({
-    fileManagerRef,
-    predicate: createErrorAwareWaitPredicate(
-      (state) => state.context.contentService !== undefined && state.context.treeService !== undefined,
-    ),
-    readyTimeout: options?.readyTimeout ?? fileManagerReadyTimeout,
+  const settled = await awaitFileManager(fileManagerRef, 'services', {
     reason: 'services-timeout',
+    ...(options?.readyTimeout === undefined ? {} : { timeoutMilliseconds: options.readyTimeout }),
+    ...(options?.clock === undefined ? {} : { clock: options.clock }),
   });
-  assertNotErrorState(settled);
-  const readyContent = settled.context.contentService;
-  const readyTree = settled.context.treeService;
-  if (!readyContent || !readyTree) {
-    throw new FileManagerNotReadyError('services-timeout');
-  }
-
-  return { contentService: readyContent, treeService: readyTree };
-}
-
-type WaitForWithTimeoutOptions = {
-  readonly fileManagerRef: FileManagerRef;
-  readonly predicate: (state: FileManagerSnapshot) => boolean;
-  /** Milliseconds. */
-  readonly readyTimeout: number;
-  readonly reason: 'proxy-timeout' | 'services-timeout';
-};
-
-async function waitForWithTimeout({
-  fileManagerRef,
-  predicate,
-  readyTimeout,
-  reason,
-}: WaitForWithTimeoutOptions): Promise<FileManagerSnapshot> {
-  return Promise.race([
-    waitFor(fileManagerRef, predicate),
-    new Promise<FileManagerSnapshot>((_resolve, reject) => {
-      const id = setTimeout(() => {
-        reject(new FileManagerNotReadyError(reason));
-      }, readyTimeout);
-      // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- access guarded below
-      const unrefable = id as unknown as { unref?: () => void };
-      unrefable.unref?.();
-    }),
-  ]);
+  return servicesOf(settled);
 }
 
 type WriteFileOptions = {
@@ -472,39 +404,37 @@ type FileManagerContextType = {
 
 const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
 
-const SharedWorkerContext = createContext<Worker | undefined>(undefined);
-
-const HomeStorageBackendContext = createContext<
-  | { readonly backend: HomeStorageBackend | undefined; readonly error: Error | undefined; readonly retry: () => void }
-  | undefined
->(undefined);
-
-/** Physical engine selected for the system-owned Home workspace. */
-export function useHomeStorageBackend(): HomeStorageBackend | undefined {
-  const selection = useContext(HomeStorageBackendContext);
-  if (selection === undefined) {
-    throw new Error('useHomeStorageBackend must be used within HomeFileManagerProvider');
-  }
-  return selection.backend;
+/** The file-manager host's ref, outside a runtime `undefined` (a component test that renders a gate alone). */
+function useOptionalFileManagerHost() {
+  const runtime = useOptionalAppRuntime();
+  return runtime === undefined ? undefined : selectRuntimeFileManagerHost(runtime);
 }
 
 /**
- * Gate component that defers rendering until the parent FileManagerProvider's
- * worker is available via SharedWorkerContext. Prevents nested
- * FileManagerProviders from creating duplicate workers during the window
- * between root mount and root worker initialization.
- */
-/**
- * The one file-manager worker this document runs, once the root mount has it.
+ * Physical engine selected for the system-owned Home workspace (row S37): the file-manager host's, once it resolved.
  *
- * The sessions registry needs it to admit and release a project's compute
- * (S44), and it is app-level: every project mount shares this worker.
- *
- * @returns The shared worker, or `undefined` before the root mount has one.
+ * @returns The engine, or `undefined` while it resolves or after it failed.
  * @public
  */
-export function useSharedFileManagerWorker(): Worker | undefined {
-  return useContext(SharedWorkerContext);
+export function useHomeStorageBackend(): HomeStorageBackend | undefined {
+  const host = useOptionalFileManagerHost();
+  if (host === undefined) {
+    throw new Error('useHomeStorageBackend must be used within <AppRuntimeProvider>');
+  }
+  return useSelector(host, selectHomeBackend);
+}
+
+/** Whether the shared worker is up, read from `rootFiles`; `false` outside a runtime, where no file manager has one. */
+function useSharedWorkerPresent(): boolean {
+  const runtime = useOptionalAppRuntime();
+  const rootFiles = runtime === undefined ? undefined : selectRuntimeRootFiles(runtime);
+  return useSelector(rootFiles, (snapshot) => (snapshot === undefined ? false : selectSharedWorkerPresent(snapshot)));
+}
+
+/** Home's backend failure, outside a runtime `undefined`. */
+function useHomeBackendFailure(): string | undefined {
+  const host = useOptionalFileManagerHost();
+  return useSelector(host, (snapshot) => (snapshot === undefined ? undefined : selectHomeBackendFailure(snapshot)));
 }
 
 /**
@@ -514,31 +444,31 @@ export function useSharedFileManagerWorker(): Worker | undefined {
  * root mount is still connecting one, which is progress and shows the caller's
  * placeholder, or its machine gave up, which used to be an unexplained blank.
  * `initialize` takes the machine's `error` state back to `connectingWorker`, so
- * Try again is a real retry rather than a page reload.
+ * Try again is a real retry rather than a page reload. When the file-manager
+ * host could not read Home's engine (row S37), the notice says so and its retry
+ * sends the host `retry`; nothing ever selects a fallback engine.
  *
  * Soft-error tone, not destructive red: nothing was lost, the service just did
  * not start.
  *
  * @param properties - The root mount's machine, for the failure check and the
- *   retry, what to show while the worker is still on its way, and whether the
- *   notice stands in for the whole shell.
+ *   retry, and what to show while the worker is still on its way.
  * @returns The notice, or the placeholder.
  */
 function SharedWorkerFallback({
   fileManagerRef,
   placeholder,
-  withShellFrame,
   isInline = false,
 }: {
   readonly isInline?: boolean;
   readonly fileManagerRef: FileManagerRef;
   readonly placeholder: ReactNode;
-  readonly withShellFrame: boolean;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
   const isBackendPending = useSelector(fileManagerRef, (state) => state.context.backendType === undefined);
-  const homeSelection = useContext(HomeStorageBackendContext);
-  const homeFailed = isBackendPending && homeSelection?.error !== undefined;
+  const host = useOptionalFileManagerHost();
+  const homeFailure = useHomeBackendFailure();
+  const homeFailed = isBackendPending && homeFailure !== undefined;
 
   if (!hasFailed && !homeFailed) {
     return placeholder;
@@ -553,7 +483,7 @@ function SharedWorkerFallback({
       type='button'
       onClick={() => {
         if (homeFailed) {
-          homeSelection.retry();
+          host?.send({ type: 'retry' });
         } else {
           fileManagerRef.send({ type: 'initialize' });
         }
@@ -573,7 +503,7 @@ function SharedWorkerFallback({
     );
   }
   return (
-    <div role='alert' className={withShellFrame ? 'h-dvh w-full' : 'size-full'}>
+    <div role='alert' className='size-full'>
       <PanelEmptyState
         icon={OctagonAlert}
         iconClassName='text-feature'
@@ -590,28 +520,29 @@ function SharedWorkerFallback({
 /**
  * Hold `children` until this document's file-manager worker exists.
  *
+ * The worker is `rootFiles`'s, which the file-manager host watches; a nested
+ * file manager built before it would start a worker of its own.
+ *
  * @param properties - The gated subtree, and the `placeholder` to show while
  *   the worker connects. A route that knows what it is opening passes its own
  *   loading state; without one the gate waits invisibly, as it always did.
- *   `withShellFrame` marks a gate above the app shell, whose failure notice
- *   then takes the window.
+ *   The failure notice fills the gate's own region: the app shell is never
+ *   below a gate (D24).
  * @returns The children, the placeholder, or the failure notice.
  */
 export function SharedWorkerGate({
   children,
   placeholder,
-  withShellFrame = false,
   shouldReportFailure = true,
 }: {
   readonly shouldReportFailure?: boolean;
   readonly children: ReactNode;
   readonly placeholder?: ReactNode;
-  readonly withShellFrame?: boolean;
 }): React.ReactNode {
-  const worker = useContext(SharedWorkerContext);
+  const isWorkerPresent = useSharedWorkerPresent();
   const fileManager = useOptionalFileManager();
 
-  if (worker) {
+  if (isWorkerPresent) {
     return children;
   }
 
@@ -619,11 +550,7 @@ export function SharedWorkerGate({
   return fileManager === undefined || !shouldReportFailure ? (
     placeholder
   ) : (
-    <SharedWorkerFallback
-      fileManagerRef={fileManager.fileManagerRef}
-      placeholder={placeholder}
-      withShellFrame={withShellFrame}
-    />
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={placeholder} />
   );
 }
 
@@ -631,12 +558,7 @@ export function SharedWorkerGate({
 export function HomeFileManagerNotice(): React.ReactNode {
   const fileManager = useOptionalFileManager();
   return fileManager ? (
-    <SharedWorkerFallback
-      fileManagerRef={fileManager.fileManagerRef}
-      placeholder={undefined}
-      withShellFrame={false}
-      isInline
-    />
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
   ) : undefined;
 }
 
@@ -645,7 +567,7 @@ export function HomeFileManagerNotice(): React.ReactNode {
  * `initialBackend` is required (Audit R4 / Finding 7) — the call site
  * must commit to a backend explicitly so the FM machine can bootstrap
  * deterministically. Product mount sites use {@link HomeFileManagerProvider}
- * so the profile's pinned Home engine is resolved once at the app root.
+ * so the profile's pinned Home engine is resolved once, by the file-manager host.
  */
 type FileManagerProviderCommonProps = {
   readonly children: ReactNode;
@@ -673,103 +595,203 @@ export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
   readonly projectId?: string;
 };
 
-/** Resolve Home once at the app root and reuse that engine at every nested mount. */
+/**
+ * Lease this mount's file manager (D6): read in render, idempotent per key, and retained once the mount commits.
+ *
+ * The key is the mount's own (`useId`, stable across StrictMode's double render and its remount, and between the
+ * server render and hydration) with its root, project and backend, so a mount that changes its root leases a fresh
+ * file manager built for it, where it used to send `setRoot`. The store starts the actor on the first retain; a
+ * release starts the grace, so StrictMode's remount keeps the lease and an unmount releases it after the grace (B3).
+ * No ref callback: a context provider renders no element to hold one, so the retain is the commit's passive effect.
+ * Not a layout effect: React cleans those up when a revealed Suspense boundary re-suspends and hides the subtree, which
+ * would release a mounted lease and drop it after the grace; a passive effect lives as long as the mount, as
+ * `useActorRef`'s actor did. It neither sends, subscribes nor times; the store does (I1, I16).
+ *
+ * A render that commits after its entry's grace (a transition held by a slow lazy chunk) finds the entry dropped: the
+ * mount renders again, and the store builds a fresh one for the key. The leased providers key their scope by the
+ * actor, so nothing below keeps the stopped one.
+ */
+function useLeasedFileManager(spec: FileManagerSpec): LeaseEntry<FileManagerActor> {
+  const runtime = useAppRuntime();
+  const mount = useId();
+  const key = JSON.stringify([mount, spec.rootDirectory, spec.projectId ?? null, spec.backend]);
+  const lease = selectRuntimeFiles(runtime).leaseFileManager(key, spec);
+  const [, renew] = useReducer((generation: number) => generation + 1, 0);
+  useEffect(() => {
+    const release = lease.retain();
+    if (lease.isDropped()) {
+      renew();
+    }
+    return release;
+  }, [lease]);
+  return lease;
+}
+
+/**
+ * The root layout's file manager: a context provider over the runtime's `rootFiles`, the file manager for `/`
+ * (R2-F2). It exists, unstarted, in the first render and on the server, and the runtime starts it.
+ *
+ * @param props - The app below the root layout.
+ * @returns The provider element.
+ * @public
+ */
+export function RootFileManagerProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  const runtime = useAppRuntime();
+  return (
+    <FileManagerScope
+      fileManagerRef={selectRuntimeRootFiles(runtime)}
+      rootDirectory='/'
+      isRoot
+      rootFacade={selectRuntimeRootFileFacade(runtime)}
+    >
+      {children}
+    </FileManagerScope>
+  );
+}
+
+/**
+ * A file manager on Home's engine, which the file-manager host resolves once (row S37): leased for this mount.
+ *
+ * @param props - The root, the project and whether the actor initializes on start.
+ * @returns The provider element.
+ * @public
+ */
 export function HomeFileManagerProvider({
   children,
   rootDirectory,
   projectId,
   shouldInitializeOnStart,
 }: HomeFileManagerProviderProps): React.ReactNode {
-  const inheritedSelection = useContext(HomeStorageBackendContext);
-  const [resolvedBackend, setResolvedBackend] = useState<HomeStorageBackend>();
-  const [resolutionFailure, setResolutionFailure] = useState<Error>();
-  const [loadBackend, setLoadBackend] = useState(() => getHomeStorageBackend);
-  const retry = useCallback(() => {
-    setResolutionFailure(undefined);
-    setLoadBackend(() => async () => getHomeStorageBackend());
-  }, []);
-  const backend = inheritedSelection === undefined ? resolvedBackend : inheritedSelection.backend;
-  const selection = useMemo(
-    () => inheritedSelection ?? { backend, error: resolutionFailure, retry },
-    [backend, inheritedSelection, resolutionFailure, retry],
-  );
-
-  useEffect(() => {
-    if (inheritedSelection !== undefined) {
-      return;
-    }
-    const controller = new AbortController();
-    // async-iife: bootstrap
-    void (async () => {
-      try {
-        const resolved = await loadBackend();
-        if (!controller.signal.aborted) {
-          setResolvedBackend(resolved);
-        }
-      } catch (error) {
-        // Keep the page mounted and expose retry through the file-service gate; never select a fallback engine.
-        if (!controller.signal.aborted) {
-          setResolutionFailure(error instanceof Error ? error : new Error(String(error)));
-        }
-      }
-    })();
-    return () => {
-      controller.abort();
-    };
-  }, [inheritedSelection, loadBackend]);
-
+  const lease = useLeasedFileManager({
+    backend: 'home',
+    rootDirectory,
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart }),
+  });
   return (
-    <HomeStorageBackendContext.Provider value={selection}>
-      <FileManagerProviderCore
-        rootDirectory={rootDirectory}
-        initialBackend={backend}
-        projectId={projectId}
-        shouldInitializeOnStart={shouldInitializeOnStart}
-      >
-        {children}
-      </FileManagerProviderCore>
-    </HomeStorageBackendContext.Provider>
+    <FileManagerScope
+      key={lease.actor.sessionId}
+      fileManagerRef={lease.actor}
+      rootDirectory={rootDirectory}
+      projectId={projectId}
+      owner={lease}
+    >
+      {children}
+    </FileManagerScope>
+  );
+}
+
+/**
+ * A project session's file manager: a provider over the actor the session's `fileManager` child built through the
+ * host for `/projects/<id>` (A6c). It creates, starts and stops nothing: the child owns the actor, its connections and
+ * its working-copy client, and the session stops the child when it closes (I1, I23). Until the child reports an
+ * actor (once `rootFiles` holds the shared worker), and while it rebuilds one on a new worker, the provider renders
+ * nothing.
+ *
+ * @param props - The session's file manager, its root and project, and the subtree.
+ * @returns The provider element, or nothing before the session has a file manager.
+ * @public
+ */
+export function SessionFileManagerProvider({
+  children,
+  fileManagerRef,
+  rootDirectory,
+  projectId,
+  isView = false,
+}: {
+  readonly children: ReactNode;
+  /** The session's file manager (`selectProjectSessionFileManager`). */
+  readonly fileManagerRef: FileManagerRef | undefined;
+  readonly rootDirectory: string;
+  readonly projectId: string;
+  /**
+   * A second view over a file manager whose session subtree already provides it (the focused project's view, A11).
+   * It serves its subtree the same way but leaves the file manager's own reports (workspace telemetry, Home's save
+   * observer) to the session's scope, which outlives it, so each fires once.
+   */
+  readonly isView?: boolean;
+}): React.ReactNode {
+  if (fileManagerRef === undefined) {
+    return null;
+  }
+  const opened = sessionFileManagerOf(fileManagerRef);
+  return (
+    <FileManagerScope
+      key={opened?.key}
+      fileManagerRef={fileManagerRef}
+      rootDirectory={rootDirectory}
+      projectId={projectId}
+      owner={opened?.owner}
+      isOwnerReporter={!isView}
+    >
+      {children}
+    </FileManagerScope>
   );
 }
 
 /** A resolved caller must still select an engine explicitly. Home alone owns deferred selection. */
-export function FileManagerProvider(props: FileManagerProviderProps): React.JSX.Element {
-  return <FileManagerProviderCore {...props} />;
-}
-
-function FileManagerProviderCore({
+export function FileManagerProvider({
   children,
   rootDirectory,
   projectId,
   initialBackend,
-  shouldInitializeOnStart = true,
-}: FileManagerProviderCommonProps & {
-  readonly initialBackend: FileSystemBackend | undefined;
+  shouldInitializeOnStart,
+}: FileManagerProviderProps): React.JSX.Element {
+  const lease = useLeasedFileManager({
+    backend: initialBackend,
+    rootDirectory,
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart }),
+  });
+  return (
+    <FileManagerScope
+      key={lease.actor.sessionId}
+      fileManagerRef={lease.actor}
+      rootDirectory={rootDirectory}
+      projectId={projectId}
+      owner={lease}
+    >
+      {children}
+    </FileManagerScope>
+  );
+}
+
+/** The external store of a scope whose owner holds no working-copy client: nothing to hear, nothing to read. */
+const subscribeToNothing = (): (() => void) => () => undefined;
+const readNothing = (): undefined => undefined;
+
+function FileManagerScope({
+  children,
+  fileManagerRef,
+  rootDirectory,
+  projectId,
+  isRoot = false,
+  owner,
+  rootFacade,
+  isOwnerReporter = true,
+}: {
+  readonly children: ReactNode;
+  readonly fileManagerRef: FileManagerRef;
+  readonly rootDirectory: string;
   readonly projectId?: string;
+  /** The root layout's scope over `rootFiles`, whose worker every other file manager shares. */
+  readonly isRoot?: boolean;
+  /**
+   * What owns this scope's file manager: its lease, or its session child (A6c). `rootFiles` has none and outlives
+   * every scope.
+   */
+  readonly owner?: FileManagerOwner | undefined;
+  /** The runtime's root facade, for the root layout's scope only: the scope reads it instead of building its own. */
+  readonly rootFacade?: RootFileFacade;
+  /** Whether this scope sends the file manager's own reports; false for a second view over a session's (A11). */
+  readonly isOwnerReporter?: boolean;
 }): React.JSX.Element {
-  const parentWorker = useContext(SharedWorkerContext);
+  const files = selectRuntimeFiles(useAppRuntime());
+  /* A scope over an owner that ends, before or during a wait (a lease's late-commit case, a session's close), ends the
+   * wait then, not at the bound. */
+  const gone = owner?.dropped;
 
   const workspaceTelemetry = useWorkspaceTelemetry();
-
-  const fileManagerRef = useActorRef(fileManagerMachine, {
-    input: {
-      rootDirectory,
-      shouldInitializeOnStart,
-      ...(initialBackend === undefined ? { backendResolution: 'pending' } : { initialBackend }),
-      projectId,
-      sharedWorker: parentWorker,
-      onExternalPollTelemetry: workspaceTelemetry.workspaceExternalPoll,
-      onRootSkipped: workspaceTelemetry.workspaceRootSkipped,
-    },
-  });
-
-  useEffect(() => {
-    // Establish the latest scope before resolving a backend can start its connection.
-    fileManagerRef.send({ type: 'setRoot', path: rootDirectory, projectId });
-    if (initialBackend !== undefined && initialBackend !== 'webaccess') {
-      fileManagerRef.send({ type: 'resolveInitialBackend', backend: initialBackend });
-    }
-  }, [fileManagerRef, initialBackend, rootDirectory, projectId]);
 
   const contentService = useSelector(fileManagerRef, (state) => state.context.contentService);
   const treeService = useSelector(fileManagerRef, (state) => state.context.treeService);
@@ -780,18 +802,18 @@ function FileManagerProviderCore({
   const unavailableReason = useSelector(fileManagerRef, (state) => state.context.unavailableReason);
 
   useEffect(() => {
-    if (!contentService || !workerChangeChannel || backendType === undefined) {
+    if (!isOwnerReporter || !contentService || !workerChangeChannel || backendType === undefined) {
       return;
     }
     return observeHomeProjectSaves({ projectId, backend: backendType, contentService, channel: workerChangeChannel });
-  }, [projectId, backendType, contentService, workerChangeChannel]);
+  }, [isOwnerReporter, projectId, backendType, contentService, workerChangeChannel]);
 
   const bindProjectToWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
       if (!projectId) {
         throw new Error('bindProjectToWorkspace requires a project scope (provider mounted without projectId)');
       }
-      const previousWorkspaceId = fileManagerRef.getSnapshot().context.activeWorkspaceId;
+      const previousWorkspaceId = selectActiveWorkspaceId(fileManagerRef);
 
       // Drop the worker-side standalone cache before reload (Audit R6
       // / Finding 9). The previous workspace's cached provider must go
@@ -800,8 +822,7 @@ function FileManagerProviderCore({
       // user has swapped away from. We also invalidate the new
       // workspaceId so a freshly-granted handle replaces any cached
       // provider that was created while permission was missing.
-      const snapshot = fileManagerRef.getSnapshot();
-      const { proxy } = snapshot.context;
+      const proxy = selectProxy(fileManagerRef);
       if (!proxy) {
         throw new Error('File manager is not ready');
       }
@@ -841,6 +862,9 @@ function FileManagerProviderCore({
   );
 
   useEffect(() => {
+    if (!isOwnerReporter) {
+      return;
+    }
     if (unavailableReason === 'permission' && activeWorkspaceId) {
       workspaceTelemetry.workspacePermissionRevoked({
         workspaceId: activeWorkspaceId,
@@ -852,7 +876,7 @@ function FileManagerProviderCore({
         reason: unavailableReason,
       });
     }
-  }, [activeWorkspaceId, unavailableReason, workspaceTelemetry]);
+  }, [isOwnerReporter, activeWorkspaceId, unavailableReason, workspaceTelemetry]);
 
   /**
    * Wait for the FM machine to enter `ready` and return the typed
@@ -860,14 +884,7 @@ function FileManagerProviderCore({
    * on the hook value.
    */
   const getReadiedProxy = useCallback(async (): Promise<FileManagerProxy> => {
-    const snapshot = await waitForWithTimeout({
-      fileManagerRef,
-      predicate: createErrorAwareWaitPredicate((state) => state.matches('ready')),
-      readyTimeout: fileManagerReadyTimeout,
-      reason: 'proxy-timeout',
-    });
-
-    assertNotErrorState(snapshot);
+    const snapshot = await readied(files, fileManagerRef, { readiness: 'ready', gone });
 
     const { proxy } = snapshot.context;
     if (!proxy) {
@@ -875,20 +892,11 @@ function FileManagerProviderCore({
     }
 
     return proxy;
-  }, [fileManagerRef]);
+  }, [files, fileManagerRef, gone]);
 
   /** The composed view client the FM machine builds once the services are up. */
   const getReadiedClient = useCallback(async (): Promise<ComposedViewClient> => {
-    const snapshot = await waitForWithTimeout({
-      fileManagerRef,
-      predicate: createErrorAwareWaitPredicate(
-        (state) => state.matches('ready') && state.context.viewClient !== undefined,
-      ),
-      readyTimeout: fileManagerReadyTimeout,
-      reason: 'proxy-timeout',
-    });
-
-    assertNotErrorState(snapshot);
+    const snapshot = await readied(files, fileManagerRef, { readiness: 'viewClient', gone });
 
     const { viewClient } = snapshot.context;
     if (!viewClient) {
@@ -896,11 +904,19 @@ function FileManagerProviderCore({
     }
 
     return viewClient;
-  }, [fileManagerRef]);
+  }, [files, fileManagerRef, gone]);
 
-  const whenServicesReady = useCallback(async () => {
-    return waitForFileManagerServices(fileManagerRef);
-  }, [fileManagerRef]);
+  const whenServicesReady = useCallback(
+    async () =>
+      servicesBound(fileManagerRef) ??
+      servicesOf(
+        await files.awaitFileManager(fileManagerRef, 'services', {
+          reason: 'services-timeout',
+          ...(gone === undefined ? {} : { gone }),
+        }),
+      ),
+    [files, fileManagerRef, gone],
+  );
 
   /* `setRoot` destroys the worker, so its opener identity releases old rooted ports. */
   const bridgeOpener = useSelector(fileManagerRef, (state) => state.context.openFileSystemBridge);
@@ -910,7 +926,7 @@ function FileManagerProviderCore({
    * them) has no host whose bridges it replaced. */
   const lastBridgeOpener = useRef(bridgeOpener);
   useEffect(() => {
-    if (bridgeOpener === undefined || parentWorker !== undefined) {
+    if (bridgeOpener === undefined || !isRoot) {
       return;
     }
     const previous = lastBridgeOpener.current;
@@ -926,13 +942,13 @@ function FileManagerProviderCore({
         console.error('[FileManager] the agent host could not take the new file service', error);
       }
     })();
-  }, [bridgeOpener, parentWorker]);
+  }, [bridgeOpener, isRoot]);
 
   const openRootedFileSystemBridge = useCallback(
     (root: string, consumer: RootedBridgeConsumer) => {
       /* An early record read may wait for services across the first render. Read
        * the current opener after that wait, not the undefined one it captured. */
-      const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
+      const opener = selectBridgeOpener(fileManagerRef);
       if (!opener) {
         throw new FileManagerNotReadyError('proxy-timeout', {
           cause: new Error('File Manager filesystem bridge is not ready.'),
@@ -972,44 +988,9 @@ function FileManagerProviderCore({
     [machineSettings],
   );
 
-  /*
-   * The one-shot read a duplicate journals, on its own connection.
-   *
-   * Not borrowed from the owner below: this reads a project the workbench is
-   * usually *not* rooted at, once per duplication, and the owner would then hold
-   * a `'user'` port open for every project ever duplicated this session.
-   */
-  const readDuplicateProjectFiles = useCallback(
-    async (projectRoot: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
-      await whenServicesReady();
-      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-      const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(projectRoot, 'user'));
-      try {
-        const files = await proxy.contents('', { versionedOnly: true });
-        const recordRows = pathRegistry.filter(
-          (row) =>
-            row.class === 'records' && !row.versioned && row.agentAccess === 'read-write' && row.match === 'root',
-        );
-        for (const row of recordRows) {
-          // oxlint-disable-next-line no-await-in-loop -- Each selected subtree is read on this one-shot connection.
-          if (!(await proxy.exists(row.prefix))) {
-            continue;
-          }
-          if (row.directory) {
-            // oxlint-disable-next-line no-await-in-loop -- Read only the selected record subtree.
-            for (const [path, content] of Object.entries(await proxy.contents(row.prefix))) {
-              files[`${row.prefix}/${path}`] = content;
-            }
-          } else {
-            // oxlint-disable-next-line no-await-in-loop -- Read only the selected record file.
-            files[row.prefix] = await proxy.readFile(row.prefix);
-          }
-        }
-        return files;
-      } finally {
-        proxy.dispose();
-      }
-    },
+  /* The one-shot read a duplicate journals, on its own connection (`createDuplicateProjectReader`). */
+  const ownReadDuplicateProjectFiles = useMemo(
+    () => createDuplicateProjectReader(openRootedFileSystemBridge, whenServicesReady),
     [openRootedFileSystemBridge, whenServicesReady],
   );
 
@@ -1017,33 +998,44 @@ function FileManagerProviderCore({
    * One owner for open, reuse and dispose, per `(root, consumer)` (charter D12, W6).
    *
    * A connection opens the first time a trusted store touches a path under its
-   * root and is held until the worker is replaced; the effect below releases what
-   * a replaced owner opened. The consumer is half the key because it is half the
-   * capability — an `'agent'` caller must never be answered with the unmasked
-   * handle a record store opened first.
+   * root and is held until the worker is replaced: the commit that installs a
+   * replacement releases what the replaced owner opened, and the file manager's
+   * lease releases the last one when it ends (D6), so neither StrictMode's
+   * remount nor any other remount releases it. The consumer is half the key
+   * because it is half the capability — an `'agent'` caller must never be
+   * answered with the unmasked handle a record store opened first.
+   *
+   * A session's file manager (A6c) brings its own: its child holds the
+   * connections, installs each replacement and releases the last when it stops,
+   * and the scope reads the child's working-copy client instead.
    */
-  const connectionsForIncarnation = useMemo(
-    () => recordConnectionsForIncarnation(openRootedFileSystemBridge, whenServicesReady),
-    [openRootedFileSystemBridge, whenServicesReady],
+  const ownedWorkingCopy = owner?.workingCopyFiles ?? rootFacade?.workingCopyFiles;
+  const connections = useMemo(
+    () => recordConnectionsOf(fileManagerRef, openRootedFileSystemBridge, whenServicesReady),
+    [fileManagerRef, openRootedFileSystemBridge, whenServicesReady],
   );
   const rootedConnections = useMemo(
-    () => connectionsForIncarnation(bridgeOpener),
-    [bridgeOpener, connectionsForIncarnation],
+    () => (ownedWorkingCopy === undefined ? connections.ownerFor(bridgeOpener) : undefined),
+    [bridgeOpener, connections, ownedWorkingCopy],
   );
 
   useLayoutEffect(() => {
-    rootedConnectionMounts.set(rootedConnections, (rootedConnectionMounts.get(rootedConnections) ?? 0) + 1);
-    return () => {
-      rootedConnectionMounts.set(rootedConnections, (rootedConnectionMounts.get(rootedConnections) ?? 1) - 1);
-      // Strict Mode reconnects within the same commit; only an owner that stays released is disposed, so a read a
-      // store started on the first mount is not aborted by the replayed cleanup.
-      queueMicrotask(() => {
-        if (rootedConnectionMounts.get(rootedConnections) === 0) {
-          rootedConnections.dispose();
-        }
-      });
-    };
-  }, [rootedConnections]);
+    if (rootedConnections !== undefined) {
+      connections.install(rootedConnections);
+    }
+  }, [connections, rootedConnections]);
+
+  useLayoutEffect(() => {
+    if (ownedWorkingCopy === undefined) {
+      owner?.attach(connections.dispose);
+    }
+  }, [connections, owner, ownedWorkingCopy]);
+
+  const childWorkingCopy = useSyncExternalStore(
+    ownedWorkingCopy?.subscribe ?? subscribeToNothing,
+    ownedWorkingCopy?.get ?? readNothing,
+    ownedWorkingCopy?.get ?? readNothing,
+  );
 
   /*
    * The trusted stores' working copy, handed out one narrowed slice at a time
@@ -1052,106 +1044,18 @@ function FileManagerProviderCore({
    * off the one `'working-copy'` client and each carries only what its own family
    * does — the context never exposes the whole surface.
    */
-  const workingCopyFiles = useMemo(() => rootedConnections.files('working-copy'), [rootedConnections]);
+  const workingCopyFiles = useMemo(
+    () => childWorkingCopy ?? (rootedConnections ?? connections.ownerFor(bridgeOpener)).files('working-copy'),
+    [bridgeOpener, childWorkingCopy, connections, rootedConnections],
+  );
 
-  const watchRecordFile = useCallback(
-    (
-      absolutePath: string,
-      listener: (event: WatchEvent) => void,
-      options?: { recursive?: boolean },
-    ): ObservationWatch => {
-      const { root, path } = rootedPathOf(absolutePath);
-      const ready = Promise.withResolvers<void>();
-      const closed = Promise.withResolvers<void>();
-      const abort = new AbortController();
-      let disposeConnection = (): void => undefined;
-      let disposedConnection = false;
-      const open = async (): Promise<void> => {
-        try {
-          await whenServicesReady();
-          abort.signal.throwIfAborted();
-          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-          abort.signal.throwIfAborted();
-          const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
-          /* A chat's append storm reaches this watch once per committed changeset (D6, D23). */
-          let watch = watchByChangeSets(proxy, { paths: [path], ...options }, listener);
-          disposeConnection = () => {
-            if (!disposedConnection) {
-              disposedConnection = true;
-              watch.unsubscribe();
-              proxy.dispose();
-            }
-          };
-          if (ENV.TAU_DEBUG) {
-            const fixture = (
-              globalThis as typeof globalThis & {
-                __tauE2eObservationWatch?: {
-                  wrapRecordWatch?(
-                    root: string,
-                    path: string,
-                    watch: ReturnType<FileSystemBridgeRootedProxy['watchReady']>,
-                  ): ReturnType<FileSystemBridgeRootedProxy['watchReady']>;
-                };
-              }
-            ).__tauE2eObservationWatch;
-            if (fixture?.wrapRecordWatch) {
-              watch = fixture.wrapRecordWatch(root, path, watch);
-            }
-          }
-          if (abort.signal.aborted) {
-            disposeConnection();
-            abort.signal.throwIfAborted();
-          }
-          await watch.ready;
-          abort.signal.throwIfAborted();
-          ready.resolve();
-          await watch.closed;
-          closed.resolve();
-          disposeConnection();
-        } catch (error) {
-          ready.reject(error);
-          closed.resolve();
-          disposeConnection();
-        }
-      };
-      void open();
-      return {
-        ready: ready.promise,
-        closed: closed.promise,
-        dispose: () => {
-          abort.abort();
-          disposeConnection();
-        },
-      };
-    },
+  const ownWatchRecordFile = useMemo(
+    () => createRecordWatch(bridgeOpener ?? openRootedFileSystemBridge, whenServicesReady),
     [bridgeOpener, openRootedFileSystemBridge, whenServicesReady],
   );
 
-  /**
-   * The `/files` browser's scoped reads (charter D5).
-   *
-   * These stay on the authority because a scope the mount table does not route
-   * has no composed view to serve it; `scope` is required, so a routed path
-   * cannot reach content here by omission.
-   */
-  const scopedStorage = useMemo<ScopedStorageClient>(() => {
-    /* One cast, for the one overloaded member: `readFile` answers text or bytes. */
-    const readFile = (async (path: string, options: { scope: WorkspaceScope }) => {
-      const proxy = await getReadiedProxy();
-      return proxy.readScopedFile(path, options);
-    }) as ScopedStorageClient['readFile'];
-    return {
-      readFile,
-      readShallowDirectory: async (path, options) => {
-        const proxy = await getReadiedProxy();
-        return proxy.readScopedShallowDirectory(path, options);
-      },
-      getZippedDirectory: async (path, options) => {
-        const proxy = await getReadiedProxy();
-        return proxy.getScopedZippedDirectory(path, options);
-      },
-    };
-  }, [getReadiedProxy]);
+  /* The `/files` browser's scoped reads (charter D5; `createScopedStorage`). */
+  const ownScopedStorage = useMemo(() => createScopedStorage(getReadiedProxy), [getReadiedProxy]);
 
   const runtimeFileSystem = useMemo(
     () =>
@@ -1356,187 +1260,44 @@ function FileManagerProviderCore({
     [getReadiedClient],
   );
 
-  /**
-   * The authority's topology, gated on the machine becoming `ready` (charter D5).
-   *
-   * These four go to the *workspace* proxy and not to the composed view: a
-   * project directory's lifecycle is the authority's subject, and the surface
-   * carries no content for a consumer to reach past it.
+  /* The authority's topology, gated on the machine becoming `ready` (charter D5; `createAuthorityClient`). */
+  const ownClient = useMemo(() => createAuthorityClient(getReadiedProxy), [getReadiedProxy]);
+
+  const { workspace: ownWorkspace, activateRootSync } = useMemo(
+    () =>
+      createWorkspaceFacade({
+        fileManagerRef,
+        getReadiedProxy,
+        getConnectedProxy: async () => {
+          const snapshot = await readied(files, fileManagerRef, { readiness: 'proxy', gone });
+          const { proxy } = snapshot.context;
+          if (!proxy) {
+            throw new FileManagerNotReadyError('proxy-timeout');
+          }
+          return proxy;
+        },
+        whenServicesReady,
+        telemetry: workspaceTelemetry,
+      }),
+    [getReadiedProxy, files, fileManagerRef, gone, whenServicesReady, workspaceTelemetry],
+  );
+
+  /*
+   * The root's scope is a view of the runtime's root facade (A4b): the facade owns the root's record connections, its
+   * root synchronisation passes, its watch and its topology client, which the project library reads too.
    */
-  const client = useMemo<FileSystemClientFacade>(() => {
-    const gated = <K extends keyof FileSystemClientFacade>(method: K): FileSystemClientFacade[K] =>
-      (async (...args: unknown[]) => {
-        const proxy = await getReadiedProxy();
-        return (proxy[method] as (...rest: unknown[]) => unknown)(...args);
-      }) as FileSystemClientFacade[K];
+  const rootValue = useSyncExternalStore(
+    rootFacade?.subscribe ?? subscribeToNothing,
+    rootFacade?.get ?? readNothing,
+    rootFacade?.get ?? readNothing,
+  );
+  const watchRecordFile = rootValue?.watchRecordFile ?? ownWatchRecordFile;
+  const readDuplicateProjectFiles = rootValue?.readDuplicateProjectFiles ?? ownReadDuplicateProjectFiles;
+  const scopedStorage = rootValue?.scopedStorage ?? ownScopedStorage;
+  const client = rootValue?.client ?? ownClient;
+  const workspace = rootValue?.workspace ?? ownWorkspace;
 
-    return {
-      listProjectManifests: gated('listProjectManifests'),
-      verifyProjectRoute: gated('verifyProjectRoute'),
-      commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
-      permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
-      adoptProjectDirectory: gated('adoptProjectDirectory'),
-    };
-  }, [getReadiedProxy]);
-
-  const { workspace, activateRootSync } = useMemo(() => {
-    type RootSyncPasses = {
-      closed: boolean;
-      running: boolean;
-      pending: Array<PromiseWithResolvers<void>>;
-    };
-    const syncLifetime: { passes: RootSyncPasses } = { passes: { closed: false, running: false, pending: [] } };
-    const assertOpen = (owner: RootSyncPasses): void => {
-      if (owner.closed) {
-        throw new Error('Workspace root synchronization owner is disposed');
-      }
-    };
-    const configurePersistedRoots = async (owner: RootSyncPasses): Promise<void> => {
-      assertOpen(owner);
-      const [proxy, services, configuration] = await Promise.all([
-        getReadiedProxy(),
-        whenServicesReady(),
-        getProjectRootConfigs(),
-      ]);
-      assertOpen(owner);
-      if (fileManagerRef.getSnapshot().context.proxy !== proxy) {
-        throw new Error('Workspace root synchronization provider changed');
-      }
-      await proxy.configureProjectRoots(configuration);
-      assertOpen(owner);
-      if (fileManagerRef.getSnapshot().context.treeService !== services.treeService) {
-        throw new Error('Workspace root synchronization services changed');
-      }
-      if (configuration.roots.some(({ backend }) => backend === 'webaccess')) {
-        services.treeService.startPolling();
-      } else {
-        services.treeService.stopPolling();
-      }
-    };
-    const drain = async (owner: RootSyncPasses): Promise<void> => {
-      owner.running = true;
-      while (owner.pending.length > 0) {
-        // Capture callers before source acquisition; later invocations require a fresh pass.
-        const callers = owner.pending.splice(0);
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- Each trailing pass must freshly acquire sources after its predecessor.
-          await configurePersistedRoots(owner);
-          for (const caller of callers) {
-            caller.resolve();
-          }
-        } catch (error) {
-          for (const caller of callers) {
-            caller.reject(error);
-          }
-        }
-      }
-      owner.running = false;
-    };
-    const syncProjectRoots = async (): Promise<void> => {
-      const { passes } = syncLifetime;
-      assertOpen(passes);
-      const caller = Promise.withResolvers<void>();
-      passes.pending.push(caller);
-      if (!passes.running) {
-        // async-iife: this drain settles every caller, including failed passes.
-        void drain(passes);
-      }
-      await caller.promise;
-    };
-    const workspace: WorkspaceFacade = {
-      mount: async (prefix, config) => {
-        const proxy = await getReadiedProxy();
-        await proxy.mount(prefix, config);
-      },
-      unmount: (prefix) => {
-        // async-iife: bootstrap. Errors here are non-fatal but worth
-        // surfacing — `workspace.unmount_failed` lights up the metrics
-        // dashboard when an unmount step fails to dispose cleanly
-        // (Audit Finding 10).
-        void (async () => {
-          try {
-            const proxy = await getReadiedProxy();
-            proxy.unmount(prefix);
-          } catch (error) {
-            const snapshot = fileManagerRef.getSnapshot();
-            workspaceTelemetry.workspaceUnmountFailed({
-              workspaceId: snapshot.context.activeWorkspaceId,
-              prefix,
-              reason: 'dispose-failed',
-              error,
-            });
-            console.warn(`[FileManager] unmount('${prefix}') failed`, error);
-          }
-        })();
-      },
-      disposeStorageRoot: async (storageRootKey) => {
-        const proxy = await getReadiedProxy();
-        proxy.disposeStorageRoot(storageRootKey);
-      },
-      syncProjectRoots,
-      replaceWorkspaceHandle: async (workspaceId, handle) => {
-        const snapshot = await waitForWithTimeout({
-          fileManagerRef,
-          predicate: createErrorAwareWaitPredicate((state) => state.context.proxy !== undefined),
-          readyTimeout: fileManagerReadyTimeout,
-          reason: 'proxy-timeout',
-        });
-        assertNotErrorState(snapshot);
-        const { proxy } = snapshot.context;
-        if (!proxy) {
-          throw new FileManagerNotReadyError('proxy-timeout');
-        }
-        await updateWorkspaceHandle(workspaceId, handle);
-        proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-        await proxy.configureProjectRoots(await getProjectRootConfigs());
-      },
-      disconnectWorkspace: async (workspaceId) => {
-        const proxy = await getReadiedProxy();
-        const disconnected = await disconnectStoredWorkspace(workspaceId);
-        if (!disconnected) {
-          return undefined;
-        }
-        proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-        try {
-          await syncProjectRoots();
-        } catch (error) {
-          console.warn('[FileManager] Workspace disconnected but root refresh failed', error);
-        }
-        return disconnected;
-      },
-      restoreWorkspaceHandle: async (workspaceId, handle) => {
-        const proxy = await getReadiedProxy();
-        const restored = await restoreStoredWorkspaceHandle(workspaceId, handle);
-        if (!restored) {
-          return false;
-        }
-        proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-        try {
-          await syncProjectRoots();
-        } catch (error) {
-          console.warn('[FileManager] Workspace handle restored but root refresh failed', error);
-        }
-        return true;
-      },
-    };
-    return {
-      workspace,
-      activateRootSync: () => {
-        if (syncLifetime.passes.closed) {
-          syncLifetime.passes = { closed: false, running: false, pending: [] };
-        }
-        const owner = syncLifetime.passes;
-        return () => {
-          owner.closed = true;
-          for (const caller of owner.pending.splice(0)) {
-            caller.reject(new Error('Workspace root synchronization owner is disposed'));
-          }
-        };
-      },
-    };
-  }, [getReadiedProxy, fileManagerRef, whenServicesReady, workspaceTelemetry]);
-
-  useLayoutEffect(() => activateRootSync(), [activateRootSync]);
+  useLayoutEffect(() => (rootFacade === undefined ? activateRootSync() : undefined), [activateRootSync, rootFacade]);
 
   const value = useMemo<FileManagerContextType>(
     () => ({
@@ -1626,16 +1387,7 @@ function FileManagerProviderCore({
     ],
   );
 
-  const isRoot = parentWorker === undefined;
-  const workerForChildren = useSelector(fileManagerRef, (state) => state.context.worker);
-
-  const provider = <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
-
-  if (isRoot) {
-    return <SharedWorkerContext.Provider value={workerForChildren}>{provider}</SharedWorkerContext.Provider>;
-  }
-
-  return provider;
+  return <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
 }
 
 export function useFileManager(): FileManagerContextType {

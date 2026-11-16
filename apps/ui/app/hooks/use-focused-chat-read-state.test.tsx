@@ -29,6 +29,8 @@ vi.mock('#hooks/use-composer-record-toasts.js', () => ({ useComposerRecordToasts
 
 const unreadChats = new Set<string>();
 const recordedUnread = new Set<string>();
+const markedUnread = new Set<string>();
+const unreadListeners = new Set<() => void>();
 const markViewed = vi.fn();
 const focusChat = vi.fn();
 const blurChat = vi.fn();
@@ -56,6 +58,8 @@ describe('useFocusedChatReadState', () => {
   beforeEach(() => {
     unreadChats.clear();
     recordedUnread.clear();
+    markedUnread.clear();
+    unreadListeners.clear();
     visibilityState = 'visible';
     markViewed.mockReset();
     focusChat.mockReset();
@@ -68,6 +72,11 @@ describe('useFocusedChatReadState', () => {
         blurChat,
         unreadRecordRef,
         isUnread: (chatId: string) => recordedUnread.has(chatId),
+        hasUnreadMark: (chatId: string) => markedUnread.has(chatId),
+        subscribeUnread: (listener: () => void) => {
+          unreadListeners.add(listener);
+          return () => unreadListeners.delete(listener);
+        },
       }),
     );
     vi.mocked(useChatSidebarStatus).mockImplementation((_projectId, chatId) => status(unreadChats.has(chatId)));
@@ -147,6 +156,34 @@ describe('useFocusedChatReadState', () => {
 
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
     expect(vi.mocked(useProjectManager)).not.toHaveBeenCalled();
+  });
+
+  /* D9, PV-S8: once a chat's log is read, a legacy mark on a log with no attention row no longer makes it unread,
+   * but the record still holds the mark and the next page answers from it. Viewing the chat clears it. */
+  it('clears a legacy mark the store no longer answers unread', () => {
+    markedUnread.add('chat-focused');
+
+    renderHook(() => {
+      useFocusedChatReadState();
+    });
+
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
+  });
+
+  it('clears a legacy mark the project record loads after the chat is focused', () => {
+    renderHook(() => {
+      useFocusedChatReadState();
+    });
+    expect(markViewed).not.toHaveBeenCalled();
+
+    markedUnread.add('chat-focused');
+    act(() => {
+      for (const listener of unreadListeners) {
+        listener();
+      }
+    });
+
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
   });
 
   it('should surface failures of the project unread record (G2)', () => {

@@ -11,7 +11,7 @@
  * checkout and every granted folder are re-identified, so a replaced root is refused (`root-changed`).
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -44,7 +44,8 @@ import type {
   ShellRunRequest,
 } from '#shell/shell-contract.js';
 import { shellEnvironment } from '#shell/shell-environment.js';
-import { createShellGitView } from '#shell/shell-git-view.js';
+import { createShellGitView, shellGitIdentityConfig, shellLfsStorageConfig } from '#shell/shell-git-view.js';
+import type { ShellGitAccount } from '#shell/shell-git-view.js';
 import {
   compileShellFilesystem,
   projectProtected,
@@ -52,6 +53,7 @@ import {
   resolveShellAccess,
   resolveShellCwd,
   rootIdentity,
+  terminalGitAccess,
 } from '#shell/shell-grant.js';
 import type { ShellGrantHost, ShellProjectProtected, ShellResolvedAccess } from '#shell/shell-grant.js';
 import { createShellCapture } from '#shell/shell-output.js';
@@ -160,6 +162,11 @@ export type TerminalSessionRequest = Readonly<{
   size: ShellTerminalSize;
   /** Extra access, passed only by the services host after the person allowed its own pending request. */
   access?: TerminalAccess | undefined;
+  /**
+   * The signed-in Tau account, which git in the session commits as (its name and no-reply address). Absent while signed
+   * out: git then asks who the person is, as it does anywhere without an identity.
+   */
+  account?: ShellGitAccount | undefined;
   signal: AbortSignal;
 }>;
 
@@ -378,7 +385,11 @@ const unavailableOf = (outcome: Exclude<ShellLaunchOutcome, { status: 'started' 
   }
 };
 
-/** A counting gate: at most `limit` holders, later ones wait in order; a waiter whose signal aborts leaves the line. */
+/**
+ * A counting gate: at most `limit` holders, later ones wait in order; a waiter whose signal aborts leaves the line. A
+ * signal that aborted before `enter` gets no slot at all: an `abort` listener added after the abort never fires, so it
+ * would otherwise wait for a slot and launch a command its caller had withdrawn (E09).
+ */
 const createGate = (limit: number) => {
   let held = 0;
   const waiting: Array<() => void> = [];
@@ -387,6 +398,9 @@ const createGate = (limit: number) => {
     waiting.shift()?.();
   };
   const enter = async (signal: AbortSignal): Promise<(() => void) | undefined> => {
+    if (signal.aborted) {
+      return undefined;
+    }
     if (held < limit) {
       held++;
       return release;
@@ -847,6 +861,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
             ...(approval === undefined ? {} : { approval }),
           }
         : notStarted(code, message);
+    /* Read live: the signal can abort while any await below is pending. */
+    const withdrawn = (): boolean => request.signal.aborted;
     const fingerprints = new Map<string, string>([[admitted.root, admitted.fingerprint]]);
     for (const folder of [...admitted.access.read, ...admitted.access.write]) {
       // oxlint-disable-next-line no-await-in-loop -- a handful of granted folders.
@@ -869,7 +885,9 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
        * the host cannot write (a full disk, a refused folder) leaves the command without git rather than failing it.
        */
       const git =
-        platform === 'win32' ? undefined : await createShellGitView(admitted.root, session.root).catch(() => undefined);
+        platform === 'win32'
+          ? undefined
+          : await createShellGitView(admitted.root, session.root, session.temporary).catch(() => undefined);
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
         checkoutProtected: admitted.checkoutProtected,
@@ -884,6 +902,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           'root-changed',
           'The project folder or a granted folder was replaced before the command started, so it did not run.',
         );
+      }
+      /* A call withdrawn while its launch was staged is never prepared (E09); `didNotStart` answers `cancelled`. */
+      if (withdrawn()) {
+        return didNotStart('launch-failed', 'The command was cancelled before it started.');
       }
       let executionId: string;
       try {
@@ -915,6 +937,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           return didNotStart('checkout-unavailable', `${answer.message} The command did not run.`);
         }
         custody = { executionId, holds };
+      }
+      /* Nor launched, when it was withdrawn while custody was recorded; the receipt is released as for any refusal. */
+      if (withdrawn()) {
+        return didNotStart('launch-failed', 'The command was cancelled before it started.');
       }
       const controller = new AbortController();
       /* Set by the timer; an object so the check after the awaits reads it live. */
@@ -1073,7 +1099,14 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return refuse('session-limit', 'Too many Terminal sessions are open.', 'Close another Terminal, then try again.');
     }
     const root = identity.real;
-    const checkoutProtected = await projectProtected(root);
+    /*
+     * The person reaches the project's real git store: writable except the names that run a program where the sandbox
+     * can protect them ({@link terminalGitAccess}): Seatbelt on macOS, the provider's store guard on Linux where it can
+     * start. Read-only elsewhere (blueprint OD2).
+     */
+    const storeGuard = platform === 'linux' && (await provider.storeGuard?.()) === true;
+    const terminalGit = terminalGitAccess(platform, storeGuard);
+    const checkoutProtected = await projectProtected(root, { terminalGit, guardStores: storeGuard });
     const requested = request.access;
     const access =
       requested === undefined
@@ -1118,6 +1151,25 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     };
     let outcome: ShellLaunchOutcome;
     try {
+      /*
+       * The session HOME's git config names who commits: the signed-in person's Tau name and no-reply address. Over a
+       * read-only store it also sends git-lfs's working copies to the session's own temporary folder, since the clean
+       * filter otherwise fails every `git status` on a project with a large file. A writable store keeps them in its
+       * own `lfs` folder, so a large file committed here keeps its object and `git lfs ls-files` reads the store as it
+       * is. A HOME that cannot take the file leaves the Terminal without it.
+       */
+      const sessionGitConfig =
+        platform === 'win32'
+          ? ''
+          : [
+              shellGitIdentityConfig(request.account),
+              terminalGit === 'read' ? shellLfsStorageConfig(session.temporary) : undefined,
+            ]
+              .filter((section) => section !== undefined)
+              .join('');
+      if (sessionGitConfig !== '') {
+        await writeFile(join(session.home, '.gitconfig'), sessionGitConfig, { mode: 0o600 }).catch(() => undefined);
+      }
       const filesystem = await compileShellFilesystem({
         checkout: root,
         checkoutProtected,
@@ -1136,6 +1188,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         filesystem,
         network: { domains: access.domains },
         startupFiles: terminalZsh === undefined ? undefined : 'zsh',
+        /* A login Zsh's path_helper moves the system folders first; the provider puts these back in front. */
+        toolchainBins: terminalZsh === undefined ? undefined : (options.toolchain?.bins ?? []),
         environment: shellEnvironment({
           platform,
           executablePath: terminalZsh?.path ?? executable.path,
@@ -1144,6 +1198,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           toolchainBins: options.toolchain?.bins ?? [],
           host: environment,
           terminal: true,
+          terminalGit,
         }),
         stdio: { kind: 'terminal', size: request.size },
         signal: request.signal,

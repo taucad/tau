@@ -193,14 +193,25 @@ describe('electron-vite main externalization', () => {
 
   it('bundles every workspace dependency into the ASAR', async () => {
     const { isExternal } = await resolveProcessExternals();
-    const manifest = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')) as {
-      readonly dependencies?: Readonly<Record<string, string>>;
-    };
+    const manifests = ['package.json', '../libs/desktop-services-host/package.json'].map(
+      (path) =>
+        JSON.parse(readFileSync(join(appRoot, path), 'utf8')) as {
+          readonly dependencies?: Readonly<Record<string, string>>;
+        },
+    );
     /* The packaged app ships no workspace `node_modules`, so a workspace package left external is missing at run
-     * time: `@taucad/agent-observability` killed the packaged services host at boot (2026-11-03). */
-    const workspace = Object.entries(manifest.dependencies ?? {})
-      .filter(([, version]) => version.startsWith('workspace:'))
-      .map(([name]) => name);
+     * time: `@taucad/agent-observability` killed the packaged services host at boot (2026-11-03). The services host
+     * library is bundled with the app, so its workspace dependencies are the app's too. */
+    const workspace = [
+      ...new Set(
+        manifests.flatMap((manifest) =>
+          Object.entries(manifest.dependencies ?? {})
+            .filter(([, version]) => version.startsWith('workspace:'))
+            .map(([name]) => name),
+        ),
+      ),
+    ];
+    expect(workspace).toContain('@taucad/desktop-services-host');
     expect(workspace).toContain('@taucad/agent-observability');
     for (const id of workspace) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one resolved config, cheap predicate

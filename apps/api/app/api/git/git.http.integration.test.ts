@@ -938,8 +938,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       const cloned = await gitOk(['rev-parse', 'HEAD'], clone);
       const base = cloned.stdout.trim();
       let file = 0;
-      /** One revision on the base, recorded as `actor` and authored at `email`. */
-      const revise = async (email: string, record?: Readonly<Record<string, unknown>>): Promise<void> => {
+      /** One revision on the base, recorded as `actor`, authored at `email` and committed by Tau or at `committer`. */
+      const revise = async (
+        email: string,
+        record?: Readonly<Record<string, unknown>>,
+        committer?: string,
+      ): Promise<void> => {
         await gitOk(['reset', '--quiet', '--hard', base], clone);
         file += 1;
         await writeFile(
@@ -965,8 +969,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         const committed = await runGit(['commit', ...message], clone, {
           GIT_AUTHOR_NAME: 'Someone',
           GIT_AUTHOR_EMAIL: email,
-          GIT_COMMITTER_NAME: 'Tau',
-          GIT_COMMITTER_EMAIL: 'noreply@tau.new',
+          GIT_COMMITTER_NAME: committer === undefined ? 'Tau' : 'Someone',
+          GIT_COMMITTER_EMAIL: committer ?? 'noreply@tau.new',
         });
         expect(committed.code, committed.stderr).toBe(0);
       };
@@ -1002,11 +1006,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       expect(leaked.stderr).toContain(authorshipRefusals.GIT_PUSH_AUTHOR_ADDRESS);
       expect(leaked.stderr).not.toContain('writer@example.com');
 
-      /* A commit Tau did not record, on a project not linked to GitHub. */
-      await revise('someone@example.com');
+      /* A commit Tau did not record, on a project not linked to GitHub: the refusal names the fix. */
+      await revise('someone@example.com', undefined, 'someone@example.com');
       const outside = await push('authorship-outside');
       expect(outside.code).not.toBe(0);
       expect(outside.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
+      expect(outside.stderr).toContain(`your Tau no-reply address is ${noreply(callers.writer.id)}`);
+      expect(outside.stderr).not.toContain('someone@example.com');
       expect(await advertised()).not.toMatch(/authorship-(?:forged|email|outside)/u);
 
       /* …and the same commit on a project linked to GitHub. */
@@ -1015,12 +1021,27 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       expect(linked.code, linked.stderr).toBe(0);
       state.origin = 'local-mirror';
 
+      /* A commit made with stock git under the identity Tau seeds. Pushed by another
+         member first, it names an account other than its pusher… */
+      await revise(noreply(callers.writer.id), undefined, noreply(callers.writer.id));
+      const owner = path.join(workspace, 'authorship-owner');
+      await gitOk(['clone', remoteFor(callers.owner.token), owner], workspace);
+      await gitOk(['fetch', '--quiet', clone, 'HEAD:refs/heads/authorship-git-carried'], owner);
+      const carried = await runGit(['push', 'origin', 'refs/heads/authorship-git-carried'], owner);
+      expect(carried.code).not.toBe(0);
+      expect(carried.stderr).toContain(authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER);
+      /* …and pushed by its own author, it is backed up. */
+      const own = await push('authorship-git');
+      expect(own.code, own.stderr).toBe(0);
+      expect(await advertised()).not.toMatch(/authorship-(?:forged|email|git-carried)/u);
+      expect(await advertised()).toContain('refs/heads/authorship-git');
+
       /* The pusher's own revision, and an agent's on the pusher's behalf. */
       await revise(noreply(callers.writer.id), {
         actor: { kind: 'user', id: callers.writer.id, name: 'Member writer' },
       });
-      const own = await push('authorship-own');
-      expect(own.code, own.stderr).toBe(0);
+      const recordedOwn = await push('authorship-own');
+      expect(recordedOwn.code, recordedOwn.stderr).toBe(0);
       await revise(noreply(callers.writer.id), {
         source: 'agent',
         actor: { kind: 'agent', id: 'agent', runId: 'run_b4', onBehalfOf: { kind: 'user', id: callers.writer.id } },

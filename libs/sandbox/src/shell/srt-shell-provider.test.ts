@@ -29,6 +29,7 @@ import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess }
 import {
   bindOwnPty,
   createSandboxShellProvider,
+  guardedVector,
   seatbeltReadDenies,
   shellSandboxCommand,
   shellSandboxProfile,
@@ -149,6 +150,17 @@ describe('createSandboxShellProvider admission', () => {
     }
   });
 
+  it('should refuse toolchain folders for the startup files on a launch without them', async () => {
+    const provider = createSandboxShellProvider({ supervisor });
+    const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], toolchainBins: ['/opt/tau/git/bin'] }));
+
+    expect(outcome).toStrictEqual({
+      status: 'unsupported',
+      requirement: 'environment',
+      message: 'only the Terminal Zsh with its startup files takes toolchain folders.',
+    });
+  });
+
   it('should refuse a relative path', async () => {
     const outcome = await createSandboxShellProvider({ supervisor }).launch(
       launchOf({ arguments: ['-c', 'true'], workingDirectory: 'project' }),
@@ -191,6 +203,106 @@ describe('createSandboxShellProvider admission', () => {
 
     expect(outcome).toMatchObject({ status: 'unsupported', requirement: 'network-isolation' });
   });
+
+  it('should refuse guarded stores on a pipe launch or without the store guard, before starting anything', async () => {
+    const root = fixtureRoot();
+    const store = join(root, '.git');
+    const guardedStores = { stores: [store], protect: ['config', 'hooks'] };
+    const filesystem = { readable: [], writable: [root], denied: [], guardedStores };
+    const pipes = await createSandboxShellProvider({ supervisor, storeGuardPath: '/opt/tau/tau-store-guard' }).launch(
+      launchOf({ arguments: ['-c', 'true'], filesystem }),
+    );
+    const unguarded = await createSandboxShellProvider({ supervisor }).launch(
+      launchOf({ arguments: ['-c', 'true'], filesystem, stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } } }),
+    );
+
+    for (const outcome of [pipes, unguarded]) {
+      expect(outcome).toStrictEqual({
+        status: 'unsupported',
+        requirement: 'filesystem-mask',
+        message: 'only a Linux Terminal launch with the store guard may write guarded stores.',
+      });
+    }
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'should refuse a guarded store outside the writable roots, inside a denied path or with a policy name that is a path',
+    async () => {
+      const root = fixtureRoot();
+      const provider = createSandboxShellProvider({ supervisor, storeGuardPath: '/opt/tau/tau-store-guard' });
+      const terminal = { kind: 'terminal', size: { columns: 80, rows: 24 } } as const;
+      const cases = [
+        {
+          readable: [],
+          writable: [root],
+          denied: [],
+          guardedStores: { stores: ['/srv/other/.git'], protect: ['config'] },
+        },
+        {
+          readable: [],
+          writable: [root],
+          denied: [join(root, '.git')],
+          guardedStores: { stores: [join(root, '.git')], protect: ['config'] },
+        },
+        {
+          readable: [],
+          writable: [root],
+          denied: [],
+          guardedStores: { stores: [join(root, '.git')], protect: ['hooks/pre-commit'] },
+        },
+        { readable: [], writable: [root], denied: [], guardedStores: { stores: [root], protect: ['config'] } },
+      ];
+      for (const filesystem of cases) {
+        // oxlint-disable-next-line no-await-in-loop -- one refusal per case.
+        const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], filesystem, stdio: terminal }));
+        expect(outcome, JSON.stringify(filesystem)).toMatchObject({
+          status: 'unsupported',
+          requirement: 'filesystem-mask',
+        });
+      }
+    },
+  );
+
+  it('should spawn an agent launch with the very vector the runtime built, whether or not a store guard is configured', () => {
+    const argv = ['/bin/sh', '-c', "exec /usr/bin/bwrap --die-with-parent -- /bin/bash -c 'git status'"] as const;
+    const agent = launchOf({ arguments: ['-c', 'git status'] });
+    const vectors = [{}, { storeGuardPath: '/opt/tau/tau-store-guard' }].map((options) =>
+      guardedVector(argv, agent, options),
+    );
+    expect(vectors[0]).toBe(argv);
+    expect(vectors[1]).toBe(argv);
+  });
+
+  it('should answer that no store guard can start without its path or with a path that is not an executable', async () => {
+    expect(await createSandboxShellProvider({ supervisor }).storeGuard?.()).toBe(false);
+    expect(
+      await createSandboxShellProvider({ supervisor, storeGuardPath: join(fixtureRoot(), 'absent') }).storeGuard?.(),
+    ).toBe(false);
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'should check a failed store guard again only once its refusal has stood for the recheck interval',
+    async () => {
+      const reasons: unknown[] = [];
+      const listener = (message: unknown): void => {
+        reasons.push(message);
+      };
+      subscribe('taucad.native-process.shell.store-guard', listener);
+      try {
+        const storeGuardPath = join(fixtureRoot(), 'absent');
+        const held = createSandboxShellProvider({ supervisor, storeGuardPath, storeGuardRecheckMilliseconds: 60_000 });
+        expect(await held.storeGuard?.()).toBe(false);
+        expect(await held.storeGuard?.()).toBe(false);
+        expect(reasons).toHaveLength(1);
+        const rechecked = createSandboxShellProvider({ supervisor, storeGuardPath, storeGuardRecheckMilliseconds: 0 });
+        expect(await rechecked.storeGuard?.()).toBe(false);
+        expect(await rechecked.storeGuard?.()).toBe(false);
+        expect(reasons).toHaveLength(3);
+      } finally {
+        unsubscribe('taucad.native-process.shell.store-guard', listener);
+      }
+    },
+  );
 
   it('should reject an already aborted launch with the abort reason', async () => {
     const controller = new AbortController();
@@ -773,6 +885,34 @@ describe('shellSandboxProfile read-only roots', () => {
   });
 });
 
+describe('shellSandboxProfile guarded stores', () => {
+  it('should pin every ancestor of a nested guarded store on Linux, so it cannot be moved aside and replanted', () => {
+    const profile = shellSandboxProfile(
+      {
+        filesystem: {
+          readable: [],
+          writable: ['/srv/project'],
+          denied: [],
+          guardedStores: {
+            stores: ['/srv/project/.git', '/srv/project/vendor/lib/.git'],
+            protect: ['config', 'hooks'],
+          },
+        },
+        network: { domains: [] },
+      },
+      { home: '/home/person' },
+    ) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['allowWrite']).toStrictEqual(
+      process.platform === 'linux'
+        ? ['/srv/project', '/srv/project/vendor', '/srv/project/vendor/lib']
+        : ['/srv/project'],
+    );
+    /* The store itself is the guard's mount, never denied or read-only here: the guard decides by name. */
+    expect(profile.filesystem['denyWrite']).not.toContain('/srv/project/vendor/lib/.git');
+  });
+});
+
 describe('seatbeltReadDenies', () => {
   it('should spell a denied directory that holds a readable path as the glob of its own name', () => {
     expect(
@@ -862,6 +1002,293 @@ describe('shellSandboxProfile on macOS', () => {
     expect(
       seatbeltDecision(literal, { operation: 'file-read-data', path: join(project, '.git', 'objects', 'x') }),
     ).toBe('deny');
+  });
+
+  /*
+   * The person's Terminal reads the real store (operator ruling 2026-11-12): `.git` is read-only and not denied. A
+   * read-only root is carved out of a denied one only when it lies strictly inside it, so naming `.git` in both lists
+   * would leave every read denied on macOS, while Linux binds it back readable: the two must never be combined.
+   */
+  const terminalLaunch = (
+    root: string,
+    lists: Readonly<{ readOnly: readonly string[]; denied: readonly string[] }>,
+  ): Parameters<typeof shellSandboxProfile>[0] => {
+    const project = join(root, 'project');
+    for (const directory of ['.git/objects/ab', '.git/refs/heads', '.git/hooks', '.git/lfs', 'src']) {
+      mkdirSync(join(project, directory), { recursive: true });
+    }
+    mkdirSync(join(root, 'home'));
+    return {
+      filesystem: { readable: [], writable: [project, join(root, 'home')], ...lists },
+      network: { domains: [] },
+    };
+  };
+
+  it('should let the Terminal read every file of a read-only .git and write, create or remove none of it', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const store = join(project, '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(terminalLaunch(root, { readOnly: [store], denied: [join(project, '.tau', 'binding.json')] })),
+    );
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    for (const path of ['', 'HEAD', 'index', 'config', 'refs/heads/main', 'objects/ab/cdef', 'lfs/objects/x']) {
+      expect(decide('file-read-data', join(store, path)), path).toBe('allow');
+    }
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of ['', 'HEAD', 'index.lock', 'config', 'hooks/post-commit', 'objects/ab/new', 'lfs/tmp/x']) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('deny');
+      }
+    }
+    expect(decide('file-read-data', join(project, '.tau', 'binding.json'))).toBe('deny');
+    expect(decide('file-write-data', join(project, 'src', 'main.scad'))).toBe('allow');
+  });
+
+  /*
+   * A Terminal whose store is writable: `.git` is in no list, so the checkout's write root covers it, and only the
+   * shell service's store policy is read-only, each name under its canonical spelling and as the caseless globs the
+   * shell service writes for it (a case-folding volume reads `.git/COMMONDIR` as `commondir`, and `.git/hook\u017F` as
+   * `hooks`). The lists are restated here rather than imported: the shell service depends on this package.
+   */
+  const executableNames = [
+    'config',
+    'hooks',
+    'commondir',
+    'config.worktree',
+    'worktrees',
+    'modules',
+    'remotes',
+    'branches',
+  ];
+  const caseless = (name: string): string =>
+    [...name]
+      .map((character) => (/[a-z]/u.test(character) ? `[${character}${character.toUpperCase()}]` : character))
+      .join('');
+  /** The letter runs a case-folding APFS volume also reads from one non-ASCII character, as the shell service lists them. */
+  const foldings: ReadonlyArray<readonly [string, string]> = [
+    ['fi', '\uFB01'],
+    ['s', '\u017F'],
+    ['k', '\u212A'],
+  ];
+  /** Every glob the shell service writes for a name: each folding run either bracketed or as its character. */
+  const caselessGlobs = (name: string): string[] => {
+    let globs = [''];
+    for (let index = 0; index < name.length; ) {
+      const folding = foldings.find(([ascii]) => name.startsWith(ascii, index));
+      const run = folding?.[0] ?? name[index]!;
+      const options = folding === undefined ? [caseless(run)] : [caseless(run), folding[1]];
+      globs = globs.flatMap((prefix) => options.map((option) => `${prefix}${option}`));
+      index += run.length;
+    }
+    return globs;
+  };
+  const storePolicy = (store: string): string[] =>
+    executableNames.flatMap((name) => [join(store, name), ...caselessGlobs(name).map((glob) => join(store, glob))]);
+
+  it('should let the Terminal write a store all but the names that run a program, under any spelling', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const store = join(project, '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(
+        terminalLaunch(root, { readOnly: storePolicy(store), denied: [join(project, '.tau', 'binding.json')] }),
+      ),
+    );
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    for (const path of ['', 'HEAD', 'index', 'config', 'hooks/pre-commit', 'objects/ab/cdef', 'lfs/objects/x']) {
+      expect(decide('file-read-data', join(store, path)), path).toBe('allow');
+    }
+    /* What add, commit, switch -c, stash and merge write, and the lock git renames into place. */
+    const written = [
+      'index.lock',
+      'index',
+      'HEAD.lock',
+      'HEAD',
+      'ORIG_HEAD',
+      'MERGE_HEAD',
+      'MERGE_MSG',
+      'AUTO_MERGE',
+      'COMMIT_EDITMSG',
+      'packed-refs.lock',
+      'objects/ab/new',
+      'objects/pack/pack-1.pack',
+      'refs/heads/side.lock',
+      'refs/stash',
+      'logs/HEAD',
+      'logs/refs/stash',
+      'lfs/objects/ab/cd/x',
+      'lfs/tmp/x',
+      'config.lock',
+    ];
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of written) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('allow');
+      }
+    }
+    /*
+     * Every write to a protected name fails, including the rename of `config.lock` over `config`, a new top-level name
+     * created in any case, and a move of `.git` itself.
+     */
+    const refused = [
+      'config',
+      'CONFIG',
+      'hooks',
+      'hooks/post-commit',
+      'Hooks/post-commit',
+      'commondir',
+      'COMMONDIR',
+      'CommonDir',
+      'config.worktree',
+      'Config.Worktree',
+      'worktrees/linked/commondir',
+      'WorkTrees/linked/commondir',
+      'modules/vendor/config',
+      'modules/vendor/hooks/post-checkout',
+      /* Git's legacy remote files: `git push backup` outside follows the address in them (blueprint Finding 6). */
+      'remotes',
+      'remotes/backup',
+      'Remotes/backup',
+      'branches',
+      'branches/mirror',
+      'BRANCHES/mirror',
+    ];
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of refused) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('deny');
+      }
+    }
+    /* `.git` itself can be neither renamed away nor replaced. */
+    for (const operation of ['file-write-create', 'file-write-unlink']) {
+      expect(decide(operation, store), `${operation} .git`).toBe('deny');
+    }
+    expect(decide('file-read-data', join(project, '.tau', 'binding.json'))).toBe('deny');
+    expect(decide('file-write-data', join(project, 'src', 'main.scad'))).toBe('allow');
+  });
+
+  /*
+   * Blueprint T15 and LP6: on a case-folding APFS volume U+017F reads as `s`, U+212A as `k` and U+FB01 as `fi`, so an
+   * absent policy name created with one of them is the policy name to git outside. Seatbelt matches the name being
+   * created as it was typed, so only a glob that spells the character itself refuses it.
+   */
+  const folded = [
+    'hook\u017F',
+    'hook\u017F/post-commit',
+    'HOOK\u017F/post-commit',
+    'hoo\u212As/post-commit',
+    'hoo\u212A\u017F/post-commit',
+    'worktree\u017F/linked/commondir',
+    'wor\u212Atrees/linked/commondir',
+    'Wor\u212Atree\u017F/linked/commondir',
+    'module\u017F/vendor/config',
+    'remote\u017F',
+    'remote\u017F/backup',
+    'REMOTE\u017F/backup',
+    'branche\u017F/mirror',
+    'config.wor\u212Atree',
+    'con\uFB01g.worktree',
+    'Con\uFB01g.Wor\u212Atree',
+    'con\uFB01g',
+    'CON\uFB01G',
+  ];
+
+  it('should refuse every spelling a case-folding volume reads as a policy name, with each folding character', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(terminalLaunch(root, { readOnly: storePolicy(store), denied: [] })),
+    );
+    const decide = (operation: string, path: string): string => seatbeltDecision(profile, { operation, path });
+
+    for (const operation of ['file-write-data', 'file-write-create', 'file-write-unlink']) {
+      for (const path of folded) {
+        expect(decide(operation, join(store, path)), `${operation} ${path}`).toBe('deny');
+      }
+    }
+    /* Names that fold onto no policy name stay writable, non-ASCII ones included. */
+    for (const path of ['remote', 'remote/x', 'hook', 'configs', 'con\uFB01', 'b\u017Franch', 'refs/heads/\u017Fide']) {
+      expect(decide('file-write-create', join(store, path)), path).toBe('allow');
+    }
+  });
+
+  it('should leave each folding spelling creatable with the ASCII caseless glob alone, the gap the wider globs close', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const readOnly = executableNames.flatMap((name) => [join(store, name), join(store, caseless(name))]);
+    const profile = seatbeltProfileOf(darwinProfile(terminalLaunch(root, { readOnly, denied: [] })));
+
+    expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'remotes/x') })).toBe('deny');
+    for (const path of folded) {
+      expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, path) }), path).toBe(
+        'allow',
+      );
+    }
+  });
+
+  it('should refuse to judge a bracket that holds a folding character, whose meaning depends on how Seatbelt reads a name', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(
+        terminalLaunch(root, { readOnly: [join(store, '[rR][eE][mM][oO][tT][eE][sS\u017F]')], denied: [] }),
+      ),
+    );
+
+    /* As characters the bracket matches U+017F; as bytes it holds 0xC5 and 0xBF apart and matches neither name. */
+    expect(() =>
+      seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'remote\u017F') }),
+    ).toThrow(/as characters and/u);
+  });
+
+  /*
+   * Blueprint T14 and LP6: a hard link gives `config` a second name that no rule names, so a write through it would be
+   * judged by the new name. Seatbelt checks `link(2)` as `file-link`, which the runtime allows nowhere, so `(deny
+   * default)` refuses every link, whichever of the two names the check is matched against.
+   */
+  it('should refuse a hard link to config, and every other hard link, under either name', () => {
+    const root = fixtureRoot();
+    const project = join(root, 'project');
+    const store = join(project, '.git');
+    const profile = seatbeltProfileOf(
+      darwinProfile(terminalLaunch(root, { readOnly: storePolicy(store), denied: [] })),
+    );
+
+    expect(profile).not.toMatch(/\(allow[^)]*\bfile-link\b/u);
+    for (const path of [
+      join(store, 'config'),
+      join(store, 'config-link'),
+      join(store, 'objects', 'ab', 'cdef'),
+      join(project, 'config-link'),
+      join(project, 'src', 'main.scad'),
+      join(root, 'home', 'config-link'),
+    ]) {
+      expect(seatbeltDecision(profile, { operation: 'file-link', path }), path).toBe('deny');
+    }
+    /* The second name itself would be an ordinary new file, which is why the link must be refused. */
+    expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'config-link') })).toBe(
+      'allow',
+    );
+  });
+
+  it('should leave an absent name creatable under another case with the canonical spelling alone, the gap the glob closes', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const readOnly = executableNames.map((name) => join(store, name));
+    const profile = seatbeltProfileOf(darwinProfile(terminalLaunch(root, { readOnly, denied: [] })));
+
+    expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'commondir') })).toBe('deny');
+    expect(seatbeltDecision(profile, { operation: 'file-write-create', path: join(store, 'COMMONDIR') })).toBe('allow');
+  });
+
+  it('should deny every read of a .git named both read-only and denied, the shape that must not return', () => {
+    const root = fixtureRoot();
+    const store = join(root, 'project', '.git');
+    const profile = seatbeltProfileOf(darwinProfile(terminalLaunch(root, { readOnly: [store], denied: [store] })));
+
+    for (const path of ['', 'HEAD', 'index', 'refs/heads/main', 'objects/ab/cdef']) {
+      expect(seatbeltDecision(profile, { operation: 'file-read-data', path: join(store, path) }), path).toBe('deny');
+    }
   });
 });
 

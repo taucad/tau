@@ -18,6 +18,8 @@ export type PublicationAccessGrant = {
   createdAt: string;
   // oxlint-disable-next-line typescript/no-restricted-types -- mirrors API DTO where revokedAt is serialized as null while active.
   revokedAt: string | null;
+  /** The invite email cannot reach this recipient; why is theirs to know, not the owner's (email bounce blueprint D5). */
+  notDelivered?: boolean;
 };
 
 type PublicationAccessPanelProps = {
@@ -187,7 +189,10 @@ export function PublicationAccessPanel({
               >
                 <div className='min-w-0'>
                   <p className='truncate text-sm'>{grant.recipientEmail}</p>
-                  <p className='text-xs text-muted-foreground'>Can view</p>
+                  <p className='text-xs text-muted-foreground'>
+                    Can view
+                    {grant.notDelivered === true ? ' · Not delivered' : ''}
+                  </p>
                 </div>
                 <Tooltip>
                   <TooltipTrigger asChild>

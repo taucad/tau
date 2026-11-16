@@ -9,7 +9,8 @@
  * chats this project has.
  */
 
-import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
+import { beforeAll, describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { mock } from 'vitest-mock-extended';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -18,7 +19,9 @@ import type { Chat } from '@taucad/chat';
 import type { RevisionRow } from '@taucad/revisions';
 import type { ComposerRecordClient } from '@taucad/chat-ui/db/composer-record-store';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import { ChatSessionStoreProvider, useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+import { MirroredChatSessionStoreProvider as ChatSessionStoreProvider } from '#hooks/chat-session-store.fixture.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
@@ -75,6 +78,12 @@ beforeEach(() => {
     headRevisionId: 'rev-u2',
   };
   chatsRef.current = [chat('chat_first'), chat('chat_second')];
+});
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
 });
 
 describe('revision numbering across chat deletion (north star W0)', () => {

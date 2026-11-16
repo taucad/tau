@@ -8,6 +8,14 @@ import {
   BillingPaymentsService,
   stripeWebhookRoute,
 } from '@taucad/api-billing';
+import {
+  EmailDeliverabilityModule,
+  normalizeEmailAddress,
+  ResendWebhookService,
+  resendWebhookRoute,
+} from '@taucad/api-email';
+import { emailAddressState, emailEvent, user } from '@taucad/api-database/schema';
+import { eq } from 'drizzle-orm';
 import { HostsModule, HostsService } from '@taucad/api-hosts';
 import {
   accountDeletionGateToken,
@@ -26,8 +34,11 @@ import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
  * - Account deletion: in Tau Cloud billing's account closure gates it; then
  *   the account's cloud hosts stop before the storage tombstone (W10 a4) and
  *   its agent evidence is erased after it (T13), in that order.
- * - Auth routes: in Tau Cloud the byte-exact Stripe webhook registers ahead of
- *   the Better Auth wildcard, when billing provides payments.
+ * - Auth routes: the byte-exact Resend webhook always, and in Tau Cloud the
+ *   byte-exact Stripe webhook when billing provides payments, register ahead
+ *   of the Better Auth wildcard.
+ * - Account deletion also erases the account address's delivery mirror
+ *   (`email_address_state`, `email_event`) before the user row goes.
  * - Rate limits: Better Auth counts in Redis, so every Machine shares one count
  *   per client and path instead of each keeping its own.
  */
@@ -37,19 +48,35 @@ export class AuthExtensionsModule {
     return {
       global: true,
       module: AuthExtensionsModule,
-      imports: [DatabaseModule, HostsModule, ...(options.tauCloudEnabled ? [BillingModule] : [])],
+      imports: [
+        DatabaseModule,
+        EmailDeliverabilityModule,
+        HostsModule,
+        ...(options.tauCloudEnabled ? [BillingModule] : []),
+      ],
       providers: [
         ...(options.tauCloudEnabled
           ? [
               { provide: accountDeletionGateToken, useExisting: BillingAccountClosureService },
               {
                 provide: authRouteExtensionsToken,
-                inject: [{ token: BillingPaymentsService, optional: true }],
-                useFactory: (payments: BillingPaymentsService | undefined): AuthRouteExtension[] =>
-                  payments === undefined ? [] : [stripeWebhookRoute(payments)],
+                inject: [ResendWebhookService, { token: BillingPaymentsService, optional: true }],
+                useFactory: (
+                  resend: ResendWebhookService,
+                  payments: BillingPaymentsService | undefined,
+                ): AuthRouteExtension[] => [
+                  resendWebhookRoute(resend),
+                  ...(payments === undefined ? [] : [stripeWebhookRoute(payments)]),
+                ],
               },
             ]
-          : []),
+          : [
+              {
+                provide: authRouteExtensionsToken,
+                inject: [ResendWebhookService],
+                useFactory: (resend: ResendWebhookService): AuthRouteExtension[] => [resendWebhookRoute(resend)],
+              },
+            ]),
         {
           provide: authRateLimitStoreToken,
           inject: [RedisService],
@@ -70,6 +97,20 @@ export class AuthExtensionsModule {
               run: async ({ userId }) => hosts.retireCloudHosts(userId),
             },
             {
+              // Verified erasure removes the account address's delivery facts with it (bounce blueprint, Storage).
+              stage: 'before-storage-tombstone',
+              run: async ({ userId }) => {
+                const { database } = databaseService;
+                const [account] = await database.select({ email: user.email }).from(user).where(eq(user.id, userId));
+                if (account === undefined) {
+                  return;
+                }
+                const address = normalizeEmailAddress(account.email);
+                await database.delete(emailAddressState).where(eq(emailAddressState.address, address));
+                await database.delete(emailEvent).where(eq(emailEvent.recipient, address));
+              },
+            },
+            {
               stage: 'after-storage-tombstone',
               run: async ({ userId }) => {
                 await eraseAccountEvidence(databaseService.database, userId);
@@ -81,7 +122,8 @@ export class AuthExtensionsModule {
       exports: [
         accountDeletionHooksToken,
         authRateLimitStoreToken,
-        ...(options.tauCloudEnabled ? [accountDeletionGateToken, authRouteExtensionsToken] : []),
+        authRouteExtensionsToken,
+        ...(options.tauCloudEnabled ? [accountDeletionGateToken] : []),
       ],
     };
   }

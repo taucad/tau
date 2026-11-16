@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from 'react-router';
+import type { Route } from './+types/route.js';
 
 /**
  * Catch-all loader for `/assets/*` requests.
@@ -26,8 +26,7 @@ import type { LoaderFunctionArgs } from 'react-router';
  * `flatRoutes()` via the `assets.$` directory naming convention.
  */
 // oxlint-disable-next-line require-await -- React Router loader signature
-export async function loader({ request }: LoaderFunctionArgs): Promise<Response> {
-  const url = new URL(request.url);
+export async function loader({ url }: Route.LoaderArgs): Promise<Response> {
   // Throwing a `Response` is the React Router idiom for short-circuiting a
   // route with an HTTP status — the framework rethrows it with the correct
   // headers/body.

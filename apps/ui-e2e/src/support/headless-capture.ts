@@ -508,12 +508,24 @@ const captureErrorToasts = (): string[] =>
 
 export const readCaptureErrorToasts = async (): Promise<string[]> => target.evaluate(captureErrorToasts);
 
+/**
+ * Wait until the viewer shows the fixture's geometry.
+ *
+ * The SVG viewer renders its document inside an open shadow root on
+ * `[data-testid="svg-viewer-host"]` (ea48b39b30), so its geometry group is
+ * read from there: `document.querySelector` cannot see into it.
+ *
+ * @param format - The viewer the fixture renders in.
+ * @returns Nothing.
+ */
 export const waitForRenderedGeometry = async (format: 'gltf' | 'svg'): Promise<void> => {
   try {
     await target.waitFor(
       (expectedFormat) =>
         expectedFormat === 'svg'
-          ? (document.querySelector('[data-slot="geometry"]')?.childElementCount ?? 0) > 0
+          ? (document
+              .querySelector('[data-testid="svg-viewer-host"]')
+              ?.shadowRoot?.querySelector('[data-slot="geometry"]')?.childElementCount ?? 0) > 0
           : ((
               globalThis as {
                 __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): readonly unknown[] };

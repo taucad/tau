@@ -29,13 +29,14 @@ type ViewerContextMenuBridge = NonNullable<ViewerContextMenuBridgeWindow['__TAU_
 
 const seedRoute = '/__e2e/viewer-context-menu';
 const canvasSelector = '[data-testid="cad-viewer-canvas-region"] canvas';
+/** Points on or between the fixture's two 16 × 18 × 8 mm boxes, in metres as the bridge takes them. */
 const componentHitCandidates: ReadonlyArray<readonly [number, number, number]> = [
   [0, 0, 0],
-  [0, 0, 4],
-  [-6, 0, 0],
-  [6, 0, 0],
-  [0, -5, 0],
-  [0, 5, 0],
+  [0, 0, 0.004],
+  [-0.006, 0, 0],
+  [0.006, 0, 0],
+  [0, -0.005, 0],
+  [0, 0.005, 0],
 ];
 
 type MenuItemVisualState = {
@@ -88,8 +89,9 @@ async function driveStableCamera(): Promise<void> {
       throw new Error('Viewer context menu e2e bridge is not installed.');
     }
     for (const bridge of bridges) {
+      // Metres, as the bridge takes them: about 120 mm from the 36 mm wide fixture, so it fills half the view.
       bridge.setCamera({
-        position: [44, -58, 34],
+        position: [0.066, -0.087, 0.051],
         target: [0, 0, 0],
         fov: 36,
         zoom: 1.2,

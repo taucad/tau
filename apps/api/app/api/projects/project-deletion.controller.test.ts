@@ -4,9 +4,8 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
+import { mock } from 'vitest-mock-extended';
 import { ProjectDeletionController } from '@taucad/api-projects/projects/project-deletion.controller';
 import {
   completeProjectDeletion,
@@ -16,7 +15,9 @@ import {
 import type { ProjectDeletionStatus } from '@taucad/api-git-core/project-deletion';
 import { gitExecutorKey } from '@taucad/api-git-core/forwarding/git-executor';
 import type { GitExecutor } from '@taucad/api-git-core/forwarding/git-executor';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSessionLookup } from '@taucad/api-auth/testing';
 import type { Environment } from '@taucad/api-core';
 import { DatabaseService } from '@taucad/api-database';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
@@ -36,7 +37,7 @@ describe('ProjectDeletionController over HTTP', () => {
   const databaseService = Object.assign(mock<DatabaseService>(), { database: mock<DatabaseService['database']>() });
   const executor = mock<GitExecutor>();
   const config = mock<ConfigService<Environment, true>>();
-  const auth = mockDeep<Auth>();
+  const getSession = vi.fn<FakeSessionLookup>();
   const signedIn = {
     user: {
       id: ownerId,
@@ -66,7 +67,7 @@ describe('ProjectDeletionController over HTTP', () => {
       providers: [
         Reflector,
         AuthGuard,
-        { provide: authInstanceKey, useValue: auth },
+        { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
         { provide: ConfigService, useValue: config },
         { provide: DatabaseService, useValue: databaseService },
         { provide: gitExecutorKey, useValue: executor },
@@ -81,7 +82,7 @@ describe('ProjectDeletionController over HTTP', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     config.get.mockReturnValue(true);
-    auth.api.getSession.mockResolvedValue(signedIn);
+    getSession.mockResolvedValue(signedIn);
     vi.mocked(requestProjectDeletion).mockResolvedValue();
     vi.mocked(completeProjectDeletion).mockResolvedValue({ projectId, state: 'deleted', deletedAt });
     vi.mocked(readOwnedProjectDeletion).mockResolvedValue({ projectId, state: 'active' });
@@ -94,7 +95,7 @@ describe('ProjectDeletionController over HTTP', () => {
   it.each(['GET', 'DELETE'] as const)(
     'should require authentication for %s before invoking deletion work',
     async (method) => {
-      auth.api.getSession.mockResolvedValue(null);
+      getSession.mockResolvedValue(null);
       const response = await app.inject({
         method,
         url: `/v1/projects/${projectId}${method === 'GET' ? '/deletion' : ''}`,

@@ -1,21 +1,30 @@
 import { PassThrough } from 'node:stream';
 
 import { createReadableStreamFromReadable } from '@react-router/node';
-import { applyHandleRequestHeaders } from '@taucad/runtime/react-router';
 import { isbot } from 'isbot';
 import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
-import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
+import type { EntryContext, HandleErrorFunction, RouterContextProvider } from 'react-router';
 import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.constants';
-import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
-import { reportingEndpoints } from '#lib/browser-reports.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
-import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
+import {
+  claimSsrErrors,
+  leafRouteId,
+  queueSsrError,
+  reportSsrError,
+  routeErrorInstrumentation,
+} from '#lib/sentry.server.js';
+import { startDocumentTiming } from '#lib/server-timing.server.js';
+import { createAppRuntime } from '#runtime/app-runtime.js';
+import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
 export const streamTimeout = 5000;
+
+/** RR7: the route a failed loader, action or middleware belongs to, for the SSR error report's route tags. */
+export const instrumentations = [routeErrorInstrumentation];
 
 /**
  * Server errors React Router saw in a loader, action or render (SB10). A request the client aborted is skipped, as
@@ -41,15 +50,16 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  _loadContext: AppLoadContext,
+  loadContext: RouterContextProvider,
 ): Promise<Response> | Response {
+  /* LB0a: the cold-instance mark, the loader's catalog entry and the render time to the headers go out as
+   * `Server-Timing`. A streamed document's headers leave at shell ready, so all-ready and bytes are not in them. */
+  const timing = startDocumentTiming(loadContext);
   const routeId = leafRouteId(routerContext);
   // Errors `handleError` took for this document go out with its route and status (SB10).
   claimSsrErrors(request, routeId, responseStatusCode);
-  applyHandleRequestHeaders(responseHeaders);
-  responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
-  // SB6: CSP violations (`report-to default`) and Chromium crash reports go to the same-origin receiver.
-  responseHeaders.set('Reporting-Endpoints', reportingEndpoints);
+  /* Cross-origin isolation, the report-only CSP and `Reporting-Endpoints` are on every response, so the root
+   * middleware sets them (`#lib/root-middleware.server`); what follows is right on a document only. */
   /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
    * cache may answer a load or refresh with a stored document without asking the server. It is
    * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex
@@ -91,6 +101,7 @@ export default function handleRequest(
   }
 
   if (request.method.toUpperCase() === 'HEAD') {
+    responseHeaders.append('Server-Timing', timing.withoutRender());
     return new Response(null, {
       status: responseStatusCode,
       headers: responseHeaders,
@@ -108,7 +119,13 @@ export default function handleRequest(
       abort();
     }, streamTimeout + 1000);
 
-    const { pipe, abort } = renderToPipeableStream(<ServerRouter context={routerContext} url={request.url} />, {
+    /* D5: one runtime per request, never started, so every reader renders the snapshot the client hydrates from. */
+    const app = (
+      <AppRuntimeProvider runtime={createAppRuntime()}>
+        <ServerRouter context={routerContext} url={request.url} />
+      </AppRuntimeProvider>
+    );
+    const { pipe, abort } = renderToPipeableStream(app, {
       [readyOption]() {
         shellRendered = true;
         const body = createModulePreloadCap(criticalModuleHrefs(routerContext));
@@ -122,6 +139,7 @@ export default function handleRequest(
         const stream = createReadableStreamFromReadable(body);
 
         responseHeaders.set('Content-Type', 'text/html');
+        responseHeaders.append('Server-Timing', timing.atReady(readyOption));
 
         rendered.pipe(body);
         pipe(rendered);

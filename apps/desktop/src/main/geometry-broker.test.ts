@@ -6,9 +6,9 @@ import type { HostGeoSpecRunner } from '@taucad/host/agent-tools';
 import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type { GeometryBrokerOptions } from '#main/geometry-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
-import { createGeometryHost } from '#tau/geometry-host.impl.js';
-import { createGeometryRunnerClient } from '#tau/geometry-runner-client.js';
-import type { UtilityPort } from '#tau/services-host.impl.js';
+import { createGeometryHost } from '@taucad/desktop-services-host/geometry-host-impl';
+import { createGeometryRunnerClient } from '@taucad/desktop-services-host/geometry-runner-client';
+import type { UtilityPort } from '@taucad/desktop-services-host';
 
 type FakePort = {
   readonly posted: unknown[];

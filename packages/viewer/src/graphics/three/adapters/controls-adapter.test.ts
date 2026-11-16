@@ -5,8 +5,10 @@ import type { Camera, PerspectiveCamera } from 'three';
 import { createActor, createAsyncLogic, createCallbackLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
 import type { RootState } from '@react-three/fiber';
+import { resolveCameraState } from '@taucad/camera';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '@taucad/three/camera';
+import { toThreeRenderPoint } from '@taucad/three/spatial';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
 import type { CameraOwnedSettings } from '#graphics/graphics-settings.js';
 import {
@@ -294,6 +296,94 @@ describe('controls adapter', () => {
     expect(zoomed).toBeCloseTo(before / 2, 6);
     expect(span()).toBeCloseTo(zoomed, 9);
     expect(harness.rig.orthographicCamera.zoom).toBe(1);
+  });
+
+  /* At 0° the camera derives its distance per view, and the rig places the native camera there and solves the clip
+   * planes for it. camera-controls rewrites the position from its own radius on every update, so a later update that
+   * reports nothing must leave the native camera at the derived distance, not at the radius the gesture began with. */
+  describe('at 0° after a gesture, a later update keeps the native camera at the derived distance', () => {
+    const startOrthographic = (): Harness => {
+      const harness = createHarness({ cameraView: { ...cameraView, verticalSpan: 0.2 }, cameraFovAngle: 0 });
+      harness.attach();
+      harness.graphics.send({
+        type: 'geometryBoundsMeasured',
+        key: 'model',
+        bounds: { min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] },
+        radius: 0.1,
+      });
+      expect(harness.rig.activeCamera).toBe(harness.rig.orthographicCamera);
+      return harness;
+    };
+    // The camera actor's distance and the native camera's distance to the presented target, in meters.
+    const distances = (harness: Harness): Readonly<{ actor: number; native: number }> => {
+      const { view } = harness.camera.getSnapshot().context;
+      const state = resolveCameraState({ view, verticalFieldOfView: 0 });
+      const { renderFrame } = harness.rig;
+      const target = toThreeRenderPoint({ renderFrame, pointMeters: view.target });
+      return {
+        actor: Math.hypot(...state.position.map((value, index) => value - view.target[index]!)),
+        native: harness.rig.orthographicCamera.position.distanceTo(target) * renderFrame.metersPerRenderUnit,
+      };
+    };
+
+    it('after a zoom-out whose span exceeds the bounds diagonal', () => {
+      const harness = startOrthographic();
+      const controls = harness.controls();
+      const before = distances(harness).actor;
+      const { renderFrame } = harness.rig;
+
+      // Out by half, short of a render-frame rescale (whose controls write would hide the defect).
+      void controls.zoomTo(controls.camera.zoom / 2, false);
+      controls.update(0);
+      harness.cameraEvents.length = 0;
+      controls.update(0);
+
+      expect(harness.cameraEvents).toEqual([]);
+      expect(harness.rig.renderFrame).toBe(renderFrame);
+      expect(harness.camera.getSnapshot().context.view.verticalSpan).toBeGreaterThan(Math.sqrt(3) * 0.2);
+      const { actor, native } = distances(harness);
+      expect(actor).toBeGreaterThan(before);
+      expect(native).toBeCloseTo(actor, 9);
+    });
+
+    it('after an orbit at constant span', () => {
+      const harness = startOrthographic();
+      const controls = harness.controls();
+      const before = distances(harness).actor;
+      const span = harness.camera.getSnapshot().context.view.verticalSpan;
+      const { renderFrame } = harness.rig;
+
+      void controls.rotate(0.6, 0.4, false);
+      controls.update(0);
+      harness.cameraEvents.length = 0;
+      controls.update(0);
+
+      expect(harness.cameraEvents).toEqual([]);
+      expect(harness.rig.renderFrame).toBe(renderFrame);
+      expect(harness.camera.getSnapshot().context.view.verticalSpan).toBeCloseTo(span, 9);
+      const { actor, native } = distances(harness);
+      expect(actor).not.toBeCloseTo(before, 6);
+      expect(native).toBeCloseTo(actor, 9);
+    });
+  });
+
+  it('hands a perspective gesture back neither a zoom nor a distance', () => {
+    const harness = createHarness();
+    harness.attach();
+    const controls = harness.controls();
+    const zoomTo = vi.spyOn(controls, 'zoomTo');
+    const dollyTo = vi.spyOn(controls, 'dollyTo');
+    const setLookAt = vi.spyOn(controls, 'setLookAt');
+    harness.cameraEvents.length = 0;
+
+    void controls.rotate(0.6, 0.4, false);
+    controls.update(0);
+    controls.update(0);
+
+    expect(harness.cameraEvents.filter((event) => event.type === 'poseObserved')).toHaveLength(1);
+    expect(zoomTo).not.toHaveBeenCalled();
+    expect(dollyTo).not.toHaveBeenCalled();
+    expect(setLookAt).not.toHaveBeenCalled();
   });
 
   /* A restored or adopted view arrives as `poseObserved` with the source `input` from a sender that is not the

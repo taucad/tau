@@ -75,6 +75,11 @@
     "reason": "reads another project's build output"
   },
   {
+    "file": "apps/desktop-e2e/src/desktop-acp-install.spec.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-arrange-workbench.spec.ts",
     "target": "packages/host/src/agent-tools.js",
     "reason": "imports another project's source by relative path instead of its package"
@@ -110,9 +115,19 @@
     "reason": "desktop e2e reuses a ui-e2e support module by relative path"
   },
   {
+    "file": "apps/desktop-e2e/src/desktop-kernel-skills.spec.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-native-payload.spec.ts",
     "target": "packages/plugins/gltf/src/fixtures/cube.glb",
     "reason": "test fixture read from another project"
+  },
+  {
+    "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
+    "target": "packages/plugins/heif/src/fixtures/small.heic",
+    "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"
   },
   {
     "file": "apps/desktop-e2e/src/desktop-picogk-kinematics.spec.ts",
@@ -133,6 +148,21 @@
     "file": "apps/desktop-e2e/src/filesystem-projection-retained.spec.ts",
     "target": "apps/ui/app/workbench-records/view-store.ts",
     "reason": "reads another project's source text to assert on or extract from it"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/acp-install.test.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/acp-install.ts",
+    "target": "packages/host/src/acp/locate.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
+  },
+  {
+    "file": "apps/desktop-e2e/src/support/acp-install.ts",
+    "target": "packages/host/src/acp/registry.js",
+    "reason": "imports the reviewed ACP profiles and locator by source path: they are @internal and the host package index pulls native modules this harness cannot load"
   },
   {
     "file": "apps/desktop-e2e/src/support/desktop-app.ts",
@@ -478,6 +508,11 @@
     "file": "apps/ui-e2e/vitest.config.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/ui/app/lib/critical-graph.node.test.ts",
+    "target": ".oxlintrc.json",
+    "reason": "holds the options of tau-lint/no-static-heavy-import (G1) to the heavy list and the route classes' static graphs"
   },
   {
     "file": "apps/ui/app/routes/[__e2e].onshape-render-profile/ablation-transform.test.ts",
@@ -880,6 +915,11 @@
     "reason": "reads another project's configuration it checks"
   },
   {
+    "file": "scripts/src/drift-fingerprint.ts",
+    "target": "libs/sandbox/scripts/shell-conformance-guest.sh",
+    "reason": "the drift check fingerprints the packages the shell guest installs, read from the guest script at run time in CI"
+  },
+  {
     "file": "scripts/src/ensure-vale.test.ts",
     "target": "pnpm-workspace.yaml",
     "reason": "reads workspace-root configuration or inventory"
@@ -938,6 +978,11 @@
     "file": "scripts/src/shell-evidence.test.ts",
     "target": "libs/sandbox/scripts/**",
     "reason": "reads the sandbox shell-conformance scripts it checks"
+  },
+  {
+    "file": "scripts/src/shell-evidence.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
   },
   {
     "file": "scripts/src/telemetry-grafana-contract.test.ts",

@@ -669,7 +669,45 @@ export const TauMetrics = {
     description: 'Invite notification emails suppressed before send, by reason',
     attributes: z.object({
       trigger: z.enum(['publish', 'invite']).optional(),
-      reason: z.enum(['cap_exceeded', 'limiter_unavailable']).optional(),
+      reason: z.enum(['cap_exceeded', 'limiter_unavailable', 'recipient_undeliverable']).optional(),
+    }),
+  }),
+
+  emailEventsTotal: defineCounter({
+    name: 'email.events',
+    unit: '{event}',
+    description:
+      'Resend delivery events received by the signed webhook, by event type, template kind, bounce type and outcome',
+    attributes: z.object({
+      type: z
+        .enum([
+          'email.sent',
+          'email.delivered',
+          'email.delivery_delayed',
+          'email.bounced',
+          'email.complained',
+          'email.failed',
+          'email.suppressed',
+          'suppression.added',
+          'suppression.removed',
+        ])
+        .optional(),
+      kind: z
+        .enum([
+          'verify-email',
+          'account-exists',
+          'magic-link',
+          'reset-password',
+          'password-changed',
+          'publication-invite',
+          'payment-failed',
+          'auto-reload-disabled',
+          'auto-reload-action-required',
+          'unknown',
+        ])
+        .optional(),
+      bounce_type: z.enum(['Permanent', 'Transient', 'Undetermined', 'other', 'none']).optional(),
+      outcome: z.enum(['stored', 'other_environment']).optional(),
     }),
   }),
 
@@ -709,6 +747,12 @@ export const TauMetrics = {
     }),
   }),
 
+  /*
+   * Deprecated, in the runtime-telemetry dual-write window (package "Dual-write window (after PR-9)"): the legacy
+   * `observability.createGeometry`/`exportGeometry` entries still record here, and the API also writes each recorded
+   * `runtime.operation` evaluate/render (executions, duration) and export (export duration, `export.format` `_OTHER`).
+   * Dashboards read `tau_runtime_*`; a follow-up removes these three once 14 days pass with no old-entry receipts.
+   */
   kernelExecutionDuration: defineHistogram({
     name: 'kernel.execution.duration',
     unit: 's',
@@ -2028,6 +2072,24 @@ export const TauMetrics = {
     description:
       'Client connections the session pooler admits for the API login (DATABASE_POOLER_POOL_SIZE); every instance reports the same value',
     attributes: z.object({}),
+  }),
+
+  /**
+   * One per session resolution on a Tau route or upgrade (`SessionResolver.resolve`). `credential` is
+   * header presence only; `authorization` + `unauthenticated` includes paired-device calls that the
+   * LLM gateway then admits by device credential, so it is not a failure rate.
+   */
+  authSessionResolutions: defineCounter({
+    name: 'tau.auth.session.resolutions',
+    unit: '{resolution}',
+    description:
+      'Session resolutions on Tau routes and WebSocket upgrades, by read mode, credential header, outcome and whether the request shared an in-flight lookup',
+    attributes: z.object({
+      mode: z.enum(['cached', 'authoritative']),
+      credential: z.enum(['cookie', 'authorization', 'none']),
+      outcome: z.enum(['authenticated', 'unauthenticated', 'error']),
+      coalesced: z.enum(['true', 'false']),
+    }),
   }),
 
   r2Requests: defineGauge({

@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
+import { startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { render } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { spyOnSend } from '@taucad/ui-core/lib/xstate-test.utils';
@@ -63,7 +66,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ client: {} }),
 }));
 
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
+  await import('#hooks/chat-session-store.fixture.js');
 const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 const { GlobalChatFlushGuard } = await import('#components/global-chat-flush-guard.js');
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
@@ -90,7 +96,7 @@ function renderWithStore(onSessionStage: () => void = () => undefined): {
   }
 
   const utils = render(
-    <UnloadProvider>
+    <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
       <ChatSessionStoreProvider>
         <Capture />
         <GlobalChatFlushGuard />
@@ -125,6 +131,22 @@ function dispatchVisibilityHidden(): void {
   });
   document.dispatchEvent(new Event('visibilitychange'));
 }
+
+/* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
+let unloadEnvironment: EnvironmentHostFixture | undefined;
+beforeEach(() => {
+  unloadEnvironment = startEnvironmentHost();
+});
+afterEach(() => {
+  unloadEnvironment?.stop();
+  unloadEnvironment = undefined;
+});
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('GlobalChatFlushGuard', () => {
   beforeEach(() => {

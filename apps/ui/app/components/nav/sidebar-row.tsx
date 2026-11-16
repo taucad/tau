@@ -15,6 +15,7 @@ import type { ComponentProps, ComponentType, ReactNode } from 'react';
 import { CircleAlert, EllipsisVertical } from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -29,7 +30,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';

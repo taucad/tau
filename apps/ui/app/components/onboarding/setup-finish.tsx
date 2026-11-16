@@ -1,5 +1,5 @@
 import { Check, FolderOpen } from 'lucide-react';
-import type { DeviceRecord, PersonProfile, ViewerPreferences } from '@taucad/preferences';
+import type { PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
 import {
@@ -16,7 +16,6 @@ export type SetupFinishProps = Readonly<{
   headingRef: React.Ref<HTMLHeadingElement>;
   profile: PersonProfile;
   viewer: ViewerPreferences;
-  device: DeviceRecord;
   isTourWanted: boolean;
   /** `tour.ended` is set: the summary says the tour was taken instead of what the switch holds. */
   hasTakenTour: boolean;
@@ -43,7 +42,6 @@ export function SetupFinish({
   headingRef,
   profile,
   viewer,
-  device,
   isTourWanted,
   hasTakenTour,
   isDesktop,
@@ -60,7 +58,7 @@ export function SetupFinish({
       : profile.goals.map((goal) => goalCopy[goal].label.toLowerCase()).join(', ');
   const lines = [
     summaryMakesText(goals),
-    ...(isViewerControlsEnabled ? [summaryViewerText(viewerSummary(viewer, profile, device))] : []),
+    ...(isViewerControlsEnabled ? [summaryViewerText(viewerSummary(viewer, profile))] : []),
     hasTakenTour ? setupFinishCopy.tourTaken : isTourWanted ? setupFinishCopy.tourOn : setupFinishCopy.tourOff,
   ];
   return (

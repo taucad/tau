@@ -94,6 +94,17 @@ function report(error: unknown): void {
   console.error(error);
 }
 
+/**
+ * Report a background request's failure only while it is still the view's latest request. A superseded request, or
+ * one whose view was destroyed (its language service is disposed with it, rejecting what was in flight), failed
+ * because nobody wants its answer any more, which is not a fault.
+ */
+function reportCurrent(error: unknown, isCurrent: boolean): void {
+  if (isCurrent) {
+    report(error);
+  }
+}
+
 async function run(task: () => unknown): Promise<void> {
   try {
     await task();
@@ -680,6 +691,9 @@ const signatureHelpPlugin = ViewPlugin.fromClass(
     public constructor(view: EditorView) {
       this.view = view;
     }
+    public destroy(): void {
+      this.generation++;
+    }
     public update(update: ViewUpdate): void {
       const help = featuresOf(update.state).signatureHelp;
       if (!help) {
@@ -717,7 +731,7 @@ const signatureHelpPlugin = ViewPlugin.fromClass(
           ),
         });
       } catch (error) {
-        report(error);
+        reportCurrent(error, generation === this.generation);
       }
     }
   },
@@ -795,7 +809,7 @@ const occurrenceHighlighter = ViewPlugin.fromClass(
             true,
           );
         } catch (error) {
-          report(error);
+          reportCurrent(error, generation === this.generation);
         }
       }
       if (generation !== this.generation || (next.size === 0 && this.decorations.size === 0)) {
@@ -872,7 +886,7 @@ const symbolPathReporter = ViewPlugin.fromClass(
           this.report();
         }
       } catch (error) {
-        report(error);
+        reportCurrent(error, current === this.generation);
         // The old symbols describe text that has since changed; show no path rather than a stale one.
         if (current === this.generation) {
           this.symbols = [];

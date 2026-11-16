@@ -104,7 +104,10 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
       { timeout: 60_000 },
     )
     .toBe(true);
-  await target.expectVisible(selectors.getByRole('button', { name: /Grid .* in, units and grid/iu }), 60_000);
+  // The grid size and unit read on Viewer settings' Grid & units row.
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last());
+  await target.expectVisible(selectors.getByRole('menuitem', { name: /^Grid & units, .* in(?:,|$)/u }), 60_000);
+  await target.keyboardPress('Escape');
   const canonicalView = await readFile(viewPath('review-front'));
   expect(JSON.parse(canonicalView!)).toMatchObject({
     version: 1,

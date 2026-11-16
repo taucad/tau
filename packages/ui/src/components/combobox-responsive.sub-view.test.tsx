@@ -108,8 +108,8 @@ describe.each([
 
     await click(screen.getByRole('option', { name: 'More kernels' }));
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
-    expect(options()).toEqual(['More kernels', 'OpenCascade', 'Manifold', 'JSCAD']);
-    expect(screen.getByRole('option', { name: 'Back to Select kernel' })).toHaveTextContent('More kernels');
+    expect(options()).toEqual(['Back', 'OpenCascade', 'Manifold', 'JSCAD']);
+    expect(screen.getByRole('option', { name: 'Back to Select kernel' })).toHaveTextContent(/^Back$/u);
     await waitFor(() => {
       expect(screen.getByRole('option', { name: 'OpenCascade' })).toHaveAttribute('aria-selected', 'true');
     });

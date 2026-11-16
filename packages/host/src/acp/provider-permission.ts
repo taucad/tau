@@ -95,21 +95,20 @@ export const providerPermissionPayload = (
     ...(unsupported ? { unsupportedReason: 'unconfigured-mcp-server' } : {}),
     options: request.options.map((option) => ({
       optionId: option.optionId,
-      requestedScope: codexMcp
-        ? option.kind === 'allow_once' || option.kind === 'reject_once'
+      /* `allow_once` and `reject_once` mean "this time only" in ACP itself, whatever the adapter, so they need no
+       * review. Only what an `allow_always` saves, and where, is the adapter's own and is claimed for reviewed ones. */
+      requestedScope:
+        option.kind === 'allow_once' || option.kind === 'reject_once'
           ? 'once'
-          : option.kind === 'allow_always' && option.optionId === 'allow_session'
-            ? 'session'
-            : option.kind === 'allow_always' && option.optionId === 'allow_always'
+          : codexMcp
+            ? option.kind === 'allow_always' && option.optionId === 'allow_session'
+              ? 'session'
+              : option.kind === 'allow_always' && option.optionId === 'allow_always'
+                ? 'persistent'
+                : 'unspecified'
+            : grokQualified && option.kind === 'allow_always' && option.optionId === 'always-allow'
               ? 'persistent'
-              : 'unspecified'
-        : grokQualified
-          ? option.kind === 'allow_once' || option.kind === 'reject_once'
-            ? 'once'
-            : option.kind === 'allow_always' && option.optionId === 'always-allow'
-              ? 'persistent'
-              : 'unspecified'
-          : 'unspecified',
+              : 'unspecified',
     })),
   };
   const { toolCall } = request;

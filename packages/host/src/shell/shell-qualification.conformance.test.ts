@@ -23,6 +23,7 @@
  * interleaving run and, on Linux, `TAU_SHELL_CONFORMANCE_BWRAP` the installed, profiled bubblewrap.
  */
 import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { subscribe, unsubscribe } from 'node:diagnostics_channel';
 import { createRequire } from 'node:module';
 import {
@@ -44,7 +45,7 @@ import {
 } from 'node:fs';
 import { connect as connectSocket, createServer } from 'node:net';
 import type { Server } from 'node:net';
-import { tmpdir } from 'node:os';
+import { release, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MessageChannel } from 'node:worker_threads';
@@ -83,6 +84,9 @@ import {
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
 const row = process.env['TAU_SHELL_CONFORMANCE_ROW'] ?? 'unnamed';
 const bwrapPath = process.env['TAU_SHELL_CONFORMANCE_BWRAP'] ?? '/usr/bin/bwrap';
+/** The Linux Terminal's git store guard, as the desktop ships it (`sandbox:build:store-guard`); unset leaves it off. */
+const storeGuardVariable = process.env['TAU_SHELL_CONFORMANCE_STORE_GUARD'];
+const storeGuardPath = storeGuardVariable === '' ? undefined : storeGuardVariable;
 const seed = Number(process.env['TAU_SHELL_QUALIFICATION_SEED'] ?? Date.now() % 2_147_483_647);
 const linux = process.platform === 'linux';
 /** The lifecycle and concurrency suites run this many times on one source (testing contract, stress). */
@@ -157,12 +161,19 @@ const countingProvider = (
     beforeLaunch?: (launch: ShellLaunch) => Promise<void>;
     /** A row that deliberately crashes a host keeps its receipts out of the custody every other row recovers over. */
     custody?: Readonly<{ appData: string; sessions: string }>;
+    /** A row that opens the human Terminal runs it with the shipped macOS own-pty rule, as the desktop does. */
+    terminal?: boolean;
+    /** The store guard this provider starts; `false` gives it none, as a package without the guard has. */
+    storeGuardPath?: string | false;
   }> = {},
 ) => {
   const custody = options.custody ?? { appData, sessions };
+  const guardPath = options.storeGuardPath === false ? undefined : (options.storeGuardPath ?? storeGuardPath);
   const real = createSandboxShellProvider({
     bwrapPath,
     home,
+    ...(guardPath === undefined ? {} : { storeGuardPath: guardPath }),
+    ...(options.terminal === true ? { macOSTerminal: true } : {}),
     custody: { directory: join(custody.appData, 'shell-custody'), sessionDirectory: custody.sessions },
     ...(options.supervisor === undefined ? {} : { supervisor: options.supervisor }),
   });
@@ -175,6 +186,7 @@ const countingProvider = (
     inventory: real.inventory,
     recover: real.recover,
     release: real.release,
+    ...(real.storeGuard === undefined ? {} : { storeGuard: real.storeGuard }),
     launch: async (launch) => {
       /* The probe's own launch proves the sandbox; it is not one of the row's calls. */
       if (launch.commandId === 'shell:probe') {
@@ -217,6 +229,9 @@ type ServiceOptions = Readonly<{
   environment?: Record<string, string | undefined>;
   /** Must name the same custody as `counting`'s provider, or recovery reads receipts the service cannot clean up. */
   custody?: Readonly<{ appData: string; sessions: string }>;
+  /** Project roots admitted beside the shared ones, for a row that opens a Terminal on its own fixture. */
+  projectRoots?: readonly string[];
+  toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }>;
 }>;
 
 const serviceOver = async (options: ServiceOptions) => {
@@ -228,8 +243,9 @@ const serviceOver = async (options: ServiceOptions) => {
     permissionModeOf: async (runId) => options.mode?.(runId) ?? 'ask',
     /* `appData` is an ancestor of every row's custody, so one entry denies a crash row's receipts too. */
     appDataRoots: [appData],
-    projectRoots: () => [project, second, candidate],
+    projectRoots: () => [project, second, candidate, ...(options.projectRoots ?? [])],
     home,
+    ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
     sessionDirectory: custody.sessions,
     ...(options.maxExecutions === undefined ? {} : { maxExecutions: options.maxExecutions }),
     environment: options.environment ?? process.env,
@@ -256,6 +272,7 @@ const agentHostOver = async (
     counting?: ReturnType<typeof countingProvider>;
     logPath?: string;
     custody?: Readonly<{ appData: string; sessions: string }>;
+    toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }>;
   }> = {},
 ) => {
   const logPath = options.logPath ?? join(root, `${label}-events.jsonl`);
@@ -268,6 +285,7 @@ const agentHostOver = async (
     ...(options.mode === undefined ? {} : { mode: options.mode }),
     ...(options.counting === undefined ? {} : { counting: options.counting }),
     ...(options.custody === undefined ? {} : { custody: options.custody }),
+    ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
   });
   const responses: ScriptedResponse[] = [
     ...calls.map((call) => ({ toolCalls: [{ id: call.id, name: call.name ?? 'shell', input: call.input }] })),
@@ -319,6 +337,55 @@ const agentHostOver = async (
     return asked;
   };
   return { host, transport, toolRegistry, counting, logPath, runId, chatId, admit, toolOutput, output, answer };
+};
+
+/**
+ * A Terminal the person types into, opened through the shell service. Each command's output and exit status land in
+ * the granted `answers` folder, written by the shell itself, so outside bytes judge.
+ */
+const typedTerminal = async (
+  shell: HostShell,
+  input: Readonly<{ projectRoot: string; answers: string; account: Readonly<{ id: string; name: string }> }>,
+) => {
+  const { answers } = input;
+  const opened = await shell.openTerminal({
+    projectRoot: input.projectRoot,
+    size: { columns: 160, rows: 48 },
+    access: { read: [], write: [answers], domains: [] },
+    account: input.account,
+    signal: new AbortController().signal,
+  });
+  if (opened.status !== 'opened') {
+    throw new Error(`the Terminal did not open: ${JSON.stringify(opened)}`);
+  }
+  const { session } = opened;
+  const reading = (async () => {
+    for await (const _chunk of session.output) {
+      /* Drained so the terminal never blocks; the answers are judged from the granted folder. */
+    }
+  })();
+  /** Type one command; its output and exit status land in the granted folder, written by the shell itself. */
+  const run = async (command: string): Promise<Readonly<{ exitCode: number; text: string }>> => {
+    const name = `answer-${randomUUID()}`;
+    const status = join(answers, `${name}.status`);
+    session.write(
+      new TextEncoder().encode(
+        `{ ${command} ; } > '${join(answers, `${name}.out`)}' 2>&1; printf '%s' "$?" > '${status}'\n`,
+      ),
+    );
+    if (!(await eventually(() => existsSync(status) && readFileSync(status, 'utf8') !== '', 60_000))) {
+      throw new Error(`the Terminal never answered ${command}`);
+    }
+    return {
+      exitCode: Number(readFileSync(status, 'utf8')),
+      text: readFileSync(join(answers, `${name}.out`), 'utf8'),
+    };
+  };
+  const close = async (): Promise<void> => {
+    await session[Symbol.asyncDispose]();
+    await reading;
+  };
+  return { run, close };
 };
 
 /** Run a whole scripted turn and return each call's shell result. */
@@ -2138,6 +2205,634 @@ describe.runIf(enabled)('shell qualification', () => {
       measurements = { writesRefused: failed.length };
     },
   );
+
+  /*
+   * Terminal git: the person's Terminal reaches the project's real store, so git there sees history live, a save made
+   * after the session opened included. On macOS the store is writable except the names through which git runs a
+   * program or follows another address (`config`, `hooks`, `commondir`, `remotes`, `branches` and the rest), so `add`,
+   * `commit`, `switch -c`, `stash` and `merge` succeed and commit under the signed-in person's Tau no-reply address,
+   * while a `git config` write, a hook, a direct write to `.git/config`, a lock renamed over it, a planted `commondir`
+   * and a planted legacy remote all fail, as do each name spelled with the characters a case-folding volume reads as
+   * its letters and a hard link to `config`. On Linux with the store guard (`TAU_SHELL_CONFORMANCE_STORE_GUARD`) the
+   * same holds through `tau-store-guard`, which refuses each policy name by name inside the sandbox's own bubblewrap.
+   * On Linux without it the store stays read-only, because bubblewrap alone cannot keep an absent `commondir` from being
+   * created without leaving a stand-in that breaks git outside, and every write fails. The project tracks a large file through Git LFS with the index Tau's refresh leaves after a
+   * save (stat data zero), which makes git run the LFS clean filter: both the Terminal and the agent's view must still
+   * answer a clean status. The host's own git and git-lfs folders are the toolchain, as the desktop passes its bundled
+   * ones. Outside bytes judge: each command's output and exit status land in a granted folder, and the store's digests
+   * are compared outside.
+   */
+  qualification(
+    'E14-terminal',
+    'Terminal git: the person reads the real store live and writes it where config and hooks stay protected',
+    async () => {
+      /*
+       * The shell service's rule (`terminalGitAccess`): the store is writable where Seatbelt protects it, and on Linux
+       * where the store guard ships. A Linux run given the guard must start it: a guard that cannot start fails here.
+       */
+      const writable = process.platform === 'darwin' || (linux && storeGuardPath !== undefined);
+      const account = { id: 'user_e14terminal', name: 'Terminal Person' };
+      const store = join(root, 'projects', 'terminal-git');
+      const pointer = join(root, 'projects', 'terminal-pointer');
+      const elsewhere = join(root, 'terminal-git-elsewhere');
+      const answers = join(root, 'terminal-git-answers');
+      const hostGit = (cwd: string, ...arguments_: string[]): string =>
+        execFileSync('git', arguments_, {
+          cwd,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            HOME: root,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_AUTHOR_NAME: 'Fixture',
+            GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+            GIT_COMMITTER_NAME: 'Fixture',
+            GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+          },
+        });
+      for (const directory of [store, pointer, elsewhere, answers]) {
+        mkdirSync(directory, { recursive: true });
+      }
+      hostGit(store, 'init', '--quiet', '--initial-branch=main');
+      hostGit(store, 'lfs', 'install', '--local', '--skip-repo');
+      writeFileSync(join(store, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+      const large = Buffer.alloc(256 * 1024, 7);
+      writeFileSync(join(store, 'large.bin'), large);
+      writeFileSync(join(store, 'part.scad'), 'cube(1);\n');
+      hostGit(store, 'add', '.gitattributes', 'large.bin', 'part.scad');
+      hostGit(store, 'commit', '--quiet', '-m', 'First part');
+      writeFileSync(join(store, 'part.scad'), 'cube(2);\n');
+      hostGit(store, 'commit', '--quiet', '-am', 'Grow the part');
+      expect(hostGit(store, 'cat-file', '-p', 'HEAD:large.bin')).toMatch(/^version https:\/\/git-lfs/u);
+      /* Tau's derived ignores, as a Tau store carries them, for the records the service creates and the stand-ins. */
+      writeFileSync(join(store, '.git', 'info', 'exclude'), '/.tau/*\n/thumbnail.webp\n/exports/\n');
+      /* What Tau's index refresh leaves after a save: the new head's tree, with no stat data. */
+      hostGit(store, 'read-tree', 'HEAD');
+      /* A checkout whose `.git` is a pointer to a store outside it, which the Terminal cannot read. */
+      hostGit(elsewhere, 'init', '--quiet', '--initial-branch=main');
+      writeFileSync(join(pointer, '.git'), `gitdir: ${join(elsewhere, '.git')}\n`);
+      const folderOf = (tool: string): string =>
+        dirname(realpathSync(execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim()));
+      /*
+       * The real git install, never a launcher in front of it: on macOS `/usr/bin/git` is Apple's xcrun shim, which
+       * writes a cache outside the sandbox, while the desktop bundles a real git. Its exec path sits beside its `bin`.
+       */
+      const execPath = realpathSync(hostGit(store, '--exec-path').trim());
+      const installedBin = join(dirname(dirname(execPath)), 'bin');
+      const gitFolder = existsSync(join(installedBin, 'git')) ? installedBin : folderOf('git');
+      const bins = [...new Set([gitFolder, folderOf('git-lfs')])];
+      const toolchain = { roots: [...new Set([...bins, execPath])], bins };
+
+      /* The agent's view of the same store, right after the save: the large file is not listed, and an edit is. */
+      const agent = await drive(
+        'e14-terminal-agent',
+        [
+          shellCall('e14t-agent-status', { command: 'git status --porcelain' }),
+          shellCall('e14t-agent-edit', {
+            command: "printf 'X' | dd of=large.bin bs=1 count=1 conv=notrunc 2>/dev/null; git status --porcelain",
+          }),
+        ],
+        { cwd: store, toolchain },
+      );
+      expect(ok(agent.outputs[0]).stdout.text).toBe('');
+      expect(ok(agent.outputs[1]).stdout.text).toBe(' M large.bin\n');
+      writeFileSync(join(store, 'large.bin'), large);
+      hostGit(store, 'read-tree', 'HEAD');
+
+      const { shell } = await serviceOver({
+        checkouts: new Map(),
+        counting: countingProvider({ terminal: true }),
+        projectRoots: [store, pointer],
+        toolchain,
+      });
+      const terminalIn = async (projectRoot: string) => typedTerminal(shell, { projectRoot, answers, account });
+
+      const terminal = await terminalIn(store);
+      try {
+        const version = await terminal.run('git --version');
+        expect(version.exitCode, version.text).toBe(0);
+        measurements = { git: version.text.trim() };
+        /* Which git and git-lfs the Terminal resolves, named in any failure below. */
+        const where = await terminal.run('command -v git git-lfs');
+        const resolved = where.text.trim();
+        /* The toolchain's git, never one a login profile's path_helper put first (Apple's xcrun shim). */
+        expect(bins, `the Terminal's git (${resolved})`).toContain(dirname(resolved.split('\n')[0] ?? ''));
+        const expectations: ReadonlyArray<readonly [string, RegExp | string]> = [
+          ['git status --porcelain', ''],
+          ['git diff HEAD~1 HEAD -- part.scad', /-cube\(1\);\n\+cube\(2\);/u],
+          ['git log --format=%s', 'Grow the part\nFirst part\n'],
+          ['git show HEAD~1:part.scad', 'cube(1);\n'],
+          ['git blame --porcelain part.scad', /summary Grow the part/u],
+          ['git branch --list', '* main\n'],
+        ];
+        for (const [command, expected] of expectations) {
+          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+          const answer = await terminal.run(command);
+          expect(answer.exitCode, `${command} (${resolved}): ${answer.text}`).toBe(0);
+          if (typeof expected === 'string') {
+            expect(answer.text, `${command} (${resolved})`).toBe(expected);
+          } else {
+            expect(answer.text, `${command} (${resolved})`).toMatch(expected);
+          }
+        }
+
+        /* A save Tau makes after the session opened: the store moves outside, and the open session reads it. */
+        writeFileSync(join(store, 'part.scad'), 'cube(3);\n');
+        hostGit(store, 'commit', '--quiet', '-am', 'Save from Tau');
+        hostGit(store, 'read-tree', 'HEAD');
+        const latest = await terminal.run('git log -1 --format=%s');
+        expect(latest).toStrictEqual({ exitCode: 0, text: 'Save from Tau\n' });
+        const afterSave = await terminal.run('git status --porcelain');
+        expect(afterSave).toStrictEqual({ exitCode: 0, text: '' });
+        /* Git outside rewrites `config` mid-session: the open session reads it, and the writes below stay refused. */
+        hostGit(store, 'config', 'branch.main.remote', 'origin');
+        const rewritten = await terminal.run('git config branch.main.remote');
+        expect(rewritten).toStrictEqual({ exitCode: 0, text: 'origin\n' });
+
+        const gitDirectory = join(store, '.git');
+        /*
+         * The shell service's store policy, restated so the judge does not read the list it judges. Each name, under
+         * every spelling a case-folding volume reads as it (`HOOKS`, or `hook` + U+017F), is judged outside: its bytes
+         * or its tree, so a name the Terminal created, removed or wrote shows. `config` is judged by its link count
+         * too, so a second name for it shows.
+         */
+        const policy = [
+          'config',
+          'hooks',
+          'commondir',
+          'config.worktree',
+          'worktrees',
+          'modules',
+          'remotes',
+          'branches',
+        ];
+        const folded = (name: string): string => name.normalize('NFD').toUpperCase().toLowerCase();
+        const executableDigest = (): string =>
+          JSON.stringify({
+            links: statSync(join(gitDirectory, 'config')).nlink,
+            entries: readdirSync(gitDirectory)
+              .filter((name) => policy.includes(folded(name)))
+              .toSorted()
+              .map((name) => {
+                const path = join(gitDirectory, name);
+                return [name, statSync(path).isDirectory() ? treeDigestOf(path) : digestOf(path)];
+              }),
+          });
+        const executableBefore = executableDigest();
+        /*
+         * Every write that would make git outside the sandbox run a program or follow an address the Terminal chose;
+         * each one fails on both platforms. `remotes` and `branches` are git's legacy remote files, which `git push
+         * backup` and `git fetch mirror` outside would follow (blueprint Finding 6).
+         */
+        const protectedWrites = [
+          'git config core.hooksPath forged',
+          `printf '#!/bin/sh\n' > .git/hooks/post-commit`,
+          `printf '[core]\n\thooksPath = forged\n' >> .git/config`,
+          'cp .git/config .git/config.lock && mv -f .git/config.lock .git/config',
+          `printf '%s\n' "$PWD/forged" > .git/commondir`,
+          `printf '%s\n' "$PWD/forged" > .git/COMMONDIR`,
+          `printf '[core]\n\thooksPath = forged\n' > .git/config.worktree`,
+          `mkdir .git/remotes && printf 'URL: %s\nPush: refs/heads/main\n' "$PWD/forged" > .git/remotes/backup`,
+          `mkdir .git/branches && printf '%s\n' "$PWD/forged" > .git/branches/mirror`,
+          /* The store never moves aside, so no other store can be planted where git outside looks. */
+          'mv .git .git-moved',
+        ];
+        /*
+         * The macOS residuals (blueprint T14, T15, LP6). A case-folding APFS volume reads U+017F as `s`, U+212A as `k`
+         * and U+FB01 as `fi`, so each policy name written with them is the policy name to git outside: each spelling
+         * is created, or written into where the volume finds the name already there. A hard link would give `config`
+         * a second name that no rule names, in the store or in the work tree. Each fails in the Terminal.
+         */
+        const foldings: ReadonlyArray<readonly [string, string]> = [
+          ['fi', '\uFB01'],
+          ['s', '\u017F'],
+          ['k', '\u212A'],
+        ];
+        const foldedSpellings = (name: string): string[] => {
+          const spellings = new Set<string>();
+          for (const [ascii, character] of foldings) {
+            for (let index = name.indexOf(ascii); index !== -1; index = name.indexOf(ascii, index + 1)) {
+              spellings.add(`${name.slice(0, index)}${character}${name.slice(index + ascii.length)}`);
+            }
+          }
+          let every = name;
+          for (const [ascii, character] of foldings) {
+            every = every.replaceAll(ascii, character);
+          }
+          if (every !== name) {
+            spellings.add(every);
+          }
+          return [...spellings];
+        };
+        const directoryNames = new Set(['hooks', 'worktrees', 'modules', 'remotes', 'branches']);
+        const macResiduals = [
+          ...policy.flatMap((name) =>
+            foldedSpellings(name).map((spelling) =>
+              directoryNames.has(name)
+                ? `mkdir -p '.git/${spelling}' && printf '%s\n' "$PWD/forged" > '.git/${spelling}/planted'`
+                : `printf '[core]\n\thooksPath = forged\n' >> '.git/${spelling}'`,
+            ),
+          ),
+          `ln .git/config .git/config-link && printf '[core]\n\thooksPath = forged\n' >> .git/config-link`,
+          `ln .git/config config-link && printf '[core]\n\thooksPath = forged\n' >> config-link`,
+        ];
+        const before = treeDigestOf(gitDirectory);
+        if (writable) {
+          /* The person's own git workflow: each step writes the real store and succeeds. */
+          const workflow = [
+            String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+            'git commit --quiet -m "Grow it again"',
+            'git switch --quiet -c side',
+            String.raw`printf 'sphere(1);\n' > side.scad && git add side.scad && git commit --quiet -m "Side part"`,
+            'git switch --quiet main',
+            String.raw`printf 'cube(5);\n' > part.scad && git stash --quiet && git stash pop --quiet`,
+            'git commit --quiet -am "Grow it once more"',
+            'git merge --quiet --no-edit side',
+          ];
+          for (const command of workflow) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            const answer = await terminal.run(command);
+            expect(answer.exitCode, `${command}: ${answer.text}`).toBe(0);
+          }
+          /* Git outside the sandbox reads what the Terminal wrote, under the person's Tau no-reply address. */
+          expect(hostGit(store, 'log', '-4', '--format=%an <%ae>|%s')).toBe(
+            [
+              `${account.name} <${account.id}@users.noreply.tau.new>|Merge branch 'side'`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Grow it once more`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Side part`,
+              `${account.name} <${account.id}@users.noreply.tau.new>|Grow it again`,
+            ].join('\n') + '\n',
+          );
+          expect(hostGit(store, 'status', '--porcelain')).toBe('');
+          /* The store keeps its own LFS objects, so the large file reads as present, as it is. */
+          const lfsFiles = await terminal.run('git lfs ls-files');
+          expect(lfsFiles.exitCode, lfsFiles.text).toBe(0);
+          expect(lfsFiles.text).toMatch(/^[\da-f]+ \* large\.bin\n$/u);
+        } else {
+          const identity = '-c user.name=Forged -c user.email=forged@example.invalid';
+          const writes = [
+            String.raw`printf 'cube(4);\n' > part.scad && git add part.scad`,
+            `git ${identity} commit --allow-empty -m forged`,
+            'git switch -c forged',
+            `git ${identity} stash`,
+            'git fetch "$PWD" main:refs/heads/fetched',
+          ];
+          const refused: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+          for (const command of writes) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            refused.push({ command, ...(await terminal.run(command)) });
+          }
+          expect(refused.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+          /* Each one that says why names the filesystem refusal; `git stash` can fail without a word. */
+          expect(
+            refused.filter(
+              (entry) =>
+                entry.text.trim() !== '' &&
+                !/read-only file system|permission denied|not permitted|unable to create|could not (?:lock|write)|cannot (?:lock|open)/iu.test(
+                  entry.text,
+                ),
+            ),
+          ).toStrictEqual([]);
+          measurements = { ...measurements, writesRefused: refused.length };
+        }
+        const refusedExecutable: Array<Readonly<{ command: string; exitCode: number; text: string }>> = [];
+        for (const command of writable ? [...protectedWrites, ...macResiduals] : protectedWrites) {
+          // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+          refusedExecutable.push({ command, ...(await terminal.run(command)) });
+        }
+        expect(refusedExecutable.filter((entry) => entry.exitCode === 0)).toStrictEqual([]);
+        /*
+         * Outside bytes are the judge: config, hooks and every other policy name, under any spelling, are what the
+         * store had, `config` has no second name, and nothing the residual cases named was left in the work tree.
+         */
+        expect(existsSync(join(store, 'config-link'))).toBe(false);
+        expect(existsSync(join(store, '.git-moved'))).toBe(false);
+        expect(executableDigest()).toBe(executableBefore);
+        if (!writable) {
+          /* A read-only store is byte for byte what the save left. */
+          expect(treeDigestOf(gitDirectory)).toBe(before);
+        }
+
+        /* The large file edited in place, same size: listed as modified, and status still succeeds. */
+        const edited = await terminal.run(
+          "printf 'X' | dd of=large.bin bs=1 count=1 conv=notrunc 2>/dev/null; git status --porcelain",
+        );
+        expect(edited.exitCode, edited.text).toBe(0);
+        expect(edited.text).toContain(' M large.bin\n');
+        expect(executableDigest()).toBe(executableBefore);
+        if (!writable) {
+          expect(treeDigestOf(gitDirectory)).toBe(before);
+        }
+        measurements = {
+          ...measurements,
+          store: writable ? 'writable' : 'read-only',
+          executableWritesRefused: refusedExecutable.length,
+        };
+      } finally {
+        await terminal.close();
+      }
+
+      const pointed = await terminalIn(pointer);
+      try {
+        const status = await pointed.run('git status --porcelain');
+        expect(status.exitCode, status.text).toBe(128);
+        /* Older git calls the unreadable store no repository; newer git names the pointer that leads nowhere. */
+        expect(status.text).toMatch(/not a git repository|gitfile does not point to a valid repository/u);
+      } finally {
+        await pointed.close();
+      }
+    },
+  );
+
+  /*
+   * E14-guard-lifecycle (Linux Terminal git parity blueprint, LP3 and LP5): the store guard as the desktop runs it.
+   * Through the shell service, a Linux Terminal over a project mounts `tau-store-guard` over its `.git` inside the
+   * launch's own outer bubblewrap: a commit succeeds, a write to `config` is refused, and the shell can neither see nor
+   * signal the guard, whose mount never reaches the host's mount table. Closing the Terminal leaves no guard process and
+   * no file behind. A guard killed from outside leaves `.git` answering an error, never open; the outer bubblewrap
+   * killed from outside, as the host's own death does through `--die-with-parent`, ends the guard with it. A provider
+   * without the guard binary opens the same store read-only, and the agent's launch never carries guarded stores. Only
+   * the Linux rows run it, and a Linux run without `TAU_SHELL_CONFORMANCE_STORE_GUARD` fails it rather than skipping.
+   */
+  if (linux) {
+    qualification(
+      'E14-guard-lifecycle',
+      'the Linux Terminal starts the store guard with each session, writes through it, and leaves nothing behind when it ends, is killed or is absent',
+      async () => {
+        if (storeGuardPath === undefined) {
+          throw new Error(
+            'TAU_SHELL_CONFORMANCE_STORE_GUARD is unset: the Linux rows run against the built store guard (sandbox:build:store-guard).',
+          );
+        }
+        const guardPath = storeGuardPath;
+        const devFuse = existsSync('/dev/fuse') ? statSync('/dev/fuse') : undefined;
+        measurements = {
+          kernel: release(),
+          devFuse:
+            devFuse === undefined
+              ? 'absent'
+              : `${devFuse.mode.toString(8).slice(-4)} ${String(devFuse.uid)}:${String(devFuse.gid)}`,
+          guard: execFileSync(guardPath, ['--version'], { encoding: 'utf8' }).trim(),
+          bwrap: bwrapPath,
+        };
+        const account = { id: 'user_e14guard', name: 'Guard Person' };
+        const store = join(root, 'projects', 'guard-lifecycle');
+        const gitDirectory = join(store, '.git');
+        const answers = join(root, 'guard-lifecycle-answers');
+        for (const directory of [store, answers]) {
+          mkdirSync(directory, { recursive: true });
+        }
+        const hostGit = (...arguments_: string[]): string =>
+          execFileSync('git', arguments_, {
+            cwd: store,
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: {
+              PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+              HOME: root,
+              GIT_CONFIG_NOSYSTEM: '1',
+              GIT_AUTHOR_NAME: 'Fixture',
+              GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+              GIT_COMMITTER_NAME: 'Fixture',
+              GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+            },
+          });
+        hostGit('init', '--quiet', '--initial-branch=main');
+        writeFileSync(join(store, 'a.txt'), 'one\n');
+        hostGit('add', 'a.txt');
+        hostGit('commit', '--quiet', '-m', 'First');
+        /* A nested store the Terminal also writes through the guard, whose folders must not move aside (B2). */
+        const nested = join(store, 'vendor', 'lib');
+        mkdirSync(nested, { recursive: true });
+        execFileSync('git', ['init', '--quiet', '--initial-branch=main'], { cwd: nested, stdio: 'ignore' });
+        const nestedConfig = digestOf(join(nested, '.git', 'config'));
+        const policy = new Set([
+          'config',
+          'hooks',
+          'commondir',
+          'config.worktree',
+          'worktrees',
+          'modules',
+          'remotes',
+          'branches',
+        ]);
+        const policyNames = (): string[] =>
+          readdirSync(gitDirectory)
+            .filter((name) => policy.has(name.normalize('NFD').toUpperCase().toLowerCase()))
+            .toSorted();
+        const namesBefore = policyNames();
+        const execPath = realpathSync(hostGit('--exec-path').trim());
+        const gitBin = dirname(realpathSync(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()));
+        const toolchain = { roots: [...new Set([gitBin, execPath])], bins: [gitBin] };
+
+        /* Every process outside that belongs to this store's guard: the guard server, and the bubblewraps above it. */
+        const guardProcesses = (): Array<Readonly<{ pid: number; command: string }>> =>
+          processesWith(`--store ${gitDirectory} `).map((line) => {
+            const [pid = '', ...command] = line.trim().split(/\s+/u);
+            return { pid: Number(pid), command: command.join(' ') };
+          });
+        const servers = () => guardProcesses().filter(({ command }) => command.startsWith(`${guardPath} launch `));
+        const outers = () => guardProcesses().filter(({ command }) => command.startsWith(`${bwrapPath} `));
+        const leftovers = (): string[] => [
+          ...readdirSync(gitDirectory).filter((name) => name.startsWith('.tau-store-guard')),
+          ...readdirSync(tmpdir()).filter((name) => name.startsWith('tau-store-guard-check-')),
+        ];
+        const scratchBefore = leftovers();
+
+        const counting = countingProvider({ terminal: true });
+        const { shell } = await serviceOver({ checkouts: new Map(), counting, projectRoots: [store], toolchain });
+
+        /* Start and write: the guard is the store inside, the host never sees its mount, and the shell cannot see it. */
+        const terminal = await typedTerminal(shell, { projectRoot: store, answers, account });
+        try {
+          const mounted = await terminal.run(`grep -c ' fuse.tau-store-guard ' /proc/self/mountinfo`);
+          expect(mounted.exitCode, mounted.text).toBe(0);
+          expect(Number(mounted.text.trim())).toBeGreaterThanOrEqual(1);
+          const commit = await terminal.run(
+            String.raw`printf 'two\n' > a.txt && git commit --quiet -am 'Through the guard'`,
+          );
+          expect(commit.exitCode, commit.text).toBe(0);
+          const config = await terminal.run(String.raw`printf '[core]\n\tfsmonitor = forged\n' >> .git/config`);
+          expect(config.exitCode, config.text).not.toBe(0);
+          expect(config.text).toMatch(/operation not permitted/iu);
+          /* The store and every folder above a nested one stay where they are: nothing is moved aside and replanted. */
+          for (const command of [
+            'mv .git .git-moved',
+            'mv vendor vendor-moved',
+            'mv vendor/lib vendor/lib-moved',
+            String.raw`printf '[core]
+	fsmonitor = forged
+' >> vendor/lib/.git/config`,
+          ]) {
+            // oxlint-disable-next-line no-await-in-loop -- one typed command at a time.
+            const moved = await terminal.run(command);
+            expect(moved.exitCode, `${command}: ${moved.text}`).not.toBe(0);
+          }
+          /* Git outside rewrites config mid-session: the Terminal reads it, and still cannot write it. */
+          hostGit('config', 'branch.main.remote', 'origin');
+          const rewritten = await terminal.run('git config branch.main.remote');
+          expect(rewritten).toStrictEqual({ exitCode: 0, text: 'origin\n' });
+          const after = await terminal.run(String.raw`printf '[core]
+	fsmonitor = forged
+' >> .git/config`);
+          expect(after.exitCode, after.text).not.toBe(0);
+          const hidden = await terminal.run('pgrep -x tau-store-guard');
+          expect(hidden, 'the shell sees no guard process').toStrictEqual({ exitCode: 1, text: '' });
+          expect(servers(), 'one guard server per Terminal').toHaveLength(1);
+          expect(readFileSync('/proc/self/mountinfo', 'utf8')).not.toContain('tau-store-guard');
+        } finally {
+          await terminal.close();
+        }
+        expect(hostGit('log', '--format=%s')).toBe('Through the guard\nFirst\n');
+        expect(readFileSync(join(gitDirectory, 'config'), 'utf8')).not.toContain('fsmonitor');
+        const configRewritten = digestOf(join(gitDirectory, 'config'));
+        expect(policyNames(), 'the store gained or lost no policy name').toStrictEqual(namesBefore);
+        expect(digestOf(join(nested, '.git', 'config'))).toBe(nestedConfig);
+        expect(['.git-moved', 'vendor-moved'].filter((name) => existsSync(join(store, name)))).toStrictEqual([]);
+        expect(await eventually(() => guardProcesses().length === 0, 20_000), JSON.stringify(guardProcesses())).toBe(
+          true,
+        );
+        expect(leftovers()).toStrictEqual(scratchBefore);
+
+        /* The guard killed from outside: `.git` answers an error inside, the real store is untouched, and nothing stays. */
+        const killed = await typedTerminal(shell, { projectRoot: store, answers, account });
+        try {
+          const [server] = servers();
+          expect(server, 'a running guard server').toBeDefined();
+          process.kill(server!.pid, 'SIGKILL');
+          expect(await eventually(() => servers().length === 0, 10_000)).toBe(true);
+          const status = await killed.run('git status --porcelain');
+          expect(status.exitCode, status.text).not.toBe(0);
+          const append = await killed.run(String.raw`printf '[core]\n\tfsmonitor = forged\n' >> .git/config`);
+          expect(append.exitCode, append.text).not.toBe(0);
+        } finally {
+          await killed.close();
+        }
+        expect(digestOf(join(gitDirectory, 'config'))).toBe(configRewritten);
+        hostGit('fsck', '--no-progress');
+        expect(await eventually(() => guardProcesses().length === 0, 20_000), JSON.stringify(guardProcesses())).toBe(
+          true,
+        );
+
+        /* The outer bubblewrap killed from outside, as the host's death does: the guard ends with its namespace. */
+        const orphaned = await typedTerminal(shell, { projectRoot: store, answers, account });
+        try {
+          const before = await orphaned.run('true');
+          expect(before.exitCode).toBe(0);
+          const [outer] = outers();
+          expect(outer, 'the outer bubblewrap').toBeDefined();
+          process.kill(outer!.pid, 'SIGKILL');
+          expect(await eventually(() => guardProcesses().length === 0, 20_000), JSON.stringify(guardProcesses())).toBe(
+            true,
+          );
+        } finally {
+          await orphaned.close();
+        }
+        expect(digestOf(join(gitDirectory, 'config'))).toBe(configRewritten);
+        expect(leftovers()).toStrictEqual(scratchBefore);
+
+        /*
+         * The host killed while the guard serves the store (E11's shape): a separate host process opens a Terminal, the
+         * row SIGKILLs it, and no guard, bubblewrap or mount outlives it, through the launch's custody.
+         */
+        const crash = { appData: join(appData, 'e14-guard'), sessions: join(root, 'e14-guard-sessions') } as const;
+        mkdirSync(crash.sessions, { recursive: true });
+        mkdirSync(crash.appData, { recursive: true });
+        const host = spawn(
+          process.execPath,
+          [
+            '--import',
+            '@oxc-node/core/register',
+            fileURLToPath(new URL('shell-guard-crash.fixture.ts', import.meta.url)),
+          ],
+          {
+            cwd: fileURLToPath(new URL('../..', import.meta.url)),
+            env: {
+              ...process.env,
+              TAU_GUARD_CRASH_PROJECT: store,
+              TAU_GUARD_CRASH_APP_DATA: crash.appData,
+              TAU_GUARD_CRASH_SESSIONS: crash.sessions,
+              TAU_GUARD_CRASH_HOME: home,
+              TAU_GUARD_CRASH_BWRAP: bwrapPath,
+              TAU_GUARD_CRASH_GUARD: guardPath,
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
+        let hostOutput = '';
+        host.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+          hostOutput += chunk;
+        });
+        host.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+          hostOutput += chunk;
+        });
+        try {
+          expect(await eventually(() => servers().length === 1, 60_000), hostOutput).toBe(true);
+        } finally {
+          host.kill('SIGKILL');
+        }
+        await new Promise((resolve) => {
+          host.once('exit', resolve);
+        });
+        expect(
+          await eventually(() => guardProcesses().length === 0, 20_000),
+          `${JSON.stringify(guardProcesses())}\n${hostOutput}`,
+        ).toBe(true);
+        expect(readFileSync('/proc/self/mountinfo', 'utf8')).not.toContain('tau-store-guard');
+        expect(digestOf(join(gitDirectory, 'config'))).toBe(configRewritten);
+        expect(leftovers()).toStrictEqual(scratchBefore);
+        hostGit('fsck', '--no-progress');
+
+        /* The agent's launches never carry guarded stores: its argv is the runtime's own, with .git denied. */
+        const terminalLaunches = counting.launches.filter((launch) => launch.stdio.kind === 'terminal');
+        expect(terminalLaunches.length).toBeGreaterThanOrEqual(3);
+        expect(
+          terminalLaunches.every(
+            (launch) =>
+              launch.filesystem.guardedStores?.stores.includes(gitDirectory) === true &&
+              launch.filesystem.guardedStores.stores.includes(join(nested, '.git')),
+          ),
+        ).toBe(true);
+        const agent = await drive('e14-guard-agent', [shellCall('e14g-agent', { command: 'true' })], {
+          cwd: store,
+          counting,
+          toolchain,
+        });
+        ok(agent.outputs[0]);
+        const agentLaunches = counting.launches.filter((launch) => launch.stdio.kind === 'pipes');
+        expect(agentLaunches.length).toBeGreaterThanOrEqual(1);
+        expect(agentLaunches.filter((launch) => launch.filesystem.guardedStores !== undefined)).toStrictEqual([]);
+        expect(agentLaunches.every((launch) => launch.filesystem.denied.includes(gitDirectory))).toBe(true);
+
+        /* No guard binary: the same store opens read-only, and no guard ever starts. */
+        const absent = countingProvider({ terminal: true, storeGuardPath: join(root, 'no-store-guard') });
+        const fallback = await serviceOver({
+          checkouts: new Map(),
+          counting: absent,
+          projectRoots: [store],
+          toolchain,
+        });
+        const readOnly = await typedTerminal(fallback.shell, { projectRoot: store, answers, account });
+        const storeBefore = treeDigestOf(gitDirectory);
+        try {
+          const log = await readOnly.run('git log -1 --format=%s');
+          expect(log).toStrictEqual({ exitCode: 0, text: 'Through the guard\n' });
+          const write = await readOnly.run(String.raw`printf 'three\n' > a.txt && git commit --quiet -am 'Refused'`);
+          expect(write.exitCode, write.text).not.toBe(0);
+          expect(guardProcesses()).toStrictEqual([]);
+        } finally {
+          await readOnly.close();
+        }
+        expect(treeDigestOf(gitDirectory)).toBe(storeBefore);
+        expect(
+          absent.launches.filter((launch) => launch.filesystem.guardedStores !== undefined),
+          'a provider without the guard is never handed guarded stores',
+        ).toStrictEqual([]);
+        measurements = { ...measurements, terminals: terminalLaunches.length + 1 };
+      },
+    );
+  }
 
   /* ---------------------------------------------------------------- Stress and determinism (S rows) */
 

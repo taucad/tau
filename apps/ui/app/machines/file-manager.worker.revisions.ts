@@ -26,6 +26,7 @@ import {
   describeTurnSettlement,
 } from '@taucad/revisions/revision-effects';
 import type {
+  CheckoutCutsOutcome,
   EditorConflictInput,
   EditorConflictOutcome,
   RevisionConflictRead,
@@ -52,6 +53,7 @@ import type {
   ReadOutcome,
   PublishDraft,
   RevisionCaptureIdentity,
+  RevisionCommitAuthor,
   RevisionDiffEntry,
   RevisionDivergence,
   RevisionGraph,
@@ -78,9 +80,12 @@ import {
   readinessOf,
   registerProjectFailureMessage,
   registerProjectOverHttp,
+  registrationOrigin,
+  revisionCommitAuthorSchema,
   settleReadiness,
   tauRemoteUrl,
   watchRevisionStream,
+  withCommitAuthor,
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
@@ -105,6 +110,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '@taucad/ui-core/lib/geospec-candidate-git';
 
 /**
@@ -143,6 +149,8 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'undo' }>
   /** *Undo*: reverse this device's newest operation on the selected line (D15). */
   | Readonly<{ command: 'undoOperation' }>
+  /** The *Merged* toast's *Undo*: a new entry with `before`'s files, while the merge is still the head (I11). */
+  | Readonly<{ command: 'undoMerge'; revisionId: string; before: string }>
   | Readonly<{ command: 'switch'; branch: string }>
   | Readonly<{ command: 'followChat'; chatId: string }>
   | Readonly<{ command: 'pinTo'; checkoutId: string }>
@@ -261,7 +269,12 @@ export type WorkerRevisionCommand =
    * their per-workspace anonymous stand-in. Turning the model of an agent turn
    * into the actor is mechanical and stays here, beside the mint.
    */
-  | Readonly<{ command: 'setActor'; actor: RevisionUserActor }>
+  | Readonly<{
+      command: 'setActor';
+      actor: RevisionUserActor;
+      /** The linked forge's no-reply identity for `actor` (D33), for the git author line alone (I3). */
+      commitAuthor?: RevisionCommitAuthor;
+    }>
   /*
    * Which device this document is (W13, W17).
    *
@@ -336,7 +349,7 @@ export type RevisionToast =
    */
   | Readonly<{
       type: 'restored';
-      mode: 'restore' | 'undoRestore';
+      mode: 'restore' | 'undoRestore' | 'undoMerge';
       revisionId: string;
       revisionNumber: number | undefined;
     }>
@@ -355,6 +368,9 @@ export type RevisionToast =
       from?: string;
       /** A *Switch* saved the unsaved work on `from` before it moved. */
       saved?: true;
+      /** The entry a *Merge* landed and the head it moved from, which its Undo returns to (I11). */
+      revisionId?: string;
+      before?: string;
     }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
@@ -538,7 +554,7 @@ export type WorkerProjectRevisions = Readonly<{
    * Resolves rather than rejects at the bound: after it the durable queue is
    * the guarantee and the next open retries (D28).
    */
-  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<CheckoutCutsOutcome>;
   /** Record an editor's overlapping edit as a conflicted revision, and wait for it (D14). */
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Both sides of one conflicted revision as text (rule 8). */
@@ -672,6 +688,12 @@ export type WorkerProjectRevisionsOptions = Readonly<{
    * publishing is refused rather than guessed.
    */
   apiBaseUrl?: () => string | undefined;
+  /**
+   * The page's resolved telemetry consent, read per sync attempt (runtime observability PR-7, AR-W6-02). The worker
+   * cannot read the device preference, the cookie banner or the account, so the page says it on the port; only
+   * `granted` reports, and absent (never said) reports nothing.
+   */
+  telemetryConsent?: () => ReportingConsent | undefined;
   /** Whether this project may hold its `revision` long poll now (RV-W5b F12); every project may without it. */
   attention?: RemoteAttention;
 }>;
@@ -812,6 +834,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* The page's latest answer, read per mint so signing in or turning anonymity
    * on changes the next revision and rewrites none of the recorded ones. */
   let person: RevisionUserActor | undefined;
+  /* That person's linked forge identity (D33), for the git author line alone: no record carries it (I3). */
+  let commitAuthor: RevisionCommitAuthor | undefined;
   /* Who every capture in this document is by (B1, I1), read per mint. There is
    * no fallback id: the page names the person (`setActor`) before it opens the
    * project, so a capture with no person is refused rather than recorded under
@@ -907,7 +931,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     checkLargeObjects,
     pullsChats,
   } = createProjectRevisionsActor({
-    port: options.port,
+    port: withCommitAuthor(options.port, (who) => (who.id === person?.id ? commitAuthor : undefined)),
     projectId,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.mintFloor === undefined ? {} : { mintFloor: options.mintFloor }),
@@ -991,12 +1015,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       /* B4c: a project its linked import tied to a GitHub repository says so, so
        * the push check admits the commits Tau did not record (B4). */
-      const remotes = await options.port.listRemotes();
-      const linked = remotes.some((remote) => remote.provider === 'github');
       await registerProjectOverHttp(
         apiBaseUrl,
         { kind: 'cookie' },
-        { id, name, ...(linked ? { origin: 'github' } : {}) },
+        {
+          id,
+          name,
+          ...registrationOrigin(await options.port.listRemotes()),
+        },
       );
     },
     publishPublication: async (input) => {
@@ -1263,10 +1289,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   actor.start();
   published = statusOf(actor.getSnapshot());
-  /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own. */
+  /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own.
+   * PR-7 (AR-W6-02): only under the page's resolved consent, so the switch stops it; `unknown` sends nothing. */
   actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
     const apiBaseUrl = options.apiBaseUrl?.();
-    if (apiBaseUrl === undefined || isDesktopTarget()) {
+    if (apiBaseUrl === undefined || isDesktopTarget() || options.telemetryConsent?.() !== 'granted') {
       return;
     }
     const { type: _type, durationMilliseconds, ...detail } = attempt;
@@ -1408,6 +1435,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       ...(toast.checkoutRoot === undefined ? {} : { checkoutRoot: toast.checkoutRoot }),
       ...(toast.from === undefined ? {} : { from: toast.from }),
       ...(toast.saved === undefined ? {} : { saved: toast.saved }),
+      ...(toast.revisionId === undefined || toast.before === undefined
+        ? {}
+        : { revisionId: toast.revisionId, before: toast.before }),
     });
   });
   branchChild?.on('toast.error', (toast) => {
@@ -1434,13 +1464,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    *
    * @returns When the cut has settled.
    */
-  const awaitSave = async (): Promise<void> => {
+  const awaitSave = async (): Promise<CheckoutCutsOutcome> => {
     const trigger = 'save';
     const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
     }
-    const cut = Promise.withResolvers<void>();
+    const cut = Promise.withResolvers<CheckoutCutsOutcome>();
     /* The answer names this request, so an idle mint or another tab's save never settles it (RM-R1); a save
      * absorbed by a later `hidden` or `close` is still answered under its own id (RM-R2, RV-W2b #4). */
     const requestId = `${trigger}:${randomUuid()}`;
@@ -1448,7 +1478,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const subscriptions = [
       actor.on('revisionMinted', (event) => {
         if (matches(event)) {
-          cut.resolve();
+          cut.resolve('recorded');
         }
       }),
       /* Terminal: the checkout re-reads and rests dirty, so nothing else will
@@ -1460,7 +1490,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }),
       actor.on('nothingToSave', (event) => {
         if (matches(event)) {
-          cut.resolve();
+          cut.resolve(event.heldBy === undefined && event.waitFor === undefined ? 'nothingToRecord' : 'refused');
         }
       }),
       actor.on('cutFailed', (event) => {
@@ -1471,7 +1501,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     ];
     try {
       actor.send({ type: 'cut', requestId, trigger, checkoutId, leaseIds: [] });
-      await cut.promise;
+      return await cut.promise;
     } finally {
       for (const subscription of subscriptions) {
         subscription.unsubscribe();
@@ -1556,19 +1586,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
   };
 
-  const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
+  const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<CheckoutCutsOutcome> => {
+    let outcome: CheckoutCutsOutcome = 'refused';
     try {
       /* `hidden` is the browser's close preparation (rule 9), so it records
        * what a close would: every checkout, live and linked (the close ruling). */
-      await (trigger === 'save' ? awaitSave() : awaitCheckoutCuts(actor, trigger));
+      outcome = await (trigger === 'save' ? awaitSave() : awaitCheckoutCuts(actor, trigger));
     } catch {
-      /* Reported already; whatever did not record is still on disk for the next cut. */
+      /* Reported already; whatever did not record is still on disk for the next cut, and the answer says so. */
     }
     try {
       await awaitSyncSettled(actor);
     } catch {
       /* The queue carries whatever did not reach the remote (D28). */
     }
+    return outcome;
   };
 
   /* The checkout a comparison reads, and its head's modes: of `paths` only when it compares those (S11). */
@@ -1656,6 +1688,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          * verbs, so the page reaches it where it lives. */
         case 'restore': {
           actor.getSnapshot().children.restore?.send({ type: 'restore', revisionId: command.revisionId });
+          return;
+        }
+        case 'undoMerge': {
+          actor
+            .getSnapshot()
+            .children.restore?.send({ type: 'undoMerge', revisionId: command.revisionId, before: command.before });
           return;
         }
         /* Routed by the root to its `remote` child, so the page still speaks
@@ -1830,6 +1868,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
          */
         case 'setActor': {
           person = command.actor;
+          /* Only a forge's no-reply address parses; anything else authors under Tau's (I3). */
+          commitAuthor = revisionCommitAuthorSchema.safeParse(command.commitAuthor).data;
           break;
         }
         case 'setDeviceId': {
@@ -2081,7 +2121,10 @@ export type WorkerRevisionRequest =
   | (GitRemoteCredential & Readonly<{ command: 'pushGithub'; id?: number }>)
   /* Whether this project is the page's focused one (RV-W5b F12): a port frame,
    * because focus is the page's fact about its projects, not the tree's. */
-  | Readonly<{ command: 'focus'; focused: boolean; id?: number }>;
+  | Readonly<{ command: 'focus'; focused: boolean; id?: number }>
+  /* The page's resolved telemetry consent (runtime observability PR-7, AR-W6-02): a port frame, said on every new
+   * port and on every change, because only the page can resolve it. The sync attempt reporter reads it. */
+  | Readonly<{ command: 'telemetryConsent'; consent: ReportingConsent; id?: number }>;
 
 /**
  * What one correlated command answered.
@@ -2122,7 +2165,7 @@ export type WorkerRevisionResult =
    * head, or none) and the toast channel (a failure). What the frame *is* is
    * permission for `pagehide` to run.
    */
-  | Readonly<{ kind: 'saved' }>
+  | Readonly<{ kind: 'saved'; outcome: CheckoutCutsOutcome }>
   /**
    * The root has taken a `sessionChanged` (audit R6). Every frame posted after
    * this one was projected after the change; frames before it may be from
@@ -2275,6 +2318,8 @@ type ProjectEntry = {
   readonly setApiBaseUrl: (apiBaseUrl: string) => void;
   /** Whether this project is the page's focused one, which alone holds the long poll (F12). */
   readonly setFocused: (focused: boolean) => void;
+  /** Record the page's resolved telemetry consent, which the sync attempt reporter reads (PR-7). */
+  readonly setTelemetryConsent: (consent: ReportingConsent) => void;
   readonly revisions: Promise<WorkerProjectRevisions>;
   readonly unsubscribe: () => void;
 };
@@ -2362,7 +2407,7 @@ const answerOf = (
      * for the close cut before `pagehide` offers a pack. An uncorrelated frame
      * takes the same path and its answer is simply dropped. */
     case 'saveRevision': {
-      return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+      return tree.saveRevision(request.trigger).then((outcome) => ({ kind: 'saved', outcome }) as const);
     }
     case 'recordEditorConflict': {
       const { path, base, mine } = request;
@@ -2418,6 +2463,8 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     /* Held apart from the credential: the origin outlives any one remote, and
      * Publish names it without minting anything (review R4). */
     let apiBaseUrl: string | undefined;
+    /* The page's last word; never said means nothing is reported (PR-7). */
+    let telemetryConsent: ReportingConsent | undefined;
     const attention = createRemoteAttention();
     const revisions = (async (): Promise<WorkerProjectRevisions> =>
       createWorkerProjectRevisions({
@@ -2438,6 +2485,7 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         /* The same fact the credential frame carries, read per use: a page that
          * signs in after the project opened publishes without reopening it. */
         apiBaseUrl: () => apiBaseUrl ?? credential?.apiBaseUrl,
+        telemetryConsent: () => telemetryConsent,
         ...((): Readonly<{ recordHistoryPush?: <Result>(run: () => Promise<Result>) => Promise<Result> }> => {
           const record = options.recordHistoryPush?.(projectId);
           return record === undefined ? {} : { recordHistoryPush: record };
@@ -2512,6 +2560,9 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         apiBaseUrl = url;
       },
       setFocused: attention.setFocused,
+      setTelemetryConsent: (consent) => {
+        telemetryConsent = consent;
+      },
       revisions,
       unsubscribe: () => {
         unsubscribe();
@@ -2680,6 +2731,13 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           /* Focus is the page's fact about its projects (F12); a reader has none to give. */
           if (!reader) {
             entry.setFocused(data.focused);
+          }
+          return;
+        }
+        if (data.command === 'telemetryConsent') {
+          /* The page's consent, like focus: a reader has none to give (PR-7). */
+          if (!reader) {
+            entry.setTelemetryConsent(data.consent);
           }
           return;
         }

@@ -424,7 +424,7 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
   const initialView = givenSnapshot?.view ?? createCameraView(options.initialView!);
   /*
    * The mirror: the rig's render frame and clip policy, which the native cameras present with the latest camera
-   * snapshot's view. A rig setter changes the mirror and presents at once.
+   * snapshot's view. A rig setter changes the mirror, sends it to the followed actor, and presents at once.
    *
    * The reconciliation rule, the only one, per kind (frame, policy), keeps at most one rig value in flight to the
    * followed actor (the rig's own, or a given one while connected). The rig sends that actor the mirror (at start or
@@ -564,8 +564,11 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       }
       renderFrame = validated;
       setFrame = !held;
-      present();
+      // Sent before presenting: an onUpdate observer that answers the presentation with an actor event (the controls
+      // adapter's echo pose) would otherwise deliver a snapshot without the frame while nothing is in flight, and the
+      // rig would take that stale frame back as the actor's own change.
       flush();
+      present();
     },
     readState() {
       if (given && !unfollow) {
@@ -586,8 +589,9 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       }
       clipPlanes = validated;
       setClip = !held;
-      present();
+      // Sent before presenting, as the render frame is.
       flush();
+      present();
     },
     connect() {
       if (given === undefined || unfollow !== undefined || disposed) {

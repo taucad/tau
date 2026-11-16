@@ -101,7 +101,8 @@ const adjudications: readonly Adjudication[] = [
     reason: 'the menu drawer label is on top, over the drawer’s own opaque fill, at 4.5:1 or more',
     measure: 'opaque-on-top',
     fill: 'surface',
-    only: '[data-slot="dropdown-menu-drawer-items"] > [data-slot="dropdown-menu-label"]',
+    // The drawer's items sit in its root view (`display: contents`) since menus open sub-views in place (#1823).
+    only: '[data-slot="dropdown-menu-drawer-items"] > [data-slot="dropdown-menu-root-view"] > [data-slot="dropdown-menu-label"]',
   },
   {
     rule: 'color-contrast',

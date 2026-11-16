@@ -36,7 +36,6 @@ describe('editor device defaults', () => {
     expect(defaultPanelState.mobileActiveTab).toBe('viewer');
     expect(defaultOperationTimeout).toBe(180_000);
     expect(defaultGraphicsSettings.graphicsBackend).toBe('webgpu');
-    expect(defaultGraphicsSettings.enablePostProcessing).toBe(true);
   });
 
   it('omits empty transient component display while retaining a hidden component', () => {

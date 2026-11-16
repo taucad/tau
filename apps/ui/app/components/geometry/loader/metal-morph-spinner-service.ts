@@ -1,5 +1,5 @@
-import { probeWebGpuSupport, resolveGraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-backend';
-import { readGraphicsBackendQueryOverride } from '@taucad/ui-core/utils/graphics-backend-override';
+import { isGraphicsContextUnavailableError } from '@taucad/viewer/graphics/graphics-backend';
+import { startShowcaseRenderer } from '#components/geometry/loader/showcase-backend.js';
 import { metalMorphSpinnerSpeed } from '#components/geometry/loader/metal-morph-sequence.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
 import type {
@@ -136,6 +136,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
   let isLooping = false;
   let sourceSize = minimumSourceSize;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let hasLoggedStartFailure = false;
 
   const activeCount = (): number => {
     let count = 0;
@@ -273,20 +274,15 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
     if (creation !== undefined) {
       return creation;
     }
-    creation = (async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = sourceSize;
-      canvas.height = sourceSize;
-      const override = readGraphicsBackendQueryOverride();
-      const isWebGpuAvailable = await probeWebGpuSupport();
-      const backend =
-        override === undefined
-          ? resolveGraphicsBackendPreference('webgpu', isWebGpuAvailable)
-          : resolveGraphicsBackendPreference(override, isWebGpuAvailable);
+    // A WebGPU canvas that cannot present starts once more on a fresh canvas, on WebGL (`startShowcaseRenderer`).
+    creation = startShowcaseRenderer(async (backend) => {
       if (registrations.size === 0 && !isWarming) {
         // Everything unsubscribed while the adapter was being probed; do not open a context for nobody.
         return;
       }
+      const canvas = document.createElement('canvas');
+      canvas.width = sourceSize;
+      canvas.height = sourceSize;
       source = canvas;
       const created = createMetalMorphLoader({
         canvas,
@@ -302,18 +298,50 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         created.tune(tuning);
       }
       applySourceSize();
-      await created.ready;
+      try {
+        await created.ready;
+      } catch (error) {
+        // A failed renderer is released, never kept: a canvas loss is replaced on a fresh canvas by the start that
+        // follows, and any other failure leaves the spinners on their stand-ins until the next subscriber asks again.
+        created.dispose();
+        if (controller === created) {
+          controller = undefined;
+          source = undefined;
+        }
+        throw error;
+      }
       if (controller !== created) {
         // Disposed while warming up.
         created.dispose();
         return;
       }
       refreshPlayback();
-    })();
+    });
     try {
       await creation;
     } finally {
       creation = undefined;
+    }
+  };
+
+  /**
+   * {@link ensureController} for a caller that cannot act on its failure. The spinners keep their stand-ins, which is
+   * the whole fallback a decorative spinner needs, so the failure is logged once, never left as an unhandled rejection.
+   * A browser without a WebGL 2 context is expected (hardware acceleration off), so it is a warning.
+   */
+  const startQuietly = async (isWarming = false): Promise<void> => {
+    try {
+      await ensureController(isWarming);
+    } catch (error) {
+      if (hasLoggedStartFailure) {
+        return;
+      }
+      hasLoggedStartFailure = true;
+      if (isGraphicsContextUnavailableError(error)) {
+        console.warn('Metal morph spinner unavailable: no WebGL 2 context', { error });
+        return;
+      }
+      console.error('Metal morph spinner failed to start', { error });
     }
   };
 
@@ -333,7 +361,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         applySourceSize();
         refreshPlayback();
       } else {
-        void ensureController();
+        void startQuietly();
       }
       return () => {
         registrations.delete(registration);
@@ -352,7 +380,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       theme = next;
       controller?.setTheme(next);
       clearIdleTimer();
-      await ensureController(true);
+      await startQuietly(true);
       if (registrations.size === 0) {
         // Nothing has subscribed, so nothing will release this renderer; hold it on the same idle delay.
         idleTimer = setTimeout(disposeController, idleDisposeDelay);

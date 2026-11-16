@@ -112,6 +112,7 @@ function TauCloudProjectsSetting({ workspaces }: { readonly workspaces: readonly
         info='Each project downloads the first time you open it.'
         control={
           <Select
+            size='md'
             value={selectedKey}
             onValueChange={(key) => {
               materializeOnSignIn.set(options.find((option) => option.key === key)?.location);

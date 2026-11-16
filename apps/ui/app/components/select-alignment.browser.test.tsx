@@ -7,15 +7,20 @@ import { page, userEvent } from 'vitest/browser';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 // Only host/network authorities are fixtures; shipping controls and layout render unchanged.
-vi.mock('#environment.config.js', () => ({
+vi.mock('#environment.config.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the existing environment module's exported names.
   ENV: { TAU_API_URL: 'http://localhost:4000', TAU_FRONTEND_URL: 'http://localhost:3000' },
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({}) }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({}) }));
-vi.mock('#utils/workspace-telemetry.utils.js', () => ({ useWorkspaceTelemetry: () => ({}) }));
+vi.mock('#utils/workspace-telemetry.utils.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useWorkspaceTelemetry: () => ({}),
+}));
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({}) }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   listWorkspaces: async () => [
     { workspaceId: 'first', name: 'Workshop' },
     { workspaceId: 'last', name: 'A workspace name that is much longer than the available trigger' },

@@ -18,14 +18,14 @@ import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '@taucad/ui-core/machines/import-staging';
-import { useOptionalFileManager, waitForFileManagerServices } from '#hooks/use-file-manager.js';
+import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { PageNotice } from '#components/layout/page-notice.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { useProjects } from '#hooks/use-projects.js';
-import { withNamedLock } from '#hooks/use-cloud-projects.js';
+import { withNamedLock } from '#lib/named-lock.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
@@ -126,9 +126,9 @@ export function meta({ params, location }: Route.MetaArgs): MetaDescriptor[] {
  * React Router SPA mode (`ui:build:desktop`) bans server `loader` exports.
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
-export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
+export function clientLoader({ url, params }: Route.ClientLoaderArgs) {
   /* An address that is not a GitHub repository opens the form holding it, never the crash page. */
-  return resolveImportRoute(readSplatPath(params), new URL(request.url).search);
+  return resolveImportRoute(readSplatPath(params), url.search);
 }
 
 type ImportMode = 'github' | 'disk';
@@ -256,15 +256,20 @@ export default function ImportRoute(): React.JSX.Element {
   const [arrivalRepository] = useState({ owner, repo });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
-  const fileManagerRef = useOptionalFileManager()?.fileManagerRef;
+  const fileManager = useOptionalFileManager();
+  /* Both are stable per file manager; the whole context value changes with its services and settings, which would
+   * re-run every preview read that depends on the session. */
+  const whenServicesReady = fileManager?.whenServicesReady;
+  const fileManagerRef = fileManager?.fileManagerRef;
   /* One import channel to the file-manager worker, opened on first use (W7). */
   const importSessionRef = useRef<ImportSession | undefined>(undefined);
   const importSession = useCallback(async (): Promise<ImportSession> => {
     if (importSessionRef.current === undefined) {
-      if (fileManagerRef === undefined) {
+      if (whenServicesReady === undefined || fileManagerRef === undefined) {
         throw new Error('The file manager is not available to import.');
       }
-      await waitForFileManagerServices(fileManagerRef);
+      /* The scope's wait, on the runtime's clock (row S18). */
+      await whenServicesReady();
       const { worker } = fileManagerRef.getSnapshot().context;
       if (worker === undefined) {
         throw new Error('The file manager is not ready to import.');
@@ -272,7 +277,7 @@ export default function ImportRoute(): React.JSX.Element {
       importSessionRef.current = openImportSession(worker);
     }
     return importSessionRef.current;
-  }, [fileManagerRef]);
+  }, [whenServicesReady, fileManagerRef]);
   /* A linked import's run: leaving the route stops its stage in the worker, the fetch with it. */
   const linkedImportAbortRef = useRef<AbortController | undefined>(undefined);
   /*

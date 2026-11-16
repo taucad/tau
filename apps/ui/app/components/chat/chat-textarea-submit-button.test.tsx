@@ -7,6 +7,7 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 
 const renderButton = (properties: {
   readonly status?: string;
+  readonly canStop?: boolean;
   readonly canResume?: boolean;
   readonly refusal?: string;
   readonly describedBy?: string;
@@ -18,6 +19,7 @@ const renderButton = (properties: {
       <p id='reason'>Claude Test can&apos;t read images.</p>
       <ChatTextareaSubmitButton
         status={properties.status ?? 'ready'}
+        canStop={properties.canStop}
         canResume={properties.canResume}
         isSubmitting={false}
         refusal={properties.refusal}
@@ -46,6 +48,17 @@ describe('ChatTextareaSubmitButton', () => {
     expect(resume).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it('should offer Stop for a run paused on an approval, whose SDK status reads ready', async () => {
+    const onCancel = vi.fn();
+    const onSubmit = vi.fn();
+    renderButton({ status: 'ready', canStop: true, onCancel, onSubmit });
+
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('should be named Send and send when nothing refuses it (F1)', async () => {

@@ -28,7 +28,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { lookup } from 'node:dns/promises';
 import { createServer as createHttpServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 import { createServer } from 'node:net';
@@ -200,6 +199,18 @@ const controlledEndpoint = async (
       executablePath: process.execPath,
       arguments: ['--import', preload.href, fileURLToPath(new URL('srt-supervisor.ts', import.meta.url))],
     },
+  };
+};
+
+/** The real supervisor with a rebinding name the test owns (C05): each listed name resolves to loopback. */
+const rebindingSupervisor = (
+  names: readonly string[],
+): Readonly<{ executablePath: string; arguments: readonly string[] }> => {
+  const preload = new URL('rebinding-name.fixture.ts', import.meta.url);
+  preload.search = new URLSearchParams({ names: names.join(',') }).toString();
+  return {
+    executablePath: process.execPath,
+    arguments: ['--import', preload.href, fileURLToPath(new URL('srt-supervisor.ts', import.meta.url))],
   };
 };
 
@@ -528,14 +539,18 @@ describe.runIf(enabled)('shell conformance', () => {
         expect(control.status).toBe(204);
         expect(listener.connections()).toBe(1);
 
-        const rebinding = await lookup('localtest.me', { all: true });
-
-        expect(rebinding.map(({ address }) => address)).toContain('127.0.0.1');
+        /* The rebinding name is the test's own (rebinding-name.fixture.ts): the supervisor resolves it to loopback. */
+        const rebindingName = 'rebinding.tau-qualification.test';
+        const rebinding = rebindingSupervisor([rebindingName]);
         const address = interfaceAddress();
         const port = String(listener.port);
-        const probes = [
+        const probes: Array<{ command: string; domains: string[]; through?: ShellProvider }> = [
           { command: `curl -fsS --max-time 5 http://127.0.0.1:${port}/`, domains: [] },
-          { command: `curl -fsS --max-time 5 http://localtest.me:${port}/`, domains: ['localtest.me'] },
+          {
+            command: `curl -fsS --max-time 5 http://${rebindingName}:${port}/`,
+            domains: [rebindingName],
+            through: createSandboxShellProvider({ bwrapPath, home, supervisor: rebinding }),
+          },
           { command: `curl -fsS --max-time 5 --noproxy '*' http://127.0.0.1:${port}/`, domains: [] },
           { command: `exec 3<>/dev/tcp/127.0.0.1/${port}`, domains: [] },
           ...(address === undefined
@@ -546,7 +561,7 @@ describe.runIf(enabled)('shell conformance', () => {
               ]),
         ];
         const outcomes = await Promise.all(
-          probes.map(async ({ command, domains }) => run(command, { network: { domains } })),
+          probes.map(async ({ command, domains, through }) => run(command, { network: { domains } }, through)),
         );
         await delay(500);
 

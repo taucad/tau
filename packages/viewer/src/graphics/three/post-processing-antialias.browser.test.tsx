@@ -231,7 +231,6 @@ it.each(
               perspectiveZoom: 1,
             },
           },
-          enablePostProcessing: true,
         },
       },
     ).start();
@@ -397,7 +396,6 @@ it.each(
             perspectiveZoom: 1,
           },
         },
-        enablePostProcessing: true,
       },
     },
   ).start();
@@ -614,7 +612,6 @@ it.each((['webgl', 'webgpu'] as const).flatMap((backend) => ['front', 'behind'].
               perspectiveZoom: 1,
             },
           },
-          enablePostProcessing: true,
         },
       },
     ).start();
@@ -810,7 +807,6 @@ it.each(
                 perspectiveZoom: 1,
               },
             },
-            enablePostProcessing: true,
           },
         },
       ).start();
@@ -1114,7 +1110,6 @@ it.each(
               perspectiveZoom: 1,
             },
           },
-          enablePostProcessing: true,
         },
       },
     ).start();
@@ -1446,7 +1441,6 @@ it.each([false, true].flatMap((forceNodeWebGl2) => [256, 2560].map((width) => ({
               perspectiveZoom: 1,
             },
           },
-          enablePostProcessing: true,
         },
       },
     ).start();
@@ -1705,7 +1699,6 @@ it.each(
               perspectiveZoom: 1,
             },
           },
-          enablePostProcessing: true,
         },
       },
     ).start();
@@ -1952,7 +1945,7 @@ it.each(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true, camera: { cameraFovAngle: 0 } } },
+      { input: { camera: { cameraFovAngle: 0 } } },
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
@@ -2103,7 +2096,6 @@ it.each(['webgpu', 'node-webgl2'] as const)(
                 perspectiveZoom: 1,
               },
             },
-            enablePostProcessing: true,
           },
         },
       ).start(),
@@ -2211,7 +2203,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true, camera: { cameraFovAngle: 0 } } },
+      { input: { camera: { cameraFovAngle: 0 } } },
     ).start();
     let state: RootState | undefined;
     let axes: Group | undefined;
@@ -2348,7 +2340,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       graphicsMachine.provide({
         actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
       }),
-      { input: { enablePostProcessing: true, camera: { cameraFovAngle: 0 } } },
+      { input: { camera: { cameraFovAngle: 0 } } },
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
@@ -2583,14 +2575,12 @@ it.each([
     const actor = createActor(machine, {
       input: {
         camera: { cameraFovAngle: 35, cameraView },
-        enablePostProcessing: true,
         sectionView: { active: true, cuts: [...cuts] },
       },
     }).start();
     const sibling = createActor(machine, {
       input: {
         camera: { cameraFovAngle: 35 },
-        enablePostProcessing: true,
         sectionView: { active: true, cuts: cuts.slice(0, 1) },
       },
     }).start();

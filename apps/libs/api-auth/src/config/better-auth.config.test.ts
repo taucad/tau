@@ -5,7 +5,8 @@ import { APIError } from 'better-auth/api';
 import { getCookies } from 'better-auth/cookies';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { github as githubProvider } from 'better-auth/social-providers';
-import { getBetterAuthConfig, redactEmailAddresses } from '#config/better-auth.config.js';
+import { getBetterAuthConfig, redactEmailAddresses, sessionCacheVersion } from '#config/better-auth.config.js';
+import { environmentSchemaBase } from '@taucad/api-core';
 import type { Environment } from '@taucad/api-core';
 import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '@taucad/api-database';
@@ -25,7 +26,7 @@ const createConfig = (
     readonly domains?: readonly string[];
     readonly users?: Record<string, string>;
   } = {},
-  rateLimitStore?: AuthRateLimitStore,
+  { rateLimitStore, sessionCacheMaxAge = 0 }: { rateLimitStore?: AuthRateLimitStore; sessionCacheMaxAge?: number } = {},
 ) => {
   const writes: RecordedWrite[] = [];
   const order: string[] = [];
@@ -65,6 +66,7 @@ const createConfig = (
       const values = new Map<string, unknown>([
         ['TAU_AUTH_ALLOWED_EMAIL_DOMAINS', allowlist.domains ?? []],
         ['AUTH_SECRET', 'test-secret'],
+        ['AUTH_SESSION_CACHE_MAX_AGE_SECONDS', sessionCacheMaxAge],
         ['AUTH_URL', authUrl],
         ['TAU_FRONTEND_URL', 'http://localhost:3000'],
         [
@@ -826,7 +828,7 @@ describe('getBetterAuthConfig sign-up readiness', () => {
       apikey: [],
       subscription: [],
     };
-    const { config, emailService } = createConfig('http://localhost:4000', {}, rateLimitStore);
+    const { config, emailService } = createConfig('http://localhost:4000', {}, { rateLimitStore });
     return {
       config,
       store,
@@ -1007,5 +1009,39 @@ describe('getBetterAuthConfig sign-up readiness', () => {
     expect(redactEmailAddresses('Sign-up attempt for existing email: someone+x@tau.new')).toBe(
       'Sign-up attempt for existing email: recipient@tau.new',
     );
+  });
+});
+
+describe('getBetterAuthConfig session cookie cache', () => {
+  it('should disable the cookie cache at 0', () => {
+    const { config } = createConfig();
+
+    expect(config.session?.cookieCache).toEqual({ enabled: false });
+  });
+
+  it('should enable an encrypted 60 s cookie cache at 60 and keep the session lifetimes', () => {
+    const { config } = createConfig(undefined, {}, { sessionCacheMaxAge: 60 });
+
+    expect(config.session).toEqual({
+      expiresIn: 60 * 60 * 24 * 7,
+      updateAge: 60 * 60 * 24,
+      cookieCache: { enabled: true, maxAge: 60, strategy: 'jwe', version: sessionCacheVersion },
+    });
+  });
+
+  it.each([
+    ['301', false],
+    ['-1', false],
+    ['1.5', false],
+    ['300', true],
+    ['0', true],
+  ])('should answer AUTH_SESSION_CACHE_MAX_AGE_SECONDS=%s with accepted=%s at startup', (value, accepted) => {
+    const field = environmentSchemaBase.shape.AUTH_SESSION_CACHE_MAX_AGE_SECONDS;
+
+    expect(field.safeParse(value).success).toBe(accepted);
+  });
+
+  it('should default AUTH_SESSION_CACHE_MAX_AGE_SECONDS to 0', () => {
+    expect(environmentSchemaBase.shape.AUTH_SESSION_CACHE_MAX_AGE_SECONDS.parse(undefined)).toBe(0);
   });
 });

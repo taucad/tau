@@ -143,6 +143,12 @@ const prefixFromModel: Record<Exclude<ModelNames, ''>, IdPrefix> = {
 /**
  * Mapping between BetterAuth log levels and NestJS log levels.
  */
+/**
+ * The session snapshot's shape version. Bumping it and deploying invalidates every snapshot without
+ * signing anyone out; bump it when the cached shape changes.
+ */
+export const sessionCacheVersion = '1';
+
 const loggerFromLogLevel = {
   error: 'error',
   warn: 'warn',
@@ -181,6 +187,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
   const allowedEmailDomains = configService.get('TAU_AUTH_ALLOWED_EMAIL_DOMAINS', { infer: true });
   const frontendURL = configService.get('TAU_FRONTEND_URL', { infer: true });
   const authSecret = configService.get('AUTH_SECRET', { infer: true });
+  const sessionCacheMaxAge = configService.get('AUTH_SESSION_CACHE_MAX_AGE_SECONDS', { infer: true });
 
   const sendVerification = async (user: { readonly email: string }, generatedUrl: string, token: string) =>
     emailService.sendVerification({
@@ -246,6 +253,16 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
   return {
     // Spread static configuration
     ...staticAuthConfig,
+
+    session: {
+      ...staticAuthConfig.session, // Keeps expiresIn and updateAge
+      // The cookie cache (auth session cookie blueprint D1): an encrypted snapshot answers cookie GETs for
+      // maxAge seconds. The request and cookie boundary in AuthModule and the guard keeps it to those.
+      cookieCache:
+        sessionCacheMaxAge > 0
+          ? { enabled: true, maxAge: sessionCacheMaxAge, strategy: 'jwe', version: sessionCacheVersion }
+          : { enabled: false },
+    },
 
     user: {
       deleteUser: {

@@ -40,6 +40,25 @@ describe('shellEnvironment', () => {
     expect(shellEnvironment({ ...options, terminal: false })).not.toHaveProperty('GIT_DIR');
   });
 
+  it('lets a Terminal read the real store without an optional lock or the system config, and points it at no view', () => {
+    const environment = shellEnvironment({ ...options, terminal: true });
+    expect(environment).toMatchObject({ GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    expect(environment).not.toHaveProperty('GIT_DIR');
+    expect(environment).not.toHaveProperty('GIT_WORK_TREE');
+    const pipe = shellEnvironment({ ...options, terminal: false });
+    expect(pipe).not.toHaveProperty('GIT_OPTIONAL_LOCKS');
+    expect(pipe).not.toHaveProperty('GIT_CONFIG_NOSYSTEM');
+  });
+
+  it('lets a Terminal that writes the store take optional locks again, still without the system config', () => {
+    const environment = shellEnvironment({ ...options, terminal: true, terminalGit: 'write' });
+    expect(environment).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1' });
+    expect(environment).not.toHaveProperty('GIT_OPTIONAL_LOCKS');
+    expect(shellEnvironment({ ...options, terminal: true, terminalGit: 'read' })).toMatchObject({
+      GIT_OPTIONAL_LOCKS: '0',
+    });
+  });
+
   it('builds only environments the sandbox provider admits', () => {
     const git = { directory: '/private/root/git', objects: '/project/.git/objects', workTree: '/project' };
     for (const platform of ['darwin', 'linux'] as const) {

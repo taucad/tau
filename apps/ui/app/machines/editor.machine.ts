@@ -3,6 +3,7 @@ import type { ActorRefFrom, EnqueueObject, SystemRegistry } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 import type { PartialDeep } from 'type-fest';
@@ -17,6 +18,10 @@ import type {
 import type { GraphicsBackendPreference } from '@taucad/viewer/graphics/graphics-settings';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { mergePanelState } from '@taucad/ui-core/utils/panel-state.utils';
+import { dockAdapterId, dockAdapterIdsOf, workbenchAdapterLogic } from '#workbench-records/workbench-adapter.js';
+import type { WorkbenchDockReady, WorkbenchDockReleased } from '#workbench-records/workbench-adapter.js';
+import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerDockReady, ViewerDockReleased } from '#workbench-records/viewer-adapter.js';
 
 const maxOpenFiles = 200;
 
@@ -127,6 +132,11 @@ export type EditorStateContext = {
   materialiseModel?: (path: string) => Promise<void>;
   /** In-flight deferred open (only set while materialising). */
   pendingOpenFile?: PendingOpenFile;
+  /**
+   * The first defect the root `onError` caught (MC-R12, charter D23): a child that failed with no handler of its own,
+   * an effect that threw, or a send to no child. Later defects are usually its consequences, so they do not replace it.
+   */
+  fault: string | undefined;
 };
 
 type PendingOpenFile = Readonly<{
@@ -147,8 +157,10 @@ type EditorStateMachineInput = {
 
 /**
  * Editor state Machine Events
+ *
+ * @public
  */
-type EditorStateEvent =
+export type EditorStateEvent =
   | { type: 'load' }
   // File operations (consolidated from fileExplorerMachine)
   | { type: 'openFile'; path: string; source: FileOpenSource; lineNumber?: number; column?: number; readOnly?: boolean }
@@ -184,7 +196,103 @@ type EditorStateEvent =
   | { type: 'focusedChatDeferred'; focusedChatId?: undefined }
   // User-initiated retry from `<FocusedChatErrorPanel>` after
   // `ensureFocusedChatActor` rejected.
-  | { type: 'retryEnsureFocusedChat' };
+  | { type: 'retryEnsureFocusedChat' }
+  /* A layout-less page's workbench Dockview hands over its adapter (A8c): share and preview have no workbench layout
+   * to run it, so the editor, whose open files it places, runs it as a child until the same Dockview releases it. */
+  | WorkbenchDockReady
+  | WorkbenchDockReleased
+  /* The viewer Dockview's adapter on a layout-less page, the same way (A8d). */
+  | ViewerDockReady
+  | ViewerDockReleased;
+
+/**
+ * The editor machine's public alphabet: every {@link EditorStateEvent} type, in the union's order. The totality test
+ * samples each one and fails when this list and the union differ.
+ *
+ * @public
+ */
+export const editorEventTypes = [
+  'load',
+  'openFile',
+  'registerMaterialiseModel',
+  'closeFile',
+  'setActiveFile',
+  'revealFileInTree',
+  'revealModelComponentInExplorer',
+  'revealModelComponentInKinematics',
+  'renameFile',
+  'closeAll',
+  'setRequestedChatId',
+  'focusKnownChat',
+  'setFocusedChatId',
+  'setPanelState',
+  'setPreviousLayout',
+  'setFileSidebarWidth',
+  'setGraphicsBackendPreference',
+  'flushNow',
+  'editorStateRetrieved',
+  'focusedChatEnsured',
+  'focusedChatDeferred',
+  'retryEnsureFocusedChat',
+  'dockReady',
+  'dockReleased',
+] as const satisfies ReadonlyArray<EditorStateEvent['type']>;
+
+/** The events only `ready` answers: tab, chat, panel and flush verbs, and the focused-chat retry. */
+const editorReadyOnlyEvents = [
+  'openFile',
+  'registerMaterialiseModel',
+  'closeFile',
+  'setActiveFile',
+  'revealFileInTree',
+  'revealModelComponentInExplorer',
+  'revealModelComponentInKinematics',
+  'renameFile',
+  'closeAll',
+  'setFocusedChatId',
+  'setPanelState',
+  'setPreviousLayout',
+  'setFileSidebarWidth',
+  'setGraphicsBackendPreference',
+  'flushNow',
+  'retryEnsureFocusedChat',
+] as const;
+
+/**
+ * The (state, event) pairs this machine leaves unanswered today (MC-R17): the totality baseline. A pair names a state
+ * where some event of its type goes unanswered; a mixed pair's type is also answered there with other context (a
+ * pair cannot say which), and the totality test checks that answer with its own row. `setRequestedChatId` and
+ * `focusKnownChat` are answered at the root.
+ *
+ * - Before `ready` (`idle` and `loading`), every verb only `ready` answers: a tab, panel or chat change sent while the
+ *   editor loads is dropped.
+ * - `load` once loading has begun: the editor loads once.
+ * - `editorStateRetrieved` outside `loading.hydrating`: the load's report lands only while its invoke runs.
+ * - `focusedChatEnsured` and `focusedChatDeferred` outside the two `ensuringFocusedChat` states: the ensure's report
+ *   lands only while its invoke runs.
+ * - `flushNow` in `ready.storing.idle` unless the last write failed, and in `ready.storing.writing`: there is nothing
+ *   pending to flush, or the write is already running.
+ *
+ * @public
+ */
+export const editorIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
+  ...['idle', 'loading'].flatMap((state) => editorReadyOnlyEvents.map((type) => [state, type] as const)),
+  ['loading', 'load'],
+  ['ready', 'load'],
+  ['idle', 'editorStateRetrieved'],
+  ['loading.ensuringFocusedChat', 'editorStateRetrieved'],
+  ['ready', 'editorStateRetrieved'],
+  ...[
+    'idle',
+    'loading.hydrating',
+    'ready.operation.idle',
+    'ready.operation.materializingOpenFile',
+    'ready.operation.focusedChatDeferred',
+    'ready.operation.focusedChatUnresolved',
+  ].flatMap((state) => [[state, 'focusedChatEnsured'] as const, [state, 'focusedChatDeferred'] as const]),
+  ['ready.storing.idle', 'flushNow'],
+  ['ready.storing.writing', 'flushNow'],
+];
 
 /**
  * Editor state Machine Emitted Events
@@ -253,6 +361,8 @@ const editorActors = {
   saveEditorStateActor,
   materialiseOpenFileActor,
   ensureFocusedChatActor,
+  workbenchAdapter: workbenchAdapterLogic,
+  viewerAdapter: viewerAdapterLogic,
 };
 
 type EditorEnqueue = EnqueueObject<EditorStateEvent, EditorStateEmitted, SystemRegistry, typeof editorActors>;
@@ -381,6 +491,19 @@ export const editorMachine = setup({
   },
 }).createMachine({
   id: 'editor',
+  // A defect is recorded and the editor stays in the state it was in, which still answers every public event (MC-R12,
+  // charter B2). The first is kept and reported once, through the app runtime's one fault hook (D23): the root cause
+  // matters more than the defects it sets off.
+  onError: ({ context, event }, enq) => {
+    if (context.fault === undefined) {
+      enq(reportAppRuntimeFault, event.error);
+    }
+    return {
+      context: {
+        fault: context.fault ?? String((event.error as { message?: unknown } | undefined)?.message ?? event.error),
+      },
+    };
+  },
   context: ({ input }) => ({
     projectId: input.projectId,
     openFiles: [],
@@ -397,9 +520,34 @@ export const editorMachine = setup({
     focusedChatError: undefined,
     materialiseModel: undefined,
     pendingOpenFile: undefined,
+    fault: undefined,
   }),
   initial: 'idle',
   on: {
+    // A layout-less page's workbench adapter (A8c, I1, D4): the `DockviewApi` reaches only the adapter's closure. A new
+    // mount replaces the adapter it had; a release names its mount, so a late one stops nothing newer.
+    dockReady: ({ children, event, actors }, enq) => {
+      for (const id of dockAdapterIdsOf(children, event.adapter)) {
+        const previous = children[id];
+        if (previous !== undefined) {
+          enq.stop(previous);
+        }
+      }
+      const id = dockAdapterId(event.adapter, event.dockId);
+      if (event.adapter === 'viewer') {
+        enq.spawn(actors.viewerAdapter, { id, input: { api: event.api, ports: event.ports } });
+      } else {
+        enq.spawn(actors.workbenchAdapter, { id, input: { api: event.api, ports: event.ports } });
+      }
+      return {};
+    },
+    dockReleased: ({ children, event }, enq) => {
+      const adapter = children[dockAdapterId(event.adapter, event.dockId)];
+      if (adapter !== undefined) {
+        enq.stop(adapter);
+      }
+      return {};
+    },
     setRequestedChatId: { context: ({ event }) => ({ requestedChatId: event.chatId }) },
     /* Fallback for the pre-`ready` window: record the request so the cold-start
      * ensure resolves to it. The `ready.operation` handler overrides this one

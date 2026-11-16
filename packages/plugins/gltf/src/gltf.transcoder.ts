@@ -28,10 +28,10 @@ export const gltfTranscodeOptionsSchema = z
   .strict();
 
 const edges = [
-  { from: 'glb', to: 'glb', fidelity: 'mesh', optionsSchema: gltfTranscodeOptionsSchema },
-  { from: 'glb', to: 'gltf', fidelity: 'mesh', optionsSchema: gltfTranscodeOptionsSchema },
-  { from: 'gltf', to: 'glb', fidelity: 'mesh', optionsSchema: gltfTranscodeOptionsSchema },
-  { from: 'gltf', to: 'gltf', fidelity: 'mesh', optionsSchema: gltfTranscodeOptionsSchema },
+  { from: 'glb', to: 'glb', optionsSchema: gltfTranscodeOptionsSchema },
+  { from: 'glb', to: 'gltf', optionsSchema: gltfTranscodeOptionsSchema },
+  { from: 'gltf', to: 'glb', optionsSchema: gltfTranscodeOptionsSchema },
+  { from: 'gltf', to: 'gltf', optionsSchema: gltfTranscodeOptionsSchema },
 ] as const;
 
 const hasTopologyMetadata = (document: Document): boolean => {

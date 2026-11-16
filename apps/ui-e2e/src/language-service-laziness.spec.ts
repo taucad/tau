@@ -40,12 +40,22 @@ const loadedLanguages = (paths: readonly string[]): Language[] =>
 /** Drain the paths transferred so far. */
 const readPaths = async (settle?: boolean): Promise<string[]> => [...(await target.readObservedRequests(settle))];
 
-/** Wait until the open project's workbench shows its launcher, so the project itself has loaded. */
+/**
+ * Wait until the open project's workbench shows its Parameters tab, so the project itself has loaded. A new project's
+ * workbench opens on Parameters beside a New tab, with no file open (#1386, 53b887367b).
+ */
 const expectProjectOpen = async (): Promise<void> => {
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
-  await target.expectVisible(selectors.getByText('Files', { exact: true }), 60_000);
+  await target.expectVisible(selectors.getByRole('tab', { name: 'Parameters', exact: true }), 60_000);
   /* Give a project-open path that started a language service the time to reach the network. */
   await target.delay(5000);
+};
+
+/** Open the Files pane with the command search, as a person does without the launcher in view. */
+const openFiles = async (): Promise<void> => {
+  await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open files');
+  await target.click(selectors.getByText('Open files', { exact: true }));
 };
 
 /** Open a source file from the file tree and return what it transferred once its language service started. */
@@ -91,7 +101,7 @@ describe('Language service laziness', () => {
     expect(loadedLanguages(projectPaths), 'OpenSCAD project without a code pane').toEqual([]);
     expect(projectPaths.filter((candidate) => languageRuntime.test(candidate))).toEqual([]);
 
-    await target.click(selectors.getByText('Files', { exact: true }));
+    await openFiles();
     expect(loadedLanguages(await openSource('main.scad', 'openscad')), 'main.scad').toEqual(['openscad']);
     expect(loadedLanguages(await openSource('main.geospec.ts', 'typescript')), 'main.geospec.ts').toEqual([
       'typescript',
@@ -104,7 +114,7 @@ describe('Language service laziness', () => {
     await expectProjectOpen();
     expect(loadedLanguages(await readPaths(false)), 'KCL project without a code pane').toEqual([]);
 
-    await target.click(selectors.getByText('Files', { exact: true }));
+    await openFiles();
     expect(loadedLanguages(await openSource('main.kcl', 'kcl')), 'main.kcl').toEqual(['kcl']);
 
     /* PicoGK, the C# kernel, runs only in Tau Desktop, so the web build gets its C# file as a new file beside main.kcl. */

@@ -10,12 +10,19 @@
  */
 
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, copyFile, mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** One platform's `git-lfs` release archive. */
 export type GitLfsArchive = Readonly<{ name: string; sha256: string; url: string; format: 'zip' | 'tar.gz' }>;
 
+/*
+ * Bumping git: review the Terminal's store policy (`terminalGitStorePolicy` in
+ * `libs/shell-service/src/shell/shell-grant.ts`) against the Threat Set of
+ * `docs/research/linux-terminal-git-parity-blueprint.md` for every name in a
+ * git directory the new release starts to read as config, hooks or a remote.
+ */
 export const gitVersion = '2.55.0';
 /** From kernel.org's signed `sha256sums.asc`. */
 export const gitSourceSha256 = '457fdb04dc8728e007d4688695e6912e6f680727920f2a40bf11eacc17505357';
@@ -210,6 +217,32 @@ export const gitPayloadLayout = (
     gitLfsLicense: join(root, 'git-lfs-LICENSE.md'),
     source: join(resourceRoot, 'SOURCES', gitSourceName),
   };
+};
+
+/**
+ * Whether one target's `git` and `git-lfs` are present as executable files, which is all a package can check
+ * without running a binary built for another machine.
+ *
+ * @param resourceRoot - `apps/desktop/resources/git`, or a packaged app's `Resources/git`.
+ * @param target - `<platform>-<arch>`.
+ * @returns For each binary, whether it is a regular file this user may execute.
+ */
+export const gitPayloadExecutables = async (
+  resourceRoot: string,
+  target: string,
+): Promise<Readonly<{ git: boolean; gitLfs: boolean }>> => {
+  const layout = gitPayloadLayout(resourceRoot, target);
+  const executable = async (path: string): Promise<boolean> => {
+    try {
+      await access(path, constants.X_OK);
+      const entry = await stat(path);
+      return entry.isFile();
+    } catch {
+      return false;
+    }
+  };
+  const [git, gitLfs] = await Promise.all([executable(layout.git), executable(layout.gitLfs)]);
+  return { git, gitLfs };
 };
 
 /** The NOTICE that travels with the binaries. */

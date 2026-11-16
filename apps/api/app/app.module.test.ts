@@ -51,11 +51,13 @@ describe('AppModule', () => {
       ),
     ).not.toContain('CodeCompletionModule');
     expect(() => moduleRef.get(BillingPaymentsService)).toThrow();
-    // Auth's extension ports: self-host binds no deletion gate and no extra auth route, and still retires
-    // cloud hosts before the storage tombstone and erases agent evidence after it.
+    // Auth's extension ports: self-host binds no deletion gate and only the Resend webhook route, and still
+    // retires cloud hosts and erases the address's email delivery rows before the storage tombstone and erases
+    // agent evidence after it.
     expect(() => moduleRef.get<unknown>(accountDeletionGateToken)).toThrow();
-    expect(() => moduleRef.get<unknown>(authRouteExtensionsToken)).toThrow();
+    expect(moduleRef.get<AuthRouteExtension[]>(authRouteExtensionsToken)).toHaveLength(1);
     expect(moduleRef.get<AccountDeletionHook[]>(accountDeletionHooksToken).map(({ stage }) => stage)).toEqual([
+      'before-storage-tombstone',
       'before-storage-tombstone',
       'after-storage-tombstone',
     ]);
@@ -85,9 +87,10 @@ describe('AppModule', () => {
       .useValue(database)
       .compile();
     const payments = moduleRef.get(BillingPaymentsService);
-    // Tau Cloud gates account deletion on billing's closure and registers the Stripe webhook ahead of the auth wildcard.
+    // Tau Cloud gates account deletion on billing's closure and registers the Resend and Stripe webhooks ahead of
+    // the auth wildcard.
     expect(moduleRef.get(accountDeletionGateToken)).toBe(moduleRef.get(BillingAccountClosureService));
-    expect(moduleRef.get<AuthRouteExtension[]>(authRouteExtensionsToken)).toHaveLength(1);
+    expect(moduleRef.get<AuthRouteExtension[]>(authRouteExtensionsToken)).toHaveLength(2);
     await expect(
       payments.prepareTopup('user', {
         requestId: 'request',

@@ -20,7 +20,8 @@ import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { DynamicToolUIPart } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
-import { createFileEditDiffStats } from '@taucad/chat/rpc';
+// The subpath, not the `@taucad/chat/rpc` barrel: the barrel carries every RPC handler into the transcript.
+import { createFileEditDiffStats } from '@taucad/chat/rpc/client-text-mutation';
 import {
   ChatToolCard,
   ChatToolCardContent,

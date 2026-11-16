@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react';
 import { createActor } from 'xstate';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -9,6 +10,10 @@ import type { ChatSession, ChatSessionStore } from '#services/chat-session-store
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import { publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
 import { lifecycleRow, logRow, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 const queueMutex = new KeyedMutex<string>();
 vi.mock('@taucad/chat-ui/db/chat-message-queue-store', async (importOriginal) => {
@@ -70,9 +75,18 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: () => ({ activeChatId: 'mounted', draftActorRef: dependencies.activeSession?.draftActorRef }),
 }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
-const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+const { useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
+/* The pre-A2 mirror over the mocked project and file managers; production's store is the runtime's. */
+const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
+  await import('#hooks/chat-session-store.fixture.js');
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
 const { useChatSelector } = await import('#hooks/use-chat.js');
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 it('should deliver a reply through the retained active session without a sidebar observation', async () => {
   let store: ChatSessionStore | undefined;
@@ -89,7 +103,7 @@ it('should deliver a reply through the retained active session without a sidebar
     );
   }
   const mounted = render(
-    <ChatSessionStoreProvider>
+    <ChatSessionStoreProvider projectSessions={liveSessions}>
       <Transcript />
     </ChatSessionStoreProvider>,
   );
@@ -97,8 +111,7 @@ it('should deliver a reply through the retained active session without a sidebar
   const session = current.get('mounted')!;
   const owner = createActor(projectSessionMachine, { input: { projectId: 'project' } });
   owner.start();
-  current.setFocusedProject('project');
-  current.setProjectSession('project', owner);
+  liveSessions.set('project', owner);
   let rows: unknown[] = [];
   let deliver: (() => void) | undefined;
   const detach = vi.fn();
@@ -218,7 +231,7 @@ it('should publish the first held live reasoning chunk through the actual SDK be
     return acquired === undefined ? <div /> : <IndexedTranscript />;
   }
   const mounted = render(
-    <ChatSessionStoreProvider>
+    <ChatSessionStoreProvider projectSessions={liveSessions}>
       <Transcript />
     </ChatSessionStoreProvider>,
   );
@@ -226,8 +239,7 @@ it('should publish the first held live reasoning chunk through the actual SDK be
   const session = current.get('mounted')!;
   const owner = createActor(projectSessionMachine, { input: { projectId: 'project' } });
   owner.start();
-  current.setFocusedProject('project');
-  current.setProjectSession('project', owner);
+  liveSessions.set('project', owner);
   let rows: unknown[] = [];
   let deliver: (() => void) | undefined;
   const detach = vi.fn();

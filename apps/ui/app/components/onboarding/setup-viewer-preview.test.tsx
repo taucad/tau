@@ -23,14 +23,7 @@ vi.mock('#components/onboarding/setup-live-preview.js', () => ({
 const { SetupViewerPreview } = await import('#components/onboarding/setup-viewer-preview.js');
 
 const renderPreview = () =>
-  render(
-    <SetupViewerPreview
-      mapping='tau'
-      cameraInput={{ preset: 'right-orbit', inputDevice: 'mouse' }}
-      gizmoStyle='axes'
-      isGizmoShown
-    />,
-  );
+  render(<SetupViewerPreview mapping='tau' cameraInput={{ preset: 'right-orbit' }} gizmoStyle='axes' isGizmoShown />);
 
 describe('setup step 3 live preview', () => {
   beforeEach(() => {
@@ -45,7 +38,7 @@ describe('setup step 3 live preview', () => {
     expect(screen.getByTestId('setup-preview-placeholder')).toHaveAttribute('role', 'status');
     expect(await screen.findByTestId('setup-live-preview')).toBeInTheDocument();
     expect(shown.props.at(-1)).toMatchObject({
-      cameraInput: { preset: 'right-orbit', inputDevice: 'mouse' },
+      cameraInput: { preset: 'right-orbit' },
       gizmoStyle: 'axes',
       isGizmoShown: true,
     });

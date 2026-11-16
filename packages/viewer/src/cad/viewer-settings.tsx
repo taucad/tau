@@ -6,8 +6,11 @@ import {
   Axis3D,
   Box,
   Grid3X3,
+  Info,
+  Lock,
+  LockOpen,
   Rotate3D,
-  RotateCcw,
+  Ruler,
   Settings,
   Spline,
   Sparkles,
@@ -19,8 +22,9 @@ import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSwitchItem,
   DropdownMenuToggleGroupItem,
@@ -30,13 +34,14 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { AxisLabel } from '#cad/section-tool-row.jsx';
 import { InfoTooltip } from '@taucad/ui/components/info-tooltip';
-import {
-  DropdownMenuSelectItem,
-  DropdownMenuSliderItem,
-  preventMenuSliderEscapeDismissal,
-} from '@taucad/ui/components/menu-slider-item';
+import { DropdownMenuSliderItem, preventMenuSliderEscapeDismissal } from '@taucad/ui/components/menu-slider-item';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import { clamp } from '@taucad/ui/utils/number';
+import { formatNumberEngineeringNotation } from '#utils/number.js';
+import { gridUnitOptions, maxGridDigits } from '#cad/grid-unit-options.js';
+import { keepMenuOpen, SettingsSubViewRow } from '#cad/settings-sub-view-row.jsx';
+import { measureViewerSettingsPlacement } from '#cad/viewer-settings-placement.js';
+import type { ViewerSettingsPlacement } from '#cad/viewer-settings-placement.js';
 import { useViewerViewFields, viewerViewFieldPaths } from '#cad/viewer-view-fields.jsx';
 import type { ViewerViewFieldPath, ViewerViewFields } from '#cad/viewer-view-fields.jsx';
 
@@ -148,6 +153,9 @@ const sourceLine = (mark: LeafMark, otherwise?: string): React.ReactNode => {
   return otherwise;
 };
 
+/** A line of text in the phone drawer starts at the drawer rows' 16px inset, where their icons and labels start. */
+const inSettingsDrawerInset = 'in-[[data-slot=dropdown-menu-drawer-items]]:px-4';
+
 /** The widest field of view in degrees; 0° is orthographic. */
 const maxVerticalFieldOfView = 90;
 /** Degrees per arrow-key step while Shift is held. */
@@ -160,9 +168,12 @@ type ViewerSettingsProps = {
    * Optional className for styling
    */
   readonly className?: ClassValue;
-  /** The side of the trigger the menu opens on. A centred bar opens it upward. */
+  /**
+   * The side of the trigger the menu opens on. Inside a viewer bar the menu opens to the right of the bar when the
+   * viewer pane has room for it; this side and `align` are where it opens otherwise. A centred bar opens it upward.
+   */
   readonly side?: DropdownMenuContentProps['side'];
-  /** How the menu aligns against the trigger. */
+  /** How the menu aligns against the trigger when it does not open beside the bar. */
   readonly align?: DropdownMenuContentProps['align'];
   /** The current view's kernel settings, closing the Rendering section; the viewer supplies them per pane. */
   readonly kernelSettings?: React.ReactNode;
@@ -285,13 +296,144 @@ function FieldOfViewRow(): React.JSX.Element {
       {mark.isFromDefaults || mark.reset ? (
         <div
           data-slot='viewer-field-of-view-source'
-          className='flex items-center gap-2 px-3 pb-1.5 text-xs text-muted-foreground'
+          className={cn('flex items-center gap-2 px-3 pb-1.5 text-xs text-muted-foreground', inSettingsDrawerInset)}
         >
           <LeafDot mark={mark} />
           {mark.isFromDefaults ? fromMyDefaults : setInThisView}
         </div>
       ) : undefined}
     </>
+  );
+}
+
+/**
+ * Grid & units: the grid size and its unit, opening the Unit list, the Lock grid size switch and the zoom hint. The
+ * sub-view stays open on a choice, as it holds more than one control.
+ *
+ * @returns The row and its sub-view; nothing until the grid has a size.
+ */
+function GridUnitsRow(): React.JSX.Element | undefined {
+  const graphicsRef = useGraphics();
+  const viewFields = useViewerViewFields();
+  const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
+  const isGridSizeLocked = useGraphicsSelector((state) => state.context.isGridSizeLocked);
+  const metersPerDisplayUnit = useGraphicsSelector((state) => state.context.displayUnits.length.metersPerUnit);
+  const unit = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
+  const mark = leafMark(viewFields, 'grid.unit');
+
+  const handleUnitChange = useCallback(
+    (selectedUnit: string) => {
+      if (viewFields) {
+        void viewFields.set('grid.unit', selectedUnit);
+        return;
+      }
+      graphicsRef.send({ type: 'setGridUnit', payload: { unit: selectedUnit } });
+    },
+    [graphicsRef, viewFields],
+  );
+  const handleLockToggle = useCallback(
+    (checked: boolean) => {
+      graphicsRef.send({ type: 'setGridSizeLocked', payload: checked });
+    },
+    [graphicsRef],
+  );
+
+  if (!gridSizes.smallSize) {
+    return undefined;
+  }
+  const gridLabel = `${formatNumberEngineeringNotation(gridSizes.smallSize / metersPerDisplayUnit, maxGridDigits)} ${unit}`;
+
+  return (
+    <SettingsSubViewRow
+      icon={<Ruler />}
+      label='Grid & units'
+      value={
+        <>
+          <LeafDot mark={mark} />
+          <span className='truncate'>{gridLabel}</span>
+          {isGridSizeLocked ? <Lock aria-hidden='true' className='size-3' /> : undefined}
+        </>
+      }
+      valueText={`${gridLabel}${isGridSizeLocked ? ', locked' : ''}`}
+    >
+      <DropdownMenuLabel>Unit</DropdownMenuLabel>
+      <DropdownMenuRadioGroup aria-label='Unit' value={unit} onValueChange={handleUnitChange}>
+        {gridUnitOptions.map((option) => (
+          <DropdownMenuRadioItem
+            key={option.value}
+            className='flex items-center justify-between gap-2'
+            value={option.value}
+            onSelect={keepMenuOpen}
+          >
+            <span>{option.label}</span>
+            <span className='flex w-8 items-center justify-center rounded-xs bg-neutral/20 px-1 py-0.5 font-mono text-xs'>
+              {option.value}
+            </span>
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel>Grid</DropdownMenuLabel>
+      <DropdownMenuSwitchItem isChecked={isGridSizeLocked} onIsCheckedChange={handleLockToggle}>
+        {isGridSizeLocked ? <Lock /> : <LockOpen />}
+        Lock grid size ({gridLabel})
+      </DropdownMenuSwitchItem>
+      <span
+        className={cn(
+          'inline-flex items-center gap-1 p-2 text-xs font-medium text-muted-foreground/80',
+          inSettingsDrawerInset,
+        )}
+      >
+        <Info className='size-3 stroke-2' /> Adjust grid size by changing zoom level
+      </span>
+    </SettingsSubViewRow>
+  );
+}
+
+/**
+ * Timeout: the CAD operation timeout, opening its options. Choosing one steps back to the menu.
+ *
+ * @param props - The embedder's timeout.
+ * @returns The row and its sub-view.
+ */
+function TimeoutRow({ operationTimeout }: { readonly operationTimeout: ViewerOperationTimeout }): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const { value, defaultValue, onChange } = operationTimeout;
+  const current =
+    timeoutOptions.find((option) => option.value === value) ??
+    timeoutOptions.find((option) => option.value === defaultValue) ??
+    timeoutOptions[0]!;
+  const handleChange = useCallback(
+    (next: string) => {
+      onChange(Number(next));
+      setIsOpen(false);
+    },
+    [onChange],
+  );
+  return (
+    <SettingsSubViewRow
+      icon={<Timer />}
+      label='Timeout'
+      value={current.label}
+      infoTooltip={
+        <InfoTooltip>
+          Maximum time to wait for CAD rendering before timing out.
+          <br /> Set to &quot;Disabled&quot; to turn off timeout.
+        </InfoTooltip>
+      }
+      isOpen={isOpen}
+      onOpenChange={setIsOpen}
+    >
+      <DropdownMenuLabel>Timeout</DropdownMenuLabel>
+      {/* The sub-view is the group named Timeout; its radio rows need no second name. */}
+      <DropdownMenuRadioGroup value={String(current.value)} onValueChange={handleChange}>
+        {timeoutOptions.map((option) => (
+          <DropdownMenuRadioItem key={option.value} value={String(option.value)} onSelect={keepMenuOpen}>
+            {option.label}
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+    </SettingsSubViewRow>
   );
 }
 
@@ -311,6 +453,18 @@ export function ViewerSettings({
   const graphicsRef = useGraphics();
 
   const [isOpen, setIsOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [placement, setPlacement] = useState<ViewerSettingsPlacement>({ side, align });
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (next) {
+        // Decided as the menu opens, before it is placed, and kept while it is open.
+        setPlacement(measureViewerSettingsPlacement(triggerRef.current ?? undefined, { side, align }));
+      }
+      setIsOpen(next);
+    },
+    [align, side],
+  );
   // A press outside leaves focus with the pointer; a keyboard close returns it to the trigger.
   const isClosingFromPointerRef = useRef(false);
 
@@ -333,8 +487,6 @@ export function ViewerSettings({
       >,
     [viewFields],
   );
-  const setInView = viewerViewFieldPaths.filter((leaf) => marks[leaf].reset !== undefined).length;
-  const resetView = viewFields?.sourceOf === undefined ? undefined : viewFields.resetView;
   /* With the host's view commands each control sets its leaf in the view; without them it changes the live owner. */
   const handlers = useMemo(() => {
     const toggle =
@@ -372,34 +524,21 @@ export function ViewerSettings({
     };
   }, [graphicsRef, viewFields]);
 
-  const onOperationTimeoutChange = operationTimeout?.onChange;
-  const handleOperationTimeoutChange = useCallback(
-    (value: string) => {
-      onOperationTimeoutChange?.(Number(value));
-    },
-    [onOperationTimeoutChange],
-  );
-
   const controlSize = useViewerControlSize();
-  const operationTimeoutValue = operationTimeout?.value;
-  const operationTimeoutDefault = operationTimeout?.defaultValue;
-  const currentTimeoutOption = useMemo(
-    () =>
-      timeoutOptions.find((option) => option.value === operationTimeoutValue) ??
-      timeoutOptions.find((option) => option.value === operationTimeoutDefault) ??
-      timeoutOptions[0]!,
-    [operationTimeoutDefault, operationTimeoutValue],
-  );
-
-  const getTimeoutValue = useCallback((option: TimeoutOption): string => String(option.value), []);
-  const getTimeoutLabel = useCallback((option: TimeoutOption): string => option.label, []);
 
   return (
-    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+    // On a phone the settings open in a bottom drawer (the responsive menu), where the placement is not read.
+    <DropdownMenu isResponsive open={isOpen} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant='overlay' size={controlSize} aria-label='Viewer settings' className={cn(className)}>
+            <Button
+              ref={triggerRef}
+              variant='overlay'
+              size={controlSize}
+              aria-label='Viewer settings'
+              className={cn(className)}
+            >
               <Settings />
             </Button>
           </DropdownMenuTrigger>
@@ -407,9 +546,13 @@ export function ViewerSettings({
         <TooltipContent side='top'>Viewer settings</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
-        align={align}
-        side={side}
+        align={placement.align}
+        side={placement.side}
+        sideOffset={placement.sideOffset}
+        alignOffset={placement.alignOffset}
+        // Its width is the placement's `viewerSettingsMenuWidthPx`.
         className='w-72'
+        drawerTitle='Viewer settings'
         onEscapeKeyDown={preventMenuSliderEscapeDismissal}
         onPointerDownOutside={() => {
           isClosingFromPointerRef.current = true;
@@ -498,41 +641,10 @@ export function ViewerSettings({
             <FieldOfViewRow />
           </>
         )}
-        {resetView ? (
-          <DropdownMenuItem
-            disabled={setInView === 0}
-            onSelect={(event) => {
-              event.preventDefault();
-              resetView();
-            }}
-          >
-            <RotateCcw />
-            Reset view
-            <span className='ml-auto text-xs text-muted-foreground'>
-              {setInView === 0 ? 'Follows the defaults' : `${setInView} changed in this view`}
-            </span>
-          </DropdownMenuItem>
-        ) : undefined}
+        <GridUnitsRow />
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Rendering</DropdownMenuLabel>
-        {operationTimeout ? (
-          <DropdownMenuSelectItem
-            value={currentTimeoutOption}
-            options={timeoutOptions}
-            getOptionValue={getTimeoutValue}
-            getOptionLabel={getTimeoutLabel}
-            infoTooltip={
-              <InfoTooltip>
-                Maximum time to wait for CAD rendering before timing out.
-                <br /> Set to &quot;Disabled&quot; to turn off timeout.
-              </InfoTooltip>
-            }
-            onValueChange={handleOperationTimeoutChange}
-          >
-            <Timer />
-            Timeout
-          </DropdownMenuSelectItem>
-        ) : undefined}
+        {operationTimeout ? <TimeoutRow operationTimeout={operationTimeout} /> : undefined}
         {kernelSettings}
       </DropdownMenuContent>
     </DropdownMenu>

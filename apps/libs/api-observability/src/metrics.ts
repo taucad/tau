@@ -194,6 +194,11 @@ export class MetricsService {
     },
   );
 
+  public readonly emailEventsTotal = this.apiMeter.createCounter(TauMetrics.emailEventsTotal.name, {
+    description: TauMetrics.emailEventsTotal.description,
+    unit: TauMetrics.emailEventsTotal.unit,
+  });
+
   public readonly publicationFileRequestsTotal = this.apiMeter.createCounter(
     TauMetrics.publicationFileRequestsTotal.name,
     {
@@ -898,6 +903,12 @@ export class MetricsService {
     description: TauMetrics.agentEvidenceLangfuseUnits.description,
     unit: TauMetrics.agentEvidenceLangfuseUnits.unit,
   });
+
+  /** One per session resolution on a Tau route or upgrade (`SessionResolver.resolve`). */
+  public readonly authSessionResolutions = this.apiMeter.createCounter(TauMetrics.authSessionResolutions.name, {
+    description: TauMetrics.authSessionResolutions.description,
+    unit: TauMetrics.authSessionResolutions.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */
@@ -908,6 +919,9 @@ export type WsCloseReason = NonNullable<z.infer<typeof TauMetrics.wsDisconnectio
 
 /** Attributes of one `ws.upgrade.rejections` increment. */
 export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.attributes>;
+
+/** Attributes of one `tau.auth.session.resolutions` increment. */
+export type AuthSessionResolutionAttributes = z.infer<typeof TauMetrics.authSessionResolutions.attributes>;
 
 /** Attributes of one `tau.agent_evidence.admissions` increment. */
 export type AgentEvidenceAdmissionAttributes = z.infer<typeof TauMetrics.agentEvidenceAdmissions.attributes>;

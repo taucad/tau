@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep } from 'vitest-mock-extended';
 import type { IncomingMessage } from 'node:http';
 import type { HttpAdapterHost } from '@nestjs/core';
 import type { Auth } from 'better-auth';
@@ -11,6 +11,9 @@ import type { DevWebSocketService } from '@taucad/api-lifecycle';
 import type { CommercialEntitlementsService } from '@taucad/api-projects/entitlements/commercial-entitlements';
 import { MetricsService } from '@taucad/api-observability/metrics';
 import { ZooTokenService } from '#api/kernels/zoo-token.service.js';
+import { SessionResolver } from '@taucad/api-auth';
+import { createSessionCacheHarness, dataCookie, tokenCookie } from '@taucad/api-auth/testing/session-cache';
+import type { SessionCacheHarness } from '@taucad/api-auth/testing/session-cache';
 import type { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
 
@@ -32,12 +35,20 @@ const createGateway = (options: {
   sessionError?: boolean;
   pro?: boolean;
   headers?: Record<string, string>;
+  /** A real resolver over a real Better Auth instance, in place of the stub. */
+  sessions?: SessionResolver;
 }): Harness => {
   const getSession =
     options.sessionError === true
       ? vi.fn().mockRejectedValue(new Error('session backend down'))
-      : vi.fn().mockResolvedValue(options.userId === undefined ? null : { user: { id: options.userId } });
-  const auth = { api: { getSession } } as unknown as Auth;
+      : vi.fn().mockResolvedValue({
+          response:
+            options.userId === undefined ? null : { session: { id: 'session-1' }, user: { id: options.userId } },
+          headers: new Headers(),
+        });
+  // The real resolver over a stub instance, so the upgrade's lookup is the one production makes.
+  const sessions =
+    options.sessions ?? new SessionResolver({ api: { getSession } } as unknown as Auth, mockDeep<MetricsService>());
 
   const service = mock<KernelsService>();
   service.createZooProxy.mockImplementation((socket) => {
@@ -54,7 +65,7 @@ const createGateway = (options: {
   const gateway = new KernelsGateway(
     service,
     mock<DevWebSocketService>(),
-    auth,
+    sessions,
     entitlements,
     zooTokens,
     mock<HttpAdapterHost>(),
@@ -138,5 +149,46 @@ describe('KernelsGateway.handleZooProxy', () => {
 
     expect(closeSpy).toHaveBeenCalledWith(4401, 'AUTH_ERROR');
     expect(rejectionSpy).toHaveBeenCalledExactlyOnceWith(1, { 'ws.gateway': 'kernels', reason: 'auth_error' });
+  });
+});
+
+/** Blueprint WP4 case 10 (H3): a deleted session row closes the upgrade although a fresh snapshot is replayed. */
+describe('KernelsGateway.handleZooProxy with the session cookie cache', () => {
+  let auth: SessionCacheHarness;
+
+  beforeAll(async () => {
+    auth = await createSessionCacheHarness();
+  });
+
+  afterAll(async () => {
+    await auth.close();
+  });
+
+  const cookiesOf = async (): Promise<{ wellFormed: string; nbsp: string; userId: string }> => {
+    const { jar, userId } = await auth.signUp();
+    const token = `${tokenCookie}=${jar.get(tokenCookie) ?? ''}`;
+    const data = `${dataCookie}=${jar.get(dataCookie) ?? ''}`;
+    expect(jar.get(dataCookie)).toBeDefined();
+    return { wellFormed: `${token}; ${data}`, nbsp: `${data};\u00A0${token}`, userId };
+  };
+
+  it('should admit the cookies while the session row exists (positive control)', async () => {
+    const { wellFormed } = await cookiesOf();
+    const { gateway, socket, closeSpy, service } = createGateway({ sessions: auth.sessions });
+    await gateway.handleZooProxy(socket, new URLSearchParams(), { headers: { cookie: wellFormed } } as IncomingMessage);
+    expect(service.createZooProxy).toHaveBeenCalledOnce();
+    expect(closeSpy).not.toHaveBeenCalledWith(4401, expect.anything());
+  });
+
+  it('should close 4401 on a replay after the row is deleted, well-formed and with U+00A0 before the token', async () => {
+    const { wellFormed, nbsp, userId } = await cookiesOf();
+    auth.deleteSessions(userId);
+    for (const cookie of [wellFormed, nbsp]) {
+      const { gateway, socket, closeSpy, service } = createGateway({ sessions: auth.sessions });
+      // oxlint-disable-next-line no-await-in-loop -- one upgrade per header shape.
+      await gateway.handleZooProxy(socket, new URLSearchParams(), { headers: { cookie } } as IncomingMessage);
+      expect(closeSpy).toHaveBeenCalledWith(4401, 'UNAUTHENTICATED');
+      expect(service.createZooProxy).not.toHaveBeenCalled();
+    }
   });
 });

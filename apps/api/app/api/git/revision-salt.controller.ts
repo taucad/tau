@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Environment } from '@taucad/api-core';
-import { UseAuth, User } from '@taucad/api-auth';
+import { AuthoritativeSession, UseAuth, User } from '@taucad/api-auth';
 
 /** Domain separation, so this HMAC never equals another use of the same secret. */
 const saltLabel = 'tau-revision-pseudonym-salt/v1';
@@ -49,6 +49,8 @@ export class RevisionSaltController {
    * @throws BadRequestException When no workspace is named.
    */
   @Get('salt')
+  // An HMAC keyed by AUTH_SECRET, valid as long as the secret: never from a session snapshot.
+  @AuthoritativeSession()
   public salt(@Query('workspace') workspace: string | undefined, @User('id') userId: string): { salt: string } {
     if (workspace === undefined || workspace === '' || workspace.length > maximumWorkspaceLength) {
       throw new BadRequestException({ code: 'REVISION_SALT_WORKSPACE_REQUIRED', message: 'Name the workspace.' });

@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
-import type { UIMatch } from 'react-router';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { downloadBlob } from '@taucad/utils/file';
@@ -53,12 +52,23 @@ import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { getGraphicsCameraState } from '@taucad/viewer/graphics/graphics-camera';
 
-export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
+/**
+ * The focused project's palette items. Rendered inside the focused project's view (A11), they register into the
+ * palette's registry above the shell under `paletteId`.
+ *
+ * @param props - The registration id.
+ * @returns Nothing until the project's providers are mounted.
+ */
+export function ProjectCommandPaletteItems({
+  paletteId,
+}: {
+  readonly paletteId: string;
+}): React.JSX.Element | undefined {
   const project = useProject({ enableNoContext: true });
-  return project === undefined ? undefined : <ProjectCommandPaletteItemsReady match={match} />;
+  return project === undefined ? undefined : <ProjectCommandPaletteItemsReady paletteId={paletteId} />;
 }
 
-function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch }): undefined {
+function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: string }): undefined {
   const { projectId, projectRef, geometryUnits, mainEntryPath } = useProject();
   const { openPanel } = useProjectWorkspace();
   const isTauDebugEnabled = useFeature('tauDebug');
@@ -259,7 +269,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   }, [capturePng, projectName]);
 
   useCommandPaletteItems(
-    match.id,
+    paletteId,
     (): CommandPaletteItem[] => [
       ...(isRemoteConnected
         ? [

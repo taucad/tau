@@ -14,7 +14,8 @@ import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { desktopTitlebarInset } from '#components/layout/page.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
-import { ProjectProvider, useProject } from '#hooks/use-project.js';
+import { ProjectProvider } from '#hooks/project-provider.js';
+import { useProject } from '#hooks/use-project.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -46,6 +47,7 @@ export function OwnedPreviewProviders({
             key={`${projectId}:${selection.key}`}
             projectId={projectId}
             profile='shared'
+            isStandalone
             previewParameterService={previewParameterService}
             kernelOptionsFactory={selection.kernelOptionsFactory}
           >

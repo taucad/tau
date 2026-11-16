@@ -100,7 +100,6 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
           <>
             <Button
               variant='outline'
-              size='sm'
               onClick={() => {
                 setIsConfirmOpen(true);
               }}
@@ -138,7 +137,6 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
         ) : (
           <Button
             variant='outline'
-            size='sm'
             onClick={() => {
               linkSocial({
                 provider,

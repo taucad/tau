@@ -32,6 +32,7 @@
  * | `abandon` | asks for permission and exits without answering it, leaving the request outstanding on the host |
  * | `tools` | emits a Codex-style `read`/`execute`/`think`/`fetch`/`edit` tool sequence with locations, diff and terminal content, each `pending → in_progress → completed` |
  * | `clear-title` | clears the write call title on its terminal update, exercising ACP presence semantics |
+ * | `update-while-asking` | refines the write call with an `in_progress` update while its permission request is outstanding, then says a line before the call completes, as claude-agent-acp can |
  * | `skills` / `skill-names` | reports complete native skill files, or only their names for packaged-host checks |
  * | `fail:quota` / `fail:rate` / `fail:context` / `fail:model` | stops on that provider failure the way both pinned adapters do: a typed AIR `sessionFailure` on an `end_turn` response when the client advertised it, else the provider sentence as text and a `-32603` rejection; `model` is a service failure whose title is a raw provider JSON body, as Codex sends one |
  * | `reset:soon` / `reset:lifted` / `reset:past` | reports Claude Code's `_claude/rateLimit` on `usage_update` before answering: rejected with a reset an hour out then a report no client can read, rejected then allowed again, or rejected with a reset that has already passed |
@@ -47,7 +48,9 @@
  * | Mode | Behaviour |
  * | --- | --- |
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
- * | `auth-required` | `initialize` advertises a `terminal-auth` method and `session/new` errors `-32000` |
+ * | `pushed-models` | `session/new` offers two models, then Grok's `_x.ai/models/update` lists four a moment later, as grok 1.0.52 does after starting on a renewable sign-in; every later answer offers all four |
+ * | `auth-required` | `initialize` advertises codex-acp 1.7.0's own methods (`api-key`, `chat-gpt`, and `chat-gpt-device-code` to a client that advertised `elicitation.url`), none with a terminal command, and `session/new` errors `-32000` |
+ * | `claude-terminal-auth` | `initialize` advertises claude-agent-acp 0.70.0's two methods to a client that sent `_meta['terminal-auth']`, each naming *this* process (`process.execPath` and `process.argv.slice(1)`) as its command, exactly as the real adapter does |
  * | `restore-auth` | restoring an existing session errors `-32000` instead of silently starting fresh |
  * | `prompt-auth` | no auth method is advertised and `session/prompt` errors `-32000`, as claude-agent-acp does for a logged-out `claude` |
  * | `images` | `promptCapabilities.image` is advertised; withheld otherwise |
@@ -107,6 +110,10 @@ type SessionState = {
 
 /** Model ids this fixture offers; the first is the `codex` pin's own default. */
 const models = ['gpt-5.3-codex-spark', 'gpt-5.3-codex'];
+/** Models only `pushed-models` adds, in its `_x.ai/models/update`. */
+const pushedModels = ['pushed-model-a', 'pushed-model-b'];
+/** Whether `pushed-models` has sent its push, after which every answer lists the pushed models too. */
+let modelsPushed = false;
 
 const mode = process.env['TAU_FAKE_AGENT_MODE'] ?? '';
 /** One mode may combine several behaviours, comma-separated (`silent,stubborn`). */
@@ -136,6 +143,9 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 let urlElicitation = false;
 /** Whether the client advertised `elicitation.form`, read at `initialize`. */
 let formElicitation = false;
+
+/** Whether the client advertised `_meta['terminal-auth']`, read at `initialize`. */
+let metaTerminalAuth = false;
 
 /** Whether the client advertised the AIR `sessionFailure` extension, read at `initialize`. */
 let airSessionFailures = false;
@@ -362,6 +372,7 @@ const toolCallUpdate = async (
   result: {
     readonly toolCallId: string;
     readonly status: 'in_progress' | 'completed' | 'failed';
+    readonly rawInput?: unknown;
     readonly rawOutput?: unknown;
     readonly content?: readonly unknown[];
   },
@@ -386,7 +397,7 @@ const promptText = (blocks: readonly unknown[]): string =>
  * @returns The full option set, as `session/new` and friends must return it.
  */
 const configOptionsOf = (session: SessionState): readonly unknown[] => {
-  const options = models.map((value) => ({ value, name: value }));
+  const options = [...models, ...(modelsPushed ? pushedModels : [])].map((value) => ({ value, name: value }));
   return [
     {
       id: 'model',
@@ -732,9 +743,9 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
   await toolCall(sessionId, { toolCallId: 'write-1', title: 'write hello.txt', rawInput: { path: 'hello.txt' } });
   /* SP-4 Result 3: a real adapter under the user's own `approval_policy =
    * "never"` writes without asking at all, so the fixture models that too. */
-  const permission = text.includes('noask')
-    ? { result: { outcome: { outcome: 'selected', optionId: 'allow' } } }
-    : await request('session/request_permission', {
+  const asked = text.includes('noask')
+    ? Promise.resolve({ result: { outcome: { outcome: 'selected', optionId: 'allow' } } })
+    : request('session/request_permission', {
         sessionId,
         toolCall: { toolCallId: 'write-1', title: 'write hello.txt', _meta: { token: 'permission-metadata-canary' } },
         options: [
@@ -749,6 +760,17 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
           { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
         ],
       });
+  if (text.includes('update-while-asking')) {
+    /* Long enough for the host to record the request durably before the refinement lands. */
+    await pause(250);
+    await toolCallUpdate(sessionId, { toolCallId: 'write-1', status: 'in_progress', rawInput: { path: 'hello.txt' } });
+  }
+  const permission = await asked;
+  if (text.includes('update-while-asking')) {
+    await textChunk(sessionId, 'Writing hello.txt now.');
+    /* Past the host's idle flush, so the line is its own durable message before the call completes. */
+    await pause(400);
+  }
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the permission response shape is fixed by ACP.
   const outcome = (permission.result as { outcome?: { outcome?: string; optionId?: string } } | undefined)?.outcome;
   if (outcome?.outcome !== 'selected' || !outcome.optionId?.startsWith('allow')) {
@@ -949,6 +971,81 @@ const openSession = (sessionId: string, params: Record<string, unknown>): Sessio
 };
 
 /**
+ * The methods `getCodexAuthMethods` in codex-acp 1.7.0 lists: none carries a terminal command, so
+ * the only paste-ready command a surface can show is the profile's own login.
+ *
+ * @returns The methods, in the adapter's order.
+ */
+const codexAuthMethods = (): Array<Record<string, unknown>> => [
+  {
+    id: 'api-key',
+    name: 'API Key',
+    description: 'Use an API key to authenticate',
+    _meta: { 'api-key': { provider: 'openai' } },
+  },
+  { id: 'chat-gpt', name: 'ChatGPT', description: 'Use ChatGPT to authenticate' },
+  ...(urlElicitation
+    ? [
+        {
+          id: 'chat-gpt-device-code',
+          name: 'ChatGPT (device code)',
+          description: 'Sign in to ChatGPT by opening a verification page and entering a one-time code',
+        },
+      ]
+    : []),
+];
+
+/**
+ * The local login methods of claude-agent-acp 0.70.0. Its `terminal-auth` command is
+ * the adapter's *own* invocation, so a host that runs it with its own runtime
+ * is handed that runtime and the adapter module as the "login command".
+ *
+ * @returns The methods, in the adapter's order.
+ */
+const claudeAuthMethods = (): Array<Record<string, unknown>> => {
+  const method = ({
+    id,
+    name,
+    description,
+    label,
+    flag,
+  }: Readonly<Record<'id' | 'name' | 'description' | 'label' | 'flag', string>>): Record<string, unknown> => ({
+    description,
+    name,
+    id,
+    type: 'terminal',
+    args: ['--cli', 'auth', 'login', flag],
+    ...(metaTerminalAuth
+      ? {
+          _meta: {
+            'terminal-auth': {
+              command: process.execPath,
+              args: [...process.argv.slice(1), '--cli', 'auth', 'login', flag],
+              label,
+            },
+          },
+        }
+      : {}),
+  });
+  return [
+    method({
+      id: 'claude-ai-login',
+      name: 'Claude Subscription',
+      description: 'Use Claude subscription ',
+      label: 'Claude Login',
+      flag: '--claudeai',
+    }),
+    method({
+      id: 'console-login',
+      name: 'Anthropic Console',
+      description: 'Use Anthropic Console (API usage billing)',
+      label: 'Anthropic Console Login',
+      flag: '--console',
+    }),
+  ];
+};
+
+/**
  * What `initialize` advertises, which the auth mode changes.
  *
  * @returns The `InitializeResponse` body.
@@ -971,19 +1068,12 @@ const initializeResult = (): Record<string, unknown> => ({
   },
   ...([...modes].some((entry) => entry.startsWith('grok')) ? { _meta: { 'x.ai/pluginDirs': true } } : {}),
   authMethods: inMode('auth-required')
-    ? [
-        {
-          id: 'codex-login',
-          name: 'Log in with Codex',
-          description: 'Sign in to the Codex CLI on the machine running this agent.',
-          /* What Claude sends back to a client that advertised
-           * `_meta['terminal-auth']`: a whole invocation the user can run. */
-          _meta: { 'terminal-auth': { command: 'codex', args: ['login'], label: 'Log in with Codex' } },
-        },
-      ]
-    : inMode('grok-auth')
-      ? [{ id: 'grok.com', name: 'Grok' }]
-      : [],
+    ? codexAuthMethods()
+    : inMode('claude-terminal-auth')
+      ? claudeAuthMethods()
+      : inMode('grok-auth')
+        ? [{ id: 'grok.com', name: 'Grok' }]
+        : [],
 });
 
 /**
@@ -1046,6 +1136,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
     case 'initialize': {
       urlElicitation = advertisesUrlElicitation(params);
       formElicitation = asRecord(asRecord(params['clientCapabilities'])?.['elicitation'])?.['form'] !== undefined;
+      metaTerminalAuth = asRecord(asRecord(params['clientCapabilities'])?.['_meta'])?.['terminal-auth'] === true;
       airSessionFailures = advertisesAirSessionFailures(params);
       if (inMode('silent')) {
         /* The adapter that never answers: the client's own timeout is the only
@@ -1061,7 +1152,22 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
         return;
       }
       const sessionId = nextSessionId();
-      reply({ sessionId, configOptions: configOptionsOf(openSession(sessionId, params)) });
+      const session = openSession(sessionId, params);
+      reply({ sessionId, configOptions: configOptionsOf(session) });
+      if (inMode('pushed-models')) {
+        /* Grok's push carries no session id and arrives after the answer (69-157 ms on a real CLI). */
+        setTimeout(() => {
+          modelsPushed = true;
+          send({
+            jsonrpc: '2.0',
+            method: '_x.ai/models/update',
+            params: {
+              currentModelId: session.model,
+              availableModels: [...models, ...pushedModels].map((modelId) => ({ modelId, name: modelId })),
+            },
+          });
+        }, 100);
+      }
       return;
     }
     case 'session/resume': {

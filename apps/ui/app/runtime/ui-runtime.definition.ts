@@ -4,6 +4,7 @@ import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
+import { heif } from '@taucad/heif';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
@@ -18,7 +19,6 @@ import { smlib } from '@taucad/smlib';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
 import { runtimeRecycleHeapBytes } from '@taucad/ui-core/lib/device-memory-class';
-import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
 
@@ -71,6 +71,8 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     gltf(),
     brep(),
     image(),
+    // HEIC/HEIF stills to JPEG, PNG and WebP (operator ruling O1); libheif loads only for a HEIC source.
+    heif(),
     slicer(),
     assimp({ preset: 'all' }),
     replicad({
@@ -95,15 +97,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     }),
     tscircuit(),
   ],
-  middleware: [
-    observabilityMiddleware({
-      reportUrl: `${config.tauApiUrl}/v1/telemetry/ingest`,
-    }),
-    parameterFileResolver(),
-    parameterUnits(),
-    geometryCache(),
-    gltfEdgeDetection(),
-  ],
+  middleware: [parameterFileResolver(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
 });
 
 const createUiRuntime = (options: UiRuntimeOptions = {}) =>

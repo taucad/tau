@@ -3,7 +3,7 @@ title: 'Accessibility Policy'
 description: 'Guidelines for accessible UI and ARIA-driven E2E testing across the Tau codebase. Covers semantic HTML, ARIA conventions, Vitest Browser selectors, and screenshot tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-11-11'
+updated: '2026-11-15'
 related:
   - docs/research/billing-redesign-blueprint.md
 ---

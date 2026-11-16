@@ -966,6 +966,29 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('evidence 
     });
   });
 
+  it('should count a trace as well when reconciliation finds an uncertain send that has no parent (LW24)', async () => {
+    const { receiptId } = await admitted('outcome');
+    vendor(async (url) => {
+      if (url.pathname.endsWith('/otel/v1/traces')) {
+        return json(503, {});
+      }
+      const { objectId } = await row(receiptId);
+      return json(200, { data: [{ id: objectId, parentObservationId: null }], meta: {} });
+    });
+    const delivery = service();
+
+    await delivery.drain(new Date());
+    await delivery.drain(new Date(Date.now() + deliveryTiming.gapAfterMilliseconds + 1));
+
+    expect(await row(receiptId)).toMatchObject({ state: 'confirmed' });
+    expect(metrics.agentEvidenceLangfuseUnits.add.mock.calls).toEqual(
+      expect.arrayContaining([
+        [1, { kind: 'observation' }],
+        [1, { kind: 'trace' }],
+      ]),
+    );
+  });
+
   it('should purge every held row at its retention', async () => {
     const { receiptId } = await admitted();
     const { expiresAt } = await row(receiptId);

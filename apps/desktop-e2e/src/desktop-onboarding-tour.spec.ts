@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import { launchDesktopApp, removeDesktopRoot } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { expectGeometryFramed, expectVisible } from '#support/scenario.js';
@@ -33,7 +34,28 @@ afterEach(async ({ task }) => {
 
 const projectName = 'Tour bracket';
 
-/** A profile holding one OpenSCAD project with a parameter, and a window-state file so setup does not open. */
+/**
+ * The workbench records Tau writes when it makes a project: one view of the main entry in the viewer, Parameters in
+ * the workbench. A folder project without them opens on the viewer's file picker, with nothing to frame.
+ */
+const seedWorkbench = async (project: string, entryPath: string): Promise<void> => {
+  const viewId = 'tour-main';
+  const view = workbenchRecords.view.schema.parse({ version: 1, entryPath });
+  const layout = workbenchRecords.layout.schema.parse({
+    version: 1,
+    lanes: { chat: true, workbench: true },
+    viewer: { kind: 'group', tabs: [{ kind: 'view', view: viewId }] },
+    workbench: { kind: 'group', tabs: [{ kind: 'pane', pane: 'parameters' }], active: 0 },
+  });
+  await mkdir(join(project, '.tau/workbench/views'), { recursive: true });
+  await writeFile(join(project, workbenchPaths.view(viewId)), workbenchRecords.view.serialize(view));
+  await writeFile(join(project, workbenchPaths.layout), workbenchRecords.layout.serialize(layout));
+};
+
+/**
+ * A profile holding one OpenSCAD project with a parameter, as Tau made it, and a window-state file so setup does not
+ * open.
+ */
 const newProfile = async (): Promise<string> => {
   const profile = await mkdtemp(join(tmpdir(), 'tau-desktop-tour-'));
   profiles.push(profile);
@@ -51,6 +73,7 @@ const newProfile = async (): Promise<string> => {
     }),
   );
   await writeFile(join(project, 'main.scad'), 'width = 20;\ncube([width, 10, 5]);\n');
+  await seedWorkbench(project, 'main.scad');
   return profile;
 };
 

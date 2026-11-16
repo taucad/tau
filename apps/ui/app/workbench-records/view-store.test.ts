@@ -1114,7 +1114,7 @@ describe('workbench view checked store', () => {
           }),
           value: (v) => v.measurements,
         },
-        ...(['surfaces', 'lines', 'gizmo', 'grid', 'axes', 'matcap', 'postProcessing'] as const).map((field) => ({
+        ...(['surfaces', 'lines', 'gizmo', 'grid', 'axes', 'matcap'] as const).map((field) => ({
           field: `display.${field}`,
           edit: (v: WorkbenchView) => ({ ...v, display: { ...v.display, [field]: !v.display[field] } }),
           value: (v: WorkbenchView) => v.display[field],

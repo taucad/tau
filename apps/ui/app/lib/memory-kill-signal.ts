@@ -22,7 +22,7 @@
 
 import { recordActivityBreadcrumb } from '@taucad/ui-core/lib/activity-breadcrumbs';
 import { readBuildId } from '#lib/build-identity.js';
-import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
+import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import { readLastMemorySample, readHighWaterWasmBytes, takeMemorySample } from '@taucad/ui-core/lib/memory-sampler';
 import { readSessionStorage } from '@taucad/ui-core/lib/session-storage';
 import { isModelKey } from '#lib/kill-memory.js';
@@ -365,7 +365,7 @@ const sharePathPattern = /^\/s\/([^/~]+)~[^/]+/u;
  * @public
  */
 export const scrubPath = (path: string): string => {
-  const plain = redactInvitationTokens(path.split(/[?#]/u, 1)[0] ?? '');
+  const plain = redactUrlCredentials(path.split(/[?#]/u, 1)[0] ?? '');
   const share = sharePathPattern.exec(plain);
   if (share === null || share[1] === 'builtin') {
     return plain;

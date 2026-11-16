@@ -242,9 +242,39 @@ export const pressModelTreeShortcut = async (page: Page): Promise<void> => {
   await page.keyboard.press('Control+a');
 };
 
-/** Choose the CAD kernel from the home page's kernel row. */
+/**
+ * Choose the CAD kernel on *New project (from code)* (`/projects/new`). With no concrete kernel remembered on the
+ * device the page preselects Replicad, since Auto became every device's default in #1982 (blueprint E5), so a row
+ * whose project must hold an OpenSCAD `main.scad` picks that kernel before *Create Project*.
+ *
+ * A browser client's page is server-rendered, and its kernel radios are buttons with no handler until React hydrates:
+ * a click on a cold load lands before then and is lost, so the page stays on Replicad. The name field adopts what was
+ * typed before hydration, which is what enables *Create Project*, so an enabled *Create Project* is the page's own
+ * sign that it now answers clicks. The call waits for it, so the caller fills the name first.
+ *
+ * Only locator waits, no `expect.poll`: suites call this from `beforeAll`, where vitest refuses `expect.poll`.
+ *
+ * @param page - The renderer, on `/projects/new`, with *Project Name* filled.
+ * @param kernelName - The kernel's display name, such as `OpenSCAD`.
+ */
+export const chooseNewProjectKernel = async (page: Page, kernelName: string): Promise<void> => {
+  await expectVisible(page.getByRole('button', { name: /^Create Project/u, disabled: false }), 60_000);
+  await page.getByRole('radio', { name: kernelName, exact: true }).click();
+  await expectVisible(page.getByRole('radio', { name: kernelName, exact: true, checked: true }), 15_000);
+};
+
+/**
+ * Choose the CAD kernel from the composer's kernel picker. Home starts on Auto, and the picker is a searchable list
+ * whose rows lead with the kernel's name (a badge may follow with no space), so the search narrows it to that kernel before the row is chosen.
+ */
 export const selectKernel = async (page: Page, kernelName: string): Promise<void> => {
-  await page.getByRole('button', { name: kernelName, exact: true }).first().click();
+  await page
+    .getByRole('button', { name: /^Kernel: /u })
+    .first()
+    .click();
+  await page.getByPlaceholder('Search kernels…').fill(kernelName);
+  const leading = new RegExp(`^${kernelName.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)}`, 'u');
+  await page.getByRole('option', { name: leading }).first().click();
   await parkPointer(page);
 };
 

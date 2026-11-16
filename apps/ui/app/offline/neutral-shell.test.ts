@@ -6,6 +6,7 @@
  * view's.
  */
 /* eslint-disable @typescript-eslint/naming-convention -- client environment keys are an external contract. */
+import { RouterContextProvider } from 'react-router';
 import { expect, it, vi } from 'vitest';
 import type * as EnvironmentConfig from '#environment.config.js';
 import { loader, shouldRevalidate } from '#root.js';
@@ -30,7 +31,7 @@ vi.mock('#environment.config.js', async (loadOriginal) => ({
 type LoaderArguments = Parameters<typeof loader>[0];
 
 /** The root loader never reads its router context. */
-const emptyContext = {};
+const emptyContext = new RouterContextProvider();
 
 const callLoader = async (cookie: string): ReturnType<typeof loader> => {
   const url = new URL('https://tau.new/usage');
@@ -64,7 +65,7 @@ it('marks the prerendered usage document noindex, nofollow', () => {
 it('keeps request cookies out of loader data', async () => {
   const data = await callLoader('tau-cad-kernel=%22openscad%22; better-auth.session_token=synthetic-session-value');
 
-  expect(data.consentStatus).toBe('unknown');
+  expect(Object.keys(data).sort()).toStrictEqual(['env', 'queries']);
   expect(JSON.stringify(data)).not.toContain('synthetic-session-value');
   expect(JSON.stringify(data)).not.toContain('session_token');
   expect(JSON.stringify(data)).not.toContain('openscad');
@@ -80,5 +81,15 @@ it('never revalidates the root server loader for the offline shell route', () =>
 
   expect(revalidate('/usage?range=30d')).toBe(false);
   expect(revalidate('/usage/')).toBe(false);
-  expect(revalidate('/projects')).toBe(true);
+  // U23: a client navigation between two other pages keeps the root data it has.
+  expect(revalidate('/projects')).toBe(false);
+  // The offline shell rule is narrow: a submission elsewhere still revalidates.
+  expect(
+    shouldRevalidate({
+      currentUrl: new URL('https://tau.new/'),
+      nextUrl: new URL('https://tau.new/projects'),
+      formMethod: 'POST',
+      defaultShouldRevalidate: true,
+    } as Parameters<typeof shouldRevalidate>[0]),
+  ).toBe(true);
 });

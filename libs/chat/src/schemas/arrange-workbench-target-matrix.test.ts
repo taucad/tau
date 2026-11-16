@@ -63,7 +63,6 @@ describe('approved workbench Target matrix', () => {
       grid: false,
       axes: false,
       matcap: true,
-      postProcessing: true,
     })) {
       expect(workbenchViewSchema.safeParse(view({ display: { [name]: value } })).success, `${name} record`).toBe(true);
       expect(arrangeWorkbenchInputSchema.safeParse(patch({ display: { [name]: value } })).success, `${name} tool`).toBe(

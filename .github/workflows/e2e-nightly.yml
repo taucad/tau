@@ -7,10 +7,13 @@ name: E2E nightly
 # summary ends with the W22 consumer parity table. Each
 # night they run against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
-# nightly, never a merge gate.
-# `workflow_dispatch` takes an optional commit to run against instead. The packaged desktop
-# suite runs on every staging candidate (`desktop-packaged.yml`, called from
-# `release-desktop-staging.yml`), not here (DS-4).
+# nightly, never a merge gate. A suite that passes two consecutive nightlies moves to ci.yml's
+# merge-queue lane for good (`test:e2e:queue`, the end-to-end ratchet) and leaves this matrix.
+# `workflow_dispatch` takes an optional commit to run against instead, and `flag_state` runs the
+# browser and desktop suites with every page opened in one of the four onboarding flag states
+# (`TAU_E2E_FLAG_STATE`, `apps/ui-e2e/src/support/flag-state.ts`); the schedule leaves it unset,
+# which is all-off. The packaged desktop suite runs on every staging candidate
+# (`desktop-packaged.yml`, called from `release-desktop-staging.yml`), not here (DS-4).
 
 on:
   schedule:
@@ -21,6 +24,11 @@ on:
         description: 'Commit to test; defaults to the head of main'
         required: false
         default: ''
+      flag_state:
+        description: 'Onboarding flag state every suite opens in'
+        type: choice
+        options: [all-off, viewer-controls, all-on, viewer-controls-onboarding]
+        default: all-off
 
 concurrency:
   group: e2e-nightly
@@ -73,6 +81,14 @@ jobs:
           # `metadata.shards` jobs when it declares that count; each job passes
           # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
           suites='[]'
+          # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
+          # `test:e2e:queue` `dependsOn` passed two consecutive nightlies and runs in ci.yml's merge-queue
+          # lane (`e2e-queue`) whenever its project is affected, so it is not run here. It never moves back.
+          pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
+          ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets["test:e2e:queue"].dependsOn // [] | .[]
+            | if type == "string" then "\($project):\(.)" else error("\($project):test:e2e:queue depends on \(tojson), not a target name") end]' \
+            "$RUNNER_TEMP/graph.json")
+          echo "Ratcheted into the merge queue: $ratcheted"
           add_suite() {
             suites=$(jq -c --arg project "$1" --arg target "$2" --argjson shards "$3" \
               '. + [range(1; $shards + 1) as $i | {project: $project, target: $target}
@@ -84,6 +100,9 @@ jobs:
           }
           for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew test:e2e:filesystem-scenarios; do
             for project in $(pnpm nx show projects --with-target "$target" --json | tail -1 | jq -r '.[]'); do
+              if jq -e --arg suite "$project:$target" 'index([$suite]) != null' <<< "$ratcheted" > /dev/null; then
+                continue
+              fi
               shards=$(pnpm nx show project "$project" --json | tail -1 | jq --arg target "$target" '.targets[$target].metadata.shards // 1')
               add_suite "$project" "$target" "$shards"
             done
@@ -173,6 +192,7 @@ jobs:
         timeout-minutes: 120
         env:
           TAU_E2E_WEBGPU_PROFILE: software
+          TAU_E2E_FLAG_STATE: ${{ inputs.flag_state || '' }}
           PROJECT: ${{ matrix.suite.project }}
           TARGET: ${{ matrix.suite.target }}
           SHARD: ${{ matrix.suite.shard }}
@@ -305,6 +325,45 @@ jobs:
           path: out/test-results/vitest-browser
           if-no-files-found: error
           retention-days: 14
+
+  # The cloud-build load tier (app state orchestration A0.11): the loading rows a self-host
+  # build cannot show, on the cloud UI variant with stand-ins answering the API by
+  # interception, so it needs no API, database or secret. Each row pins a known defect: it
+  # is a plain test that passes while its defect assertion fails, and records that failure
+  # as a notice annotation naming the defect (`cloudDefectRow`). The job goes red when an
+  # assertion passes (its defect fixed without flipping the row) or when anything else in a
+  # row faults: a load, a precondition, the timeout, setup or teardown.
+  cloud-load:
+    name: Cloud-build load tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [plan]
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    steps:
+      - *checkout
+      - *setup-nx
+
+      - name: Install Chromium for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run the cloud-build load tier
+        timeout-minutes: 45
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:cloud-load --parallel=1 --outputStyle=stream
+
+      - *root-hygiene
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vitest-browser-diagnostics-cloud-load
+          path: out/test-results/vitest-browser
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Consumer parity (charter D33, W22, gate T16): one row per consumer of native dependency
   # resolution, in this run's summary. It runs no suite: each row reads the latest conclusion of

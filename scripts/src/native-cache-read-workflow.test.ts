@@ -8,7 +8,8 @@ import { describe, expect, it } from 'vitest';
  * (CP-4): writes come only from `ci.yml` on `main` through environment `nx-cache-write`. A pull request
  * job granted `id-token: write` would trade the read token for a write session (setup-nx `nx-guard.ts`,
  * item 5), so none of these jobs has one, nor an environment. The per-host Build123d suites skip the
- * remote cache, because their task hash names no host. The shell conformance workflow stays cache-less.
+ * remote cache, because their task hash names no host. The shell conformance workflow scopes its cache env to the
+ * macOS job of a reuse run (pinned in `shell-evidence.test.ts`).
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -76,9 +77,10 @@ describe('native cache read workflows', () => {
     }
   });
 
-  it('should keep the shell conformance workflow off the remote cache', () => {
-    const text = workflowText('shell-conformance');
-    expect(text).not.toContain('NX_SELF_HOSTED_REMOTE_CACHE');
-    expect(workflow('shell-conformance').env?.['NX_NO_CLOUD']).toBe('true');
+  it('should give the shell conformance workflow no workflow-wide cache env', () => {
+    const env = workflow('shell-conformance').env ?? {};
+    expect(env['NX_SELF_HOSTED_REMOTE_CACHE_SERVER']).toBeUndefined();
+    expect(env['NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN']).toBeUndefined();
+    expect(env['NX_NO_CLOUD']).toBe('true');
   });
 });

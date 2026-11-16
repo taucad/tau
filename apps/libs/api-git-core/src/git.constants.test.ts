@@ -7,8 +7,10 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import {
   authorshipRefusals,
+  commitRefusalMarker,
   ceilingRefusalMarker,
   gitLfsObjectKey,
+  isRemovableRef,
   pktLine,
   preReceiveHookScript,
   projectIdFromRepository,
@@ -771,16 +773,24 @@ describe('pre-receive authorship check (B4)', () => {
     git('commit', '--quiet', '--allow-empty', '-m', 'base');
     const base = git('rev-parse', 'HEAD');
     const tree = git('rev-parse', 'HEAD^{tree}');
-    /** One commit on `parent`, authored at `email`, with `message`. */
-    const commit = async (email: string, message: string, parent = base): Promise<string> => {
+    /**
+     * One commit on `parent` with `message`: authored at `email` and committed by Tau, or authored and
+     * committed at the two addresses given.
+     */
+    const commit = async (
+      email: string | Readonly<{ author: string; committer: string }>,
+      message: string,
+      parent = base,
+    ): Promise<string> => {
+      const { author, committer } = typeof email === 'string' ? { author: email, committer: 'noreply@tau.new' } : email;
       const file = path.join(fixture, '.git', `commit-${String(Math.random()).slice(2)}`);
       await writeFile(
         file,
         [
           `tree ${tree}`,
           `parent ${parent}`,
-          `author Someone <${email}> 1790000000 +0000`,
-          'committer Tau <noreply@tau.new> 1790000000 +0000',
+          `author Someone <${author}> 1790000000 +0000`,
+          `committer Someone <${committer}> 1790000000 +0000`,
           '',
           message,
         ].join('\n'),
@@ -918,6 +928,65 @@ describe('pre-receive authorship check (B4)', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
     const linked = await repository.push(outside, { TAU_GIT_FORGE: 'github' });
     expect(linked.code, linked.stderr).toBe(0);
+  });
+
+  /* A commit made with stock git under the identity Tau seeds: author and committer are the pusher's no-reply address. */
+  it("passes the pusher's own commit made with git, on a project not linked to GitHub", async () => {
+    const repository = await authorshipRepository();
+    onTestFinished(repository.dispose);
+    const own = await repository.commit({ author: noreply(pusher), committer: noreply(pusher) }, 'Edited with git\n');
+    const outcome = await repository.push(own);
+    expect(outcome.code, outcome.stderr).toBe(0);
+    /* Tau's own committer beside the pusher's author passes too: it names no one else. */
+    const viaTau = await repository.commit(noreply(pusher), 'Edited with git\n');
+    const tau = await repository.push(viaTau);
+    expect(tau.code, tau.stderr).toBe(0);
+  });
+
+  it('refuses another member pushing that commit, and one committed with another address, without repeating it', async () => {
+    const repository = await authorshipRepository();
+    onTestFinished(repository.dispose);
+    const theirs = await repository.commit({ author: noreply(other), committer: noreply(other) }, 'Edited with git\n');
+    const outcome = await repository.push(theirs);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stderr).toContain(
+      `${commitRefusalMarker} ${theirs.slice(0, 12)} — ${authorshipRefusals.GIT_PUSH_ACTOR_NOT_PUSHER}`,
+    );
+    expect(outcome.stderr).not.toContain(other);
+    /* The pusher's author with a real committer address would put that address in Tau Cloud. */
+    const leaked = await repository.commit(
+      { author: noreply(pusher), committer: 'me@example.com' },
+      'Edited with git\n',
+    );
+    const committed = await repository.push(leaked);
+    expect(committed.code).toBe(1);
+    expect(committed.stderr).toContain(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU);
+    expect(committed.stderr).not.toContain('me@example.com');
+  });
+
+  it('refuses a commit made with git under a foreign address with the fix and the pusher’s own address', async () => {
+    const repository = await authorshipRepository();
+    onTestFinished(repository.dispose);
+    const foreign = await repository.commit(
+      { author: 'me@example.com', committer: 'me@example.com' },
+      'Edited with git\n',
+    );
+    const outcome = await repository.push(foreign);
+    expect(outcome.code).toBe(1);
+    expect(outcome.stderr).toContain(
+      `${commitRefusalMarker} ${foreign.slice(0, 12)} — ${authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU}`,
+    );
+    expect(authorshipRefusals.GIT_PUSH_NOT_RECORDED_BY_TAU).toContain('Commit with your Tau identity');
+    expect(outcome.stderr).toContain(`Tau: your Tau no-reply address is ${noreply(pusher)}.`);
+    expect(outcome.stderr).not.toContain('me@example.com');
+    /* Only that refusal names the pusher's address: one that names another account does not. */
+    const theirs = await repository.commit({ author: noreply(other), committer: noreply(other) }, 'Edited with git\n');
+    const named = await repository.push(theirs);
+    expect(named.stderr).not.toContain('no-reply address is');
+  });
+
+  it('should spell the commit refusal marker the way packages/revisions matches it', () => {
+    expect(commitRefusalMarker).toBe('Tau: refused commit');
   });
 
   it("takes GitHub's no-reply address for the pusher's revision on a linked project only", async () => {
@@ -1065,19 +1134,19 @@ describe('pre-receive version-number check (B6)', () => {
     /**
      * One annotated tag on the base commit named `name`: a version with `id`,
      * by a tagger at `seconds`. `record` replaces the whole `Tau-Tag` record,
-     * and `null` leaves the trailer out.
+     * and `null` leaves the trailer out. `object` names another entry.
      */
     const tag = async (
       ref: string,
       name: string,
-      options: Readonly<{ id?: string; seconds?: number; record?: unknown }> = {},
+      options: Readonly<{ id?: string; seconds?: number; record?: unknown; object?: string }> = {},
     ): Promise<string> => {
       const file = path.join(fixture, '.git', `tag-${String(Math.random()).slice(2)}`);
       const record = 'record' in options ? options.record : { version: 2, id: options.id ?? versionId(), name };
       await writeFile(
         file,
         [
-          `object ${base}`,
+          `object ${options.object ?? base}`,
           'type commit',
           `tag ${ref}`,
           `tagger Someone <${pusher}@users.noreply.tau.new> ${String(options.seconds ?? 1_790_000_000)} +0000`,
@@ -1172,6 +1241,23 @@ describe('pre-receive version-number check (B6)', () => {
     expect(replaced.stderr).toContain(versionNumberRefusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
   });
 
+  it('refuses a rename that moves a backed-up version to another entry (N1)', async () => {
+    const repository = await versionRepository();
+    onTestFinished(repository.dispose);
+    const id = versionId();
+    const held = await repository.tag('v4', 'Hinge', { id });
+    repository.git('update-ref', 'refs/tags/v4', held);
+    repository.git('commit', '--quiet', '--allow-empty', '-m', 'later');
+    const later = repository.git('rev-parse', 'HEAD');
+    /* The same id and a later tagger time, but on a later entry: git's fast-forward rule alone lets it through. */
+    const moved = await repository.push([
+      `${held} ${await repository.tag('v4', 'Hinge', { id, seconds: 1_790_000_200, object: later })} refs/tags/v4`,
+    ]);
+    expect(moved.code).toBe(1);
+    expect(moved.stderr).toContain(`Tau: refused refs/tags/v4 — ${versionNumberRefusals.GIT_PUSH_VERSION_MOVED}`);
+    expect(moved.stderr).toContain('Tau: nothing was written.');
+  });
+
   it('tells two versions apart by id, even on the same entry by the same tagger in the same second', async () => {
     const repository = await versionRepository();
     onTestFinished(repository.dispose);
@@ -1224,5 +1310,28 @@ describe('pre-receive version-number check (B6)', () => {
 
   it('spells the taken-number marker the way packages/revisions matches it', () => {
     expect(versionNumberTakenMarker).toBe('Tau: version number taken');
+  });
+});
+
+/* D24, F2: the audited removal verb takes a conflict line and nothing else. A
+   version is never removed, so its tag is refused like every other ref. */
+describe('isRemovableRef', () => {
+  it.each(['refs/heads/conflicts/main/device-b', 'refs/heads/conflicts/feature.x/laptop-2'])(
+    'should admit the conflict line %s',
+    (ref) => {
+      expect(isRemovableRef(ref)).toBe(true);
+    },
+  );
+
+  it.each([
+    'refs/tags/v4',
+    'refs/tags/v1.0.0',
+    'refs/heads/main',
+    'refs/heads/conflicts',
+    'refs/heads/conflicts/',
+    'refs/heads/conflicts/../main',
+    'refs/tau/chats/chat_1',
+  ])('should refuse %s', (ref) => {
+    expect(isRemovableRef(ref)).toBe(false);
   });
 });

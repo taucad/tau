@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
@@ -19,13 +19,16 @@ import type { ContentFacts, FileSystemProvider } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
-import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { createApplyTreeEffects } from '#apply-tree.js';
+import { revisionTreeId } from '#git-tree-id.js';
+import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
-import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
@@ -59,6 +62,14 @@ const fixture = async (
      * `bare`: a listing from a port that reports no ignore context, so it is listed whole at every capture;
      * `failing`: the port's own rules, but a question about named paths fails. */
     ignoreRules?: 'listing' | 'bare' | 'port' | 'failing';
+    /* The checkout as the revision layer opens it in a host: raw, its pointers as they are. */
+    raw?: boolean;
+    /* Every declaration to the index fails, as one whose index cannot open. */
+    failingDeclarations?: boolean;
+    /* The repository folds case (`core.ignoreCase`), as a native host's on a case-insensitive disk. */
+    ignoreCase?: boolean;
+    /* The start's listing of its checkouts fails, or so does every read of a branch's head. */
+    failing?: 'listing' | 'head';
   }>,
 ) => {
   const backend = options?.backend ?? 'node';
@@ -87,7 +98,7 @@ const fixture = async (
     cleanups.push(() => {
       service.dispose();
     });
-    return service.createRootedFileSystem('/');
+    return service.createRootedFileSystem('/', undefined, options?.raw === true ? { placeholders: 'raw' } : undefined);
   };
   const memory = new MemoryProvider();
   let rooted = open();
@@ -101,9 +112,22 @@ const fixture = async (
   /* Where each capture asked the index from: a walk probes it with a generation past any it issued. */
   const asked: number[] = [];
   const overrides: Overrides = {};
+  /* What the revision layer says of its placeholders, in order (D9). */
+  const declarations: string[] = [];
   /* Every capture read, counted; and the index's answers, replaceable per test. */
   const counted = (): RevisionFileSystem =>
     Object.assign(Object.create(rooted) as RevisionFileSystem, {
+      releaseDeclaration: () => {
+        declarations.push('release');
+        rooted.releaseDeclaration?.();
+      },
+      declarePending: (async (declared, paths, declareOptions) => {
+        declarations.push('declare');
+        if (options?.failingDeclarations === true) {
+          throw new Error('the index could not open');
+        }
+        return rooted.declarePending?.(declared, paths, declareOptions);
+      }) satisfies NonNullable<RevisionFileSystem['declarePending']>,
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
         reads.push(path);
         // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-explicit-any -- forwards the view's own overloads.
@@ -156,7 +180,7 @@ const fixture = async (
       return base.ignoredPaths?.(root);
     },
   };
-  const port: RevisionPort =
+  const ruled: RevisionPort =
     options?.ignoreRules === 'port'
       ? base
       : options?.ignoreRules === 'failing'
@@ -174,6 +198,19 @@ const fixture = async (
                     ),
               ignoreContext: async () => JSON.stringify(ignored),
             };
+  const cased: RevisionPort =
+    options?.ignoreCase === true
+      ? { ...ruled, describe: async () => ({ ...(await ruled.describe()), ignoreCase: true }) }
+      : ruled;
+  const refused = async (): Promise<never> => {
+    throw new Error('the store could not be read');
+  };
+  const port: RevisionPort =
+    options?.failing === 'listing'
+      ? { ...cased, listCheckouts: refused, readHead: refused }
+      : options?.failing === 'head'
+        ? { ...cased, readRef: refused, readHead: async () => ({ branch: 'main', head: undefined }) }
+        : cased;
   /* Memory stamps its files now and cannot be told otherwise: the captures read a clock a minute on,
    * so only what a test writes after a capture is racy at the next. */
   const clock =
@@ -217,6 +254,7 @@ const fixture = async (
     actors,
     walking,
     fillChecked,
+    declarations,
     reads,
     listed,
     overrides,
@@ -642,6 +680,47 @@ describe('a first revision built from recorded blob ids (D12)', () => {
     expect(tree?.find(({ path }) => path === 'dir1/f6.txt')?.oid).toBe(blobOidOf(initial['dir1/f6.txt']!));
   });
 
+  /* F1: the record answers one capture, so a cut beside a compare or another cut may hash the file itself; the
+   * record is the file's own id, so every capture names the same tree and the revision minted from either is right. */
+  it.each(['cut', 'compare'] as const)(
+    "should mint the walked tree from a cut beside a %s that reads a committed import's record at once",
+    async (beside) => {
+      const initial = files(10);
+      const at = await fixture(initial);
+      await writeImportRecord(at, 'dir1/f1.txt', blobOidOf(initial['dir1/f1.txt']!));
+      at.reload();
+
+      const [first, other] = await Promise.all([
+        cut(at.actors),
+        beside === 'cut'
+          ? cut(at.actors)
+          : run<{ treeId: string }>(at.actors.checkout.captureTree, { checkoutId: 'live' }),
+      ]);
+      /* A checkout holds one cut: of two at once the later one is minted, and the earlier is refused, never minted. */
+      const isCut = (held: Readonly<{ treeId: string }>): held is Cut => 'cutId' in held;
+      const order = (held: Cut): number => Number(held.cutId.split('-').at(-1));
+      const [taken, replaced] = isCut(other) && order(other) > order(first) ? [other, first] : [first, other];
+      const write = async (held: Cut) =>
+        run<{ revisionId: string }>(at.actors.checkout.writeRevision, {
+          checkoutId: 'live',
+          cutId: held.cutId,
+          treeId: held.treeId,
+          parents: [],
+          trigger: 'save',
+          leaseIds: [],
+        });
+      const { revisionId: written } = await write(taken);
+      if (isCut(replaced)) {
+        await expect(write(replaced)).rejects.toThrow('no longer held');
+      }
+
+      const walked = await walkedTreeId(at.walking);
+      expect([first.treeId, other.treeId]).toEqual([walked, walked]);
+      const record = await at.port.readRevision(revisionId(written));
+      expect(record?.treeId).toBe(walked);
+    },
+  );
+
   it('should hash a same-size change the index has not observed yet, never pinning the recorded id to it', async () => {
     const initial = files(10);
     const at = await fixture(initial);
@@ -839,5 +918,135 @@ describe("a cut under the checkout's own Git ignore rules (S10)", () => {
     expect(at.walked()).toBe(false);
     expect(dropped.treeId).toBe(await walkedTreeId(at.walking));
     expect(dropped.treeId).not.toBe(adopted.treeId);
+  });
+});
+
+/* The revision layer is the placeholders' only writer and reads the attributes that make a pointer one (D9). */
+describe("a capture declares the checkout's placeholders to its index (D9)", () => {
+  /*
+   * Mounting the checkout is the word that it will be declared: every other view holds a file the size of a pointer
+   * until the first capture's declaration, or until that capture lets go of the checkout without one.
+   */
+  it('should end the hold by its first capture’s declaration, letting go of nothing else', async () => {
+    const at = await fixture(files(3), { backend: 'memory', raw: true });
+    await at.fillChecked;
+    expect(at.declarations[0]).toBe('declare');
+    expect(at.declarations).not.toContain('release');
+  });
+
+  it('should let go of the checkout when its first capture cannot declare it, so nothing waits on a word', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const at = await fixture(files(3), { backend: 'memory', raw: true, failingDeclarations: true });
+    await at.fillChecked;
+    expect(at.declarations.slice(0, 2)).toStrictEqual(['declare', 'release']);
+    expect(warn).toHaveBeenCalledWith(
+      '[revisions] the checkout index could not learn its placeholders',
+      expect.any(Error),
+    );
+  });
+
+  /* A start that cannot look leaves nothing waiting on a word it will not give (I7 is kept by the reads, not the hold). */
+  it.each([
+    /* No checkout is known: the project directory is let go of. */
+    ['listing', 'release'],
+    /* The placeholders are looked at before the head, so the checkout is declared before the head fails. */
+    ['head', 'declare'],
+  ] as const)(
+    'should let go of or declare the checkout when the start’s fill check cannot read the %s',
+    async (failing, word) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const at = await fixture(files(3), { backend: 'memory', raw: true, failing });
+      /* Well inside the stall bound: nothing waits on the word. */
+      await expect.poll(() => at.declarations.length > 0, { timeout: 5000 }).toBe(true);
+      expect(at.declarations).toStrictEqual([word]);
+    },
+  );
+
+  it('should mark each pointer the attributes track, and no other, and follow the attributes when they change', async () => {
+    const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+    const text = new TextDecoder().decode(pointer);
+    const at = await fixture(
+      {
+        ...files(5),
+        'models/part.step': text,
+        'notes/pointer.txt': text,
+        'vendor/.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n',
+        'vendor/blob.bin': text,
+      },
+      { backend: 'memory', raw: true },
+    );
+    await cut(at.actors);
+    expect(
+      await at.rooted.pendingPaths!(['models/part.step', 'notes/pointer.txt', 'vendor/blob.bin', 'dir1/f1.txt']),
+    ).toStrictEqual(['models/part.step', 'vendor/blob.bin']);
+    /* The attributes stop tracking the family: the next capture says so, and the mark ends. */
+    await at.rooted.writeFile(generatedGitattributesPath, '');
+    await cut(at.actors);
+    expect(await at.rooted.pendingPaths!(['models/part.step', 'vendor/blob.bin'])).toStrictEqual(['vendor/blob.bin']);
+  });
+
+  /* #2010's flush verifies by the paths it wrote and captures nothing: its own writes end the marks they replace (D9). */
+  it('should unmark what a fill flush filled by its paths and keep the marks of the pointers it left', async () => {
+    const encoder = new TextEncoder();
+    const object = encoder.encode('solid part a\n');
+    const { bytes: pointerA } = lfsPointerFor(object);
+    const { bytes: pointerB } = lfsPointerFor(encoder.encode('solid part b\n'));
+    const decoder = new TextDecoder();
+    const at = await fixture(
+      { ...files(3), 'models/a.step': decoder.decode(pointerA), 'models/b.step': decoder.decode(pointerB) },
+      { backend: 'memory', raw: true },
+    );
+    await cut(at.actors);
+    expect(await at.rooted.pendingPaths!(['models/a.step', 'models/b.step'])).toStrictEqual([
+      'models/a.step',
+      'models/b.step',
+    ]);
+    const live = at.rooted;
+    const capture = vi.fn(async () =>
+      captureRevisionTree(live, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
+    );
+    let temporary = 0;
+    const { materializeTree } = createApplyTreeEffects({
+      useFileSystem: async (_place, operation) => operation(live),
+      capture,
+      onApplyingTree: undefined,
+      policy: tauRevisionPolicy.policy,
+      withCheckoutFence: async (_checkoutId, operation) => operation(),
+      checkoutTreeId: async (_checkoutId, tree) => revisionTreeId(tree, 'sha1'),
+      temporarySibling: (path, role) => {
+        temporary += 1;
+        return `${path}.tau-${role}.${String(temporary)}.tmp`;
+      },
+      unlinkIfPresent: async (rooted, path) => {
+        await rooted.unlink(path).catch(() => undefined);
+      },
+    });
+
+    await materializeTree(
+      { id: 'live', projectId: 'project-1', root: '/', kind: 'live', branch: 'main', baseRevisionId: undefined },
+      new ImmutableRevisionTree([['models/a.step', object]]),
+      { before: new ImmutableRevisionTree([['models/a.step', pointerA]]), purpose: 'fill' },
+    );
+
+    expect(capture).not.toHaveBeenCalled();
+    expect(await live.readFile('models/a.step')).toStrictEqual(object);
+    expect(await at.rooted.pendingPaths!(['models/a.step', 'models/b.step'])).toStrictEqual(['models/b.step']);
+  });
+
+  /* The declaration reads the attributes as the repository does, so it names exactly what the fill fills. */
+  it('should mark a pointer the attributes track only by folding case where the repository folds it', async () => {
+    const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+    const text = new TextDecoder().decode(pointer);
+    const tree = {
+      ...files(3),
+      'vendor/.gitattributes': '*.BIN filter=lfs diff=lfs merge=lfs -text\n',
+      'vendor/blob.bin': text,
+    };
+    const folding = await fixture(tree, { backend: 'memory', raw: true, ignoreCase: true });
+    await cut(folding.actors);
+    expect(await folding.rooted.pendingPaths!(['vendor/blob.bin'])).toStrictEqual(['vendor/blob.bin']);
+    const exact = await fixture(tree, { backend: 'memory', raw: true });
+    await cut(exact.actors);
+    expect(await exact.rooted.pendingPaths!(['vendor/blob.bin'])).toStrictEqual([]);
   });
 });

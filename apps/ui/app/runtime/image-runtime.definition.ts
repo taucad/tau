@@ -1,5 +1,5 @@
 import { defineRuntime } from '@taucad/runtime/worker';
-import { imageTranscoder } from '@taucad/image';
+import { renderTranscoder } from '@taucad/image';
 
 /** Image-only runtime for direct GLB transcoding. */
-export const imageRuntime = defineRuntime({ transcoders: [imageTranscoder()] });
+export const imageRuntime = defineRuntime({ transcoders: [renderTranscoder()] });

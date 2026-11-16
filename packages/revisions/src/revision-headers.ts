@@ -40,24 +40,98 @@ export const tauCommitter = Object.freeze({ name: 'Tau', email: 'noreply@tau.new
 /** Email domain for a person who chose anonymity, in GitHub's `noreply` shape. @public */
 export const anonymousActorEmailDomain = 'users.noreply.tau.new';
 
+/**
+ * The Tau account a Tau no-reply address names: `<id>@users.noreply.tau.new`.
+ *
+ * What a commit made with git under the identity Tau gives a person carries
+ * instead of a Tau record. A pseudonym's address names no account, and
+ * any other address is not Tau's, so both answer `undefined`.
+ *
+ * @param email - A commit's author address.
+ * @returns The account id, or `undefined` when the address is not one account's Tau no-reply address.
+ * @public
+ */
+export const tauNoreplyAccountOf = (email: string): string | undefined => {
+  const suffix = `@${anonymousActorEmailDomain}`;
+  const id = email.endsWith(suffix) ? email.slice(0, -suffix.length) : '';
+  return id === '' || id.startsWith('anon:') || /[@\s<>]/u.test(id) ? undefined : id;
+};
+
+/**
+ * Who a commit Tau did not record names: its git author's name, and the
+ * Tau account its author address names when it is one person's no-reply
+ * address (a commit made with git under the identity Tau gives them).
+ *
+ * @param commit - The decoded commit.
+ * @returns The log entry's author fields.
+ * @public
+ */
+export const unrecordedAuthorOf = (
+  commit: Readonly<{ author: Readonly<{ name: string; email: string }> }>,
+): Readonly<{ authorName: string; authorAccountId?: string }> => {
+  const account = tauNoreplyAccountOf(commit.author.email);
+  return account === undefined
+    ? { authorName: commit.author.name }
+    : { authorName: commit.author.name, authorAccountId: account };
+};
+
+/**
+ * The git author line of a project linked to a forge (D33): that forge's
+ * no-reply name and address for the person recording.
+ *
+ * An input to the author line alone, beside the record and never in it (I3):
+ * no trailer, tag record or actor has a field for it. Only a GitHub no-reply
+ * address is written; any other is not, and the line falls back to the Tau
+ * no-reply address the person's id gives.
+ *
+ * @public
+ */
+export type RevisionCommitAuthor = Readonly<{ name: string; email: string }>;
+
+/** GitHub's no-reply address, `<id>+<login>@users.noreply.github.com`, as Tau Cloud's push check reads it. */
+const githubNoreplyAddress = /^\d+\+[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?@users\.noreply\.github\.com$/u;
+
+/**
+ * The commit-author input a setActor request or a linked import carries, as a schema.
+ *
+ * Strict, and only a forge's no-reply address parses, so a host refuses any
+ * other address at its boundary rather than ignoring it later.
+ *
+ * @public
+ */
+export const revisionCommitAuthorSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .regex(/^[^\n<>]+$/u),
+    email: z.string().regex(githubNoreplyAddress),
+  })
+  .strict();
+
 const textEncoder = new TextEncoder();
 
-const userActorSchema = z.object({
-  kind: z.literal('user'),
-  id: z.string(),
-  name: z.string().optional(),
-  email: z.string().optional(),
-  anonymous: z.boolean().optional(),
-});
+/* Strict, like the commit record's: a version whose actor carries an address,
+ * or any field a person or agent does not have, is not a version (I3, I7). */
+const userActorSchema = z
+  .object({
+    kind: z.literal('user'),
+    id: z.string(),
+    name: z.string().optional(),
+    anonymous: z.boolean().optional(),
+  })
+  .strict();
 
 const actorSchema = z.discriminatedUnion('kind', [
   userActorSchema,
-  z.object({
-    kind: z.literal('agent'),
-    id: z.string(),
-    runId: z.string().optional(),
-    onBehalfOf: userActorSchema.optional(),
-  }),
+  z
+    .object({
+      kind: z.literal('agent'),
+      id: z.string(),
+      runId: z.string().optional(),
+      onBehalfOf: userActorSchema.optional(),
+    })
+    .strict(),
 ]);
 
 /**
@@ -83,14 +157,26 @@ export type RevisionTrailer = Readonly<{
 }>;
 
 /* One key order for a person, whoever built the object, so two hosts derive
- * the same trailer bytes for the same identity. */
+ * the same trailer bytes for the same identity. The fields are copied, never
+ * spread: an untyped caller's extra field, an address among them, is not
+ * written (I3). */
 const canonicalPerson = (person: RevisionUserActor): RevisionUserActor => ({
   kind: 'user',
   id: person.id,
   ...(person.name === undefined ? {} : { name: person.name }),
-  ...(person.email === undefined ? {} : { email: person.email }),
   ...(person.anonymous === undefined ? {} : { anonymous: person.anonymous }),
 });
+
+/* A version's actor, copied the same way. */
+const canonicalActor = (actor: RevisionActor): RevisionActor =>
+  actor.kind === 'agent'
+    ? {
+        kind: 'agent',
+        id: actor.id,
+        ...(actor.runId === undefined ? {} : { runId: actor.runId }),
+        ...(actor.onBehalfOf === undefined ? {} : { onBehalfOf: canonicalPerson(actor.onBehalfOf) }),
+      }
+    : canonicalPerson(actor);
 
 const canonicalIdentity = (actor: RevisionIdentity): RevisionIdentity =>
   actor.kind === 'agent'
@@ -156,24 +242,37 @@ const describeActor = (actor: RevisionIdentity): string => {
 /**
  * The git author of one revision: the person, never the tool (A26).
  *
+ * The address is never the person's: it is the Tau no-reply address their id
+ * gives, or, for a project linked to a forge, that forge's no-reply address,
+ * given as its own input because no record carries an address (I3).
+ *
  * Anonymity is applied at write time, so an anonymous actor arrives here with
- * an `anon:` id and no email and gets the `noreply` address git clients already
- * treat as "no mailbox". Its `anon:` id is a hash of a salt the history never
- * records (EQ10 option (a)): signed in, the API's per-`(workspace, account)`
- * salt, an HMAC keyed with a server secret; signed out, the device's random
- * one. Without that salt the person cannot be recovered from the pseudonym,
+ * an `anon:` id and gets the `noreply` address git clients already treat as
+ * "no mailbox", never a forge's, which would name the account. Its `anon:` id
+ * is a hash of a salt the history never records (EQ10 option (a)): signed in,
+ * the API's per-`(workspace, account)` salt, an HMAC keyed with a server
+ * secret; signed out, the device's random one. Without that salt the person cannot be recovered from the pseudonym,
  * even though attributed commits beside it carry user ids.
  *
  * @param provenance - The revision's provenance.
+ * @param commitAuthor - The linked forge's no-reply identity for this person, if the project is linked to one.
  * @returns The `author` signature for the commit object.
  * @public
  */
-export const revisionAuthorSignature = (provenance: RevisionProvenance): GitSignature => {
+export const revisionAuthorSignature = (
+  provenance: RevisionProvenance,
+  commitAuthor?: RevisionCommitAuthor,
+): GitSignature => {
   const person = provenance.actor.kind === 'agent' ? provenance.actor.onBehalfOf : provenance.actor;
+  const seconds = Math.floor(provenance.createdAt / 1000);
+  const forge = person.anonymous === true ? undefined : revisionCommitAuthorSchema.safeParse(commitAuthor).data;
+  if (forge !== undefined) {
+    return { name: forge.name, email: forge.email, seconds, offsetMinutes: 0 };
+  }
   return {
     name: person.name ?? person.id,
-    email: person.email ?? `${person.id}@${anonymousActorEmailDomain}`,
-    seconds: Math.floor(provenance.createdAt / 1000),
+    email: `${person.id}@${anonymousActorEmailDomain}`,
+    seconds,
     offsetMinutes: 0,
   };
 };
@@ -255,6 +354,9 @@ export const parseRevisionCommitMessage = (message: string): RevisionTrailer | u
 /**
  * The tagger of one annotated tag: whoever named the revision.
  *
+ * Under the Tau no-reply address the person's id gives, never a forge's or
+ * their own (I3): nothing a tag is made from carries an address.
+ *
  * Falls back to Tau itself, because a tag object must have a tagger and a host
  * that names a version at publish time has no person to attribute it to.
  *
@@ -271,7 +373,7 @@ export const taggerSignature = (actor: RevisionActor | undefined, createdAt: num
   }
   return {
     name: person.name ?? person.id,
-    email: person.email ?? `${person.id}@${anonymousActorEmailDomain}`,
+    email: `${person.id}@${anonymousActorEmailDomain}`,
     seconds,
     offsetMinutes: 0,
   };
@@ -325,7 +427,7 @@ export const revisionTagMessage = (input: RevisionTagTrailer): string => {
     id: input.id,
     name: input.name,
     ...(input.note === undefined ? {} : { note: input.note }),
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    ...(input.actor === undefined ? {} : { actor: canonicalActor(input.actor) }),
   });
   return `${title === '' ? input.name : title}\n\n${tagTrailerPrefix}${trailer}\n`;
 };
@@ -361,7 +463,7 @@ export const parseRevisionTagMessage = (message: string | undefined): RevisionTa
     id: result.data.id,
     name: result.data.name,
     note: result.data.note,
-    actor: result.data.actor === undefined ? undefined : Object.freeze(result.data.actor),
+    actor: result.data.actor === undefined ? undefined : Object.freeze(canonicalActor(result.data.actor)),
   });
 };
 

@@ -98,6 +98,8 @@ type ChatTextareaDesktopProperties = {
   readonly attachmentAccept: string;
   readonly attachmentInputSupported: boolean;
   readonly status: string;
+  /** Whether Stop replaces Send (`useChatTextareaLogic`'s `canStop`). */
+  readonly canStop?: boolean;
   readonly formattedCancelKeyCombination: string;
 
   // Context data for Tiptap editor
@@ -241,6 +243,7 @@ export const ChatTextareaDesktop = memo(function ({
   attachmentAccept,
   attachmentInputSupported,
   status,
+  canStop = false,
   formattedCancelKeyCombination,
 
   // Context data
@@ -709,6 +712,7 @@ export const ChatTextareaDesktop = memo(function ({
           creationLocationControl={creationLocationControl}
           acpSessionData={acpSessionData}
           status={status}
+          canStop={canStop}
           focusEditor={focusEditor}
           handleAtButtonClick={handleAtButtonClick}
           handleFileSelect={handleFileSelect}
@@ -795,7 +799,8 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
       if (disposed) {
         return;
       }
-      const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model]');
+      /* The pending name's placeholder is cut like the name, so it too makes the labels leave first. */
+      const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model], [data-slot=trigger-model-placeholder]');
       for (let hidden = 0; hidden <= collapseSteps.length; hidden += 1) {
         for (const [index, flag] of collapseSteps.entries()) {
           bar.toggleAttribute(flag, index < hidden);
@@ -854,6 +859,7 @@ export const ChatTextareaBar = memo(function ({
   creationLocationControl,
   acpSessionData,
   status,
+  canStop = false,
   focusEditor,
   handleAtButtonClick,
   handleFileSelect,
@@ -881,6 +887,7 @@ export const ChatTextareaBar = memo(function ({
   readonly creationLocationControl?: React.ReactNode;
   readonly acpSessionData?: AcpSessionData;
   readonly status: string;
+  readonly canStop?: boolean;
   readonly focusEditor: () => void;
   readonly handleAtButtonClick: () => void;
   readonly handleFileSelect: () => void;
@@ -970,6 +977,7 @@ export const ChatTextareaBar = memo(function ({
         {dictationControl}
         <ChatTextareaSubmitButton
           status={status}
+          canStop={canStop}
           isSubmitting={isSubmitting}
           isDictating={isDictating}
           canResume={canResume}

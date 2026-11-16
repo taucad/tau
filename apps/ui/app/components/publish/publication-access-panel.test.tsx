@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
 import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';
+import type { PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const toastSuccessMock = vi.fn();
@@ -69,6 +70,44 @@ describe('PublicationAccessPanel', () => {
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /revoke friend@example.com/i })).toBeInTheDocument();
+  });
+
+  // Email bounce blueprint R9 and D5: "Not delivered", with no reason.
+  it('marks a recipient the invite email cannot reach as not delivered', () => {
+    const grant: Pick<PublicationAccessGrant, 'publicationId' | 'status' | 'createdAt' | 'revokedAt'> = {
+      publicationId: 'pub_panel',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      revokedAt: null,
+    };
+    renderPanel(
+      <PublicationAccessPanel
+        apiBaseUrl='https://api.example'
+        publicationId='pub_panel'
+        shareUrl='https://tau.example/s/tau~pub_panel'
+        visibility='private'
+        grants={[
+          {
+            ...grant,
+            id: 'pva_1',
+            recipientEmail: 'friend@example.com',
+            notDelivered: false,
+          },
+          {
+            ...grant,
+            id: 'pva_2',
+            recipientEmail: 'gone@example.com',
+            notDelivered: true,
+          },
+        ]}
+        onVisibilityChange={vi.fn()}
+        onGrantsChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('Can view')).toHaveLength(1);
+    expect(screen.getByText('Can view · Not delivered')).toBeInTheDocument();
+    expect(screen.queryByText(/spam|bounced|complain/iu)).not.toBeInTheDocument();
   });
 
   it('labels revoke controls with a tooltip', async () => {

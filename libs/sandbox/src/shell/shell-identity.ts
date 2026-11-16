@@ -232,7 +232,7 @@ export const resolveTerminalZsh = async (platform: NodeJS.Platform): Promise<Ter
 
 /**
  * Arguments that start the human Terminal's Zsh as an interactive login shell, so it reads `.zshenv`, `.zprofile`,
- * `.zshrc` and `.zlogin` from `ZDOTDIR`, which the provider sets to the person's home.
+ * `.zshrc` and `.zlogin` from `ZDOTDIR`: the provider's wrappers, which read the person's own files from their home.
  *
  * @public
  */

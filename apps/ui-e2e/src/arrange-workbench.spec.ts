@@ -146,7 +146,10 @@ test('arranges review views and a report from the live root, then restores', asy
       { timeout: 60_000 },
     )
     .toBe(true);
-  await target.expectVisible(selectors.getByRole('button', { name: /Grid .* cm, units and grid/iu }), 60_000);
+  // The grid size and unit read on Viewer settings' Grid & units row.
+  await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last());
+  await target.expectVisible(selectors.getByRole('menuitem', { name: /^Grid & units, .* cm(?:,|$)/u }), 60_000);
+  await target.keyboardPress('Escape');
   let files = await readWorkbenchTree();
   expect(JSON.parse(files[layoutPath]!)).toMatchObject({
     viewer: { kind: 'split', direction: 'row' },
@@ -254,10 +257,7 @@ export default function main() {
     )
     .toBe(true);
   await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last());
-  await target.expectVisible(
-    selectors.getByCss('[data-slot="dropdown-menu-select-item"] [role="combobox"]').filter({ hasText: 'Disabled' }),
-    60_000,
-  );
+  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Timeout, Disabled' }), 60_000);
   await target.keyboardPress('Escape');
   const beforeWorkbench = await workbenchBytes();
   const conflict = await call(

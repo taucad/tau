@@ -5,7 +5,10 @@
 import * as THREE from 'three';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { disposeViewportGizmoChildren } from '#graphics/three/controls/viewport-gizmo-adapter.js';
+import {
+  disposeViewportGizmoChildren,
+  readViewportGizmoPose,
+} from '#graphics/three/controls/viewport-gizmo-adapter.js';
 
 /** The renderer surface the cube reads while it builds: its canvas, viewport and scissor. */
 const renderer = {
@@ -83,5 +86,34 @@ describe('view cube repaint', () => {
     }
     expect([labelDisposed, labelTextureDisposed, lineDisposed].map((spy) => spy.mock.calls.length)).toEqual([1, 1, 1]);
     gizmo.dispose();
+  });
+});
+
+describe('view cube pole views', () => {
+  const axes = ['x', 'y', 'z'] as const;
+  const cases = axes.flatMap((up) => [1, -1].map((sign) => ({ up, sign })));
+
+  it.each(cases)('should present the roll the cube turned to, $up up, side $sign', ({ up, sign }) => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.up.set(0, 0, 0)[up] = 1;
+    camera.position.set(3, 4, 5);
+    camera.lookAt(0, 0, 0);
+    const gizmo = new ViewportGizmo(camera, renderer, { type: 'cube', up, container: document.body });
+    const pole = new THREE.Vector3();
+    pole[up] = sign;
+
+    gizmo.lookFrom(pole, false);
+    const pose = readViewportGizmoPose({
+      camera,
+      target: gizmo.target,
+      renderFrame: { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
+      verticalSpan: 1,
+    });
+
+    // The camera presents an upright view from the pose's direction; it has to be the one the cube turned to.
+    const presented = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(new THREE.Vector3(...pose!.direction), new THREE.Vector3(), camera.up),
+    );
+    expect(presented.angleTo(camera.quaternion)).toBeLessThan(0.01);
   });
 });

@@ -8,6 +8,13 @@
  * `require-any`, `require-not`, `vnode-type`) and refuses any other, so a runtime upgrade that writes a new filter fails
  * here instead of being read as no match. It is not Seatbelt: path resolution, firmlinks and the kernel's own checks
  * are observed only on a Mac.
+ *
+ * Two of those checks matter to a protected name and are modelled conservatively. A case-folding volume finds a name
+ * under spellings Seatbelt does not compare (`hook\u017F` for `hooks`), so a profile must spell each one itself; and a
+ * regex is matched both as characters and as UTF-8 bytes, since which one Seatbelt does is not observed here. A hard
+ * link gives a protected file a second name, which a rule on the first name does not match; Seatbelt checks `link(2)`
+ * as `file-link`, which no rule of the runtime's allows, so `(deny default)` refuses it. Which of the two names that
+ * operation is matched against is not observed here, so a caller asks for both.
  */
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js';
 import {
@@ -82,6 +89,30 @@ const text = (expression: Expression | undefined): string => {
   return expression.slice(1);
 };
 
+/** A string's UTF-8 bytes, one character per byte, so a regular expression without `u` matches them byte by byte. */
+const bytesOf = (value: string): string => Buffer.from(value, 'utf8').toString('latin1');
+
+/**
+ * Whether a profile regex matches a path. Whether Seatbelt's matcher reads a path's UTF-8 bytes or its characters is
+ * observed only on a Mac, and a pattern can answer differently under the two (`[sſ]` holds one character, or the
+ * two bytes of U+017F as two alternatives). The evaluator therefore matches both ways and refuses to decide when they
+ * disagree, so a profile is judged only where its meaning does not depend on that.
+ *
+ * @param pattern - The rule's regex source.
+ * @param path - The queried path.
+ * @returns Whether it matches, under both readings.
+ */
+const regexMatches = (pattern: string, path: string): boolean => {
+  const characters = new RegExp(pattern, 'u').test(path);
+  const bytes = new RegExp(bytesOf(pattern)).test(bytesOf(path));
+  if (characters !== bytes) {
+    throw new Error(
+      `the regex ${JSON.stringify(pattern)} answers ${JSON.stringify(path)} ${String(characters)} as characters and ${String(bytes)} as bytes`,
+    );
+  }
+  return characters;
+};
+
 const matches = (filter: Expression, query: SeatbeltQuery): boolean => {
   if (typeof filter === 'string') {
     throw new TypeError(`unexpected filter ${filter}`);
@@ -96,7 +127,7 @@ const matches = (filter: Expression, query: SeatbeltQuery): boolean => {
       return query.path === text(rest[0]);
     }
     case 'regex': {
-      return new RegExp(text(rest[0]), 'u').test(query.path);
+      return regexMatches(text(rest[0]), query.path);
     }
     case 'require-all': {
       return rest.every((inner) => matches(inner, query));

@@ -7,6 +7,16 @@ import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-
 import type { DesktopSession } from '#support/desktop-app.js';
 import { currentRun, latestCompletedRun } from '#support/acp-evidence.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
+import { loadRoutingCases, runRoutingCase, runToolCalls } from '#support/kernel-routing-smoke.js';
+import type { ToolCall } from '#support/kernel-routing-smoke.js';
+import type { Page } from 'playwright';
+/* oxlint-disable no-restricted-imports -- This projectless e2e harness cannot resolve the host package export; the
+ * reviewed profiles are the one place an agent's name, CLI, fallbacks and login command live (V14). */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Its desktop sibling owns the host package dependency.
+import { acpAgentProfiles } from '../../../packages/host/src/acp/registry.js';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Its desktop sibling owns the host package dependency.
+import type { AcpAgentProfile } from '../../../packages/host/src/acp/registry.js';
+/* oxlint-enable no-restricted-imports */
 import {
   activeChatId,
   connectPickedFolder,
@@ -125,79 +135,32 @@ if (unknownKernels.length > 0) {
   );
 }
 
-const codexAvailable = ((): boolean => {
+/** The reviewed profile with this registry id: the agent's name, CLI and adapter come from the one place Tau keeps them. */
+const profileOf = (id: string): AcpAgentProfile => {
+  const profile = acpAgentProfiles.find((candidate) => candidate.id === id);
+  if (profile === undefined) {
+    throw new Error(`No ACP agent profile ${id}. Profiles: ${acpAgentProfiles.map((each) => each.id).join(', ')}`);
+  }
+  return profile;
+};
+
+/** Whether the desktop can resolve this agent's adapter package, if it has one, and its CLI answers `--version` on PATH. */
+const agentAvailable = (profile: AcpAgentProfile): boolean => {
+  if (profile.cli === undefined) {
+    return false;
+  }
   try {
-    createRequire(join(import.meta.dirname, '../../desktop/package.json')).resolve(
-      '@agentclientprotocol/codex-acp/package.json',
-    );
-    execFileSync('codex', ['--version'], { stdio: 'ignore', timeout: 30_000 });
+    if (profile.package !== undefined) {
+      createRequire(join(import.meta.dirname, '../../desktop/package.json')).resolve(`${profile.package}/package.json`);
+    }
+    execFileSync(profile.cli, ['--version'], { stdio: 'ignore', timeout: 30_000 });
     return true;
   } catch {
     return false;
   }
-})();
-
-type ToolCall = {
-  readonly id: string;
-  readonly name: string;
-  readonly kind?: string;
-  readonly title: string;
-  input?: unknown;
-  output?: unknown;
-  isError: boolean;
-  readonly edits: string[];
 };
 
-/** Paths an ACP tool message's content parts name: the files an edit call touched. */
-const editedPaths = (content: unknown): readonly string[] =>
-  (Array.isArray(content) ? (content as unknown[]) : []).flatMap((part) =>
-    typeof part === 'object' && part !== null && 'path' in part && typeof part.path === 'string' ? [part.path] : [],
-  );
-
-/** Pair one run's tool inputs and outputs, in order, with the call metadata ACP records. */
-const runToolCalls = (events: string, runId: string): readonly ToolCall[] => {
-  const calls = new Map<string, ToolCall>();
-  for (const line of events.split('\n').filter((row) => row.trim() !== '')) {
-    const event = JSON.parse(line) as {
-      type: string;
-      runId?: string;
-      message?: {
-        role?: string;
-        toolCallId?: string;
-        toolName?: string;
-        content?: unknown;
-        isError?: boolean;
-        call?: { nativeName?: string; kind?: string };
-      };
-    };
-    const { message } = event;
-    if (
-      event.type !== 'message.appended' ||
-      event.runId !== runId ||
-      message?.toolCallId === undefined ||
-      (message.role !== 'tool-input' && message.role !== 'tool-output')
-    ) {
-      continue;
-    }
-    const call = calls.get(message.toolCallId) ?? {
-      id: message.toolCallId,
-      name: message.call?.nativeName ?? message.toolName ?? '',
-      ...(message.call?.kind === undefined ? {} : { kind: message.call.kind }),
-      title: message.toolName ?? '',
-      isError: false,
-      edits: [],
-    };
-    calls.set(message.toolCallId, call);
-    if (message.role === 'tool-input') {
-      call.input = message.content;
-    } else {
-      call.output = message.content;
-      call.isError = message.isError === true;
-    }
-    call.edits.push(...editedPaths(message.content));
-  }
-  return [...calls.values()];
-};
+const codexAvailable = agentAvailable(profileOf('codex'));
 
 /** Codex titles a search of a skill directory or reference file `Search for '<pattern>' in <slug | api-*.md>`, with no path. */
 const skillSearch = /^Search for .* in (?:cad-[\da-z-]+|geospec-authoring|workbench|(?:tau-)?api-[\w-]+\.md)$/u;
@@ -243,6 +206,60 @@ const lookupMetrics = (calls: readonly ToolCall[], model: string) => {
 const lastOutput = (calls: readonly ToolCall[], toolName: string): ToolCall | undefined =>
   calls.findLast((call) => call.title === toolName && call.output !== undefined);
 
+/** How a spec places one vendor agent: its row name, the model it runs on, and whether harmless tools run unasked. */
+type AgentChoice = {
+  readonly displayName: string;
+  /** Matches the advertised model name; absent takes the agent's first model row. */
+  readonly model?: RegExp | undefined;
+  /** Switch the composer to `Always approve` before the turn, as the Grok smoke always has. */
+  readonly alwaysApprove?: boolean | undefined;
+};
+
+/** Select the agent on its model and return the model's advertised name. */
+const chooseAgent = async (page: Page, choice: AgentChoice): Promise<string> => {
+  const { displayName, model } = choice;
+  // A device that already chose this agent on this model (the composer remembers it) needs no choice.
+  const trigger = page.getByRole('button', { name: /^Agent and model: /u }).first();
+  const placed = await trigger.getAttribute('aria-label');
+  const current = new RegExp(`^Agent and model: ${displayName}, (.+?)(?:,|$)`, 'u').exec(placed ?? '')?.[1];
+  let advertised: string;
+  if (current !== undefined && (model === undefined || model.test(current))) {
+    advertised = current;
+  } else if (model === undefined) {
+    const label = await selectAgent(page, displayName);
+    advertised = new RegExp(`^Agent and model: ${displayName}, (.+?)(?:,|$)`, 'u').exec(label)?.[1] ?? label;
+  } else {
+    await openAgentList(page);
+    await page.getByRole('option', { name: new RegExp(`^${displayName}`, 'u') }).click();
+    // The selected row's text ends with its effort label, e.g. `GPT-6-SolMedium`.
+    const texts = await page.getByRole('option').allTextContents();
+    const options = texts.map((name) => name.replace(/(?:Minimal|Low|Medium|High|Extra High|Max)$/u, ''));
+    const found = options.find((name) => model.test(name));
+    if (found === undefined) {
+      throw new Error(
+        `The ${displayName} adapter advertises no model matching ${String(model)}: ${options.join(' | ')}`,
+      );
+    }
+    await page.keyboard.press('Escape');
+    await selectAgent(page, displayName, found);
+    advertised = found;
+  }
+  if (choice.alwaysApprove === true) {
+    // Home also mounts the empty-project composer below the primary composer.
+    const permissionControl = page.getByRole('button', { name: /^Mode:/u }).first();
+    if ((await permissionControl.getAttribute('aria-label')) !== 'Mode: Always approve') {
+      await permissionControl.click();
+      await page.getByRole('option', { name: /^Always approve(?:\s|$)/u }).click();
+    }
+    await expect.poll(async () => permissionControl.getAttribute('aria-label')).toBe('Mode: Always approve');
+  }
+  return advertised;
+};
+
+/** Select Codex on the Codex model this spec runs on, and return the model's advertised name. */
+const chooseCodex = async (page: Page): Promise<string> =>
+  chooseAgent(page, { displayName: 'Codex', model: modelPattern });
+
 let session: DesktopSession | undefined;
 let seededEmail: string | undefined;
 
@@ -273,17 +290,7 @@ test.skipIf(!enabled).each(selected)(
       await expectSignedIn(page);
       await selectKernel(page, control.kernel);
       await connectPickedFolder(session);
-      await openAgentList(page);
-      await page.getByRole('option', { name: /^Codex/u }).click();
-      const options = await page.getByRole('option').allTextContents();
-      const advertised = options.find((name) => modelPattern.test(name));
-      if (advertised === undefined) {
-        throw new Error(
-          `The Codex adapter advertises no model matching ${String(modelPattern)}: ${options.join(' | ')}`,
-        );
-      }
-      await page.keyboard.press('Escape');
-      await selectAgent(page, 'Codex', advertised);
+      const advertised = await chooseCodex(page);
       const slug = await submitPrompt(page, control.prompt);
       await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
       const projectRoot = join(session.pickedDirectory, slug);
@@ -354,4 +361,86 @@ test.skipIf(!enabled).each(selected)(
   },
   // The turn alone may take the 20-minute poll above, plus launch and sign-in.
   1_500_000,
+);
+
+/**
+ * AKS-3c's desktop ACP smoke (automatic kernel selection blueprint, D9 and Appendix E): eight development cases on one
+ * real, signed-in vendor agent. Six entry-less projects under Auto (two each for BRep, electronics and computational
+ * engineering), one existing project that must keep its kernel, and one manual pick against content. A case passes
+ * when the first written entry binds an acceptable kernel; Codex's threshold is seven of eight (Tau #2250), read from
+ * the `[kernel-routing-smoke]` lines, and another agent's is set from its first recorded run.
+ *
+ * Opt-in (`TAU_E2E_AKS_ACP=true`). `TAU_E2E_AKS_AGENT` names the agent by registry id, `codex` (the default), `claude`
+ * or `grok`; `TAU_E2E_AKS_MODEL` overrides the model pattern (Codex otherwise uses this spec's
+ * `TAU_E2E_KERNEL_SKILLS_MODEL`, Grok `Grok 4.7`, Claude Code its first model row); `TAU_E2E_AKS_ONLY` names a subset
+ * of case ids. The real run is recorded on the operator's devices (ACP agent install paths blueprint, I7).
+ */
+const aksEnabled = process.env['TAU_E2E_AKS_ACP'] === 'true';
+/* A release build talks only to its channel's API, so the test user this suite seeds cannot sign in to it:
+ * `TAU_E2E_AKS_SIGNED_OUT=true` runs the vendor agent signed out. */
+const aksSignedOut = process.env['TAU_E2E_AKS_SIGNED_OUT'] === 'true';
+const aksOnly = process.env['TAU_E2E_AKS_ONLY']?.split(',').map((id) => id.trim());
+const aksModel = process.env['TAU_E2E_AKS_MODEL'];
+/** Each agent the cases run on, keyed by registry id, with the model pattern it runs when none is named. */
+const aksAgentDefaults = {
+  codex: { model: modelPattern, alwaysApprove: false },
+  claude: { model: undefined, alwaysApprove: false },
+  // As `desktop-chat-grok.spec.ts`: harmless tool calls must not stop on approvals nobody answers.
+  grok: { model: /^Grok 4\.7\b/u, alwaysApprove: true },
+} as const;
+const isAksAgent = (id: string): id is keyof typeof aksAgentDefaults => Object.hasOwn(aksAgentDefaults, id);
+const aksAgentId = process.env['TAU_E2E_AKS_AGENT'] ?? 'codex';
+if (!isAksAgent(aksAgentId)) {
+  throw new Error(
+    `TAU_E2E_AKS_AGENT names no AKS agent: ${aksAgentId}. Agents: ${Object.keys(aksAgentDefaults).join(', ')}`,
+  );
+}
+const aksProfile = profileOf(aksAgentId);
+const aksDefaults = aksAgentDefaults[aksAgentId];
+const aksChoice: AgentChoice = {
+  displayName: aksProfile.displayName,
+  model: aksModel === undefined ? aksDefaults.model : new RegExp(aksModel, 'iu'),
+  alwaysApprove: aksDefaults.alwaysApprove,
+};
+const aksCaseIds = [
+  'u3-m8-bolt',
+  'u4-cast-housing',
+  'u9-keypad-pt',
+  'u9-led-blinker',
+  'u8-cooling-jacket',
+  'u8-cold-plate',
+  'own-openscad-add-fillets',
+  'pick-picovoxel-bracket',
+].filter((id) => aksOnly === undefined || aksOnly.includes(id));
+
+test.skipIf(!aksEnabled).each(aksCaseIds)(
+  `[aks-acp] ${aksProfile.displayName} binds an acceptable kernel for %s`,
+  async (id) => {
+    expect(
+      agentAvailable(aksProfile),
+      `The ACP smoke requires the installed ${aksProfile.displayName} ${aksProfile.package === undefined ? '' : 'adapter and '}CLI.`,
+    ).toBe(true);
+    const [routingCase] = await loadRoutingCases([id]);
+    if (routingCase === undefined) {
+      throw new Error(`No development case ${id}.`);
+    }
+    const account = tauTestAccount(`aks-acp-${aksProfile.id}-${id}`);
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged && !aksSignedOut) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    try {
+      const verdict = await runRoutingCase(session, routingCase, {
+        signedOut: aksSignedOut,
+        chooseAgent: async (page) => chooseAgent(page, aksChoice),
+      });
+      expect(verdict.pass, verdict.reason).toBe(true);
+    } catch (error) {
+      await session.capture(`aks-acp-${aksProfile.id}-failure-${id}`);
+      throw error;
+    }
+  },
+  1_800_000,
 );

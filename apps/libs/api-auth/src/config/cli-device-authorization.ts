@@ -1,6 +1,6 @@
 import type { BetterAuthPlugin } from 'better-auth';
 import { deviceAuthorization } from 'better-auth/plugins';
-import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
+import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx } from 'better-auth/api';
 import { makeSignature } from 'better-auth/crypto';
 import { z } from 'zod';
 
@@ -14,7 +14,8 @@ const decisionEndpoint = (decision: 'approve' | 'deny') =>
       body: z.object({ userCode: z.string().min(4).max(32) }),
     },
     async (context) => {
-      const session = await getSessionFromCtx(context);
+      // Approval mints a session for the CLI: never from a session snapshot or a session already on the context.
+      const session = await getAuthoritativeSessionFromCtx(context);
       if (!session) {
         throw new APIError('UNAUTHORIZED', { message: 'Sign in before reviewing a CLI request.' });
       }

@@ -34,6 +34,51 @@ describe('declaration graph', () => {
     const references = await declarationImports("export type { A } from 'a'; type B = import('b').B;");
     expect(references.map((item) => item.name)).toEqual(['a', 'b']);
   });
+  it('should load an index that re-exports more than 128 modules, as date-fns does on esm.sh', async () => {
+    // The esm.sh `date-fns@4.4.0/index.d.ts` is 246 `export * from "./<name>.d.ts"` lines over a shared `types.d.ts`.
+    const base = 'https://esm.sh/date-fns@4.4.0/';
+    const names = Array.from({ length: 246 }, (_, index) => `fn${index}`);
+    const files = new Map<string, string>([
+      [`${base}index.d.ts`, names.map((name) => `export * from "./${name}.d.ts";`).join('\n')],
+      [`${base}types.d.ts`, 'export type DateArg = Date | number;'],
+      ...names.map((name): [string, string] => [
+        `${base}${name}.d.ts`,
+        `import type { DateArg } from "./types.d.ts";\nexport declare function ${name}(date: DateArg): Date;`,
+      ]),
+    ]);
+    const graph = await loadDeclarationGraph({
+      entry: `${base}index.d.ts`,
+      imports: declarationImports,
+      read: async (url) => files.get(url)!,
+      resolve: async (name, parent) => new URL(name, parent).href,
+    });
+    expect(graph.size).toBe(files.size);
+  });
+  it('should request sibling declarations together and leave the bound to the reader', async () => {
+    const base = 'https://esm.sh/pkg@1/';
+    const names = ['a', 'b', 'c'];
+    const files = new Map<string, string>([
+      [`${base}index.d.ts`, names.map((name) => `export * from "./${name}.d.ts";`).join('\n')],
+      ...names.map((name): [string, string] => [`${base}${name}.d.ts`, `export type ${name.toUpperCase()} = 1;`]),
+    ]);
+    let inFlight = 0;
+    let peak = 0;
+    await loadDeclarationGraph({
+      entry: `${base}index.d.ts`,
+      imports: declarationImports,
+      read: async (url) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        inFlight -= 1;
+        return files.get(url)!;
+      },
+      resolve: async (name, parent) => new URL(name, parent).href,
+    });
+    expect(peak).toBe(names.length);
+  });
   it('rejects incomplete graphs without publishing a partial success', async () => {
     await expect(
       loadDeclarationGraph({

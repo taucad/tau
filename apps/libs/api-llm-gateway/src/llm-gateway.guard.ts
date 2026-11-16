@@ -2,9 +2,8 @@ import { HttpStatus, Inject, Injectable, UnauthorizedException, createParamDecor
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import type { Auth } from 'better-auth';
 import type { FastifyRequest } from 'fastify';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
 import type { Environment } from '@taucad/api-core';
 import { HostsService } from '@taucad/api-hosts';
 import { createTauCorsOriginValidator } from '@taucad/api-core/utils/cors';
@@ -21,11 +20,11 @@ export class LlmGatewayAuthGuard extends AuthGuard implements CanActivate {
 
   public constructor(
     @Inject(Reflector) reflector: Reflector,
-    @Inject(authInstanceKey) auth: Auth,
+    @Inject(SessionResolver) sessions: SessionResolver,
     @Inject(HostsService) private readonly hosts: HostsService,
     @Inject(ConfigService) config: ConfigService<Environment, true>,
   ) {
-    super(reflector, auth);
+    super(reflector, sessions);
     this.validateOrigin = createTauCorsOriginValidator(
       config.get('TAU_FRONTEND_URL', { infer: true }),
       config.get('ADDITIONAL_CORS_ORIGINS', { infer: true }),

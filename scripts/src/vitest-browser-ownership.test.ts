@@ -130,7 +130,10 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-community-preview.spec.ts',
       'apps/desktop-e2e/src/desktop-converter.spec.ts',
       'apps/desktop-e2e/src/desktop-ephemeral-isolation.spec.ts',
+      // The AKS-3c kernel routing smokes drive a packaged or installed app and type their Page helpers.
+      'apps/desktop-e2e/src/desktop-kernel-skills.spec.ts',
       'apps/desktop-e2e/src/desktop-kernel-utility-cap.spec.ts',
+      'apps/desktop-e2e/src/desktop-lfs-packaged.spec.ts',
       'apps/desktop-e2e/src/desktop-machine-profiles.spec.ts',
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
@@ -145,6 +148,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/support/filesystem-projection-delivery.ts',
       'apps/desktop-e2e/src/support/filesystem-projection-fixture.test.ts',
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
+      'apps/desktop-e2e/src/support/kernel-routing-smoke.ts',
       'apps/desktop-e2e/src/support/revisions-pane.ts',
       'apps/desktop-e2e/src/support/scenario.ts',
       // Terminal qualification drives the production Electron surface and native process lifecycle.
@@ -316,6 +320,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
         'apps/ui/app/components/terminal/terminal-renderer.vitest.browser.config.ts',
+        'apps/ui/app/hooks/attachment-image.vitest.browser.config.ts',
         'apps/ui/app/machines/project-open.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',

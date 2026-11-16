@@ -2,8 +2,8 @@
 
 /**
  * `@taucad/agent-host/wire`: the one seam contract (D11). Strict payload-only schemas, the answers, the reads, the
- * hello and limits, and the refusal registry. Imports only `zod` and zod-only schemas, so the page, the CLI,
- * apps/api and the run actor share it.
+ * hello and limits, the refusal registry and the attachment media table. Imports only `zod`, zod-only schemas and
+ * the dependency-free image header reader, so the page, the CLI, apps/api and the run actor share it.
  */
 
 export {
@@ -17,6 +17,30 @@ export {
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
 export { agentWireLimits } from '#wire/limits.js';
+export {
+  attachmentImageBackground,
+  attachmentImageLimits,
+  normalizeImageAttachment,
+  sniffAttachmentMediaType,
+} from '#wire/attachment-media.js';
+export type {
+  AttachmentRefusalReason,
+  AttachmentTranscodeInput,
+  AttachmentTranscodePort,
+  NormalizedImageAttachment,
+  NormalizeImageAttachmentInput,
+} from '#wire/attachment-media.js';
+// The stored-media table and its pure helpers live in the bundled `@taucad/utils/attachment-media`, so a package that
+// needs only the table does not depend on this one (I2).
+export {
+  attachmentExtensionOf,
+  attachmentExtensions,
+  attachmentImageMediaTypes,
+  attachmentMedia,
+  attachmentMediaTypes,
+  isAttachmentMediaType,
+} from '@taucad/utils/attachment-media';
+export type { AttachmentImageMediaType, AttachmentMediaType } from '@taucad/utils/attachment-media';
 export {
   providerPermissionSchema,
   providerPermissionObservationSchema,

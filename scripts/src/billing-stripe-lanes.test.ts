@@ -27,10 +27,9 @@ const job = (path: string, name: string): Job => {
 const pinnedPostgresPull =
   /^docker pull postgres:17-alpine@(sha256:[0-9a-f]{64})\ndocker tag postgres@\1 postgres:17-alpine\n?$/u;
 
-const lanes = [
-  ['.github/workflows/ci.yml', 'billing-e2e'],
-  ['.github/workflows/billing-nightly.yml', 'billing-nightly'],
-] as const;
+// The billing nightly was retired (CI throughput review BN-1): `ci.yml` runs both billing targets, in the merge
+// queue on the commit that lands, on the same pinned image.
+const lanes = [['.github/workflows/ci.yml', 'billing-e2e']] as const;
 
 describe('credential-free billing CI', () => {
   it.each(lanes)('should execute local contracts without a credential gate in %s', (path, name) => {
@@ -53,7 +52,6 @@ describe('credential-free billing CI', () => {
 
     expect(pulls.map(({ lane }) => lane)).toEqual([
       '.github/workflows/ci.yml#billing-e2e',
-      '.github/workflows/billing-nightly.yml#billing-nightly',
       '.github/workflows/ci.yml#api',
     ]);
     expect(pulls.filter(({ digest }) => digest === undefined)).toEqual([]);
@@ -64,14 +62,13 @@ describe('credential-free billing CI', () => {
     expect(launcher).toContain("pull_policy: 'never'");
   });
 
-  it('should run every target billing-nightly runs in a planned ci.yml lane', () => {
+  it('should run both billing targets in a planned ci.yml lane, with no billing nightly', () => {
     const targets = (path: string, name: string): readonly string[] =>
       (job(path, name).steps ?? []).flatMap(
         ({ run }) => /^pnpm nx run-many -t (test:billing-[\w-]+)$/u.exec(run ?? '')?.slice(1) ?? [],
       );
 
-    const nightly = targets('.github/workflows/billing-nightly.yml', 'billing-nightly');
-    expect(nightly).toEqual(['test:billing-foundation', 'test:billing-composition']);
+    expect(existsSync(resolve(root, '.github/workflows/billing-nightly.yml'))).toBe(false);
     expect(targets('.github/workflows/ci.yml', 'billing-e2e')).toContain('test:billing-foundation');
     expect(targets('.github/workflows/ci.yml', 'api')).toContain('test:billing-composition');
     // Assembled so the source holds no template-like string literal.

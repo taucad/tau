@@ -342,6 +342,8 @@ export type FileTreeNode =
       children: FileTreeNode[];
       /** What a composed view says about this entry; absent on a raw authority listing. */
       provenance?: FileProvenance;
+      /** A folder only a tree write's arriving entries make (D10): not on disk yet. */
+      pending?: true;
     }
   | ({
       id: string;
@@ -353,6 +355,8 @@ export type FileTreeNode =
       children?: never;
       /** What a composed view says about this entry; absent on a raw authority listing. */
       provenance?: FileProvenance;
+      /** A pending entry (D9, D10): its bytes are not on the device yet; `size` is what they will be. */
+      pending?: true;
     } & StatContentMetadata);
 
 /**

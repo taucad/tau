@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LanguageId } from '@taucad/preferences';
-import { emptyDeviceRecord, emptyPersonProfile, emptyViewerPreferences, familiarProducts } from '@taucad/preferences';
+import { emptyPersonProfile, emptyViewerPreferences, familiarProducts } from '@taucad/preferences';
 import { familiarFromText } from '#components/onboarding/setup-copy.js';
 import {
   announceChangedRows,
@@ -51,14 +51,15 @@ describe('setup model', () => {
     expect(presetReason(undefined)).toBe('Tau’s default. Pick another if it is closer to what you know');
     expect(presetReason('solidworks')).toBe('Suggested because you use SolidWorks');
     expect(presetReason('slicer')).toBe('Tau’s default. Pick another if it is closer to what you know');
-    expect(presetReason('game-engine')).toBe('Suggested because you use Maya, Unity or Unreal');
+    expect(presetReason('game-engine')).toBe('Suggested because you use Maya or Unity');
     expect(presetReason('nx-creo')).toBe('Suggested because you use Creo');
+    expect(presetReason('tinkercad')).toBe('Suggested from your answer. Pick another if it is closer to what you know');
     expect(presetReason('kicad')).toBe('Tau’s default. Pick another if it is closer to what you know');
   });
 
   it('says where each preset is familiar from, from the documented products', () => {
     expect(familiarFromText(familiarProducts('middle-shift'))).toBe('Familiar from Blender and Creo');
-    expect(familiarFromText(familiarProducts('alt'))).toBe('Familiar from Maya, Unity and Unreal');
+    expect(familiarFromText(familiarProducts('alt'))).toBe('Familiar from Maya and Unity');
     expect(familiarFromText(familiarProducts('middle-ctrl'))).toBe('Familiar from SolidWorks');
     expect(familiarFromText([])).toBeUndefined();
   });
@@ -76,18 +77,12 @@ describe('setup model', () => {
       pan: [['Ctrl', 'Middle drag']],
       zoom: [['Shift', 'Middle drag'], ['Scroll']],
     });
-    expect(legendBindings('trackpad')).toEqual({
-      orbit: [['Click drag'], ['Alt', 'Two-finger scroll']],
-      pan: [['Shift', 'Click drag'], ['Two-finger scroll']],
-      zoom: [['Pinch']],
-    });
   });
 
   it('announces only the rows whose text changed', () => {
     const input = {
       profile: emptyPersonProfile,
       viewer: emptyViewerPreferences,
-      device: emptyDeviceRecord,
       kernels: browser,
       isViewerControlsEnabled: true,
     };

@@ -77,6 +77,8 @@ export type AuthService = {
   token(): string | undefined;
   /** The signed-in account's user id, once a `get-session` named it; `undefined` while signed out or unknown. */
   principal(): string | undefined;
+  /** The signed-in account's display name, learned with {@link AuthService.principal}; `undefined` when it has none. */
+  principalName(): string | undefined;
   /** Load any persisted credential. Call once at startup. */
   restore(): Promise<void>;
   /** Open the system browser and settle when a session arrives (or the attempt fails). */
@@ -131,6 +133,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
   const seeded = options.packaged ? undefined : options.seededToken;
   let token: string | undefined = seeded;
   let principal: string | undefined;
+  let principalName: string | undefined;
   let pending: PendingSignIn | undefined;
   let timer: NodeJS.Timeout | undefined;
 
@@ -166,6 +169,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
   const drop = async (): Promise<void> => {
     token = undefined;
     principal = undefined;
+    principalName = undefined;
     try {
       await unlink(credentialPath);
     } catch (error) {
@@ -187,13 +191,20 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
     return true;
   };
 
-  /* Better-auth's `get-session` answers `{ session, user }`; the user's id is the account a run is funded by. */
-  const sessionUser = async (response: Response): Promise<string | undefined> => {
+  /*
+   * Better-auth's `get-session` answers `{ session, user }`; the user's id is the account a run is funded by, and the
+   * id and name are who the Terminal's git commits as.
+   */
+  const sessionUser = async (response: Response): Promise<Readonly<{ id: string; name?: string }> | undefined> => {
     try {
       const body: unknown = await response.json();
       const user: unknown = typeof body === 'object' && body !== null ? Reflect.get(body, 'user') : undefined;
       const id: unknown = typeof user === 'object' && user !== null ? Reflect.get(user, 'id') : undefined;
-      return typeof id === 'string' ? id : undefined;
+      const name: unknown = typeof user === 'object' && user !== null ? Reflect.get(user, 'name') : undefined;
+      if (typeof id !== 'string') {
+        return undefined;
+      }
+      return typeof name === 'string' && name !== '' ? { id, name } : { id };
     } catch {
       return undefined;
     }
@@ -244,9 +255,10 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
     }
     const refreshed = await adoptRefreshedToken(response);
     const user = response.ok ? await sessionUser(response) : undefined;
-    const learned = user !== undefined && user !== principal;
+    const learned = user !== undefined && (user.id !== principal || user.name !== principalName);
     if (learned) {
-      principal = user;
+      principal = user.id;
+      principalName = user.name;
     }
     if (refreshed) {
       log('info', 'auth.token-refreshed');
@@ -277,6 +289,7 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
   return {
     token: () => token,
     principal: () => principal,
+    principalName: () => principalName,
     refresh,
 
     async restore() {

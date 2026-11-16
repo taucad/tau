@@ -172,8 +172,10 @@ export async function prepareLinkedGithubImport({
       files: setupFiles,
       provenance: {
         source: 'import',
-        /* The Tau person who linked it, so History reads it as theirs (D33). */
-        actor: { kind: 'user', id: person.id, ...author },
+        /* The Tau person who linked it, so History reads it as theirs (D33). The
+         * GitHub no-reply identity is `author`, the setup revision's author line
+         * alone; no record carries an address (I3). */
+        actor: { kind: 'user', id: person.id, ...(person.name === undefined ? {} : { name: person.name }) },
         /* The Start version, V1 (A6): History reads it as "imported from GitHub". */
         capture: startTrigger('github'),
         via: 'browser',

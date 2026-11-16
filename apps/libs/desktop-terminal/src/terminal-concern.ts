@@ -20,7 +20,12 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 
-import type { ShellProbe, TerminalSession, TerminalSessionOutcome } from '@taucad/shell-service';
+import type {
+  ShellProbe,
+  TerminalSession,
+  TerminalSessionOutcome,
+  TerminalSessionRequest,
+} from '@taucad/shell-service';
 import { terminalClientFrameSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
   TerminalAccess,
@@ -50,6 +55,11 @@ export type TerminalConcernOptions = {
   readonly isTrustedRoot: (root: string) => boolean;
   /** The physical spelling a root is keyed by. */
   readonly canonicalRoot: (root: string) => string;
+  /**
+   * The signed-in Tau account, read as each shell opens, which git in the session commits as. Absent or answering
+   * `undefined` while signed out, and git then asks who the person is.
+   */
+  readonly account?: (() => TerminalSessionRequest['account']) | undefined;
   readonly log: (event: string, detail?: unknown, level?: 'info' | 'warn') => void;
   /** How long a host-minted access request stays answerable. Milliseconds. */
   readonly accessRequestMilliseconds?: number;
@@ -420,13 +430,16 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         access,
       }: Readonly<{ settleBy: number; size: TerminalSize; access: TerminalAccess | undefined }>,
     ): Promise<TerminalRefusal | undefined> => {
-      const openTerminal = async (): Promise<TerminalSessionOutcome> =>
-        shell.openTerminal({
+      const openTerminal = async (): Promise<TerminalSessionOutcome> => {
+        const account = options.account?.();
+        return shell.openTerminal({
           projectRoot,
           size,
           signal: controller.signal,
           ...(access === undefined ? {} : { access }),
+          ...(account === undefined ? {} : { account }),
         });
+      };
       /*
        * Main's allowlist is not the shell service's: the service learns a project only when that project's agent host
        * starts, which the pane does not wait for. On the stock Debian guest the pane asked 1.8 s before it did (shell

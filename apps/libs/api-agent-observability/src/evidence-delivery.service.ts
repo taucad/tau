@@ -749,14 +749,14 @@ export class EvidenceDeliveryService implements OnModuleInit, OnModuleDestroy {
       new Date(row.observedAt.getTime() - 60_000),
       this.shutdown.signal,
     );
-    if (found === 'present') {
+    if (found === 'present' || found === 'present-root') {
       const settled = await this.settle(row, { kind: 'confirmed' });
       /*
        * An acknowledged send was counted at its answer; one whose answer was uncertain is counted once it is found.
-       * Its payload is gone by then, so only the object read back is counted.
+       * Its payload is gone by then, so only the object read back is counted, with a trace when it has no parent.
        */
       if (settled !== 'lease-lost' && row.reason !== 'acknowledged') {
-        this.countUnits({ observations: 1, traces: 0 });
+        this.countUnits({ observations: 1, traces: found === 'present-root' ? 1 : 0 });
       }
       return settled;
     }

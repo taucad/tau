@@ -24,7 +24,7 @@ import { createActor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 
 import { createAcpExternalAgentPort } from '#acp/index.js';
-import type { AcpAdapter } from '#acp/index.js';
+import type { AcpAdapter, AgentMediaTranscoder } from '#acp/index.js';
 import { createHostToolRegistry, createHostWebResearchClient } from '#agent-tools.js';
 import type { HostRuntimeClient, HostToolFileSystem, HostToolRegistryOptions } from '#agent-tools.js';
 import { projectHostMachine } from '#project-host.machine.js';
@@ -106,6 +106,7 @@ export type ProjectHostOptions = Pick<
   | 'apiBaseUrl'
   | 'tauCredential'
   | 'syncTelemetryPlacement'
+  | 'syncTelemetryConsent'
   | 'via'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
@@ -128,6 +129,11 @@ export type ProjectHostOptions = Pick<
     revisionActor?: RevisionUserActor | undefined;
     /** The adapters this machine discovered; the host builds the ACP port over its own checkouts. */
     externalAgents?: Readonly<{ agents: readonly AcpAdapter[]; mcpUrl: () => string }> | undefined;
+    /**
+     * The runtime's image transcoder for agent media (WP6): an ACP agent's AVIF, GIF or oversized image is filed as
+     * the JPEG it converts to. Absent, agent media is filed as sent.
+     */
+    mediaTranscoder?: AgentMediaTranscoder | undefined;
     /** Each revision fact; reporting only, never fatal. */
     onRevisionEvent: (event: HostRevisionEvent) => void;
     /**
@@ -470,6 +476,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.apiBaseUrl === undefined ? {} : { apiBaseUrl: options.apiBaseUrl }),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
     ...(options.syncTelemetryPlacement === undefined ? {} : { syncTelemetryPlacement: options.syncTelemetryPlacement }),
+    ...(options.syncTelemetryConsent === undefined ? {} : { syncTelemetryConsent: options.syncTelemetryConsent }),
     events: options.onRevisionEvent,
   });
 
@@ -565,6 +572,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
             workspaceRoot,
             checkouts,
             ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
+            ...(options.mediaTranscoder === undefined ? {} : { mediaTranscoder: options.mediaTranscoder }),
             mcp: {
               /* Read per run: the caller's listener may bind after this host exists. */
               get url(): string {

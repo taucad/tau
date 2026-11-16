@@ -27,7 +27,7 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { EditorDocument } from '#lib/editor-document.js';
 import type * as UseFeatureModule from '#flags/use-feature.js';
 
@@ -1206,19 +1206,70 @@ describe('Revisions pane vocabulary and History', () => {
     },
   );
 
-  /* M2 (I6, S20): an unlocated line is loading geometry, never *No revisions yet*, never `main`. */
-  it('renders History’s loading geometry while the line is unknown', async () => {
+  /* The pane's host is the History landmark (the phone surface, the Workbench tab), so the list is a named group:
+     a second `region` called History fails axe's landmark-unique on the phone sheet. */
+  it('names its History card as a group, never a second History landmark', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toContainElement(screen.getByRole('heading', { name: 'History' }));
+    expect(screen.queryByRole('region', { name: 'History' })).not.toBeInTheDocument();
+  });
+
+  /* M2 (I6, S20): an unlocated line is History's busy frame, never *No revisions yet*, never `main`. */
+  it('renders History’s busy frame while the line is unknown', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
 
     renderPane();
 
-    expect(await screen.findByRole('status', { name: 'Loading history' })).toHaveAttribute('aria-busy', 'true');
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(within(card).getByTestId('history-skeleton')).toBeInTheDocument();
     expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'History' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Where you are' })).not.toHaveTextContent('main');
     /* HQ7: nothing is offered over a line nobody has located yet. */
     expect(screen.queryByRole('button', { name: /Switch branch/u })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument();
+  });
+
+  /* History while it loads draws skeleton rows, and the branch chip a skeleton pill. */
+  it('draws skeleton rows in History and a skeleton branch chip while History loads', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+
+    renderPane();
+
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(within(card).getAllByTestId('history-skeleton')).toHaveLength(1);
+    expect(
+      screen.getByRole('region', { name: 'Where you are' }).querySelector('[data-slot="skeleton"]'),
+    ).not.toBeNull();
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No history yet')).not.toBeInTheDocument();
+  });
+
+  /* S20 (I6): a wait that ends in an empty History ends its indicator at once: *Loading history…* is never on screen
+     with *No history yet*, even after the indicator has shown. */
+  it('never shows Loading history with No history yet when a shown wait ends empty', async () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(0);
+    onTestFinished(() => {
+      now.mockRestore();
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'unknown' } };
+    const { rerender } = render(<RevisionsPanelBody />, { wrapper });
+    const card = await screen.findByRole('group', { name: 'History' });
+    expect(card).toHaveAttribute('aria-busy', 'true');
+
+    now.mockReturnValue(1200);
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, line: { kind: 'branch', name: 'main' } };
+    rerender(<RevisionsPanelBody />);
+
+    await waitFor(() => {
+      expect(card).toHaveTextContent('No history yet');
+    });
+    expect(card).not.toHaveTextContent('Loading history');
   });
 
   /*

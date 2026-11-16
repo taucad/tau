@@ -100,7 +100,6 @@ export function RemoteComputeSettings(): React.JSX.Element {
             description='Approve only if your Tau CLI shows this code. The device will run your project code.'
             control={
               <Button
-                size='sm'
                 disabled={busy}
                 onClick={async () => {
                   await approve();
@@ -120,7 +119,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
             ) : undefined
           }
           control={
-            <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
+            <Button variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
               Use local
             </Button>
           }
@@ -134,7 +133,6 @@ export function RemoteComputeSettings(): React.JSX.Element {
             control={
               <>
                 <Button
-                  size='sm'
                   variant='outline'
                   disabled={busy || !device.online}
                   onClick={() => {

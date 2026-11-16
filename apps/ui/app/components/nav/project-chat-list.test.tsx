@@ -76,6 +76,7 @@ vi.mock('react-router', () => ({
   useLocation: () => ({ search }),
   useNavigate: () => mockNavigate,
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
+  useRouteLoaderData: () => undefined,
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarMenuButton: ({ children, ...properties }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -625,5 +626,36 @@ describe('ProjectChatList', () => {
     mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [{ ...chat(1), recencyAt: now }] });
     render(<ProjectChatList project={project} isProjectActive />);
     expect(screen.queryAllByText('Earlier')).toHaveLength(1);
+  });
+
+  describe('loading', () => {
+    /** The sidebar rows the project's chat list draws: skeletons, chats and labels alike. */
+    const chatListRowCount = (): number => document.querySelectorAll(`#project-chats-${project.id} > li`).length;
+
+    it('draws three generic skeleton rows and is busy until the chat listing answers', () => {
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [], isLoading: true });
+      const view = render(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(screen.getAllByTestId('project-chat-skeleton')).toHaveLength(3);
+      expect(chatListRowCount()).toBe(3);
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.queryByText('No chats yet')).not.toBeInTheDocument();
+      expect(document.querySelector(`#project-chats-${project.id}`)).toHaveAttribute('aria-busy', 'true');
+
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [chat(1), chat(2)] });
+      view.rerender(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(screen.queryAllByTestId('project-chat-skeleton')).toHaveLength(0);
+      expect(screen.getAllByRole('link')).toHaveLength(2);
+      expect(document.querySelector(`#project-chats-${project.id}`)).not.toHaveAttribute('aria-busy');
+    });
+
+    it('draws no skeleton rows over chats already listed during a refresh', () => {
+      mockUseChatRecords.mockReturnValue({ ...defaultChatsResult, chats: [chat(1)], isLoading: true });
+      render(<ProjectChatList project={project} isProjectActive={false} />);
+
+      expect(screen.queryAllByTestId('project-chat-skeleton')).toHaveLength(0);
+      expect(screen.getAllByRole('link')).toHaveLength(1);
+    });
   });
 });

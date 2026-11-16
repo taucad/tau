@@ -55,7 +55,6 @@ const capturedFields = (record: WorkbenchView): Pick<WorkbenchView, 'fieldOfView
       grid: values['display.grid'],
       axes: values['display.axes'],
       matcap: values['display.matcap'],
-      postProcessing: values['display.postProcessing'],
     },
   };
 };

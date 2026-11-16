@@ -64,9 +64,6 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
-          "env": "TAU_TELEMETRY_HOST"
-        },
-        {
           "env": "COMMIT_REF"
         },
         {
@@ -206,6 +203,97 @@
         "command": "node --import @oxc-node/core/register apps/ui/scripts/check-desktop-payload.mts"
       }
     },
+    "check-critical-budget": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Critical-path budget gate (progressive loading guard G3 and shell invariant 7): measures each route class's interactive tier in the web client build (brotli bytes, requests, largest chunk) against critical-budget.json, names any heavy module family (AI SDK, three.js, kernels, editor, telemetry) among the tier's module ids, and fails when a document may preload a kernel, wasm or worker asset. Reads the module-id manifest `ui:build` writes to build/client-module-ids.json. CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-critical-budget.mts",
+        "{projectRoot}/scripts/critical-path.mts",
+        "{projectRoot}/critical-budget.json",
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-critical-budget.mts"
+      }
+    },
+    "check-static-shells": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Static-shell gate (progressive loading PL3, shell invariants 1, 2, 5 and 6): for each static-shell class of app/lib/route-classes.ts, renders the shell through the web server build for two different visitors a day apart and requires the prerendered bytes, the function's own document for a real URL of the class, the build id /health/build answers, the function document's isolation, CSP, reporting and document policies on the static headers (netlify.toml and the _headers the build writes), and no rendered placeholder. Runs with the build's environment (TAU_API_URL, TAU_WEBSOCKET_URL, TAU_FRONTEND_URL, as ci.yml sets them workflow-wide). CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-static-shells.mts",
+        "{projectRoot}/scripts/write-content-security-policy-headers.mts",
+        "{projectRoot}/app/lib/route-classes.ts",
+        "{projectRoot}/app/lib/content-security-policy.server.ts",
+        "{projectRoot}/netlify.toml",
+        {
+          "env": "TAU_API_URL"
+        },
+        {
+          "env": "TAU_WEBSOCKET_URL"
+        },
+        {
+          "env": "TAU_FRONTEND_URL"
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{server/**,client/**/*.html}"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-static-shells.mts"
+      }
+    },
+    "size": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "SSR bundle budget (SSR bundle policy): fails when the web build's server output (`du -sk build/server`, after ui:build moved the server source maps out) or its index.js exceeds the budget in scripts/check-ssr-bundle-budget.mts, or when a server file deep-imports @react-three/drei/core. Re-based in RR0 on the output check-server-output keeps clean. CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-ssr-bundle-budget.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/server/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-ssr-bundle-budget.mts"
+      }
+    },
+    "check-server-output": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8): fails when a server output holds a .wasm file, a worker bundle or a file also in its client/assets. Checks the web build (ssr: true, so build/server must exist), the desktop renderer build and the `tau serve` build (both ssr: false, so React Router 7 deletes build/server; one left behind is checked). The docs site has its own docs:check-server-output. CI's build lane runs it whenever this app is affected; build and build:desktop are already in that lane, build:serve is added by this target."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-server-output.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/{server,client/assets}/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build"
+      }
+    },
     "build:serve": {
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets", "csharp-language:prepare", "openscad-language:prepare"],
@@ -215,9 +303,6 @@
         "^production",
         {
           "env": "TAU_CLOUD_ENABLED"
-        },
-        {
-          "env": "TAU_TELEMETRY_HOST"
         },
         {
           "env": "GEOSPEC_MT_STAGED_PACKAGE_ROOT"
@@ -367,33 +452,159 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Real-browser source editor acceptance on the affected CI browser lane."
+        "description": "Real-browser source editor, chat lane and composer image conversion acceptance (raster host parity over the web-worker transport) on the affected CI browser lane."
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts"
+        "parallel": false,
+        "commands": [
+          "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project chromium"
+        ]
       }
     },
     "test:e2e": {
-      "executor": "nx:run-commands",
+      "executor": "nx:noop",
+      "dependsOn": [
+        "test:e2e:chat-viewer",
+        "test:e2e:agent-host",
+        "test:e2e:editor-layout",
+        "test:e2e:chat-message-queue",
+        "test:e2e:viewer-resize",
+        "test:e2e:chat-print",
+        "test:e2e:follow-latest-output",
+        "test:e2e:terminal-renderer",
+        "test:e2e:history-lanes"
+      ],
       "metadata": {
-        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
-      },
+        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
+      }
+    },
+    "test:e2e:chat-viewer": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
       "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The CAD viewer's real Dockview header and viewer bar suite (chat-viewer.vitest.browser.config.ts). One task of test:e2e."
+      },
       "options": {
         "cwd": "{projectRoot}",
-        "commands": [
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
-        ],
-        "parallel": false
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:agent-host": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The agent host worker suite for capabilities, recovery and channel diagnostics (agent-host.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:editor-layout": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The editor layout suite (editor-layout.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:chat-message-queue": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The chat message queue suite (chat-message-queue.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:viewer-resize": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The SVG and GPU viewer resize suite (viewer-resize.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:chat-print": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The chat print suite (chat-print.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:follow-latest-output": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The follow-latest-output suite (use-follow-latest-output.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:terminal-renderer": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "The terminal renderer suite (terminal-renderer.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
+      }
+    },
+    "test:e2e:history-lanes": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "metadata": {
+        "description": "History's lanes suite (history-lanes.vitest.browser.config.ts). One task of test:e2e."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:queue": {
+      "executor": "nx:noop",
+      "dependsOn": ["test:e2e:attachment-image-engines"],
+      "metadata": {
+        "description": "The ui end-to-end suites admitted to the merge queue (ci.yml lane e2e-queue, CI decomposition blueprint DC-23/DC-24): each runs as its own row whenever ui is affected, and e2e-nightly.yml leaves it out."
+      }
+    },
+    "test:e2e:attachment-image-engines": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "Composer image conversion host parity (c): the attachment-image suite, raster golden parity included, in Firefox and WebKit over the web-worker transport (attachment-image.vitest.browser.config.ts). Admitted to the merge queue through test:e2e:queue (about 20 s, green twice from a cold cache); Chromium parity (b) stays on the browser lane's verify-browser."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
       }
     },
     "sourcemaps": {
@@ -429,7 +640,17 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
+    },
+    "formal:wide": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The nightly-tier TLA+ configs under specs/ (the wide bounds), run on the schedule by formal-nightly.yml. Not named formal:nightly, which ci.yml runs in the merge queue for every affected project."
+      },
+      "options": {
+        "command": "node tools/formal/src/cli.ts check --tier nightly apps/ui"
+      }
     }
   }
 }

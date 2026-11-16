@@ -11,6 +11,11 @@ describe('page shell and populated Projects', () => {
     await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
     await target.navigate('/projects');
     await target.expectVisible(selectors.getByRole('searchbox', { name: 'Search projects' }), 60_000);
+    // The shell paints its controls before the catalog resolves (#1554), so wait for the first card, not the toolbar.
+    await target.expectVisible(
+      selectors.getByRole('list', { name: 'Projects', exact: true }).getByRole('listitem').first(),
+      60_000,
+    );
     const geometry = await target.evaluate(() => {
       const scroller = document.querySelector('main > section');
       const card = document.querySelector('ul[aria-label="Projects"] > li');

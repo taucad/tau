@@ -28,7 +28,6 @@ const away: ViewFieldValues = {
   'display.grid': false,
   'display.axes': false,
   'display.matcap': true,
-  'display.postProcessing': true,
   'grid.unit': 'in',
 };
 
@@ -41,7 +40,6 @@ const personal: Required<PersonViewFieldDefaults> = {
   'display.grid': false,
   'display.axes': false,
   'display.matcap': true,
-  'display.postProcessing': true,
   'grid.unit': 'cm',
 };
 
@@ -123,7 +121,7 @@ describe('resolveViewSettings', () => {
   });
 
   it('resolves an old fully written file as set where it differs and inherited where it does not', () => {
-    // A build without the feature wrote every leaf, post-processing on (a view created with no active viewer).
+    // A build without the feature wrote every leaf, edges off and the retired post-processing toggle on.
     const old = workbenchRecords.view.read(
       new TextEncoder().encode(
         JSON.stringify({
@@ -134,7 +132,7 @@ describe('resolveViewSettings', () => {
           upDirection: 'z',
           display: {
             surfaces: true,
-            lines: true,
+            lines: false,
             gizmo: true,
             grid: true,
             axes: true,
@@ -154,8 +152,8 @@ describe('resolveViewSettings', () => {
       person: personal,
       view,
     });
-    expect(resolved.sources['display.postProcessing']).toBe('view');
-    expect(resolved.values['display.postProcessing']).toBe(true);
+    expect(resolved.sources['display.lines']).toBe('view');
+    expect(resolved.sources['display.matcap']).toBe('person');
     expect(resolved.sources['display.grid']).toBe('person');
     expect(resolved.sources.upDirection).toBe('tau');
     // With no person, every leaf renders what the file holds.

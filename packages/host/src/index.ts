@@ -61,13 +61,16 @@ export type {
   RevisionFileRead,
   RevisionOpenOutcome,
   RevisionPublishOutcome,
+  RevisionBackupOutcome,
   RevisionSaveOutcome,
   RevisionSwitchOutcome,
+  RevisionTagOutcome,
   TurnCheckout,
   TurnConflictedEvent,
   TurnFailedEvent,
   TurnFinalizedEvent,
 } from '#revisions.js';
+export type { RevisionEngineFailure, RevisionEngineFailureCode } from '#revision-engine-failures.js';
 export { isolationHeaders, serveStaticUi } from '#static-ui.js';
 export type { StaticUiHandler, StaticUiOptions } from '#static-ui.js';
 export { createProjectHost, createProjectHostActor } from '#project-host.js';
@@ -147,6 +150,7 @@ export {
   openAcpSession,
   probeAcpAgentModels,
   probeAcpAgents,
+  resolveAcpAdapterExecutable,
   resolveAcpAdapters,
   spawnAcpAdapter,
   tauMcpServerName,
@@ -156,14 +160,20 @@ export type {
   AcpAdapterRefusal,
   AcpAgentDiscovery,
   AcpAgentProfile,
+  AcpExecutableFileSystem,
   AcpExternalAgentPortOptions,
   AcpPromptTurn,
   AcpAgentFacts,
   AcpLimitReset,
   AcpSession,
+  AcpShellCommand,
+  AcpSupportedPlatform,
   AcpTurnOutcome,
   AcpWireFrame,
+  AgentMediaTranscoder,
+  AgentMediaTranscoding,
   OpenAcpSessionOptions,
+  ReviewedAcpAgentProfile,
   SpawnedAcpAdapter,
 } from '#acp/index.js';
 export {

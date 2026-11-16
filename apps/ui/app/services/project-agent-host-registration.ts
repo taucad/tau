@@ -2,15 +2,42 @@ import { desktopBridge, isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { registrationProbeChatId } from '@taucad/ui-core/lib/chat-observation-guard';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
+import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { StorageDurabilityClass } from '@taucad/agent-host';
+import type { FileSystemBackend } from '@taucad/types';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 
 export type ProjectAgentHostRegistration = Readonly<{ release: () => Promise<void> }>;
 
+/*
+ * The log class each storage provider declares (`packages/filesystem` providers), which is what the worker's host
+ * opens for the project. Only `exclusive-append` needs the origin-private filesystem and its sync access handle.
+ */
+const backendDurability: Readonly<Record<FileSystemBackend, StorageDurabilityClass>> = {
+  opfs: 'exclusive-append',
+  indexeddb: 'transactional-rewrite',
+  webaccess: 'stream-append',
+  memory: 'ephemeral',
+  node: 'transactional-rewrite',
+};
+
+/* A project whose storage row cannot be read keeps the strictest probe. */
+const projectDurability = async (projectId: string): Promise<StorageDurabilityClass> => {
+  try {
+    const config = await getProjectFileSystemConfig(projectId);
+    return config === undefined ? 'exclusive-append' : backendDurability[config.backend];
+  } catch {
+    return 'exclusive-append';
+  }
+};
+
 /**
  * Prove this project's local agent host is usable and retain its host resource.
  *
- * Browser registration runs the real worker capability request. Desktop opens
+ * Browser registration runs the real worker capability request for the log the
+ * project's own storage provides: an IndexedDB project needs no origin-private
+ * filesystem, so a session without one still opens it. Desktop opens
  * the real launcher channel and performs a read-only attach before the
  * session may report ready.
  */
@@ -19,7 +46,7 @@ export const registerProjectAgentHost = async (
   attachmentId: string,
 ): Promise<ProjectAgentHostRegistration> => {
   if (!isDesktopTarget) {
-    const capability = await probeBrowserAgentHostCapability();
+    const capability = await probeBrowserAgentHostCapability({ durability: await projectDurability(projectId) });
     if (!capability.supported) {
       throw new Error(`Browser agent host is unavailable: ${capability.reason}`);
     }

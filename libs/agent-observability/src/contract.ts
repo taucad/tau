@@ -79,6 +79,8 @@ const phaseInterval = z
     end: z.number().nonnegative().nullable(),
   })
   .refine((value) => value.end === null || value.end >= value.start, 'Interval end precedes start');
+/* The kinds of host a run ran on, as a run's outcome and its tools name them. */
+const runHost = z.enum(['browser', 'desktop', 'cloud', 'cli']);
 const summary = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('instruction'),
@@ -145,6 +147,11 @@ const summary = z.discriminatedUnion('kind', [
     outcome,
     revisionBefore: digest.nullable(),
     revisionAfter: digest.nullable(),
+    /*
+     * The host, kernel and model of the run the tool ran in, as the run's outcome names them, so a tool row carries the
+     * same labels as its run's root and generations (LW17). Optional so an older host's fact still admits.
+     */
+    labels: z.strictObject({ host: runHost.nullable(), kernel: id.nullable(), model: id.nullable() }).optional(),
   }),
   z.strictObject({
     kind: z.literal('transformation'),
@@ -190,7 +197,7 @@ const summary = z.discriminatedUnion('kind', [
           priorTurns: count,
           modelCalls: count,
           toolCalls: count,
-          host: z.enum(['browser', 'desktop', 'cloud', 'cli']).nullable(),
+          host: runHost.nullable(),
           kernel: id.nullable(),
           model: id.nullable(),
         })

@@ -3,6 +3,8 @@
  * all-or-nothing install, prior version survives an interrupted install, API
  * and cross-origin requests bypass the worker entirely, navigation falls back
  * to the neutral document offline, and stored responses replay their headers.
+ * Time is the fake scope's own manual clock, so the navigation bound is driven
+ * step by step with no real waiting.
  */
 import { expect, it } from 'vitest';
 import {
@@ -44,14 +46,37 @@ type FakeScope = OfflineShellScope & {
   readonly messages: OfflineShellMessage[];
   /** Paths the network refuses, simulating an interrupted install or an offline device. */
   readonly failures: Set<string>;
+  /** URLs whose network answer stays pending until the test settles it through `held`. */
+  readonly stalled: Set<string>;
+  /** The pending network answer of each stalled URL that has been fetched. */
+  readonly held: Map<string, HeldAnswer>;
+  setTimeout(callback: () => void, ms: number): number;
+  clearTimeout(handle: number | undefined): void;
+  /** Moves the manual clock forward, firing every timer that falls due. */
+  advance(ms: number): void;
+  /** Timers still scheduled on the manual clock. */
+  pendingTimers(): number;
 };
+
+/** A network answer the test settles by hand. */
+type HeldAnswer = { resolve(response: Response): void; reject(error: unknown): void };
 
 const createScope = (): FakeScope => {
   const messages: OfflineShellMessage[] = [];
   const failures = new Set<string>();
+  const stalled = new Set<string>();
+  const held = new Map<string, HeldAnswer>();
   const stores = new Map<string, FakeCache>();
+  const timers = new Map<number, { readonly at: number; readonly callback: () => void }>();
+  let now = 0;
+  let nextHandle = 1;
 
   const fetch = async (input: string): Promise<Response> => {
+    if (stalled.has(input)) {
+      return new Promise<Response>((resolve, reject) => {
+        held.set(input, { resolve, reject });
+      });
+    }
     if (failures.has(input)) {
       throw new TypeError('Failed to fetch');
     }
@@ -88,7 +113,29 @@ const createScope = (): FakeScope => {
     location: { origin },
     messages,
     failures,
+    stalled,
+    held,
     fetch,
+    setTimeout: (callback, ms) => {
+      const handle = nextHandle++;
+      timers.set(handle, { at: now + ms, callback });
+      return handle;
+    },
+    clearTimeout: (handle) => {
+      if (handle !== undefined) {
+        timers.delete(handle);
+      }
+    },
+    advance: (ms) => {
+      now += ms;
+      for (const [handle, timer] of [...timers].sort(([, a], [, b]) => a.at - b.at)) {
+        if (timer.at <= now) {
+          timers.delete(handle);
+          timer.callback();
+        }
+      }
+    },
+    pendingTimers: () => timers.size,
     clients: {
       matchAll: async () => [
         {
@@ -259,4 +306,139 @@ it('never serves from an incomplete cache', async () => {
   await expect(respondFromOfflineShell(scope, manifest, request(`${origin}/assets/entry-aaa.js`))).rejects.toThrow(
     TypeError,
   );
+});
+
+/** Lets every queued promise reaction run; no clock time passes. */
+const settle = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+/** Whether a promise has settled yet, without waiting for it. */
+const peek = async <T>(
+  promise: Promise<T>,
+): Promise<{ readonly settled: true; readonly value: T } | { readonly settled: false }> => {
+  await settle();
+  const pending = Symbol('pending');
+  const value = await Promise.race([promise, Promise.resolve(pending)]);
+  return value === pending ? { settled: false } : { settled: true, value: value as T };
+};
+
+const usageUrl = `${origin}/usage`;
+
+/** An installed shell whose `/usage` navigation is held on the network. */
+const stalledNavigation = async (): Promise<{ readonly scope: FakeScope; readonly cached: Response | undefined }> => {
+  const scope = createScope();
+  await installOfflineShell(scope, manifest);
+  scope.stalled.add(usageUrl);
+  const cache = await scope.caches.open(offlineShellCacheName('v1'));
+  return { scope, cached: await cache.match('/usage') };
+};
+
+const held = (scope: FakeScope): HeldAnswer => {
+  const answer = scope.held.get(usageUrl);
+  if (answer === undefined) {
+    throw new Error('The navigation never reached the network.');
+  }
+  return answer;
+};
+
+it('U24: a navigation with no response for 3,000 ms is answered with the cached neutral shell', async () => {
+  const { scope, cached } = await stalledNavigation();
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  scope.advance(3000);
+
+  const outcome = await peek(response);
+  expect(outcome.settled && outcome.value).toBe(cached);
+});
+
+it('serves the network when it answers at 2,999 ms', async () => {
+  const { scope } = await stalledNavigation();
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  scope.advance(2999);
+  const early = await peek(response);
+  expect(early.settled).toBe(false);
+  held(scope).resolve(new Response('network:/usage', { headers: isolationHeaders }));
+
+  const served = await response;
+  expect(await served?.text()).toBe('network:/usage');
+});
+
+it('falls back to the neutral document at once when the network fails', async () => {
+  const { scope, cached } = await stalledNavigation();
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  held(scope).reject(new TypeError('Failed to fetch'));
+
+  const outcome = await peek(response);
+  expect(outcome.settled && outcome.value).toBe(cached);
+});
+
+it('clears the navigation timer when the network wins', async () => {
+  const { scope } = await stalledNavigation();
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  held(scope).resolve(new Response('network:/usage'));
+  await response;
+
+  expect(scope.pendingTimers()).toBe(0);
+});
+
+it('keeps waiting for the network at 3,000 ms when no document is cached', async () => {
+  const { scope } = await stalledNavigation();
+  const cache = scope.caches.stores.get(offlineShellCacheName('v1'));
+  cache?.entries.delete('/usage');
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  scope.advance(3000);
+  const atBound = await peek(response);
+  expect(atBound.settled).toBe(false);
+  held(scope).resolve(new Response('network:/usage'));
+
+  const served = await response;
+  expect(await served?.text()).toBe('network:/usage');
+});
+
+it('leaves no unhandled rejection when the network fails after the fallback', async () => {
+  const { scope, cached } = await stalledNavigation();
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', record);
+  try {
+    const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+    await settle();
+    scope.advance(3000);
+    expect(await response).toBe(cached);
+
+    held(scope).reject(new TypeError('Failed to fetch'));
+    await settle();
+    await settle();
+  } finally {
+    process.off('unhandledRejection', record);
+  }
+
+  expect(unhandled).toStrictEqual([]);
+});
+
+it('discards a late network answer instead of storing it', async () => {
+  const { scope, cached } = await stalledNavigation();
+
+  const response = respondFromOfflineShell(scope, manifest, navigation(usageUrl));
+  await settle();
+  scope.advance(3000);
+  expect(await response).toBe(cached);
+  held(scope).resolve(new Response('session-rendered:/usage'));
+  await settle();
+
+  const cache = await scope.caches.open(offlineShellCacheName('v1'));
+  expect(await cache.match('/usage')).toBe(cached);
 });

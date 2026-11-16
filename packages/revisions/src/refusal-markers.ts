@@ -101,3 +101,28 @@ export const versionNumberTakenMarker = 'Tau: version number taken';
  */
 export const isVersionNumberRefusal = (message: string | undefined): boolean =>
   message?.includes(versionNumberTakenMarker) ?? false;
+
+/**
+ * The fixed first words of a hosted-remote refusal that names one commit of
+ * the push: one that does not name its pusher, one with an address Tau Cloud
+ * does not keep, or one Tau did not record and was not made with the pusher's
+ * Tau identity. The server prints it from `commitRefusalMarker` in
+ * `apps/libs/api-git-core/src/git.constants.ts`; those two copies, both
+ * tested, are the only ones.
+ */
+export const commitRefusalMarker = 'Tau: refused commit';
+
+/**
+ * Whether a refusal the remote wrote refuses a commit for what it records.
+ *
+ * The commit stays in every later push of its branch, so a retry is refused
+ * the same way: only the person can clear it, by making that commit again
+ * (the sentence says how) and asking for *Try again*. The scheduler files it
+ * as terminal, so the refusal is shown once rather than on every backoff.
+ *
+ * @param message - The sentence the remote sent, verbatim.
+ * @returns True when the remote refused a named commit.
+ * @public
+ */
+export const isCommitRefusal = (message: string | undefined): boolean =>
+  message?.includes(commitRefusalMarker) ?? false;

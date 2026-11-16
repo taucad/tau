@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { nightlyProject } from '#check.js';
+import { checkProject, nightlyProject } from '#check.js';
 
 const roots: string[] = [];
 
@@ -116,4 +116,56 @@ it('should reject a symlinked simulation parent without deleting outside files',
   expect(readFileSync(victim, 'utf8')).toBe('keep me');
   expect(existsSync(path.join(outside, 'simulated/.skipped'))).toBe(false);
   expect(lines.some((line) => line.includes('symlink'))).toBe(true);
+});
+
+const familyProject = (): { readonly root: string; readonly projectRoot: string } => {
+  const root = mkdtempSync(path.join(tmpdir(), 'formal-family-'));
+  roots.push(root);
+  const projectRoot = path.join(root, 'packages/example');
+  for (const family of ['alpha', 'beta']) {
+    mkdirSync(path.join(projectRoot, 'specs', family), { recursive: true });
+    writeFileSync(path.join(projectRoot, 'specs', family, 'expected.json'), JSON.stringify({ configs: {} }));
+  }
+  return { root, projectRoot };
+};
+
+it('should check one family under its own target name when --family names it', async () => {
+  const { root, projectRoot } = familyProject();
+  const lines: string[] = [];
+
+  const status = await checkProject(
+    { root, env: { PATH: '', JAVA_HOME: '/missing/java' } },
+    { tier: 'pr', projectRoot, family: 'alpha', log: (line) => lines.push(line) },
+  );
+
+  expect(status).toBe(0);
+  expect(lines).toEqual([
+    'SKIPPED packages/example:formal:tla:alpha: java, tlc not found; run pnpm nx run formal:setup',
+  ]);
+});
+
+it('should fail a family that names no spec directory', async () => {
+  const { root, projectRoot } = familyProject();
+  const lines: string[] = [];
+
+  const status = await checkProject(
+    { root, env: { PATH: '' } },
+    { tier: 'pr', projectRoot, family: 'gamma', log: (line) => lines.push(line) },
+  );
+
+  expect(status).toBe(1);
+  expect(lines).toEqual(['packages/example:formal:tla:gamma: no specs/gamma/expected.json']);
+});
+
+it('should refuse a family at the lean tier', async () => {
+  const { root, projectRoot } = familyProject();
+  const lines: string[] = [];
+
+  const status = await checkProject(
+    { root, env: { PATH: '' } },
+    { tier: 'lean', projectRoot, family: 'alpha', log: (line) => lines.push(line) },
+  );
+
+  expect(status).toBe(2);
+  expect(lines).toEqual(['packages/example:formal:lean:alpha: --family selects a TLA+ family; the lean tier has none']);
 });

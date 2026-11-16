@@ -26,10 +26,9 @@ type WireFamily = (typeof wireFamilies)[number];
 /**
  * The model id a same-provider switch carries end to end. Hermetic: the test
  * hands it in and asserts the same string comes back on the wire, so it reads
- * no catalog and does not track one — the 3.1 Pro row itself now routes to
- * `gemini-3.1-pro-preview-customtools`.
+ * no catalog and does not track one.
  */
-const geminiSwitchModelId = 'gemini-3.1-pro-preview';
+const geminiSwitchModelId = 'gemini-4-argon';
 
 type Flavour = {
   /** The pi API the recording provider spoke. */
@@ -72,7 +71,7 @@ const flavours: Readonly<Record<WireFamily, Flavour>> = {
   },
   vertexai: {
     api: 'openai-completions',
-    modelId: 'gemini-3.8-flash',
+    modelId: 'gemini-4-hydrogen',
     callIds: ['uMxj91xgFixture', 'Pv2kd81QFixture'],
     // What the Vertex shim plus pi's completions codec record for a Gemini thought.
     thinkingSignature: 'reasoning_content',

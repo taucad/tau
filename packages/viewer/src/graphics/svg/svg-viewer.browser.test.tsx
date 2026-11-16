@@ -1,18 +1,14 @@
 /* oxlint-disable eslint/no-await-in-loop -- Wheel turns must advance the same live panzoom instance in order. */
 import '#test/browser.css';
 import { render, screen } from '@testing-library/react';
+import { createActor } from 'xstate';
 import { page } from 'vitest/browser';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { KnownArtifact } from '@taucad/runtime';
+import { SvgViewer } from '#graphics/svg/svg-viewer.jsx';
+import { GraphicsProvider } from '#hooks/use-graphics.jsx';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 
-vi.mock('#hooks/use-graphics.jsx', () => ({
-  useGraphics: () => ({ send: () => undefined, on: () => ({ unsubscribe: () => undefined }) }),
-  useGraphicsSelector: <T,>(
-    selector: (state: { context: { gridSizes: { largeSize: number; smallSize: number } } }) => T,
-  ): T => selector({ context: { gridSizes: { largeSize: 10, smallSize: 1 } } }),
-}));
-
-const { SvgViewer } = await import('#graphics/svg/svg-viewer.jsx');
 const copper: Extract<KnownArtifact, { mimeType: 'image/svg+xml' }> = {
   mimeType: 'image/svg+xml',
   content:
@@ -23,9 +19,13 @@ describe('SVG viewer in Chromium', () => {
   it('keeps authored CSS in the shadow root and renders copper through zoom', async () => {
     await page.viewport(720, 600);
     const bodyBackground = getComputedStyle(document.body).backgroundColor;
+    // A real graphics actor: since 57d2a258bd (#1961) it runs the view's pan and zoom adapter, which owns the wheel.
+    const graphics = createActor(graphicsMachine, { input: {} }).start();
     render(
       <div data-testid='frame' style={{ width: 480, height: 480 }}>
-        <SvgViewer artifact={copper} enableGrid={false} enableAxes={false} />
+        <GraphicsProvider graphicsRef={graphics}>
+          <SvgViewer artifact={copper} enableGrid={false} enableAxes={false} />
+        </GraphicsProvider>
       </div>,
     );
     const host = await screen.findByTestId('svg-viewer-host');

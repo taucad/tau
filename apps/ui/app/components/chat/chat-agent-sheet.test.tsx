@@ -138,7 +138,7 @@ const { ChatAgentSheet } = await import('#components/chat/chat-agent-sheet.js');
 
 const noConfig: AgentConfig = { options: [], valueOf: () => '', select: vi.fn() };
 
-const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacementTarget => ({
+const codex = (refusal?: ExternalAgentDescriptor['refusal'], fixCommand?: string): AgentHostPlacementTarget => ({
   hostId: 'desktop',
   rung: 'in-process',
   label: 'This Mac',
@@ -150,6 +150,7 @@ const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacement
       displayName: 'Codex',
       models: refusal ? [] : [{ id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }],
       ...(refusal ? { refusal } : { defaultModel: 'gpt-5.6-sol' }),
+      ...(fixCommand === undefined ? {} : { fixCommand }),
     },
   ],
 });
@@ -231,6 +232,8 @@ describe('ChatAgentSheet', () => {
     const trigger = screen.getByRole('button', { name: 'Agent and model: Model' });
     expect(trigger).not.toHaveTextContent(fable.id);
     expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('w-20');
+    // Cut like the name when the bar is narrow, so the bar's collapse sees it overflow (never squeezed under 24px).
+    expect(trigger.querySelector('[data-slot="trigger-model-placeholder"]')).toHaveClass('min-w-0', 'overflow-hidden');
     expect(trigger.querySelector('[data-slot="trigger-model"]')).toBeNull();
   });
 
@@ -371,7 +374,7 @@ describe('ChatAgentSheet', () => {
     /* Browsing an agent changes nothing, and the way back is to the agents. */
     expect(setActiveExecution).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText('Search Codex models…')).toHaveFocus();
-    expect(screen.getByRole('button', { name: 'Back to agents' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to agents' })).toHaveTextContent(/^Back$/u);
     await userEvent.click(screen.getByRole('option', { name: 'GPT-5.6-Sol' }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({
@@ -440,7 +443,7 @@ describe('ChatAgentSheet', () => {
   });
 
   it('lists an agent its host cannot start, with the reason, the fix and the code — never as a choice', async () => {
-    state.placements = [codex('EXTERNAL_AGENT_AUTH_REQUIRED')];
+    state.placements = [codex('EXTERNAL_AGENT_AUTH_REQUIRED', 'codex login')];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
     await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
@@ -453,26 +456,40 @@ describe('ChatAgentSheet', () => {
     expect(screen.queryByRole('option')).toBeNull();
   });
 
-  it.each([
-    ['/home/tau/work', 'curl -fsSL https://claude.ai/install.sh | bash'],
-    [String.raw`C:\Users\tau\work`, 'irm https://claude.ai/install.ps1 | iex'],
-  ])('gives a daemon at %s the Claude installer for its own shell', async (workspaceRoot, command) => {
+  it('shows the fix command the host put on a refused Grok row', async () => {
     state.placements = [
       {
         ...codex(),
         hostId: 'studio',
         label: 'studio',
         rung: 2,
-        workspaceRoot,
-        externalAgents: [{ id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_NOT_FOUND' }],
+        workspaceRoot: String.raw`C:\Users\tau\work`,
+        externalAgents: [
+          { id: 'grok', displayName: 'Grok Build', models: [], refusal: 'CLI_NOT_FOUND', fixCommand: 'grok login' },
+        ],
       },
     ];
     renderSheet();
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
     await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
-    await userEvent.click(screen.getByRole('option', { name: 'Claude Code, unavailable' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Grok Build, unavailable' }));
 
-    expect(screen.getByText(command)).toBeInTheDocument();
+    expect(screen.getByText('grok login')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+  });
+
+  it('shows only the reason and the code when the host gave a refused row no fix command', async () => {
+    state.placements = [codex('EXTERNAL_AGENT_AUTH_REQUIRED')];
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Codex, unavailable' }));
+
+    expect(screen.getByText("Codex can't start on this computer")).toBeInTheDocument();
+    expect(screen.getByText(/You are not logged in to it on that host/u)).toBeInTheDocument();
+    expect(screen.getByText('EXTERNAL_AGENT_AUTH_REQUIRED')).toBeInTheDocument();
+    expect(screen.queryByText('codex login')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy command' })).toBeNull();
   });
 
   it('reads an external agent’s reasoning from its own thought level, and hides its “Default”', () => {
@@ -671,7 +688,7 @@ describe('ChatAgentSheet', () => {
     expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
 
     await userEvent.click(settings);
-    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent('Settings');
+    expect(screen.getByRole('button', { name: 'Back to settings' })).toHaveTextContent(/^Back$/u);
     /* Focus lands on the first control: the chosen Collaboration mode. */
     expect(
       within(screen.getByRole('tablist', { name: 'Collaboration mode' })).getByRole('tab', { name: 'Plan' }),

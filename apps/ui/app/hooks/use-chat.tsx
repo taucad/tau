@@ -38,7 +38,7 @@
  *   on missing sessions to keep cross-chat dispatch safe.
  */
 
-import type { Chat as AiSdkChat } from '@ai-sdk/react';
+import type { ChatView } from '#services/deferred-chat.js';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
@@ -50,7 +50,10 @@ import type { ActorRefFrom } from 'xstate';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
-import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
+import { selectChatTranscript } from '#services/chat-session-store.js';
+import type { ChatSession, ChatTranscriptState, StopOrigin } from '#services/chat-session-store.js';
+import { noComposerTrays } from '#services/chat-composer-trays.js';
+import type { ComposerTray } from '#services/chat-composer-trays.js';
 import type { ChatMessageQueueIntent } from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { TurnGroup } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
@@ -64,7 +67,7 @@ import type {
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
-type ChatInstance = AiSdkChat<MyUIMessage>;
+type ChatInstance = ChatView;
 
 type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
 
@@ -154,6 +157,10 @@ export type CombinedChatState = {
   messageOrder: readonly string[];
   turnGroups: readonly TurnGroup[];
   agentInvocations: string;
+  /** The transcript's load state (I21): the lane draws no empty-chat state while it is `loading`. */
+  transcript: ChatTranscriptState;
+  /** The composer trays whose height the lane reserves while their reads are pending (U10). */
+  rememberedComposerTrays: readonly ComposerTray[];
   status: ChatInstance['status'];
   error: Error | undefined;
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
@@ -237,8 +244,9 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
     [activeChatId, draftActorRef, persistenceActorRef, store],
   );
   const getSnapshot = useCallback((): T => {
-    const chat = store.get(activeChatId)?.chat;
-    const messages = store.get(activeChatId)?.messages ?? emptyMessages;
+    const session = store.get(activeChatId);
+    const chat = session?.chat;
+    const messages = session?.messages ?? emptyMessages;
     const projection = store.getProjection(activeChatId);
     const status = selectVisibleChatStatus(chat?.status ?? 'ready', projection);
     const draftContext = draftActorRef.getSnapshot().context;
@@ -257,6 +265,8 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       get agentInvocations() {
         return store.getMessagePresentation(activeChatId).agentInvocations;
       },
+      transcript: selectChatTranscript(session),
+      rememberedComposerTrays: session?.rememberedComposerTrays ?? noComposerTrays,
       status,
       error: chat?.error,
       persistedError: persistenceContext?.persistedError,
@@ -367,6 +377,8 @@ export type DraftAttachmentOptions = {
   readonly filename?: string;
   /** Keep a generated lossless artifact byte-for-byte instead of applying the upload compression policy. */
   readonly preserveOriginal?: boolean;
+  /** The picked, dropped or pasted file's declared `type`, for the intake counter; the bytes decide the label (I1). */
+  readonly declaredType?: string;
 };
 
 const sourceFields = (
@@ -379,8 +391,8 @@ export type DraftActions = {
   /**
    * Add a raw image or PDF data URL to the new-message draft. Synchronous: the
    * `draftMachine` enqueues it through its single `attachmentProcessing`
-   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which resizes
-   * images and stores the bytes before the draft references them. Pass the
+   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which converts
+   * images through the storage policy and stores the bytes before the draft references them. Pass the
    * original data URL. Generated captures pass `preserveOriginal` so their
    * lossless bytes bypass upload compression. Failures and refusals are
    * emitted by the machine for one toast subscriber, so callers MUST NOT wrap

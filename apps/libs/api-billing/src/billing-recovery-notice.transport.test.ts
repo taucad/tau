@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BillingRecoveryNoticeEmailTransport } from '#billing-recovery-notice.transport.js';
+import { RecoveryNoticeUndeliverableError } from '#billing-payments.service.js';
 import type { DatabaseService } from '@taucad/api-database';
 
 type OwnerRows = ReadonlyArray<{ readonly email: string }>;
@@ -19,14 +20,20 @@ const databaseReturning = (rows: OwnerRows): Pick<DatabaseService, 'database'> =
   return { database: database as unknown as DatabaseService['database'] };
 };
 
-const createTransport = (rows: OwnerRows) => {
+const createTransport = (rows: OwnerRows, undeliverable: readonly string[] = []) => {
   const email = {
     sendPaymentFailed: vi.fn(async () => undefined),
     sendAutoReloadDisabled: vi.fn(async () => undefined),
     sendAutoReloadActionRequired: vi.fn(async () => undefined),
   };
-  const transport = new BillingRecoveryNoticeEmailTransport(databaseReturning(rows), email, 'https://tau.new');
-  return { transport, email };
+  const deliverability = {
+    undeliverableAmong: vi.fn(async () => new Set(undeliverable)),
+  };
+  const transport = new BillingRecoveryNoticeEmailTransport(databaseReturning(rows), email, {
+    frontendURL: 'https://tau.new',
+    deliverability,
+  });
+  return { transport, email, deliverability };
 };
 
 const payload = {
@@ -99,4 +106,29 @@ describe('BillingRecoveryNoticeEmailTransport', () => {
     expect(email.sendAutoReloadDisabled).not.toHaveBeenCalled();
     expect(email.sendAutoReloadActionRequired).not.toHaveBeenCalled();
   });
+
+  // T9 (email bounce blueprint R10): an owner Resend suppresses is never sent to and the notice is not delivered.
+  it.each(['renewal_failed', 'consent_disabled', 'authentication_required'])(
+    'refuses %s for an undeliverable owner address before any send',
+    async (kind) => {
+      const { transport, email, deliverability } = createTransport(
+        [{ email: 'Owner@Example.com' }],
+        ['owner@example.com'],
+      );
+
+      const delivery = transport.deliver({
+        kind,
+        accountId: 'acct_1',
+        payload,
+        dedupeKey: `${kind}:1`,
+      });
+
+      await expect(delivery).rejects.toBeInstanceOf(RecoveryNoticeUndeliverableError);
+      await expect(delivery).rejects.toMatchObject({ accountId: 'acct_1' });
+      expect(deliverability.undeliverableAmong).toHaveBeenCalledWith(['Owner@Example.com']);
+      expect(email.sendPaymentFailed).not.toHaveBeenCalled();
+      expect(email.sendAutoReloadDisabled).not.toHaveBeenCalled();
+      expect(email.sendAutoReloadActionRequired).not.toHaveBeenCalled();
+    },
+  );
 });

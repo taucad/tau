@@ -298,7 +298,7 @@ export const menuSwitchRowVariants = cva('justify-between', {
 export const menuSwitchRowDescriptionClass = 'text-xs font-medium text-muted-foreground/80';
 
 /**
- * The view-stack Back row: a full-width row as tall as the list rows, its ChevronLeft and the open view's title muted.
+ * The view-stack Back row: a full-width compact row, its ChevronLeft and "Back" muted.
  *
  * @public
  *
@@ -328,7 +328,9 @@ export const menuViewBackClass = 'w-full gap-2 text-xs text-muted-foreground dat
 export const comboboxViewTriggerClass = 'text-xs text-muted-foreground data-disabled:text-muted-foreground';
 
 /**
- * The trailing ChevronRight of a row that opens a sub-view. A disclosure row's chevron points down instead.
+ * The trailing ChevronRight of a row that opens a sub-view. A disclosure row's chevron points down instead. It takes
+ * the row's free space (`ml-auto`) unless a value before it already does, so a row's value sits against the chevron
+ * at the row's gap instead of the two splitting the space between them.
  *
  * @public
  *
@@ -339,7 +341,7 @@ export const comboboxViewTriggerClass = 'text-xs text-muted-foreground data-disa
  * export const className = menuViewTriggerChevronClass;
  * ```
  */
-export const menuViewTriggerChevronClass = 'ml-auto size-3.5 shrink-0 text-muted-foreground';
+export const menuViewTriggerChevronClass = 'ml-auto size-3.5 shrink-0 text-muted-foreground [.ml-auto+&]:ml-0';
 
 /**
  * The short horizontal slide a view enters with: from the right when it opens, from the left on a step back, none on

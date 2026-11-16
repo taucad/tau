@@ -94,6 +94,15 @@ export const setAnonymousRevisions = (workspace: string, anonymous: boolean): vo
 };
 
 /**
+ * Hear every change of any workspace's anonymity preference, outside React (the session's `revisions` child).
+ *
+ * @param listener - Called after each change; read {@link getAnonymousRevisions}.
+ * @returns The unsubscribe function.
+ * @public
+ */
+export const subscribeAnonymousRevisions = (listener: () => void): (() => void) => topic.subscribe(listener);
+
+/**
  * React binding for {@link getAnonymousRevisions}.
  *
  * @param workspace - Workspace slug from the route.
@@ -102,7 +111,7 @@ export const setAnonymousRevisions = (workspace: string, anonymous: boolean): vo
  */
 export const useAnonymousRevisions = (workspace: string): boolean =>
   useSyncExternalStore(
-    (listener) => topic.subscribe(listener),
+    subscribeAnonymousRevisions,
     () => getAnonymousRevisions(workspace),
     () => false,
   );
@@ -249,6 +258,51 @@ const fetchAccountSalt = async (workspace: string): Promise<string> => {
 };
 
 /**
+ * The account's salt for a workspace as host state holds it, outside React (the session's `revisions` child).
+ *
+ * @param input - Workspace slug and the signed-in account.
+ * @returns The salt, or `undefined` before the API has answered once.
+ * @public
+ */
+export const getRevisionSalt = (input: Readonly<{ workspace: string; userId: string }>): string | undefined =>
+  readSalt(saltKey(input.workspace, input.userId));
+
+/**
+ * Hear every salt the API answers, outside React.
+ *
+ * @param listener - Called after each answer; read {@link getRevisionSalt}.
+ * @returns The unsubscribe function.
+ * @public
+ */
+export const subscribeRevisionSalt = (listener: () => void): (() => void) => saltTopic.subscribe(listener);
+
+/**
+ * Ask the API for the account's salt once per account and workspace while nothing is held: the request
+ * {@link useRevisionSalt} makes, shared with every other caller. A failure is forgotten, so a later ask retries.
+ *
+ * @param input - Workspace slug and the signed-in account.
+ * @public
+ */
+export const requestRevisionSalt = (input: Readonly<{ workspace: string; userId: string }>): void => {
+  const { workspace } = input;
+  const key = saltKey(workspace, input.userId);
+  if (workspace === '' || readSalt(key) !== undefined || requestedSalts.has(key)) {
+    return;
+  }
+  requestedSalts.add(key);
+  // async-iife: bootstrap -- the answer lands in host state and every reader hears it.
+  void (async (): Promise<void> => {
+    try {
+      writeSalt(key, await fetchAccountSalt(workspace));
+      saltTopic.emit();
+    } catch {
+      /* Offline, or not signed in on the server: this device's salt stands in. */
+      requestedSalts.delete(key);
+    }
+  })();
+};
+
+/**
  * The signed-in account's salt for this workspace, fetched once per account
  * and workspace as soon as either is known, and cached in host state (EQ10
  * option (a)).
@@ -268,26 +322,16 @@ export const useRevisionSalt = (
   const { workspace, userId } = input;
   const key = userId === undefined ? undefined : saltKey(workspace, userId);
   const salt = useSyncExternalStore(
-    (listener) => saltTopic.subscribe(listener),
+    subscribeRevisionSalt,
     () => (key === undefined ? undefined : readSalt(key)),
     () => undefined,
   );
   useEffect(() => {
-    if (key === undefined || workspace === '' || salt !== undefined || requestedSalts.has(key)) {
+    if (userId === undefined || salt !== undefined) {
       return;
     }
-    requestedSalts.add(key);
-    // async-iife: bootstrap -- the answer lands in host state and re-renders every consumer.
-    void (async (): Promise<void> => {
-      try {
-        writeSalt(key, await fetchAccountSalt(workspace));
-        saltTopic.emit();
-      } catch {
-        /* Offline, or not signed in on the server: this device's salt stands in. */
-        requestedSalts.delete(key);
-      }
-    })();
-  }, [key, salt, workspace]);
+    requestRevisionSalt({ workspace, userId });
+  }, [salt, userId, workspace]);
   return salt;
 };
 /**
@@ -304,13 +348,6 @@ export const revisionUserActor = (
     anonymous: boolean;
     /** The account's salt for this workspace, from {@link useRevisionSalt}; absent signed out or before it answers. */
     salt?: string;
-    /**
-     * The name and address commits are authored with instead of the session's,
-     * for a project linked to GitHub: GitHub declines a push that exposes a
-     * private address (GH007), so a linked project records the account's
-     * no-reply identity (D33). The actor id stays the Tau user.
-     */
-    commitIdentity?: Readonly<{ name: string; email: string }>;
   }>,
 ): RevisionUserActor => {
   if (input.anonymous || input.user === undefined) {
@@ -321,14 +358,12 @@ export const revisionUserActor = (
      * account, and one shared "signed-out" pseudonym would make every
      * signed-out person in a workspace one false identity.
      *
-     * No email either way: it is the identifying half, so an anonymous actor
-     * never carries one and nothing downstream has to remember to strip it.
+     * No address either way: a person has no address field (I3). A linked
+     * project's forge identity travels beside the actor as `setActor`'s
+     * `commitAuthor`, and the host never applies it to an anonymous person.
      */
     const salt = (input.user === undefined ? undefined : input.salt) ?? deviceSalt(input.workspace);
     return { kind: 'user', id: anonymousId(salt), name: 'Anonymous', anonymous: true };
-  }
-  if (input.commitIdentity !== undefined) {
-    return { kind: 'user', id: input.user.id, ...input.commitIdentity };
   }
   return { kind: 'user', id: input.user.id, ...(input.user.name === undefined ? {} : { name: input.user.name }) };
 };
@@ -416,6 +451,52 @@ const personOf = (who: RevisionRowWho): RevisionUserActor | undefined => {
 
 const nobody: RevisionWho = { line: '', isYou: false, isAgent: false };
 
+/** How History marks a commit the person made with git rather than in Tau. */
+const madeWithGit = 'made with git';
+
+/**
+ * Who a commit made with git reads as: the person whose Tau no-reply address
+ * authored it, marked {@link madeWithGit}, on every project, so the row says
+ * both who and how even where Tau's own entries show no who line.
+ *
+ * The address is the commit's claim, so it is believed only as far as the
+ * server confirms it. Tau Cloud backs up such a commit on a project it
+ * registered only for the account its address names, so a pushed one is that
+ * account's when that account pushed it. A project linked to GitHub takes
+ * commits without that check: one that another account pushed, or a push the
+ * server withholds, reads as any pushed entry does. Not pushed yet, it is
+ * made on this device, and reads as its address says. Until the push record
+ * is read, it claims no account: it reads as its git author.
+ *
+ * @param who - The entry's typed who.
+ * @param context - The session and push record.
+ * @param pusher - Who pushed the entry, when it is on Tau Cloud.
+ * @returns The who, or `undefined` when the entry is not a commit made with git under a Tau no-reply address.
+ */
+const madeWithGitWho = (
+  who: RevisionRowWho,
+  context: RevisionWhoContext,
+  pusher: RevisionPusher | undefined,
+): RevisionWho | undefined => {
+  if (who.kind !== 'unrecorded' || who.authorAccountId === undefined) {
+    return undefined;
+  }
+  const lineOf = (name: string, viaDevice = false): string =>
+    [...(name === '' ? [] : [name]), madeWithGit, ...(viaDevice ? ['by a cloud agent host'] : [])].join(' · ');
+  /* Unread, the push record cannot say who pushed it, so the address claims no account yet. */
+  if (context.pushRecord === undefined) {
+    return { line: lineOf(who.authorName ?? ''), isYou: false, isAgent: false };
+  }
+  const accountId = who.authorAccountId;
+  if (pusher !== undefined && (pusher.kind !== 'account' || pusher.accountId !== accountId)) {
+    return undefined;
+  }
+  const isYou = context.session?.id === accountId;
+  const pushedName = pusher?.kind === 'account' && pusher.name !== '' ? pusher.name : undefined;
+  const name = isYou ? 'You' : (pushedName ?? context.pushRecord.memberName(accountId) ?? who.authorName ?? '');
+  return { line: lineOf(name, pusher?.viaDevice === true), isYou, isAgent: false };
+};
+
 /**
  * Who a pushed entry reads as: the account the server authenticated, with
  * `recorded as` beside it when the entry names another account in the
@@ -465,8 +546,9 @@ const pushedWho = (
  * card and the arrival sentence show (blueprint "Who made it comes from what
  * the server authenticated", I2).
  *
- * In order: an agent's result reads `Agent`; an entry on Tau Cloud is the
- * account that pushed it; an entry made on this device is whoever is signed in
+ * In order: an agent's result reads `Agent`; a commit the person made with
+ * git under their Tau no-reply address is that person, `made with git`; an
+ * entry on Tau Cloud is the account that pushed it; an entry made on this device is whoever is signed in
  * here, and nobody signed out; a commit Tau did not write is its git author;
  * anything else shows no name. The recorded identity is read by its type (B2),
  * never printed and never trusted for a name, and no id is parsed for what it
@@ -501,6 +583,10 @@ export const revisionWho = (entry: RevisionWhoEntry, context: RevisionWhoContext
   const anonymous =
     context.showAnonymousId && isAnonymous ? `Anonymous · ${person.id.replace(/^anon:/u, '')}` : 'Anonymous';
   const pusher = context.pushRecord?.pushedBy(entry.revisionId);
+  const git = madeWithGitWho(entry.who, context, pusher);
+  if (git !== undefined) {
+    return git;
+  }
   if (pusher !== undefined) {
     return pushedWho({ person, context, pusher, anonymous, isShared });
   }

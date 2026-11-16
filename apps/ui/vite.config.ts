@@ -16,12 +16,9 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
+import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
-import {
-  resolveTauBuildRelease,
-  resolveTauCloudBuildEnabled,
-  resolveTauTelemetryHostCloud,
-} from './build-environment.js';
+import { resolveTauBuildRelease, resolveTauCloudBuildEnabled } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -33,6 +30,10 @@ import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.j
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config lives outside app aliases.
+import { createServerOutputAssets } from './server-output-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { netlifyFunctionExcludedPaths } from './app/lib/route-classes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -160,6 +161,7 @@ const desktopSourceOverrides = new Map([
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
+  ['#services/attachment-image-backend.js', '#services/attachment-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
@@ -405,12 +407,13 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
 export const createUiReactCompilerPlugin = (): Plugin => {
   const compilerPlugins = react({
     compiler: { target: '19', logDiagnostics: true },
-    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
+    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
     include: [
       '**/apps/ui/app/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-kit/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/chat-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/project-workspace/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/files-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-core/src/**/*.{js,jsx,ts,tsx}',
     ],
     exclude: [
@@ -480,6 +483,9 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   },
 });
 
+/** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
+const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
+
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
@@ -535,10 +541,11 @@ export default defineConfig(({ command, mode }) => {
       tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
-      /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
-      tauTelemetryHostCloudBuild: JSON.stringify(
-        !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
-      ),
+      /*
+       * Every web build may report signed-out runtime telemetry; the deployment's own API policy probe is the only
+       * gate (unset means off), so a self-hosted UI reports only to an API its operator turned on. Tests stub the module.
+       */
+      tauTelemetryHostCloudBuild: JSON.stringify(!isTest),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
       tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
@@ -592,8 +599,15 @@ export default defineConfig(({ command, mode }) => {
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
+      // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
+      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
       createSentryReleaseRecordPlugin(buildId),
+      /*
+       * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical
+       * budget check (`scripts/check-critical-budget.mts`) can attribute a route's interactive bytes to modules.
+       */
+      moduleIdManifest({ outFile: criticalModuleIdsPath, root: path.resolve(__dirname, '../..') }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -611,8 +625,12 @@ export default defineConfig(({ command, mode }) => {
           [
             createUiReactCompilerPlugin(),
             reactRouter(),
-            // Netlify plugin is only needed for Netlify builds
-            ...(isNetlify ? [netlifyReactRouter()] : []),
+            /*
+             * Netlify plugin is only needed for Netlify builds. Its function is registered at `/*` with
+             * `preferStatic`, and Netlify runs functions before redirects, so a static shell's URLs are excluded
+             * here for `netlify.toml`'s 200 rewrite to reach them (`app/lib/route-classes.ts`).
+             */
+            ...(isNetlify ? [netlifyReactRouter({ excludedPaths: netlifyFunctionExcludedPaths() })] : []),
           ]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284

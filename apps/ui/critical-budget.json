@@ -1,0 +1,49 @@
+{
+  "$comment": "Guard G3 (scripts/check-critical-budget.mts): each route class's interactive tier on the web client build, per build variant. Growth past the tolerance fails, and so does landing under the budget by more than the ratchet margin until it is lowered (--write). Raising a budget names its reason in the commit.",
+  "tolerance": {
+    "bytes": 0.01,
+    "requests": 2
+  },
+  "ratchetMargin": {
+    "bytes": 0.05,
+    "requests": 5
+  },
+  "variants": {
+    "self-host": {
+      "project": {
+        "brotliBytes": 2953073,
+        "requests": 402,
+        "largestChunkBrotliBytes": 228543,
+        "knownHeavy": {
+          "editor": "PL5: the code viewer of the workbench dock",
+          "react-three": "PL5: the printer viewer of the workbench dock",
+          "three": "PL5: part thumbnails and the printer viewer"
+        }
+      },
+      "home": {
+        "brotliBytes": 1273734,
+        "requests": 290,
+        "largestChunkBrotliBytes": 138882,
+        "knownHeavy": {}
+      }
+    },
+    "cloud": {
+      "project": {
+        "brotliBytes": 2978856,
+        "requests": 417,
+        "largestChunkBrotliBytes": 229660,
+        "knownHeavy": {
+          "editor": "PL5: the code viewer of the workbench dock",
+          "react-three": "PL5: the printer viewer of the workbench dock",
+          "three": "PL5: part thumbnails and the printer viewer"
+        }
+      },
+      "home": {
+        "brotliBytes": 1296528,
+        "requests": 304,
+        "largestChunkBrotliBytes": 138947,
+        "knownHeavy": {}
+      }
+    }
+  }
+}

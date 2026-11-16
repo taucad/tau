@@ -22,7 +22,18 @@ type SectionViewBridgeWindow = Window & {
   };
 };
 
-type PixelStats = Readonly<{ sampledPixels: number; blueish: number; darkTextish: number }>;
+type SampleBox = Readonly<{ left: number; top: number; right: number; bottom: number }>;
+/**
+ * A picker sample: the XY tile's blue band and the ink of its label. The band's box is in sample pixels; the label ink
+ * counts neutral pixels well darker than the tile's face inside the middle of that box.
+ */
+type PixelStats = Readonly<{
+  sampledPixels: number;
+  sampleSize: number;
+  blueish: number;
+  blueBox: SampleBox | undefined;
+  labelInk: number;
+}>;
 type CanvasSampleRegion = Readonly<{ x: number; y: number; width: number; height: number }>;
 
 const previewCanvasSelector = 'canvas[data-engine]';
@@ -166,17 +177,41 @@ async function samplePng(pngBase64: string, region: CanvasSampleRegion): Promise
       );
 
       const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+      const pixel = (x: number, y: number): readonly [number, number, number] => {
+        const index = (y * sampleWidth + x) * 4;
+        return [data[index]!, data[index + 1]!, data[index + 2]!];
+      };
       let blueish = 0;
-      let darkTextish = 0;
-      for (let index = 0; index < data.length; index += 4) {
-        const r = data[index]!;
-        const g = data[index + 1]!;
-        const b = data[index + 2]!;
-        blueish += Number(b > 145 && b > r + 25 && b > g + 20);
-        darkTextish += Number(r < 65 && g < 65 && b < 65);
+      let blueBox: { left: number; top: number; right: number; bottom: number } | undefined;
+      for (let y = 0; y < sampleHeight; y += 1) {
+        for (let x = 0; x < sampleWidth; x += 1) {
+          const [r, g, b] = pixel(x, y);
+          if (b > 145 && b > r + 25 && b > g + 20) {
+            blueish += 1;
+            blueBox = {
+              left: Math.min(blueBox?.left ?? x, x),
+              top: Math.min(blueBox?.top ?? y, y),
+              right: Math.max(blueBox?.right ?? x, x),
+              bottom: Math.max(blueBox?.bottom ?? y, y),
+            };
+          }
+        }
       }
 
-      return { sampledPixels: sampleWidth * sampleHeight, blueish, darkTextish };
+      // The label is printed on the face in the cube's font: small, anti-aliased neutral ink on a light face.
+      let labelInk = 0;
+      if (blueBox) {
+        const insetX = Math.round((blueBox.right - blueBox.left) / 5);
+        const insetY = Math.round((blueBox.bottom - blueBox.top) / 5);
+        for (let y = blueBox.top + insetY; y < blueBox.bottom - insetY; y += 1) {
+          for (let x = blueBox.left + insetX; x < blueBox.right - insetX; x += 1) {
+            const channels = pixel(x, y);
+            labelInk += Number(Math.max(...channels) < 170 && Math.max(...channels) - Math.min(...channels) < 20);
+          }
+        }
+      }
+
+      return { sampledPixels: sampleWidth * sampleHeight, sampleSize: sampleWidth, blueish, blueBox, labelInk };
     },
     { pngBase64, sampleRegion: region },
   );
@@ -371,10 +406,30 @@ describe('Section view controls', () => {
         width: square.size / square.canvas.width,
         height: square.size / square.canvas.height,
       });
-      expect(stats.blueish, `the XY tile should face the camera: ${JSON.stringify(stats)}`).toBeGreaterThan(
-        stats.sampledPixels * 0.05,
+      // Since 75bd18137f the tiles are flat in the cube's face tone, each edged by a band in its normal's muted axis
+      // colour. Facing the camera, the XY tile's band is a square ring in the middle of the picker; the other two
+      // stand edge on and draw no ring.
+      const { blueBox, sampleSize } = stats;
+      if (!blueBox) {
+        throw new Error(`the XY tile should be drawn in the picker: ${JSON.stringify(stats)}`);
+      }
+      const bandWidth = blueBox.right - blueBox.left;
+      const bandHeight = blueBox.bottom - blueBox.top;
+      expect(bandWidth, `the XY tile should face the camera: ${JSON.stringify(stats)}`).toBeGreaterThan(
+        sampleSize * 0.3,
       );
-      expect(stats.darkTextish, `the XY tile should carry its label: ${JSON.stringify(stats)}`).toBeGreaterThan(20);
+      expect(bandHeight, `the XY tile should face the camera: ${JSON.stringify(stats)}`).toBeGreaterThan(
+        sampleSize * 0.3,
+      );
+      expect(
+        Math.abs(bandWidth - bandHeight),
+        `the XY tile should be square on: ${JSON.stringify(stats)}`,
+      ).toBeLessThan(sampleSize * 0.05);
+      expect(
+        Math.hypot((blueBox.left + blueBox.right - sampleSize) / 2, (blueBox.top + blueBox.bottom - sampleSize) / 2),
+        `the XY tile should sit in the middle of the picker: ${JSON.stringify(stats)}`,
+      ).toBeLessThan(sampleSize * 0.05);
+      expect(stats.labelInk, `the XY tile should carry its label: ${JSON.stringify(stats)}`).toBeGreaterThan(20);
 
       await target.mouseMove(square.left + square.size / 2, square.top + square.size / 2);
       await target.mouseDown();

@@ -111,9 +111,11 @@
     "./components/toggle-group": "./src/components/toggle-group.tsx",
     "./components/tooltip": "./src/components/tooltip.tsx",
     "./components/view-stack": "./src/components/view-stack.tsx",
+    "./components/wait-indicator": "./src/components/wait-indicator.tsx",
     "./hooks/use-mobile": "./src/hooks/use-mobile.ts",
     "./hooks/use-platform": "./src/hooks/use-platform.ts",
     "./hooks/use-tick-animation": "./src/hooks/use-tick-animation.ts",
+    "./hooks/use-wait-clock": "./src/hooks/use-wait-clock.ts",
     "./styles/base.css": {
       "types": "./src/styles/base.css.d.ts",
       "default": "./src/styles/base.css"
@@ -128,6 +130,7 @@
     "./utils/number": "./src/utils/number.ts",
     "./utils/platform": "./src/utils/platform.ts",
     "./utils/pointer-capture": "./src/utils/pointer-capture.ts",
+    "./utils/wait-timing": "./src/utils/wait-timing.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -493,6 +496,11 @@
         "import": "./dist/components/view-stack.mjs",
         "default": "./dist/components/view-stack.mjs"
       },
+      "./components/wait-indicator": {
+        "types": "./dist/components/wait-indicator.d.mts",
+        "import": "./dist/components/wait-indicator.mjs",
+        "default": "./dist/components/wait-indicator.mjs"
+      },
       "./hooks/use-mobile": {
         "types": "./dist/hooks/use-mobile.d.mts",
         "import": "./dist/hooks/use-mobile.mjs",
@@ -507,6 +515,11 @@
         "types": "./dist/hooks/use-tick-animation.d.mts",
         "import": "./dist/hooks/use-tick-animation.mjs",
         "default": "./dist/hooks/use-tick-animation.mjs"
+      },
+      "./hooks/use-wait-clock": {
+        "types": "./dist/hooks/use-wait-clock.d.mts",
+        "import": "./dist/hooks/use-wait-clock.mjs",
+        "default": "./dist/hooks/use-wait-clock.mjs"
       },
       "./styles/base.css": {
         "types": "./dist/styles/base.css.d.ts",
@@ -545,6 +558,11 @@
         "types": "./dist/utils/pointer-capture.d.mts",
         "import": "./dist/utils/pointer-capture.mjs",
         "default": "./dist/utils/pointer-capture.mjs"
+      },
+      "./utils/wait-timing": {
+        "types": "./dist/utils/wait-timing.d.mts",
+        "import": "./dist/utils/wait-timing.mjs",
+        "default": "./dist/utils/wait-timing.mjs"
       },
       "./package.json": "./package.json"
     },

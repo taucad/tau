@@ -1,9 +1,11 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { filesPane } from '#support/file-tree.js';
+import { filesPane, treeItem } from '#support/file-tree.js';
 
 const consentCookieName = 'tau-cookie-consent';
+/** The entry file of a project made at `/projects/new` with its preselected kernel, replicad. */
+const newProjectEntry = 'main.ts';
 const consentStatus = async (): Promise<string | undefined> => {
   const cookies = await target.cookies();
   const cookie = cookies.find(({ name }) => name === consentCookieName);
@@ -37,6 +39,21 @@ const eventCount = async (name: string): Promise<number> => {
   return summary.events.filter((event) => event === name).length;
 };
 const hasEvent = async (name: string): Promise<boolean> => (await eventCount(name)) > 0;
+/**
+ * The replay snapshots sent once a person has used the page.
+ *
+ * posthog-js 1.438 holds a new recording's buffer until the user interacts (`holding buffer:
+ * no_interaction_since_recording_started. nothing is uploaded until the user interacts with the page`), and only a
+ * trusted rrweb mouse, scroll, input or touch event releases it. A row that only navigates or clicks from script
+ * never uploads a snapshot, so each read first moves the mouse as a person would: the recording starts when the page
+ * is idle, so an interaction before it starts would not count.
+ */
+let pointerStep = 0;
+const snapshotsAfterInteraction = async (): Promise<number> => {
+  pointerStep += 1;
+  await target.mouseMove(16 + (pointerStep % 32), 16 + (pointerStep % 32));
+  return eventCount('$snapshot');
+};
 const sentinelPresent = async (sentinel: string): Promise<boolean> => {
   const summary = await target.readPostHogSummary([sentinel]);
   return summary.present[sentinel] === true;
@@ -148,6 +165,7 @@ test('redacts invitation credentials from decoded replay and autocapture transpo
     document.body.append(publicControl);
     const invitation = document.createElement('a');
     invitation.href = `/invitations/${invitationToken}`;
+    invitation.id = 'replay-invitation';
     invitation.textContent = 'Open invitation';
     invitation.addEventListener('click', (event) => {
       event.preventDefault();
@@ -156,11 +174,26 @@ test('redacts invitation credentials from decoded replay and autocapture transpo
     const input = document.createElement('input');
     input.value = `https://tau.new/invitations/${invitationToken}`;
     document.body.append(input);
+  }, token);
+  /* Admission initialises autocapture in deferred, time-sliced tasks (`__preview_deferred_init_extensions`), so a
+   * click made the moment consent lands can precede its listener: click until the click is captured. The history
+   * tracker behind `capture_pageview: 'history_change'` is started the same way, so the route changes follow it. */
+  await expect
+    .poll(
+      async () => {
+        await target.evaluate(() => {
+          document.querySelector<HTMLAnchorElement>('#replay-invitation')?.click();
+        });
+        return hasEvent('$autocapture');
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  await target.evaluate((invitationToken: string) => {
     history.pushState({}, '', `/invitations/${invitationToken}`);
     history.pushState({}, '', `/auth/sign-in?redirectTo=%2Finvitations%2F${invitationToken}`);
-    invitation.click();
   }, token);
-  await expect.poll(async () => eventCount('$snapshot'), { timeout: 30_000 }).toBeGreaterThan(0);
+  await expect.poll(snapshotsAfterInteraction, { timeout: 30_000 }).toBeGreaterThan(0);
   const summary = await target.readPostHogSummary([token, 'Public replay control']);
   expect(summary.events).toContain('$snapshot');
   expect(summary.events).toContain('$autocapture');
@@ -182,14 +215,14 @@ test.each(['/invitations/Replay-Bearer-123', '/auth/sign-in?redirectTo=%2Finvita
       },
     ]);
     await target.navigate(path);
-    await expect.poll(async () => eventCount('$snapshot'), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect.poll(snapshotsAfterInteraction, { timeout: 30_000 }).toBeGreaterThan(0);
     const summary = await target.readPostHogSummary(['Replay-Bearer-123']);
     expect(summary.events).toContain('$snapshot');
     expect(summary.present['Replay-Bearer-123']).toBe(false);
   },
 );
 
-test('blocks replay from mounted editor, chat and file surfaces', async () => {
+test('records editor, chat and file text in replay but never a credential block', async () => {
   await target.installPostHogFixture('phc_test_key');
   await target.navigate('/');
   await decide('accepted');
@@ -197,10 +230,6 @@ test('blocks replay from mounted editor, chat and file surfaces', async () => {
   await target.fill(selectors.getByCss('input#project-name'), 'Private workspace');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
-  const sourceTab = selectors.getByRole('tab', { name: 'main.scad', exact: true }).last();
-  await target.expectVisible(sourceTab, 60_000);
-  await target.click(sourceTab);
-  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   if (!(await target.isVisible(filesPane()))) {
     await target.click(selectors.getByRole('button', { name: /Search/u }));
     const search = selectors.getByPlaceholder('Search projects, chats, and actions…');
@@ -208,55 +237,60 @@ test('blocks replay from mounted editor, chat and file surfaces', async () => {
     await target.click(selectors.getByText('Open files', { exact: true }));
   }
   await target.expectVisible(filesPane(), 60_000);
+  /* A new project opens no file (53b887367b, #1386), and `/projects/new` preselects replicad, whose entry is
+   * `main.ts` (3948936544, #1825): open the entry from Files so the editor surface is mounted. */
+  await target.click(treeItem(newProjectEntry));
+  const sourceTab = selectors.getByRole('tab', { name: newProjectEntry, exact: true }).last();
+  await target.expectVisible(sourceTab, 60_000);
+  await target.click(sourceTab);
+  await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
   if ((await target.getAttribute(chatToggle, 'aria-pressed')) === 'false') {
     await target.click(chatToggle);
   }
   await target.fill(
     selectors.getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]').last(),
-    'Private prompt sentinel',
+    'Private composer sentinel',
   );
   const surfaces = await target.evaluate(() => {
-    const blocks = [...document.querySelectorAll<HTMLElement>('.ph-no-capture')];
-    const editor = blocks.find((block) => block.classList.contains('editor-container'));
-    const chat = blocks.find((block) => block.classList.contains('overflow-hidden'));
-    const files = blocks.find((block) => block.querySelector('[role="treeitem"]') !== null);
-    for (const [block, sentinel] of [
-      [editor, 'Private source sentinel'],
-      [chat, 'Private chat sentinel'],
-      [files, 'Private filename sentinel'],
+    const editor = document.querySelector<HTMLElement>('.editor-container');
+    const files = document.querySelector<HTMLElement>('[role="treeitem"]')?.parentElement ?? null;
+    for (const [host, sentinel] of [
+      [editor, 'Visible source sentinel'],
+      [files, 'Visible filename sentinel'],
     ] as const) {
-      if (!block) {
+      if (!host) {
         continue;
       }
       const probe = document.createElement('span');
       probe.textContent = sentinel;
-      block.append(probe);
+      host.append(probe);
     }
+    // A credential surface (new API key, device sign-in code) carries the SDK's block class.
+    const credential = document.createElement('span');
+    credential.className = 'ph-no-capture';
+    credential.textContent = 'Private credential sentinel';
+    document.body.append(credential);
     const control = document.createElement('span');
     control.textContent = 'Public project control';
     document.body.append(control);
-    return { editor: Boolean(editor), chat: Boolean(chat), files: Boolean(files) };
+    return { editor: Boolean(editor), files: Boolean(files) };
   });
-  expect(surfaces).toStrictEqual({ editor: true, chat: true, files: true });
+  expect(surfaces).toStrictEqual({ editor: true, files: true });
   await expect.poll(async () => sentinelPresent('Public project control'), { timeout: 30_000 }).toBe(true);
   const summary = await target.readPostHogSummary([
-    'Private prompt sentinel',
-    'Private source sentinel',
-    'Private chat sentinel',
-    'Private filename sentinel',
+    'Visible source sentinel',
+    'Visible filename sentinel',
+    'Private credential sentinel',
+    'Private composer sentinel',
     'Public project control',
   ]);
   expect(summary.events).toContain('$snapshot');
   expect(summary.present['Public project control']).toBe(true);
-  for (const sensitive of [
-    'Private prompt sentinel',
-    'Private source sentinel',
-    'Private chat sentinel',
-    'Private filename sentinel',
-  ]) {
-    expect(summary.present[sensitive]).toBe(false);
-  }
+  expect(summary.present['Visible source sentinel']).toBe(true);
+  expect(summary.present['Visible filename sentinel']).toBe(true);
+  expect(summary.present['Private credential sentinel']).toBe(false);
+  expect(summary.present['Private composer sentinel']).toBe(false);
 });
 
 test('withdraws an accepted tab when the website announces a decline', async () => {

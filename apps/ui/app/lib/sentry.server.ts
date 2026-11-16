@@ -1,10 +1,10 @@
 import type * as SentryNode from '@sentry/node';
 import type { ErrorEvent } from '@sentry/node';
 import { isRouteErrorResponse } from 'react-router';
-import type { EntryContext } from 'react-router';
+import type { EntryContext, ServerInstrumentation } from 'react-router';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
-import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
+import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import { isObservabilityHarnessEnabled } from '#lib/observability-harness-context.js';
 import { automatedRunEnvironment, scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
 
@@ -20,6 +20,8 @@ export type SsrErrorScope = {
   readonly request: Request;
   /** The React Router id of the deepest matched route, when the document render knows it. */
   readonly routeId?: string;
+  /** The URL pattern of the matched routes (for example `/w/:workspace/:project`), when known. */
+  readonly routePattern?: string;
   /** The HTTP status the request is answered with. */
   readonly status: number;
   /** Which server channel saw the error. */
@@ -45,6 +47,25 @@ const harnessTags = (url: URL): Readonly<Record<string, string>> => {
     ? // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry query tag contract.
       { e2e_run: run }
     : {};
+};
+
+/**
+ * The page a request is for. `handleError` only ever gets the raw request, so a client navigation's error arrives on
+ * `/<path>.data?_routes=…` (`/_root.data` or `/_.data` for `/`); it reports under the page's URL, as the document's
+ * does, so both group on one URL and a harness data request keeps its `e2e_run` tag (B4).
+ *
+ * @param request - The request React Router handed over.
+ * @returns Its URL without the single-fetch suffix and `_routes` parameter.
+ */
+const pageUrl = (request: Request): URL => {
+  const url = new URL(request.url);
+  if (url.pathname === '/_root.data' || url.pathname.endsWith('/_.data')) {
+    url.pathname = url.pathname.slice(0, url.pathname.lastIndexOf('/') + 1);
+  } else if (url.pathname.endsWith('.data')) {
+    url.pathname = url.pathname.slice(0, -'.data'.length);
+  }
+  url.searchParams.delete('_routes');
+  return url;
 };
 
 /**
@@ -75,7 +96,7 @@ export const scrubServerSentryEvent = (event: ErrorEvent): ErrorEvent => {
   }
   delete event.user;
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON round trip of the same event.
-  return JSON.parse(redactInvitationTokens(JSON.stringify(event))) as ErrorEvent;
+  return JSON.parse(redactUrlCredentials(JSON.stringify(event))) as ErrorEvent;
 };
 
 /** Start the SDK once, on the first error. */
@@ -126,12 +147,15 @@ const keepAlive = (promise: Promise<unknown>): void => {
  * @param scope - The request, route and status it belongs to.
  * @public
  */
-export const reportSsrError = (error: unknown, { request, routeId, status, channel }: SsrErrorScope): void => {
+export const reportSsrError = (
+  error: unknown,
+  { request, routeId, routePattern, status, channel }: SsrErrorScope,
+): void => {
   const dsn = ENV.SENTRY_DSN;
   if (!dsn || request.signal.aborted) {
     return;
   }
-  const url = new URL(request.url);
+  const url = pageUrl(request);
   const userAgent = request.headers.get('user-agent');
   const send = async (): Promise<void> => {
     try {
@@ -151,6 +175,7 @@ export const reportSsrError = (error: unknown, { request, routeId, status, chann
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag name filtered on by operators.
         http_status: String(status),
         ...(routeId === undefined ? {} : { route: routeId }),
+        ...(routePattern === undefined ? {} : { 'route.pattern': routePattern }),
         ...runTags,
       });
       // Only what an operator needs is attached; `beforeSend` scrubs it again. A harness run reports apart.
@@ -178,18 +203,49 @@ const statusOf = (error: unknown): number => (isRouteErrorResponse(error) ? erro
 /** Errors `handleError` saw for a request, waiting for the document render to name their route. */
 const pending = new WeakMap<Request, unknown[]>();
 
+/** The route whose loader, action or middleware failed with an error, as the route instrumentation saw it. */
+const failedRoutes = new WeakMap<WeakKey, Readonly<{ routeId: string; routePattern: string }>>();
+
+/**
+ * The route instrumentation `entry.server` exports (React Router 8 migration RR7): when a route's loader, action or
+ * middleware fails, it notes that route's id and pattern against the error, so a `.data` or resource request, which
+ * no document render names, still reports its route. The innermost failure is kept: a middleware further out sees
+ * the same error after it.
+ *
+ * @public
+ */
+export const routeErrorInstrumentation: ServerInstrumentation = {
+  route: (route) => {
+    const record: NonNullable<Parameters<typeof route.instrument>[0]['loader']> = async (handler, { pattern }) => {
+      const result = await handler();
+      if (result.status === 'error' && !failedRoutes.has(result.error)) {
+        failedRoutes.set(result.error, { routeId: route.id, routePattern: `/${pattern.replace(/^\//u, '')}` });
+      }
+    };
+    route.instrument({ loader: record, action: record, middleware: record });
+  },
+};
+
 const flush = (request: Request, routeId: string | undefined, status: number | undefined): void => {
   const errors = pending.get(request);
   pending.delete(request);
   for (const error of errors ?? []) {
-    reportSsrError(error, { request, routeId, status: status ?? statusOf(error), channel: 'handle-error' });
+    const failed = typeof error === 'object' && error !== null ? failedRoutes.get(error) : undefined;
+    reportSsrError(error, {
+      request,
+      routeId: routeId ?? failed?.routeId,
+      routePattern: failed?.routePattern,
+      status: status ?? statusOf(error),
+      channel: 'handle-error',
+    });
   }
 };
 
 /**
  * Take an error React Router handed to `handleError`. A document render calls the entry's `handleRequest` in the
  * same task right after (`renderHtml`), which names the route and status ({@link claimSsrErrors}); a data or
- * resource request never does, so what is still waiting at the next microtask is reported without a route. A
+ * resource request never does, so what is still waiting at the next microtask is reported with the route the
+ * instrumentation saw fail ({@link routeErrorInstrumentation}), or none. A
  * route error response under 500 is skipped.
  *
  * @param error - The thrown value.

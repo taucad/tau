@@ -3,7 +3,7 @@
 import { applyDecorators, createParamDecorator, SetMetadata, UseGuards } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { isPublicAuth, isOptionalAuth } from '#auth.constant.js';
+import { isAuthoritativeSession, isPublicAuth, isOptionalAuth } from '#auth.constant.js';
 import { AuthGuard } from '#auth.guard.js';
 import type { AuthUser } from '#auth.type.js';
 
@@ -30,6 +30,13 @@ export const PublicAuth = (): ReturnType<typeof SetMetadata> => SetMetadata(isPu
  * Route will still execute even if user is not authenticated
  */
 export const OptionalAuth = (): ReturnType<typeof SetMetadata> => SetMetadata(isOptionalAuth, true);
+
+/**
+ * Marks a route or controller whose session must be read from the store on every request, never
+ * from a session snapshot or a shared in-flight lookup. Required on any `GET` that mints something
+ * outliving the request: a signed link, a presigned URL or a token.
+ */
+export const AuthoritativeSession = (): ReturnType<typeof SetMetadata> => SetMetadata(isAuthoritativeSession, true);
 
 /**
  * Parameter decorator to extract the authenticated user from the request.

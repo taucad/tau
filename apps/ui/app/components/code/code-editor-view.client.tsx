@@ -150,8 +150,9 @@ const editorTheme = EditorView.theme({
   '.cm-conflict-mine': { backgroundColor: 'color-mix(in oklch, var(--success) 20%, transparent)' },
   '.cm-conflict-theirs': { backgroundColor: 'color-mix(in oklch, var(--feature) 20%, transparent)' },
   '.cm-lineNumbers .cm-gutterElement': { minWidth: '4ch', padding: '0 var(--spacing)' },
-  '.cm-gutter-lint': { width: '0' },
-  '.cm-gutter-lint:has(.cm-lint-marker)': { width: '1em' },
+  /* The lint gutter keeps its width with no marker in it, so a diagnostic that arrives after the mount (the language
+     service's, seconds later) moves no line of text (A15f2, F9). */
+  '.cm-gutter-lint': { width: '1em' },
   '.cm-gutter-lint .cm-gutterElement': { padding: '0' },
 });
 
@@ -223,7 +224,7 @@ export function CodeEditorView({
     // One span per constructed view: the open's `.cm-editor` connections count this overlay and the view's own root.
     const mountSpan = pageProjectOpenPerformance().begin('editor.mount');
     const overlay = globalThis.document.createElement('div');
-    overlay.className = 'cm-editor ph-no-capture';
+    overlay.className = 'cm-editor';
     overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:50';
     globalThis.document.body.append(overlay);
     const applyHistory = (kind: 'undo' | 'redo'): boolean => {
@@ -348,7 +349,7 @@ export function CodeEditorView({
     restoreViewPosition(document, viewId, view);
     markCodeEditorMilestone('editor-mounted', viewId);
     mountSpan.finish('ok');
-    overlay.className = `${view.dom.className} cm-overlays ph-no-capture`;
+    overlay.className = `${view.dom.className} cm-overlays`;
     const unsubscribe = document.subscribe((event: DocumentChange) => {
       if (event.origin === 'view' && event.viewId === viewId) {
         return;
@@ -494,10 +495,7 @@ export function CodeEditorView({
     >
       <ContextMenuTrigger className='contents'>
         {/* `isolate` keeps CodeMirror's own stacking (gutters 200, panels 300) below app menus and popovers at z-50. */}
-        <div
-          ref={hostRef}
-          className={cn('editor-container ph-no-capture isolate size-full overflow-hidden', className)}
-        />
+        <div ref={hostRef} className={cn('editor-container isolate size-full overflow-hidden', className)} />
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem

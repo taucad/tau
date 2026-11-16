@@ -37,7 +37,14 @@ export type ResolvedModel = {
   model?: Model;
 };
 
-const buildResolved = (id: string, rows: readonly Model[] | undefined): ResolvedModel => {
+/**
+ * Resolve a model id against catalog rows, as `useModels().resolveModel` does.
+ *
+ * @param id - The model id.
+ * @param rows - The catalog rows, or `undefined` before the catalog has answered.
+ * @returns The resolved view, never null.
+ */
+export const resolveCatalogModel = (id: string, rows: readonly Model[] | undefined): ResolvedModel => {
   const model = rows?.find((entry) => entry.id === id);
   return {
     id,
@@ -281,11 +288,15 @@ export const useModels = () => {
 
   /* Reads the query cache rather than this render's data, so a caller that just awaited the catalog sees it. */
   const resolveModel = useCallback(
-    (id: string): ResolvedModel => buildResolved(id, queryClient.getQueryData<Model[]>(modelsQuery.queryKey) ?? data),
+    (id: string): ResolvedModel =>
+      resolveCatalogModel(id, queryClient.getQueryData<Model[]>(modelsQuery.queryKey) ?? data),
     [queryClient, data],
   );
 
-  const selectedModel = useMemo<ResolvedModel>(() => buildResolved(selectedModelId, data), [data, selectedModelId]);
+  const selectedModel = useMemo<ResolvedModel>(
+    () => resolveCatalogModel(selectedModelId, data),
+    [data, selectedModelId],
+  );
 
   return {
     data,

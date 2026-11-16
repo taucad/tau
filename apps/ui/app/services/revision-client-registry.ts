@@ -1,3 +1,4 @@
+import { Topic } from '@taucad/events';
 import type { RevisionClient } from '#types/revision-client.types.js';
 
 type ClientState = {
@@ -13,7 +14,43 @@ type ClientState = {
  * is one: two connections for one project would mean two ports the worker keeps
  * the root alive for, and a close from either would be a lie.
  */
-export const revisionClients = new Map<string, ClientState>();
+const clientTopic = new Topic<void>({ name: 'revision-clients' });
+
+/* A map that says when a project's client is set or removed, so a wait can follow a client that arrives later. */
+class ClientRegistry extends Map<string, ClientState> {
+  public override set(projectId: string, state: ClientState): this {
+    super.set(projectId, state);
+    notifyClientListeners();
+    return this;
+  }
+
+  public override delete(projectId: string): boolean {
+    const deleted = super.delete(projectId);
+    notifyClientListeners();
+    return deleted;
+  }
+
+  public override clear(): void {
+    super.clear();
+    notifyClientListeners();
+  }
+}
+
+const notifyClientListeners = (): void => {
+  clientTopic.emit();
+};
+
+export const revisionClients = new ClientRegistry();
+
+/**
+ * Hear each change of which client a project has (SP2h review): a held turn follows the one that arrives or replaces
+ * the client it started with.
+ *
+ * @param listener - Called after each set, removal or reset.
+ * @returns The unsubscription.
+ * @public
+ */
+export const subscribeRevisionClients = (listener: () => void): (() => void) => clientTopic.subscribe(listener);
 
 /**
  * This project's client if one already exists, without opening one (W20).

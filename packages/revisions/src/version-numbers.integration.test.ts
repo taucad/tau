@@ -288,6 +288,60 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
     }
   }, 180_000);
 
+  it.each([
+    { tag: 'v2', next: 3 },
+    { tag: 'v1', next: 2 },
+  ])(
+    'backs up main past a local $tag that is not a version, never offers it, and numbers the next version V$next',
+    async ({ tag, next }) => {
+      const remoteRoot = await temporaryRoot(`remote-foreign-${tag}`);
+      const remote = await startGitHttpBackend({ root: remoteRoot });
+      const hook = join(remote.repositoryPath, 'hooks', 'pre-receive');
+      await writeFile(hook, versionNumberHook);
+      await chmod(hook, 0o755);
+      try {
+        const one = await device(leg, `foreign-${tag}`, remote.url);
+        const first = await one.port.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(10);\n')]]),
+          provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 9, 0, 0) },
+          summary: { generated: 'Lid' },
+        });
+        await one.port.updateRef({ name: mainRef, expectedHead: undefined, head: revisionId(first.commitId) });
+        await one.sync(first.commitId);
+
+        /* What `git tag <tag>` in the project's folder leaves: a lightweight tag at the head. */
+        const foreign = `refs/tags/${tag}`;
+        await one.port.updateRef({ name: foreign, expectedHead: undefined, head: revisionId(first.commitId) });
+        const second = await one.port.writeRevision({
+          parents: [revisionId(first.commitId)],
+          tree: new ImmutableRevisionTree([['lid.scad', encoder.encode('cube(20);\n')]]),
+          provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 10, 0, 0) },
+          summary: { generated: 'Bigger lid' },
+        });
+        await one.port.updateRef({
+          name: mainRef,
+          expectedHead: revisionId(first.commitId),
+          head: revisionId(second.commitId),
+        });
+        const offeredBefore = one.offers.length;
+        await one.sync(second.commitId);
+        expect(await remote.git(['rev-parse', mainRef])).toBe(second.commitId);
+        expect(one.offers.slice(offeredBefore).flat()).not.toContain(foreign);
+
+        /* The tag stays on the device and keeps its number (T1); the next version is numbered above it. */
+        expect(await one.port.readRef(foreign)).toBe(first.commitId);
+        const version = await one.port.tag({ name: 'Ready for print', revisionId: revisionId(second.commitId) });
+        expect(version.number).toBe(next);
+        await one.sync(second.commitId);
+        expect(await remote.git(['for-each-ref', '--format=%(refname)', 'refs/tags/'])).toBe(`refs/tags/v${next}`);
+      } finally {
+        await remote.close();
+      }
+    },
+    120_000,
+  );
+
   it('finishes a move that stopped after its new tag was written, and takes no other number (R6)', async () => {
     const remoteRoot = await temporaryRoot('remote-r6');
     const remote = await startGitHttpBackend({ root: remoteRoot });
@@ -383,6 +437,69 @@ describe.runIf(gitToolchainOnPath).each(legs)('version numbers across two device
       await two.sync(head);
       expect(await remote.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"From A"');
       expect(two.said).toStrictEqual([]);
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
+  it('keeps a rename the remote did not touch when only another ref of the atomic push moved (N3)', async () => {
+    const remote = await startGitHttpBackend({
+      root: await temporaryRoot('remote-n3'),
+      /* Moves `main` after the advertisement, inside the receive, before its compare-and-set. */
+      preReceive: [
+        'if [ -f tau-move-main ]; then',
+        '  env -u GIT_QUARANTINE_PATH git update-ref refs/heads/main "$(cat tau-move-main)"',
+        '  rm tau-move-main',
+        'fi',
+      ],
+    });
+    try {
+      const one = await device(leg, 'n3a', remote.url);
+      const write = async (body: string, parents: readonly string[], second: number): Promise<string> => {
+        const receipt = await one.port.writeRevision({
+          parents: parents.map((parent) => revisionId(parent)),
+          tree: new ImmutableRevisionTree([['lid.scad', encoder.encode(body)]]),
+          provenance: { source: 'user', ...recordedBy('actor-b6'), createdAt: Date.UTC(2026, 10, 11, 9, 0, second) },
+          summary: { generated: 'Lid' },
+        });
+        return receipt.commitId;
+      };
+      const head = await write('cube(10);\n', [], 0);
+      await one.port.updateRef({ name: mainRef, expectedHead: undefined, head: revisionId(head) });
+      await one.port.tag({ name: 'Base cut', revisionId: revisionId(head) });
+      await one.sync(head);
+
+      /* A renames V2 and records a new entry; another writer moves the remote's `main` inside the receive. */
+      await one.port.tag({ number: 2, name: 'Renamed on A', revisionId: revisionId(head) });
+      const next = await write('cube(12);\n', [head], 1);
+      await one.port.updateRef({ name: mainRef, expectedHead: revisionId(head), head: revisionId(next) });
+      const other = await remote.git([
+        '-c',
+        'user.name=Another writer',
+        '-c',
+        'user.email=another@example.test',
+        'commit-tree',
+        await remote.git(['rev-parse', `${head}^{tree}`]),
+        '-p',
+        head,
+        '-m',
+        'Another writer',
+      ]);
+      await writeFile(join(remote.repositoryPath, 'tau-move-main'), `${other}\n`);
+      const pushed = await toPromise(
+        createActor(one.actors.sync.push, {
+          input: { remote: 'tau', branch: 'main', leases: { [mainRef]: head } },
+        }).start(),
+      );
+
+      /* Nothing landed, the remote never renamed V2, so A keeps its rename to offer again. */
+      expect(pushed.refs).toContainEqual(expect.objectContaining({ name: mainRef, status: 'rejected' }));
+      expect(pushed.refs).toContainEqual(
+        expect.objectContaining({ name: 'refs/tags/v2', status: 'rejected', reason: 'leaseLost' }),
+      );
+      await expect(remote.git(['rev-parse', mainRef])).resolves.toBe(other);
+      expect(await remote.git(['cat-file', 'tag', 'refs/tags/v2'])).toContain('"name":"Base cut"');
+      expect(await one.numbers()).toStrictEqual({ 'Renamed on A': 2 });
     } finally {
       await remote.close();
     }

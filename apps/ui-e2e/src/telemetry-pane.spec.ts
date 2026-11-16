@@ -60,7 +60,7 @@ const openSecondGeometryUnit = async (): Promise<void> => {
 
 type TelemetrySurfaceState = {
   readonly bodyBackground: string;
-  readonly bodyToPaneBottomGap: number;
+  readonly bodyToNextUnitGap: number;
   readonly bottomRadius: number;
   readonly contentPadding: number;
   readonly filterBackground: string;
@@ -83,7 +83,14 @@ const readTelemetrySurfaceState = async (header: Locator): Promise<TelemetrySurf
     const headerRoot = element.closest<HTMLElement>('[data-slot="paneview-header"]');
     const pane = element.closest<HTMLElement>('.dv-pane');
     const body = pane?.querySelector<HTMLElement>('[data-slot="telemetry-unit-surface"]');
-    const paneBody = body?.closest<HTMLElement>('.dv-pane-body');
+    /* Since e997172583 the unit gap is the next header's top margin, or the collection's bottom
+     * padding under the last unit, rather than padding inside each pane body. */
+    const collection = pane?.closest<HTMLElement>('[class~="pb-(--pane-unit-gap)"]');
+    const nextUnitEdge = (unitHeader: HTMLElement, root: HTMLElement): number => {
+      const headers = [...root.querySelectorAll<HTMLElement>('[data-slot="paneview-header"]')];
+      const nextHeader = headers[headers.indexOf(unitHeader) + 1];
+      return nextHeader ? nextHeader.getBoundingClientRect().top : root.getBoundingClientRect().bottom;
+    };
     const content = body?.querySelector<HTMLElement>('[data-slot="telemetry-unit-content"]');
     const panel = document.querySelector<HTMLElement>('[data-slot="telemetry-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="telemetry-filter"]');
@@ -94,7 +101,7 @@ const readTelemetrySurfaceState = async (header: Locator): Promise<TelemetrySurf
     if (
       !headerRoot ||
       !body ||
-      !paneBody ||
+      !collection ||
       !content ||
       !panel ||
       !toolbar ||
@@ -112,7 +119,7 @@ const readTelemetrySurfaceState = async (header: Locator): Promise<TelemetrySurf
     const scrollerStyle = getComputedStyle(scroller);
     return {
       bodyBackground: getComputedStyle(body).backgroundColor,
-      bodyToPaneBottomGap: paneBody.getBoundingClientRect().bottom - bodyBounds.bottom,
+      bodyToNextUnitGap: nextUnitEdge(headerRoot, collection) - bodyBounds.bottom,
       bottomRadius: Number.parseFloat(getComputedStyle(body).borderBottomLeftRadius),
       contentPadding: Number.parseFloat(getComputedStyle(content).paddingLeft),
       filterBackground: getComputedStyle(filter).backgroundColor,
@@ -180,7 +187,7 @@ test('modernizes Telemetry as a filterable, truthful, accessible trace explorer'
   const lightSurface = await readTelemetrySurfaceState(main);
   expect(lightSurface.seamDelta).toBeLessThanOrEqual(1);
   expect(lightSurface.horizontalEdgeDelta).toBeLessThanOrEqual(1);
-  expect(lightSurface.bodyToPaneBottomGap).toBeCloseTo(8, 0);
+  expect(lightSurface.bodyToNextUnitGap).toBeCloseTo(8, 0);
   expect(lightSurface.bottomRadius).toBeGreaterThan(0);
   expect(lightSurface.contentPadding).toBe(8);
   expect(lightSurface.filterHeight).toBe(28);

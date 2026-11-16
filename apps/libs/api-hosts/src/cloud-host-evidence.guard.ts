@@ -1,9 +1,8 @@
 import { Inject, Injectable, UnauthorizedException, createParamDecorator } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Auth } from 'better-auth';
 import type { FastifyRequest } from 'fastify';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
 import { HostsService } from '#hosts.service.js';
 
 /** A provisioned cloud host reporting for its owner on its own project (T11). */
@@ -30,10 +29,10 @@ type ReporterRequest = FastifyRequest & { [reporterKey]?: CloudHostReporter; use
 export class CloudHostEvidenceGuard extends AuthGuard implements CanActivate {
   public constructor(
     @Inject(Reflector) reflector: Reflector,
-    @Inject(authInstanceKey) auth: Auth,
+    @Inject(SessionResolver) sessions: SessionResolver,
     @Inject(HostsService) private readonly hosts: HostsService,
   ) {
-    super(reflector, auth);
+    super(reflector, sessions);
   }
 
   public override async canActivate(context: ExecutionContext): Promise<boolean> {

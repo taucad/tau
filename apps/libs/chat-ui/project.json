@@ -3,5 +3,13 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/chat-ui",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:feature"]
+  "tags": ["scope:ui", "type:app-lib", "layer:feature"],
+  "targets": {
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
+    }
+  }
 }

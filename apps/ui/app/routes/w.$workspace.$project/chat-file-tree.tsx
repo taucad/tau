@@ -35,7 +35,8 @@ export const FileTreePanelBody = memo(function ({
   readonly shouldHandleReveal?: () => boolean;
   readonly readOnly?: boolean;
 }): React.JSX.Element {
-  const availability = useProjectAvailability();
+  /* A first view (STO-25): open once the entry closure lands, every entry still to land listed as arriving (I7). */
+  const availability = useProjectAvailability('tree');
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }

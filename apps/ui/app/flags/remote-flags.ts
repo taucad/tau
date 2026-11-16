@@ -13,6 +13,11 @@
  * seeded on {@link seededFlagStateGlobal} before the page's scripts run replace the PostHog client's values for the
  * life of the page. A deployed build never reads the global, and nothing stores it, so no device can override a flag
  * this way.
+ *
+ * The source also says whether its values are settled ({@link readRemoteFlagStatus}): `pending` while a client is
+ * connected but has not answered, `evaluated` once PostHog's values (or a seeded state) are in, and `absent` when no
+ * answer will come (analytics not admitted or withdrawn, the SDK failed to load, or the flag load failed), so the
+ * defaults are final. The layout-flag mirror (`#flags/layout-flags`) writes only settled values.
  */
 
 import { Topic } from '@taucad/events';
@@ -23,15 +28,30 @@ import { ENV } from '#environment.config.js';
 /** Evaluated values of the PostHog-backed flags, by registry name. A flag PostHog did not return is absent. */
 export type RemoteFlagValues = Readonly<Partial<Record<FeatureFlagName, boolean>>>;
 
+/**
+ * Whether the remote values can still change without a later event: `pending` until a connected client answers,
+ * `evaluated` once it has, `absent` when no answer will come and the registry defaults are final.
+ */
+export type RemoteFlagStatus = 'pending' | 'evaluated' | 'absent';
+
 /** The part of the PostHog client this source reads. */
 export type RemoteFlagClient = {
   readonly featureFlags?: { getFlagVariants(): Record<string, string | boolean> } | undefined;
-  onFeatureFlags(callback: () => void): (() => void) | undefined;
+  /** PostHog calls back with the flags, their variants and whether loading them failed. */
+  onFeatureFlags(
+    callback: (
+      flags?: readonly string[],
+      variants?: Readonly<Record<string, string | boolean>>,
+      context?: { readonly errorsLoading?: boolean },
+    ) => void,
+  ): (() => void) | undefined;
 };
 
 const remoteFlagTopic = new Topic<void>({ name: 'remote-feature-flags' });
 
 let values: RemoteFlagValues | undefined;
+/* Until the analytics boundary decides, nothing has answered. */
+let status: RemoteFlagStatus = 'pending';
 let disconnectClient: (() => void) | undefined;
 
 /** Each PostHog-backed registry name with its PostHog flag key. */
@@ -89,11 +109,12 @@ function isSame(a: RemoteFlagValues | undefined, b: RemoteFlagValues | undefined
   return remoteFlagKeys.every(([name]) => a[name] === b[name]);
 }
 
-function update(next: RemoteFlagValues | undefined): void {
-  if (isSame(values, next)) {
+function update(next: RemoteFlagValues | undefined, nextStatus: RemoteFlagStatus): void {
+  if (isSame(values, next) && status === nextStatus) {
     return;
   }
   values = next;
+  status = nextStatus;
   remoteFlagTopic.emit();
 }
 
@@ -105,7 +126,15 @@ export function readRemoteFlagValues(): RemoteFlagValues | undefined {
   return seededValues ?? values;
 }
 
-/** Listen for changes to the remote values; returns the unsubscribe. */
+/**
+ * Whether the values {@link readRemoteFlagValues} gives are settled. A seeded end-to-end flag state is always
+ * `evaluated`.
+ */
+export function readRemoteFlagStatus(): RemoteFlagStatus {
+  return seededValues === undefined ? status : 'evaluated';
+}
+
+/** Listen for changes to the remote values or their status; returns the unsubscribe. */
 export function subscribeRemoteFlags(listener: () => void): () => void {
   return remoteFlagTopic.subscribe(listener);
 }
@@ -117,12 +146,17 @@ export function subscribeRemoteFlags(listener: () => void): () => void {
  * @param client - The initialised PostHog singleton.
  */
 export function connectRemoteFlags(client: RemoteFlagClient): void {
-  disconnectRemoteFlags();
-  const read = (): void => {
+  releaseClient();
+  update(undefined, 'pending');
+  const read = (
+    _flags?: readonly string[],
+    _variants?: Readonly<Record<string, string | boolean>>,
+    context?: { readonly errorsLoading?: boolean },
+  ): void => {
     const variants = client.featureFlags?.getFlagVariants();
-    if (variants !== undefined) {
-      update(project(variants));
-    }
+    /* A failed flag load still answers: no value is coming, so what the client holds now is final. */
+    const answered: RemoteFlagStatus = context?.errorsLoading === true ? 'absent' : 'evaluated';
+    update(variants === undefined ? values : project(variants), answered);
   };
   try {
     // `onFeatureFlags` also calls back at once when flags have already loaded.
@@ -131,12 +165,20 @@ export function connectRemoteFlags(client: RemoteFlagClient): void {
   } catch {
     // Optional analytics must not prevent the product from opening; defaults stay in force.
     disconnectClient = undefined;
+    update(undefined, 'absent');
   }
 }
 
-/** Stop following the client and return every PostHog-backed flag to its registry default. */
-export function disconnectRemoteFlags(): void {
+function releaseClient(): void {
   disconnectClient?.();
   disconnectClient = undefined;
-  update(undefined);
+}
+
+/**
+ * Stop following the client and return every PostHog-backed flag to its registry default, which is then final:
+ * analytics are not admitted, were withdrawn, or the SDK could not load.
+ */
+export function disconnectRemoteFlags(): void {
+  releaseClient();
+  update(undefined, 'absent');
 }

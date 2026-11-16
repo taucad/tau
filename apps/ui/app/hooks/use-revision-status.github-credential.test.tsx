@@ -12,16 +12,15 @@ import { render } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { MockProxy } from 'vitest-mock-extended';
 import { createActor, setup, types } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { useEffect } from 'react';
+import { startSessionRevisionsStandIn } from '#runtime/session-revisions.fixture.js';
+import type { fileManagerMachine as realFileManagerMachine } from '#machines/file-manager.machine.js';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { Topic } from '@taucad/events';
 import type { GitRemoteCredential, RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
-import {
-  githubCredentialRenewDelay,
-  revisionClientTestApi,
-  useRevisionClientLifecycle,
-  useRevisionCommands,
-} from '#hooks/use-revision-status.js';
+import { githubCredentialRenewDelay, revisionClientTestApi, useRevisionCommands } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { GithubRequestError } from '#lib/github-connections.js';
@@ -107,8 +106,16 @@ const scriptedClient = (): Readonly<{
 
 let commands: ReturnType<typeof useRevisionCommands> | undefined;
 
+/* A7b: the session's `revisions` child owns the lifecycle; this starts it for as long as the row mounts it. */
 function Owner(): React.JSX.Element {
-  useRevisionClientLifecycle();
+  useEffect(
+    () =>
+      startSessionRevisionsStandIn({
+        projectId,
+        fileManagerRef: fileManagerRef as unknown as ActorRefFrom<typeof realFileManagerMachine>,
+      }),
+    [],
+  );
   commands = useRevisionCommands();
   return <div data-testid='owner' />;
 }
@@ -730,10 +737,14 @@ describe('connecting a remote', () => {
       expiresAt: expiringIn(eightHours),
     });
 
-    expect(scripted.actors().at(-1)).toMatchObject({
+    /* The forge identity rides beside the person, for the author line alone (D33, I3). */
+    const sent = scripted.actors().at(-1);
+    expect(sent).toMatchObject({
       command: 'setActor',
-      actor: { kind: 'user', name: 'octo', email: '7+octo@users.noreply.github.com' },
+      actor: { kind: 'user' },
+      commitAuthor: { name: 'octo', email: '7+octo@users.noreply.github.com' },
     });
+    expect(JSON.stringify(sent?.command === 'setActor' ? sent.actor : undefined)).not.toContain('noreply.github.com');
   });
 
   it('should link a github.com address with no App credential as an anonymous read-only remote (G2)', async () => {

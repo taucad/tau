@@ -2,7 +2,7 @@
 import { describe, expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { axeAudit, readPageSemantics } from '#support/page-audit.js';
+import { pageAxeViolations, readPageSemantics } from '#support/page-audit.js';
 import { flagTest, runsInFlagStates } from '#support/flag-state-test.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- event and person properties are analytics wire names. */
@@ -95,7 +95,7 @@ const openSetupFromHelp = async (): Promise<void> => {
 
 /**
  * Answer every step and finish: 3D printing; Blender, which suggests middle-drag orbit with Shift pan and axis balls;
- * then Right-drag orbit, the Axes gizmo and the trackpad switch, none of them the suggestion.
+ * then Right-drag orbit and the Axes gizmo, neither of them the suggestion.
  */
 const answerEveryStep = async (): Promise<void> => {
   await target.click(selectors.getByRole('checkbox', { name: /3D printing/u }));
@@ -108,7 +108,6 @@ const answerEveryStep = async (): Promise<void> => {
     selectors.getByRole('group', { name: 'Mouse controls' }).getByRole('radio', { name: /Right-drag orbit/u }),
   );
   await target.click(selectors.getByRole('radio', { name: 'Axes', exact: true }));
-  await target.click(selectors.getByRole('switch', { name: 'I use a trackpad' }));
   await target.click(continueButton());
   await target.expectVisible(stepHeading('Design, verify, build'));
   await target.click(selectors.getByRole('button', { name: 'Finish', exact: true }));
@@ -175,14 +174,13 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
       tour_wanted: true,
     });
 
-    // Other surfaces may set their own person properties; setup's six hold these values.
+    // Other surfaces may set their own person properties; setup's five hold these values.
     expect(await personProperties()).toMatchObject({
       setup_status: 'completed',
       goals: ['printing'],
       tool: 'blender',
       mouse_preset: 'right-orbit',
       gizmo_style: 'axes',
-      input_device: 'trackpad',
     });
     expect(await setupStatuses()).toStrictEqual(['offered', 'completed']);
   });
@@ -232,7 +230,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     const findings: Record<string, unknown> = {};
     const audit = async (step: string): Promise<void> => {
       const semantics = await readPageSemantics();
-      const { violations } = await axeAudit();
+      const violations = await pageAxeViolations();
       findings[step] = { semantics, violations };
       expect.soft(violations, `${step}: axe violations`).toStrictEqual([]);
       expect.soft(semantics.headingOnes, `${step}: exactly one h1`).toHaveLength(1);

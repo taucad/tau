@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DockviewApi } from 'dockview-react';
 import { XIcon } from 'lucide-react';
@@ -17,7 +17,8 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { frameHintKey, writePhoneFrameHint } from '#lib/frame-hint.js';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -259,6 +260,13 @@ function snapPointLength(point: number | string | null): string {
   return typeof point === 'string' ? point : `${Number(point)} * 100dvh`;
 }
 
+/**
+ * A sheet that starts where it rests. Vaul paints a sheet with snap points first at `--initial-transform` (100%, below
+ * the screen), then moves it to its detent, `--snap-point-height`, with a transition once its effects run: on load that
+ * is a slide up the whole sheet (M3). Starting at the detent leaves the move nothing to travel.
+ */
+const restingEntrance: Record<`--${string}`, string> = { '--initial-transform': 'var(--snap-point-height)' };
+
 const textEntryInputTypes = new Set(['text', 'search', 'email', 'url', 'tel', 'password', 'number']);
 
 /** Escape inside a field or the code editor belongs to that control (clear, close a suggestion), not to the sheet. */
@@ -476,8 +484,17 @@ function useChatCue(): MobileWorkbenchDestinationCue | undefined {
 }
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
-  const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
-    useChatInterfaceState();
+  const {
+    isEditorReady,
+    isLayoutRestored,
+    activeTab,
+    handleTabChange,
+    drawerOpen,
+    handleDrawerChange,
+    snapPoints,
+    activeSnapPoint,
+    handleSnapChange,
+  } = useChatInterfaceState();
   const chatCue = useChatCue();
   const [viewerApi, setViewerApi] = useState<DockviewApi>();
   const [viewerFileActions, setViewerFileActions] = useState<ViewerFileActions>();
@@ -529,6 +546,18 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     [handleDrawerChange],
   );
 
+  /* M3: the sheet the workspace loads with (a surface restored from storage) is already where it rests, so it appears
+   * there instead of sliding up from below the screen. Until that first presentation ends or the person chooses a
+   * surface, the sheet's entrance starts at vaul's resting offset; every later opening answers a gesture and slides. */
+  const [entersAtRest, setEntersAtRest] = useState(true);
+  const [wasOpen, setWasOpen] = useState(drawerOpen);
+  if (wasOpen !== drawerOpen) {
+    setWasOpen(drawerOpen);
+    if (!drawerOpen) {
+      setEntersAtRest(false);
+    }
+  }
+
   // A surface the person chooses takes focus; one restored from storage or opened by the app does not.
   const surfaceToFocus = useRef<MobilePanelId | undefined>(undefined);
   const chooseSurface = useCallback(
@@ -536,6 +565,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
       // Choosing the open surface changes nothing, so no focus is owed to a later, app-opened visit.
       const isUnchanged = id === activeTab && drawerOpen;
       surfaceToFocus.current = id === 'viewer' || isUnchanged ? undefined : id;
+      setEntersAtRest(false);
       handleTabChange(id);
     },
     [activeTab, drawerOpen, handleTabChange],
@@ -568,19 +598,36 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     [acknowledgeDecisions, drawerOpen, handleSnapChange],
   );
 
+  /* The frame hint mirrors the surface the editor machine holds, so the next load of this project draws its phone
+   * frame with that tab selected and the sheet where it opens (A15c). Only once the editor state has loaded: before
+   * that the surface is the default. */
+  useLayoutEffect(() => {
+    const hintKey = frameHintKey(globalThis.location.pathname);
+    if (isEditorReady && hintKey !== undefined) {
+      writePhoneFrameHint(hintKey, activeTab);
+    }
+  }, [isEditorReady, activeTab]);
+
   const isViewerTab = activeTab === 'viewer';
   const sheetHeight = snapPointLength(activeSnapPoint);
 
   return (
-    <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
+    <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
+      {/* The route's busy state while the workspace is drawn but not shown, outside it so it is exposed: the phone
+       * frame is hidden from assistive technology, and the gates' marker is gone once the workspace mounts. */}
+      {isLayoutRestored ? null : <WorkspaceOpening />}
       <div
+        /* Until the stored layout is read the surface is the default, not this project's: the phone frame stands in for
+         * the workspace, which is drawn but not shown, and gives way to it in the commit the layout is restored
+         * (A15c, `PhoneFrame`). */
+        data-mobile-workspace={isLayoutRestored ? 'ready' : 'opening'}
         className={cn(
+          'data-[mobile-workspace=opening]:invisible',
           // --nav-height is the height of the navigation tabs
           'absolute inset-0 flex size-full flex-col overflow-hidden',
           mobileWorkbenchNavigationHeight,
           'md:hidden', // Hidden on desktop
-          // The workspace lands over the skeleton's background rather than snapping in.
-          'animate-in duration-200 fade-in-50 motion-reduce:animate-none',
+          // No entrance on load (U9, LI5): the workspace paints in its final state over the phone frame's boxes.
         )}
       >
         {/* W2 (D2, EQ2 = H1): the project's top bar — sidebar, title with status line, Share. */}
@@ -636,6 +683,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
               )}
               style={{
                 height: '100%',
+                ...(entersAtRest ? restingEntrance : undefined),
               }}
               onEscapeKeyDown={(event) => {
                 if (isEditingTarget(event.target ?? undefined)) {

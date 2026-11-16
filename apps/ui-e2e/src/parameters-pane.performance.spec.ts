@@ -555,15 +555,19 @@ const installProbe = (): void => {
   } catch {
     // Only Chromium reports Long Animation Frames; the budget then reads zero frames.
   }
+  /* Since 22d06913fa (#1429) one committed changeset posts one notice that lists its changes. */
   new BroadcastChannel('tau-fs-changes').addEventListener(
     'message',
-    (event: MessageEvent<{ type?: string; path?: string }>) => {
-      probe.fsWrites.push({
-        phase: probe.phase,
-        t: performance.now(),
-        type: String(event.data.type ?? ''),
-        path: String(event.data.path ?? ''),
-      });
+    (event: MessageEvent<{ changes?: ReadonlyArray<{ type?: string; path?: string }> }>) => {
+      const t = performance.now();
+      for (const change of event.data.changes ?? []) {
+        probe.fsWrites.push({
+          phase: probe.phase,
+          t,
+          type: String(change.type ?? ''),
+          path: String(change.path ?? ''),
+        });
+      }
     },
   );
   let pillOn = false;

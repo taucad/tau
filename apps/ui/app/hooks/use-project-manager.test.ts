@@ -2,7 +2,8 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -29,7 +30,9 @@ import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ConnectedWorkspace, CreateProjectOptions, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
@@ -252,7 +255,18 @@ const mockFileManager = {
   workspace: { syncProjectRoots: mockSyncProjectRoots },
   scopedStorage: { readShallowDirectory: mockReadScopedShallowDirectory },
 };
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
+/* A4b: the library reads the root file facade the runtime builds; here, one over the double. */
+const rootFiles = testRootFiles(mockFileManager);
+/* A12: the app runtime's chat store hears of a first chat created empty. Since A4a the library reads the store the
+ * runtime built it with. Rows run with no runtime unless one sets it. */
+const appRuntime = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | undefined,
+  notedEmpty: [] as string[],
+}));
+vi.mock('#runtime/app-runtime-provider.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useOptionalAppRuntime: () => appRuntime.current,
+}));
 
 const recordConfigWrite = async (_config: ProjectFileSystemConfig): Promise<void> => {
   phaseOrder.push('locator');
@@ -345,6 +359,9 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({
   desktopBridge: () => undefined,
   hostPathName: (path: string) => /[^/\\]+(?=[/\\]*$)/.exec(path)?.[0] ?? path,
   nodeHomeRoot: () => '/Users/tester/Library/Application Support/Tau/home',
+  /* The runtime's `environment` is composed with the desktop quit seam; the web build's never asks. */
+  onDesktopQuitRequested: () => () => undefined,
+  reportDesktopQuiesced: () => undefined,
 }));
 
 let mockIsFileSystemAccessSupported = false;
@@ -579,8 +596,39 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { ProjectLibrary } = await import('#runtime/project-library.js');
+/* A2: the provider is over a library the runtime builds with its query client; each wrapper's client gets one here. */
+const libraries = new WeakMap<QueryClient, InstanceType<typeof ProjectLibrary>>();
+/* The chat store the A12 row reads: it notes each chat created empty. */
+const notingChatStore: Pick<ProjectLibraryChatSessions, 'noteCreatedEmpty'> = {
+  noteCreatedEmpty: (chatId: string) => {
+    appRuntime.notedEmpty.push(chatId);
+  },
+};
+const libraryFor = (queryClient: QueryClient): InstanceType<typeof ProjectLibrary> => {
+  let library = libraries.get(queryClient);
+  if (library === undefined) {
+    library = new ProjectLibrary({
+      queryClient,
+      rootFiles: () => rootFiles,
+      chatSessions: () =>
+        appRuntime.current === undefined ? undefined : (notingChatStore as ProjectLibraryChatSessions),
+    });
+    library.start();
+    libraries.set(queryClient, library);
+    startedLibraries.push(library);
+  }
+  return library;
+};
+/* A wrapper's library outlives its tree, as the runtime's does: stop it with the case. */
+const startedLibraries: Array<InstanceType<typeof ProjectLibrary>> = [];
+afterEach(() => {
+  for (const library of startedLibraries.splice(0)) {
+    library.stop();
+  }
+});
 const { useChatRecords } = await import('#hooks/use-chat-records.js');
-const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
+const { tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 
 const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -588,7 +636,7 @@ const createWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, undefined, children),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
 };
@@ -603,10 +651,10 @@ const createCountingWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, undefined, children),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
-  return { wrapper, projectsInvalidations };
+  return { wrapper, projectsInvalidations, queryClient };
 };
 
 const createInspectableWrapper = () => {
@@ -615,7 +663,7 @@ const createInspectableWrapper = () => {
     return createElement(
       QueryClientProvider,
       { client: queryClient },
-      createElement(ProjectManagerProvider, undefined, children),
+      createElement(ProjectManagerProvider, { library: libraryFor(queryClient) }, children),
     );
   };
   return { wrapper, queryClient };
@@ -2460,7 +2508,7 @@ describe('useProjectManager.createProject', () => {
     }
   });
 
-  it('should reject a held metadata read when its provider unmounts', async () => {
+  it('should keep a held metadata read across a provider unmount, and reject it when the library stops (A4b)', async () => {
     const ready = Promise.withResolvers<void>();
     mockWatchRecordFile.mockReturnValue({
       ready: ready.promise,
@@ -2489,8 +2537,15 @@ describe('useProjectManager.createProject', () => {
         expect(mockWatchRecordFile).toHaveBeenCalled();
       });
       const pending = view.result.current.getChatRecordsForResource(fakeProject.id);
+      const unsettled = Symbol('unsettled');
       const refused = expect(pending).rejects.toThrow('Chat observation was disposed.');
+      /* The facade is the runtime's: a provider unmount releases nothing (B9). */
       view.unmount();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await expect(Promise.race([pending, Promise.resolve(unsettled)])).resolves.toBe(unsettled);
+      libraryFor(queryClient).stop();
       await refused;
       expect(mockReadChatRecords).not.toHaveBeenCalled();
     } finally {
@@ -2584,17 +2639,40 @@ describe('useProjectManager.createProject', () => {
     expect(mockInvalidateChatLog).not.toHaveBeenCalled();
   });
 
-  it('cancels a pending library invalidation when the provider unmounts', async () => {
-    const { wrapper, projectsInvalidations } = createCountingWrapper();
-    const { unmount } = renderHook(() => useProjectManager(), { wrapper });
+  /** Render, let the library's watch subscribe, then emit a manifest write under fake timers. */
+  const renderWithPendingInvalidation = async () => {
+    const counting = createCountingWrapper();
+    const view = renderHook(() => useProjectManager(), { wrapper: counting.wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
     vi.useFakeTimers();
+    act(() => {
+      emitWorkerChange('fileWritten', '/test-project/tau.json');
+    });
+    return { ...counting, view };
+  };
+
+  it('runs a pending library invalidation across a provider unmount (A4b)', async () => {
+    const { view, projectsInvalidations } = await renderWithPendingInvalidation();
     try {
-      act(() => {
-        emitWorkerChange('fileWritten', '/test-project/tau.json');
+      view.unmount();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
       });
-      unmount();
-      act(() => {
-        vi.advanceTimersByTime(1000);
+      expect(projectsInvalidations()).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a pending library invalidation when the library stops (A4b)', async () => {
+    const { view, projectsInvalidations, queryClient } = await renderWithPendingInvalidation();
+    try {
+      view.unmount();
+      libraryFor(queryClient).stop();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
       });
       expect(projectsInvalidations()).toBe(0);
     } finally {
@@ -3514,6 +3592,35 @@ describe('useProjectManager.createProject', () => {
     expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
   });
 
+  it('tells the chat store of a first chat created with no prompt, so it shows empty at once (A12, I21)', async () => {
+    appRuntime.current = {};
+    appRuntime.notedEmpty = [];
+    try {
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await act(async () =>
+        result.current.createProject({
+          project: fakeProject,
+          files: pendingCreate.files,
+          location: { kind: 'home' },
+        }),
+      );
+      expect(appRuntime.notedEmpty).toEqual([pendingCreate.chat!.id]);
+
+      // A first chat that carries the person's prompt is not empty.
+      appRuntime.notedEmpty = [];
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'auto',
+          initialMessage: { content: 'a bracket', attachments: [] },
+          location: { kind: 'home' },
+        }),
+      );
+      expect(appRuntime.notedEmpty).toEqual([]);
+    } finally {
+      appRuntime.current = undefined;
+    }
+  });
+
   it('creates an entry-less project under Auto: no main, no model file, and a first chat on Auto (D3)', async () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -3635,8 +3742,11 @@ describe('useProjectManager.createProject', () => {
       expect(mockCompletePending).not.toHaveBeenCalled();
       mockGetPendingProjectOperations.mockResolvedValue([persisted]);
       mockResumeResources.mockResolvedValueOnce([persisted.chat!]);
+      /* A3b named change (rule 5): a terminal failure is never replayed again in the tab that saw it, as a tab that
+       * had already read its journal behaved before; the next page load replays the row. */
+      const reloaded = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
       await act(async () => {
-        await result.current.getProjectListing();
+        await reloaded.result.current.getProjectListing();
       });
       await vi.waitFor(() => {
         expect(mockCompletePending).toHaveBeenCalledWith(operationId);
@@ -4896,5 +5006,231 @@ describe('useProjectManager.createProject', () => {
       ['all-chats'],
       ['chat', activityChat.id],
     ]);
+  });
+
+  // ── Route access answers (L8, A0.4) ─────────────────────────────────────────
+  /*
+   * One row per answer of `getProjectRouteAccess`, and the two reads it must
+   * take again: an epoch that moves while the route is verified, and a
+   * recovery that starts while the library row is read. Characterisation of
+   * today's loop; ordering is held by deferred promises.
+   */
+  describe('route access answers (L8)', () => {
+    const verified: ProjectRouteVerification = {
+      status: 'verified',
+      project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+    };
+    /** A mock call that reports when it is reached and settles only once released. */
+    const held = <T>(value: T) => {
+      const reached = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      return {
+        reached: reached.promise,
+        release: () => {
+          release.resolve();
+        },
+        call: async (): Promise<T> => {
+          reached.resolve();
+          await release.promise;
+          return value;
+        },
+      };
+    };
+
+    it('L8: should answer recovering while this tab replays a row for the project', async () => {
+      mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+      const commit = held({ status: 'committed' } as const);
+      mockCommitPendingProjectDirectory.mockImplementationOnce(commit.call);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+          status: 'recovering',
+          recovery: {
+            operationId,
+            projectId: fakeProject.id,
+            kind: 'create',
+            storage: { backend: 'opfs', providerBasePath: pendingCreate.providerBasePath },
+            status: 'recovering',
+          },
+        });
+      });
+      expect(mockVerifyProjectRoute).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await commit.reached;
+        commit.release();
+        await result.current.getProjectListing();
+      });
+    });
+
+    it('L8: should answer recovery-failed once this tab has given up on a row for the project', async () => {
+      vi.useFakeTimers();
+      try {
+        mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+        mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
+        const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+        await act(async () => {
+          await result.current.getProjectListing();
+          // Drain the recovery loop; the fake clock yields once and fires nothing.
+          await vi.advanceTimersByTimeAsync(0);
+        });
+
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+          status: 'recovery-failed',
+          recovery: {
+            operationId,
+            projectId: fakeProject.id,
+            kind: 'create',
+            storage: { backend: 'opfs', providerBasePath: pendingCreate.providerBasePath },
+            status: 'failed',
+            reason: 'filesystem-error',
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('L8: should answer unavailable when the verified route reports its storage unavailable', async () => {
+      mockVerifyProjectRoute.mockResolvedValue({ status: 'unavailable' });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'unavailable' });
+      });
+      expect(mockVerifyProjectRoute).toHaveBeenCalledExactlyOnceWith({ projectId: fakeProject.id });
+      expect(mockListProjectManifests).not.toHaveBeenCalled();
+      expect(mockGetProjectLibraryState).not.toHaveBeenCalled();
+    });
+
+    it('L8: should answer ready for a verified route whose library row is not trashed', async () => {
+      mockVerifyProjectRoute.mockResolvedValue(verified);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({
+          status: 'ready',
+          project: { ...projectToManifest(fakeProject), id: fakeProject.id },
+        });
+      });
+      expect(mockGetProjectLibraryState).toHaveBeenCalledExactlyOnceWith(fakeProject.id);
+    });
+
+    it('L8: should answer trashed for a verified route whose library row is trashed', async () => {
+      mockVerifyProjectRoute.mockResolvedValue(verified);
+      mockGetProjectLibraryState.mockResolvedValue({ projectId: fakeProject.id, lastActivityAt: 10, deletedAt: 11 });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({
+          status: 'trashed',
+          project: { ...projectToManifest(fakeProject), id: fakeProject.id },
+        });
+      });
+    });
+
+    it('L8: should answer conflict when discovery finds the project id in two directories', async () => {
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [fakeLocator, { ...fakeLocator, relativeDirectory: 'test-project-copy' }].map((locator) => ({
+          status: 'duplicate-id',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator,
+        })),
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'conflict' });
+      });
+      expect(mockVerifyProjectRoute).toHaveBeenCalledExactlyOnceWith({ projectId: fakeProject.id });
+      expect(mockGetProjectLibraryState).not.toHaveBeenCalled();
+    });
+
+    it('L8: should answer missing when no pass discovers the project and no route names it', async () => {
+      mockListProjectManifests.mockResolvedValue({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [],
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
+      });
+      expect(mockGetProjectFileSystemConfig).toHaveBeenCalledWith(fakeProject.id);
+    });
+
+    it('L8: should verify again when the discovery epoch moves while the route is being verified', async () => {
+      const stale = held(verified);
+      mockVerifyProjectRoute.mockImplementationOnce(stale.call).mockResolvedValueOnce({ status: 'unavailable' });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      const access = result.current.getProjectRouteAccess(fakeProject.id);
+      await act(async () => stale.reached);
+      act(() => {
+        emitWorkerChange('fileDeleted', '/test-project/tau.json');
+      });
+      stale.release();
+
+      // The verification the epoch overtook is never answered from.
+      await act(async () => {
+        await expect(access).resolves.toEqual({ status: 'unavailable' });
+      });
+      expect(mockVerifyProjectRoute).toHaveBeenCalledTimes(2);
+      expect(mockGetProjectLibraryState).not.toHaveBeenCalled();
+    });
+
+    it.each(['verified', 'discovered'] as const)(
+      'L8: should answer recovering when a recovery for the project starts while its %s library row is read',
+      async (route) => {
+        mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+        mockVerifyProjectRoute.mockResolvedValue(route === 'verified' ? verified : { status: 'discovery-required' });
+        mockGetProjectFileSystemConfig.mockResolvedValue({
+          projectId: fakeProject.id,
+          backend: 'opfs',
+          providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+        });
+        mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValue([pendingPermanentDelete]);
+        const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+        // Discovery is ready before the route asks, so the deletion below runs no pass and moves no epoch.
+        await act(async () => result.current.getProjectListing());
+        if (route === 'verified') {
+          // Drop the snapshot so the route verifies instead of reading the listing.
+          act(() => {
+            emitWorkerChange('fileDeleted', '/unrelated-project/tau.json');
+          });
+        }
+        const libraryRead = held<ProjectLibraryState | undefined>({ projectId: fakeProject.id, lastActivityAt: 10 });
+        mockGetProjectLibraryState.mockImplementationOnce(libraryRead.call);
+        const deletion = held({ status: 'deleted' } as const);
+        mockPermanentlyDeleteProjectDirectory.mockImplementationOnce(deletion.call);
+        const verifications = mockVerifyProjectRoute.mock.calls.length;
+
+        const access = result.current.getProjectRouteAccess(fakeProject.id);
+        await act(async () => libraryRead.reached);
+        expect(mockVerifyProjectRoute).toHaveBeenCalledTimes(route === 'verified' ? verifications + 1 : verifications);
+        // The recovery starts while the route is still reading the library row.
+        const deleting = result.current.permanentlyDeleteProject(fakeProject.id);
+        await act(async () => deletion.reached);
+        libraryRead.release();
+
+        await act(async () => {
+          await expect(access).resolves.toMatchObject({
+            status: 'recovering',
+            recovery: {
+              operationId: pendingPermanentDelete.operationId,
+              kind: 'permanent-delete',
+              status: 'recovering',
+            },
+          });
+        });
+        await act(async () => {
+          deletion.release();
+          await deleting;
+        });
+      },
+    );
   });
 });

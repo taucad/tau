@@ -52,6 +52,7 @@ import {
   revisionCommitterSignature,
   revisionTagMessage,
   taggerSignature,
+  unrecordedAuthorOf,
 } from '#revision-headers.js';
 import type { RevisionTrailer } from '#revision-headers.js';
 import { walkRevisionLog } from '#revision-log-order.js';
@@ -549,7 +550,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       summary: trailer?.summary ?? { generated: commit.message.split('\n')[0] ?? '' },
       provenance: trailer?.provenance ?? unattributed,
       /* B3: a commit Tau did not record reads as its git author, as GitHub shows it. */
-      ...(trailer === undefined ? { authorName: commit.author.name } : {}),
+      ...(trailer === undefined ? unrecordedAuthorOf(commit) : {}),
       conflicted: commit.conflictedTrees !== undefined,
     });
   };
@@ -2008,7 +2009,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         tree: treeId,
         parents: [...input.parents],
         /* A26: the person wrote it, Tau recorded it — git's own split. */
-        author: revisionAuthorSignature(input.provenance),
+        author: revisionAuthorSignature(input.provenance, input.commitAuthor),
         committer: revisionCommitterSignature(input.provenance),
         message: revisionCommitMessage(trailer),
         changeId: deriveChangeId(objectFormat, { treeId, parents: input.parents, trailer }),

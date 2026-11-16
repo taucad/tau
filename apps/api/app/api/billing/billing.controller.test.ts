@@ -11,11 +11,12 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
-import { describe, expect, it } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
+import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { wireOpenHoldsSchema, wireUsageSnapshotSchema } from '@taucad/billing';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 
 const instant = new Date('2026-09-05T12:00:00.000Z');
@@ -93,9 +94,9 @@ describe('billing authenticated reporting endpoints', () => {
     const billing = mock<BillingService>();
     const payments = mock<BillingPaymentsService>();
     const usage = mock<BillingUsageService>();
-    const auth = mockDeep<Auth>();
+    const getSession = vi.fn<FakeSessionLookup>();
     const closure = mock<BillingAccountClosureService>();
-    auth.api.getSession.mockResolvedValue(null);
+    getSession.mockResolvedValue(null);
     usage.getUsage.mockResolvedValue(emptyUsage);
     usage.getOpenHolds.mockResolvedValue(openHolds);
     const module = await Test.createTestingModule({
@@ -103,7 +104,7 @@ describe('billing authenticated reporting endpoints', () => {
       providers: [
         Reflector,
         AuthGuard,
-        { provide: authInstanceKey, useValue: auth },
+        { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
         { provide: BillingService, useValue: billing },
         { provide: BillingUsageService, useValue: usage },
         { provide: BillingPaymentsService, useValue: payments },
@@ -137,7 +138,7 @@ describe('billing authenticated reporting endpoints', () => {
         payload: topup,
       });
       expect(signedOutPurchase.statusCode).toBe(401);
-      auth.api.getSession.mockResolvedValue({
+      getSession.mockResolvedValue({
         user: { ...owner, emailVerified: false },
         session,
       });
@@ -148,7 +149,7 @@ describe('billing authenticated reporting endpoints', () => {
       });
       expect(unverifiedPurchase.statusCode).toBe(403);
       expect(payments.prepareTopup).not.toHaveBeenCalled();
-      auth.api.getSession.mockResolvedValue({ user: owner, session });
+      getSession.mockResolvedValue({ user: owner, session });
       const injectedOwner = await app.inject({
         method: 'POST',
         url: '/v1/billing/payment-actions/topup',

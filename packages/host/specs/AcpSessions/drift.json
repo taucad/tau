@@ -34,6 +34,7 @@
     "acpSession.closing.terminating.xstate.timeout": "AdapterExited",
     "acpSession.elicitationComplete": "Stutter",
     "acpSession.flushed": "Stutter",
+    "acpSession.grokModels": "Stutter",
     "acpSession.grokNotification": "Stutter",
     "acpSession.grokSettings": "Stutter",
     "acpSession.idle.persisting.lend": "Acquire",
@@ -93,6 +94,7 @@
     "closed",
     "elicitationComplete",
     "flushed",
+    "grokModels",
     "grokNotification",
     "grokSettings",
     "idleExpired",
@@ -109,11 +111,11 @@
     "vendorRequest"
   ],
   "specs": {
-    "AcpSessions.tla": "a9376f40d521bda6c19005379528a12422f612170002167a6bfe3a30430ab561"
+    "AcpSessions.tla": "bb553d0678ae4f758389b8d34327b9db262f0df0aa020885c8325c9e65f4df9a"
   },
   "tables": {},
   "versions": {
-    "acpSession": "3",
+    "acpSession": "4",
     "acpSessions": "1"
   }
 }

@@ -7,13 +7,41 @@ const hoisted = vi.hoisted(() => ({
   controllers: [] as MetalMorphLoaderController[],
   createOptions: [] as Array<{ canvas?: HTMLCanvasElement; onFrame?: () => void; theme?: string; quality?: string }>,
   probeResult: false,
+  loseNextWebGpuCanvas: false,
+  canvasLost: false,
+  /** What the next renderer's start rejects with: no WebGL 2 context, or any other failure. */
+  nextStartFailure: undefined as 'no-context' | 'other' | undefined,
 }));
+
+/** What createRenderer throws when `getContext('webgl2')` answers `null`. */
+const createContextUnavailableError = (): Error => {
+  const error = new Error('This browser could not start 3D graphics (WebGL 2 is unavailable).');
+  error.name = 'GraphicsContextUnavailableError';
+  return error;
+};
 
 vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
   createMetalMorphLoader: vi.fn((options: { onFrame?: () => void }) => {
     hoisted.createOptions.push(options);
+    const { backend } = options as { backend?: string };
+    const losesCanvas = hoisted.loseNextWebGpuCanvas && backend === 'webgpu';
+    if (losesCanvas) {
+      // What createRenderer does for a WebGPU canvas the browser cannot present: report the loss, then reject.
+      hoisted.loseNextWebGpuCanvas = false;
+      hoisted.canvasLost = true;
+      hoisted.probeResult = false;
+    }
+    const failure = hoisted.nextStartFailure;
+    hoisted.nextStartFailure = undefined;
+    const ready = losesCanvas
+      ? Promise.reject(new Error('The WebGPU canvas could not present a frame: Device was destroyed.'))
+      : failure === 'no-context'
+        ? Promise.reject(createContextUnavailableError())
+        : failure === 'other'
+          ? Promise.reject(new Error('The shader failed to compile.'))
+          : Promise.resolve();
     const controller = {
-      ready: Promise.resolve(),
+      ready,
       play: vi.fn(),
       pause: vi.fn(),
       renderOnce: vi.fn(),
@@ -36,7 +64,12 @@ vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
 
 vi.mock('@taucad/viewer/graphics/graphics-backend', () => ({
   probeWebGpuSupport: vi.fn(async (): Promise<boolean> => hoisted.probeResult),
-  resolveGraphicsBackendPreference: vi.fn((): string => 'webgl'),
+  resolveGraphicsBackendPreference: vi.fn((preference: string, isAvailable: boolean): string =>
+    preference === 'webgpu' && isAvailable ? 'webgpu' : 'webgl',
+  ),
+  webGpuFallbackReason: vi.fn(() => (hoisted.canvasLost ? 'canvas-loss' : undefined)),
+  isGraphicsContextUnavailableError: (value: unknown): boolean =>
+    value instanceof Error && value.name === 'GraphicsContextUnavailableError',
 }));
 
 vi.mock('@taucad/ui-core/utils/graphics-backend-override', () => ({
@@ -44,6 +77,7 @@ vi.mock('@taucad/ui-core/utils/graphics-backend-override', () => ({
 }));
 
 const { createMetalMorphSpinnerService } = await import('#components/geometry/loader/metal-morph-spinner-service.js');
+const { resetShowcaseContextAvailability } = await import('#components/geometry/loader/showcase-backend.js');
 
 type FakeContext = {
   clearRect: ReturnType<typeof vi.fn>;
@@ -103,6 +137,11 @@ describe('metalMorphSpinnerService', () => {
   beforeEach(() => {
     hoisted.controllers.length = 0;
     hoisted.createOptions.length = 0;
+    hoisted.probeResult = false;
+    hoisted.loseNextWebGpuCanvas = false;
+    hoisted.canvasLost = false;
+    hoisted.nextStartFailure = undefined;
+    resetShowcaseContextAvailability();
     vi.useFakeTimers();
   });
 
@@ -121,6 +160,27 @@ describe('metalMorphSpinnerService', () => {
 
     expect(hoisted.controllers).toHaveLength(1);
     expect(service.getDiagnostics()).toMatchObject({ subscriberCount: 20, activeCount: 20, rendererCount: 1 });
+  });
+
+  it('should open the renderer again on a fresh canvas on WebGL when its WebGPU canvas cannot present', async () => {
+    hoisted.probeResult = true;
+    hoisted.loseNextWebGpuCanvas = true;
+    const service = createMetalMorphSpinnerService();
+    await service.warm('dark');
+
+    const [lost, started] = hoisted.createOptions as Array<{ backend: string; canvas: HTMLCanvasElement }>;
+    expect(lost).toMatchObject({ backend: 'webgpu' });
+    expect(started).toMatchObject({ backend: 'webgl' });
+    expect(started?.canvas).not.toBe(lost?.canvas);
+    expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(service.getDiagnostics().rendererCount).toBe(1);
+
+    // The renderer that opened is the WebGL one, and it is what spinners draw from.
+    const target = createTarget();
+    service.subscribe(target);
+    hoisted.createOptions[1]?.onFrame?.();
+    expect(hoisted.controllers).toHaveLength(2);
+    expect(target.firstFrames).toBe(1);
   });
 
   it('should reuse the live renderer for a spinner that subscribes later', async () => {
@@ -436,5 +496,56 @@ describe('metalMorphSpinnerService', () => {
 
     expect(hoisted.controllers).toHaveLength(0);
     expect(service.getDiagnostics().rendererCount).toBe(0);
+  });
+
+  it('should leave spinners on their stand-ins, and open no further context, when the browser gives no WebGL 2 context', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    hoisted.nextStartFailure = 'no-context';
+    const service = createMetalMorphSpinnerService();
+    const first = createTarget();
+    // An unhandled rejection here fails the test run (TAU-UI-1N).
+    service.subscribe(first);
+    await settle();
+    await settle();
+
+    expect(hoisted.controllers).toHaveLength(1);
+    expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(service.getDiagnostics().rendererCount).toBe(0);
+    expect(first.firstFrames).toBe(0);
+    expect(warn).toHaveBeenCalledOnce();
+
+    // The browser will not give one later either: the next spinner keeps its stand-in without another attempt.
+    const second = createTarget();
+    service.subscribe(second);
+    await service.warm('light');
+    await settle();
+
+    expect(hoisted.controllers).toHaveLength(1);
+    expect(second.firstFrames).toBe(0);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
+  it('should release a renderer whose start failed and open a fresh one for the next spinner', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    hoisted.nextStartFailure = 'other';
+    const service = createMetalMorphSpinnerService();
+    service.subscribe(createTarget());
+    await settle();
+    await settle();
+
+    expect(hoisted.controllers[0]?.dispose).toHaveBeenCalledOnce();
+    expect(service.getDiagnostics().rendererCount).toBe(0);
+    expect(error).toHaveBeenCalledOnce();
+
+    const target = createTarget();
+    service.subscribe(target);
+    await settle();
+    hoisted.createOptions[1]?.onFrame?.();
+
+    expect(hoisted.controllers).toHaveLength(2);
+    expect(service.getDiagnostics().rendererCount).toBe(1);
+    expect(target.firstFrames).toBe(1);
+    error.mockRestore();
   });
 });

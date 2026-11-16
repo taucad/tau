@@ -20,7 +20,8 @@ import { startStorageHop } from '@taucad/api-git-core/testing/storage-hop';
 import type { StorageHop } from '@taucad/api-git-core/testing/storage-hop';
 import { decodeManifest } from '@taucad/api-git-core/store/manifest';
 import { hashHostGitCredential, mintHostGitCredential, resolveHostGitCredential } from '@taucad/api-hosts';
-import { AuthGuard, authInstanceKey } from '@taucad/api-auth';
+import { AuthGuard, SessionResolver } from '@taucad/api-auth';
+import { authInstanceKey } from '@taucad/api-auth/testing';
 import { staticAuthConfig } from '@taucad/api-auth/config/auth-static';
 import type { Environment } from '@taucad/api-core';
 import { corsBaseConfiguration } from '@taucad/api-core/constants/cors';
@@ -119,6 +120,7 @@ describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {
       providers: [
         Reflector,
         AuthGuard,
+        SessionResolver,
         { provide: authInstanceKey, useValue: auth },
         { provide: DatabaseService, useValue: Object.assign(mock<DatabaseService>(), { database }) },
         { provide: gitExecutorKey, useValue: hop.forwarder },

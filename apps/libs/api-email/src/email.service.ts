@@ -6,6 +6,7 @@ import type { Environment } from '@taucad/api-core';
 import type { EmailMessage, EmailTemplateKind } from '#email.types.js';
 import { renderEmailTemplate, subjectForEmailTemplate } from '#email-templates.js';
 import { assertEmailTemplateUrlAllowed } from '#email-link-builder.js';
+import { emailEnvironmentOf, maskRecipient } from '#email-address.js';
 
 /** Why an email is sent, which decides the address it comes from (email readiness, Part C). */
 type SenderClass = 'identity' | 'notifications' | 'billing';
@@ -65,6 +66,12 @@ export class EmailService {
       // A unique reference per send stops Gmail threading same-subject transactional emails into one conversation,
       // where it trims repeated content and buries the newest link (email readiness R8).
       headers: { 'X-Entity-Ref-ID': randomUUID() },
+      // Resend echoes tags on every delivery event, so the webhook knows the kind and environment of a bounce
+      // without a send log (email bounce blueprint R6).
+      tags: [
+        { name: 'kind', value: templateKind },
+        { name: 'env', value: emailEnvironmentOf(this.configService) },
+      ],
     });
 
     if (response.error) {
@@ -167,8 +174,7 @@ export class EmailService {
   }
 
   private describeRecipient(email: string): string {
-    const [, domain = 'unknown-domain'] = email.split('@');
-    return `recipient@${domain}`;
+    return maskRecipient(email);
   }
 
   private getResendApiKey(): string | undefined {

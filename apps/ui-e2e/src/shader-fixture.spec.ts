@@ -78,52 +78,66 @@ const expectRenderedPixels = async (pngBase64: string, backend: ShaderFixtureBac
   ).toBeGreaterThan(5);
 };
 
+/**
+ * Whether a WebGPU canvas presents in this run, which it does in the WebGPU hardware qualification tier
+ * (`ui-e2e:test:e2e:webgpu` with `TAU_E2E_WEBGPU_PROFILE=hardware`). On the software adapter the browser destroys the
+ * device at the first presented frame (`target.presentedGraphicsBackend`), so the fixture canvas this row screenshots
+ * stays blank; the WebGPU row, which proves WGSL and presented WebGPU pixels, runs where a WebGPU canvas presents.
+ */
+const presentsWebGpu = target.presentedGraphicsBackend('webgpu') === 'webgpu';
+
 test.describe('generated shader fixture', () => {
   for (const backend of ['common-webgl', 'webgpu'] as const satisfies readonly ShaderFixtureBackend[]) {
-    test(`compiles and renders the infinite grid through Three ${backend}`, async () => {
-      const initialEvents = await target.events();
-      const pageErrorStart = initialEvents.pageErrors.length;
-      await target.navigate(`/__e2e/shader-fixture?backend=${backend}`);
-      await target.waitFor(() => {
-        const status = document.querySelector<HTMLElement>('[data-testid="shader-fixture-result"]')?.dataset['status'];
-        return status !== undefined && status !== 'pending';
-      });
+    test.runIf(backend === 'common-webgl' || presentsWebGpu)(
+      `compiles and renders the infinite grid through Three ${backend}`,
+      async () => {
+        const initialEvents = await target.events();
+        const pageErrorStart = initialEvents.pageErrors.length;
+        await target.navigate(`/__e2e/shader-fixture?backend=${backend}`);
+        await target.waitFor(() => {
+          const status = document.querySelector<HTMLElement>('[data-testid="shader-fixture-result"]')?.dataset[
+            'status'
+          ];
+          return status !== undefined && status !== 'pending';
+        });
 
-      const output = selectors.getByTestId('shader-fixture-result');
-      expect(await target.getAttribute(output, 'data-status')).toBe('ready');
-      const result = await readFixture();
-      expect(result?.requestedBackend).toBe(backend);
-      expect(result?.actualBackend).toBe(backend);
-      expect(result?.vertexShader.length).toBeGreaterThan(100);
-      expect(result?.fragmentShader.length).toBeGreaterThan(100);
+        const output = selectors.getByTestId('shader-fixture-result');
+        expect(await target.getAttribute(output, 'data-status')).toBe('ready');
+        const result = await readFixture();
+        expect(result?.requestedBackend).toBe(backend);
+        expect(result?.actualBackend).toBe(backend);
+        expect(result?.vertexShader.length).toBeGreaterThan(100);
+        expect(result?.fragmentShader.length).toBeGreaterThan(100);
 
-      if (backend === 'webgpu') {
-        expect(result?.vertexShader).toContain('@vertex');
-        expect(result?.fragmentShader).toContain('@fragment');
-      } else {
-        expect(result?.vertexShader).toContain('#version 300 es');
-        expect(result?.fragmentShader).toContain('#version 300 es');
-      }
+        if (backend === 'webgpu') {
+          expect(result?.vertexShader).toContain('@vertex');
+          expect(result?.fragmentShader).toContain('@fragment');
+        } else {
+          expect(result?.vertexShader).toContain('#version 300 es');
+          expect(result?.fragmentShader).toContain('#version 300 es');
+        }
 
-      await target.delay(250);
-      const screenshot = await target.screenshot(
-        selectors.getByCss('canvas[aria-label="Generated shader fixture"]'),
-        `generated-shader-${backend}.png`,
-      );
-      expect(screenshot.length).toBeGreaterThan(100);
-      await expectRenderedPixels(screenshot, backend);
-
-      if (backend === 'webgpu') {
-        await target.reload();
-        await target.waitFor(
-          () =>
-            document.querySelector<HTMLElement>('[data-testid="shader-fixture-result"]')?.dataset['status'] === 'ready',
+        await target.delay(250);
+        const screenshot = await target.screenshot(
+          selectors.getByCss('canvas[aria-label="Generated shader fixture"]'),
+          `generated-shader-${backend}.png`,
         );
-        const reloadedFixture = await readFixture();
-        expect(reloadedFixture?.actualBackend).toBe('webgpu');
-      }
-      const finalEvents = await target.events();
-      expect(finalEvents.pageErrors.slice(pageErrorStart)).toEqual([]);
-    });
+        expect(screenshot.length).toBeGreaterThan(100);
+        await expectRenderedPixels(screenshot, backend);
+
+        if (backend === 'webgpu') {
+          await target.reload();
+          await target.waitFor(
+            () =>
+              document.querySelector<HTMLElement>('[data-testid="shader-fixture-result"]')?.dataset['status'] ===
+              'ready',
+          );
+          const reloadedFixture = await readFixture();
+          expect(reloadedFixture?.actualBackend).toBe('webgpu');
+        }
+        const finalEvents = await target.events();
+        expect(finalEvents.pageErrors.slice(pageErrorStart)).toEqual([]);
+      },
+    );
   }
 });

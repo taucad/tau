@@ -276,6 +276,24 @@ describe('checkReactEventLayerCeiling', () => {
     ).toEqual(['pkg/src/nested/counted.tsx: listed more than once']);
   });
 
+  it('should report a ceiling line whose file does not exist', () => {
+    workspace = mkdtempSync(join(tmpdir(), 'react-event-layer-'));
+    writeFileSync(join(workspace, 'pnpm-workspace.yaml'), 'packages: []\n');
+    const source = join(workspace, 'pkg', 'src');
+    mkdirSync(source, { recursive: true });
+    const effect = "import { useEffect } from 'react';\nuseEffect(() => actor.send({ type: 'a' }), []);\n";
+    writeFileSync(join(source, 'kept.tsx'), effect);
+    writeFileSync(join(source, 'quiet.tsx'), 'export const quiet = 1;\n');
+    const manifest = join(source, 'react-event-layer.ceiling.json');
+    writeFileSync(manifest, '{ "pkg/src/gone.tsx": 2, "pkg/src/kept.tsx": 1, "pkg/src/quiet.tsx": 1 }\n');
+
+    expect(
+      checkReactEventLayerCeiling({ manifest: pathToFileURL(manifest), directories: [pathToFileURL(source)] }),
+    ).toEqual([
+      'pkg/src/gone.tsx: a ceiling line whose file does not exist; delete the line, or carry it to the moved path',
+    ]);
+  });
+
   it('should hold a zero scope at zero except its named exceptions', () => {
     workspace = mkdtempSync(join(tmpdir(), 'react-event-layer-'));
     writeFileSync(join(workspace, 'pnpm-workspace.yaml'), 'packages: []\n');

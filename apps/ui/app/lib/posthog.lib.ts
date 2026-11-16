@@ -1,13 +1,13 @@
 import * as Cookies from 'es-cookie';
 import type { PostHogConfig } from 'posthog-js';
 import { ENV } from '#environment.config.js';
-import { redactInvitationTokens } from '@taucad/ui-core/lib/invitation-token.lib';
+import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 
 /** One captured event, as much of it as this redaction reads. */
 type AnalyticsEvent = Readonly<{ properties?: Record<string, unknown> }>;
 
 /**
- * Redact invitation tokens in event properties, including replay snapshots.
+ * Redact URL credentials (invitation and sign-in tokens) in event properties, including replay snapshots.
  * The SDK may transport snapshots separately, so recorder masking and decoded
  * transport checks remain necessary alongside this event hook.
  *
@@ -21,7 +21,7 @@ export const redactEventProperties = <Event extends AnalyticsEvent>(event: Event
   }
   const redact = (value: unknown): unknown => {
     if (typeof value === 'string') {
-      return redactInvitationTokens(value);
+      return redactUrlCredentials(value);
     }
     if (Array.isArray(value)) {
       return value.map((item) => redact(item));
@@ -69,7 +69,7 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // already-captured events after a later withdrawal.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     request_batching: false,
-    // Strip invitation tokens (charter W5, D27); the web host also gates on consent (`#lib/web-posthog.lib`).
+    // Strip invitation and sign-in tokens from URLs (charter W5, D27); the web host also gates on consent (`#lib/web-posthog.lib`).
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     before_send: (event) => redactEventProperties(event),
     // Defer extension initialization (session recording, autocapture, dead-click detection, etc.)
@@ -81,26 +81,30 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     // is started manually by the web analytics lifecycle after the page is idle.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     disable_session_recording: true,
-    // Invitation links carry bearer credentials in href; rrweb must omit the node before compression.
+    // Replays record rendered text, including chat, editor code and file names, so they can be used to
+    // debug what a user saw (session replay fidelity blueprint, 2026-11-13). Typed input values stay
+    // masked. Credentials never reach a replay: invitation links carry bearer tokens in href, and
+    // elements that show one (a new API key, the device sign-in code) carry `ph-no-capture`.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     session_recording: {
-      // Replays otherwise record chat messages, editor code, file names and agent output as
-      // rendered text; mask every text node and input (agent usage telemetry blueprint, Q3).
-      maskTextSelector: '*',
       maskAllInputs: true,
+      // `maskAllInputs` covers input, textarea and select only. The chat composer is a TipTap
+      // (ProseMirror) contenteditable, so unsent text typed there is masked here; sent messages
+      // render in the transcript, which replays in full.
+      maskTextSelector: '.ProseMirror',
       blockSelector: 'a[href*="/invitations/"], a[href*="%2Finvitations%2F" i]',
       // The SDK calls this for rrweb Meta href before snapshot compression too.
       maskCapturedNetworkRequestFn: (request) => ({
         ...request,
-        name: redactInvitationTokens(request.name),
+        name: redactUrlCredentials(request.name),
         requestBody:
           request.requestBody === undefined || request.requestBody === null
             ? request.requestBody
-            : redactInvitationTokens(request.requestBody),
+            : redactUrlCredentials(request.requestBody),
         responseBody:
           request.responseBody === undefined || request.responseBody === null
             ? request.responseBody
-            : redactInvitationTokens(request.responseBody),
+            : redactUrlCredentials(request.responseBody),
       }),
     },
   },

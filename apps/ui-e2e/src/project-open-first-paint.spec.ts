@@ -48,7 +48,8 @@ const recordFirstPaint = (): void => {
         element.textContent.includes('Loading editor…') &&
         element.closest('[data-slot="editor-pane-placeholder"]') === null,
     );
-    const skeleton = document.querySelector('[data-testid="workspace-skeleton"]') !== null;
+    /* From A15b the workspace frame's lanes stand where the skeleton stood, until the split view takes their boxes. */
+    const skeleton = document.querySelector('[data-slot="workspace-frame-lanes"]')?.checkVisibility() === true;
     const editor = document.querySelector('.cm-editor .cm-content') !== null;
     const next: FirstPaintSample = {
       path: location.pathname,
@@ -69,7 +70,14 @@ const recordFirstPaint = (): void => {
       samples.push(next);
     }
   };
-  new MutationObserver(sample).observe(document, { subtree: true, childList: true, characterData: true });
+  /* The reveal is an attribute change on the desktop container (`data-workspace-lanes`), which hides the lanes. */
+  new MutationObserver(sample).observe(document, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['data-workspace-lanes'],
+  });
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.name.includes('cdn.jsdelivr.net')) {
@@ -93,6 +101,10 @@ test('opens a project without a page-wide editor splash, a blank workspace, or C
   await target.navigate('/projects/new');
 
   await target.fill(selectors.getByCss('input#project-name'), 'First paint');
+  /* `/projects/new` preselects Replicad when the remembered choice is Auto (AKS-11, 00cc5c2e4c); `main.scad` is an
+   * OpenSCAD project's entry. */
+  await target.click(selectors.getByRole('radio', { name: 'OpenSCAD', exact: true }));
+  await target.expectAttribute(selectors.getByRole('radio', { name: 'OpenSCAD', exact: true }), 'aria-checked', 'true');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   /* A new project's workbench opens on Parameters beside a New tab, with no file
    * open (#1386). Open the source from the Files pane so the reload below

@@ -33,6 +33,8 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { useDesktopFullscreen } from '#hooks/use-desktop-fullscreen.js';
 import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { useWorkspaceFrameState } from '#components/layout/use-workspace-frame-state.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
@@ -55,7 +57,7 @@ const phoneHeaderOffsetClasses = 'max-md:mt-(--header-height) max-md:h-[calc(100
  *
  * @public
  */
-export const desktopTitlebarInset = 'md:group-data-[sidebar-open=false]/app-shell:pt-9';
+export const desktopTitlebarInset = 'md:sidebar-closed:pt-9';
 
 /*
  * Each history entry keeps its place in the shell's scroller. React Router's
@@ -90,9 +92,18 @@ const holdScrollPosition = (scroller: HTMLElement, top: number, onRelease: () =>
     scroller.scrollTop = top;
   });
   observer.observe(scroller);
-  for (const child of scroller.children) {
-    observer.observe(child);
-  }
+  /* The content's boxes: a `display: contents` host (the shell's workspace frame host, A15b2) has none, so its
+   * children are observed in its place. */
+  const observeBoxes = (parent: Element): void => {
+    for (const child of parent.children) {
+      if (getComputedStyle(child).display === 'contents') {
+        observeBoxes(child);
+      } else {
+        observer.observe(child);
+      }
+    }
+  };
+  observeBoxes(scroller);
   const release = (): void => {
     observer.disconnect();
     clearTimeout(holdTimeout);
@@ -339,7 +350,7 @@ function PageShellHeader({
     >
       <div
         className={cn(
-          'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
+          'pointer-events-auto ml-2 flex h-full items-center gap-1 md:sidebar-closed:ml-(--titlebar-controls-width)',
           !hasBreadcrumbItems && 'md:hidden',
           phoneBar.cluster,
           isDesktopTarget && '[app-region:no-drag]',
@@ -427,10 +438,10 @@ const WebTitlebarControls = ({
  * full width.
  */
 const shellPaneClasses = {
-  sidebar: 'left-0 w-(--sidebar-panel-width) max-md:hidden group-data-[sidebar-open=false]/app-shell:hidden',
+  sidebar: 'left-0 w-(--sidebar-panel-width) max-md:hidden sidebar-closed:hidden',
   content: cn(
     'left-(--sidebar-panel-width) w-[calc(100%-var(--sidebar-panel-width))]',
-    'max-md:left-0 max-md:w-full group-data-[sidebar-open=false]/app-shell:left-0 group-data-[sidebar-open=false]/app-shell:w-full',
+    'max-md:left-0 max-md:w-full sidebar-closed:left-0 sidebar-closed:w-full',
   ),
 } as const;
 
@@ -550,7 +561,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     titleItems,
     actionItems,
     pageWrapperMatches,
-    enableOverflowY,
+    enableOverflowY: routeEnablesOverflowY,
     providers,
     enablePageHeaderMatches,
   } = useTypedMatches((handles) => ({
@@ -564,6 +575,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
   const { key: locationKey, pathname, hash } = useLocation();
+  const workspaceFrame = useWorkspaceFrameState();
+  const enableOverflowY = routeEnablesOverflowY && !workspaceFrame.pending;
   const navigationType = useNavigationType();
   const pageScrollRef = useRef<HTMLDivElement>(null);
   const previousPathnameRef = useRef(pathname);
@@ -612,7 +625,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   // D11/I4: one header action, from the deepest route that declares one, unless a deeper
   // titled page (`/projects/new` under `/projects`) sits below it: a parent's action is not the child's.
   const actionMatch = selectPageAction(actionItems, pageTitles.path);
-  const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
+  /* A15b2 review: drawn ahead of the route, the shell lays out the destination as the project route does (no page header,
+   * no page scroller, `projectRouteHandle`), so the frame is drawn in its final box at the top of the section rather
+   * than in the page being left's layout, where it would move on the commit or sit above a scrolled-away offset. */
+  const enablePageHeader =
+    !workspaceFrame.pending && !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
   const hasPageHeaderChrome =
     hasBreadcrumbItems || (actionMatch !== undefined && actionMatch.handle.actionsScope !== 'phone');
   const isMobile = useIsMobile();
@@ -664,7 +681,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     return (
       <Compose components={Providers}>
         {desktopDragBand}
-        {enableOverflowY ? (
+        {routeEnablesOverflowY ? (
           <div ref={pageScrollRef} className='h-dvh overflow-y-auto' onScroll={handlePageScroll}>
             <Outlet />
           </div>
@@ -707,14 +724,22 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               onScroll={enableOverflowY ? handlePageScroll : undefined}
             >
               <PhoneTopBarContext.Provider value={phoneTopBar}>
-                <Compose components={Providers}>
-                  <RouteCommandPaletteItems />
-                  {/* Its compute section reads the active project; the dialog is a
-                      portal, so only its place in the React tree matters. */}
-                  <SettingsDialog />
-                  <HomeFileManagerNotice />
-                  <SectionContent error={error} />
-                </Compose>
+                {/* Outside the route's providers, so a route waiting on the file-manager worker still opens
+                    it: its project sections read the focused session (A11). */}
+                <SettingsDialog />
+                {/* A15b2: the shell draws the workspace frame, above the route's providers, so a click on a project
+                    draws it before the route's commit and the commit only fills it (`useWorkspaceFrameState`). */}
+                <WorkspaceFrame
+                  isDrawn={workspaceFrame.drawn}
+                  isPending={workspaceFrame.pending}
+                  pathname={workspaceFrame.pathname}
+                >
+                  <Compose components={Providers}>
+                    <RouteCommandPaletteItems />
+                    <HomeFileManagerNotice />
+                    <SectionContent error={error} />
+                  </Compose>
+                </WorkspaceFrame>
               </PhoneTopBarContext.Provider>
             </section>
           </SidebarInset>

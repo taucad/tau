@@ -41,8 +41,8 @@ import {
   DrawerTrigger,
   useIsInsideDrawer,
 } from '@taucad/ui/components/drawer';
-import { menuItemVariants, menuViewBackClass } from '@taucad/ui/components/menu.variants';
-import { stepBackOnEmptySearch, ViewStackBackContent, viewStackEnterClass } from '@taucad/ui/components/view-stack';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { stepBackOnEmptySearch, ViewStackBack, viewStackEnterClass } from '@taucad/ui/components/view-stack';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SwitchRow } from '@taucad/ui/components/switch';
 import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
@@ -65,8 +65,7 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { externalAgentFixCommand, externalAgentRefusalReasons } from '@taucad/ui-core/lib/external-agent';
-import type { ExternalAgentHostShell } from '@taucad/ui-core/lib/external-agent';
+import { externalAgentRefusalReasons } from '@taucad/ui-core/lib/external-agent';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { groupModels } from '@taucad/chat-ui/utils/model-groups';
@@ -294,24 +293,6 @@ function SheetAgentGlyph({
 const hostWhere = (placement: AgentHostPlacementTarget): string =>
   placement.hostId === 'desktop' ? 'this computer' : placement.label;
 
-/**
- * Which shell a fix command for this host is written in.
- *
- * A daemon's workspace root is the host's own path, so a drive letter or UNC
- * share names Windows; the desktop host is this computer, so its answer is the
- * browser's own platform.
- *
- * @param placement - The host the refused agent belongs to.
- * @returns The host's shell family.
- */
-const hostShell = (placement: AgentHostPlacementTarget): ExternalAgentHostShell => {
-  if (placement.workspaceRoot !== '') {
-    return /^(?:[A-Za-z]:[\\/]|\\\\)/u.test(placement.workspaceRoot) ? 'windows' : 'posix';
-  }
-  // oxlint-disable-next-line @typescript-eslint/no-deprecated -- Firefox and Safari expose no client-hints platform.
-  return typeof navigator !== 'undefined' && /^win/iu.test(navigator.platform) ? 'windows' : 'posix';
-};
-
 const acpKey = (hostId: TauAgentHostId, agentId: string): string =>
   `acp:${encodeURIComponent(hostId)}:${encodeURIComponent(agentId)}`;
 
@@ -327,7 +308,7 @@ const acpAgent = (
       : {
           reason: externalAgentRefusalReasons[descriptor.refusal],
           code: descriptor.refusal,
-          command: externalAgentFixCommand(descriptor.id, descriptor.refusal, hostShell(placement)),
+          command: descriptor.fixCommand,
           where,
         }
     : { reason: `${placement.label} is offline`, code: 'HOST_OFFLINE', command: undefined, where };
@@ -1422,24 +1403,7 @@ function Sheet({
         >
           {/* A full-width back row as tall as the list rows below it. */}
           <div className='flex shrink-0 border-b p-1'>
-            <button
-              type='button'
-              aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
-              className={cn(rowClass, menuViewBackClass)}
-              onClick={back}
-            >
-              <ViewStackBackContent
-                title={
-                  view === 'models' && isFromAgents
-                    ? 'Agents'
-                    : view === 'effort'
-                      ? 'Effort'
-                      : view === 'options'
-                        ? 'Settings'
-                        : sheetModel.name
-                }
-              />
-            </button>
+            <ViewStackBack parentLabel={view === 'models' && isFromAgents ? 'agents' : 'settings'} onBack={back} />
           </div>
           {view === 'options' ? (
             <SettingsPage settings={settings} />
@@ -1478,6 +1442,19 @@ function Sheet({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The model name's stand-in while the catalog has not named it: 80px when the bar has room, and cut like the name
+ * when it has not, so the bar's collapse (`useBarCollapse`) measures it as overflowing and lets the kernel, mode and
+ * level labels leave first instead of squeezing the trigger under its own content.
+ */
+function TriggerModelPlaceholder(): React.JSX.Element {
+  return (
+    <span data-slot='trigger-model-placeholder' aria-hidden='true' className='flex h-3 w-20 min-w-0 overflow-hidden'>
+      <span className='h-full w-20 shrink-0 rounded-sm bg-muted' />
+    </span>
   );
 }
 
@@ -1526,11 +1503,7 @@ export function ChatAgentSheet({
     >
       {sheetModel.glyph}
       {sheetModel.isNamePending ? (
-        <span
-          data-slot='trigger-model-placeholder'
-          aria-hidden='true'
-          className='h-3 w-20 shrink-0 rounded-sm bg-muted'
-        />
+        <TriggerModelPlaceholder />
       ) : (
         <span data-slot='trigger-model' className='min-w-0 truncate text-xs'>
           {sheetModel.name}

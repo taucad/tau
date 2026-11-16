@@ -1,0 +1,12 @@
+/*
+ * Client facts before first paint (`#lib/client-facts`). The head script sets these attributes on `<html>` from the
+ * device's record; the markup is the same for every visitor, so whatever a fact changes on screen is drawn here.
+ */
+
+:root.light {
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
+}

@@ -3,7 +3,7 @@ title: 'UX Policy'
 description: 'Interaction design rules: inline editing, progressive disclosure, confirmation patterns, keyboard conventions and user-side copy for all Tau UI surfaces.'
 status: active
 created: '2026-04-08'
-updated: '2026-11-10'
+updated: '2026-11-13'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/accessibility-policy.md
@@ -149,7 +149,7 @@ Pick the surface by what the list does, then nest the same way everywhere:
 | See facts or a few controls beside actions   | Disclosure row (`menu-disclosure-item`) | Expands in place; never replaces the list                                                        |
 | Act on a target by right-click               | `ContextMenu`                           | Flyout submenus are allowed (pointer convention)                                                 |
 
-Both sub-view surfaces compose the shared responsive view stack in `packages/ui`: a full-width Back row naming the parent, Escape and Backspace-on-empty step back, focus returns to the row that opened the view, and the same views render on pointer and touch. The Left arrow is never bound to Back, because slider rows use it.
+Both sub-view surfaces compose the shared responsive view stack in `packages/ui`: a full-width Back row that reads "Back" and is named `Back to <parent>` for assistive technology, the view itself named by its group (and by a heading where its rows do not say what it is), Escape and Backspace-on-empty step back, focus returns to the row that opened the view, and the same views render on pointer and touch. The Left arrow is never bound to Back, because slider rows use it.
 
 Never open a second popover from a menu or picker, stack a drawer from a menu, or use a hover flyout outside right-click menus. A `ComboBoxResponsive` opened from a pane control (no parent list) may still stack its drawer on a phone (`isNested`).
 

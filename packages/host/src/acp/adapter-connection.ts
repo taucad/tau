@@ -13,6 +13,7 @@ import { grokPlanSchema, permissionOfGrokPlan, grokPlanResponseOf } from '#acp/g
 import { z } from 'zod';
 import { grokNotificationOf } from '#acp/grok-notifications.js';
 import { grokQuestionSchema } from '#acp/grok-questions.js';
+import { grokModelsSchema } from '#acp/grok-models.js';
 import { elicitationRequestSchema } from '#acp/elicitation-request.js';
 
 import { client } from '@agentclientprotocol/sdk';
@@ -48,6 +49,39 @@ const callError = (error: unknown, stderr: string): AcpCallError => {
 };
 
 /**
+ * The connection to an adapter whose spawn threw, such as a CLI gone since discovery (`CLI_NOT_FOUND`).
+ *
+ * No process exists, so the actor stays alive and answers as an adapter that refused: every call
+ * settles with the thrown error and its code, and a terminate or kill reports the exit. The session
+ * then fails its turn with that code and closes through its own ladder.
+ *
+ * @param error - What the spawn threw.
+ * @param sendBack - The session's inbox.
+ * @param receive - Registers the command handler.
+ */
+const unspawned = (
+  error: unknown,
+  sendBack: (event: AcpSessionEvent) => void,
+  receive: (listener: (command: AcpConnectionCommand) => void) => void,
+): void => {
+  const stderr = error instanceof Error ? error.message : String(error);
+  let exited = false;
+  receive((command) => {
+    if (command.type === 'call') {
+      sendBack({
+        type: 'callSettled',
+        id: command.id,
+        at: Date.now(),
+        answer: { method: command.method, error: callError(error, stderr) },
+      });
+    } else if ((command.type === 'terminate' || command.type === 'kill') && !exited) {
+      exited = true;
+      sendBack({ type: 'adapterExited', stderr });
+    }
+  });
+};
+
+/**
  * The connection logic `acpSession` invokes at its root.
  *
  * @param onFrame - Optional tap on every JSON-RPC frame.
@@ -61,7 +95,13 @@ export const createAdapterConnection = (
     const send = (event: AcpSessionEvent): void => {
       sendBack(event);
     };
-    const adapter = spawnAcpAdapter({ adapter: input.adapter, cwd: input.cwd, ...(onFrame ? { onFrame } : {}) });
+    let adapter: ReturnType<typeof spawnAcpAdapter>;
+    try {
+      adapter = spawnAcpAdapter({ adapter: input.adapter, cwd: input.cwd, ...(onFrame ? { onFrame } : {}) });
+    } catch (error) {
+      unspawned(error, send, receive);
+      return () => undefined;
+    }
     const waiting = new Map<string, { resolve(result: unknown): void; reject(error: unknown): void }>();
     let requests = 0;
     /* A vendor request is answered by the machine's `respond`, whenever it decides. */
@@ -99,6 +139,10 @@ export const createAdapterConnection = (
           }
         },
       )
+      /* Grok's model list, pushed after `session/new` in place of a `config_option_update`. */
+      .onNotification('_x.ai/models/update', grokModelsSchema, ({ params }) => {
+        send({ type: 'grokModels', models: params });
+      })
       .onRequest('session/request_permission', async ({ params }) => ask('session/request_permission', params))
       .onRequest('_x.ai/exit_plan_mode', grokPlanSchema, async ({ params }) => {
         if (input.adapter.id !== 'grok') {

@@ -531,6 +531,40 @@ describe('createThreeCameraRig following a given actor', () => {
     camera.stop();
   });
 
+  it('should keep a rig change when its presentation is answered with an actor event before the actor holds it', () => {
+    // The controls adapter answers each presentation with an echo pose, synchronously, from inside `onUpdate`.
+    const camera = startGiven();
+    const gridPolicy = {
+      farPaddingVerticalSpans: 4,
+      presentationPlane: { normal: [0, 0, 1], offsetMeters: 0 },
+    } as const;
+    camera.send({ type: 'setClipPolicy', clipPolicy: gridPolicy });
+    const rig = createThreeCameraRig({
+      actorRef: camera,
+      onUpdate(_, snapshot) {
+        camera.send({ type: 'poseObserved', ...snapshot.view, source: 'input', echoRevision: snapshot.revision });
+      },
+    });
+    const disconnect = rig.connect();
+    const gridNear = rig.perspectiveCamera.near;
+
+    rig.setClipPlanes({ farPaddingVerticalSpans: 4 });
+    expect(camera.getSnapshot().context.clipPolicy).toEqual({ farPaddingVerticalSpans: 4 });
+    expect(rig.perspectiveCamera.near).toBeGreaterThan(gridNear);
+    expectAgreement(rig);
+
+    rig.setClipPlanes(gridPolicy);
+    expect(camera.getSnapshot().context.clipPolicy).toEqual(gridPolicy);
+    expect(rig.perspectiveCamera.near).toBe(gridNear);
+
+    rig.setRenderFrame(frameAt(4));
+    expect(rig.renderFrame).toEqual(frameAt(4));
+    expect(camera.getSnapshot().context.renderFrame).toEqual(frameAt(4));
+    expectAgreement(rig);
+    disconnect();
+    camera.stop();
+  });
+
   it('should connect once at a time', () => {
     const camera = startGiven();
     const updates: number[] = [];

@@ -3,7 +3,7 @@ title: 'Design Policy'
 description: 'Canonical Tau design principles, governance and review guidance.'
 status: active
 created: '2026-10-15'
-updated: '2026-11-10'
+updated: '2026-11-15'
 ---
 
 # Design Policy

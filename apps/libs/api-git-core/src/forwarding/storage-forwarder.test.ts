@@ -111,11 +111,11 @@ describe('storage forwarder connections (DC1 review)', () => {
         served.add(request.socket);
         response
           .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ ref: 'refs/tags/v1', tip: '0'.repeat(40), generation: 2 }));
+          .end(JSON.stringify({ ref: 'refs/heads/conflicts/main/device-b', tip: '0'.repeat(40), generation: 2 }));
       });
     });
 
-    await expect(forwarder.removeRef(facts)).resolves.toMatchObject({ ref: 'refs/tags/v1' });
+    await expect(forwarder.removeRef(facts)).resolves.toMatchObject({ ref: 'refs/heads/conflicts/main/device-b' });
     const second = await forwarder.removeRef(facts).catch((error: unknown) => error);
 
     expect(second).toBeInstanceOf(HttpException);

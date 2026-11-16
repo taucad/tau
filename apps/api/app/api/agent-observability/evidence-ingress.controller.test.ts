@@ -3,11 +3,12 @@ import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import type { Auth } from 'better-auth';
-import { afterEach, describe, expect, it } from 'vitest';
-import { mock, mockDeep } from 'vitest-mock-extended';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { evidenceLimits } from '@taucad/agent-observability/contract';
-import { authInstanceKey } from '@taucad/api-auth';
+import { SessionResolver } from '@taucad/api-auth';
+import { fakeSessionResolver } from '@taucad/api-auth/testing';
+import type { FakeSession, FakeSessionLookup } from '@taucad/api-auth/testing';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import {
   EvidenceIngressController,
@@ -17,7 +18,7 @@ import { EvidenceIngressService } from '@taucad/api-agent-observability/evidence
 import type { EvidenceReceipt } from '@taucad/api-agent-observability/evidence-admission';
 import { CloudHostEvidenceGuard, HostsService } from '@taucad/api-hosts';
 
-type Session = NonNullable<Awaited<ReturnType<Auth['api']['getSession']>>>;
+type Session = NonNullable<FakeSession>;
 
 const receipt: EvidenceReceipt = {
   receipt: 'evr_1',
@@ -34,8 +35,8 @@ const device = (cloudProjectId: string | undefined): Device =>
   mock<Device>({ id: 'device-1', ownerId: 'owner-1', cloudProjectId: cloudProjectId ?? null });
 
 const createApp = async (signedIn = true, host?: Device) => {
-  const auth = mockDeep<Auth>();
-  auth.api.getSession.mockResolvedValue(signedIn ? mock<Session>({ user: { id: 'user-1' } }) : null);
+  const getSession = vi.fn<FakeSessionLookup>();
+  getSession.mockResolvedValue(signedIn ? mock<Session>({ user: { id: 'user-1' } }) : null);
   const ingress = mock<EvidenceIngressService>();
   ingress.admit.mockResolvedValue(receipt);
   const hosts = mock<HostsService>();
@@ -49,7 +50,7 @@ const createApp = async (signedIn = true, host?: Device) => {
       CloudHostEvidenceGuard,
       { provide: EvidenceIngressService, useValue: ingress },
       { provide: HostsService, useValue: hosts },
-      { provide: authInstanceKey, useValue: auth },
+      { provide: SessionResolver, useValue: fakeSessionResolver(getSession) },
     ],
   }).compile();
   const app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

@@ -89,6 +89,8 @@ export type ProjectedRun = Readonly<{
   finalRevision?: string | undefined;
   filesChanged?: number | undefined;
   priorTurns?: number | undefined;
+  /** The kernel the run targeted, from the snapshot its turn committed (LW17). */
+  kernel?: string | undefined;
   /** The model calls the run prepared. */
   invocations?: ReadonlyArray<Readonly<{ purpose: string; modelId: string }>> | undefined;
   /** This turn's message, the final reply and the changed paths, when the host read content (LW6). */
@@ -424,15 +426,29 @@ const foreignTailsOf = async (
 };
 
 type TurnMeasures = NonNullable<OutcomeFact['turn']>;
+type RunLabels = Pick<TurnMeasures, 'host' | 'kernel' | 'model'>;
+
+/**
+ * The host, kernel and model a run ran on (LW17): the host this projection is for, the kernel its turn's snapshot
+ * targeted, and the model its last generation used, named as the API names a requested model. Its outcome and each of
+ * its tools carry the same labels.
+ */
+const runLabelsOf = async (run: ProjectedRun, context: ProjectionContext): Promise<RunLabels> => {
+  const model = (run.invocations ?? []).findLast((invocation) => invocation.purpose === 'generation')?.modelId;
+  return {
+    host: context.host ?? null,
+    kernel: run.kernel === undefined ? null : await contractId('kernel', run.kernel),
+    model: model === undefined ? null : await contractId('model', model),
+  };
+};
 
 /**
  * What a run did, as counts, digests and closed labels (LW6): the revision it wrote as a digest, never its id; its
  * checks; and the model its last generation used, named as the API names a requested model. The revision it started
  * from is not in its rows, so it is not claimed.
  */
-const turnMeasures = async (run: ProjectedRun, context: ProjectionContext): Promise<TurnMeasures> => {
+const turnMeasures = async (run: ProjectedRun, labels: RunLabels): Promise<TurnMeasures> => {
   const generations = (run.invocations ?? []).filter((invocation) => invocation.purpose === 'generation');
-  const model = generations.at(-1)?.modelId;
   const results = run.tools.flatMap((tool) =>
     tool.check === undefined || tool.output === undefined ? [] : [tool.check.result],
   );
@@ -446,9 +462,7 @@ const turnMeasures = async (run: ProjectedRun, context: ProjectionContext): Prom
     priorTurns: run.priorTurns ?? 0,
     modelCalls: generations.length,
     toolCalls: run.tools.length,
-    host: context.host ?? null,
-    kernel: null,
-    model: model === undefined ? null : await contractId('model', model),
+    ...labels,
   };
 };
 
@@ -457,6 +471,8 @@ export const checksAssessor = 'cad-checks-v1';
 
 /* Tool classes that can change a model file; a check that ran before one of them settled did not see the final design. */
 const changingClasses: ReadonlySet<ToolFact['toolClass']> = new Set(['write', 'execute']);
+/* Write-class tools that change the agent's own state, never a model file: a todo list or the workbench layout. */
+const designNeutralTools: ReadonlySet<string> = new Set(['update_todos', 'arrange_workbench']);
 
 /**
  * Whether a completed run did its task, by rule `cad-checks-v1` (LW7): `verified` when at least one check at the final
@@ -473,7 +489,9 @@ const assessedSuccess = (
   if (run.termination !== 'completed') {
     return undecided;
   }
-  const changes = run.tools.filter((tool) => changingClasses.has(classOf(tool.toolName)));
+  const changes = run.tools.filter(
+    (tool) => changingClasses.has(classOf(tool.toolName)) && !designNeutralTools.has(tool.toolName),
+  );
   const results = new Set(
     run.tools.flatMap((tool) =>
       tool.check === undefined ||
@@ -544,6 +562,7 @@ const designOf = async (
 export const projectRun = async (run: ProjectedRun, context: ProjectionContext): Promise<RunProjection> => {
   const classOf =
     context.toolClass ?? ((toolName: string): ToolFact['toolClass'] => tauToolEvidence.get(toolName) ?? 'other');
+  const labels = await runLabelsOf(run, context);
   const toolCandidates = run.tools.map(async (tool): Promise<Candidate> => {
     if (tool.output === undefined && run.ending === undefined) {
       return 'pending';
@@ -572,6 +591,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           outcome: tool.output === undefined ? 'unknown' : tool.outcome,
           revisionBefore: null,
           revisionAfter: null,
+          labels,
         },
       },
       occurredAt: tool.startedAt,
@@ -653,7 +673,7 @@ export const projectRun = async (run: ProjectedRun, context: ProjectionContext):
           termination: run.termination,
           ...assessedSuccess(run, classOf),
           ...failureFields(run.ending.failure),
-          turn: await turnMeasures(run, context),
+          turn: await turnMeasures(run, labels),
         },
       },
       ...(content === undefined

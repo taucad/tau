@@ -323,11 +323,23 @@ describe('large workspace connection', () => {
       const workspace = await root.getDirectoryHandle(workspaceName);
       const source = await workspace.getDirectoryHandle('project-0');
       const copy = await workspace.getDirectoryHandle('ambiguous-copy', { create: true });
+      /* A project's identity is `.tau/project.json` (#902), so the copy carries it to share project-0's id. */
+      const directoryOf = async (base: FileSystemDirectoryHandle, path: string, create: boolean) => {
+        let directory = base;
+        for (const segment of path.split('/').slice(0, -1)) {
+          // oxlint-disable-next-line no-await-in-loop -- Each directory exists only once its parent is open.
+          directory = await directory.getDirectoryHandle(segment, { create });
+        }
+        return directory;
+      };
       await Promise.all(
-        ['tau.json', 'main.ts'].map(async (filename) => {
+        ['tau.json', 'main.ts', '.tau/project.json'].map(async (path) => {
+          const filename = path.split('/').at(-1)!;
           try {
-            const sourceFile = await source.getFileHandle(filename);
-            const targetFile = await copy.getFileHandle(filename, { create: true });
+            const sourceDirectory = await directoryOf(source, path, false);
+            const targetDirectory = await directoryOf(copy, path, true);
+            const sourceFile = await sourceDirectory.getFileHandle(filename);
+            const targetFile = await targetDirectory.getFileHandle(filename, { create: true });
             const writable = await targetFile.createWritable();
             const file = await sourceFile.getFile();
             await writable.write(await file.arrayBuffer());

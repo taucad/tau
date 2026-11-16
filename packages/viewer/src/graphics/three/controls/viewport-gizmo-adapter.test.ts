@@ -4,7 +4,7 @@
  * stand-in that turns the camera it was given and dispatches the cube's events.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Color, Raycaster, Scene, Vector3 } from 'three';
+import { Color, Matrix4, Raycaster, Scene, Vector3 } from 'three';
 import type { Camera, EventDispatcher, Object3D } from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor, InspectionEvent } from 'xstate';
@@ -334,6 +334,26 @@ describe('view cube adapter', () => {
     // Tilted off the pole away from the screen's up, so the presented view keeps +x up on screen.
     expect(context.view.direction[0]).toBeLessThan(0);
     expect(context.view.direction[1]).toBeCloseTo(0, 6);
+  });
+
+  it('should keep the roll the cube turned to on a face straight down the up axis', () => {
+    const harness = createHarness();
+    harness.attachCube();
+    const gizmo = harness.gizmo();
+    // A bottom face exactly on the z up axis, looking up, rolled so the screen's up is +x.
+    gizmo.camera.position.set(0, 0, -20);
+    gizmo.camera.up.set(0, 0, 1);
+    gizmo.camera.quaternion.setFromRotationMatrix(
+      new Matrix4().makeBasis(new Vector3(0, 1, 0), new Vector3(1, 0, 0), new Vector3(0, 0, -1)),
+    );
+
+    gizmo.dispatchEvent({ type: 'change' });
+
+    const { direction } = harness.camera.getSnapshot().context.view;
+    expect(direction[2]).toBeCloseTo(-1, 5);
+    // Below the target an upright camera's screen up points away from the axis, so the tilt is toward it.
+    expect(direction[0]).toBeGreaterThan(0);
+    expect(direction[1]).toBeCloseTo(0, 6);
   });
 
   it('should send each drag step to the camera and hold the lock while the press turns it', () => {

@@ -15,3 +15,4 @@ export * from '#schema/hosts.schema.js';
 export * from '#schema/durable-events.schema.js';
 export * from '#schema/jobs.schema.js';
 export * from '#schema/billing.schema.js';
+export * from '#schema/email.schema.js';

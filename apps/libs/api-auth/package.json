@@ -28,6 +28,8 @@
     "./config/auth-static": "./src/config/auth-static.config.ts",
     "./config/better-auth": "./src/config/better-auth.config.ts",
     "./module": "./src/auth.module.ts",
+    "./testing": "./src/testing.ts",
+    "./testing/session-cache": "./src/testing/session-cache.fixture.ts",
     "./package.json": "./package.json"
   },
   "imports": {
@@ -43,6 +45,7 @@
     "@taucad/api-core": "workspace:*",
     "@taucad/api-database": "workspace:*",
     "@taucad/api-email": "workspace:*",
+    "@taucad/api-observability": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
@@ -53,7 +56,7 @@
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",
-    "@taucad/api-observability": "workspace:*",
+    "better-call": "catalog:",
     "dotenv": "catalog:",
     "pino-http": "^10.5.0",
     "reflect-metadata": "^0.2.2",

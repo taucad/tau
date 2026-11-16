@@ -313,6 +313,10 @@ export const refusals = {
   BRANCH_UNAVAILABLE: { owner: 'revisions', retry: 'wait' },
   /** The branch or publish machine is busy with another verb (W5 RM-S8). */
   REVISIONS_BUSY: { owner: 'revisions', retry: 'wait' },
+  /** A *Merge* with nothing to bring: nothing moved, so it is never *Merged* (M1). */
+  MERGE_UP_TO_DATE: { owner: 'revisions', retry: 'never' },
+  /** A *Merge* refused because a restore on either side took back what the two branches share (M1). */
+  MERGE_UNDONE: { owner: 'revisions', retry: 'never' },
   /** Another root holds the turn's lease (W5, RV2-F1). */
   LEASE_HELD_ELSEWHERE: { owner: 'revisions', retry: 'wait' },
   // W8 placement (TS-S4 types `TurnPlacementRefusalCode` against these)

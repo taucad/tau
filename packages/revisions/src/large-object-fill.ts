@@ -16,12 +16,15 @@
  * where it now is.
  */
 import { workerTimings } from '@taucad/filesystem';
+import type { DeclaredPlaceholder } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
 import type { LargeObjectsFacet, LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
+import { attributesOf, placeholderPathMatcher } from '#workspace-config.js';
+import type { AttributesReading } from '#workspace-config.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 
 /** One placeholder: the pointer bytes on disk and the object they name. */
@@ -114,20 +117,49 @@ const defaultRetryMilliseconds: readonly number[] = [2000, 5000, 15_000, 30_000,
 export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
 
 /**
- * The placeholders a tree holds: every entry that is a pointer.
- *
- * A pointer never reaches a checkout as content — an authored pointer is
- * hydrated on every read — so a pointer in a checkout is a placeholder.
+ * The placeholders a tree holds: every pointer the tree's attributes files
+ * track ({@link placeholderPathMatcher}). A pointer anywhere else is a
+ * person's text: never fetched, never written over.
  *
  * @param tree - A tree read with `largeObjects: 'local'`, or a capture.
+ * @param reading - How the repository reads its attributes (`core.ignoreCase`).
  * @returns The placeholders by path.
  */
-export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string, Placeholder> =>
-  new Map(
-    tree.entries().flatMap(({ path, content }) => {
+export const largeObjectPlaceholders = (
+  tree: ImmutableRevisionTree,
+  reading?: AttributesReading,
+): Map<string, Placeholder> => {
+  const entries = tree.entries();
+  const tracked = placeholderPathMatcher(attributesOf(entries), reading);
+  return new Map(
+    entries.flatMap(({ path, content }) => {
       const pointer = readLfsPointer(content);
-      return pointer === undefined ? [] : [[path, { oid: pointer.oid, size: pointer.size, pointer: content }] as const];
+      return pointer === undefined || !tracked(path)
+        ? []
+        : [[path, { oid: pointer.oid, size: pointer.size, pointer: content }] as const];
     }),
+  );
+};
+
+/**
+ * The placeholders the revision layer declares to a checkout's index (D9): the tree's
+ * {@link largeObjectPlaceholders}, the rule its fill and read-through use.
+ *
+ * @param tree - The checkout's tree: a capture, or the tree a write lands.
+ * @param options - Paths whose pointer lands as its object (a write's sourced paths), and how the repository reads
+ *   its attributes.
+ * @returns The declared placeholders by path, with the size of the pointer each one is.
+ */
+export const declaredPlaceholders = (
+  tree: ImmutableRevisionTree,
+  options?: Readonly<{ except?: ReadonlyMap<string, unknown> | undefined; reading?: AttributesReading | undefined }>,
+): Map<string, DeclaredPlaceholder> =>
+  new Map(
+    [...largeObjectPlaceholders(tree, options?.reading)].flatMap(([path, { oid, size, pointer }]) =>
+      options?.except?.has(path) === true
+        ? []
+        : [[path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const],
+    ),
   );
 
 /**
@@ -162,6 +194,8 @@ export const createLargeObjectFill = (
     reportMilliseconds?: number;
     /** The most bytes one flush writes; see {@link defaultFlushBytes}. */
     flushBytes?: number;
+    /** How the repository reads its attributes (`core.ignoreCase`), so the fill names what the declaration does. */
+    attributesReading?: () => Promise<AttributesReading>;
     /** The waits before a failed fill tries again; see {@link defaultRetryMilliseconds}. */
     retryMilliseconds?: readonly number[];
   }>,
@@ -189,6 +223,7 @@ export const createLargeObjectFill = (
   const reportMilliseconds = dependencies.reportMilliseconds ?? defaultReportMilliseconds;
   const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
   const retryMilliseconds = dependencies.retryMilliseconds ?? defaultRetryMilliseconds;
+  const attributesReading = dependencies.attributesReading ?? (async (): Promise<AttributesReading> => ({}));
   /* One fill per checkout; a newer one replaces it, and the older one's callbacks go quiet. */
   const fills = new Map<string, Fill>();
   /* Checkouts this fill has given its word on, so a host never reads silence as "nothing to fill" (D10 `filled`). */
@@ -367,6 +402,8 @@ export const createLargeObjectFill = (
 
   const sweep = async (fill: Fill): Promise<boolean> => {
     const before = await capture(fill.place);
+    /* Only a pointer the attributes track is a placeholder: a person's pointer text is never filled (D9). */
+    const tracked = placeholderPathMatcher(attributesOf(before.entries()), await attributesReading());
     const filled: string[] = [];
     const gone: string[] = [];
     let written = 0;
@@ -375,7 +412,7 @@ export const createLargeObjectFill = (
     const sourced = new Map<string, Readonly<{ oid: string; size: number }>>();
     const entries: RevisionTreeInput[] = before.entries().map(({ path, content, mode }) => {
       const known = fill.pending.get(path);
-      const placeholder = placeholderAt(fill, known, content);
+      const placeholder = tracked(path) ? placeholderAt(fill, known, content) : undefined;
       if (placeholder === undefined) {
         if (known !== undefined) {
           gone.push(path);
@@ -436,7 +473,9 @@ export const createLargeObjectFill = (
           throw error;
         }
         for (const path of filled) {
-          const placeholder = placeholderAt(fill, fill.pending.get(path), before.get(path) ?? new Uint8Array());
+          const placeholder = tracked(path)
+            ? placeholderAt(fill, fill.pending.get(path), before.get(path) ?? new Uint8Array())
+            : undefined;
           if (placeholder !== undefined) {
             fill.pending.set(path, placeholder);
           }
@@ -632,11 +671,47 @@ export const createLargeObjectFill = (
     };
     try {
       fill.fromStore = (await landsFromStore?.(fill.place)) === true;
-      const full = await port.readTree(fill.head, fill.fromStore ? { ...transfer, largeObjects: 'stored' } : transfer);
-      if (!isCurrent(fill)) {
-        return;
+      /*
+       * The placeholders name their objects, so a store that fetches by oid is asked for them at once (Tau
+       * #2013): reading the head's tree first read every blob it holds before the first object was asked for.
+       * A store-landing checkout reads the head with `stored`, which says which objects the store holds whole.
+       */
+      let byOid = !fill.fromStore && port.fetchLargeObjects !== undefined;
+      if (byOid && port.fetchLargeObjects !== undefined) {
+        try {
+          const fetched = await port.fetchLargeObjects(
+            [...fill.wanted].map(([oid, size]) => ({ oid, size })),
+            transfer,
+          );
+          if (!isCurrent(fill)) {
+            return;
+          }
+          for (const [oid, content] of fetched) {
+            if (fill.wanted.has(oid)) {
+              arrive(fill, oid, content);
+            }
+          }
+        } catch (error) {
+          if (!isCurrent(fill)) {
+            return;
+          }
+          /* An object the fetch by oid found missing is looked for in the head's tree, as a fill read it before. */
+          if (!(error instanceof RevisionPortError && error.code === 'MISSING_LARGE_OBJECT')) {
+            throw error;
+          }
+          byOid = false;
+        }
       }
-      arriveFromTree(fill, full);
+      if (!byOid) {
+        const full = await port.readTree(
+          fill.head,
+          fill.fromStore ? { ...transfer, largeObjects: 'stored' } : transfer,
+        );
+        if (!isCurrent(fill)) {
+          return;
+        }
+        arriveFromTree(fill, full);
+      }
       /* A placeholder the head does not name (an undo's, a merge's) is fetched by its own oid. */
       const unnamed = [...fill.wanted].flatMap(([oid, size]) => (fill.arrived.has(oid) ? [] : [{ oid, size }]));
       if (unnamed.length > 0 && port.fetchLargeObjects !== undefined) {
@@ -734,7 +809,7 @@ export const createLargeObjectFill = (
     head: RevisionId | undefined,
     placeholders?: ReadonlyMap<string, Placeholder>,
   ): Promise<void> => {
-    const pending = new Map(placeholders ?? largeObjectPlaceholders(await capture(place)));
+    const pending = new Map(placeholders ?? largeObjectPlaceholders(await capture(place), await attributesReading()));
     const previous = fills.get(place.id);
     if (previous !== undefined) {
       fills.delete(place.id);

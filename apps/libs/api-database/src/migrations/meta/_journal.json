@@ -484,6 +484,13 @@
       "when": 1794314005846,
       "tag": "0069_agent_evidence_outbox_object",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794729193095,
+      "tag": "0070_email_event_inbox",
+      "breakpoints": true
     }
   ]
 }

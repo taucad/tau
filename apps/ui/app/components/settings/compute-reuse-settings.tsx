@@ -1,14 +1,14 @@
 import { useState } from 'react';
-import { Button } from '@taucad/ui/components/button';
+import { useSelector } from '@xstate/react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
 import { setComputeReuseMode, useComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import type { ComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
-import { useProject } from '#hooks/use-project.js';
-import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-project-view.session.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { desktopProjectRoot } from '#constants/desktop-kernel-options.js';
+import { Button } from '@taucad/ui/components/button';
 
 const modes: ReadonlyArray<{
   value: ComputeReuseMode;
@@ -35,8 +35,9 @@ const modes: ReadonlyArray<{
 
 export function ComputeReuseSettings(): React.JSX.Element {
   const selected = useComputeReuseMode();
-  const project = useProject({ enableNoContext: true });
-  const fileManager = useOptionalFileManager();
+  /* Settings is in the shell, outside the focused project's view: it reads the focused session (A11). */
+  const project = useFocusedProjectSession();
+  const fileManagerRef = project?.fileManagerRef;
   const [status, setStatus] = useState<{ projectId: string; value: string }>();
   const [collection, setCollection] = useState<{
     projectId: string;
@@ -47,19 +48,20 @@ export function ComputeReuseSettings(): React.JSX.Element {
   const collectCursor = collection && collection.projectId === projectId ? collection.cursor : undefined;
   const currentStatus = status && status.projectId === projectId ? status.value : undefined;
   const confirmClear = projectId !== undefined && confirmClearProjectId === projectId;
-  const available = Boolean(
-    project && (desktopBridge() ?? fileManager?.fileManagerRef.getSnapshot().context.computeControl),
-  );
+  /* Follow the file manager's control: it arrives when the worker connects and goes when the worker is replaced. */
+  const computeControl = useSelector(fileManagerRef, (snapshot) => snapshot?.context.computeControl);
+  const available = Boolean(project && (desktopBridge() ?? computeControl));
   const control = async (action: 'inspect' | 'clear' | 'collect', cursor?: string): Promise<void> => {
     if (!project) {
       return;
     }
     const bridge = desktopBridge();
-    const browserControl = fileManager?.fileManagerRef.getSnapshot().context.computeControl;
-    if (!bridge && !browserControl) {
-      throw new Error('The active project compute authority is unavailable.');
-    }
+    const browserControl = computeControl;
     try {
+      /* The control can go between a render and a click (the worker was replaced): report it in the status. */
+      if (!bridge && !browserControl) {
+        throw new Error('The active project compute authority is unavailable.');
+      }
       const result = bridge
         ? action === 'inspect'
           ? await bridge.compute.inspect(await desktopProjectRoot(project.projectId))
@@ -120,6 +122,7 @@ export function ComputeReuseSettings(): React.JSX.Element {
         }
         control={
           <Select
+            size='md'
             value={selected}
             onValueChange={(value) => {
               setComputeReuseMode(value as ComputeReuseMode);
@@ -150,21 +153,16 @@ export function ComputeReuseSettings(): React.JSX.Element {
         }
       >
         <div className='flex flex-wrap items-center gap-2'>
-          <Button size='sm' variant='outline' disabled={!available} onClick={async () => control('inspect')}>
+          <Button variant='outline' disabled={!available} onClick={async () => control('inspect')}>
             Check size
           </Button>
-          <Button
-            size='sm'
-            variant='outline'
-            disabled={!available}
-            onClick={async () => control('collect', collectCursor)}
-          >
+          <Button variant='outline' disabled={!available} onClick={async () => control('collect', collectCursor)}>
             {collectCursor ? 'Free more' : 'Free space'}
           </Button>
           {confirmClear ? (
             <Button
-              size='sm'
               variant='destructive'
+              disabled={!available}
               onClick={async () => {
                 setConfirmClearProjectId(undefined);
                 return control('clear');
@@ -174,7 +172,6 @@ export function ComputeReuseSettings(): React.JSX.Element {
             </Button>
           ) : (
             <Button
-              size='sm'
               variant='outline'
               disabled={!available}
               onClick={() => {

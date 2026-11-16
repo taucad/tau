@@ -3,7 +3,7 @@ title: 'UI Policy'
 description: 'Design system entry point: principles, token architecture, typography, spacing, motion, and component composition for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-11-11'
+updated: '2026-11-15'
 related:
   - docs/policy/color-policy.md
   - docs/policy/diagram-policy.md
@@ -158,6 +158,7 @@ A piece of UI that appears on more than one surface has one implementation, and 
 | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Dialog and sheet close control                                                   | `DialogContent`, `SheetContent` in `packages/ui`                        |
 | Loading placeholder                                                              | `Skeleton` in `packages/ui`                                             |
+| Wait indicator for work with no shape                                            | `WaitIndicator` and `utils/wait-timing` in `packages/ui`                |
 | Plan cards, coming-soon icon and legend                                          | `@taucad/ui-kit/components/plan-cards` (app Billing and public pricing) |
 | Card brand and saved payment method                                              | `@taucad/ui-kit/components/payment-method`                              |
 | Plan catalogue (names, prices, features)                                         | `@taucad/billing/plan-catalog`                                          |
@@ -205,9 +206,11 @@ Mark a feature that is not available yet with the coming-soon icon (`ComingSoonI
 
 ### Loading Placeholders
 
-Content that is loading is drawn as its own shape: `Skeleton` bars where the text, controls and cards are about to appear, at their final size, so nothing moves when the data arrives. Do not show a centred spinner, a "Loading…" sentence or an empty card for content. One wrapper carries `role='status'`, `aria-busy='true'` and the words for screen readers; the bars are `aria-hidden`. A spinner remains correct inside a busy button and for work whose result has no shape yet (an upload, a running job).
+Content that is loading is drawn as its own shape: `Skeleton` bars where the text, controls and cards are about to appear, at their final size, so nothing moves when the data arrives. Do not show a centred spinner, a "Loading…" sentence or an empty card for content. One wrapper carries `role='status'`, `aria-busy='true'` and the words for screen readers; the bars are `aria-hidden`. A spinner remains correct inside a busy button and for work whose result has no shape yet (an upload, a running job). Such a wait, and a background refresh over content already on screen (a Tau Cloud listing, a model check), uses `WaitIndicator` in a slot the frame already has.
 
-**Why**: a spinner tells the person nothing about what is coming and shifts the layout when it is replaced.
+Skeletons are generic: they draw the region's usual shape (a fixed number of cards or rows), not a count or names remembered from an earlier visit. They are server-rendered, so the first paint already shows where content will appear.
+
+**Why**: a spinner tells the person nothing about what is coming and shifts the layout when it is replaced, and an empty frame on first paint reads as a broken page. The 2026-11-13 rule that removed skeletons left Home blank from first paint until hydration on every load, and was reversed on 2026-11-15 ([Home projects skeleton restoration](../research/home-projects-skeleton-restoration.md)).
 
 ## 6. Motion
 

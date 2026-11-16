@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { spawn, spawnSync } from 'node:child_process';
+import { access, copyFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -19,11 +19,18 @@ import { loadWorkspaceKernelRows, workspaceRoot } from '#testing/live/workspace-
  * The plugin must be built first (`pnpm nx run agent-plugin:build`) and `claude` must be on `PATH`. The run uses the
  * live Anthropic credential and an isolated `HOME`, so no user setting, hook or other plugin reaches the agent. The
  * agent may edit files and call the Tau tools only: no shell and no web.
+ *
+ * `TAU_PLUGIN_SMOKE_HOST=codex` runs the same cases on headless Codex (`codex exec --json`) with the plugin installed
+ * from this checkout through a local marketplace, under an isolated `CODEX_HOME` holding only a copy of the operator's
+ * Codex login and an empty `HOME`. Codex reads a skill with its shell, so its shell runs in the `workspace-write` sandbox (no network);
+ * `TAU_PLUGIN_SMOKE_KEEP` keeps the transcripts.
  */
 
 const pluginRoot = join(workspaceRoot, 'packages/agent-plugin');
-const claudeModel = process.env['TAU_PLUGIN_SMOKE_MODEL'] ?? 'claude-sonnet-5-5';
+const host = process.env['TAU_PLUGIN_SMOKE_HOST'] === 'codex' ? 'codex' : 'claude';
+const smokeModel = process.env['TAU_PLUGIN_SMOKE_MODEL'] ?? (host === 'codex' ? 'gpt-6-sol' : 'claude-sonnet-5-5');
 const credential = process.env['TAU_TEST_ANTHROPIC_API_KEY'] ?? process.env.ANTHROPIC_API_KEY;
+const codexAuth = join(process.env['CODEX_HOME'] ?? join(homedir(), '.codex'), 'auth.json');
 const caseTimeout = 900_000;
 
 /*
@@ -88,12 +95,51 @@ const toolUsesOf = (transcript: string): ToolUse[] =>
       );
     });
 
+/**
+ * The tool calls of a `codex exec --json` transcript, in the Claude shapes the verdict reads: a file change is a
+ * `Write`, a shell command a `Bash` and a Tau tool `mcp__tau__<tool>`.
+ */
+const codexToolUsesOf = (transcript: string): ToolUse[] =>
+  transcript
+    .split('\n')
+    .filter((line) => line.startsWith('{'))
+    .flatMap((line): ToolUse[] => {
+      const event: unknown = JSON.parse(line);
+      const item = isRecord(event) && event['type'] === 'item.completed' ? event['item'] : undefined;
+      if (!isRecord(item)) {
+        return [];
+      }
+      if (item['type'] === 'file_change' && Array.isArray(item['changes'])) {
+        return (item['changes'] as unknown[]).flatMap((change) =>
+          isRecord(change) && typeof change['path'] === 'string'
+            ? // eslint-disable-next-line @typescript-eslint/naming-convention -- Claude Code's Write input names the field.
+              [{ name: 'Write', input: { file_path: change['path'] } }]
+            : [],
+        );
+      }
+      if (item['type'] === 'command_execution') {
+        return [{ name: 'Bash', input: { command: text(item['command']) } }];
+      }
+      if (item['type'] === 'mcp_tool_call' && typeof item['tool'] === 'string') {
+        return [
+          {
+            name: `mcp__${text(item['server'])}__${item['tool']}`,
+            input: isRecord(item['arguments']) ? item['arguments'] : {},
+          },
+        ];
+      }
+      return [];
+    });
+
 const resultOf = (transcript: string): Record<string, unknown> | undefined =>
   transcript
     .split('\n')
     .filter((line) => line.startsWith('{'))
     .map((line): unknown => JSON.parse(line))
-    .find((event): event is Record<string, unknown> => isRecord(event) && event['type'] === 'result');
+    .find(
+      (event): event is Record<string, unknown> =>
+        isRecord(event) && (event['type'] === 'result' || event['type'] === 'turn.completed'),
+    );
 
 const writeTools = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const tauTool = (name: string, tool: string): boolean => name.startsWith('mcp__') && name.endsWith(`__${tool}`);
@@ -105,7 +151,8 @@ const readTauSkillFirst = (uses: readonly ToolUse[]): boolean => {
   return before.some(
     ({ name, input }) =>
       (name === 'Skill' && /(?:^|:)tau$/u.test(text(input['skill']) || text(input['command']))) ||
-      (name === 'Read' && text(input['file_path']).endsWith('skills/tau/SKILL.md')),
+      (name === 'Read' && text(input['file_path']).endsWith('skills/tau/SKILL.md')) ||
+      (name === 'Bash' && text(input['command']).includes('skills/tau/SKILL.md')),
   );
 };
 
@@ -151,7 +198,7 @@ const entryOf = async (projectRoot: string, uses: readonly ToolUse[]): Promise<s
   return undefined;
 };
 
-const runClaude = async (input: Readonly<{ cwd: string; home: string; prompt: string }>): Promise<string> =>
+const runAgent = async (input: Readonly<{ cwd: string; home: string; prompt: string }>): Promise<string> =>
   new Promise((resolve, reject) => {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -159,36 +206,50 @@ const runClaude = async (input: Readonly<{ cwd: string; home: string; prompt: st
         env[key] = value;
       }
     }
-    env['HOME'] = input.home;
-    env['ANTHROPIC_API_KEY'] = credential ?? '';
     env['CI'] = 'true';
-    const child = spawn(
-      'claude',
-      [
-        '-p',
-        input.prompt,
-        '--plugin-dir',
-        pluginRoot,
-        '--model',
-        claudeModel,
-        '--output-format',
-        'stream-json',
-        '--verbose',
-        // File edits inside the case's empty folder and the Tau tools only: no shell, no web.
-        '--permission-mode',
-        'acceptEdits',
-        '--allowedTools',
-        'Read,Write,Edit,Glob,Grep,Skill,mcp__plugin_tau_tau__*',
-        '--disallowedTools',
-        'Bash,WebFetch,WebSearch,Task',
-      ],
-      {
-        cwd: input.cwd,
-        // The API augments ProcessEnv with typed values; a child process takes plain strings.
-        env: env as unknown as NodeJS.ProcessEnv,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
+    if (host === 'codex') {
+      env['CODEX_HOME'] = input.home;
+      env['HOME'] = `${input.home}-user`;
+    } else {
+      env['HOME'] = input.home;
+      env['ANTHROPIC_API_KEY'] = credential ?? '';
+    }
+    const args =
+      host === 'codex'
+        ? [
+            'exec',
+            '--json',
+            '--skip-git-repo-check',
+            '--model',
+            smokeModel,
+            '--sandbox',
+            'workspace-write',
+            input.prompt,
+          ]
+        : [
+            '-p',
+            input.prompt,
+            '--plugin-dir',
+            pluginRoot,
+            '--model',
+            smokeModel,
+            '--output-format',
+            'stream-json',
+            '--verbose',
+            // File edits inside the case's empty folder and the Tau tools only: no shell, no web.
+            '--permission-mode',
+            'acceptEdits',
+            '--allowedTools',
+            'Read,Write,Edit,Glob,Grep,Skill,mcp__plugin_tau_tau__*',
+            '--disallowedTools',
+            'Bash,WebFetch,WebSearch,Task',
+          ];
+    const child = spawn(host, args, {
+      cwd: input.cwd,
+      // The API augments ProcessEnv with typed values; a child process takes plain strings.
+      env: env as unknown as NodeJS.ProcessEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const decoder = new TextDecoder();
     const errorDecoder = new TextDecoder();
     let stdout = '';
@@ -204,12 +265,48 @@ const runClaude = async (input: Readonly<{ cwd: string; home: string; prompt: st
     child.on('close', (code) => {
       clearTimeout(timer);
       if (stdout === '' && code !== 0) {
-        reject(new Error(`claude exited ${String(code)}: ${stderr.slice(0, 2000)}`));
+        reject(new Error(`${host} exited ${String(code)}: ${stderr.slice(0, 2000)}`));
         return;
       }
       resolve(stdout);
     });
   });
+
+/** Install the plugin from this checkout into an isolated `CODEX_HOME` that holds a copy of the operator's login. */
+const prepareCodexHome = async (root: string): Promise<string> => {
+  const home = join(root, 'codex-home');
+  const marketplace = join(root, 'marketplace');
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  // Codex also discovers skills under `$HOME/.agents/skills`: the agent gets an empty home of its own.
+  await mkdir(`${home}-user`, { recursive: true });
+  await mkdir(join(marketplace, '.agents/plugins'), { recursive: true });
+  await copyFile(codexAuth, join(home, 'auth.json'));
+  await symlink(pluginRoot, join(marketplace, 'tau'));
+  await writeFile(
+    join(marketplace, '.agents/plugins/marketplace.json'),
+    JSON.stringify({
+      name: 'tau-checkout',
+      interface: { displayName: 'Tau checkout' },
+      plugins: [
+        { name: 'tau', source: './tau', description: 'Tau plugin from this checkout', category: 'productivity' },
+      ],
+    }),
+  );
+  const codex = (args: readonly string[]): void => {
+    const { status, stderr } = spawnSync('codex', [...args], {
+      // The API augments ProcessEnv with typed values; a child process takes plain strings.
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable's name.
+      env: { ...(process.env as Record<string, string>), CODEX_HOME: home } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    });
+    if (status !== 0) {
+      throw new Error(`codex ${args.join(' ')} exited ${String(status)}: ${stderr.slice(0, 2000)}`);
+    }
+  };
+  codex(['plugin', 'marketplace', 'add', marketplace]);
+  codex(['plugin', 'add', 'tau@tau-checkout']);
+  return home;
+};
 
 type SmokeVerdict = Readonly<{
   case: string;
@@ -223,38 +320,48 @@ type SmokeVerdict = Readonly<{
   turns: number | undefined;
 }>;
 
-describe.skipIf(credential === undefined || credential === '')(
-  `AKS-3c plugin smoke on Claude Code with ${claudeModel} (set TAU_TEST_ANTHROPIC_API_KEY to run)`,
+describe.skipIf(host === 'claude' && (credential === undefined || credential === ''))(
+  `AKS-3c plugin smoke on ${host === 'codex' ? 'Codex' : 'Claude Code'} with ${smokeModel} (set TAU_TEST_ANTHROPIC_API_KEY, or TAU_PLUGIN_SMOKE_HOST=codex, to run)`,
   () => {
     let root: string;
     let kernels: readonly BindingKernelRow[];
+    let codexHome: string;
     const verdicts: SmokeVerdict[] = [];
 
     beforeAll(async () => {
-      root = await mkdtemp(join(tmpdir(), 'tau-plugin-smoke-'));
+      // Real path: Codex reports the folder's resolved path (`/private/var/...` on macOS).
+      root = await realpath(await mkdtemp(join(tmpdir(), 'tau-plugin-smoke-')));
       kernels = await loadWorkspaceKernelRows();
       expect(await exists(join(pluginRoot, 'dist/launch.mjs')), 'build the plugin first').toBe(true);
+      if (host === 'codex') {
+        codexHome = await prepareCodexHome(root);
+      }
     });
 
     afterAll(async () => {
       const bound = verdicts.filter(({ acceptable }) => acceptable).length;
       const skillFirst = verdicts.filter(({ tauSkillFirst }) => tauSkillFirst).length;
       console.log(
-        `[plugin-routing-smoke] summary ${JSON.stringify({ model: claudeModel, bound, skillFirst, of: verdicts.length, threshold: 12 })}`,
+        `[plugin-routing-smoke] summary ${JSON.stringify({ host, model: smokeModel, bound, skillFirst, of: verdicts.length, threshold: 12 })}`,
       );
-      await rm(root, { recursive: true, force: true });
+      if (process.env['TAU_PLUGIN_SMOKE_KEEP'] === 'true') {
+        console.log(`[plugin-routing-smoke] kept ${root}`);
+        await rm(join(root, 'codex-home', 'auth.json'), { force: true });
+      } else {
+        await rm(root, { recursive: true, force: true });
+      }
     });
 
     it.each(smokeCases.map((smokeCase) => [smokeCase.id, smokeCase] as const))(
       'binds an acceptable kernel for %s',
       async (id, smokeCase) => {
         const cwd = join(root, id);
-        const home = join(root, `${id}-home`);
+        const home = host === 'codex' ? codexHome : join(root, `${id}-home`);
         await mkdir(cwd, { recursive: true });
         await mkdir(home, { recursive: true });
-        const transcript = await runClaude({ cwd, home, prompt: smokeCase.prompt });
+        const transcript = await runAgent({ cwd, home, prompt: smokeCase.prompt });
         await writeFile(join(root, `${id}.jsonl`), transcript, 'utf8');
-        const uses = toolUsesOf(transcript);
+        const uses = host === 'codex' ? codexToolUsesOf(transcript) : toolUsesOf(transcript);
         const entryPath = await entryOf(cwd, uses);
         const source = entryPath === undefined ? '' : await readFile(join(cwd, entryPath), 'utf8').catch(() => '');
         const binding = entryPath === undefined ? undefined : bindEntryFirstPass({ entryPath, source, kernels });

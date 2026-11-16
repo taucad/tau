@@ -654,7 +654,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await vi.waitFor(
       () => {
         expect(alpha.frames.filter((frame) => frame.type === 'error' && frame.id === 1)).toEqual([]);
-        expect(alpha.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'saved' } });
+        expect(alpha.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'saved', outcome: 'recorded' } });
         expect(root.status().headRevisionId).toBeDefined();
       },
       { timeout: 10_000 },
@@ -828,7 +828,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 90)).toEqual({
       type: 'result',
       id: 90,
-      result: { kind: 'saved' },
+      result: { kind: 'saved', outcome: 'recorded' },
     });
     expect(root.status().headRevisionId).toBeDefined();
 
@@ -1437,7 +1437,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     fixture.announce('alpha', ['main.scad']);
     alpha.send({ command: 'saveRevision', id: 3, trigger: 'save' });
 
-    expect(await answered(3)).toEqual({ type: 'result', id: 3, result: { kind: 'saved' } });
+    /* The cut lost its compare-and-swap: the answer says the bytes stayed unrecorded (A7e). */
+    expect(await answered(3)).toEqual({ type: 'result', id: 3, result: { kind: 'saved', outcome: 'refused' } });
     expect(alpha.frames).toContainEqual({
       type: 'toast',
       toast: {
@@ -1719,7 +1720,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         await settle(4);
         answer = alpha.frames.find((frame) => 'id' in frame && frame.id === 78);
       }
-      expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
+      expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved', outcome: 'recorded' } });
       const after = await root.log();
       expect(after.length).toBeGreaterThan(before);
     } finally {
@@ -1755,8 +1756,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       }
     }
 
-    expect(answer).toEqual({ type: 'result', id: 77, result: { kind: 'saved' } });
+    expect(answer).toEqual({ type: 'result', id: 77, result: { kind: 'saved', outcome: 'recorded' } });
     expect(rowsWhenAnswered).toBeGreaterThan(before);
+  });
+
+  /* A7e (22:19Z): a close over trees that are all unchanged says so, apart from one that recorded or was refused. */
+  it('should answer a close cut over unchanged trees as nothing to record', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+    alpha.send({ command: 'saveRevision', id: 79, trigger: 'close' });
+    await vi.waitFor(() => {
+      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 79)).toBeDefined();
+    });
+    alpha.send({ command: 'saveRevision', id: 80, trigger: 'close' });
+    let answer: WorkerRevisionResponse | undefined;
+    for (let attempt = 0; attempt < 60 && answer === undefined; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await settle(4);
+      answer = alpha.frames.find((frame) => 'id' in frame && frame.id === 80);
+    }
+    expect(answer).toEqual({ type: 'result', id: 80, result: { kind: 'saved', outcome: 'nothingToRecord' } });
   });
 
   /* A save whose compare-and-swap lost is settled, not left to the deadline: the next open mints the same bytes. */
@@ -1796,7 +1818,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     }
 
     expect(conflictNext).toBe(false);
-    expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
+    expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved', outcome: 'refused' } });
   });
 
   it('should mint one strictly increasing generation per content-change event (F9, F4)', async () => {
@@ -2762,4 +2784,87 @@ describe('readiness liveness over every writer (INV)', () => {
       root = await fixture.root('alpha');
     });
   }, 120_000);
+});
+
+/*
+ * Runtime observability PR-7 (AR-W6-02): the browser's sync producer sends under the one consent rule. The page says
+ * its resolved consent on the port; only `granted` sends, and `unknown` (a signed-in preference still loading) holds.
+ */
+describe('the sync attempt reporter follows the page consent (runtime observability PR-7)', () => {
+  type Seen = { readonly ingest: unknown[]; readonly requests: string[] };
+
+  /** Open alpha on a Tau remote whose pull answers at once, with `consent` said (or not) before anything else. */
+  const connectWith = async (
+    consent: WorkerRevisionRequest | undefined,
+  ): Promise<Readonly<{ alpha: Client; seen: Seen; restore: () => void }>> => {
+    const fixture = harness(['alpha'], (port) => ({ ...port, listRemoteRefs: async () => [] }));
+    await fixture.service
+      .createRootedFileSystem('/projects/alpha')
+      .writeFile('tau.json', JSON.stringify({ name: 'Alpha project' }));
+    const alpha = await fixture.open('alpha');
+    const seen: Seen = { ingest: [], requests: [] };
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      seen.requests.push(url);
+      if (url === 'https://api.test/v1/telemetry/ingest') {
+        seen.ingest.push(JSON.parse(typeof init?.body === 'string' ? init.body : 'null'));
+      }
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof globalThis.fetch;
+    if (consent !== undefined) {
+      alpha.send(consent);
+    }
+    alpha.send({ command: 'remoteCredential', apiBaseUrl: 'https://api.test' });
+    alpha.send({ command: 'connectRemote', kind: 'tau' });
+    return {
+      alpha,
+      seen,
+      restore: () => {
+        globalThis.fetch = original;
+      },
+    };
+  };
+
+  it('should report a settled pull when the page consent is granted', async () => {
+    const { seen, restore } = await connectWith({ command: 'telemetryConsent', consent: 'granted' });
+    try {
+      await vi.waitFor(() => {
+        const entries = seen.ingest.flatMap(
+          (body) => (body as { entries: ReadonlyArray<{ name: string; detail: unknown }> }).entries,
+        );
+        expect(entries.map(({ name, detail }) => ({ name, detail }))).toContainEqual({
+          name: 'observability.syncAttempt',
+          detail: { direction: 'pull', outcome: 'ok', placement: 'browser' },
+        });
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it.each([
+    ['denied', { command: 'telemetryConsent', consent: 'denied' } as const],
+    ['unknown', { command: 'telemetryConsent', consent: 'unknown' } as const],
+    ['never said', undefined],
+  ])('should send no sync attempt while the page consent is %s, and send once it is granted', async (_label, said) => {
+    const { alpha, seen, restore } = await connectWith(said);
+    try {
+      /* The pull ran: its usage read went out, and the attempt it settled had every turn to be reported. */
+      await vi.waitFor(() => {
+        expect(seen.requests).toContain('https://api.test/v1/projects/alpha/usage');
+      });
+      await settle(40);
+      expect(seen.ingest).toEqual([]);
+
+      /* The producer is alive: the same port's grant lets the next attempt through. */
+      alpha.send({ command: 'telemetryConsent', consent: 'granted' });
+      alpha.send({ command: 'syncNow' });
+      await vi.waitFor(() => {
+        expect(seen.ingest).not.toEqual([]);
+      });
+    } finally {
+      restore();
+    }
+  });
 });

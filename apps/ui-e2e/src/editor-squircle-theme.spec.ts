@@ -97,8 +97,23 @@ test('should apply the shared squircle curve while preserving semantic circles',
     radius: supportsSquircle ? '15px' : '11px',
     shape: expectedShape,
   });
+  /*
+   * The product declares `corner-shape: round` for full-round controls. `round` is `superellipse(1)` (CSS Borders 4),
+   * and Chrome 156 serializes the computed keyword as that function, so read how this browser computes the keyword.
+   */
+  const computedRound = await target.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.setProperty('corner-shape', 'round');
+    document.body.append(probe);
+    const shape = getComputedStyle(probe).getPropertyValue('corner-shape').trim();
+    probe.remove();
+    return shape;
+  });
+  if (supportsSquircle) {
+    expect(['round', 'superellipse(1)']).toContain(computedRound);
+  }
   const fullRoundGeometry = await readCornerGeometry(fullRoundAction);
-  expect(fullRoundGeometry.shape).toBe(supportsSquircle ? 'round' : '');
+  expect(fullRoundGeometry.shape).toBe(supportsSquircle ? computedRound : '');
 
   const attachedSurface = await target.evaluateLocator(disclosure, (node) => {
     const header = node.closest<HTMLElement>('[data-slot="paneview-header"]');

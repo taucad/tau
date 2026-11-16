@@ -71,7 +71,7 @@ test('runs setup to the end, preview included, with the network off and no remot
     await expectVisible(page.getByRole('heading', { level: 1, name: 'Design, verify, build' }));
     await page.getByRole('button', { name: 'Finish', exact: true }).click();
     await expectVisible(page.getByRole('heading', { level: 1, name: 'You’re set' }));
-    await page.getByRole('link', { name: 'Start building', exact: true }).click();
+    await page.getByRole('button', { name: 'Start building', exact: true }).click();
     await page.waitForURL((url) => url.pathname === '/');
   } finally {
     await application.evaluate(async ({ session: electronSession }) => {

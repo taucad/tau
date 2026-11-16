@@ -4,6 +4,7 @@ import {
   pageProjectOpenPerformance,
   readLocalProjectOpenPerformance,
   resetPageProjectOpenPerformance,
+  setProjectOpenRouteClassReader,
 } from '#lib/project-open-performance.js';
 import type { ProjectOpenPerformanceConfig } from '#lib/project-open-performance.js';
 
@@ -82,7 +83,7 @@ describe('local project-open performance recorder', () => {
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure.mock.calls[0]?.[0]).toBe('tau.load.tree.list');
     expect(measure.mock.calls[0]?.[1]?.detail).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       buildId: 'cc200962038bb96efab158c77c821c8322a34740',
       fixtureId: 'root-10',
       runId,
@@ -142,7 +143,7 @@ describe('local project-open performance recorder', () => {
     expect(JSON.stringify(measure.mock.calls)).not.toContain('/private/project/source.ts');
   });
 
-  it('should give the page one recorder, inert without an injection', () => {
+  it('should give the page one recorder, inert outside a browser page without an injection', () => {
     const measure = stubTiming();
 
     const inert = pageProjectOpenPerformance();
@@ -156,5 +157,154 @@ describe('local project-open performance recorder', () => {
     resetPageProjectOpenPerformance();
     pageProjectOpenPerformance().begin('composer.mount').finish('ok');
     expect(measure.mock.calls.map(([name]) => name)).toEqual(['tau.load.composer.mount']);
+  });
+});
+
+describe('deployed project-open performance recorder', () => {
+  const stubDeployedPage = () => {
+    const measure = stubTiming();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+    vi.stubGlobal('document', {});
+    const fetch = vi.fn();
+    const sendBeacon = vi.fn();
+    const send = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('navigator', { sendBeacon });
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        public open = vi.fn();
+        public send = send;
+      },
+    );
+    return { measure, network: [fetch, sendBeacon, send] };
+  };
+
+  it('should create tau.load measures on a nonloopback page without a harness injection', () => {
+    const { measure } = stubDeployedPage();
+
+    const recorder = pageProjectOpenPerformance();
+    const span = recorder.begin('composer.mount');
+    recorder.begin('editor.runtime', span.spanId).finish('ok');
+    span.finish('ok', { fileCount: 3 });
+    recorder.record('viewer.firstFrame', { start: 40, end: 52, outcome: 'ok' });
+
+    expect(measure.mock.calls.map(([name]) => name)).toEqual([
+      'tau.load.editor.runtime',
+      'tau.load.composer.mount',
+      'tau.load.viewer.firstFrame',
+    ]);
+    expect(measure.mock.calls[1]?.[1]).toMatchObject({
+      start: 10,
+      detail: {
+        schemaVersion: 2,
+        environment: 'deployed',
+        realm: 'page',
+        phase: 'composer.mount',
+        spanId,
+        parentSpanId: null,
+        runId: null,
+        journeyId: null,
+        buildId: null,
+        fixtureId: null,
+        routeTemplate: null,
+        routeClass: null,
+        outcome: 'ok',
+        counters: { fileCount: 3 },
+      },
+    });
+  });
+
+  it('should send nothing over the network', async () => {
+    const { network } = stubDeployedPage();
+
+    const recorder = pageProjectOpenPerformance();
+    recorder.begin('editor.mount').finish('ok');
+    recorder.record('canvas.2d', { start: 1, end: 2, outcome: 'ok', source: 'gizmo.face' });
+    recorder.begin('composer.mount').finish('error');
+    await Promise.resolve();
+
+    for (const send of network) {
+      expect(send).not.toHaveBeenCalled();
+    }
+  });
+
+  // The Mac qualification of #2120 found a deployed tab stopped measuring at its 256th measure, the eighth in-app open;
+  // the timeline stays bounded, and a later open in the same tab is still measured.
+  it('should keep a bounded timeline per page and still measure a later open', () => {
+    const { measure } = stubDeployedPage();
+    const timeline: string[] = [];
+    measure.mockImplementation((name) => {
+      timeline.push(name);
+    });
+    const clearMeasures = vi.fn((name: string) => {
+      timeline.splice(0, timeline.length, ...timeline.filter((entry) => entry !== name));
+    });
+    vi.stubGlobal('performance', { ...performance, clearMeasures });
+
+    const recorder = pageProjectOpenPerformance();
+    let largest = 0;
+    for (let index = 0; index < 1000; index++) {
+      recorder.record(index % 2 === 0 ? 'canvas.2d' : 'viewer.mount', { start: index, end: index + 1, outcome: 'ok' });
+      largest = Math.max(largest, timeline.length);
+    }
+    recorder.begin('editor.mount').finish('ok');
+
+    expect(measure).toHaveBeenCalledTimes(1001);
+    expect(largest).toBe(256);
+    expect(timeline.length).toBeLessThanOrEqual(256);
+    expect(timeline.at(-1)).toBe('tau.load.editor.mount');
+    expect(new Set(clearMeasures.mock.calls.map(([name]) => name))).toEqual(
+      new Set(['tau.load.canvas.2d', 'tau.load.viewer.mount']),
+    );
+  });
+
+  it('should stay inert outside a browser page, as in server rendering', () => {
+    const measure = stubTiming();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+
+    pageProjectOpenPerformance().begin('composer.mount').finish('ok');
+    resetPageProjectOpenPerformance();
+    vi.stubGlobal('location', undefined);
+    vi.stubGlobal('document', {});
+    pageProjectOpenPerformance().begin('composer.mount').finish('ok');
+
+    expect(measure).not.toHaveBeenCalled();
+  });
+
+  it('should leave the harness-only reader and an explicit recorder unchanged on a deployed page', () => {
+    const { measure } = stubDeployedPage();
+
+    expect(readLocalProjectOpenPerformance()).toBeUndefined();
+    createProjectOpenPerformance().begin('tree.list').finish('ok');
+
+    expect(measure).not.toHaveBeenCalled();
+  });
+});
+
+describe('route class (RR7)', () => {
+  afterEach(() => {
+    setProjectOpenRouteClassReader(undefined);
+    resetPageProjectOpenPerformance();
+    vi.unstubAllGlobals();
+  });
+
+  it('should tag each measure with the route class the page shows when it is written', () => {
+    const measure = vi.fn<(name: string, options: PerformanceMeasureOptions) => void>();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+    vi.stubGlobal('document', {});
+    vi.stubGlobal('performance', { now: () => 1, timeOrigin: 1000, measure, clearMeasures: () => undefined });
+    let routeClass: string | undefined = 'project';
+    setProjectOpenRouteClassReader(() => routeClass);
+
+    const recorder = pageProjectOpenPerformance();
+    recorder.record('viewer.firstFrame', { start: 1, end: 2, outcome: 'ok' });
+    routeClass = undefined;
+    recorder.record('viewer.firstFrame', { start: 3, end: 4, outcome: 'ok' });
+
+    expect(measure.mock.calls.map(([, options]) => (options.detail as { routeClass: unknown }).routeClass)).toEqual([
+      'project',
+      null,
+    ]);
   });
 });

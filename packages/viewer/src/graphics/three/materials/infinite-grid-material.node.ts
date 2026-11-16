@@ -10,7 +10,6 @@ import { setLogarithmicDepthOverride } from '#graphics/three/logarithmic-depth.j
 import {
   abs,
   add,
-  cameraPosition,
   cameraProjectionMatrix,
   cameraViewMatrix,
   clamp,
@@ -114,6 +113,7 @@ export function createInfiniteGridNodeMaterial(
     smallPhase = [0, 0],
     largePhase = [0, 0],
     alphaThreshold = 0.01,
+    gridCenter = [0, 0],
   } = properties ?? {};
 
   if (!['xyz', 'xzy', 'zyx'].includes(axes)) {
@@ -137,6 +137,8 @@ export function createInfiniteGridNodeMaterial(
   const uSmallPhase = uniform(new Vector2(...smallPhase));
   const uLargePhase = uniform(new Vector2(...largePhase));
   const uAlphaThreshold = uniform(alphaThreshold);
+  // The view target's foot on the grid plane, not the camera's: the camera's foot drifts from the model as FOV falls.
+  const uGridCenter = uniform(new Vector2(...gridCenter));
 
   const material = new MeshBasicNodeMaterial({
     side: DoubleSide,
@@ -156,19 +158,7 @@ export function createInfiniteGridNodeMaterial(
   setLogarithmicDepthOverride(material, logarithmicDepthBehindGltfSurface(gridViewZ));
 
   material.vertexNode = Fn(() => {
-    const cameraPlane = vec2().toVar('tauGridCameraPlane');
-
-    If(axesIndexUniform.equal(float(0)), () => {
-      cameraPlane.assign(cameraPosition.xy);
-    })
-      .ElseIf(axesIndexUniform.equal(float(1)), () => {
-        cameraPlane.assign(cameraPosition.xz);
-      })
-      .Else(() => {
-        cameraPlane.assign(cameraPosition.zy);
-      });
-
-    renderPlanePosition.assign(add(cameraPlane, mul(positionLocal.xy, uGridDistance)));
+    renderPlanePosition.assign(add(uGridCenter, mul(positionLocal.xy, uGridDistance)));
 
     const posWorld = vec3().toVar('tauGridWorld');
 
@@ -256,6 +246,10 @@ export function createInfiniteGridNodeMaterial(
     if (overrides.largePhase !== undefined) {
       uLargePhase.value.set(...overrides.largePhase);
     }
+
+    if (overrides.gridCenter !== undefined) {
+      uGridCenter.value.set(...overrides.gridCenter);
+    }
   };
 
   return { material, applyVisualOverrides };
@@ -263,7 +257,8 @@ export function createInfiniteGridNodeMaterial(
 
 /**
  * Infinite grid analogue for {@link infiniteGridMaterial} using WebGPU + TSL.
- * Prefer {@link createInfiniteGridNodeMaterial} when you need to update sizes/colour without rebuilding.
+ * Prefer {@link createInfiniteGridNodeMaterial} when you need to update sizes/colour without rebuilding, or to keep
+ * the grid centred under a moving view: this material stays centred on `properties.gridCenter`.
  * @public
  */
 export function infiniteGridNodeMaterial(properties?: InfiniteGridMaterialProperties): MeshBasicNodeMaterial {

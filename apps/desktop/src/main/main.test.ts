@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
+import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -139,14 +139,14 @@ vi.mock('#main/error-reporting.js', () => ({
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
 }));
 
-vi.mock('#tau/native-preparation.js', () => ({
+vi.mock('@taucad/desktop-services-host/native-preparation', () => ({
   createDesktopKernelPreparer: (options: unknown) => {
     state.nativePreparerOptions = options;
     return { prepare: state.nativePrepare, cancel: state.nativeCancel, dispose: async () => undefined };
   },
 }));
 
-vi.mock('#tau/native-store.js', () => ({
+vi.mock('@taucad/desktop-services-host/native-store', () => ({
   desktopNativeKernelIds: () => ['build123d'],
   startNativeStore: vi.fn(async (options: unknown) => {
     state.nativeStoreOptions = options;
@@ -362,6 +362,7 @@ vi.mock('#main/auth-service.js', () => ({
     restore: vi.fn(async () => state.authRestored),
     token: vi.fn(() => state.authToken),
     principal: vi.fn(() => undefined),
+    principalName: vi.fn(() => undefined),
     refresh: vi.fn(async () => undefined),
     onChange: vi.fn(),
     dispose: vi.fn(),
@@ -443,6 +444,7 @@ vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => state.shellApplied),
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
+  bundledStoreGuardEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -645,6 +647,52 @@ describe('desktop main compute owner', () => {
       await expect(restart).resolves.toBe(true);
       expect(state.servicesDispose).toHaveBeenCalledOnce();
       expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs a quit that reached before-quit with no reason of its own as external',
+    async () => {
+      await bootstrap();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', { purpose: 'quit', reason: 'external' });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs the session ending as the reason for the quit that follows it',
+    async () => {
+      await bootstrap();
+      const { powerMonitor } = await import('electron');
+      // `on` is overloaded per event, so its recorded calls are read untyped.
+      const calls: ReadonlyArray<readonly unknown[]> = vi.mocked(powerMonitor.on).mock.calls;
+      const shutdown = calls.findLast(([event]) => event === 'shutdown')?.[1];
+      expect(shutdown).toBeTypeOf('function');
+      (shutdown as () => void)();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+          purpose: 'quit',
+          reason: 'system-shutdown',
+        });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs an update restart as its own quit reason',
+    async () => {
+      await bootstrap();
+      await expect(state.prepareToRestart!()).resolves.toBe(true);
+      expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+        purpose: 'restart',
+        reason: 'update-install',
+      });
     },
     bootMilliseconds,
   );

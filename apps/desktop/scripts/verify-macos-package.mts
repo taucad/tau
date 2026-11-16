@@ -39,7 +39,7 @@ import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 import { desktopArtifactName } from '#shared/desktop-release.js';
 import { isQuickLookEnabled } from '#shared/quick-look.js';
-import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
+import { preparableNativeDeployments } from '@taucad/desktop-services-host/desktop-native-deployments';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';

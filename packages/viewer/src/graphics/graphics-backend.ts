@@ -31,6 +31,43 @@ const requestWebGpuAdapter = async (): Promise<boolean | undefined> => {
 };
 
 /**
+ * The browser gave a canvas no WebGL 2 context: `getContext('webgl2')` answered `null`. Hardware acceleration is off,
+ * the GPU or its driver is blocklisted, or the GPU process gave up after repeated crashes. Unlike a failed WebGPU
+ * start, nothing on the page can fall back from it: every Tau renderer, WebGPU's included, ends on WebGL 2 when it
+ * cannot use WebGPU. Its message is written for the person at the browser.
+ * @public
+ */
+export class GraphicsContextUnavailableError extends Error {
+  public override readonly name = 'GraphicsContextUnavailableError';
+
+  public constructor(options?: ErrorOptions) {
+    super(
+      'This browser could not start 3D graphics (WebGL 2 is unavailable). Turn on hardware acceleration in the browser settings, or try another browser.',
+      options,
+    );
+  }
+}
+
+/**
+ * Whether a value is a {@link GraphicsContextUnavailableError}, or an error caused by one. Matched by name, so an error
+ * rebuilt across a module or bundle boundary still counts.
+ *
+ * @param value - The thrown or rejected value.
+ * @returns Whether the browser could not create a WebGL 2 context.
+ * @public
+ */
+export function isGraphicsContextUnavailableError(value: unknown): value is Error {
+  let current: unknown = value;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    if (current.name === 'GraphicsContextUnavailableError') {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+/**
  * Probe WebGPU adapter availability without creating a GPUDevice.
  *
  * Matches the Tau graphics machine probe contract.

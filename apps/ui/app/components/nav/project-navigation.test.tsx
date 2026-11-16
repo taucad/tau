@@ -7,12 +7,12 @@ import type { ReactNode } from 'react';
 import type { SyncFacet } from '@taucad/revisions';
 import type { useProjects } from '#hooks/use-projects.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
-import type { ProjectListShape } from '#lib/project-list-shape.lib.js';
 
 const mockUseProjects = vi.fn();
 const mockCloudIntent = vi.fn();
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => mockCloudIntent() as string | undefined }));
 const mockCreateChat = vi.fn();
+const mockNoteCreatedEmpty = vi.fn<(chatId: string) => void>();
 const mockIsProjectExpanded = vi.fn();
 const mockSetProjectDisclosure = vi.fn();
 const mockNavigate = vi.fn();
@@ -27,8 +27,6 @@ let search = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => mockUseProjects() as ReturnType<typeof useProjects> }));
-let rememberedShape: ProjectListShape | undefined;
-vi.mock('#hooks/use-project-list-shape.js', () => ({ useProjectListShape: () => rememberedShape }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createChat: mockCreateChat }) }));
 vi.mock('#hooks/use-app-ui-preferences.js', () => ({
   useAppUiPreferences: () => ({
@@ -76,7 +74,7 @@ vi.mock('#components/nav/project-chat-list.js', () => ({
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarGroup: ({ children }: { readonly children: ReactNode }) => <section>{children}</section>,
   SidebarGroupLabel: ({ children }: { readonly children: ReactNode }) => <h2>{children}</h2>,
-  SidebarMenu: ({ children }: { readonly children: ReactNode }) => <ul>{children}</ul>,
+  SidebarMenu: ({ children, ...properties }: { readonly children: ReactNode }) => <ul {...properties}>{children}</ul>,
   SidebarMenuItem: ({ children, ...properties }: { readonly children: ReactNode }) => (
     <li {...properties}>{children}</li>
   ),
@@ -162,8 +160,17 @@ const mockLiveNow = vi.fn();
 const mockCloseProject = vi.fn();
 const mockGetProjectClosePlan = vi.fn();
 let liveProjectIds: readonly string[] = [];
+/** Why a project's session closed, by project: the registry's `closed` entries. */
+let closedReasons: Readonly<Record<string, string>> = {};
 vi.mock('#hooks/use-sessions.js', () => ({
   useLiveProjectIds: () => liveProjectIds,
+  useProjectLiveness: (projectId: string) => ({
+    projectId,
+    live: liveProjectIds.includes(projectId),
+    status: undefined,
+    closedReason: closedReasons[projectId],
+    policyRefusal: undefined,
+  }),
   useSessions: () => ({ on: () => ({ unsubscribe: () => undefined }) }),
 }));
 vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
@@ -176,7 +183,7 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
   };
 });
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan }),
+  useChatSessionStore: () => ({ getProjectClosePlan: mockGetProjectClosePlan, noteCreatedEmpty: mockNoteCreatedEmpty }),
 }));
 
 const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => ({
@@ -235,13 +242,13 @@ describe('ProjectNavigation', () => {
     pathname = '/';
     search = '';
     pendingLocation = undefined;
-    rememberedShape = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
     mockCloudIntent.mockReturnValue(undefined);
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
     mockSetProjectDisclosure.mockResolvedValue(undefined);
     mockNavigate.mockResolvedValue(undefined);
     liveProjectIds = [];
+    closedReasons = {};
     mockRow.mockImplementation((projectId: string) => closedRow(projectId));
     mockLiveNow.mockReturnValue({ projects: 0, idleProjectIds: [] });
     mockGetProjectClosePlan.mockResolvedValue({
@@ -366,6 +373,8 @@ describe('ProjectNavigation', () => {
     fireEvent.click(newChatButton);
     await vi.waitFor(() => {
       expect(mockCreateChat).toHaveBeenCalledWith('proj_two', { name: 'New chat', messages: [] });
+      // Created empty, so the chat store shows it empty at once (A12, I21).
+      expect(mockNoteCreatedEmpty).toHaveBeenCalledWith('chat/two');
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo', {
         state: { focusChatComposer: true },
       });
@@ -496,35 +505,34 @@ describe('ProjectNavigation', () => {
     expect(screen.getAllByRole('link')).toHaveLength(2);
   });
 
-  it('shows one-line skeletons while the first list loads', () => {
+  /* Loading draws one page of generic skeleton rows, whatever the device has listed before. */
+  it('draws five skeleton rows, busy, until the first listing answers', () => {
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
-    render(<ProjectNavigation />);
-    const skeletons = screen.getAllByTestId('project-navigation-skeleton');
-    expect(skeletons).toHaveLength(3);
-    expect(skeletons[0]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
-  });
+    const view = render(<ProjectNavigation />);
 
-  /* R5: the listing fills the rows the last listing had, so nothing below them moves. */
-  it('reserves skeleton rows, never names, and the Show more row past a page', () => {
-    rememberedShape = { count: 7 };
-    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
-    render(<ProjectNavigation />);
-
-    const placeholders = screen.getAllByTestId('project-navigation-skeleton');
-    expect(placeholders).toHaveLength(6);
-    expect(placeholders[0]?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(1);
-    expect(placeholders[0]).toHaveTextContent('');
-    expect(placeholders[5]).toHaveTextContent('Show more projects');
+    expect(screen.getAllByTestId('project-navigation-skeleton')).toHaveLength(5);
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
     expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
+    expect(document.querySelector('section > ul')).toHaveAttribute('aria-busy', 'true');
+    expect(document.querySelector('[data-slot=wait-indicator]')).toBeNull();
+
+    mockUseProjects.mockReturnValue(projectsResult);
+    view.rerender(<ProjectNavigation />);
+
+    expect(screen.queryAllByTestId('project-navigation-skeleton')).toHaveLength(0);
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
+    expect(document.querySelector('section > ul')).not.toHaveAttribute('aria-busy');
   });
 
-  it('says there are no projects before the listing when the last listing had none', () => {
-    rememberedShape = { count: 0 };
+  it('says there are no projects only once the listing has answered empty', () => {
     mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
-    render(<ProjectNavigation />);
+    const view = render(<ProjectNavigation />);
+    expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
 
-    expect(screen.queryByTestId('project-navigation-skeleton')).not.toBeInTheDocument();
+    mockUseProjects.mockReturnValue({ ...projectsResult, projects: [] });
+    view.rerender(<ProjectNavigation />);
     expect(screen.getByText('No projects yet')).toBeInTheDocument();
+    expect(screen.queryAllByTestId('project-navigation-skeleton')).toHaveLength(0);
   });
 
   /* D3, D11, D16: a collapsed project carries its chats' rollup on the
@@ -712,5 +720,113 @@ describe('ProjectNavigation', () => {
     render(<ProjectNavigation />);
     expect(screen.getByText('Earlier')).toBeInTheDocument();
     expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Two', 'One']);
+  });
+
+  // ── Load defects (A0.9) ──
+
+  describe('reload', () => {
+    /** The list as drawn: each row's link name, or a label row's text. */
+    const drawnRows = (): string[] =>
+      [...document.querySelectorAll('section > ul > li')].map(
+        (item) => item.querySelector('a')?.textContent ?? item.textContent,
+      );
+
+    /*
+     * U6 as the reload runs it: the listing answers before the open project's
+     * session goes live, so there is a frame with the listing and nothing live.
+     * The open project is first from that frame, so nothing moves when its
+     * session goes live, and afterwards the registry alone says what is live.
+     */
+    it('U6: no row moves when the listing answers before the open project goes live', () => {
+      pathname = '/w/home/one';
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      const view = render(<ProjectNavigation />);
+      expect(screen.getAllByTestId('project-navigation-skeleton')).toHaveLength(5);
+
+      mockUseProjects.mockReturnValue(projectsResult);
+      view.rerender(<ProjectNavigation />);
+      const listed = drawnRows();
+
+      liveProjectIds = ['proj_one'];
+      view.rerender(<ProjectNavigation />);
+      const live = drawnRows();
+
+      liveProjectIds = [];
+      view.rerender(<ProjectNavigation />);
+
+      expect([listed, live]).toEqual([
+        ['One', 'Earlier', 'Two'],
+        ['One', 'Earlier', 'Two'],
+      ]);
+      expect(drawnRows()).toEqual(['Two', 'One']);
+    });
+
+    /* Leaving the project the page was loaded on ends its wait: coming back, only the registry says what is live. */
+    it("U6: leaving the reload's open project ends its wait", () => {
+      pathname = '/w/home/one';
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      const view = render(<ProjectNavigation />);
+      mockUseProjects.mockReturnValue(projectsResult);
+      view.rerender(<ProjectNavigation />);
+      expect(drawnRows()).toEqual(['One', 'Earlier', 'Two']);
+
+      pathname = '/';
+      view.rerender(<ProjectNavigation />);
+      pathname = '/w/home/one';
+      view.rerender(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'One']);
+    });
+
+    /*
+     * R1/P46: an open project whose session a policy or the person closed is
+     * not live, on its own page too. It sorts with the rest, below the live
+     * ones and the "Earlier" divider.
+     */
+    it('R1: the open project whose session closed sits below the live ones and the divider', () => {
+      pathname = '/w/home/one';
+      liveProjectIds = ['proj_two'];
+      closedReasons = { [firstProject.id]: 'Closed to save memory' };
+      mockUseProjects.mockReturnValue({
+        ...projectsResult,
+        projects: [{ ...firstProject, lastActivityAt: 30 }, secondProject],
+      });
+      render(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'Earlier', 'One']);
+    });
+
+    /* R1: on a reload, an open project whose session closed is not drawn as live once the listing answers either. */
+    it('R1: on a reload, a closed open project is not drawn as live when the listing answers', () => {
+      pathname = '/w/home/one';
+      liveProjectIds = ['proj_two'];
+      closedReasons = { [firstProject.id]: 'Closed to save memory' };
+      mockUseProjects.mockReturnValue({ ...projectsResult, projects: [], isLoading: true });
+      const view = render(<ProjectNavigation />);
+      mockUseProjects.mockReturnValue({
+        ...projectsResult,
+        projects: [{ ...firstProject, lastActivityAt: 30 }, secondProject],
+      });
+      view.rerender(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'Earlier', 'One']);
+    });
+
+    /*
+     * Outside a reload's wait for its open project's session, an open project
+     * whose session never opened (an open the live budget refused, then "Not
+     * now") is not drawn as live.
+     */
+    it('R1: once the listing answers, an open project whose session never opened sorts with the rest', () => {
+      pathname = '/w/home/one';
+      liveProjectIds = ['proj_two'];
+      mockUseProjects.mockReturnValue({
+        ...projectsResult,
+        projects: [{ ...firstProject, lastActivityAt: 30 }, secondProject],
+      });
+      render(<ProjectNavigation />);
+
+      expect(drawnRows()).toEqual(['Two', 'Earlier', 'One']);
+    });
   });
 });

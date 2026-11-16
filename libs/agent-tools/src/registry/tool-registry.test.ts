@@ -1741,7 +1741,7 @@ describe('createChatToolRegistry GeoSpec evidence normalization', () => {
     },
   );
 
-  it('should archive oversized lineage and tests without hiding final qualification or accounting', async () => {
+  it('should archive oversized lineage, keep bounded test rows, and not hide final qualification or accounting', async () => {
     const original = {
       success: true,
       ...testModelOutputSchema.parse({
@@ -1818,10 +1818,13 @@ describe('createChatToolRegistry GeoSpec evidence normalization', () => {
       runStatus: 'not-run',
       lineageStatus: 'mixed',
       accounting: original.accounting,
-      omittedTests: 2,
+      omittedTests: 0,
       omittedLineage: 1,
+      tests: [
+        { id: 'skipped', requirement: 'skipped', targetFile: 'main.geospec.ts', status: 'skipped' },
+        { id: 'not-run', requirement: 'not-run', targetFile: 'main.geospec.ts', status: 'not-run' },
+      ],
     });
-    expect(compact).not.toHaveProperty('tests');
     expect(compact).not.toHaveProperty('lineage');
     expect(JSON.stringify(compact).length).toBeLessThan(128 * 1024);
     expect(recordWrite).toHaveBeenCalledOnce();

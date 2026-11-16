@@ -6,16 +6,17 @@ import { describe, expect, it } from 'vitest';
 const appRoot = join(import.meta.dirname, '..');
 
 /*
- * PostHog session replay masks inputs by default but records rendered text.
- * These containers render user CAD source, chat transcripts and file names, so
- * each carries the SDK's default block class.
+ * PostHog session replay records rendered text so replays can be used for
+ * debugging (session replay fidelity blueprint, 2026-11-13). Credentials are
+ * the exception: these containers render a bearer secret, so each carries the
+ * SDK's default block class. Invitation links are blocked by `blockSelector`.
  */
 describe('session replay privacy', () => {
   it.each([
-    'components/code/code-editor-view.client.tsx',
-    'routes/w.$workspace.$project/chat-history.tsx',
-    'routes/w.$workspace.$project/chat-editor-file-tree.tsx',
-  ])('should block replay of %s', (path) => {
+    'components/auth/api-key/new-api-key-dialog.tsx',
+    'routes/auth.cli/route.tsx',
+    'routes/w.$workspace.$project/revision-collaborators.tsx',
+  ])('should block replay of the credential in %s', (path) => {
     expect(readFileSync(join(appRoot, path), 'utf8')).toMatch(/['\s]ph-no-capture[\s']/u);
   });
 });

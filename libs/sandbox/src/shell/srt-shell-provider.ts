@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { channel } from 'node:diagnostics_channel';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -31,6 +31,7 @@ import type { ProcessRow } from '#shell/process-tree.js';
 import { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 import { createShellCustody } from '#shell/shell-custody.js';
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
+import { zshStartupWrappers } from '#shell/shell-zsh-startup.js';
 import { holdProtectedStandIns, useStandInJournal } from '#shell/shell-stand-ins.js';
 import type { StandInProfile } from '#shell/shell-stand-ins.js';
 import type {
@@ -50,6 +51,8 @@ import {
   stagedTerminalStartArguments,
 } from '#shell/shell-start-barrier.js';
 import type { LaunchAnnouncement } from '#shell/shell-start-barrier.js';
+import { probeStoreGuard, storeGuardCommand } from '#shell/store-guard.js';
+import type { StoreGuardProbe } from '#shell/store-guard.js';
 import type { SupervisorControl, SupervisorJob, SupervisorReply } from '#shell/srt-supervisor.js';
 
 /**
@@ -139,6 +142,17 @@ export type SandboxShellProviderOptions = Readonly<{
    * the next start sweeps the ones a crash left behind.
    */
   standInJournal?: string;
+  /**
+   * On Linux, the `tau-store-guard` executable that writes a Terminal's git stores through a name guard
+   * ({@link ShellFilesystem.guardedStores}). Without it, or where its start check fails, {@link ShellProvider.storeGuard}
+   * answers `false` and the host keeps the stores read-only (blueprint OD2).
+   */
+  storeGuardPath?: string;
+  /**
+   * How long a failed store guard start check stands before {@link ShellProvider.storeGuard} checks again, so a
+   * one-off failure does not keep the stores read-only until restart. Defaults to one minute.
+   */
+  storeGuardRecheckMilliseconds?: number;
 }>;
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
@@ -227,7 +241,7 @@ const deniedVariants = (paths: readonly string[]): string[] => {
  * ancestors. Binding a directory that is already writable onto itself widens nothing.
  *
  * @param writable - The launch's writable roots.
- * @param protectedPaths - Its read-only and denied paths.
+ * @param protectedPaths - Its read-only, denied and guarded paths.
  * @param denied - Its denied paths, every spelling: no ancestor inside one is bound.
  * @returns The ancestors to bind, outermost first.
  */
@@ -307,9 +321,10 @@ export const shellSandboxProfile = (
     ),
   ]);
   const readOnly = [...(launch.filesystem.readOnly ?? []), ...startupFiles];
+  /* A guarded store is protected too: its ancestors never move away, so no store can be planted where it was. */
   const pinned = pinnedAncestors(
     launch.filesystem.writable,
-    [...readOnly, ...launch.filesystem.denied],
+    [...readOnly, ...launch.filesystem.denied, ...(launch.filesystem.guardedStores?.stores ?? [])],
     physicalVariants(launch.filesystem.denied),
   );
   const { domains } = launch.network;
@@ -421,6 +436,46 @@ type Supervisor = Readonly<{
  */
 const createRuntimeDirectory = (): string | undefined =>
   process.platform === 'linux' ? mkdtempSync(join(tmpdir(), 'tau-shell-runtime-')) : undefined;
+
+/** A launch as the sandbox runs it, and how to remove what the provider wrote for it. */
+type ContainedLaunch = Readonly<{ launch: ShellLaunch; remove: () => void }>;
+
+/**
+ * The launch as the sandbox runs it. For the Terminal Zsh, the provider writes its startup wrappers
+ * ({@link zshStartupWrappers}) to a private folder that the sandbox reads but cannot write, and only the provider sets
+ * `ZDOTDIR` to it: a host value stays refused. The folder is removed when the supervisor closes.
+ *
+ * @param launch - The admitted launch.
+ * @param home - The person's home, which holds their own startup files.
+ * @returns The launch to profile and run, and its cleanup.
+ */
+const containedLaunch = (launch: ShellLaunch, home: string): ContainedLaunch => {
+  if (launch.startupFiles !== 'zsh') {
+    return { launch, remove: () => undefined };
+  }
+  const folder = mkdtempSync(join(tmpdir(), 'tau-shell-zsh-'));
+  const remove = (): void => {
+    rmSync(folder, { recursive: true, force: true });
+  };
+  try {
+    const wrappers = zshStartupWrappers({ folder, home, toolchainBins: launch.toolchainBins ?? [] });
+    for (const [name, text] of Object.entries(wrappers)) {
+      writeFileSync(join(folder, name), text, { mode: 0o600, flag: 'wx' });
+    }
+  } catch (error) {
+    remove();
+    throw error;
+  }
+  return {
+    launch: {
+      ...launch,
+      filesystem: { ...launch.filesystem, readOnly: [...(launch.filesystem.readOnly ?? []), folder] },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+      environment: { ...launch.environment, ZDOTDIR: folder },
+    },
+    remove,
+  };
+};
 
 /**
  * The output streams of a child spawned with an extra descriptor, whose typings no longer promise them.
@@ -566,6 +621,8 @@ type ByteQueue = Readonly<{
 
 // Private diagnostics: numeric queue occupancy only, never command text or output bytes.
 const queueDiagnostics = channel('taucad.native-process.shell.byte-queue');
+/** Why the store guard's start check failed, once per process; the host keeps read-only stores (blueprint OD2). */
+const storeGuardDiagnostics = channel('taucad.native-process.shell.store-guard');
 type QueueIdentity = Readonly<{ commandId: string; stream: 'stdout' | 'stderr' | 'pty' }>;
 
 const byteQueue = (pause: () => void, resume: () => void, identity: QueueIdentity): ByteQueue => {
@@ -820,6 +877,40 @@ const hostBound = (argv: readonly string[], bwrapPath: string): readonly string[
     : argv;
 
 /**
+ * The vector for a launch with guarded stores (blueprint R2): the outer bubblewrap and the guard launcher, which exec
+ * the runtime's own command text once the guard is mounted and every capability is dropped. Any other launch keeps
+ * its vector.
+ *
+ * @param argv - The host-bound `[shell, '-c', 'exec <bwrap> …']` vector.
+ * @param launch - The launch, whose `guardedStores` decide.
+ * @param options - The provider's bubblewrap and guard paths.
+ * @returns The vector to spawn, or `undefined` when a guarded launch's vector is not the shape Tau recognises.
+ * @internal
+ */
+export const guardedVector = (
+  argv: readonly string[],
+  launch: ShellLaunch,
+  options: SandboxShellProviderOptions,
+): readonly string[] | undefined => {
+  const guarded = launch.filesystem.guardedStores;
+  if (guarded === undefined) {
+    return argv;
+  }
+  const bwrapPath = options.bwrapPath ?? '/usr/bin/bwrap';
+  const [shell, flag, command] = argv;
+  if (
+    options.storeGuardPath === undefined ||
+    shell === undefined ||
+    flag !== '-c' ||
+    command === undefined ||
+    !command.startsWith(`exec ${bwrapPath} `)
+  ) {
+    return undefined;
+  }
+  return [shell, '-c', storeGuardCommand({ guardPath: options.storeGuardPath, bwrapPath, guarded, command })];
+};
+
+/**
  * A launch spawned behind its start barrier (I7): the staged root runs nothing until `open`, and `abandon` makes it
  * exit without executing the workload.
  */
@@ -1005,6 +1096,52 @@ const startMacTerminal = ({ argv, launch, size, owner }: TerminalStart, binding:
 };
 
 /**
+ * Why a launch's guarded stores may not start: only a Linux Terminal launch with the store guard takes them, and each
+ * store must lie inside a writable root, outside every read-only and denied path, under a policy of plain names.
+ *
+ * @param launch - The launch.
+ * @param options - The provider's options, for the guard's path.
+ * @param roots - The launch's absolute writable, read-only and denied roots.
+ * @returns The refusal, or `undefined` when the launch has none or they may start.
+ */
+const guardedStoresRefusal = (
+  launch: ShellLaunch,
+  options: SandboxShellProviderOptions,
+  roots: Readonly<{ writable: readonly string[]; readOnly: readonly string[]; denied: readonly string[] }>,
+): ShellLaunchOutcome | undefined => {
+  const { guardedStores } = launch.filesystem;
+  if (guardedStores === undefined) {
+    return undefined;
+  }
+  const { writable, readOnly, denied } = roots;
+  if (process.platform !== 'linux' || launch.stdio.kind !== 'terminal' || options.storeGuardPath === undefined) {
+    return unsupported(
+      'filesystem-mask',
+      'only a Linux Terminal launch with the store guard may write guarded stores.',
+    );
+  }
+  const plain = /^[^/\0]+$/u;
+  if (
+    guardedStores.stores.length === 0 ||
+    guardedStores.protect.length === 0 ||
+    guardedStores.protect.some((name) => !plain.test(name) || name === '.' || name === '..') ||
+    guardedStores.stores.some(
+      (store) =>
+        !isAbsolute(store) ||
+        store.includes('\0') ||
+        !writable.some((root) => store !== root && inside(store, root)) ||
+        [...readOnly, ...denied].some((path) => inside(store, path) || inside(path, store)),
+    )
+  ) {
+    return unsupported(
+      'filesystem-mask',
+      'each guarded store must lie inside a writable root, outside every read-only and denied path, with a plain policy.',
+    );
+  }
+  return undefined;
+};
+
+/**
  * Refuse a launch whose shape the provider cannot enforce, before anything starts.
  */
 const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): ShellLaunchOutcome | undefined => {
@@ -1034,6 +1171,13 @@ const admit = (launch: ShellLaunch, options: SandboxShellProviderOptions): Shell
     (process.platform !== 'darwin' || launch.stdio.kind !== 'terminal' || launch.executablePath !== '/bin/zsh')
   ) {
     return unsupported('filesystem-mask', 'only the macOS Terminal running /bin/zsh may read Zsh startup files.');
+  }
+  if (launch.toolchainBins !== undefined && launch.startupFiles === undefined) {
+    return unsupported('environment', 'only the Terminal Zsh with its startup files takes toolchain folders.');
+  }
+  const guardRefusal = guardedStoresRefusal(launch, options, { writable, readOnly, denied });
+  if (guardRefusal !== undefined) {
+    return guardRefusal;
   }
   if (launch.stdio.kind === 'terminal') {
     if (process.platform === 'darwin' && options.macOSTerminal !== true) {
@@ -1143,6 +1287,43 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     useStandInJournal(options.standInJournal);
   }
   const custody = createShellCustody(options.custody ?? defaultCustody());
+  /*
+   * One start check, reused (blueprint R3): a host without the guard keeps read-only stores. A failed check stands for
+   * `storeGuardRecheckMilliseconds`, then runs again; a guarded launch whose sandbox could not be set up forgets a
+   * passed check, so the host's retry checks afresh and opens the stores read-only if the guard no longer starts (OD2).
+   */
+  let storeGuard: Promise<boolean> | undefined;
+  let storeGuardRefusedAt: number | undefined;
+  const storeGuardRecheck = options.storeGuardRecheckMilliseconds ?? 60_000;
+  const forgetStoreGuard = (): void => {
+    storeGuard = undefined;
+    storeGuardRefusedAt = undefined;
+  };
+  const storeGuardAvailable = async (): Promise<boolean> => {
+    if (storeGuardRefusedAt !== undefined && Date.now() - storeGuardRefusedAt >= storeGuardRecheck) {
+      forgetStoreGuard();
+    }
+    storeGuard ??= (async () => {
+      if (process.platform !== 'linux' || options.storeGuardPath === undefined) {
+        return false;
+      }
+      const probe = await probeStoreGuard({
+        guardPath: options.storeGuardPath,
+        bwrapPath: options.bwrapPath ?? '/usr/bin/bwrap',
+      }).catch(
+        (error: unknown): StoreGuardProbe => ({
+          available: false,
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      if (!probe.available) {
+        storeGuardRefusedAt = Date.now();
+        storeGuardDiagnostics.publish({ available: false, reason: probe.reason });
+      }
+      return probe.available;
+    })();
+    return storeGuard;
+  };
   const stage = async (launch: ShellLaunch, binding: PtyBinding | undefined): Promise<ShellLaunchOutcome> => {
     let lock: number;
     try {
@@ -1166,32 +1347,33 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
     // observes the filesystem; released only once this launch's supervisor is gone (see holdProtectedStandIns).
     let releaseStandIns: () => void;
     let profile: Record<string, unknown>;
+    let contained: ContainedLaunch | undefined;
     try {
-      profile = shellSandboxProfile(launch, options, runtimeDirectory);
+      contained = containedLaunch(launch, options.home ?? homedir());
+      profile = shellSandboxProfile(contained.launch, options, runtimeDirectory);
       releaseStandIns = holdProtectedStandIns(standInProfile(profile, launch));
     } catch (error) {
       if (runtimeDirectory !== undefined) {
         rmSync(runtimeDirectory, { recursive: true, force: true });
       }
+      contained?.remove();
       return {
         status: 'sandbox-unavailable',
         message: `a protected path could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    const { remove } = contained;
+    const release = (): void => {
+      releaseStandIns();
+      remove();
+    };
     const announcement = announcementFor(launch);
     let started: Supervisor;
     try {
       started = await startSupervisor(
         {
           profile,
-          /* Only the provider sets ZDOTDIR, and only for the Terminal Zsh it admitted: a host value stays refused. */
-          command: shellSandboxCommand(
-            launch.startupFiles === 'zsh'
-              ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
-                { ...launch, environment: { ...launch.environment, ZDOTDIR: options.home ?? homedir() } }
-              : launch,
-            announcement?.command,
-          ),
+          command: shellSandboxCommand(contained.launch, announcement?.command),
           workingDirectory: launch.workingDirectory,
           commandId: launch.commandId,
           guard: launch.network.domains.length > 0,
@@ -1200,7 +1382,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         { runtimeDirectory, lock },
       );
     } catch (error) {
-      releaseStandIns();
+      release();
       throw error;
     }
     const supervisor: Supervisor = {
@@ -1209,7 +1391,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         try {
           await started.close();
         } finally {
-          releaseStandIns();
+          release();
         }
       },
     };
@@ -1221,7 +1403,15 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       await supervisor.close();
       launch.signal.throwIfAborted();
     }
-    const argv = hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap');
+    const argv = guardedVector(
+      hostBound(supervisor.reply.argv, options.bwrapPath ?? '/usr/bin/bwrap'),
+      launch,
+      options,
+    );
+    if (argv === undefined) {
+      await supervisor.close();
+      return { status: 'sandbox-unavailable', message: 'the sandbox command could not be wrapped by the store guard.' };
+    }
     const owner: LaunchOwner = { supervisor, table: options.processTable };
     let staged: Staged;
     if (launch.stdio.kind === 'pipes') {
@@ -1265,6 +1455,7 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
   };
   return {
     name: 'srt-0.0.75',
+    storeGuard: storeGuardAvailable,
     prepare: async (input) => custody.prepare(input),
     inventory: async () => custody.inventory(),
     recover: async (input) => custody.recover(input),
@@ -1274,6 +1465,15 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
       const refusal = admit(launch, options);
       if (refusal !== undefined) {
         return refusal;
+      }
+      const guarded = launch.filesystem.guardedStores !== undefined;
+      if (guarded && !(await storeGuardAvailable())) {
+        /* Nothing ran: the host's retry asks again and opens the stores read-only. */
+        return {
+          status: 'sandbox-unavailable',
+          message: 'the store guard cannot start on this device.',
+          retryable: true,
+        };
       }
       let binding: PtyBinding | undefined;
       if (launch.stdio.kind === 'terminal') {
@@ -1289,7 +1489,11 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
           return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
         }
       }
-      return stage(launch, binding);
+      const outcome = await stage(launch, binding);
+      if (guarded && outcome.status === 'sandbox-unavailable' && outcome.retryable === true) {
+        forgetStoreGuard();
+      }
+      return outcome;
     },
   };
 };

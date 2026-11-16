@@ -168,7 +168,7 @@
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
       "targets": [
         {
-          "expr": "sum(increase(kernel_executions_total{app=~\"$app\",service_name=~\"$service\"}[24h]))"
+          "expr": "sum(increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render\",tau_runtime_outcome=~\"succeeded|issue|failed|timed-out|terminated|discarded\"}[24h]))"
         }
       ],
       "id": 6

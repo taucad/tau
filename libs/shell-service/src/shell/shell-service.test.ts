@@ -213,6 +213,28 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     expect([...(filesystem.readOnly ?? []), ...filesystem.denied]).not.toContain(join(project, '.tau', 'AGENTS.md'));
   });
 
+  it("should hand the provider the same agent launch, byte for byte, whether or not the provider's store guard starts", async () => {
+    /* Everything but the per-launch ids, the abort signal and the per-launch session folders' names. */
+    const launchOf = async (storeGuard: boolean): Promise<string> => {
+      const { service, provider } = harness();
+      Object.assign(provider, { storeGuard: vi.fn(async () => storeGuard) });
+      await service.run(call({ command: 'git status' }));
+      const { executionId, commandId, signal: _signal, ...launch } = provider.launches[0]!;
+      const sessionNames = new Set(
+        JSON.stringify(launch).match(new RegExp(`${sessions.replaceAll('/', String.raw`\/`)}/[^/"]+`, 'gu')) ?? [],
+      );
+      let text = JSON.stringify(launch).replaceAll(executionId, '<execution>').replaceAll(commandId, '<command>');
+      for (const [index, name] of [...sessionNames].entries()) {
+        text = text.replaceAll(name, `<session ${String(index)}>`);
+      }
+      return text;
+    };
+    const guarded = await launchOf(true);
+    expect(guarded).not.toContain('guardedStores');
+    expect(guarded).toContain('<session 0>');
+    expect(guarded).toBe(await launchOf(false));
+  });
+
   it('should run without git when the host cannot write the git view', async () => {
     vi.mocked(createShellGitView).mockRejectedValueOnce(
       Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }),
@@ -220,7 +242,7 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     const { service, provider } = harness();
     const output = await service.run(call({ command: 'true' }));
 
-    expect(createShellGitView).toHaveBeenCalledWith(project, expect.any(String));
+    expect(createShellGitView).toHaveBeenCalledWith(project, expect.any(String), expect.any(String));
     expect(output).toMatchObject({ status: 'completed', exitCode: 0 });
     expect(provider.launches[0]!.environment).not.toHaveProperty('GIT_DIR');
   });
@@ -463,6 +485,82 @@ describe('the launch Tau compiles (D4, D20, D26, A05)', () => {
     expect(outputs.map((output) => output.status)).toEqual(['cancelled', 'cancelled', 'cancelled', 'cancelled']);
     expect(provider.launches).toHaveLength(2);
   });
+  it('a call whose signal aborted before it reached a full admission limit leaves at once and is never staged (E09)', async () => {
+    const { service, provider } = harness(() => ({ status: 'started' }), { maxExecutions: 1 });
+    const prepare = provider.prepare.bind(provider);
+    let prepared = 0;
+    vi.spyOn(provider, 'prepare').mockImplementation(async (request) => {
+      prepared += 1;
+      return prepare(request);
+    });
+    const holding = new AbortController();
+    const holder = service.run({
+      ...call({ command: 'sleep 300' }, { signal: holding.signal }),
+      toolCallId: 'call-holder',
+    });
+    await vi.waitFor(() => {
+      expect(provider.launches).toHaveLength(1);
+    });
+    const late = new AbortController();
+    late.abort();
+    const queued = service.run({
+      ...call({ command: 'echo queued' }, { signal: late.signal }),
+      toolCallId: 'call-late',
+    });
+    /* It settles while the holder still has the slot: it never waits for a slot it would refuse to use. */
+    const settled = await Promise.race([
+      queued,
+      new Promise<'still waiting'>((resolve) => {
+        setTimeout(() => {
+          resolve('still waiting');
+        }, 1000);
+      }),
+    ]);
+    expect(settled).toMatchObject({ status: 'cancelled' });
+    holding.abort();
+    await expect(holder).resolves.toMatchObject({ status: 'cancelled' });
+    expect(prepared).toBe(1);
+    expect(provider.launches).toHaveLength(1);
+  });
+  it('a call already withdrawn when a slot is free is never staged (E09)', async () => {
+    const { service, provider } = harness(() => ({ status: 'started' }), { maxExecutions: 1 });
+    const prepare = vi.spyOn(provider, 'prepare');
+    const withdrawn = new AbortController();
+    withdrawn.abort();
+    await expect(service.run(call({ command: 'echo late' }, { signal: withdrawn.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(provider.launches).toHaveLength(0);
+  });
+
+  it('a call withdrawn while its custody is recorded is never launched, and its hold is released (E09)', async () => {
+    const { service, provider, checkouts } = harness(() => ({ status: 'started' }));
+    const controller = new AbortController();
+    const log: string[] = [];
+    checkouts.set('run-1', {
+      cwd: project,
+      admission: 'admission-1',
+      executions: {
+        hold: async (executionId) => {
+          log.push(`hold:${executionId}`);
+          controller.abort();
+          return { status: 'applied' };
+        },
+        release: async (executionId) => {
+          log.push(`release:${executionId}`);
+          return { status: 'applied' };
+        },
+      },
+    });
+    const launch = vi.spyOn(provider, 'launch');
+    await expect(service.run(call({ command: 'echo late' }, { signal: controller.signal }))).resolves.toMatchObject({
+      status: 'cancelled',
+    });
+    expect(launch).not.toHaveBeenCalled();
+    expect(provider.launches).toHaveLength(0);
+    expect(log.map((entry) => entry.split(':')[0])).toEqual(['hold', 'release']);
+  });
 });
 
 describe('access requests (D5, D20, A26)', () => {
@@ -699,6 +797,164 @@ describe('human Terminal sessions (D6, D21)', () => {
     await expect(opened.session.exited).resolves.toEqual({ signal: 'SIGKILL' });
   });
 
+  it("reads the project's real git store read-only in the Terminal, while the agent's launch still denies it", async () => {
+    const { service, provider } = harness((launch) =>
+      launch.stdio.kind === 'terminal'
+        ? { status: 'started', stdout: '$ ' }
+        : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } },
+    );
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    const [terminal] = provider.launches;
+    const store = join(project, '.git');
+    const nested = join(project, 'vendor', 'lib', '.git');
+
+    expect(terminal!.filesystem.denied).not.toContain(store);
+    expect(terminal!.filesystem.denied).not.toContain(nested);
+    expect(terminal!.filesystem.readOnly).toStrictEqual(expect.arrayContaining([store, nested]));
+    expect(terminal!.filesystem.denied).toStrictEqual(
+      expect.arrayContaining([join(project, '.tau', 'binding.json'), other, appData]),
+    );
+    expect(terminal!.environment).toMatchObject({ GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    expect(terminal!.environment).not.toHaveProperty('GIT_DIR');
+    expect(terminal!.environment).not.toHaveProperty('GIT_WORK_TREE');
+    /* Git-lfs keeps its working copies in the session's own temporary folder, never the read-only store. */
+    expect(await readFile(join(terminal!.environment['HOME']!, '.gitconfig'), 'utf8')).toBe(
+      `[lfs]\n\tstorage = "${join(terminal!.environment['TMPDIR']!, 'git-lfs')}"\n`,
+    );
+
+    await service.run(call({ command: 'true' }));
+    const agent = provider.launches[1]!;
+    expect(agent.filesystem.denied).toStrictEqual(expect.arrayContaining([store, nested]));
+    expect(agent.filesystem.readOnly).not.toContain(store);
+    expect(agent.filesystem.readOnly).not.toContain(nested);
+    await opened.session[Symbol.asyncDispose]();
+  });
+
+  const openedTerminal = async (
+    overrides: Partial<ShellServiceOptions>,
+    account?: Readonly<{ id: string; name?: string }>,
+  ): Promise<
+    Readonly<{
+      launch: ShellLaunch;
+      gitConfig: string | undefined;
+      agent: () => Promise<ShellLaunch>;
+      close: () => Promise<void>;
+    }>
+  > => {
+    const { service, provider } = harness(
+      (launch) =>
+        launch.stdio.kind === 'terminal'
+          ? { status: 'started', stdout: '$ ' }
+          : { status: 'started', stdout: 'ok\n', exit: { exitCode: 0 } },
+      overrides,
+    );
+    const opened = await service.openTerminal({
+      projectRoot: project,
+      size,
+      ...(account === undefined ? {} : { account }),
+      signal: new AbortController().signal,
+    });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    const launch = provider.launches[0]!;
+    const gitConfig = await readFile(join(launch.environment['HOME']!, '.gitconfig'), 'utf8').catch(() => undefined);
+    const agent = async (): Promise<ShellLaunch> => {
+      await service.run(call({ command: 'true' }));
+      return provider.launches.at(-1)!;
+    };
+    return { launch, gitConfig, agent, close: async () => opened.session[Symbol.asyncDispose]() };
+  };
+
+  it('opens the store for writing in a macOS Terminal, all but the names that run a program, and commits as the person', async () => {
+    const { launch, gitConfig, agent, close } = await openedTerminal(
+      { platform: 'darwin' },
+      { id: 'user_1', name: 'Ada Lovelace' },
+    );
+    const store = join(project, '.git');
+
+    expect(launch.filesystem.denied.filter((path) => path.startsWith(`${store}/`) || path === store)).toStrictEqual([]);
+    expect(launch.filesystem.readOnly).not.toContain(store);
+    expect(launch.filesystem.readOnly).toStrictEqual(
+      expect.arrayContaining(
+        ['config', 'hooks', 'commondir', 'config.worktree', 'worktrees', 'modules'].map((name) => join(store, name)),
+      ),
+    );
+    expect(launch.filesystem.readOnly).toContain(join(store, '[cC][oO][mM][mM][oO][nN][dD][iI][rR]'));
+    expect(launch.filesystem.writable).toContain(project);
+    /* Optional locks are back, since `git status` may refresh the index; the system config stays out. */
+    expect(launch.environment).toMatchObject({ GIT_CONFIG_NOSYSTEM: '1' });
+    expect(launch.environment).not.toHaveProperty('GIT_OPTIONAL_LOCKS');
+    /* The store keeps its own LFS objects: no scratch folder, so a committed large file keeps its bytes. */
+    expect(gitConfig).toBe('[user]\n\tname = "Ada Lovelace"\n\temail = "user_1@users.noreply.tau.new"\n');
+    /* The agent's launch on the same Mac is unchanged: the real store stays denied, with no identity of the person. */
+    const agentLaunch = await agent();
+    expect(agentLaunch.filesystem.denied).toContain(store);
+    expect(agentLaunch.filesystem.readOnly).not.toContain(join(store, 'config'));
+    expect(agentLaunch.environment).not.toHaveProperty('GIT_CONFIG_NOSYSTEM');
+    await close();
+  });
+
+  it('writes no identity while signed out, so git asks who the person is', async () => {
+    const writable = await openedTerminal({ platform: 'darwin' });
+    expect(writable.gitConfig).toBeUndefined();
+    await writable.close();
+
+    const readOnly = await openedTerminal({});
+    expect(readOnly.gitConfig).not.toContain('[user]');
+    expect(readOnly.gitConfig).toContain('[lfs]');
+    await readOnly.close();
+  });
+
+  it('keeps a Linux Terminal store read-only, with the LFS scratch folder and the identity beside it', async () => {
+    const { launch, gitConfig, close } = await openedTerminal({}, { id: 'user_1', name: '' });
+
+    expect(launch.filesystem.readOnly).toContain(join(project, '.git'));
+    expect(launch.filesystem.readOnly).not.toContain(join(project, '.git', 'commondir'));
+    expect(launch.environment).toMatchObject({ GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1' });
+    /* An empty name falls back to the account id, which git accepts. */
+    expect(gitConfig).toBe(
+      `[user]\n\tname = "user_1"\n\temail = "user_1@users.noreply.tau.new"\n[lfs]\n\tstorage = "${join(launch.environment['TMPDIR']!, 'git-lfs')}"\n`,
+    );
+    await close();
+  });
+
+  it('writes no identity a config line cannot carry, and quotes the one it writes', async () => {
+    const forged = await openedTerminal(
+      { platform: 'darwin' },
+      { id: 'user_1', name: 'Ada\n[core]\n\thooksPath = /tmp' },
+    );
+    expect(forged.gitConfig).toBeUndefined();
+    await forged.close();
+    const unaddressable = await openedTerminal({ platform: 'darwin' }, { id: 'user 1@x', name: 'Ada' });
+    expect(unaddressable.gitConfig).toBeUndefined();
+    await unaddressable.close();
+    const quoted = await openedTerminal(
+      { platform: 'darwin' },
+      { id: 'user_1', name: String.raw`Ada "the" \ Countess` },
+    );
+    expect(quoted.gitConfig).toContain(String.raw`name = "Ada \"the\" \\ Countess"`);
+    await quoted.close();
+  });
+
+  it("still refuses a Terminal grant that names a version-control directory, the checkout's own included", async () => {
+    const { service, provider } = harness(() => ({ status: 'started', stdout: '$ ' }));
+    for (const folder of [join(project, '.git'), join(outside, '.git')]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal per folder.
+      const outcome = await service.openTerminal({
+        projectRoot: project,
+        size,
+        access: { read: [], write: [folder], domains: [] },
+        signal: new AbortController().signal,
+      });
+      expect(outcome, folder).toMatchObject({ status: 'refused', code: 'access-unsupported' });
+    }
+    expect(provider.launches).toStrictEqual([]);
+  });
+
   it('runs the verified macOS Zsh with the startup files for the Terminal only, never for an agent', async () => {
     const terminalZsh = { path: '/bin/zsh', realPath: '/bin/zsh', digest: `sha256:${'b'.repeat(64)}` } as const;
     const { service, provider } = harness(
@@ -706,7 +962,7 @@ describe('human Terminal sessions (D6, D21)', () => {
         launch.stdio.kind === 'terminal'
           ? { status: 'started', stdout: '$ ' }
           : { status: 'started', stdout: 'hi\n', exit: { exitCode: 0 } },
-      { terminalZsh },
+      { terminalZsh, toolchain: { roots: [], bins: ['/opt/tau/git/bin'] } },
     );
     const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
     if (opened.status !== 'opened') {
@@ -718,11 +974,13 @@ describe('human Terminal sessions (D6, D21)', () => {
       executablePath: '/bin/zsh',
       arguments: ['-l', '-i'],
       startupFiles: 'zsh',
+      toolchainBins: ['/opt/tau/git/bin'],
       environment: { SHELL: '/bin/zsh' },
     });
     expect(provider.launches[0]!.environment).not.toHaveProperty('ZDOTDIR');
     expect(provider.launches[1]).toMatchObject({ executablePath: executable.path });
     expect(provider.launches[1]).not.toHaveProperty('startupFiles');
+    expect(provider.launches[1]).not.toHaveProperty('toolchainBins');
     expect(provider.launches[1]!.arguments.slice(0, 2)).toStrictEqual(['--noprofile', '--norc']);
     await opened.session[Symbol.asyncDispose]();
   });
@@ -749,6 +1007,29 @@ describe('human Terminal sessions (D6, D21)', () => {
     ).resolves.toMatchObject({ status: 'refused', code: 'sandbox-unavailable' });
     expect(twice.provider.launches).toHaveLength(2);
     expect(twice.provider.released).toHaveLength(2);
+  });
+
+  it('opens the stores read-only when a guarded Terminal could not be set up and the guard no longer starts (OD2)', async () => {
+    const { service, provider } = harness((launch) =>
+      launch.filesystem.guardedStores === undefined
+        ? { status: 'started', stdout: '$ ' }
+        : {
+            status: 'sandbox-unavailable',
+            message: 'the sandbox could not be set up, so nothing ran.',
+            retryable: true,
+          },
+    );
+    const checks = [true, false];
+    Object.assign(provider, { storeGuard: vi.fn(async () => checks.shift() ?? false) });
+    const opened = await service.openTerminal({ projectRoot: project, size, signal: new AbortController().signal });
+    if (opened.status !== 'opened') {
+      throw new Error(`expected opened, got ${opened.code}`);
+    }
+    expect(provider.launches).toHaveLength(2);
+    expect(provider.launches[0]!.filesystem.guardedStores?.stores).toContain(join(project, '.git'));
+    expect(provider.launches[1]!.filesystem.guardedStores).toBeUndefined();
+    expect(provider.launches[1]!.filesystem.readOnly).toContain(join(project, '.git'));
+    await opened.session[Symbol.asyncDispose]();
   });
 
   it('maps a provider that cannot give a terminal to pty-unavailable', async () => {

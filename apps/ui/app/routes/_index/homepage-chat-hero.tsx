@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router';
 import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
 import { HomeChatComposer } from '#routes/_index/home-chat-composer.js';
-import { HomeSuggestions } from '#routes/_index/home-suggestions.js';
 import { Separator } from '@taucad/ui/components/separator';
 import { buttonVariants } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
@@ -12,8 +11,7 @@ import { Loader } from '@taucad/ui/components/loader';
  * composer (kernel selector + textarea) with a "Build from code" escape hatch.
  * Shared by the legacy landing (flag off) and the signed-in home view (flag on),
  * both of which start new projects from the same persistent homepage draft, and
- * by the web and desktop homes, so the suggestions row under the composer is the
- * same on both.
+ * by the web and desktop homes, so Home's hero is the same on both.
  */
 export function HomepageChatHero({ composer }: { readonly composer?: React.ReactNode } = {}): React.JSX.Element {
   return (
@@ -25,11 +23,7 @@ export function HomepageChatHero({ composer }: { readonly composer?: React.React
           </Heading>
         </div>
 
-        <HomeNewProjectComposerProvider>
-          {composer ?? <HomeChatComposer />}
-          {/* Behind onboarding: up to four suggestions that fill the composer above. */}
-          <HomeSuggestions />
-        </HomeNewProjectComposerProvider>
+        <HomeNewProjectComposerProvider>{composer ?? <HomeChatComposer />}</HomeNewProjectComposerProvider>
         <div className='mx-auto my-6 flex w-20 items-center justify-center'>
           <Separator />
           <div className='mx-4 text-sm text-muted-foreground'>or</div>

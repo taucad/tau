@@ -44,7 +44,7 @@ const viewOf = (overrides: Partial<TauViewerViewState> = {}): TauViewerViewState
 const settingsOf = (overrides: Partial<TauViewerViewSettings> = {}): TauViewerViewSettings => ({
   fieldOfView: 45,
   upDirection: 'z',
-  display: { surfaces: true, lines: true, gizmo: true, grid: false, axes: true, matcap: false, postProcessing: false },
+  display: { surfaces: true, lines: true, gizmo: true, grid: false, axes: true, matcap: false },
   grid: { unit: 'cm' },
   section: { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 0.01, isFlipped: false }] },
   measurements: [{ id: 'm-1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [0.1, 0, 0], distance: 0.1 }],

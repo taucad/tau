@@ -1,11 +1,13 @@
+import { Fragment, StrictMode, useEffect, useState } from 'react';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FinancialSessionProvider,
   FinancialSessionScope,
   useFinancialSession,
 } from '#providers/financial-session-provider.js';
+import type { FinancialSessionIdentity } from '#providers/financial-session-provider.js';
 
 const purgeSavedUsage = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage }));
@@ -136,5 +138,190 @@ describe('FinancialSessionProvider', () => {
 
     expect(purgeSavedUsage).not.toHaveBeenCalled();
     other.close();
+  });
+});
+
+const owner = (ownerId: string): FinancialSessionIdentity => ({
+  apiBaseUrl: 'https://api',
+  environment: 'development',
+  ownerId,
+});
+
+describe('FinancialSessionScope', () => {
+  it('N1: keeps the children mounted when identity goes from none to an owner', () => {
+    let mounts = 0;
+    let unmounts = 0;
+    const Marker = (): undefined => {
+      useEffect(() => {
+        mounts += 1;
+        return () => {
+          unmounts += 1;
+        };
+      }, []);
+      return undefined;
+    };
+    const { rerender } = render(
+      <FinancialSessionScope identity={undefined}>
+        <Marker />
+      </FinancialSessionScope>,
+      { wrapper: wrap(new QueryClient()) },
+    );
+
+    rerender(
+      <FinancialSessionScope identity={owner('a')}>
+        <Marker />
+      </FinancialSessionScope>,
+    );
+
+    expect({ mounts, unmounts }).toEqual({ mounts: 1, unmounts: 0 });
+  });
+
+  it('H7: keeps a child upgraded state and its single mount when identity goes from none to an owner', () => {
+    let mounts = 0;
+    let unmounts = 0;
+    const seen: boolean[] = [];
+    /** Stands in for the rich composer: it upgrades once after mount. */
+    const Upgrading = (): undefined => {
+      const [upgraded, setUpgraded] = useState(false);
+      seen.push(upgraded);
+      useEffect(() => {
+        mounts += 1;
+        // oxlint-disable-next-line react/set-state-in-effect -- the stand-in upgrades once after mount, as the composer does
+        setUpgraded(true);
+        return () => {
+          unmounts += 1;
+        };
+      }, []);
+      return undefined;
+    };
+    const { rerender } = render(
+      <FinancialSessionScope identity={undefined}>
+        <Upgrading />
+      </FinancialSessionScope>,
+      { wrapper: wrap(new QueryClient()) },
+    );
+    expect(seen.at(-1)).toBe(true);
+    seen.length = 0;
+
+    rerender(
+      <FinancialSessionScope identity={owner('a')}>
+        <Upgrading />
+      </FinancialSessionScope>,
+    );
+
+    expect({ mounts, unmounts, seen: seen.every(Boolean) }).toEqual({ mounts: 1, unmounts: 0, seen: true });
+  });
+
+  it('still binds a first owner when identity goes from none to an owner: purges billing state and other accounts saved usage', () => {
+    const queryClient = new QueryClient();
+    let session: ReturnType<typeof useFinancialSession> | undefined;
+    const Capture = (): undefined => {
+      session = useFinancialSession();
+      return undefined;
+    };
+    const tree = (identity: FinancialSessionIdentity | undefined): React.JSX.Element => (
+      <FinancialSessionScope identity={identity}>
+        <Capture />
+      </FinancialSessionScope>
+    );
+    const { rerender } = render(tree(undefined), { wrapper: wrap(queryClient) });
+    queryClient.setQueryData(['billing', 'credits'], { balance: 'device' });
+    const before = session?.capture();
+    purgeSavedUsage.mockClear();
+
+    rerender(tree(owner('a')));
+
+    expect(purgeSavedUsage).toHaveBeenCalledWith({ environment: 'development', ownerId: 'a' });
+    expect(queryClient.getQueryData(['billing', 'credits'])).toBeUndefined();
+    expect(before?.isCurrent()).toBe(false);
+  });
+
+  it.each([
+    { mode: 'plain', Wrapper: Fragment },
+    { mode: 'StrictMode', Wrapper: StrictMode },
+  ])(
+    'fetches a first owner billing query once and stays on its live cache entry, $mode (pass-through relies on TanStack starting the fetch in its passive setOptions, after the layout bind purges; a double fetch fails this row)',
+    async ({ Wrapper }) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const fetched: string[] = [];
+      /** A billing consumer keyed by owner, enabled only once an owner is known. */
+      const Consumer = ({ ownerId }: { readonly ownerId: string | undefined }): React.ReactNode => {
+        const { data } = useQuery({
+          queryKey: ['billing', 'balance', ownerId],
+          async queryFn() {
+            fetched.push(ownerId ?? 'none');
+            return { owner: ownerId };
+          },
+          enabled: ownerId !== undefined,
+        });
+        return data?.owner ?? 'empty';
+      };
+      const tree = (identity: FinancialSessionIdentity | undefined): React.JSX.Element => (
+        <Wrapper>
+          <FinancialSessionScope identity={identity}>
+            <Consumer ownerId={identity?.ownerId} />
+          </FinancialSessionScope>
+        </Wrapper>
+      );
+      const { container, rerender } = render(tree(undefined), { wrapper: wrap(queryClient) });
+      expect(container.textContent).toBe('empty');
+
+      rerender(tree(owner('a')));
+      await waitFor(() => {
+        expect(container.textContent).toBe('a');
+      });
+      expect(fetched).toEqual(['a']);
+
+      await act(async () => {
+        await queryClient.invalidateQueries({ queryKey: ['billing'] });
+      });
+      expect(fetched).toEqual(['a', 'a']);
+      expect(container.textContent).toBe('a');
+    },
+  );
+
+  it('never renders a new identity with the previous owner billing state', () => {
+    type Seen = {
+      readonly identity: string | undefined;
+      readonly cached: string | undefined;
+      readonly held: string | undefined;
+    };
+    const seen: Seen[] = [];
+    const balanceKey = ['billing', 'balance'] as const;
+    /** Reads billing state two ways: the shared query cache and React state latched at mount. */
+    const Probe = ({ identity }: { readonly identity: FinancialSessionIdentity | undefined }): undefined => {
+      const cached = useQueryClient().getQueryData<{ owner: string }>(balanceKey)?.owner;
+      const [held] = useState(() => identity?.ownerId);
+      seen.push({ identity: identity?.ownerId, cached, held });
+      return undefined;
+    };
+    const queryClient = new QueryClient();
+    const tree = (identity: FinancialSessionIdentity | undefined): React.JSX.Element => (
+      <FinancialSessionScope identity={identity}>
+        <Probe identity={identity} />
+      </FinancialSessionScope>
+    );
+    const { rerender } = render(tree(owner('a')), { wrapper: wrap(queryClient) });
+    act(() => {
+      queryClient.setQueryData(balanceKey, { owner: 'a' });
+    });
+    rerender(tree(owner('a')));
+    expect(seen.at(-1)).toEqual({ identity: 'a', cached: 'a', held: 'a' });
+
+    rerender(tree(owner('b')));
+    expect(seen.at(-1)).toEqual({ identity: 'b', cached: undefined, held: 'b' });
+    act(() => {
+      queryClient.setQueryData(balanceKey, { owner: 'b' });
+    });
+    rerender(tree(owner('b')));
+    rerender(tree(undefined));
+
+    const stale = seen.filter(
+      (row) =>
+        (row.cached !== undefined && row.cached !== row.identity) ||
+        (row.held !== undefined && row.held !== row.identity),
+    );
+    expect(stale).toEqual([]);
+    expect(seen.at(-1)).toEqual({ identity: undefined, cached: undefined, held: undefined });
   });
 });

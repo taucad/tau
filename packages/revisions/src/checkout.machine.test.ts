@@ -9,6 +9,7 @@ import {
   checkoutMachine,
   checkoutMintFloorMilliseconds,
   checkoutQueuedCutLimit,
+  checkoutWaitWindowMilliseconds,
   satisfiesCut,
   selectCheckoutDirty,
 } from '#checkout.machine.js';
@@ -78,6 +79,13 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  * 31  a lost CAS on a trigger-only cut is exactly one terminal answer (D3, T5)
  * 32  a checkout spawned over a stale tree rests `clean`, then reads `dirty` when
  *     the spawn-time comparison answers; an equal tree stays `clean` (D4)
+ * 33  a cut that finds a Git operation in progress mints nothing, keeps its request
+ *     queued and reports `waiting` with the operation; the checkout looks again
+ *     every window, and once the operation ends mints on the head it left
+ * 34  while waiting, a leaving page's cut is answered `nothingToSave` at once,
+ *     every other request waits, and a queued one can still be withdrawn
+ * 35  a rebase whose todo runs commands holds every mint like any other, and the
+ *     parent hears when a look finds that fact changed (LP7)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
@@ -1377,6 +1385,7 @@ describe('checkoutMachine', () => {
     const writeInvoke = invokeId('minting.writing');
     const casInvoke = invokeId('minting.publishing');
     const readHeadInvoke = invokeId('rereading');
+    const probeInvoke = invokeId('waiting.probing');
     const captureInvokes = [invokeId('clean.comparing'), invokeId('dirty.comparing')];
     const publicEvents: readonly CheckoutMachineEvent[] = [
       { type: 'changed', paths: ['a.ts'], generation: 1 },
@@ -1386,6 +1395,7 @@ describe('checkoutMachine', () => {
       { type: 'fenceGranted' },
       { type: 'fenceRefused', reason: 'held elsewhere' },
     ];
+    const headOutput = { revisionId: 'rev-9', treeId: 'tree-9', branch: 'main' };
     const options = {
       input: {
         checkoutId: 'checkout-1',
@@ -1399,6 +1409,12 @@ describe('checkoutMachine', () => {
         ...publicEvents,
         { type: `xstate.done.actor.${cutInvoke}`, output: { treeId: nextTreeId, cutId: 'cut-1' } },
         { type: `xstate.error.actor.${cutInvoke}`, error: new Error('quota') },
+        { type: `xstate.done.actor.${cutInvoke}`, output: { treeId: '', cutId: '', waitFor: { kind: 'merge' } } },
+        { type: `xstate.done.actor.${probeInvoke}`, output: { ...headOutput, waitFor: { kind: 'rebase' } } },
+        { type: `xstate.done.actor.${probeInvoke}`, output: headOutput },
+        /* The wait's only timer: delayed events are not public, so the walk sends it as one. */
+        { type: 'xstate.after.waitWindow.checkout.waiting.holding' },
+        { type: `xstate.error.actor.${probeInvoke}`, error: new Error('ESTALE') },
         { type: `xstate.done.actor.${writeInvoke}`, output: { status: 'written', revisionId: 'rev-2' } },
         {
           type: `xstate.done.actor.${writeInvoke}`,
@@ -1432,6 +1448,7 @@ describe('checkoutMachine', () => {
       'checkout.clean.differs',
       'checkout.dirty.matched',
       'checkout.spacing.routing',
+      'checkout.waiting.done',
     ]);
     expect(unreachedStates(checkoutMachine, options).filter((id) => !transient.has(id))).toEqual([]);
   });
@@ -1722,6 +1739,174 @@ describe('checkoutMachine mint floor (D11)', () => {
     await flush();
 
     expect(actor.getSnapshot().matches('spacing')).toBe(false);
+
+    actor.stop();
+  });
+});
+
+describe('checkoutMachine waits out a Git operation in progress', () => {
+  const merging = { kind: 'merge' } as const;
+
+  /* A save whose cut found stock Git mid-merge: `r-1` waits at the front of the queue. */
+  const waiting = async (): Promise<Harness> => {
+    const harness = start();
+    harness.actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    harness.actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
+    harness.promises.settle('cut', { output: { treeId: '', cutId: '', waitFor: merging } });
+    await flush();
+    return harness;
+  };
+
+  const statusFacts = (harness: Harness): AnyEventObject[] =>
+    harness.parent.events.filter((event) => event.type === 'checkoutStatusChanged');
+
+  it('should mint nothing, answer nobody and say why while the operation lasts', async () => {
+    const harness = await waiting();
+    const { actor, promises, callbacks, clock, parent } = harness;
+
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    expect(actor.getSnapshot().hasTag('dirty')).toBe(true);
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    expect(callbacks.active('fence')).toBe(0);
+    expect(answersOf(parent.events)).toEqual([]);
+    expect(statusFacts(harness).at(-1)).toMatchObject({ status: 'waiting', waitFor: merging });
+
+    const reported = statusFacts(harness).length;
+    clock.advance(checkoutWaitWindowMilliseconds);
+    expect(actor.getSnapshot().matches({ waiting: 'probing' })).toBe(true);
+    promises.settle('readHead', {
+      output: { revisionId: 'rev-1', treeId: headTreeId, branch: 'main', waitFor: merging },
+    });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    /* The same operation is not news: the parent hears it once. */
+    expect(statusFacts(harness)).toHaveLength(reported);
+    expect(answersOf(parent.events)).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('should mint the waiting request once the operation ends, on the head it left', async () => {
+    const harness = await waiting();
+    const { actor, promises, callbacks, clock, parent } = harness;
+
+    clock.advance(checkoutWaitWindowMilliseconds);
+    /* The person committed the merge: the branch moved while the checkout waited. */
+    promises.settle('readHead', { output: { revisionId: 'rev-5', treeId: 'tree-5', branch: 'main' } });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ minting: 'acquiring' })).toBe(true);
+    expect(actor.getSnapshot().context.waitFor).toBeUndefined();
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    /* Every path, since the head moved under the waiting request (D4, I6). */
+    expect(promises.inputsFor('cut').at(-1)).toMatchObject({ trigger: 'save', changedPaths: undefined });
+    promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-2' } });
+    await flush();
+    expect(promises.inputsFor('writeRevision').at(-1)).toMatchObject({ parents: ['rev-5'] });
+    promises.settle('writeRevision', { output: { status: 'written', revisionId: 'rev-6' } });
+    await flush();
+    expect(promises.inputsFor('casHead').at(-1)).toMatchObject({ expectedHead: 'rev-5', head: 'rev-6' });
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-6' } });
+    await flush();
+
+    expect(answersOf(parent.events)).toMatchObject([{ type: 'revisionMinted', requestId: 'r-1', revisionId: 'rev-6' }]);
+    expect(statusFacts(harness).at(-1)).not.toHaveProperty('waitFor');
+
+    actor.stop();
+  });
+
+  it('should answer a leaving page at once and keep every other request waiting', async () => {
+    const harness = await waiting();
+    const { actor, parent } = harness;
+
+    actor.send({ type: 'cut', requestId: 'c-1', trigger: 'close', leaseIds: [] });
+    actor.send({ type: 'cut', requestId: 't-1', trigger: 'turn', turn: turnOf('turn-1'), leaseIds: ['run-1'] });
+
+    expect(answersOf(parent.events)).toMatchObject([{ type: 'nothingToSave', requestId: 'c-1', waitFor: merging }]);
+    expect(
+      actor.getSnapshot().context.queued.map((request) => request.requesters.map((requester) => requester.requestId)),
+    ).toEqual([['r-1'], ['t-1']]);
+
+    actor.send({ type: 'cancelCut', requestId: 'r-1' });
+    expect(answersOf(parent.events).at(-1)).toMatchObject({ type: 'cutCancelled', requestId: 'r-1' });
+
+    actor.stop();
+  });
+
+  it('should name a detached head and the branch back, reporting the change of operation', async () => {
+    const harness = await waiting();
+    const { actor, promises, clock } = harness;
+
+    clock.advance(checkoutWaitWindowMilliseconds);
+    promises.settle('readHead', {
+      output: {
+        revisionId: 'rev-1',
+        treeId: headTreeId,
+        branch: undefined,
+        waitFor: { kind: 'detached', branch: 'main' },
+      },
+    });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    expect(statusFacts(harness).at(-1)).toMatchObject({
+      status: 'waiting',
+      waitFor: { kind: 'detached', branch: 'main' },
+    });
+
+    actor.stop();
+  });
+
+  it('should hold every mint on a rebase that will run commands, and report when that changes', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, clock, parent } = harness;
+    const running = { kind: 'rebase', runsCommands: true } as const;
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: '', cutId: '', waitFor: running } });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    expect(answersOf(parent.events)).toEqual([]);
+    expect(statusFacts(harness).at(-1)).toMatchObject({ status: 'waiting', waitFor: running });
+
+    /* Autosave stays paused: the idle window mints nothing either. */
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
+    clock.advance(checkoutWaitWindowMilliseconds);
+    promises.settle('readHead', {
+      output: { revisionId: 'rev-1', treeId: headTreeId, branch: undefined, waitFor: running },
+    });
+    await flush();
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    const reported = statusFacts(harness).length;
+
+    /* The person dropped the exec line: still a rebase, no longer one that runs commands. */
+    clock.advance(checkoutWaitWindowMilliseconds);
+    promises.settle('readHead', {
+      output: { revisionId: 'rev-1', treeId: headTreeId, branch: undefined, waitFor: { kind: 'rebase' } },
+    });
+    await flush();
+    expect(statusFacts(harness)).toHaveLength(reported + 1);
+    expect(statusFacts(harness).at(-1)?.['waitFor']).toEqual({ kind: 'rebase' });
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+
+    actor.stop();
+  });
+
+  it('should keep waiting when a look fails', async () => {
+    const harness = await waiting();
+    const { actor, promises, clock } = harness;
+
+    clock.advance(checkoutWaitWindowMilliseconds);
+    promises.settle('readHead', { error: new Error('ESTALE') });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
 
     actor.stop();
   });

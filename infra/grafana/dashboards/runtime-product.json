@@ -1691,7 +1691,7 @@
     {
       "title": "Transcoder Usage (daily)",
       "type": "timeseries",
-      "description": "§11 panel 30. Completed uses of each transcoder (assimp, gltf, image, svg-image, slicer); operation separates direct transcodes from the transcoder hop of an export. A transcoder unused in the range has no series. Population: the Population variable (default signed-in).",
+      "description": "§11 panel 30. Completed uses of each transcoder (assimp, gltf, render, svg, raster, slicer; heif where registered). The GLB renderer reported as image and the SVG rasteriser as svg-image until the 2026-11 rename, so their series break there; operation separates direct transcodes from the transcoder hop of an export. A transcoder unused in the range has no series. Population: the Population variable (default signed-in).",
       "targets": [
         {
           "expr": "sum by (tau_runtime_plugin, tau_runtime_operation) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"transcoder\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[1d]))",

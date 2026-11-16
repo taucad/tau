@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
   locationKey: 'default',
   pathname: '/',
   navigationType: 'POP' as 'POP' | 'PUSH' | 'REPLACE',
+  workspaceFrame: { drawn: false, pending: false, pathname: '/' },
 }));
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
@@ -64,6 +65,9 @@ vi.mock('allotment', () => {
   );
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
 });
+vi.mock('#components/layout/use-workspace-frame-state.js', () => ({
+  useWorkspaceFrameState: () => state.workspaceFrame,
+}));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => state.authState }));
 vi.mock('#hooks/use-desktop-fullscreen.js', () => ({ useDesktopFullscreen: () => state.isFullscreen }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureFlags: () => ({}) }));
@@ -139,9 +143,7 @@ vi.mock('@taucad/ui-kit/icons/tau-wordmark', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
 }));
 vi.mock('#components/settings/settings-dialog.js', () => ({
-  /* `ComputeReuseSettings` inside the real dialog reads the project context the
-   * matched route contributes, so the dialog is probed the same way. */
-  SettingsDialog: () => (useContext(RouteProviderContext) ? <span>Settings dialog</span> : undefined),
+  SettingsDialog: () => <span>Settings dialog</span>,
 }));
 
 const { Page } = await import('#components/layout/page.js');
@@ -162,6 +164,7 @@ beforeEach(() => {
   state.locationKey = 'default';
   state.pathname = '/';
   state.navigationType = 'POP';
+  state.workspaceFrame = { drawn: false, pending: false, pathname: '/' };
   sessionStorage.clear();
   vi.unstubAllEnvs();
 });
@@ -240,12 +243,12 @@ describe('Page application shell', () => {
     expect(screen.getByText('Project commands').closest('[data-slot=route-provider]')).not.toBeNull();
   });
 
-  it('should render the settings dialog inside the matched routes providers', () => {
+  it('should render the settings dialog outside the matched routes providers, so a waiting route still opens it', () => {
     state.providers = [{ handle: { providers: () => RouteProvider } }];
 
     render(<Page />);
 
-    expect(screen.getByText('Settings dialog').closest('[data-slot=route-provider]')).not.toBeNull();
+    expect(screen.getByText('Settings dialog').closest('[data-slot=route-provider]')).toBeNull();
   });
 
   it('hides the outer sidebar pane on mobile while keeping main content mounted', () => {
@@ -359,9 +362,7 @@ describe('Page header contract', () => {
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
     ).toBe('calc(var(--sidebar-panel-width) - 1px)');
-    expect(container.querySelector('header > div')).toHaveClass(
-      'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
-    );
+    expect(container.querySelector('header > div')).toHaveClass('md:sidebar-closed:ml-(--titlebar-controls-width)');
   });
 
   it('should update occupied header width and traffic-light inset on native fullscreen transitions', () => {
@@ -524,6 +525,45 @@ describe('Page scroll restoration', () => {
     }
   });
 
+  /* Review round 2 (A15b2): the route content sits in the shell's frame host, a `display: contents` box, so the hold
+   * watches the content inside it, not the host. */
+  it("should watch the route content's own box through the shell's frame host", () => {
+    const observed: Element[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public observe(element: Element): void {
+          observed.push(element);
+        }
+        public disconnect(): void {
+          // Nothing to release.
+        }
+      },
+    );
+    const style = document.createElement('style');
+    style.textContent = '.contents { display: contents; }';
+    document.head.append(style);
+    try {
+      state.enableOverflowY = true;
+      state.locationKey = 'community';
+      state.pathname = '/community';
+      const { rerender } = render(<Page />);
+      scrollTo(900);
+      state.locationKey = 'example';
+      state.navigationType = 'PUSH';
+      rerender(<Page />);
+      state.locationKey = 'community';
+      state.navigationType = 'POP';
+      rerender(<Page />);
+
+      expect(observed).toContain(screen.getByText('Page content'));
+      expect(observed.some((element) => element.classList.contains('contents'))).toBe(false);
+    } finally {
+      style.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('should keep the offset when a filter or dialog replaces the entry on the same page', () => {
     state.enableOverflowY = true;
     state.locationKey = 'community';
@@ -577,5 +617,52 @@ describe('Page scroll restoration', () => {
 
     expect(container.querySelector('section')).not.toHaveClass('overflow-y-auto');
     expect(sessionStorage).toHaveLength(0);
+  });
+});
+
+/*
+ * A15b2 (F11): drawn ahead of the route, the frame is laid out as the project route lays it out, so the route's
+ * commit moves nothing: no page header and no page scroller (the page being left may be scrolled away), and the frame
+ * reads the destination's hint, as the router has not pushed its URL yet.
+ */
+describe('Page workspace frame ahead of the route', () => {
+  it("should lay the pending frame out as the project route does, at the destination's path", () => {
+    state.hasBreadcrumb = true;
+    state.enableOverflowY = true;
+    state.workspaceFrame = { drawn: true, pending: true, pathname: '/w/home/gearbox' };
+    const { container } = render(<Page />);
+    const frame = container.querySelector('[data-slot=workspace-frame]');
+
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame).toHaveTextContent('Page content');
+    expect(container.querySelector('header')).not.toBeInTheDocument();
+    expect(container.querySelector('main')).toHaveClass('[--header-height:0px]');
+    expect(container.querySelector('section')).not.toHaveClass('overflow-y-auto');
+  });
+
+  it('should keep the page content in one node from the page being left, through the pending frame, to the route', () => {
+    state.hasBreadcrumb = true;
+    const { container, rerender } = render(<Page />);
+    const content = screen.getByText('Page content');
+    expect(container.querySelector('header')).toBeInTheDocument();
+
+    state.workspaceFrame = { drawn: true, pending: true, pathname: '/w/home/gearbox' };
+    rerender(<Page />);
+    expect(screen.getByText('Page content')).toBe(content);
+    const frame = container.querySelector('[data-slot=workspace-frame]');
+    const lanes = container.querySelector('[data-slot=workspace-frame-lanes]');
+
+    /* The route commits: the same frame and lanes, no longer pending. */
+    state.workspaceFrame = { drawn: true, pending: false, pathname: '/w/home/gearbox' };
+    rerender(<Page />);
+    expect(container.querySelector('[data-slot=workspace-frame]')).toBe(frame);
+    expect(container.querySelector('[data-slot=workspace-frame-lanes]')).toBe(lanes);
+    expect(frame).not.toHaveAttribute('data-workspace-pending');
+    expect(screen.getByText('Page content')).toBe(content);
+
+    state.workspaceFrame = { drawn: false, pending: false, pathname: '/' };
+    rerender(<Page />);
+    expect(screen.getByText('Page content')).toBe(content);
+    expect(container.querySelector('header')).toBeInTheDocument();
   });
 });

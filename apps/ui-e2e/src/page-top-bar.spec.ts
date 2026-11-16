@@ -82,7 +82,11 @@ describe.each([320, 390])('shell page top bar at %ipx', (width) => {
       })
       .toBe('Projects');
     const projects = await readTopBar();
-    expect(projects).toMatchObject({ height: 48, overflow: 0, crumb: undefined, headings: 1, headingPainted: false });
+    expect(projects).toMatchObject({ height: 48, overflow: 0, headings: 1, headingPainted: false });
+    /* `target.evaluate` returns through the browser-command RPC, which serializes to JSON and drops a property whose
+     * value is `undefined`; `toMatchObject({ crumb: undefined })` then fails on the missing key, so absence is checked
+     * on its own. */
+    expect(projects.crumb).toBeUndefined();
     // PG-PROJ-1: New project is the bar's one action at 40px, and the title row's copy is gone (I4).
     expect(projects.action?.text).toBe('New project');
     expect(projects.action?.height).toBeGreaterThanOrEqual(40);

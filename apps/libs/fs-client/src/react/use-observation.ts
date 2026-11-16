@@ -47,6 +47,15 @@ export function useObservation<T>(service: ObservationService<T> | undefined): O
 const valueAbsent = (): undefined => undefined;
 
 /**
+ * Read only the decoded value of a service's snapshot.
+ * @param service - Shared resource owner, or undefined before it is available.
+ * @returns The current decoded value, or undefined before publication.
+ */
+function selectObservationValue<T>(service: ObservationService<T> | undefined): T | undefined {
+  return service?.getSnapshot().value;
+}
+
+/**
  * Select only the decoded value, avoiding renders for lifecycle-only changes.
  * @param service - Shared resource owner.
  * @returns The current decoded value, or undefined before publication.
@@ -55,7 +64,7 @@ const valueAbsent = (): undefined => undefined;
 export function useObservationValue<T>(service: ObservationService<T> | undefined): T | undefined {
   const value = useSyncExternalStore(
     service?.subscribe ?? subscribeAbsent,
-    () => service?.getSnapshot().value,
+    () => selectObservationValue(service),
     valueAbsent,
   );
   useEffect(() => {

@@ -1,79 +1,49 @@
 /**
  * ChatSessionStoreProvider
  *
- * App-shell-singleton provider that owns one `ChatSessionStore` for the
- * lifetime of the app. The store outlives every React subtree and owns the
- * per-chat AI SDK `Chat`, persistence actor, draft actor and composer record
- * actor, plus each project's unread record; React components subscribe via
- * `useChatSession(chatId, projectId)` (acquire/release) and
- * `useChatSessionSnapshot(chatId, selector)` (re-render gate).
+ * Hands down the app runtime's one `ChatSessionStore`, which outlives every
+ * React subtree and owns the per-chat AI SDK `Chat`, persistence actor, draft
+ * actor and composer record actor, plus each project's unread record; React
+ * components subscribe via `useChatSession(chatId, projectId)`
+ * (acquire/release) and `useChatSessionSnapshot(chatId, selector)` (re-render
+ * gate).
  *
- * The provider mirrors the closures from `useProjectManager()` and the file
- * client the composer records are written through into the store on every
- * render via `setDependencies`, so the store always invokes the latest
- * worker-backed methods.
+ * The runtime builds the store with its dependencies (A2): the project
+ * library's chat-record ports and its record-file facade. Nothing is mirrored
+ * here, and the store survives an owner-change remount of the billing fence
+ * (B9).
  */
 
-import { createContext, useContext, useState } from 'react';
-import type { EventRejection } from 'xstate';
-import { ChatSessionStore } from '#services/chat-session-store.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
-import { inspect } from '#machines/inspector.js';
-import {
-  isPlacementOnThisDevice,
-  isPlacementOnThisDeviceNow,
-  onPlacementReachabilityChanged,
-} from '#lib/agent-host-placement.js';
+import { createContext, useContext } from 'react';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
+import { selectRuntimeChatSessions } from '#runtime/app-runtime.js';
+import { useAppRuntime } from '#runtime/app-runtime-provider.js';
 
 const ChatSessionStoreContext = createContext<ChatSessionStore | undefined>(undefined);
 
 type ChatSessionStoreProviderProps = {
   readonly children: React.ReactNode;
+  /** A store a test composes instead of the runtime's. */
+  readonly store?: ChatSessionStore;
 };
 
-/* Development only: a rejected event is a machine that did not expect it (MC-R4). */
-const warnRejectedEvent = (rejection: EventRejection): void => {
-  console.warn('[ChatSessionStore] an actor rejected an event', rejection);
-};
-
-export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderProps): React.JSX.Element {
-  const [store] = useState(
-    () =>
-      new ChatSessionStore({
-        ...(inspect === undefined ? {} : { inspect }),
-        ...(import.meta.env.DEV ? { onRejectedEvent: warnRejectedEvent } : {}),
-      }),
+/**
+ * Hand down the chat store: the runtime's, or the one a test passes.
+ *
+ * @param props - The tree, and a test's store.
+ * @returns The provider element.
+ * @public
+ */
+export function ChatSessionStoreProvider({ children, store }: ChatSessionStoreProviderProps): React.JSX.Element {
+  return store === undefined ? (
+    <RuntimeChatSessionStore>{children}</RuntimeChatSessionStore>
+  ) : (
+    <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>
   );
-  const projectManager = useProjectManager();
-  const { recordFiles, watchRecordFile } = useFileManager();
+}
 
-  // Mirror the latest project manager closures into the store synchronously
-  // during render so child subtrees that acquire a session in the same
-  // render pass (e.g. `<ActiveChatProvider>` → `useChatSession()`) see the
-  // real worker-backed closures instead of the default throwing stubs. The
-  // store reads `#deps` at call time, so this swap is atomic and never
-  // tears in-flight work; calling it on every render is explicitly
-  // supported (see `ChatSessionStore.setDependencies`).
-  store.setDependencies({
-    getChat: projectManager.getChat,
-    patchChat: projectManager.patchChat,
-    adoptLegacyChatPlacement: projectManager.adoptLegacyChatPlacement,
-    isPlacementOnThisDevice,
-    isPlacementOnThisDeviceNow,
-    onPlacementReachabilityChanged,
-    touchChatRecency: projectManager.touchChatRecency,
-    consumeChatStartupRequest: projectManager.consumeChatStartupRequest,
-    commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,
-    // Composer records and chat attachments are files, reached through the root that owns them.
-    client: recordFiles,
-    watchRecordFile,
-    /* The project's revision client, wherever its revisions run: this tab's worker or the desktop host. */
-    /* Round 27: and it answers whether this device can pull the chat, as its placement's pull does. */
-    pullRemote: async (projectId, chatId) => (await peekRevisionClient(projectId)?.pullRemote(chatId)) ?? true,
-  });
-
+function RuntimeChatSessionStore({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+  const store = selectRuntimeChatSessions(useAppRuntime());
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;
 }
 

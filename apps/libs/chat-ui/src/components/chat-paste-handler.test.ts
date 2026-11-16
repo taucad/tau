@@ -1,8 +1,43 @@
 import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '#components/chat-paste-handler.js';
+import type { AttachmentIntakeRefusal } from '#utils/attachment-intake.js';
 
-const makeFile = (name: string, type = 'image/png'): File => new File([new Blob(['stub'])], name, { type });
+/** A PNG header: intake labels a pasted file from its bytes, so every image fixture must hold real image bytes. */
+const pngBytes = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00,
+  0x30, 0x00, 0x00, 0x00, 0x20, 0x08, 0x02, 0x00, 0x00, 0x00,
+]);
+const jpegBytes = new Uint8Array([
+  0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x20, 0x00, 0x30, 0x03, 0x01, 0x22, 0x00,
+]);
+const webpBytes = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46, 0x1a, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4c, 0x0d, 0x00, 0x00,
+  0x00, 0x2f, 0x2f, 0xc0, 0x07, 0x00,
+]);
+
+const pdfLike = new TextEncoder().encode('%PDF-1.7\n');
+
+/** A 48×32, 24-bit BMP header: a format Tau converts but does not store. */
+const bmpBytes = (() => {
+  const bytes = new Uint8Array(58);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x42, 0x4d]);
+  view.setUint32(2, 58, true);
+  view.setUint32(10, 54, true);
+  view.setUint32(14, 40, true);
+  view.setInt32(18, 48, true);
+  view.setInt32(22, 32, true);
+  view.setUint16(26, 1, true);
+  view.setUint16(28, 24, true);
+  return bytes;
+})();
+
+// The jsdom File has no `arrayBuffer`; every browser the app supports does.
+const makeFile = (name: string, type = 'image/png', bytes: Uint8Array<ArrayBuffer> = pngBytes): File =>
+  Object.assign(new File([new Blob(['stub'])], name, { type }), {
+    arrayBuffer: async () => new Uint8Array(bytes).buffer,
+  });
 
 const makeItem = (file: File): DataTransferItem => ({
   kind: 'file',
@@ -163,6 +198,75 @@ describe('chat paste image handling', () => {
       'data:image/png;base64,RAW_C.png',
     ]);
     expect(onReadError).toHaveBeenCalledOnce();
+  });
+
+  it('should attach a pasted JPEG whose declared type is empty, labelled from its bytes', async () => {
+    const event = {
+      clipboardData: makeClipboardData({ items: [makeItem(makeFile('small.jpg', '', jpegBytes))] }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string) => void>();
+
+    expect(handleClipboardImagePaste({ event, onImage })).toBe(true);
+
+    await waitFor(() => {
+      expect(onImage).toHaveBeenCalledOnce();
+    });
+    expect(onImage.mock.calls[0]?.[0]).toBe('data:image/jpeg;base64,RAW_small.jpg');
+  });
+
+  it('should label a pasted WebP named .jpg as image/webp', async () => {
+    const event = {
+      clipboardData: makeClipboardData({ items: [makeItem(makeFile('photo.jpg', 'image/jpeg', webpBytes))] }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string) => void>();
+
+    expect(handleClipboardImagePaste({ event, onImage })).toBe(true);
+
+    await waitFor(() => {
+      expect(onImage.mock.calls[0]?.[0]).toBe('data:image/webp;base64,RAW_photo.jpg');
+    });
+  });
+
+  it('should refuse a pasted file whose bytes are not an image Tau stores or converts', async () => {
+    const heic = makeFile('photo.heic', 'image/heic', new TextEncoder().encode('not really an image'));
+    const pdf = makeFile('blob', '', pdfLike);
+    const event = {
+      clipboardData: makeClipboardData({ items: [makeItem(heic), makeItem(pdf)] }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string) => void>();
+    const onRefused = vi.fn<(refusal: AttachmentIntakeRefusal, file: File) => void>();
+
+    expect(handleClipboardImagePaste({ event, onImage, onRefused })).toBe(true);
+
+    await waitFor(() => {
+      expect(onRefused).toHaveBeenCalledTimes(2);
+    });
+    expect(onRefused.mock.calls).toEqual([
+      [{ outcome: 'refused', reason: 'not-an-image' }, heic],
+      [{ outcome: 'refused', reason: 'not-an-image' }, pdf],
+    ]);
+    expect(onImage).not.toHaveBeenCalled();
+  });
+
+  it('should admit a pasted image the host converts, and refuse it by name when it does not', async () => {
+    const bmp = makeFile('scan.bmp', 'image/bmp', bmpBytes);
+    const paste = () => ({
+      clipboardData: makeClipboardData({ items: [makeItem(bmp)] }),
+      preventDefault: vi.fn(),
+    });
+    const onImage = vi.fn<(dataUrl: string, file: File) => void>();
+    const onRefused = vi.fn<(refusal: AttachmentIntakeRefusal, file: File) => void>();
+
+    handleClipboardImagePaste({ event: paste(), onImage, onRefused, loadTranscodeSources: async () => ['bmp'] });
+    handleClipboardImagePaste({ event: paste(), onImage, onRefused });
+
+    await waitFor(() => {
+      expect(onImage).toHaveBeenCalledWith('data:image/bmp;base64,RAW_scan.bmp', bmp);
+      expect(onRefused).toHaveBeenCalledWith({ outcome: 'refused', reason: 'unsupported-format', format: 'bmp' }, bmp);
+    });
   });
 
   it('should leave non-image paste events to the caller fallback', () => {

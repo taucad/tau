@@ -206,6 +206,19 @@ describe('projectRun', () => {
       ).toEqual(verified);
     });
 
+    it('ignores a todo or workbench update after the last check, which changes no model file', async () => {
+      expect(
+        await success({
+          tools: [
+            tool(['c1', 'edit_file', 3]),
+            tool(['c2', 'test_model', 10], 'passed'),
+            tool(['c3', 'update_todos', 20]),
+            tool(['c4', 'arrange_workbench', 30]),
+          ],
+        }),
+      ).toEqual(verified);
+    });
+
     it('cannot decide a run with no check, no check after its last edit, or no decided check', async () => {
       expect(await success({ tools: [tool(['c1', 'edit_file', 3])] })).toEqual(unknown);
       expect(
@@ -547,6 +560,26 @@ describe('projectRun with the content grant (LW6)', () => {
       },
     });
     expect(JSON.stringify(outcome)).not.toContain(revision);
+  });
+
+  it('names the kernel the run targeted on its outcome (LW17)', async () => {
+    const outcome = outcomeOf(await projectRun({ ...contentRun(), kernel: 'replicad' }, context({ host: 'browser' })))!;
+
+    expect(outcome.payload).toMatchObject({ plane: 'summary', fact: { turn: { kernel: 'replicad' } } });
+  });
+
+  it('labels each tool with the host, kernel and model its run names on its outcome (LW17)', async () => {
+    const projection = await projectRun({ ...contentRun(), kernel: 'replicad' }, context({ host: 'browser' }));
+    const tools = projection.evidence.filter((item) => item.semantic.kind === 'tool');
+    const labels = { host: 'browser', kernel: 'replicad', model: await contractId('model', 'anthropic/model-b') };
+
+    expect(tools).toHaveLength(2);
+    for (const tool of tools) {
+      expect(evidenceSchema.safeParse(tool).success).toBe(true);
+      expect(tool.payload).toMatchObject({ plane: 'summary', fact: { kind: 'tool', labels } });
+    }
+    const outcome = outcomeOf(projection)!;
+    expect(outcome.payload).toMatchObject({ fact: { turn: labels } });
   });
 
   it('writes a tool’s arguments in and its result out, and nothing of either without the grant', async () => {

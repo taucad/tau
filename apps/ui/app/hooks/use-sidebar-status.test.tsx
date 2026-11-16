@@ -39,9 +39,19 @@ import type { SnapshotListener } from '@taucad/ui-core/lib/xstate-test.utils';
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: () => undefined }));
+/* A5b: a person's open goes to focus, which opens with the request it kept (I4). */
+const focusSend = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-sessions.js', () => ({
   useSessions: vi.fn(),
+  useFocus: () => ({ focus: { send: focusSend }, bindings: {} }),
   useLiveProjectIds: () => Object.keys(fakeRegistry.refs),
+  useProjectLiveness: (projectId: string) => ({
+    projectId,
+    live: fakeRegistry.refs[projectId] !== undefined,
+    status: undefined,
+    closedReason: fakeRegistry.closed[projectId]?.reason,
+    policyRefusal: undefined,
+  }),
 }));
 vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
@@ -258,7 +268,16 @@ const resetRegistry = (): void => {
 const liveProject = (projectId: string, status: Partial<SessionsProjectStatus> = {}): void => {
   fakeRegistry.refs[projectId] = sessionRefFor(projectId);
   fakeRegistry.chatReferences[projectId] ??= {};
-  fakeRegistry.status[projectId] = { state: 'live', runs: 0, dirty: false, pushed: true, pending: 0, ...status };
+  fakeRegistry.status[projectId] = {
+    state: 'live',
+    runs: 0,
+    dirty: false,
+    pushed: true,
+    pending: 0,
+    chatReady: true,
+    availability: 'settled',
+    ...status,
+  };
 };
 
 const closeProject = (projectId: string, reason: ProjectSessionCloseReason): void => {
@@ -1323,5 +1342,44 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
     expect(screen.getByTestId('project').textContent).toBe('busy');
     expect(screen.getByTestId('chat').textContent).toBe('queued');
     expect(screen.getByTestId('header').textContent).toBe('2 live · gearbox');
+  });
+});
+
+/*
+ * A0.2 (row S39): the sidebar's `openProject` is one of the two other senders of `open`. Since A5b it asks focus
+ * (`openRequested`), which re-sends the request it kept for the project (I4); that the reopened session carries it is
+ * pinned over the route gate harness in `project-route.test.tsx`.
+ */
+describe('use-sidebar-status — pin (A0.2 S39): the sidebar open', () => {
+  const reopened = 'proj_sidebar_open_aaaaaaa';
+
+  afterEach(() => {
+    focusSend.mockReset();
+  });
+
+  function Open(): React.JSX.Element {
+    const { openProject } = useSidebarCommands();
+    return (
+      <button
+        type='button'
+        onClick={() => {
+          openProject(reopened);
+        }}
+      >
+        Open
+      </button>
+    );
+  }
+
+  it('should ask focus to open the project, and send the registry nothing itself', () => {
+    const registrySend = vi.fn();
+    vi.mocked(useSessions).mockImplementation(() => ({ ...fakeRegistry.actor, send: registrySend }));
+    render(<Open />);
+    act(() => {
+      screen.getByRole('button', { name: 'Open' }).click();
+    });
+
+    expect(focusSend.mock.calls).toEqual([[{ type: 'openRequested', projectId: reopened }]]);
+    expect(registrySend).not.toHaveBeenCalled();
   });
 });

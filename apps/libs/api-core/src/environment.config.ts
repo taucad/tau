@@ -252,6 +252,16 @@ export const environmentSchemaBase = z.object({
 
   // Authentication
   AUTH_SECRET: z.string(),
+  // Auth session cookie cache: seconds a session snapshot (session_data) may answer cookie GETs without a store read.
+  AUTH_SESSION_CACHE_MAX_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(300)
+    .default(0)
+    .describe(
+      'Seconds a Better Auth session snapshot may authenticate cookie GET/HEAD requests without a PostgreSQL read; 0 disables the cookie cache',
+    ),
   /**
    * HMAC secret for short-lived anonymous publication view dedup. Must be at least 32 characters.
    */
@@ -277,6 +287,12 @@ export const environmentSchemaBase = z.object({
 
   // Email delivery
   RESEND_API_KEY: z.string().default(''),
+  // Signing secret of the Resend webhook endpoint (email bounce blueprint R7, R15). Empty answers the
+  // webhook with 503, never "accept unsigned"; Terraform writes it per environment from the resend_webhook resource.
+  RESEND_WEBHOOK_SECRET: z
+    .string()
+    .default('')
+    .describe('Signing secret (whsec_...) for the /v1/auth/resend/webhook endpoint; empty answers 503'),
   // Account and security sender, and the fallback for the purpose-specific senders below.
   TAU_EMAIL_FROM: z.string().default('Tau <identity@taucad.dev>'),
   // Purpose-specific senders (email readiness, Part C). Unset or empty sends from TAU_EMAIL_FROM, so a

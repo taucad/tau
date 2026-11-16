@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentLogEvent, UserProviderMessage } from '#log/event-types.js';
+import type { AgentLogEvent, JsonValue, UserProviderMessage } from '#log/event-types.js';
 import { observeOwnTurns, observeTurns } from '#log/turn-observation.js';
 
 const chatId = 'chat-1';
@@ -394,6 +394,28 @@ describe('observeTurns', () => {
 
     expect(first).toMatchObject({ finalRevision: 'rev-1', filesChanged: 1, priorTurns: 0 });
     expect(next).toMatchObject({ runId: 'run-2', priorTurns: 1 });
+  });
+
+  it('names the kernel the run targets from the snapshot its turn committed, and none when it names none (LW17)', () => {
+    const withSnapshot = (snapshot: JsonValue): AgentLogEvent[] =>
+      term(
+        't1',
+        toolTurn.map(
+          (body): Body =>
+            body.type === 'turn.history-projection-committed'
+              ? { ...body, context: { ...body.context, snapshot } }
+              : body,
+        ),
+      );
+    const owner = { kernel: 'openscad', entryPath: 'main.scad' };
+
+    expect(
+      observeTurns(chatId, withSnapshot({ kernel: { preference: 'auto', owner, available: [] } }))[0]?.kernel,
+    ).toBe('openscad');
+    expect(
+      observeTurns(chatId, withSnapshot({ kernel: { preference: 'replicad', owner, available: [] } }))[0]?.kernel,
+    ).toBe('replicad');
+    expect(observeTurns(chatId, term('t1', toolTurn))[0]).not.toHaveProperty('kernel');
   });
 
   describe('with content (LW6)', () => {

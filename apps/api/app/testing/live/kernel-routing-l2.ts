@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -169,8 +169,9 @@ const testModelLoads = (content: JsonValue): readonly string[] => {
 };
 
 /**
- * The entry a turn wrote: the last file its own `evaluate_model` rendered, else the first model its own `test_model`
- * loaded, else the manifest's main.
+ * The entry the host adopted for a turn: the manifest's main when it names a file that exists, which is the host's own
+ * record of adoption; else the first model the turn's own `evaluate_model` rendered or `test_model` loaded, in call
+ * order, because the host adopts the first (blueprint D3) and a later render of another file never replaces it.
  *
  * @param input - The folder and the turn's CAD calls.
  * @returns The entry's path relative to the folder, or undefined when the turn rendered nothing and declared no main.
@@ -179,28 +180,36 @@ const testModelLoads = (content: JsonValue): readonly string[] => {
 export const findL2Entry = async (
   input: Readonly<{ projectRoot: string; cadCalls: readonly L2CadCall[] }>,
 ): Promise<string | undefined> => {
-  const rendered = input.cadCalls
-    .filter(({ invocation, result }) => invocation.toolName === toolName.evaluateModel && !result.isError)
-    .map(({ invocation }) => stringField(invocation.input, 'targetFile'))
-    .findLast((path) => path !== undefined);
-  if (rendered !== undefined) {
-    return rendered;
+  const declared = await manifestMain(input.projectRoot);
+  if (declared !== undefined) {
+    return declared;
   }
-  /* An agent that proves its model with GeoSpec may never call `evaluate_model`; the host adopts the first model a
-   * complete `test_model` load rendered, as it adopts an `evaluate_model` target (blueprint D3). */
-  const loaded = input.cadCalls
-    .filter(({ invocation, result }) => invocation.toolName === toolName.testModel && !result.isError)
-    .flatMap(({ result }) => testModelLoads(result.content))
-    .find((path) => path !== l2OraclePath);
-  if (loaded !== undefined) {
-    return loaded;
-  }
+  return input.cadCalls
+    .filter(({ result }) => !result.isError)
+    .flatMap(({ invocation, result }): readonly string[] => {
+      if (invocation.toolName === toolName.evaluateModel) {
+        const target = stringField(invocation.input, 'targetFile')?.replace(/^\/+/u, '');
+        return target === undefined ? [] : [target];
+      }
+      return invocation.toolName === toolName.testModel
+        ? testModelLoads(result.content).filter((path) => path !== l2OraclePath)
+        : [];
+    })
+    .at(0);
+};
+
+/** The manifest's main entry when it names a file in the folder; undefined while the project is entry-less. */
+const manifestMain = async (projectRoot: string): Promise<string | undefined> => {
   try {
-    const manifest: unknown = JSON.parse(await readFile(join(input.projectRoot, 'tau.json'), 'utf8'));
+    const manifest: unknown = JSON.parse(await readFile(join(projectRoot, 'tau.json'), 'utf8'));
     const assets = isRecord(manifest) ? manifest['assets'] : undefined;
     const main = isRecord(assets) ? assets['main'] : undefined;
     const entryPath = isRecord(main) ? main['entryPath'] : undefined;
-    return typeof entryPath === 'string' ? entryPath : undefined;
+    if (typeof entryPath !== 'string' || entryPath === '') {
+      return undefined;
+    }
+    await access(join(projectRoot, entryPath));
+    return entryPath;
   } catch {
     return undefined;
   }

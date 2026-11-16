@@ -162,6 +162,26 @@ describe('findL2Entry', () => {
     },
   });
 
+  it('should keep the first model a turn loaded when it renders another file afterwards, as the host does', async () => {
+    const projectRoot = await createL2Project({ id: 'first-adopted' });
+    const evaluate: L2CadCall = {
+      invocation: {
+        toolCallId: 'evaluate-after-load',
+        toolName: toolName.evaluateModel,
+        input: { targetFile: 'main.scad' },
+        signal: new AbortController().signal,
+      },
+      result: { content: { success: true, status: 'ready' }, isError: false },
+    };
+    try {
+      await expect(findL2Entry({ projectRoot, cadCalls: [compactTestModel('complete'), evaluate] })).resolves.toBe(
+        'parts/spacer.scad',
+      );
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it('should take the first model a compact test_model result loaded when its lineage was dropped', async () => {
     const projectRoot = await createL2Project({ id: 'compact-entry' });
     try {

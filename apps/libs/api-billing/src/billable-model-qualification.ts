@@ -298,6 +298,16 @@ const routes = [
     rates('2', '.1', undefined, '10'),
     { pricingRevision: '2026-11-13', validThrough: '2026-11-30T23:59:59.999Z' },
   ),
+  // https://cloud.google.com/vertex-ai/generative-ai/pricing (cache writes billed from 2027-01-12; not metered yet)
+  route(
+    'google-gemini-4-hydrogen',
+    'Gemini 4 Hydrogen',
+    'openai-completions',
+    1_048_576,
+    65_536,
+    rates('1.5', '.075', undefined, '7.5'),
+    { pricingRevision: '2026-11-16' },
+  ),
   route(
     'google-gemini-3.1-pro',
     'Gemini 3.1 Pro',

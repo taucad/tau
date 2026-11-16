@@ -956,6 +956,46 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
+    'gemini-4-hydrogen': {
+      enabled: true,
+      id: 'google-gemini-4-hydrogen',
+      providerKind: 'tau-hosted',
+      name: 'Gemini 4 Hydrogen',
+      slug: 'gemini-4-hydrogen',
+      recommended: true,
+      description:
+        'Fast, low-cost Gemini 4 model for everyday CAD edits, agentic tool loops, and quick geometry iterations.',
+      provider: {
+        id: 'vertexai',
+        name: 'Google',
+      },
+      model: 'gemini-4-hydrogen',
+      support: {
+        tools: true,
+        toolChoice: false,
+        // ponytail: Google also offers XHIGH; the Vertex request boundary admits LOW/MEDIUM/HIGH only.
+        reasoning: lowToHighReasoning,
+        modalities: pdfInputModalities,
+      },
+      details: {
+        family: 'gemini',
+        families: ['gemini'],
+        contextWindow: 200_000, // Provider shares 1,048,576 tokens across input, thinking, and output.
+        maxTokens: 65_536, // Single-stream limit; longer output requires continuation support.
+        // Google's standard price; no promotion. Cache writes are billed only from January 12, 2027.
+        cost: {
+          inputTokens: 1.5,
+          outputTokens: 7.5,
+          cacheReadTokens: 0.075,
+          cacheWriteTokens: 0,
+        },
+      },
+      configuration: {
+        streaming: true,
+        // Google's own default for this model; it rejects MINIMAL outright.
+        thinkingLevel: 'HIGH',
+      },
+    },
     'gemini-3.1-pro': {
       id: 'google-gemini-3.1-pro',
       providerKind: 'tau-hosted',

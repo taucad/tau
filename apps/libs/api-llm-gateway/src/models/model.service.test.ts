@@ -29,6 +29,7 @@ const cappedModelIds = [
   'openai-gpt-5.5',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
+  'google-gemini-4-hydrogen',
   'google-gemini-3.1-pro',
   'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
@@ -66,6 +67,7 @@ const pdfInputModelIds = [
   'openai-gpt-5.5',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
+  'google-gemini-4-hydrogen',
   'google-gemini-3.1-pro',
   'google-gemini-3.8-flash',
   'google-gemini-3.5-flash-lite',
@@ -217,6 +219,7 @@ describe('modelList', () => {
     const geminiModelIds = [
       'google-gemini-4-argon',
       'google-gemini-4-carbon',
+      'google-gemini-4-hydrogen',
       'google-gemini-3.1-pro',
       'google-gemini-3.8-flash',
       'google-gemini-3.5-flash-lite',
@@ -420,7 +423,7 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it.each(['gemini-4-argon', 'gemini-4-carbon'])(
+  it.each(['gemini-4-argon', 'gemini-4-carbon', 'gemini-4-hydrogen'])(
     'should list %s with image and PDF input and selectable reasoning',
     async (model) => {
       const listedModels = await createModelService().getModels();

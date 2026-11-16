@@ -44,8 +44,8 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(32);
-    expect(new Set(billableModelRouteIds).size).toBe(32);
+    expect(billableModelRouteIds).toHaveLength(33);
+    expect(new Set(billableModelRouteIds).size).toBe(33);
     expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
@@ -620,6 +620,18 @@ describe('catalog route vocabulary', () => {
       ]);
     },
   );
+
+  it('should bill gemini-4-hydrogen at its standard rate with no expiry', () => {
+    const result = qualifyRoute('google-gemini-4-hydrogen');
+
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'google/gemini-4-hydrogen' });
+    expect(result.invocation.supplierRatesValidUntil).toBeNull();
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1500000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '75000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '7500000000000', denominatorUnits: '1000000' },
+    ]);
+  });
 
   it.each([
     { input: 'hello', suffix: '', amounts: ['1000000000000', '50000000000', '1250000000000', '5000000000000'] },

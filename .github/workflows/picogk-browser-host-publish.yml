@@ -25,14 +25,14 @@
 # with `If-None-Match: *` and immutable caching (D7, I3), first to staging and then to production:
 #   - `publish-staging`, environment `dependencies-staging` (no reviewer): bucket
 #     `tau-staging-au-dependencies`, read back from `https://dependencies.taucad.dev`.
-#   - `publish-production`, environment `dependencies` (a required reviewer): bucket
+#   - `publish-production`, environment `dependencies` (no reviewer since approvals audit R4): bucket
 #     `tau-prod-dependencies`, read back from `https://dependencies.tau.new`.
 # Both run `.github/actions/picogk-browser-host-publish`. Each bucket is locked, so a blob that already
 # exists is refused; it counts as present only when its bytes, read back through the bucket, hash to its
 # key. When production has published, `dispatch-producer` dispatches this workflow on `main`, whose
-# "already tagged" path opens or updates the pin pull request. Whichever path opens it, CI's "Validate
-# workspace" proves every blob on both hosts again on that pull request and in the merge queue, so `main`
-# never names a digest a host does not serve (D9, I2). Both environments admit `dependency@*` tags and no
+# "already tagged" path opens or updates the pin pull request and enables auto-merge. Whichever path opens
+# it, CI's "Validate workspace" proves every blob on both hosts again on that pull request and in the merge
+# queue, so `main` never names a digest a host does not serve (D9, I2), and the queue lands it unattended. Both environments admit `dependency@*` tags and no
 # branch or pull request (I6).
 #
 # This file is not one of the key's inputs: changing how the host is published does not rebuild it.
@@ -302,7 +302,8 @@ jobs:
             echo
             echo "- This pull request is **bot-managed** by \`picogk-browser-host-publish.yml\`: a new inputs key"
             echo "  rewrites \`$PIN_BRANCH\`. Do not push to it."
-            echo "- \"Validate workspace\" proves every blob on both hosts again before it can merge."
+            echo "- \"Validate workspace\" proves every blob on both hosts again before it can merge. Auto-merge"
+            echo "  is on: the merge queue lands it when that passes."
           } > "$RUNNER_TEMP/body.md"
           number=$(gh pr list --base main --head "$PIN_BRANCH" --state open --json number --jq '.[0].number // empty')
           if [ -z "$number" ]; then
@@ -310,6 +311,9 @@ jobs:
           else
             gh pr edit "$number" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
           fi
+          # Unattended (operator choice 2026-11-16T00:48Z, approvals audit R5): the merge queue lands the pin once
+          # "Validate workspace" has proven every blob on both hosts; a failing proof leaves it open.
+          gh pr merge "$PIN_BRANCH" --auto --squash
           printf -- '- pin pull request: %s\n' "$subject" >> "$GITHUB_STEP_SUMMARY"
 
   # ---- Publish, on a dependency@picogk-browser-* tag ------------------------------------------------

@@ -3,7 +3,7 @@
 # fetch them from `TAU_DEPENDENCY_MIRROR`. Today that is the PicoGK `dotnet` runtime archives from
 # `builds.dotnet.microsoft.com`, pinned by the sha256 of the bytes whose sha512 Microsoft publishes.
 #
-# Dispatched on `main`, the `tag` job downloads every `dotnet` file `packages/plugins/picogk/tau-plugin.json`
+# On a `main` push that changes `packages/plugins/picogk/tau-plugin.json`, or dispatched on `main`, the `tag` job downloads every `dotnet` file `packages/plugins/picogk/tau-plugin.json`
 # pins, refuses unless each matches its pinned integrity and byte length, and names the bytes with a key: the
 # first 16 hex of the SHA-256 of their sorted SHA-256 hexes (`scripts/src/mirror-dependency-files.ts`). It
 # then ends green, creating nothing, when `dependency@dotnet-runtime-<key>` already exists or when both hosts
@@ -17,7 +17,7 @@
 # immutable caching, first to staging and then to production:
 #   - `publish-staging`, environment `dependencies-staging` (no reviewer): bucket
 #     `tau-staging-au-dependencies`, read back from `https://dependencies.taucad.dev`.
-#   - `publish-production`, environment `dependencies` (a required reviewer): bucket
+#   - `publish-production`, environment `dependencies` (no reviewer since approvals audit R4): bucket
 #     `tau-prod-dependencies`, read back from `https://dependencies.tau.new`.
 # Both run `.github/actions/dependency-files-publish`. Each bucket is locked, so a blob that already exists is
 # refused; it counts as present only when its bytes, read back through the bucket, hash to its key. Both
@@ -27,7 +27,12 @@ run-name: ${{ github.ref_name }}
 
 on:
   push:
+    # A pin change on main runs the producer unattended (operator choice 2026-11-16T00:48Z, approvals audit R5);
+    # path filters do not apply to the tag push.
+    branches: [main]
     tags: ['dependency@dotnet-runtime-*']
+    paths:
+      - packages/plugins/picogk/tau-plugin.json
   workflow_dispatch:
 
 permissions:

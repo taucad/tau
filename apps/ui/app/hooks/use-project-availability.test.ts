@@ -13,14 +13,20 @@ import {
   surfaceReadiness,
   useLargeObjectPending,
   useOpenedLargeObjectPending,
+  useProjectAvailability,
 } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { useProject } from '#hooks/use-project.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
+import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn() }));
 vi.mock('#lib/tau-cloud-intent.js', () => ({ canOpenCloudProject: vi.fn() }));
+vi.mock('@taucad/ui-core/lib/cloud-open-lock', () => ({ followCloudOpen: vi.fn(() => () => undefined) }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
   mock<RevisionStatusProjection>({
@@ -299,5 +305,35 @@ describe('readiness while a cold open is owed', () => {
   it('takes its own reading once its root is connected', () => {
     expect(pendingOpenReadiness({ readiness: 'materialized', remote: tau }, 'treeReady')).toBe('materialized');
     expect(pendingOpenReadiness({ readiness: undefined, remote: tau }, 'treeReady')).toBe('treeReady');
+  });
+});
+
+/*
+ * Another tab's open: its broadcast readiness speaks for the opener's tree write, whose expected entries live in the
+ * opener's worker. This tab's listing knows none of them, so its first view waits for its own reading (I7).
+ */
+describe('a first view in a tab that follows another tab’s open', () => {
+  it('opens on its own readiness only, never on the opener’s broadcast', () => {
+    vi.mocked(useProject).mockReturnValue({ projectId: 'project-1' } as ReturnType<typeof useProject>);
+    vi.mocked(useTauCloudIntent).mockReturnValue('open');
+    vi.mocked(canOpenCloudProject).mockReturnValue(true);
+    vi.mocked(followCloudOpen).mockImplementation((_projectId, listener) => {
+      listener('entryReady');
+      return () => undefined;
+    });
+    const applying = {
+      ...status({ state: 'pending', pullPhase: 'applying' }),
+      remote: { kind: 'none', phase: 'none' },
+      readiness: undefined,
+    } as unknown as RevisionStatusProjection;
+    vi.mocked(useRevisionStatus).mockReturnValue(applying);
+    expect(renderHook(() => useProjectAvailability('tree')).result.current).toBe('preparing');
+
+    vi.mocked(useRevisionStatus).mockReturnValue({
+      ...applying,
+      remote: { kind: 'tau', phase: 'connected' },
+      readiness: 'entryReady',
+    } as unknown as RevisionStatusProjection);
+    expect(renderHook(() => useProjectAvailability('tree')).result.current).toBe('ready');
   });
 });

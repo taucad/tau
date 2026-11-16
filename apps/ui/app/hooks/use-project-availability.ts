@@ -97,10 +97,12 @@ export function projectAvailability(
 export function useProjectAvailability(surface?: ReadinessSurface): ProjectAvailability {
   const { projectId } = useProject();
   const intent = useTauCloudIntent(projectId);
-  const readiness = useProjectReadiness();
-  return projectAvailability(intent === 'open', useRevisionStatus(), {
+  const status = useRevisionStatus();
+  return projectAvailability(intent === 'open', status, {
     canOpen: canOpenCloudProject(projectId),
-    firstView: surface === undefined ? undefined : { surface, readiness },
+    /* This tab's own reading only: a followed one speaks for the opener's tree write, which this tab's listing does
+       not know, so its arriving rows would be missing here (I7). */
+    firstView: surface === undefined ? undefined : { surface, readiness: ownOpenReadiness(status) },
   });
 }
 
@@ -322,10 +324,19 @@ export function pendingOpenReadiness(
   own: Pick<RevisionStatusProjection, 'readiness' | 'remote'> | undefined,
   followed: ProjectReadiness | undefined,
 ): ProjectReadiness {
-  if (own?.readiness !== undefined && own.remote.kind !== 'none') {
-    return own.readiness;
-  }
-  return followed ?? 'connected';
+  return ownOpenReadiness(own) ?? followed ?? 'connected';
+}
+
+/**
+ * This tab's own readiness during a Tau Cloud open: once its own root is connected, its reading; before, nothing.
+ *
+ * @param own - This tab's projection.
+ * @returns Its own readiness, or `undefined` while its root has not connected.
+ */
+export function ownOpenReadiness(
+  own: Pick<RevisionStatusProjection, 'readiness' | 'remote'> | undefined,
+): ProjectReadiness | undefined {
+  return own?.readiness !== undefined && own.remote.kind !== 'none' ? own.readiness : undefined;
 }
 
 /** The selected checkout's readiness, as its host settled it; `undefined` until published. */

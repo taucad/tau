@@ -1125,8 +1125,12 @@ export class ProjectIndexes {
       return false;
     }
     const rows = new Map<string, Readonly<{ size: number; mtimeMs: number }>>();
+    const carriedAt = Date.now();
     for (const entry of state.index.walk('', { kinds: ['file'] })) {
-      rows.set(entry.path, { size: entry.size, mtimeMs: entry.mtimeMs });
+      /* A file inside the racy window may change again at the same size and mtime: its mark is not carried (I5). */
+      if (carriedAt - entry.mtimeMs > timestampGranularityMilliseconds) {
+        rows.set(entry.path, { size: entry.size, mtimeMs: entry.mtimeMs });
+      }
     }
     this._stored.set(root, { rows, pending: state.index.pendingSnapshot(), declared: true, carried: true });
     return true;

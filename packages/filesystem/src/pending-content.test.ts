@@ -406,7 +406,11 @@ describe('marked placeholders (D9)', () => {
     const view = service.createRootedFileSystem(route);
     expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
     const indexes = (service as unknown as { _projectIndexes: ProjectIndexes })._projectIndexes;
+    /* The files are older than the racy window by the time the topology changes. */
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 5000);
     indexes.evict('/');
+    clock.mockRestore();
     const answer = await Promise.race([
       view.stat('models/part.step'),
       new Promise<'waiting'>((resolve) => {
@@ -420,6 +424,18 @@ describe('marked placeholders (D9)', () => {
       expect.objectContaining({ name: 'part.step', size: part.byteLength, pending: true }),
     ]);
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+  });
+
+  /* A file written within the racy window may change again at the same mtime: its mark is not carried, nor trusted. */
+  it('should carry no mark of a file written within the racy window, answering it as unknown, never as text', async () => {
+    service.setPendingObjectSource(async () => part);
+    const view = service.createRootedFileSystem(route);
+    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+    const indexes = (service as unknown as { _projectIndexes: ProjectIndexes })._projectIndexes;
+    indexes.evict('/');
+    expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength, pending: true });
+    await expect(view.readFile('models/part.step')).rejects.toBeInstanceOf(PendingContentError);
+    expect(await view.readFile('main.scad')).toStrictEqual(encoder.encode('import("models/part.step");'));
   });
 });
 

@@ -123,6 +123,7 @@ type DeployServer = {
 const startDeployServer = async (
   builds: Readonly<Record<Deploy, ServerBuild>>,
   shells?: Readonly<Record<Deploy, string>>,
+  hold = true,
 ): Promise<DeployServer> => {
   let live: Deploy = 'previous';
   const documents: Deploy[] = [];
@@ -142,7 +143,7 @@ const startDeployServer = async (
   app.use(coiMiddleware());
   app.use('/assets', (request: Request, response: Response, next) => {
     const renderedByNext = request.headers.cookie?.includes(`${deployCookie}=next`) === true;
-    if (live === 'previous' && heldChunk.test(request.originalUrl)) {
+    if (hold && live === 'previous' && heldChunk.test(request.originalUrl)) {
       held.push(() => {
         sendDeletedAsset(response);
       });
@@ -261,11 +262,12 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
   /** A fresh browser context on a fresh pair of deploys, with the previous one live. */
   const open = async (
     path = '/',
+    hold = true,
   ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
     if (browser === undefined || builds === undefined || shells === undefined) {
       expect.fail('the builds and browser did not start');
     }
-    const live = await startDeployServer(builds, shells);
+    const live = await startDeployServer(builds, shells, hold);
     server = live;
     context = await browser.newContext();
     const page = await context.newPage();
@@ -275,8 +277,10 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
         errors.push(message.text());
       }
     });
-    await page.goto(`${live.origin}${path}`, { waitUntil: 'commit' });
-    await live.heldRequest;
+    await page.goto(`${live.origin}${path}`, { waitUntil: hold ? 'commit' : 'networkidle' });
+    if (hold) {
+      await live.heldRequest;
+    }
     return { page, live, errors };
   };
 
@@ -308,6 +312,29 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
     expect(live.documents).toStrictEqual(['previous', 'next']);
     expect(new URL(page.url()).pathname).toBe('/w/home/bracket-v2');
+  }, 120_000);
+
+  /* React Router 8 migration RR6: route module splitting is on, so a route's client loader could load as a chunk of
+   * its own, outside the patched `loadRouteModule` this recovery rests on. The import route has the app's one
+   * `clientLoader`; a page fully loaded on the previous deploy navigates to it after the next deploy went live, when
+   * none of the previous deploy's chunks are served. */
+  it('should load the import route of a replaced build from the new deploy, client loader included', async () => {
+    const { page, live, errors } = await open('/', false);
+    expect(live.documents).toStrictEqual(['previous']);
+
+    live.deploy();
+    await page.evaluate(() => {
+      globalThis.history.pushState(null, '', '/import/github.com/taucad/tau');
+      globalThis.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    expect(await settledState(page, nextBuildId), `module load errors: ${JSON.stringify(errors)}`).toBe(
+      'reloaded into the next deploy',
+    );
+    await page.waitForLoadState('networkidle');
+    expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    expect(new URL(page.url()).pathname).toBe('/import/github.com/taucad/tau');
   }, 120_000);
 
   it('should offer the reload, never force it, once the user has worked on the page', async () => {

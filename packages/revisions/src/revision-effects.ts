@@ -3278,11 +3278,51 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   const evidenceRefName = 'refs/tau/evidence/exports';
   /*
-   * The remote's evidence record this device has written to disk (SP2h review). A projection's fetch moves the
-   * remote-tracking ref before it writes a file, and a projection can stop after that fetch (a failed apply beside it,
-   * a deadline, a close), so the tracking ref is no proof the exports landed. This ref moves only once they have.
+   * The remote's evidence record this device has written to disk, per remote (SP2h review): a control record under
+   * `.git`, `""` for none. A projection's fetch moves the remote-tracking ref before it writes a file, and a
+   * projection can stop after that fetch (a failed apply beside it, a deadline, a close), so the tracking ref is no
+   * proof the exports landed. This record moves only once they have. A device with no entry for a remote, as one an
+   * older build restored from, takes the tracking head it holds before the pull's records are fetched, once.
    */
-  const appliedEvidenceRef = (remote: string): string => `refs/tau/applied/${remote}/evidence/exports`;
+  const appliedEvidencePath = '.git/tau-applied-evidence.json';
+  const wholeAppliedEvidence = jsonRecord(
+    (value) =>
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.values(value).every((head) => typeof head === 'string'),
+  );
+  const readAppliedEvidence = async (): Promise<Readonly<Record<string, string>>> => {
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), appliedEvidencePath, {
+      accepts: wholeAppliedEvidence,
+    });
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `wholeAppliedEvidence` checked the shape.
+    return text !== undefined && wholeAppliedEvidence(text) ? (JSON.parse(text) as Record<string, string>) : {};
+  };
+  const writeAppliedEvidence = async (remote: string, head: string): Promise<void> => {
+    const applied = await readAppliedEvidence();
+    await writeControlRecord(
+      controlPlaneFiles(await recordsFileSystem()),
+      appliedEvidencePath,
+      `${JSON.stringify({ ...applied, [remote]: head })}\n`,
+    );
+  };
+  /*
+   * What this device has applied of a remote's evidence record before this pull: its applied entry, seeded once from
+   * the tracking head held before any record is fetched (an older build's trust, kept for migration only).
+   */
+  const appliedEvidenceBasis = async (
+    remote: string,
+    trackingHead: string | undefined,
+  ): Promise<string | undefined> => {
+    const applied = await readAppliedEvidence();
+    if (Object.hasOwn(applied, remote)) {
+      const head = applied[remote];
+      return head === '' ? undefined : head;
+    }
+    await writeAppliedEvidence(remote, trackingHead ?? '');
+    return trackingHead;
+  };
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
 
   /*
@@ -7240,8 +7280,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
               ? undefined
-              : ((await port.readRef(appliedEvidenceRef(input.remote))) ??
-                (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
+              : ((await appliedEvidenceBasis(
+                  input.remote,
+                  trackingBefore.find(
+                    (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
+                  )?.head,
+                )) ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
           },
           ...(advanced.length === 0 ? {} : { advanced }),
           ...(merged.length === 0 ? {} : { merged }),
@@ -7330,10 +7374,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * record that *changed* — and what it must never do for one that did
            * not, which is how a device that had already restored an export, and
            * then edited it, had its own file replaced by the same remote bytes on
-           * the very next pull. What this device has already applied is the
-           * applied ref, which moves only once the record is on disk, or a record
-           * its own evidence ref already holds; never the tracking ref, which a
-           * projection's fetch moves before it writes anything (SP2h review).
+           * the very next pull. What this device has already applied is its
+           * applied-evidence record, which moves only once the record is on disk,
+           * or a record its own evidence ref already holds; never the tracking
+           * ref, which a projection's fetch moves before it writes anything
+           * (SP2h review), but for an older build's device's first pull.
            */
           const { priorEvidenceHead } = input;
           const fetchedEvidenceHead = fetchedEvidence?.head;
@@ -7347,12 +7392,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             recordTasks.push(async (): Promise<SyncRefOutcome> => {
               try {
                 await projectEvidence([fetchedEvidence], signal);
-                const applied = appliedEvidenceRef(input.remote);
-                await port.updateRef({
-                  name: applied,
-                  expectedHead: await port.readRef(applied),
-                  head: revisionId(fetchedEvidence.head),
-                });
+                await writeAppliedEvidence(input.remote, fetchedEvidence.head);
                 return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
               } catch (error) {
                 return {

@@ -5077,6 +5077,48 @@ describe('independent sync record failures', () => {
     expect(after.recordProjection?.priorEvidenceHead).toBe(remoteHead);
   }, 30_000);
 
+  /* SP2h re-review: a device that restored exports on an older build has only its tracking ref to say so. Its first
+   * pull on this build takes that as applied, once, and leaves an export it edited since alone (C21, R11). */
+  it('leaves an edited export alone on the first pull after an upgrade from tracking-ref trust', async () => {
+    const context = await fixture({
+      'tau.json': '{"syncLargeExports":true}\n',
+      'exports/shared.step': 'edited since it was restored\n',
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const recorded = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded output\n']]),
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+      summary: { generated: 'Exports' },
+    });
+    const remoteHead = revisionId(recorded.commitId);
+    const tracking = 'refs/remotes/tau/tau/evidence/exports';
+    /* What the older build left: the tracking ref it restored from, and no evidence ref of this device's own. */
+    await context.port.updateRef({ name: tracking, expectedHead: undefined, head: remoteHead });
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+        fetch: async () => ({ refs: [{ name: tracking, head: remoteHead }] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    expect(fetched.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+    const projected = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
+
+    expect(projected.records).toEqual([{ name: 'refs/tau/evidence/exports', status: 'upToDate', head: remoteHead }]);
+    expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('edited since it was restored\n');
+    expect(await context.filesystem.exists('.tau/artifacts/sync-conflicts')).toBe(false);
+  }, 30_000);
+
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({
       'tau.json': '{"syncLargeExports":true}\n',

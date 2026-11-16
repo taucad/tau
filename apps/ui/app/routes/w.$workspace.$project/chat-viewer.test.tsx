@@ -2110,6 +2110,19 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(screen.getByTestId('chat-viewer-status')).toBe(status);
   });
 
+  /* D21 round 3: a view with no recorded entry is bound to main by the adapter in the settle commit's layout effect, so
+     the settle commit itself keeps the stage rather than drawing "No file selected" first. */
+  it('U13 (A15e): should keep the stage of a view still to be bound to main as the files settle', () => {
+    mockSyncStatus = checking;
+    renderViewer(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
+    const stage = screen.getByTestId('chat-viewer-layout');
+
+    publishSyncStatus(filled);
+    expect(screen.queryByText('No file selected')).not.toBeInTheDocument();
+    expect(screen.queryByText('No model yet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+  });
+
   it('U13 (A15e): should show no empty state for an unbound view while the files are checked', () => {
     mockSyncStatus = checking;
     renderViewer(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);

@@ -311,6 +311,33 @@ function MissingViewerFile({
 type ViewerEntryAbsence = 'unbound' | 'directory' | 'missing' | undefined;
 
 /**
+ * The view's absence once its files are known.
+ *
+ * @param facts - The view's entry, main, whether the view waited for the files, and what is known about the entry.
+ * @returns The absence, or `undefined` when the entry renders.
+ */
+function settledAbsence({
+  entryPath,
+  mainEntryPath,
+  hasWaited,
+  isDirectory,
+  isMissing,
+}: Readonly<{
+  entryPath: string | undefined;
+  mainEntryPath: string | undefined;
+  hasWaited: boolean;
+  isDirectory: boolean;
+  isMissing: boolean;
+}>): ViewerEntryAbsence {
+  if (entryPath) {
+    return isDirectory ? 'directory' : isMissing ? 'missing' : undefined;
+  }
+  /* A view that waited for the files with no entry, while main is known, is about to be bound to main: the adapter binds
+     it in the settle commit's layout effect, so the stage stays rather than drawing "No file selected" for one commit. */
+  return mainEntryPath && hasWaited ? undefined : 'unbound';
+}
+
+/**
  * Why the view has no entry to render (none is bound, it names a directory, or the file is not there), and the main it
  * is moving to. While the model's files are checked or downloaded an absence is not known afresh: the one known when
  * they last settled for this entry stays, and otherwise the stage and its last render stay (A15e; UI Policy § 5: no
@@ -338,6 +365,10 @@ function useViewerEntryAbsence({
   const [followedMain, setFollowedMain] = useState(mainEntryPath);
   const [settled, setSettled] = useState<Readonly<{ entryPath: string | undefined; absence: ViewerEntryAbsence }>>();
   const renderedPath = entryPath ?? '';
+  const [hasWaited, setHasWaited] = useState(isFilesWait);
+  if (isFilesWait && !hasWaited) {
+    setHasWaited(true);
+  }
   const followTarget =
     !isFilesWait && mainEntryPath && mainEntryPath !== followedMain && entryPath === followedMain
       ? mainEntryPath
@@ -355,8 +386,7 @@ function useViewerEntryAbsence({
       followTarget,
     };
   }
-  const fileAbsence: ViewerEntryAbsence = isDirectory ? 'directory' : isMissing ? 'missing' : undefined;
-  const absence: ViewerEntryAbsence = entryPath ? fileAbsence : 'unbound';
+  const absence = settledAbsence({ entryPath, mainEntryPath, hasWaited, isDirectory, isMissing });
   if (settled === undefined || settled.entryPath !== entryPath || settled.absence !== absence) {
     setSettled({ entryPath, absence });
   }

@@ -79,7 +79,10 @@ describe('removeServerAssetCopy', () => {
 describe('createServerOutputAssets', () => {
   it('should apply to the server build only', () => {
     const plugin = createServerOutputAssets({ clientDirectory: '/client' });
-    const apply = plugin.apply as (config: Record<string, unknown>, environment: Record<string, unknown>) => boolean;
+    const apply = plugin.apply as unknown as (
+      config: Record<string, unknown>,
+      environment: Record<string, unknown>,
+    ) => boolean;
 
     expect(apply({}, { command: 'build', mode: 'production', isSsrBuild: true })).toBe(true);
     expect(apply({}, { command: 'build', mode: 'production', isSsrBuild: false })).toBe(false);
@@ -101,7 +104,7 @@ describe('createServerOutputAssets', () => {
       build: { outDir: 'server' },
       logger: { info: () => undefined },
     });
-    const writeBundle = plugin.writeBundle as {
+    const writeBundle = plugin.writeBundle as unknown as {
       handler: (options: Record<string, unknown>, bundle: Record<string, unknown>) => void;
     };
 

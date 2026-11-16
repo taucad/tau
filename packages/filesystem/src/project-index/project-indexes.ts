@@ -841,20 +841,21 @@ export class ProjectIndexes {
    *
    * @param root - Absolute root the declaration is about.
    * @param declared - The placeholders, by root-relative path.
-   * @param paths - The root-relative paths it speaks for; omitted, every path under the root.
-   * @param options - `basis`: the {@link declarationBasis} the declaration was found on; a whole declaration a tree
-   *   write's expectation has overtaken since speaks for an older tree, and changes nothing.
+   * @param scope - `paths`: the root-relative paths it speaks for; omitted, every path under the root. `basis`: the
+   *   {@link declarationBasis} the declaration was found on; a whole declaration a tree write's expectation has
+   *   overtaken since speaks for an older tree, and changes nothing.
    */
   public async declarePending(
     root: string,
     declared: ReadonlyMap<string, DeclaredPlaceholder>,
-    paths?: readonly string[],
-    options?: Readonly<{ basis?: number }>,
+    scope?: Readonly<{ paths?: readonly string[] | undefined; basis?: number | undefined }>,
   ): Promise<void> {
     const key = normalizePath(root);
-    const overtaken = (): boolean => options?.basis !== undefined && this.declarationBasis(key) !== options.basis;
+    const paths = scope?.paths;
+    const basis = scope?.basis;
+    const overtaken = (): boolean => basis !== undefined && this.declarationBasis(key) !== basis;
     try {
-      if (!(await this._declare(key, declared, paths, overtaken))) {
+      if (!(await this._declare(key, declared, { paths, overtaken }))) {
         return;
       }
       if (paths === undefined) {
@@ -892,9 +893,9 @@ export class ProjectIndexes {
   private async _declare(
     key: string,
     declared: ReadonlyMap<string, DeclaredPlaceholder>,
-    paths: readonly string[] | undefined,
-    overtaken: () => boolean,
+    scope: Readonly<{ paths: readonly string[] | undefined; overtaken: () => boolean }>,
   ): Promise<boolean> {
+    const { paths, overtaken } = scope;
     if (overtaken()) {
       return false;
     }

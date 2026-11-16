@@ -1314,8 +1314,7 @@ export class RootedViews {
         await this._projectIndexes.declarePending(
           root,
           new Map([...declared].map(([path, placeholder]) => [local(path), placeholder])),
-          paths?.map((path) => local(path)),
-          declareOptions,
+          { paths: paths?.map((path) => local(path)), basis: declareOptions?.basis },
         );
       },
       declarationBasis: (): number => this._projectIndexes.declarationBasis(root),

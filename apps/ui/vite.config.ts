@@ -160,6 +160,7 @@ const desktopSourceOverrides = new Map([
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/attachment-image-backend.js', '#services/attachment-image-backend.desktop.js'],
+  ['#runtime/attachment-transcode-sources.js', '#runtime/attachment-transcode-sources.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],

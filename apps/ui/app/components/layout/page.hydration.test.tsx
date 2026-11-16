@@ -5,11 +5,12 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-router', async () => {
-  const { createContext } = await import('react');
+vi.mock('react-router', async (importOriginal) => {
+  /* The real module's contexts, with no data router provided: the shell's workspace frame state reads the committed
+   * location (A15b2). */
+  const actual = await importOriginal<Record<string, unknown>>();
   return {
-    /* No data router here: the shell's workspace frame state reads the committed location (A15b2). */
-    UNSAFE_DataRouterContext: createContext(undefined),
+    ...actual,
     Link: ({ children, to }: { readonly children: ReactNode; readonly to: string }) => <a href={to}>{children}</a>,
     Outlet: () => <div data-route-content>Hydrated route content</div>,
     useLocation: () => ({ key: 'default', pathname: '/' }),

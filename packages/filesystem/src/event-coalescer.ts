@@ -22,7 +22,7 @@ import { commonAncestor, sharedOrigin, touchedDirectoriesOf } from '#change-even
 import type { ChangeSet, ChangeSetEntry, ChangeSetReset, ChangeSetSegment } from '#change-event-bus.js';
 import { copyEventAuthorities, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
 import { parentDirectory } from '@taucad/utils/path';
-import type { PathChangeEvent } from '#types.js';
+import type { ChangeEvent, PathChangeEvent } from '#types.js';
 
 /**
  * Configuration for {@link EventCoalescer}.
@@ -640,3 +640,17 @@ export class ChangeSetCoalescer {
     }
   }
 }
+
+/**
+ * One port's delivery as the one message it crosses the wire as: the fact
+ * itself when there is one, a `changeSet` envelope otherwise, with covered
+ * summaries pruned ({@link pruneDirectorySummaries}).
+ *
+ * @param facts - One port's facts from one delivery, in order (at least one).
+ * @returns The message to emit.
+ * @public
+ */
+export const deliveryMessage = (facts: readonly PathChangeEvent[]): ChangeEvent => {
+  const pruned = pruneDirectorySummaries(facts);
+  return pruned.length === 1 ? pruned[0]! : { type: 'changeSet', entries: [...pruned] };
+};

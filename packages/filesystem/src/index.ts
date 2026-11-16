@@ -152,12 +152,14 @@ export {
   coalesceChangeEvents,
   overflowLossSignals,
   pruneDirectorySummaries,
+  deliveryMessage,
   ChangeSetCoalescer,
   mergeChangeSets,
   nextFrame,
 } from '#event-coalescer.js';
 export type { CoalescerOptions, ChangeSetCoalescerOptions, FrameScheduler } from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
+export { scopeEventToRoot } from '#scope-event-to-root.js';
 export { WatchRegistry, watchEventsOfChangeSetFor } from '#watch-registry.js';
 export type { ChangeSetWatchRequest, WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';

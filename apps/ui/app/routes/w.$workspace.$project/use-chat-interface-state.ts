@@ -10,11 +10,17 @@ import {
 import type { MobilePanelId } from '@taucad/ui-core/constants/editor.constants';
 import type { PaneviewPanelState, PanelState } from '@taucad/ui-core/types/editor.types';
 import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
+import { phoneOpeningSnapPoint } from '#lib/frame-hint.js';
 
 export type ChatInterfaceState = {
   // Loading state
   /** Whether the editor state has been loaded from storage (ready for rendering) */
   isEditorReady: boolean;
+  /**
+   * Whether the stored panel state has been read (or failed to be, leaving the defaults): the surface and the sheet
+   * are then the restored ones, though the editor may still be ensuring its focused chat (A15c).
+   */
+  isLayoutRestored: boolean;
 
   activeTab: MobilePanelId;
   setActiveTab: (value: MobilePanelId) => void;
@@ -44,6 +50,10 @@ export function useChatInterfaceState(): ChatInterfaceState {
 
   // Defer the mobile drawer until its persisted active surface is available.
   const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
+  const isLayoutRestored = useSelector(
+    editorRef,
+    (state) => !state.matches('idle') && !state.matches({ loading: 'hydrating' }),
+  );
 
   const mobileActiveTab = useSelector(editorRef, (state) => state.context.panelState.mobileActiveTab);
 
@@ -66,9 +76,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
    * it because selecting the already active tab is not a change. */
   const drawerOpen = activeTab !== 'viewer';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
-  const [snapPoint, setSnapPoint] = useState<number | string | null>(
-    activeTab === 'editor' ? 1 : mobileDrawerOpenSnapPoint,
-  );
+  const [snapPoint, setSnapPoint] = useState<number | string | null>(phoneOpeningSnapPoint(activeTab));
   const [previousTab, setPreviousTab] = useState(activeTab);
 
   /* Every collapse, whichever action caused it, returns the drawer to half height, so the next panel never reopens
@@ -124,6 +132,7 @@ export function useChatInterfaceState(): ChatInterfaceState {
 
   return {
     isEditorReady,
+    isLayoutRestored,
     activeTab,
     setActiveTab,
     drawerOpen,

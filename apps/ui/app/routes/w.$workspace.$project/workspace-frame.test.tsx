@@ -2,7 +2,7 @@ import { render } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writeWideFrameHint } from '#lib/frame-hint.js';
+import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
 
@@ -56,6 +56,8 @@ describe('WorkspaceFrame', () => {
 
   afterEach(() => {
     globalThis.history.replaceState(null, '', '/');
+    document.documentElement.removeAttribute('style');
+    document.documentElement.removeAttribute(frameTabAttribute);
   });
 
   // ── Known defects (A0.9), flipped by A15b ──
@@ -178,5 +180,73 @@ describe('WorkspaceFrame', () => {
     expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
     expect(frame).toHaveTextContent('content');
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
+  });
+
+  // ── A15c: the phone frame (blueprint P-h; C6) ──
+
+  /*
+   * C6: before any client render (the server's HTML, which a phone paints first), the frame already holds the phone
+   * workspace's four parts, each a bare box: the top bar, the viewer's box, the sheet and the tab bar. Nothing in them is
+   * a skeleton or animates in. The sheet's display and detent are the hint's variables, closed by default.
+   */
+  it('C6: the first render draws the phone top bar, viewer box, sheet and tab bar, with no skeleton and no animation', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(frameAt('/w/home/one'));
+    const phone = container.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]');
+
+    expect(phone).not.toBeNull();
+    expect(phone).toHaveAttribute('aria-hidden', 'true');
+    expect(phone!.hasAttribute('inert')).toBe(true);
+    const parts = [...phone!.querySelectorAll<HTMLElement>('[data-frame-part]')].map(
+      (part) => part.dataset['framePart'],
+    );
+    expect(parts).toEqual(['top-bar', 'viewer', 'sheet', 'tab-bar']);
+    expect(phone!.querySelector('[data-slot=skeleton]')).toBeNull();
+    expect(phone!.innerHTML).not.toMatch(/animate-|fade-in|slide-in/u);
+    const sheet = phone!.querySelector<HTMLElement>('[data-frame-part=sheet]')!;
+    expect(sheet.className).toContain('[display:var(--frame-sheet-display,none)]');
+    expect(sheet.className).toContain('top-[calc(100dvh_-_var(--frame-sheet-height,0px))]');
+    /* The tab bar names every destination, so a phone's first paint is contentful. */
+    expect(phone!.querySelector('[data-frame-part=tab-bar]')).toHaveTextContent('ChatParametersModelAll');
+    /* The server sets no variable: the pre-paint script's on `<html>` stand until the client renders. */
+    expect(container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!.getAttribute('style')).toBeNull();
+  });
+
+  it("C6: on the client the frame draws this project's remembered sheet and selects its tab", () => {
+    writePhoneFrameHint('home/one', 'parameters');
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.style.getPropertyValue('--frame-sheet-display')).toBe('flex');
+    expect(frame.style.getPropertyValue('--frame-sheet-height')).toBe('calc(0.5 * 100dvh)');
+    expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('parameters');
+  });
+
+  it("does not carry the document's first project's sheet or tab to a project with no phone hint", () => {
+    /* The pre-paint script's values for the project the document loaded first. */
+    document.documentElement.setAttribute(frameTabAttribute, 'chat');
+    document.documentElement.style.setProperty('--frame-sheet-display', 'flex');
+    const frame = renderFrame('/w/home/two');
+
+    expect(frame.style.getPropertyValue('--frame-sheet-display')).toBe('none');
+    expect(frame.style.getPropertyValue('--frame-sheet-height')).toBe('0px');
+    expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('model');
+  });
+
+  it('gives each phone part way to the live one in its own box, and the whole phone frame to a failure or notice', () => {
+    const frame = renderFrame('/w/home/one');
+    const phone = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]')!;
+    const part = (name: string): string => phone.querySelector<HTMLElement>(`[data-frame-part=${name}]`)!.className;
+
+    /* Every part waits for the workspace's restored layout; the top bar keeps its box in the column, so the viewer's
+     * box below it never moves, and the viewer's box also waits for the live stage. */
+    expect(part('top-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:invisible');
+    expect(part('viewer')).toContain(
+      '[[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden',
+    );
+    expect(part('sheet')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
+    expect(part('tab-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
+    expect(phone.className).toContain('[[data-slot=workspace-frame]:has([data-slot=project-route-notice])_&]:hidden');
+    expect(phone.className).toContain('md:hidden');
   });
 });

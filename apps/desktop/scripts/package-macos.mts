@@ -34,8 +34,14 @@ import { desktopArtifactName } from '#shared/desktop-release.js';
 
 import { isQuickLookEnabled } from '#shared/quick-look.js';
 
-// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+/* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
+import {
+  macosBundleId,
+  macosPackageArchitecture,
+  macosPackageFuses,
+  parseMacosPackageMode,
+} from './macos-package-mode.mjs';
+/* oxlint-enable no-restricted-imports -- End operational script import exception. */
 // oxlint-disable-next-line no-restricted-imports -- Shared operational signing helper.
 import { localSigningIdentity } from './local-signing.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Shared install container builder and verifier.
@@ -311,7 +317,7 @@ const packagePaths = await packager({
   platform: 'darwin',
   arch: architecture,
   name: 'Tau',
-  appBundleId: localIdentity ? 'com.taucad.tau.desktop.local' : 'com.taucad.tau.desktop',
+  appBundleId: macosBundleId({ release }, localIdentity !== undefined),
   appCategoryType: 'public.app-category.graphics-design',
   appVersion: desktopPackageVersion(metadata.version),
   /* Squirrel.Mac compares bundle versions, so the build version is the release version. */

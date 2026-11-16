@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { CloudLoadRecord, CloudRequestCounts, CloudStandInDelays } from '#support/cloud-stand-ins.js';
-import { waitForOfflineShell } from '#support/billing-usage-fixture.js';
+import { setTargetOffline, waitForOfflineShell } from '#support/billing-usage-fixture.js';
 import {
   cloudDefectRow,
   cloudLoadProbe,
@@ -13,6 +13,14 @@ import {
   readCloudLoadRecord,
   recordCloudLoad,
 } from '#support/cloud-stand-ins.js';
+
+/** F14: what an offline reload of a project draws. */
+type OfflineRead = {
+  readonly url: string;
+  readonly frame: boolean;
+  readonly workspace: boolean;
+  readonly alerts: readonly string[];
+};
 
 /**
  * The cloud-build load tier (lane A0.11, `ui-e2e:test:e2e:cloud-load`): the loading defects a self-host build cannot
@@ -364,6 +372,63 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
           load.firstContentfulPaint,
           `U24: first contentful paint (ms) with the document held ${String(documentStall)} ms; its response started at ${String(load.responseStart)} ms`,
         ).toBeLessThanOrEqual(shellPaintBound);
+      });
+    },
+  );
+
+  /*
+   * F14 (A15b2, programme control 2026-11-16T12:12Z): with the service worker installed and the browser offline, a
+   * reload of a project on this device draws the workspace frame and the workspace, with no error state.
+   */
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title:
+        'F14: an offline reload of a project on this device renders the workspace frame and the workspace, the service worker installed',
+    },
+    async (defect) => {
+      await openSignedIn();
+      const route = await seedLocalProject();
+      await waitForSettledProject();
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      await setTargetOffline(true);
+      let reloadError = '';
+      let offline: OfflineRead;
+      /* Back online whatever happens, so a later row never runs offline. */
+      try {
+        try {
+          await target.reload();
+        } catch (error) {
+          reloadError = error instanceof Error ? error.message.split('\n')[0]! : String(error);
+        }
+        const readOffline = async (): Promise<OfflineRead> =>
+          target.evaluate(() => ({
+            url: location.href,
+            frame: document.querySelector('[data-slot="workspace-frame"]') !== null,
+            workspace: document.querySelector('[data-project-workspace]') !== null,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((node) =>
+              node.textContent.trim().slice(0, 120),
+            ),
+          }));
+        /* Up to 30 s for the workspace; a page that never draws it is the defect, read as it stands. */
+        await target
+          .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
+          .catch(() => undefined);
+        /* Not caught: a failed read is a harness fault, which must fail the row, not stand as the defect. */
+        offline = await readOffline();
+        await target.writeArtifact(
+          'cloud-load-gate/f14-offline-reload.json',
+          `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,
+        );
+      } finally {
+        await setTargetOffline(false);
+      }
+      await defect(() => {
+        expect(
+          { frame: offline.frame, workspace: offline.workspace, alerts: offline.alerts },
+          `F14: after an offline reload of ${route} (${reloadError || 'the reload resolved'}), the page at ${offline.url || 'unknown'}`,
+        ).toEqual({ frame: true, workspace: true, alerts: [] });
       });
     },
   );

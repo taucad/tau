@@ -55,7 +55,6 @@ const imageTranscoder = defineTranscoder({
     {
       from: 'glb',
       to: 'webp',
-      fidelity: 'mesh',
       optionsSchema: z.object({ width: z.number().default(768), height: z.number().default(432), quality: z.number() }),
       content: ['includeEdges'],
     },

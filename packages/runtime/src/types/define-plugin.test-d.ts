@@ -14,7 +14,7 @@ import { defineBundler } from '#types/runtime-bundler.types.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineMiddleware } from '#plugins/middleware-entry.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
-import type { TranscodeInput } from '#types/runtime-transcoder.types.js';
+import type { TranscodeInput, TranscoderEdge } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import type { RuntimeConfigInput, RuntimeConfigOutput } from '#worker/runtime-definition.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
@@ -143,7 +143,7 @@ describe('positive-only middleware and transcoder declarations', () => {
     defineTranscoder({
       ...base,
       id: 'omittedTranscoderContent',
-      edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }] as const,
+      edges: [{ from: 'glb', to: 'stl' }] as const,
     });
     defineTranscoder({
       ...base,
@@ -152,7 +152,6 @@ describe('positive-only middleware and transcoder declarations', () => {
         {
           from: 'glb',
           to: 'stl',
-          fidelity: 'mesh',
           // @ts-expect-error -- transcoder content must be non-empty.
           content: [],
         },
@@ -165,7 +164,6 @@ describe('positive-only middleware and transcoder declarations', () => {
         {
           from: 'glb',
           to: 'stl',
-          fidelity: 'mesh',
           // @ts-expect-error -- unknown transcoder content is rejected.
           content: ['includeSketches'],
         },
@@ -239,6 +237,14 @@ describe('defineBundler', () => {
 });
 
 describe('defineTranscoder', () => {
+  it('declares an edge by its two formats; the runtime derives route fidelity', () => {
+    const edge: TranscoderEdge = { from: 'step', to: 'iges' };
+    // @ts-expect-error -- edges carry no fidelity; the runtime derives it from `from` and `to`.
+    const stale: TranscoderEdge = { from: 'glb', to: 'step', fidelity: 'brep' };
+    expectTypeOf(edge).not.toHaveProperty('fidelity');
+    void stale;
+  });
+
   it('preserves transcoder edge literals and per-edge options', () => {
     const transcoder = defineTranscoder({
       id: 'typedTranscoder',
@@ -248,10 +254,9 @@ describe('defineTranscoder', () => {
         {
           from: 'glb',
           to: 'stl',
-          fidelity: 'mesh',
           optionsSchema: z.object({ binary: z.boolean() }),
         },
-        { from: 'glb', to: 'usdz', fidelity: 'mesh' },
+        { from: 'glb', to: 'usdz' },
       ] as const,
       async initialize() {
         return {};
@@ -281,13 +286,11 @@ describe('defineTranscoder', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           optionsSchema: z.object({ width: z.number() }),
         },
         {
           from: 'svg',
           to: 'png',
-          fidelity: 'mesh',
           optionsSchema: z.object({ density: z.number() }),
         },
       ] as const,
@@ -347,7 +350,6 @@ describe('defineTranscoder', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           optionsSchema: z.object({ first: z.literal(true) }),
         },
       ] as const,
@@ -366,7 +368,6 @@ describe('defineTranscoder', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           optionsSchema: z.object({ second: z.literal(true) }),
         },
       ] as const,

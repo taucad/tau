@@ -85,7 +85,7 @@ describe('plugin factory public surface', () => {
     const transcoder = defineTranscoder({
       id: 'transcoder',
       permissions,
-      edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }] as const,
+      edges: [{ from: 'glb', to: 'stl' }] as const,
       name: 'TranscoderDefinition',
       version: '1.0.0',
       async initialize() {
@@ -133,7 +133,7 @@ describe('plugin factory public surface', () => {
     });
     await expect(resolveRuntimePluginDefinition('transcoder', transcoderPlugin)).resolves.toMatchObject({
       name: 'TranscoderDefinition',
-      edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'stl' }],
     });
   });
 });

@@ -315,6 +315,10 @@ catalog:
   omggif: 1.0.10
   '@types/omggif': 1.0.5
   utif2: 4.1.0
+  # HEIC decoder for @taucad/heif (LGPL-3.0, never bundled; operator ruling O2). Exact: the pinned
+  # libheif.wasm SHA-256 and packages/plugins/heif/src/fixtures/golden.json change with any release.
+  # 1.23.5 carries libheif 1.23.5 and libde265 1.0.15.
+  libheif-js: 1.23.5
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.

@@ -1,8 +1,9 @@
 /**
  * Composer image conversion in Chromium (blueprint WP5).
  *
- * - Host parity (b): every `golden.json` case of the raster transcoder runs through `client.transcode` in the
- *   attachment worker over the web-worker transport and must produce the recorded bytes.
+ * - Host parity (b): every `golden.json` case of the raster transcoder, and of the HEIF transcoder (WP7), runs
+ *   through `client.transcode` in the attachment worker over the web-worker transport and must produce the recorded
+ *   bytes. A 16384×16384 HEIC is refused from its header there too.
  * - The worker's lifecycle: none for a canonical image, one for the first image that needs converting, none once idle.
  * - The composer's intake and draft image step through the real worker: labels from bytes by pick and by paste, the
  *   1568 px fit, the white matte, TIFF conversion and a refusal that names what was refused.
@@ -95,6 +96,78 @@ describe('raster transcoder host parity (b): Chromium, web-worker transport', ()
       width: entry.width,
       height: entry.height,
     });
+  });
+});
+
+const heifFixtureUrls = import.meta.glob<string>('../../../../packages/plugins/heif/src/fixtures/*', {
+  query: '?url',
+  import: 'default',
+  eager: true,
+});
+
+const heifFixture = async (name: string): Promise<Uint8Array<ArrayBuffer>> => {
+  const url = heifFixtureUrls[`../../../../packages/plugins/heif/src/fixtures/${name}`];
+  if (url === undefined) {
+    throw new Error(`No HEIF fixture named ${name}`);
+  }
+  const response = await fetch(url);
+  return new Uint8Array(await response.arrayBuffer());
+};
+
+const heifGolden = JSON.parse(new TextDecoder().decode(await heifFixture('golden.json'))) as {
+  readonly cases: readonly GoldenCase[];
+};
+
+describe('HEIF transcoder host parity (b): Chromium, web-worker transport', () => {
+  let client: AttachmentImageClient;
+
+  beforeAll(async () => {
+    client = await attachmentImageBackend.createClient();
+    await client.connect();
+  });
+
+  afterAll(() => {
+    client.terminate();
+  });
+
+  it('should cover small.heic and the rotated heic-rot6.heic', () => {
+    expect(new Set(heifGolden.cases.map(({ fixture }) => fixture))).toEqual(new Set(['small.heic', 'heic-rot6.heic']));
+  });
+
+  it.each(
+    heifGolden.cases.map(
+      (entry) => [`${entry.fixture} (${entry.from}) → ${entry.to} ${JSON.stringify(entry.options)}`, entry] as const,
+    ),
+  )('should reproduce the golden output of %s', async (_label, entry) => {
+    const result = await client.transcode({
+      from: entry.from,
+      to: entry.to,
+      files: [{ name: entry.fixture, bytes: await heifFixture(entry.fixture), mimeType: 'application/octet-stream' }],
+      options: entry.options,
+    });
+    if (!result.success) {
+      expect.fail(result.issues.map(({ message }) => message).join('; '));
+    }
+    const [file] = result.data;
+    const probe = probeImage(file!.bytes);
+    expect({ sha256: await sha256(file!.bytes), width: probe?.width, height: probe?.height }).toEqual({
+      sha256: entry.sha256,
+      width: entry.width,
+      height: entry.height,
+    });
+  });
+
+  it('should refuse a 16384×16384 HEIC from its header', async () => {
+    const result = await client.transcode({
+      from: 'heic',
+      to: 'jpeg',
+      files: [{ name: 'bomb.heic', bytes: await heifFixture('bomb-16384.heic'), mimeType: 'image/heic' }],
+      options: {},
+    });
+    expect(result.success).toBe(false);
+    expect(result.success ? '' : result.issues[0]?.message).toBe(
+      'HEIC of 16384×16384 exceeds the 50000000-pixel limit',
+    );
   });
 });
 

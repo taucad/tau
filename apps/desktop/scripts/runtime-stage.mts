@@ -32,9 +32,13 @@ import { copyRuntimeClosure, copyTree } from '@taucad/nx/runtime-closure';
 /** A `<platform>-<arch>` the desktop app is packaged for. */
 export type RuntimeTarget = 'darwin-arm64' | 'darwin-x64' | 'linux-x64' | 'win32-x64';
 
-/** Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking. */
+/**
+ * Match binary basenames and relative package directories so hidden checkout ancestors cannot defeat ASAR unpacking.
+ * `libheif-*.wasm` is libheif (LGPL-3.0), which the main build emits as its own asset: it stays a separate file
+ * outside the integrity-checked archive, where a user can inspect and replace it (LGPL-3.0 section 4d).
+ */
 export const runtimeAsarOptions = {
-  unpack: '{*.node,*.dll,esbuild,esbuild.exe}',
+  unpack: '{*.node,*.dll,esbuild,esbuild.exe,libheif-*.wasm}',
   unpackDir:
     '**/node_modules/{@agentclientprotocol,@img,node-pty,@anthropic-ai/sandbox-runtime/vendor/{seccomp,java-proxy-agent}}',
 };

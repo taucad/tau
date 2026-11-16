@@ -179,6 +179,7 @@
             "brep",
             "gltf",
             "image",
+            "heif",
             "jscad",
             "manifold",
             "middleware",

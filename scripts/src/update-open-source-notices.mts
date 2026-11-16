@@ -9,7 +9,8 @@
  * license record, lists the MIT components of the desktop app's C# runtime,
  * and carries the Open CASCADE Technology notice with the unmodified LGPL-2.1
  * and Open CASCADE exception texts, read from the installed `geospec-engine`
- * package together with the OCCT revision its SOURCE-RELINK receipt pins. The
+ * package together with the OCCT revision its SOURCE-RELINK receipt pins, and the libheif notice with the exact
+ * libheif and libde265 sources and the LGPL-3.0 and GPL-3.0 texts the installed `libheif-js` ships. The
  * website (`apps/www`) renders the file at `/legal/open-source/`; the macOS package ships the same
  * file inside the app bundle.
  *
@@ -229,6 +230,38 @@ export function parseOcctRevision(receipt: string): string {
   return match[1]!;
 }
 
+/**
+ * The HEIC decoder the apps convey, and the exact sources it is built from. `libheif-js` publishes no source, so
+ * these are recorded here and checked against the installed wrapper: a different wrapper version refuses until this
+ * record names the sources of the libheif and libde265 it compiles in.
+ */
+export const libheifRelease = {
+  wrapper: '1.23.5',
+  libheif: { version: '1.23.5', commit: '413e2a87' },
+  libde265: { version: '1.0.15' },
+  emscripten: '3.1.61',
+} as const;
+
+/** The installed `libheif-js` release and the license texts it ships. */
+export type LibheifNotice = { version: string; lgpl3: string; gpl3: string };
+
+/**
+ * Split the license file `libheif-js` ships into its LGPL-3.0 and GPL-3.0 texts. The file is a preamble, then the
+ * LGPL-3.0, the GPL-3.0 and the MIT License of libheif's sample applications, each after a line of dashes.
+ *
+ * @returns The two texts, unmodified.
+ */
+export function splitLibheifLicense(text: string): { lgpl3: string; gpl3: string } {
+  const sections = text.split(/^-{20,}$/mu).map((section) => section.replace(/^\n+/u, ''));
+  const lgpl3 = sections.find((section) => /^\s*GNU LESSER GENERAL PUBLIC LICENSE\s+Version 3,/u.test(section));
+  const gpl3 = sections.find((section) => /^\s*GNU GENERAL PUBLIC LICENSE\s+Version 3,/u.test(section));
+  if (lgpl3 === undefined || gpl3 === undefined) {
+    throw new Error('The libheif-js license file does not hold the LGPL-3.0 and GPL-3.0 texts.');
+  }
+
+  return { lgpl3, gpl3 };
+}
+
 export function generateNotices(input: {
   packages: PackageInfo[];
   vendored: VendoredComponent[];
@@ -236,8 +269,11 @@ export function generateNotices(input: {
   lgpl: string;
   occtException: string;
   engine: EngineRelease;
+  libheif: LibheifNotice;
 }): string {
-  const { packages, vendored, desktopRuntime, lgpl, occtException, engine } = input;
+  const { packages, vendored, desktopRuntime, lgpl, occtException, engine, libheif } = input;
+  const { libde265 } = libheifRelease;
+  const libheifSource = libheifRelease.libheif;
   const sorted = packages.toSorted((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
   const occtPackages = sorted.filter(({ name }) =>
     ['libcascade', 'occt-import-js', 'replicad-opencascadejs'].includes(name),
@@ -273,6 +309,32 @@ export function generateNotices(input: {
     'corresponding OCCT source and relink kit, these license texts and the GeoSpec engine notices. The macOS app also',
     'carries the kit inside the app bundle, under `Tau.app/Contents/Resources/SOURCES`. The source of the GeoSpec engine,',
     'including how it builds and links OCCT, is at [github.com/taucad/geospec](https://github.com/taucad/geospec).',
+    '',
+    '## libheif and libde265',
+    '',
+    'The web and desktop apps convert HEIC and HEIF photos with **libheif** and its HEVC decoder **libde265**,',
+    'Copyright © Dirk Farin and struktur AG. Both are licensed under the',
+    '[GNU Lesser General Public License version 3](#gnu-lesser-general-public-license-version-3), which incorporates',
+    'the [GNU General Public License version 3](#gnu-general-public-license-version-3); both are reproduced in full',
+    'below. They run as one WebAssembly file, `libheif.wasm`, and only when you attach a HEIC or HEIF image.',
+    '',
+    'The file is taken unmodified from',
+    `\`libheif-js\` ${libheif.version} ([source](https://github.com/catdad-experiments/libheif-js)), which builds it from:`,
+    '',
+    `- libheif ${libheifSource.version}, upstream commit \`${libheifSource.commit}\``,
+    `  ([source](https://github.com/strukturag/libheif/tree/${libheifSource.commit}))`,
+    `- libde265 ${libde265.version}`,
+    `  ([source](https://github.com/strukturag/libde265/releases/download/v${libde265.version}/libde265-${libde265.version}.tar.gz))`,
+    `- libheif's \`scripts/build-emscripten.sh\` at that commit, run with Emscripten ${libheifRelease.emscripten} by`,
+    '  [libheif-emscripten](https://github.com/catdad-experiments/libheif-emscripten)',
+    '',
+    'You may modify libheif and libde265, use a modified version with Tau, and reverse engineer Tau to debug such',
+    'modifications. `libheif.wasm` is a separate file: the web app fetches it from its own URL, and the desktop app',
+    'keeps it outside the app archive, in `app.asar.unpacked`. Tau checks the file against a pinned SHA-256 before it',
+    'loads it, so to use a modified build, change that pin in `packages/plugins/heif/src/heif-decoder.ts` and rebuild',
+    'Tau from its complete source at [github.com/taucad/tau](https://github.com/taucad/tau).',
+    '',
+    'HEIC images are HEVC-coded. This notice concerns copyright only; it grants no patent license for HEVC.',
     '',
     '## Third-Party Packages',
     '',
@@ -324,6 +386,14 @@ export function generateNotices(input: {
     '',
     ...fence(occtException),
     '',
+    '## GNU Lesser General Public License version 3',
+    '',
+    ...fence(libheif.lgpl3),
+    '',
+    '## GNU General Public License version 3',
+    '',
+    ...fence(libheif.gpl3),
+    '',
     '---',
     '',
     'If you think a license or credit is missing or wrong, please',
@@ -355,6 +425,13 @@ async function main(): Promise<void> {
       ].map((packageInfo) => [`${packageInfo.name}@${packageInfo.version}`, packageInfo]),
     ).values(),
   ];
+  const libheifDirectory = await resolvePackageDirectory('libheif-js', join(rootDirectory, 'packages/plugins/heif'));
+  const libheifManifest = libheifDirectory === undefined ? undefined : await readManifest(libheifDirectory);
+  if (!libheifDirectory || libheifManifest?.version !== libheifRelease.wrapper) {
+    throw new Error(
+      `libheif-js ${libheifManifest?.version ?? 'is not installed'}; the notices record the sources of ${libheifRelease.wrapper}. Update libheifRelease with the libheif and libde265 sources of the new release.`,
+    );
+  }
   const occtLicenseDirectory = join(engineDirectory, 'licenses');
   const [tscircuitRecord, desktopRuntimeRecord, picoGkWorkerLock, lgpl, occtException, sourceRelink] =
     await Promise.all([
@@ -365,6 +442,7 @@ async function main(): Promise<void> {
       readFile(join(occtLicenseDirectory, 'OCCT-LGPL-exception.txt'), 'utf8'),
       readFile(join(occtLicenseDirectory, 'SOURCE-RELINK.json'), 'utf8'),
     ]);
+  const libheifLicense = splitLibheifLicense(await readFile(join(libheifDirectory, 'libheif-wasm/LICENSE'), 'utf8'));
   const desktopRuntime = JSON.parse(desktopRuntimeRecord) as DesktopRuntimeNotices;
   const drift = desktopRuntimeDrift(
     desktopRuntime,
@@ -383,6 +461,7 @@ async function main(): Promise<void> {
     lgpl,
     occtException,
     engine: { version: engineManifest.version, occtRevision: parseOcctRevision(sourceRelink) },
+    libheif: { version: libheifRelease.wrapper, ...libheifLicense },
   });
   console.log(`App closure: ${String(closure.length)} packages, ${String(packages.length)} third-party listed`);
 

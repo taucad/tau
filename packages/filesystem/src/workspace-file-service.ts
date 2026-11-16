@@ -1339,7 +1339,6 @@ export class WorkspaceFileService {
     resolved: Readonly<{ provider: FileSystemProvider; path: string }>,
     options?: Readonly<{ signal?: AbortSignal | undefined; scope?: WorkspaceScope | undefined }>,
   ): Promise<Uint8Array<ArrayBuffer>> {
-    const generation = this._projectIndexes.generationAt(canonicalPath);
     const bytes = await resolved.provider.readFile(resolved.path);
     /* The source answers by mount, as a rooted view's read asks it. */
     const root = options?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
@@ -1349,7 +1348,6 @@ export class WorkspaceFileService {
       root: root ?? canonicalPath,
       path: local,
       bytes,
-      generation,
       signal: options?.signal,
       stallMilliseconds: this._pendingStallMilliseconds,
     });

@@ -447,7 +447,6 @@ export class RootedViews {
       at: ReturnType<typeof resolveLocal>,
       signal?: AbortSignal,
     ): Promise<Readonly<{ bytes: Uint8Array<ArrayBuffer>; answer: Uint8Array<ArrayBuffer> }>> => {
-      const generation = projectIndexes.generationAt(at.authorityPath);
       const bytes = await at.resolution.provider.readFile(at.resolution.path);
       if (raw) {
         return { bytes, answer: bytes };
@@ -457,7 +456,6 @@ export class RootedViews {
         root,
         path: at.localPath,
         bytes,
-        generation,
         signal,
         stallMilliseconds,
       });
@@ -737,7 +735,8 @@ export class RootedViews {
        */
       const from = resolveLocal(source);
       const bytes = await from.resolution.provider.readFile(from.resolution.path);
-      const object = pendingObjectOf(bytes);
+      /* Only a marked placeholder is one: an unmarked pointer is a person's text, copied as it is. */
+      const object = markedAt(from.authorityPath, bytes.byteLength) === undefined ? undefined : pendingObjectOf(bytes);
       /* A copy of a marked placeholder is one too, so its stat agrees with its read. */
       const markCopy = (): void => {
         if (object !== undefined) {
@@ -748,9 +747,7 @@ export class RootedViews {
         /* Nothing is written yet: a copy stopped here leaves the target as it was. */
         options?.signal?.throwIfAborted();
         await writeFile(target, bytes);
-        if (!raw && markedAt(from.authorityPath, bytes.byteLength) !== undefined) {
-          markCopy();
-        }
+        markCopy();
         return;
       }
       const local = { object, pointer: bytes, localOnly: true } as const;

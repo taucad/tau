@@ -154,32 +154,26 @@ export const pendingObjectOf = (bytes: Uint8Array<ArrayBuffer>): PendingObject |
   }
 };
 
-/** The index's marks, as a read keeps them (see {@link readAsMarked}). @internal */
+/** The index's marks, as a read answers by them (see {@link readAsMarked}). @internal */
 export type PendingMarks = Readonly<{
-  pendingAt: (authorityPath: string) => PendingObject | undefined;
-  markPending: (
-    authorityPath: string,
-    object: PendingObject,
-    observed: Readonly<{ size: number; generation?: number | undefined }>,
-  ) => void;
+  pendingAt: (authorityPath: string, size?: number) => PendingObject | undefined;
   endPending: (authorityPath: string) => void;
   /** The first declaration of a root awaiting one that holds this path (see {@link untilDeclared}). */
   declarationAt: (authorityPath: string) => Promise<void> | undefined;
 }>;
 
 /**
- * What a non-raw view's read of one file answers (D9). A marked file reads
- * through to its object. The read also keeps the mark true to what it met, so
- * the next stat answers as it did: bytes that are no pointer, or a pointer the
- * source says is no placeholder, end a mark; an unmarked pointer is asked
- * about once, and marked when the source answers its object (a checkout edited
- * from outside between the revision layer's looks). Without a source an
- * unmarked pointer is the text it is.
+ * What a non-raw view's read of one file answers (D9): the marks are the whole
+ * answer. A marked file reads through to its object; anything else is the
+ * bytes it holds, an unmarked pointer among them, and no source is asked about
+ * it: an outside edit is the revision layer's next capture to declare. A
+ * marked file whose bytes are no pointer, or that the source says is no
+ * placeholder, loses its mark, so the next stat answers as this read did.
  *
  * @param marks - The index's marks.
  * @param source - The host's source.
- * @param read - The authority path read, its mount and its path under it, the bytes on disk, the entry's generation
- *   before the read, the caller's cancellation and the bound.
+ * @param read - The authority path read, its mount and its path under it, the bytes on disk, the caller's
+ *   cancellation and the bound.
  * @returns The bytes the path stands for.
  * @throws {PendingContentError} When a placeholder's object could not be had within the bound.
  * @internal
@@ -192,22 +186,22 @@ export const readAsMarked = async (
     root: string;
     path: string;
     bytes: Uint8Array<ArrayBuffer>;
-    generation?: number | undefined;
     signal?: AbortSignal | undefined;
     stallMilliseconds?: number | undefined;
   }>,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const { bytes, generation, signal, stallMilliseconds, ...at } = read;
+  const { bytes, signal, stallMilliseconds, ...at } = read;
   const object = pendingObjectOf(bytes);
   const awaiting = object === undefined ? undefined : marks.declarationAt(at.authorityPath);
-  if (awaiting !== undefined && marks.pendingAt(at.authorityPath) === undefined) {
+  if (awaiting !== undefined && marks.pendingAt(at.authorityPath, bytes.byteLength) === undefined) {
     await untilDeclared(awaiting, at.path, stallMilliseconds);
   }
-  const marked = marks.pendingAt(at.authorityPath);
-  if (object === undefined || (marked === undefined && source === undefined)) {
-    if (marked !== undefined) {
-      marks.endPending(at.authorityPath);
-    }
+  const marked = marks.pendingAt(at.authorityPath, bytes.byteLength);
+  if (marked === undefined) {
+    return bytes;
+  }
+  if (object === undefined) {
+    marks.endPending(at.authorityPath);
     return bytes;
   }
   const answered = await readThroughPending(
@@ -216,11 +210,7 @@ export const readAsMarked = async (
     { pointer: bytes, ...(signal === undefined ? {} : { signal }), stallMilliseconds },
   );
   if (answered === bytes) {
-    if (marked !== undefined) {
-      marks.endPending(at.authorityPath);
-    }
-  } else if (marked?.oid !== object.oid || marked.size !== object.size) {
-    marks.markPending(at.authorityPath, object, { size: bytes.byteLength, generation });
+    marks.endPending(at.authorityPath);
   }
   return answered;
 };

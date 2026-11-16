@@ -35,7 +35,11 @@ let service: WorkspaceFileService;
 /* The memory provider under the project, for a test that makes one of its calls fail. */
 let memory: FileSystemProvider;
 
-const createService = async (pendingStallMilliseconds?: number): Promise<WorkspaceFileService> => {
+/* A project whose `models/part.step` is a placeholder the revision layer declared, unless `declared` is false. */
+const createService = async (
+  pendingStallMilliseconds?: number,
+  options?: Readonly<{ declared?: boolean }>,
+): Promise<WorkspaceFileService> => {
   const providerRegistry = new ProviderRegistry();
   const scope = { backend: 'memory', storageRootKey: 'memory:pending-content' } as const;
   const provider = await providerRegistry.getProvider(scope);
@@ -52,16 +56,19 @@ const createService = async (pendingStallMilliseconds?: number): Promise<Workspa
   await created.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'gear' }], roots: [] });
   await created.writeFile(`${route}/main.scad`, 'import("models/part.step");');
   await created.writeFile(`${route}/models/part.step`, pointer);
+  if (options?.declared !== false) {
+    await declarePart(created);
+  }
   return created;
 };
 
 /* What the revision layer, the placeholders' only writer, declares of the checkout. */
-const declarePart = async (on: WorkspaceFileService): Promise<void> => {
+async function declarePart(on: WorkspaceFileService): Promise<void> {
   const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
   await on.createRootedFileSystem(route, undefined, { placeholders: 'raw' }).declarePending!(
     new Map([['models/part.step', placeholder]]),
   );
-};
+}
 
 beforeEach(async () => {
   service = await createService();
@@ -283,13 +290,24 @@ describe('marked placeholders (D9)', () => {
     expect(await view.readFile('models/part.step')).toStrictEqual(part);
   });
 
-  it('should answer a pointer nobody declared as the text it is, in a stat and a read alike', async () => {
-    const view = service.createRootedFileSystem(route);
+  /* Once declared, the marks are the whole answer: an outside edit is the next capture's to declare, not a read's. */
+  it('should answer a pointer nobody declared as the text it is, in a stat and a read alike, asking no source', async () => {
+    const plain = await createService(undefined, { declared: false });
+    const source = vi.fn<PendingObjectSource>(async () => part);
+    plain.setPendingObjectSource(source);
+    const view = plain.createRootedFileSystem(route);
     const stat = await view.stat('models/part.step');
     expect(stat).toMatchObject({ size: pointer.byteLength });
     expect(stat).not.toHaveProperty('pending');
     expect(await view.readFile('models/part.step')).toStrictEqual(pointer);
+    expect(await plain.readFile(`${route}/models/part.step`)).toStrictEqual(pointer);
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
+    expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
+    /* A copy of it is the text it is, too. */
+    await view.duplicate!('models/part.step', 'notes/copy.txt');
+    expect(await view.readFile('notes/copy.txt')).toStrictEqual(pointer);
+    expect(source).not.toHaveBeenCalled();
+    plain.dispose();
   });
 
   it('should refuse a declared placeholder whose object cannot be had, never answering the pointer (I7)', async () => {
@@ -298,22 +316,6 @@ describe('marked placeholders (D9)', () => {
     await expect(service.createRootedFileSystem(route).readFile('models/part.step')).rejects.toMatchObject({
       code: 'PENDING',
     });
-  });
-
-  /* A checkout edited from outside between the revision layer's looks: the read asks once, and the mark follows. */
-  it('should mark an undeclared pointer a read finds to be a placeholder, so the next stat agrees', async () => {
-    const source = vi.fn<PendingObjectSource>(async () => part);
-    service.setPendingObjectSource(source);
-    const view = service.createRootedFileSystem(route);
-    await view.statTree!('');
-    expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
-    expect(await view.readFile('models/part.step')).toStrictEqual(part);
-    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
-    /* A write replaces the pointer and ends the mark. */
-    await view.writeFile('models/part.step', 'mine');
-    const written = await view.stat('models/part.step');
-    expect(written).toMatchObject({ size: 4 });
-    expect(written).not.toHaveProperty('pending');
   });
 
   it('should end a mark the source says is no placeholder, so the next stat is the pointer', async () => {
@@ -352,8 +354,9 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     });
 
   it('should hold a file the size of a pointer until the revision layer declares the root, and no other', async () => {
-    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
-    const view = service.createRootedFileSystem(route);
+    const cold = await createService(undefined, { declared: false });
+    const raw = cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = cold.createRootedFileSystem(route);
     raw.awaitDeclaration!();
     expect(await view.stat('main.scad')).toMatchObject({ size: 27 });
     const statting = view.stat('models/part.step');
@@ -369,10 +372,11 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     /* Declared once, the marks alone answer. */
     await raw.writeFile('notes/pointer.txt', pointer);
     expect(await view.stat('notes/pointer.txt')).toMatchObject({ size: pointer.byteLength });
+    cold.dispose();
   });
 
   it('should refuse with PENDING, never answering a small file, when the word does not come within the bound', async () => {
-    const bounded = await createService(30);
+    const bounded = await createService(30, { declared: false });
     const raw = bounded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = bounded.createRootedFileSystem(route);
     raw.awaitDeclaration!();

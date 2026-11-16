@@ -46,17 +46,20 @@ export const workspaceFrameEndId = 'workspace-frame-end';
  * On a phone the lanes are not drawn: the phone frame is its own (A15c). Data slots are the frame rows' contract:
  * `[data-slot=workspace-frame]` and one `[data-slot=workspace-lane]` per lane.
  *
- * @param props - The project route's content, and whether the frame is drawn: off a project route (a suite that
- *   mounts the route with no app host) the same host element stays, with no frame, so the content keeps its tree
- *   position.
+ * @param props - The content, whether the frame is drawn, and whether it is drawn ahead of the route. The shell draws
+ *   it (`Page`, A15b2) on a project route and for a navigation to one; on any other route the same host element stays,
+ *   with no frame, so the content keeps its tree position.
  * @returns The frame with the content over it.
  */
 export function WorkspaceFrame({
   children,
   isDrawn = true,
+  isPending = false,
 }: {
   readonly children?: React.ReactNode;
   readonly isDrawn?: boolean;
+  /** The frame is drawn for a project the route has not committed yet: the content is still the page being left. */
+  readonly isPending?: boolean;
 }): React.JSX.Element {
   /* The document's URL, as the pre-paint script reads it: the frame also renders in suites with no router. */
   const wide = useSyncExternalStore(subscribeToNothing, readDocumentFrameHint, noHintOnServer);
@@ -74,8 +77,12 @@ export function WorkspaceFrame({
   return (
     <div
       data-slot='workspace-frame'
+      data-workspace-pending={isPending || undefined}
       className={cn(
         'size-full bg-background md:relative md:isolate',
+        /* A15b2: drawn ahead of the route, the frame shows alone; the page being left stays in place, unseen, until the
+         * route's commit replaces it. */
+        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes])]:invisible',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route

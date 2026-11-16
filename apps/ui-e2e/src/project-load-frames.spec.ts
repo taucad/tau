@@ -1095,9 +1095,14 @@ knownDefect('F4 (A11, A15b, P2): the server HTML for a project draws no sidebar 
 
 /*
  * F11, A15b half (programme control, 2026-11-13T14:40Z): S-nav took the root loader's half
- * (`root-revalidation.spec.ts`). This row holds the destination's own route module 3 s, the chunk a click from Home has
- * to load before the router commits, and asks that the click still commits the URL and paints the destination's
- * workspace frame within the acknowledge time (blueprint, § One timing ladder: 100 ms).
+ * (`root-revalidation.spec.ts`). This row holds the destination's code 3 s, both the project route module and the
+ * workspace chunk, and asks that the click still commits the URL and paints the destination's workspace frame within
+ * the acknowledge time (blueprint, § One timing ladder: 100 ms).
+ *
+ * A15b2: React Router commits only once the destination's route module has loaded, so the module is in the entry graph
+ * (`lib/eager-route-modules.ts`) and is never requested after Home has loaded. The forcing is therefore the workspace
+ * chunk's hold, which every click from Home meets: the route module's hold stays, and whether the module was requested
+ * at all is recorded, not required.
  */
 const acknowledgeMilliseconds = 100;
 
@@ -1109,10 +1114,10 @@ type DestinationFrameLoad = {
 };
 
 knownDefect(
-  'F11 (A15b): a click on a project row from Home, with the project route module 3 s late, commits the URL and paints the destination workspace frame within 100 ms',
+  'F11 (A15b): a click on a project row from Home, with the project route module and the workspace chunk 3 s late, commits the URL and paints the destination workspace frame within 100 ms',
   {
     artifact: 'f11-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async (): Promise<DestinationFrameLoad> => {
       await seedProjects('wide', { regions: { workspaceFrame } });
@@ -1130,6 +1135,7 @@ knownDefect(
       });
       precondition(routeChunk !== '', 'F11: the router manifest names no module for the project route');
       await delayRequests(routeChunk.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`), chunkDelay);
+      await delayWorkspaceChunk();
       await target.evaluate(() => {
         const record = globalThis as typeof globalThis & { __f11PushAt?: number };
         const push = history.pushState.bind(history);
@@ -1146,13 +1152,15 @@ knownDefect(
       await settleProject();
       const delayed = await readDelayedRequests();
       precondition(
-        delayed.some((url) => url.includes(routeChunk)),
-        `F11: the project route module (${routeChunk}) was never delayed: ${delayed.join(', ') || 'none'}`,
+        delayed.some((url) => new RegExp(workspaceChunk, 'u').test(url)),
+        `F11: the workspace chunk was never delayed: ${delayed.join(', ') || 'none'}`,
       );
+      /* Recorded, not required: the route module is in the entry graph, so this is normally false. */
+      const routeModuleRequested = delayed.some((url) => url.includes(routeChunk));
       const pushAt = await target.evaluate(
         () => (globalThis as typeof globalThis & { __f11PushAt?: number }).__f11PushAt,
       );
-      const record = await keepRecord('f11-wide', { routeChunk, pushAt });
+      const record = await keepRecord('f11-wide', { routeChunk, routeModuleRequested, pushAt });
       const click = record.marks.find((mark) => mark.name === 'click');
       precondition(click !== undefined, 'F11: the click was not marked');
       return { record, click: click!, pushAt, routeChunk };

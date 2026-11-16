@@ -33,6 +33,8 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { useDesktopFullscreen } from '#hooks/use-desktop-fullscreen.js';
 import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { useWorkspaceFrameState } from '#components/layout/use-workspace-frame-state.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
@@ -564,6 +566,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
   const { key: locationKey, pathname, hash } = useLocation();
+  const workspaceFrame = useWorkspaceFrameState();
   const navigationType = useNavigationType();
   const pageScrollRef = useRef<HTMLDivElement>(null);
   const previousPathnameRef = useRef(pathname);
@@ -710,11 +713,15 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                 {/* Outside the route's providers, so a route waiting on the file-manager worker still opens
                     it: its project sections read the focused session (A11). */}
                 <SettingsDialog />
-                <Compose components={Providers}>
-                  <RouteCommandPaletteItems />
-                  <HomeFileManagerNotice />
-                  <SectionContent error={error} />
-                </Compose>
+                {/* A15b2: the shell draws the workspace frame, above the route's providers, so a click on a project
+                    draws it before the route's commit and the commit only fills it (`useWorkspaceFrameState`). */}
+                <WorkspaceFrame isDrawn={workspaceFrame.drawn} isPending={workspaceFrame.pending}>
+                  <Compose components={Providers}>
+                    <RouteCommandPaletteItems />
+                    <HomeFileManagerNotice />
+                    <SectionContent error={error} />
+                  </Compose>
+                </WorkspaceFrame>
               </PhoneTopBarContext.Provider>
             </section>
           </SidebarInset>

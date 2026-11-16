@@ -825,6 +825,8 @@ const boxChanges = (entries: readonly ProjectLoadRegionEntry[]): string[] => {
 
 /** The persistent workspace frame A15b adds (blueprint: `R/workspace-frame*`, "the workspace-frame element"). */
 const workspaceFrame = '[data-slot="workspace-frame"]';
+/** The frame's lanes layer, which a pending frame shows over the hidden page being left (A15b2). */
+const frameLanes = '[data-slot="workspace-frame-lanes"]';
 /** The chat lane, by the history region it holds. */
 const chatLane = '[data-slot="floating-panel"]:has([role="region"][aria-label="Chat history"])';
 /** The entry chunk every page loads first: holding it holds hydration. */
@@ -1095,9 +1097,14 @@ knownDefect('F4 (A11, A15b, P2): the server HTML for a project draws no sidebar 
 
 /*
  * F11, A15b half (programme control, 2026-11-13T14:40Z): S-nav took the root loader's half
- * (`root-revalidation.spec.ts`). This row holds the destination's own route module 3 s, the chunk a click from Home has
- * to load before the router commits, and asks that the click still commits the URL and paints the destination's
- * workspace frame within the acknowledge time (blueprint, § One timing ladder: 100 ms).
+ * (`root-revalidation.spec.ts`). This row holds the destination's code 3 s, both the project route module and the
+ * workspace chunk, and asks that the click still commits the URL and paints the destination's workspace frame within
+ * the acknowledge time (blueprint, § One timing ladder: 100 ms).
+ *
+ * A15b2: React Router commits only once the destination's route module has loaded, so the module is in the entry graph
+ * (`lib/eager-route-modules.ts`) and is never requested after Home has loaded. The forcing is therefore the workspace
+ * chunk's hold, which every click from Home meets: the route module's hold stays, and whether the module was requested
+ * at all is recorded, not required.
  */
 const acknowledgeMilliseconds = 100;
 
@@ -1109,13 +1116,13 @@ type DestinationFrameLoad = {
 };
 
 knownDefect(
-  'F11 (A15b): a click on a project row from Home, with the project route module 3 s late, commits the URL and paints the destination workspace frame within 100 ms',
+  'F11 (A15b): a click on a project row from Home, with the project route module and the workspace chunk 3 s late, commits the URL and paints the destination workspace frame within 100 ms, in its final box',
   {
     artifact: 'f11-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async (): Promise<DestinationFrameLoad> => {
-      await seedProjects('wide', { regions: { workspaceFrame } });
+      await seedProjects('wide', { regions: { workspaceFrame, frameLanes } });
       await target.navigate('/');
       await target.expectVisible(composer, 60_000);
       await target.delay(settleWindow);
@@ -1130,6 +1137,7 @@ knownDefect(
       });
       precondition(routeChunk !== '', 'F11: the router manifest names no module for the project route');
       await delayRequests(routeChunk.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`), chunkDelay);
+      await delayWorkspaceChunk();
       await target.evaluate(() => {
         const record = globalThis as typeof globalThis & { __f11PushAt?: number };
         const push = history.pushState.bind(history);
@@ -1146,26 +1154,48 @@ knownDefect(
       await settleProject();
       const delayed = await readDelayedRequests();
       precondition(
-        delayed.some((url) => url.includes(routeChunk)),
-        `F11: the project route module (${routeChunk}) was never delayed: ${delayed.join(', ') || 'none'}`,
+        delayed.some((url) => new RegExp(workspaceChunk, 'u').test(url)),
+        `F11: the workspace chunk was never delayed: ${delayed.join(', ') || 'none'}`,
       );
+      /* Recorded, not required: the route module is in the entry graph, so this is normally false. */
+      const routeModuleRequested = delayed.some((url) => url.includes(routeChunk));
       const pushAt = await target.evaluate(
         () => (globalThis as typeof globalThis & { __f11PushAt?: number }).__f11PushAt,
       );
-      const record = await keepRecord('f11-wide', { routeChunk, pushAt });
+      const record = await keepRecord('f11-wide', { routeChunk, routeModuleRequested, pushAt });
       const click = record.marks.find((mark) => mark.name === 'click');
       precondition(click !== undefined, 'F11: the click was not marked');
       return { record, click: click!, pushAt, routeChunk };
     },
     assert: ({ record, click, pushAt }) => {
-      const frame = regionsOf(record, 'workspaceFrame').find((entry) => entry.present && entry.t >= click.t);
+      const drawn = regionsOf(record, 'workspaceFrame').filter((entry) => entry.present && entry.t >= click.t);
+      const frame = drawn[0];
+      /* The lanes as they stand in the frame's first frame: shown, not hidden with the page being left. */
+      const lanes = regionsOf(record, 'frameLanes').findLast((entry) => frame !== undefined && entry.t <= frame.t);
+      /* A15b2 review: drawn ahead of the route, the frame is already the destination's, one node in its final box, on
+       * screen, so the route's commit moves and replaces nothing. */
+      const settled = drawn.at(-1);
+      const moved = drawn.filter(
+        (entry) =>
+          entry.node !== settled?.node ||
+          entry.x !== settled.x ||
+          entry.y !== settled.y ||
+          entry.width !== settled.width ||
+          entry.height !== settled.height,
+      );
       expectMeasured(
         {
           pushWithin: pushAt !== undefined && pushAt - click.t <= acknowledgeMilliseconds,
           frameWithin: frame !== undefined && frame.t - click.t <= acknowledgeMilliseconds,
+          frameVisible: frame?.visible === true,
+          lanesVisible: lanes?.present === true && lanes.visible,
+          frameMoves: moved.map(
+            (entry) =>
+              `${describeFrame(entry)}: node ${entry.node} ${entry.x},${entry.y} ${entry.width}x${entry.height}`,
+          ),
         },
-        `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}`,
-        { pushWithin: true, frameWithin: true },
+        `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}, settling at ${settled === undefined ? 'none' : `node ${settled.node} ${settled.x},${settled.y} ${settled.width}x${settled.height}`}`,
+        { pushWithin: true, frameWithin: true, frameVisible: true, lanesVisible: true, frameMoves: [] },
       );
     },
   },

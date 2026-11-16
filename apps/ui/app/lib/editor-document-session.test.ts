@@ -25,6 +25,7 @@ function service(initial: string): {
 } {
   const content = mock<FileContentService>();
   content.addEditorSaveFlusher.mockReturnValue(() => undefined);
+  content.retain.mockReturnValue(() => undefined);
   let contentChange = (_event: ContentChangeEvent): void => undefined;
   let outcomeChange = (_event: OutcomeChangeEvent): void => undefined;
   content.resolve.mockResolvedValue(outcome(initial));

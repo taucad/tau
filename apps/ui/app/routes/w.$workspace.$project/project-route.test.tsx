@@ -566,6 +566,7 @@ vi.mock('#hooks/use-projects.js', () => ({
     ),
 }));
 const routeModule = await import('./project-route.js');
+const { WorkspaceFrame } = await import('./workspace-frame.js');
 const intentModule = await import('./project-route-intent.js');
 const sessionsModule = await import('./project-live-sessions.js');
 const { startFocusHost } = await import('#runtime/app-runtime-focus.fixture.js');
@@ -2457,16 +2458,19 @@ describe('project route shell identity (A0.7)', () => {
         <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <routeModule.ProjectSessionsHost>
             <ShellMarker />
-            <Routes>
-              <Route
-                path='/w/:workspace/:project'
-                element={
-                  <routeModule.ProjectRouteProviders>
-                    <sessionsModule.ProjectChatRoute />
-                  </routeModule.ProjectRouteProviders>
-                }
-              />
-            </Routes>
+            {/* A15b2: the shell hosts the workspace frame (`Page`), around the route's providers. */}
+            <WorkspaceFrame>
+              <Routes>
+                <Route
+                  path='/w/:workspace/:project'
+                  element={
+                    <routeModule.ProjectRouteProviders>
+                      <sessionsModule.ProjectChatRoute />
+                    </routeModule.ProjectRouteProviders>
+                  }
+                />
+              </Routes>
+            </WorkspaceFrame>
           </routeModule.ProjectSessionsHost>
         </SessionsProvider>
       </DataBrowserRouter>
@@ -2475,7 +2479,7 @@ describe('project route shell identity (A0.7)', () => {
     await flushTasks();
     /* Connecting: the shell is there and the content region holds the workspace frame, with nothing over it. */
     expect(shellNodes()).toHaveLength(1);
-    expect(document.querySelector('[data-slot="workspace-frame"]')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="workspace-frame"]')).toHaveLength(1);
     expect(screen.getByTestId('workspace-opening')).toBeInTheDocument();
     expect(screen.queryByTestId('focused-project')).not.toBeInTheDocument();
 

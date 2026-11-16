@@ -8,6 +8,7 @@ import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-con
 function createSession(): EditorDocumentSession {
   const content = mock<FileContentService>();
   content.addEditorSaveFlusher.mockReturnValue(() => undefined);
+  content.retain.mockReturnValue(() => undefined);
   content.onDidContentChange.mockReturnValue(() => undefined);
   content.onDidChangeOutcome.mockReturnValue(() => undefined);
   return new EditorDocumentSession({ contentService: content, projectId: 'declarations' });

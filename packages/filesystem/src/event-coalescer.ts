@@ -21,7 +21,8 @@
 import { commonAncestor, sharedOrigin, touchedDirectoriesOf } from '#change-event-bus.js';
 import type { ChangeSet, ChangeSetEntry, ChangeSetReset, ChangeSetSegment } from '#change-event-bus.js';
 import { copyEventAuthorities, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
-import type { PathChangeEvent } from '#types.js';
+import { parentDirectory } from '@taucad/utils/path';
+import type { ChangeEvent, PathChangeEvent } from '#types.js';
 
 /**
  * Configuration for {@link EventCoalescer}.
@@ -194,6 +195,13 @@ export class EventCoalescer {
 /**
  * Apply coalescing rules to a batch of events.
  *
+ * A file moved away from a path the batch later writes or moves onto again is
+ * only its arrival at the target: the move-aside of a revision write's
+ * replacement, whose path the publish refills. A write to a path the batch
+ * then moves away, with nothing after, is told by the move alone. So a
+ * replacement's four facts (stage, move aside, publish, drop the backup) net to
+ * the publish and the backup's removal (STO-25 SP2g).
+ *
  * Same originator across a merged path sequence preserves the tag via
  * {@link tagEventOrigin}; mixed originators (including untagged mixed with
  * tagged) leave the cloned survivor untagged so every bridge port receives
@@ -211,8 +219,41 @@ export function coalesceChangeEvents(events: PathChangeEvent[]): PathChangeEvent
   const indexedEvents: Array<{ index: number; event: PathChangeEvent }> = [];
   const renamedFromPaths = new Set<string>();
   const pathHistory = new Map<string, Array<{ index: number; event: PathChangeEvent }>>();
-
+  /* Per file path, the last fact that puts a file there and the last move away from it. */
+  const lastArrival = new Map<string, number>();
+  const lastMoveAway = new Map<string, number>();
   for (const [index, event] of events.entries()) {
+    switch (event.type) {
+      case 'fileWritten': {
+        lastArrival.set(event.path, index);
+        break;
+      }
+      case 'fileRenamed': {
+        lastArrival.set(event.newPath, index);
+        lastMoveAway.set(event.oldPath, index);
+        break;
+      }
+      case 'fileCopied': {
+        lastArrival.set(event.targetPath, index);
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }
+
+  for (const [index, original] of events.entries()) {
+    let event = original;
+    if (event.type === 'fileRenamed' && (lastArrival.get(event.oldPath) ?? -1) > index) {
+      const { newPath, backend, target } = event;
+      event = { type: 'fileWritten', path: newPath, backend, ...(target === undefined ? {} : { target }) };
+      copyEventAuthorities(original, event);
+      const origin = getEventOrigin(original);
+      if (origin !== undefined) {
+        tagEventOrigin(event, origin);
+      }
+    }
     if (event.type === 'directoryChanged') {
       indexedEvents.push({ index, event });
       continue;
@@ -244,6 +285,10 @@ export function coalesceChangeEvents(events: PathChangeEvent[]): PathChangeEvent
     if (collapsed.type === 'fileDeleted' && renamedFromPaths.has(path)) {
       continue;
     }
+    /* Written, then moved away with nothing after: the move says it all. */
+    if (collapsed.type === 'fileWritten' && history.at(-1)!.index < (lastMoveAway.get(path) ?? -1)) {
+      continue;
+    }
 
     indexedEvents.push({ index: history.at(-1)!.index, event: collapsed });
   }
@@ -266,6 +311,150 @@ function getEventPath(event: PathChangeEvent): string | undefined {
     }
   }
 }
+
+/** The paths a fact names that its change leaves unknown: never a copy's untouched source. */
+type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', string>>;
+
+/**
+ * A re-list of a whole subtree that stands for a directory removal an
+ * overflowed window netted: the directory went and came back within the lost
+ * window. It is a worker-side shape only, never a wire fact, so a copy keeps
+ * it and every consumer has to say what it means: a port rooted beneath it
+ * reads it as its whole-root reset, any other port as `directoryChanged`.
+ * @public
+ */
+export type SubtreeReset = Readonly<{ type: 'subtreeReset'; path: string; backend: PathChangeEvent['backend'] }>;
+
+/**
+ * What {@link overflowLossSignals} answers: change facts and {@link SubtreeReset}s.
+ * @public
+ */
+export type LossSignal = PathChangeEvent | SubtreeReset;
+
+/**
+ * What a coalescing window that overflowed is replaced with: a
+ * `directoryChanged` for each directory a discarded fact touched — a file's
+ * parent, a directory itself beside its parent — which every consumer reads as
+ * a reset of that subtree, and a `backendChanged` only for a backend that
+ * really changed. Nothing is silently dropped (I5) and nothing a discarded fact
+ * named still reads as it was (I7), but a large write into one folder no longer
+ * resets every root on the bus. A directory is named itself so a fact at a
+ * rooted connection's own root still resets that root once scoped, and a
+ * discarded removal or move of a directory is kept as itself, ahead of the
+ * re-lists: a connection rooted beneath it reads that as its whole-root reset,
+ * where an ancestor's re-list says only that the ancestor's listing changed.
+ * When the window fills the removed path again, the directory's re-list stands
+ * for the removal instead (a {@link SubtreeReset}), so no open file under it
+ * reads as gone (I7) while a connection beneath it still resets.
+ *
+ * @param discarded - The facts the window discarded, in order.
+ * @returns The loss signals, in the order their directories first appeared.
+ * @public
+ */
+export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): LossSignal[] => {
+  const kept = new Map<string, PathChangeEvent>();
+  const signals = new Map<string, LossSignal>();
+  /* Directories a netted removal leaves to their re-list, which must still reach every port beneath them. */
+  const subtrees: Array<{ backend: PathChangeEvent['backend']; path: string }> = [];
+  const named = (event: PathChangeEvent): string[] => {
+    const { path, oldPath, newPath, targetPath } = event as NamedPaths;
+    return [path, oldPath, newPath, targetPath].filter((value) => value !== undefined);
+  };
+  /* Per fact, whether a later fact of its backend names a path at or under the one it removes. */
+  const filledLater = new Set<string>();
+  const netted = Array.from<boolean>({ length: discarded.length });
+  for (let index = discarded.length - 1; index >= 0; index -= 1) {
+    const event = discarded[index]!;
+    if (event.type === 'directoryDeleted' || event.type === 'directoryRenamed') {
+      const removed = event.type === 'directoryDeleted' ? event.path : event.oldPath;
+      netted[index] = filledLater.has(`${event.backend}\0${removed}`);
+    }
+    for (const path of named(event)) {
+      for (let at = path; !filledLater.has(`${event.backend}\0${at}`); at = parentDirectory(at)) {
+        filledLater.add(`${event.backend}\0${at}`);
+        if (at === '/') {
+          break;
+        }
+      }
+    }
+  }
+  for (const event of discarded) {
+    if (event.type === 'backendChanged') {
+      signals.set(event.backend, event);
+    }
+  }
+  for (const [index, event] of discarded.entries()) {
+    if (signals.has(event.backend)) {
+      continue;
+    }
+    if (event.type === 'directoryDeleted' || event.type === 'directoryRenamed') {
+      /* Something lands at or under the removed directory later in the window: told as gone, its open
+       * files would flash orphaned until their re-list (I7), so the re-list alone carries it. */
+      if (netted[index] === true) {
+        for (const path of named(event)) {
+          subtrees.push({ backend: event.backend, path });
+        }
+      } else {
+        kept.set(`${event.type}\0${event.backend}\0${named(event).join('\0')}`, event);
+      }
+    }
+    for (const path of named(event)) {
+      for (const directory of event.type.startsWith('directory')
+        ? [parentDirectory(path), path]
+        : [parentDirectory(path)]) {
+        const key = `${event.backend}\0${directory}`;
+        if (!signals.has(key)) {
+          signals.set(key, { type: 'directoryChanged', path: directory, backend: event.backend });
+        }
+      }
+    }
+  }
+  for (const { backend, path } of subtrees) {
+    const key = `${backend}\0${path}`;
+    if (signals.get(key)?.type === 'directoryChanged') {
+      signals.set(key, { type: 'subtreeReset', path, backend });
+    }
+  }
+  return [...[...kept.values()].filter(({ backend }) => !signals.has(backend)), ...signals.values()];
+};
+
+/** A directory and every directory above it, in its own root spelling (`''` scoped, `/` absolute). */
+const selfAndAncestors = (path: string): string[] => {
+  const chain = [path];
+  for (let at = path; at !== '' && at !== '/'; ) {
+    const separator = at.lastIndexOf('/');
+    at = separator > 0 ? at.slice(0, separator) : separator === 0 ? '/' : '';
+    chain.push(at);
+  }
+  return chain;
+};
+
+/**
+ * One delivery's directory summaries without repeats: a summary is dropped when
+ * the same directory, or a directory above it, is summarized again later in the
+ * delivery, since that later re-list reads everything the earlier one would.
+ * Every other fact keeps its place.
+ *
+ * @param events - One delivery's facts, in order, in one path namespace.
+ * @returns The facts with covered summaries removed; the same array when none is.
+ * @public
+ */
+export const pruneDirectorySummaries = (events: readonly PathChangeEvent[]): readonly PathChangeEvent[] => {
+  const later = new Set<string>();
+  const covered = new Set<number>();
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type !== 'directoryChanged') {
+      continue;
+    }
+    const key = (path: string): string => `${event.backend}\0${path}`;
+    if (selfAndAncestors(event.path).some((path) => later.has(key(path)))) {
+      covered.add(index);
+    }
+    later.add(key(event.path));
+  }
+  return covered.size === 0 ? events : events.filter((_, index) => !covered.has(index));
+};
 
 /**
  * Schedules one callback and returns its cancel; the default is the next animation frame.
@@ -504,3 +693,19 @@ export class ChangeSetCoalescer {
     }
   }
 }
+
+/**
+ * One port's delivery as the one message it crosses the wire as: the fact
+ * itself when there is one, a `changeSet` envelope otherwise, with covered
+ * summaries pruned ({@link pruneDirectorySummaries}).
+ *
+ * @param facts - One port's facts from one delivery, in order (at least one).
+ * @returns The message to emit.
+ * @public
+ */
+export const deliveryMessage = (facts: readonly LossSignal[]): ChangeEvent => {
+  const pruned = pruneDirectorySummaries(
+    facts.map((fact): PathChangeEvent => (fact.type === 'subtreeReset' ? { ...fact, type: 'directoryChanged' } : fact)),
+  );
+  return pruned.length === 1 ? pruned[0]! : { type: 'changeSet', entries: [...pruned] };
+};

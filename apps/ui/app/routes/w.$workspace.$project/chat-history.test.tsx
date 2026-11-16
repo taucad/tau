@@ -888,6 +888,20 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     }
   });
 
+  /* Review round 10: a pushed entry on the document's project (the archive, then a chat) is a later wait. */
+  it('times a load on a pushed entry of the document project from its own start', () => {
+    globalThis.history.replaceState(null, '', '/w/acme/bracket?chat=archived');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.stubGlobal('navigation', { activation: { entry: { key: 'loaded' } }, currentEntry: { key: 'pushed' } });
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    try {
+      renderOverDeferredTranscript(history);
+      expect(revealDelay()).toBe(1000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('times a return to the document project, after leaving it, from its own start', () => {
     const clock = freshPerformanceClock();
     globalThis.history.replaceState(null, '', '/w/acme/bracket');

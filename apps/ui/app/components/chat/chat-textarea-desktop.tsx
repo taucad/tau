@@ -460,7 +460,12 @@ export const ChatTextareaDesktop = memo(function ({
      * its own commit, so the content lands in a microtask after it. */
     let isCurrent = true;
     queueMicrotask(() => {
-      if (isCurrent && !editor.isDestroyed) {
+      if (!isCurrent || editor.isDestroyed) {
+        return;
+      }
+      /* The editor may hold this text by now (a painted draft written at its handover, with its caret): nothing to do. */
+      const latest = extractContent(editor);
+      if (latest.text !== inputText || chipCount > latest.contextChips.length) {
         editor.commands.setContent(buildEditorContentJson(segments), {
           emitUpdate: false,
         });
@@ -560,9 +565,15 @@ export const ChatTextareaDesktop = memo(function ({
     const isPaintedDraftTaken = onEarlyInputAdopted?.() ?? false;
     if (earlyInput.edited && extractContent(editor).text !== earlyInput.text) {
       editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: true });
-    } else if (isPaintedDraftTaken && earlyInput.prefilled && extractContent(editor).text === '') {
+    } else if (
+      (isPaintedDraftTaken || inputText === earlyInput.text) &&
+      earlyInput.prefilled &&
+      extractContent(editor).text === ''
+    ) {
       /* A painted draft stays in the box while the draft takes it (`onEarlyInputAdopted`), not written as an edit, so
-       * the chat's record still wins when it lands (P-a: nothing leaves and comes back on arrival). */
+       * the chat's record still wins when it lands (P-a: nothing leaves and comes back on arrival). A record already
+       * read with the same text is written now too, rather than in the draft sync's microtask, so the painted caret
+       * and selection are carried below. */
       editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: false });
       paintedTextRef.current = earlyInput.text;
     }
@@ -585,7 +596,7 @@ export const ChatTextareaDesktop = memo(function ({
     }
     // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
     editor.view.focus();
-  }, [editor, earlyInput, enableAutoFocus, onEarlyInputAdopted]);
+  }, [editor, earlyInput, enableAutoFocus, onEarlyInputAdopted, inputText]);
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.

@@ -149,12 +149,12 @@ type HistoryEntryNavigation = Readonly<{
  * Whether the page is on the history entry its document loaded, as the Navigation API says: a `replaceState` keeps the
  * entry's key, so the route's rewrites (`?chat=`, canonical slugs) leave it the same entry.
  *
- * @returns `true` on the document's own entry, `false` on another or where the API is missing.
+ * @returns `true` on the document's own entry, `false` on another, `undefined` where the API is missing.
  */
-const isOnDocumentEntry = (): boolean => {
+const isOnDocumentEntry = (): boolean | undefined => {
   const { navigation } = globalThis as { navigation?: HistoryEntryNavigation };
   const loaded = navigation?.activation?.entry?.key;
-  return loaded !== undefined && loaded === navigation?.currentEntry?.key;
+  return loaded === undefined ? undefined : loaded === navigation?.currentEntry?.key;
 };
 
 /**
@@ -166,8 +166,9 @@ const isOnDocumentEntry = (): boolean => {
 const isOnDocumentProject = (): boolean => {
   /* The history entry first: the route corrects the URL's slugs to the canonical ones with `replaceState`, which keeps
    * the entry but changes the project's path. */
-  if (isOnDocumentEntry()) {
-    return true;
+  const isDocumentEntry = isOnDocumentEntry();
+  if (isDocumentEntry !== undefined) {
+    return isDocumentEntry;
   }
   const [entry] = globalThis.performance.getEntriesByType('navigation');
   if (entry === undefined) {

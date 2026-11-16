@@ -806,6 +806,56 @@ describe('expected entries (D10)', () => {
     },
   );
 
+  /*
+   * STO-25: a listing taken before a tree write announced its entries holds none of its arriving rows, and nothing on
+   * disk changes where only arriving rows go. So the announcement tells each watch over them to re-list, as the end
+   * does, and a tree listed early shows every entry the write will land, never missing (I7).
+   */
+  it('should tell every watch over a tree write’s arriving rows to re-list when it announces them', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    const before = await view.readdirWithStats!('');
+    expect(before.map((row) => row.name)).not.toContain('README.md');
+    const sets: ChangeSet[] = [];
+    const stop = view.watchChangeSets!({ paths: [''], recursive: false }, (set) => {
+      sets.push(set);
+    });
+    await raw.expectEntries!([
+      { path: 'main.scad', size: 27, arriving: false },
+      { path: 'README.md', size: 12, arriving: true },
+      { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+    ]);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    stop();
+    expect(sets.map((set) => set.reset?.prefix)).toStrictEqual(['']);
+    const after = await view.readdirWithStats!('');
+    expect(
+      after
+        .filter((row) => row.arriving === true)
+        .map((row) => row.name)
+        .toSorted(),
+    ).toStrictEqual(['README.md', 'lib']);
+    raw.endExpectation!();
+  });
+
+  it('should tell no watch to re-list when a tree write announces only entries already on disk', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    const sets: ChangeSet[] = [];
+    const stop = view.watchChangeSets!({ paths: [''], recursive: true }, (set) => {
+      sets.push(set);
+    });
+    await raw.expectEntries!([{ path: 'main.scad', size: 27, arriving: false }]);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    stop();
+    expect(sets).toStrictEqual([]);
+    raw.endExpectation!();
+  });
+
   it('should know a tree write’s entries in a cold root’s index and answer when they have landed', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);
     service.setPendingObjectSource(source);

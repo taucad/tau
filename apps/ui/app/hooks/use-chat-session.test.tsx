@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { act, render, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { StrictMode, Suspense, useEffect, useState } from 'react';
@@ -125,6 +126,12 @@ function createWrapper() {
     return <ChatSessionStoreProvider>{children}</ChatSessionStoreProvider>;
   };
 }
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('useChatSession', () => {
   beforeEach(() => {

@@ -464,6 +464,7 @@ const {
 const actualWorkspace = await vi.importActual<typeof ProjectWorkspaceContext>(
   '#routes/w.$workspace.$project/project-workspace-context.js',
 );
+const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 
 describe('hidden workbench operation panels', () => {
   it.each([
@@ -2434,9 +2435,9 @@ describe('Workbench file reconciliation', () => {
         <Lifecycle>
           <MemoryRouter>
             <KeyboardProvider>
-              <actualWorkspace.ProjectWorkspaceProvider>
+              <ProjectWorkspaceProvider>
                 <MountedWorkbench />
-              </actualWorkspace.ProjectWorkspaceProvider>
+              </ProjectWorkspaceProvider>
             </KeyboardProvider>
           </MemoryRouter>
         </Lifecycle>,

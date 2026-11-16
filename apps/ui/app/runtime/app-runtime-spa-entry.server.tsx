@@ -11,7 +11,7 @@
 import { isbot } from 'isbot';
 import { renderToReadableStream } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
-import type { AppLoadContext, EntryContext } from 'react-router';
+import type { EntryContext } from 'react-router';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
@@ -22,7 +22,8 @@ export default async function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  _loadContext: AppLoadContext,
+  // The SPA builds run no server middleware, so React Router's context here is a plain object nothing reads.
+  _loadContext: unknown,
 ): Promise<Response> {
   if (request.method.toUpperCase() === 'HEAD') {
     return new Response(null, { status: responseStatusCode, headers: responseHeaders });

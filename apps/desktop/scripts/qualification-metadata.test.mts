@@ -53,8 +53,15 @@ for (const route of ['windows-nsis', 'macos-zip', 'macos-dmg', 'linux-apt', 'lin
     channel: 'staging',
   } as const;
   assertQualificationConsumerScope(input);
+  if (route === 'windows-nsis') {
+    assert.throws(() => {
+      assertQualificationConsumerScope({ ...input, channel: 'production' });
+    }, /staging platform scope/u);
+  } else {
+    assertQualificationConsumerScope({ ...input, channel: 'production' });
+  }
   for (const change of [
-    { channel: 'production' },
+    { channel: 'preview' },
     { scope: 'all' },
     { scope: undefined },
     { scope: linux ? 'macos' : 'linux' },

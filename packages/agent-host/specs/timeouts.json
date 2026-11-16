@@ -1034,6 +1034,14 @@
       "owner": "W10"
     },
     {
+      "id": "E40",
+      "bound": "Agent media transcode: one host-runtime conversion of an ACP image is aborted after 30 s and the image is filed as sent",
+      "site": "packages/host/src/acp/media.ts",
+      "token": "transcodeTimeout",
+      "class": "External edge",
+      "owner": "composer-image-format-support WP6"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",

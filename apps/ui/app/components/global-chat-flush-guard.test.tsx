@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { render } from '@testing-library/react';
@@ -139,6 +140,12 @@ beforeEach(() => {
 afterEach(() => {
   unloadEnvironment?.stop();
   unloadEnvironment = undefined;
+});
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
 });
 
 describe('GlobalChatFlushGuard', () => {

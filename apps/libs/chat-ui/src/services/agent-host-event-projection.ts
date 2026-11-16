@@ -528,8 +528,10 @@ const toolChunkFacts = (
     ...(call?.status === 'completed' || call?.status === 'failed' ? { status: call.status } : {}),
     ...(external ? { origin: 'external' } : {}),
     ...(typeof agentId === 'string' ? { agentId } : {}),
-    // Grok omits nativeName; its qualified Tau tool name is already canonical.
-    ...(presentation === 'tau-mcp' ? { presentation, nativeName: call?.nativeName ?? message.toolName } : {}),
+    /* A Tau MCP row's own tool name is the canonical Tau name for every adapter;
+     * `call.nativeName` is the adapter's spelling (Claude's `mcp__tau__test_model`,
+     * nothing for Grok) and older durable rows still carry it. */
+    ...(presentation === 'tau-mcp' ? { presentation, nativeName: message.toolName } : {}),
   };
   const tau = durable as ToolChunkMetadata;
   return {

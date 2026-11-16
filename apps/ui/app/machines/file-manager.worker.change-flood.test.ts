@@ -1,3 +1,6 @@
+// @vitest-environment node
+/* Node, not jsdom: the transferred port hands back Node's `Uint8Array`, which a
+ * jsdom realm's wire validation refuses, and every content read would fail. */
 /**
  * What a cold open's tree write costs the page (STO-25 SP2g).
  *
@@ -280,7 +283,6 @@ const harness = async (): Promise<Harness> => {
 /** The revision layer's own tree write over the checkout the worker gives it. */
 const materialize = async (service: WorkspaceFileService, target: ImmutableRevisionTree): Promise<void> => {
   const checkout = service.createRootedFileSystem(root, undefined, { placeholders: 'raw' });
-  let temporary = 0;
   const { materializeTree } = createApplyTreeEffects({
     useFileSystem: async (_place, operation) => operation(checkout),
     capture: async () => captureRevisionTree(checkout, { exclude: (path) => path.startsWith('.git') }),
@@ -288,9 +290,10 @@ const materialize = async (service: WorkspaceFileService, target: ImmutableRevis
     policy: tauPathPolicy,
     withCheckoutFence: async (_checkoutId, operation) => operation(),
     checkoutTreeId: async () => 'tree',
+    /* The production spelling (`revision-effects.ts`): a dot-prefixed sibling named by a UUID. */
     temporarySibling: (path, role) => {
-      temporary += 1;
-      return `${path}.tau-${role}.${String(temporary)}.tmp`;
+      const separator = path.lastIndexOf('/');
+      return `${path.slice(0, separator + 1)}.${path.slice(separator + 1)}.tau-${role}.${crypto.randomUUID()}.tmp`;
     },
     unlinkIfPresent: async (filesystem, path) => {
       await filesystem.unlink(path).catch(() => undefined);
@@ -354,6 +357,33 @@ const showTree = async (fileTree: FileTreeService): Promise<void> => {
   );
 };
 
+const shownDirectories = (): string[] => [
+  '',
+  'parts',
+  ...Array.from({ length: directoryCount }, (_, group) => groupPath(group)),
+];
+
+/** Every shown directory's rows, by name. */
+const shownListings = async (fileTree: FileTreeService): Promise<Record<string, string[]>> =>
+  Object.fromEntries(
+    shownDirectories().map((directory) => [
+      directory,
+      (fileTree.listDirectorySync(directory) ?? []).map(({ name }) => name).toSorted(),
+    ]),
+  );
+
+/** The same directories as the checkout holds them. */
+const diskListings = async (service: WorkspaceFileService): Promise<Record<string, string[]>> => {
+  const checkout = service.createRootedFileSystem(root, undefined, { placeholders: 'raw' });
+  const listed = await Promise.all(
+    shownDirectories().map(async (directory) => {
+      const names = await checkout.readdir(directory);
+      return [directory, names.filter((name) => !name.startsWith('.git')).toSorted()] as const;
+    }),
+  );
+  return Object.fromEntries(listed);
+};
+
 describe('a tree write across the worker boundary (STO-25 SP2g)', () => {
   it('should hand the page a cold open’s 2,000 files in bounded deliveries', async () => {
     const fixture = await harness();
@@ -392,9 +422,16 @@ describe('a tree write across the worker boundary (STO-25 SP2g)', () => {
       expect(delta.backendChanged).toBe(0);
       expect(fixture.read).not.toContain('main.scad');
       /* The open document the write replaced is re-read; no file it replaced ever reads as gone (I7). */
-      expect(fixture.read).toContain(partPath(7));
+      /* At most twice: its move aside and its publish land in separate change sets, and a
+       * read the second one overtakes must run again. */
+      expect(fixture.read.filter((path) => path === partPath(7)).length).toBeGreaterThanOrEqual(1);
+      expect(fixture.read.filter((path) => path === partPath(7)).length).toBeLessThanOrEqual(2);
       expect(delta.orphanFlips).toBe(0);
       expect(delta.outcomes).toBeLessThanOrEqual(2);
+      /* What the page holds is what landed: the replaced document's new text and every listing as on disk (I5). */
+      const replaced = fixture.content.peekOutcome(partPath(7));
+      expect(replaced.kind === 'text' ? new TextDecoder().decode(replaced.content) : replaced.kind).toBe('sphere(7);');
+      expect(await shownListings(fixture.tree)).toEqual(await diskListings(fixture.service));
     },
     60_000,
   );

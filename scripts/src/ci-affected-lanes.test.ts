@@ -164,6 +164,7 @@ describe('ci.yml affected-only lanes', () => {
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue' },
+      'e2e-queue': { targets: ['test:e2e:queue'], pr: 'queue' },
     });
   });
 
@@ -226,6 +227,7 @@ describe('ci.yml affected-only lanes', () => {
       'billing-e2e',
       'shell',
       'formal-nightly',
+      'e2e-queue',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -1048,12 +1050,13 @@ describe('queue-verdict action', () => {
 });
 
 describe('plan lane selection', () => {
-  /** A project of the fixture graph: its root, tags and target names. */
+  /** A project of the fixture graph: its root, tags, target names and any target's configuration. */
   type Node = {
     readonly root: string;
     readonly type?: string;
     readonly tags?: readonly string[];
     readonly targets?: readonly string[];
+    readonly config?: Record<string, unknown>;
   };
   // Every tag and target a selector names exists, as the plan requires; the API family is one app and two
   // libraries, and `core` is a library the API depends on (affected through a dependency only).
@@ -1087,6 +1090,14 @@ describe('plan lane selection', () => {
       targets: ['test:native-darwin'],
     },
     sandbox: { root: 'libs/sandbox', type: 'lib', tags: ['ci:shell'], targets: ['test:shell-conformance'] },
+    'ui-e2e': {
+      root: 'apps/ui-e2e',
+      targets: ['test:e2e', 'test:e2e:development', 'test:e2e:daemon-host', 'test:e2e:queue'],
+      config: {
+        'test:e2e': { metadata: { shards: 12 } },
+        'test:e2e:queue': { executor: 'nx:noop', dependsOn: ['test:e2e:daemon-host', 'test:e2e:development'] },
+      },
+    },
     host: {
       root: 'packages/host',
       type: 'lib',
@@ -1103,7 +1114,13 @@ describe('plan lane selection', () => {
       affected,
       files,
       selectors = planStep?.env?.['LANE_SELECTORS'] ?? '',
-    }: { readonly affected: readonly string[]; readonly files: readonly string[]; readonly selectors?: string },
+      graphNodes = nodes,
+    }: {
+      readonly affected: readonly string[];
+      readonly files: readonly string[];
+      readonly selectors?: string;
+      readonly graphNodes?: Record<string, Node>;
+    },
   ): {
     readonly status: number | undefined;
     readonly stdout: string;
@@ -1115,7 +1132,7 @@ describe('plan lane selection', () => {
       const graph = {
         graph: {
           nodes: Object.fromEntries(
-            Object.entries(nodes).map(([name, node]) => [
+            Object.entries(graphNodes).map(([name, node]) => [
               name,
               {
                 name,
@@ -1123,7 +1140,9 @@ describe('plan lane selection', () => {
                 data: {
                   root: node.root,
                   tags: node.tags ?? [],
-                  targets: Object.fromEntries((node.targets ?? []).map((target) => [target, {}])),
+                  targets: Object.fromEntries(
+                    (node.targets ?? []).map((target) => [target, node.config?.[target] ?? {}]),
+                  ),
                 },
               },
             ]),
@@ -1340,6 +1359,54 @@ describe('plan lane selection', () => {
     const { status, stderr } = plan('merge_group', { affected: everything, files: [], selectors });
     expect(status).not.toBe(0);
     expect(stderr).toContain('lane selectors name a pull-request rule other than queue or touched');
+  });
+
+  it('should run one row per ratcheted suite of an affected project in the merge queue and none on a pull request', () => {
+    const queue = plan('merge_group', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['e2e-queue']).toBe('true');
+    expect(JSON.parse(queue.outputs['e2e-queue-suites'] ?? '')).toEqual([
+      {
+        project: 'ui-e2e',
+        target: 'test:e2e:daemon-host',
+        label: 'ui-e2e test:e2e:daemon-host',
+        slug: 'ui-e2e-test-e2e-daemon-host',
+      },
+      {
+        project: 'ui-e2e',
+        target: 'test:e2e:development',
+        label: 'ui-e2e test:e2e:development',
+        slug: 'ui-e2e-test-e2e-development',
+      },
+    ]);
+    const pullRequest = plan('pull_request', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
+    expect(pullRequest.status, pullRequest.stderr).toBe(0);
+    expect(pullRequest.outputs['e2e-queue']).toBe('false');
+    expect(pullRequest.outputs['e2e-queue-suites']).toBe('[]');
+    const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['e2e-queue']).toBe('false');
+    expect(unrelated.outputs['e2e-queue-suites']).toBe('[]');
+  });
+
+  it.each([
+    [['^test:e2e'], 'depends on "^test:e2e", which is not a target of ui-e2e'],
+    [['csharp-language:prepare'], 'depends on "csharp-language:prepare", which is not a target of ui-e2e'],
+    [[{ target: 'test:e2e:development' }], 'which is not a target of ui-e2e'],
+    [['test:e2e'], 'ui-e2e:test:e2e declares shards; the e2e-queue lane runs a suite as one job'],
+  ])('should fail the plan when a ratchet lists %j', (dependsOn, message) => {
+    const endToEnd = nodes['ui-e2e'];
+    const graphNodes = {
+      ...nodes,
+      'ui-e2e': {
+        ...endToEnd,
+        root: endToEnd?.root ?? '',
+        config: { ...endToEnd?.config, 'test:e2e:queue': { dependsOn } },
+      },
+    };
+    const { status, stderr } = plan('merge_group', { affected: ['ui-e2e'], files: [], graphNodes });
+    expect(status).not.toBe(0);
+    expect(stderr).toContain(message);
   });
 });
 

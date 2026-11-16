@@ -53,7 +53,7 @@ import {
 import { metaConfig } from '#constants/meta.constants.js';
 import { allocateSlug, projectNameToSlug } from '@taucad/ui-core/utils/project-directory.utils';
 import { toStorageWriteError, WorkspaceIdentityConflictError } from '@taucad/ui-core/filesystem/workspace-errors';
-import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
+import { probeHomeOpfs } from '@taucad/files-ui/filesystem/home-opfs-probe';
 import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';

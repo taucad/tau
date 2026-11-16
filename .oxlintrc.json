@@ -1105,12 +1105,14 @@
       "files": [
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       // Tests and route entries retain the uncompiled React Router/Vitest transform paths.
       "excludeFiles": [
         "apps/ui/app/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{test,spec}.{ts,tsx}",
+        "apps/libs/files-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{test,spec}.{ts,tsx}",
         "apps/ui/app/root.{ts,tsx}",
         "apps/ui/app/routes/*.{ts,tsx}",
@@ -1683,6 +1685,7 @@
       "files": [
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       "rules": {
@@ -1696,6 +1699,7 @@
       "files": [
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": ["**/*.{test,spec}.{ts,tsx}", "**/*.test-harness.{ts,tsx}", "**/*.stories.{ts,tsx}"],
@@ -1709,6 +1713,7 @@
       "files": [
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
+        "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
         "packages/ui/src/**/*.{ts,tsx}"
       ],
@@ -1741,6 +1746,7 @@
       "files": [
         "apps/ui/app/**/*.tsx",
         "apps/libs/project-workspace/src/**/*.tsx",
+        "apps/libs/files-ui/src/**/*.tsx",
         "apps/libs/ui-core/src/**/*.tsx",
         "packages/ui/src/**/*.tsx"
       ],

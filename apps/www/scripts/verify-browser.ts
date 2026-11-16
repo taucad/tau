@@ -41,7 +41,11 @@ try {
   assert.match(html, /<h1[ >]/u);
   assert.match(html, /rel="canonical" href="https:\/\/tau.new\/"/u);
   assert.match(html, /content="index,follow"/u);
-  assert.match(response.headers.get('content-security-policy') ?? '', /nonce-/u);
+  const policy = response.headers.get('content-security-policy') ?? '';
+  assert.match(policy, /nonce-/u);
+  // Production hosts only: the UI's marketing edge function selects staging's for taucad.dev.
+  assert.match(policy, /connect-src 'self' https:\/\/api\.tau\.new[ ;]/u);
+  assert.doesNotMatch(/connect-src [^;]*/u.exec(policy)?.[0] ?? '', /taucad\.dev/u);
   const missing = await fetch(`${origin}/missing-page`);
   assert.equal(missing.status, 404);
   const sitemap = await fetch(`${origin}/sitemap.xml`);

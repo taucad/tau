@@ -38,7 +38,7 @@ vi.mock('#components/ui/floating-panel.js', () => {
   };
 });
 
-vi.mock('#components/filesystem/workspace-directory-panel.js', () => ({
+vi.mock('@taucad/files-ui/components/filesystem/workspace-directory-panel', () => ({
   WorkspaceDirectoryPanel: ({ onConnect }: { onConnect?: () => void }) => (
     <button type='button' onClick={onConnect}>
       Reconnect

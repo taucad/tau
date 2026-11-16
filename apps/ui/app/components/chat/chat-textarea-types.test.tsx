@@ -613,13 +613,27 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     };
   };
 
-  const stubBytes = new TextEncoder().encode('stub');
+  // Intake labels a file from its bytes (I1), so each fixture holds the header of what it claims to be.
+  const stubBytes = new TextEncoder().encode('%PDF-1.7\n');
+  const pngBytes = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00,
+    0x30, 0x00, 0x00, 0x00, 0x20, 0x08, 0x02, 0x00, 0x00, 0x00,
+  ]);
+  const jpegBytes = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x20, 0x00, 0x30, 0x03, 0x01, 0x22, 0x00,
+  ]);
+  const webpBytes = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x1a, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4c, 0x0d, 0x00, 0x00,
+    0x00, 0x2f, 0x2f, 0xc0, 0x07, 0x00,
+  ]);
 
-  const makeFile = (name: string, type = 'image/png'): File => {
+  const makeFile = (name: string, type = 'image/png', bytes?: Uint8Array<ArrayBuffer>): File => {
+    const content =
+      bytes ?? (type === 'application/pdf' ? stubBytes : type.startsWith('image/') ? pngBytes : stubBytes);
     // The jsdom File has no `arrayBuffer`; every browser the app supports does.
     return Object.assign(new File([new Blob(['stub'])], name, { type }), {
       __taggedAs: name,
-      arrayBuffer: async () => new Uint8Array(stubBytes).buffer,
+      arrayBuffer: async () => new Uint8Array(content).buffer,
     });
   };
 
@@ -845,6 +859,69 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     ]);
     expect(event.preventDefault).toHaveBeenCalledOnce();
     expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('should attach a picked JPEG whose declared type is empty, labelled image/jpeg', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+    const input = { files: [makeFile('small.jpg', '', jpegBytes)], value: 'C:\\fakepath\\small.jpg' };
+
+    act(() => {
+      result.current.handleFileChange({ target: input } as unknown as React.ChangeEvent<HTMLInputElement>);
+    });
+
+    await waitFor(() => {
+      expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledOnce();
+    });
+    expect(chatActionsMock.addDraftAttachment.mock.calls[0]?.[0]).toBe('data:image/jpeg;base64,RAW_small.jpg');
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('should attach a pasted JPEG whose declared type is empty, labelled image/jpeg', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+    const event = buildClipboardEvent([makeFile('small.jpg', '', jpegBytes)]);
+
+    act(() => {
+      expect(result.current.handlePaste(event)).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledOnce();
+    });
+    expect(chatActionsMock.addDraftAttachment.mock.calls[0]?.[0]).toBe('data:image/jpeg;base64,RAW_small.jpg');
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('should label a dropped WebP named .jpg and typed image/jpeg as image/webp', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(buildDragEvent([makeFile('photo.jpg', 'image/jpeg', webpBytes)]));
+    });
+
+    expect(chatActionsMock.addDraftAttachment.mock.calls.map(([source]) => source)).toEqual([
+      'data:image/webp;base64,RAW_photo.jpg',
+    ]);
+  });
+
+  it('should refuse a dropped file whose bytes are not a stored type, whatever its declared type', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(
+        buildDragEvent([makeFile('IMG_0001.jpg', 'image/jpeg', new TextEncoder().encode('....ftypheic'))]),
+      );
+    });
+
+    expect(chatActionsMock.addDraftAttachment).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('Only images and PDFs are supported');
   });
 
   it('should reject direct image adds when the selected model is text-only', () => {

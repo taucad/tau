@@ -24,7 +24,7 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
+import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
 import { getWorkspace, listWorkspaces, requestHandlePermission } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';

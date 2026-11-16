@@ -37,8 +37,8 @@ import {
   bestRouteForActiveKernel,
   deriveAvailableFormats,
   exportDocumentWithValidatedInput,
-} from '#utils/export-formats.utils.js';
-import type { AppRuntimeExportRoute } from '#utils/export-formats.utils.js';
+} from '@taucad/files-ui/utils/export-formats.utils';
+import type { AppRuntimeExportRoute } from '@taucad/files-ui/utils/export-formats.utils';
 import { ExportPane, ExportSchemaForm as SharedExportSchemaForm } from '@taucad/workbench-panes/export/export-pane';
 import type { ExportSchemaFormProps } from '@taucad/workbench-panes/export/export-pane';
 import {

@@ -3,7 +3,7 @@ import { Plus } from 'lucide-react';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { Loader } from '@taucad/ui/components/loader';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
-import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
+import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
 import {
   checkHandlePermission,
   getWorkspace,

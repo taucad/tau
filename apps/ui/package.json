@@ -56,6 +56,7 @@
     "@taucad/csharp-language": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
+    "@taucad/files-ui": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",

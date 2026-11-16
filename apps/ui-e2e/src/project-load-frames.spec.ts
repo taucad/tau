@@ -642,7 +642,7 @@ knownDefect(
   'M1: on a 390 by 844 reload with the workspace chunk 3 s late, first contentful paint is within 100 ms of first paint',
   {
     artifact: 'm1-phone',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone');
@@ -1171,19 +1171,28 @@ knownDefect(
   },
 );
 
-/** The phone frame's four parts (blueprint P-h). */
+/**
+ * The phone frame's four parts (blueprint P-h), whatever draws them: the phone workspace's own, or, until each
+ * arrives, the workspace frame's part in its box (A15c). This is the rows' contract with the frame, as
+ * `workspaceLanes` is at wide size: each part of the phone frame carries `data-frame-part` inside
+ * `[data-slot="workspace-frame-phone"]`. The recorder keeps the first visible match, so a part that gave way to the
+ * live one is not read.
+ */
+/** The phone workspace's own sheet, once it is drawn. */
+const livePhoneSheet = '[role="dialog"]:has([aria-label="Drawer height"])';
+const phoneFramePart = (part: string): string => `[data-slot="workspace-frame-phone"] [data-frame-part="${part}"]`;
 const phoneFrameRegions = {
-  topBar: '[data-slot="mobile-project-top-bar"]',
-  viewer: '[data-slot="viewer-stage"]',
-  sheet: '[role="dialog"]:has([aria-label="Drawer height"])',
-  tabBar: 'nav[aria-label="Workbench"]',
+  topBar: `[data-slot="mobile-project-top-bar"], ${phoneFramePart('top-bar')}`,
+  viewer: `[data-slot="viewer-stage"], ${phoneFramePart('viewer')}`,
+  sheet: `${livePhoneSheet}, ${phoneFramePart('sheet')}`,
+  tabBar: `nav[aria-label="Workbench"], ${phoneFramePart('tab-bar')}`,
 } as const;
 
 knownDefect(
-  'F5 (A15c): on a 390 by 844 reload with the workspace chunk 3 s late, the top bar, viewer, sheet and tab bar hold their final boxes from the first frame, with no skeleton and no sheet animation',
+  'F5 (A15c): on a 390 by 844 reload with the workspace chunk 3 s late, the top bar, viewer, sheet and tab bar hold their final boxes from the first frame, with no skeleton in them and no sheet animation',
   {
     artifact: 'f5-phone',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone', { regions: phoneFrameRegions });
@@ -1193,7 +1202,7 @@ knownDefect(
           .getByRole('navigation', { name: 'Workbench' })
           .getByRole('button', { name: 'Parameters', exact: true }),
       );
-      await target.expectVisible(selectors.getByCss(phoneFrameRegions.sheet), 30_000);
+      await target.expectVisible(selectors.getByCss(livePhoneSheet), 30_000);
       await target.delay(settleWindow);
       await delayWorkspaceChunk();
       await target.reload();
@@ -1227,14 +1236,21 @@ knownDefect(
         ];
       });
       const sheetAnimations = regionsOf(record, 'sheet').filter((entry) => entry.animations > 0);
+      /* Under the 2026-11-15 ruling (#2307) a skeleton in final geometry is allowed, so the sidebar sheet's held
+       * Recents and chat rows do not count: the phone frame's own four parts draw none. */
+      const partSkeletons = Object.keys(phoneFrameRegions).flatMap((name) =>
+        regionsOf(record, name)
+          .filter((entry) => entry.skeletons > 0)
+          .map((entry) => `${name} ${describeEntry(entry)}`),
+      );
       expectMeasured(
         {
           moved: moved.slice(0, 6),
-          skeletonFrames: record.skeletonFrames.length,
+          partSkeletons: partSkeletons.slice(0, 6),
           sheetAnimations: sheetAnimations.map((entry) => describeEntry(entry)),
         },
-        'F5: a part of the phone frame was absent or away from its settled box, a skeleton was drawn, or the sheet animated',
-        { moved: [], skeletonFrames: 0, sheetAnimations: [] },
+        'F5: a part of the phone frame was absent or away from its settled box, drew a skeleton, or the sheet animated',
+        { moved: [], partSkeletons: [], sheetAnimations: [] },
       );
     },
   },

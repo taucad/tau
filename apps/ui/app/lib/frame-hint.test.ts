@@ -7,10 +7,17 @@ import {
   frameHintStorageKey,
   frameHintVariableNames,
   frameHintVariables,
+  frameTabAttribute,
+  phoneFrameDestination,
+  phoneFrameHintVariableNames,
+  phoneFrameHintVariables,
+  readPhoneFrameHint,
   readWideFrameHint,
+  writePhoneFrameHint,
   writeWideFrameHint,
 } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
+import { mobilePanelIds } from '@taucad/ui-core/constants/editor.constants';
 
 const workbenchClosed: WideFrameHint = {
   chatOpen: true,
@@ -18,6 +25,19 @@ const workbenchClosed: WideFrameHint = {
   workbenchOpen: false,
   workbenchWidth: 420,
   compactAuxiliary: 'chat',
+};
+
+/** Run the pre-paint script at `pathname` and read back the phone variables and the tab it left on `<html>`. */
+const runPhoneScriptAt = (pathname: string): Record<string, string> => {
+  runScriptAt(pathname);
+  const html = document.documentElement;
+  const tab = html.getAttribute(frameTabAttribute);
+  return Object.fromEntries([
+    ...phoneFrameHintVariableNames
+      .map((name) => [name, html.style.getPropertyValue(name)] as const)
+      .filter(([, value]) => value !== ''),
+    ...(tab === null ? [] : [[frameTabAttribute, tab] as const]),
+  ]);
 };
 
 /** Run the pre-paint script at `pathname` and read back the variables it left on `<html>`. */
@@ -40,6 +60,7 @@ describe('frame hint', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     document.documentElement.removeAttribute('style');
+    document.documentElement.removeAttribute(frameTabAttribute);
   });
 
   afterEach(() => {
@@ -167,5 +188,75 @@ describe('frame hint', () => {
       projects: Record<string, unknown>;
     };
     expect(Object.keys(stored.projects)).toHaveLength(frameHintProjectLimit);
+  });
+
+  // ── A15c: the phone shape ──
+
+  it('derives the same phone variables and tab as the script for every surface', () => {
+    for (const tab of mobilePanelIds) {
+      writePhoneFrameHint('home/one', tab);
+      document.documentElement.removeAttribute('style');
+      document.documentElement.removeAttribute(frameTabAttribute);
+      const phone = readPhoneFrameHint('home/one');
+
+      expect(phone?.tab).toBe(tab);
+      expect(runPhoneScriptAt('/w/home/one')).toEqual({
+        ...phoneFrameHintVariables(phone!),
+        [frameTabAttribute]: phoneFrameDestination(tab),
+      });
+    }
+  });
+
+  it('records the detent the sheet opens at: full for the Editor, half for any other surface', () => {
+    writePhoneFrameHint('home/one', 'editor');
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'editor', snap: 1 });
+    expect(phoneFrameHintVariables(readPhoneFrameHint('home/one')!)['--frame-sheet-height']).toBe('calc(1 * 100dvh)');
+
+    writePhoneFrameHint('home/one', 'chat');
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'chat', snap: 0.5 });
+
+    writePhoneFrameHint('home/one', 'viewer');
+    expect(phoneFrameHintVariables(readPhoneFrameHint('home/one')!)).toEqual({
+      '--frame-sheet-display': 'none',
+      '--frame-sheet-height': '0px',
+    });
+  });
+
+  it('keeps the wide layout when the phone layout is written, and the phone layout when the wide one is', () => {
+    writeWideFrameHint('home/one', workbenchClosed, 1);
+    writePhoneFrameHint('home/one', 'parameters', 2);
+    writeWideFrameHint('home/one', { ...workbenchClosed, chatWidth: 500 }, 3);
+
+    expect(readWideFrameHint('home/one')).toEqual({ ...workbenchClosed, chatWidth: 500 });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'parameters', snap: 0.5 });
+    expect(runScriptAt('/w/home/one')).toEqual(frameHintVariables({ ...workbenchClosed, chatWidth: 500 }));
+    expect(runPhoneScriptAt('/w/home/one')).toEqual({
+      '--frame-sheet-display': 'flex',
+      '--frame-sheet-height': 'calc(0.5 * 100dvh)',
+      [frameTabAttribute]: 'parameters',
+    });
+  });
+
+  it('keeps a phone-only entry, which sets no wide variable', () => {
+    writePhoneFrameHint('home/one', 'chat');
+
+    expect(readWideFrameHint('home/one')).toBeUndefined();
+    expect(runScriptAt('/w/home/one')).toEqual({});
+    expect(runPhoneScriptAt('/w/home/one')[frameTabAttribute]).toBe('chat');
+  });
+
+  it.each([
+    ['an unknown surface', { tab: 'gallery', snap: 0.5 }],
+    ['an unknown detent', { tab: 'chat', snap: 0.7 }],
+    ['a layout that is not an object', 'chat'],
+  ])('ignores a phone layout holding %s and still applies the wide one', (_name, phone) => {
+    globalThis.localStorage.setItem(
+      frameHintStorageKey,
+      JSON.stringify({ v: 1, projects: { 'home/one': { usedAt: 1, wide: workbenchClosed, phone } } }),
+    );
+
+    expect(readPhoneFrameHint('home/one')).toBeUndefined();
+    expect(runPhoneScriptAt('/w/home/one')).toEqual({});
+    expect(runScriptAt('/w/home/one')).toEqual(frameHintVariables(workbenchClosed));
   });
 });

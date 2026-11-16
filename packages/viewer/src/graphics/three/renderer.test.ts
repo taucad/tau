@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ThreeModule from 'three';
 import type * as ThreeWebGpuModule from 'three/webgpu';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { GraphicsContextUnavailableError } from '#graphics/graphics-backend.js';
 /* eslint-disable @typescript-eslint/naming-convention -- stub class + module-export property names mirror three.js's WebGPURenderer/WebGLRenderer spellings */
 
 /**
@@ -33,6 +34,11 @@ const hoisted = vi.hoisted(() => {
     /** The queue never reports the first frame's work done. */
     workDoneStalls: false,
     presentedFrames: 0,
+    /**
+     * `getContext('webgl2')` answers `null`: the node renderer ends on Three's WebGL 2 backend with no context and its
+     * start rejects reading extensions from it, and the classic renderer throws while it creates its context.
+     */
+    webGlContextUnavailable: false,
   };
 });
 
@@ -42,12 +48,17 @@ vi.mock('three/webgpu', async (importOriginal) => {
     public readonly setTransparentSort = vi.fn();
     public readonly setOpaqueSort = vi.fn();
     public readonly setRenderObjectFunction = vi.fn();
-    public readonly backend = new actual.WebGPUBackend();
+    public backend: object = new actual.WebGPUBackend();
     public readonly dispose = vi.fn();
     public get coordinateSystem() {
       return hoisted.nativeBackend ? actual.WebGPUCoordinateSystem : actual.WebGLCoordinateSystem;
     }
     public readonly init = vi.fn(async () => {
+      if (hoisted.webGlContextUnavailable) {
+        // What Three's WebGL 2 backend (forced, or the fallback from WebGPU) does with a `null` context.
+        this.backend = { isWebGLBackend: true, gl: null };
+        throw new TypeError("Cannot read properties of null (reading 'getSupportedExtensions')");
+      }
       if (hoisted.initializationError) {
         throw hoisted.initializationError;
       }
@@ -128,6 +139,9 @@ vi.mock('three', async (importOriginal) => {
     public readonly parameters: { canvas: HTMLCanvasElement };
 
     public constructor(parameters: { canvas: HTMLCanvasElement }) {
+      if (hoisted.webGlContextUnavailable) {
+        throw new Error('Error creating WebGL context.');
+      }
       this.parameters = parameters;
       this.domElement = parameters.canvas;
       hoisted.createdRenderers.push({
@@ -158,6 +172,7 @@ describe('createRenderer', () => {
     hoisted.presentationThrows = false;
     hoisted.workDoneStalls = false;
     hoisted.presentedFrames = 0;
+    hoisted.webGlContextUnavailable = false;
   });
 
   // First in this file: no test before it has reported a canvas loss to the shared module.
@@ -276,6 +291,31 @@ describe('createRenderer', () => {
     expect(hoisted.createdRenderers[0]?.dispose).not.toHaveBeenCalled();
   });
 
+  it('should reject a viewport without a WebGL 2 context as unavailable, not as a WebGPU failure to retry on WebGL', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    hoisted.webGlContextUnavailable = true;
+
+    for (const backend of ['webgl', 'webgpu'] as const) {
+      const creation = createRenderer('viewport', backend, {
+        canvas: document.createElement('canvas'),
+        nodePipeline: true,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each backend's rejection is checked in turn.
+      await expect(creation).rejects.toBeInstanceOf(GraphicsContextUnavailableError);
+      // oxlint-disable-next-line no-await-in-loop -- each backend's rejection is checked in turn.
+      await expect(creation).rejects.not.toBeInstanceOf(WebGpuInitializationError);
+    }
+  });
+
+  it('should reject a classic WebGL renderer without a context as unavailable', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    hoisted.webGlContextUnavailable = true;
+
+    const creation = createRenderer('offscreen', 'webgl', document.createElement('canvas'));
+    await expect(creation).rejects.toBeInstanceOf(GraphicsContextUnavailableError);
+    await expect(creation).rejects.toHaveProperty('cause.message', 'Error creating WebGL context.');
+  });
+
   describe('reversed-Z transparent sort wiring', () => {
     it('should register reversedDepthTransparentSort on the WebGPU viewport renderer', async () => {
       const { createRenderer } = await import('#graphics/three/renderer.js');
@@ -349,6 +389,7 @@ describe('createRenderer showcase preset', () => {
     hoisted.presentationThrows = false;
     hoisted.workDoneStalls = false;
     hoisted.presentedFrames = 0;
+    hoisted.webGlContextUnavailable = false;
   });
 
   it('should present one frame on a presented WebGPU showcase canvas, and none on WebGL, offscreen or readback-only', async () => {
@@ -431,5 +472,22 @@ describe('createRenderer showcase preset', () => {
     expect(hoisted.createdRenderers.at(0)?.options).toMatchObject({
       powerPreference: 'low-power',
     });
+  });
+
+  it('should reject a showcase without a WebGL 2 context as unavailable instead of a null-context TypeError', async () => {
+    const { createRenderer } = await import('#graphics/three/renderer.js');
+    hoisted.webGlContextUnavailable = true;
+
+    for (const backend of ['webgl', 'webgpu'] as const) {
+      const creation = createRenderer('showcase', backend, {
+        canvas: document.createElement('canvas'),
+        powerPreference: 'low-power',
+        presented: true,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- each backend's rejection is checked in turn.
+      await expect(creation).rejects.toBeInstanceOf(GraphicsContextUnavailableError);
+      // oxlint-disable-next-line no-await-in-loop -- each backend's rejection is checked in turn.
+      await expect(creation).rejects.toHaveProperty('cause.name', 'TypeError');
+    }
   });
 });

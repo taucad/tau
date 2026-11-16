@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fc from 'fast-check';
-import { EventCoalescer, coalesceChangeEvents, overflowLossSignals } from '#event-coalescer.js';
+import {
+  EventCoalescer,
+  coalesceChangeEvents,
+  overflowLossSignals,
+  pruneDirectorySummaries,
+} from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
 import type { PathChangeEvent } from '#types.js';
 
@@ -594,8 +599,15 @@ describe('overflowLossSignals', () => {
         { type: 'fileCopied', sourcePath: '/p/src/three.scad', targetPath: '/p/c/three.scad', backend: testBackend },
         { type: 'directoryDeleted', path: '/p/gone', backend: testBackend },
         { type: 'directoryRenamed', oldPath: '/p/d', newPath: '/q/d', backend: testBackend },
-      ]).map((event) => ('path' in event ? event.path : event.type)),
-    ).toEqual(['/p/a', '/p/b', '/p/c', '/p', '/p/gone', '/p/d', '/q', '/q/d']);
+      ]),
+    ).toEqual([
+      /* A removal or move is a fact the port's scoping needs as itself: above a root it resets that root. */
+      { type: 'directoryDeleted', path: '/p/gone', backend: testBackend },
+      { type: 'directoryRenamed', oldPath: '/p/d', newPath: '/q/d', backend: testBackend },
+      ...['/p/a', '/p/b', '/p/c', '/p', '/p/gone', '/p/d', '/q', '/q/d'].map(
+        (path): PathChangeEvent => ({ type: 'directoryChanged', path, backend: testBackend }),
+      ),
+    ]);
   });
 
   it('should keep a discarded backendChanged as its backend’s whole signal, and scope every other backend', () => {
@@ -609,5 +621,42 @@ describe('overflowLossSignals', () => {
       { type: 'backendChanged', backend: testBackend },
       { type: 'directoryChanged', path: '/b', backend: 'opfs' },
     ]);
+  });
+});
+
+describe('pruneDirectorySummaries', () => {
+  const summary = (path: string, backend = testBackend): PathChangeEvent => ({
+    type: 'directoryChanged',
+    path,
+    backend,
+  });
+
+  it('should keep one summary per directory, at its last place', () => {
+    expect(pruneDirectorySummaries([summary('/a'), written('/a/x'), summary('/a')])).toEqual([
+      written('/a/x'),
+      summary('/a'),
+    ]);
+  });
+
+  it('should drop a summary a later summary of an ancestor covers', () => {
+    expect(
+      pruneDirectorySummaries([summary('a/b'), written('a/b/x'), summary('a'), summary('c'), summary('')]),
+    ).toEqual([written('a/b/x'), summary('')]);
+    expect(pruneDirectorySummaries([summary('/a/b'), summary('/')])).toEqual([summary('/')]);
+  });
+
+  it('should keep a summary no later ancestor covers, and one of another backend', () => {
+    const events = [summary('/a'), summary('/a/b'), summary('/ab'), summary('/a/c', 'opfs')];
+    expect(pruneDirectorySummaries([...events, summary('/', 'opfs')])).toEqual([
+      summary('/a'),
+      summary('/a/b'),
+      summary('/ab'),
+      summary('/', 'opfs'),
+    ]);
+  });
+
+  it('should return the same facts when no summary repeats or is covered', () => {
+    const events = [written('/a'), summary('/b'), deleted('/c')];
+    expect(pruneDirectorySummaries(events)).toBe(events);
   });
 });

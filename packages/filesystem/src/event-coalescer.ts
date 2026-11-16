@@ -323,13 +323,17 @@ type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', 
  * really changed. Nothing is silently dropped (I5) and nothing a discarded fact
  * named still reads as it was (I7), but a large write into one folder no longer
  * resets every root on the bus. A directory is named itself so a fact at a
- * rooted connection's own root still resets that root once scoped.
+ * rooted connection's own root still resets that root once scoped, and a
+ * discarded removal or move of a directory is kept as itself, ahead of the
+ * re-lists: a connection rooted beneath it reads that as its whole-root reset,
+ * where an ancestor's re-list says only that the ancestor's listing changed.
  *
  * @param discarded - The facts the window discarded, in order.
  * @returns The loss signals, in the order their directories first appeared.
  * @public
  */
 export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): PathChangeEvent[] => {
+  const kept = new Map<string, PathChangeEvent>();
   const signals = new Map<string, PathChangeEvent>();
   for (const event of discarded) {
     if (event.type === 'backendChanged') {
@@ -341,6 +345,9 @@ export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): Path
       continue;
     }
     const { path, oldPath, newPath, targetPath } = event as NamedPaths;
+    if (event.type === 'directoryDeleted' || event.type === 'directoryRenamed') {
+      kept.set(`${event.type}\0${event.backend}\0${path ?? `${oldPath!}\0${newPath!}`}`, event);
+    }
     for (const named of [path, oldPath, newPath, targetPath]) {
       if (named === undefined) {
         continue;
@@ -355,7 +362,45 @@ export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): Path
       }
     }
   }
-  return [...signals.values()];
+  return [...[...kept.values()].filter(({ backend }) => !signals.has(backend)), ...signals.values()];
+};
+
+/** A directory and every directory above it, in its own root spelling (`''` scoped, `/` absolute). */
+const selfAndAncestors = (path: string): string[] => {
+  const chain = [path];
+  for (let at = path; at !== '' && at !== '/'; ) {
+    const separator = at.lastIndexOf('/');
+    at = separator > 0 ? at.slice(0, separator) : separator === 0 ? '/' : '';
+    chain.push(at);
+  }
+  return chain;
+};
+
+/**
+ * One delivery's directory summaries without repeats: a summary is dropped when
+ * the same directory, or a directory above it, is summarized again later in the
+ * delivery, since that later re-list reads everything the earlier one would.
+ * Every other fact keeps its place.
+ *
+ * @param events - One delivery's facts, in order, in one path namespace.
+ * @returns The facts with covered summaries removed; the same array when none is.
+ * @public
+ */
+export const pruneDirectorySummaries = (events: readonly PathChangeEvent[]): readonly PathChangeEvent[] => {
+  const later = new Set<string>();
+  const covered = new Set<number>();
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type !== 'directoryChanged') {
+      continue;
+    }
+    const key = (path: string): string => `${event.backend}\0${path}`;
+    if (selfAndAncestors(event.path).some((path) => later.has(key(path)))) {
+      covered.add(index);
+    }
+    later.add(key(event.path));
+  }
+  return covered.size === 0 ? events : events.filter((_, index) => !covered.has(index));
 };
 
 /**

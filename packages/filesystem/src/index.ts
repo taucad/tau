@@ -151,6 +151,7 @@ export {
   EventCoalescer,
   coalesceChangeEvents,
   overflowLossSignals,
+  pruneDirectorySummaries,
   ChangeSetCoalescer,
   mergeChangeSets,
   nextFrame,

@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
 import {
   classesOwningRoute,
+  routeClassOfRouteId,
   isStaticShellPath,
   netlifyFunctionExcludedPaths,
   netlifyShellRedirects,
@@ -296,5 +297,20 @@ describe('skew protection on a shell response', () => {
     );
     // `netlify.toml` header rules do not apply to function responses, so `.data` and `/preview` keep their pin.
     expect(route('/w/home/bracket-v2.data')).toStrictEqual({ kind: 'function' });
+  });
+});
+
+describe('routeClassOfRouteId (RR7)', () => {
+  it.each([
+    { routeId: 'routes/w.$workspace.$project', classId: 'project' },
+    { routeId: 'routes/_index', classId: 'home' },
+    { routeId: 'routes/projects_.new', classId: 'app-page' },
+    { routeId: 'routes/health.live', classId: 'resource' },
+    { routeId: 'routes/manifest[.webmanifest]', classId: 'public-file' },
+    { routeId: 'routes/[__e2e].geospec-runner', classId: 'fixture' },
+    { routeId: 'root', classId: undefined },
+    { routeId: 'routes/not-a-route', classId: undefined },
+  ])('should name $routeId as $classId, a file route by its name without the extension', ({ routeId, classId }) => {
+    expect(routeClassOfRouteId(routeId)?.id).toBe(classId);
   });
 });

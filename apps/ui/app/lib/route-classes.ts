@@ -208,6 +208,25 @@ export const classesOwningRoute = (entry: string): RouteClass[] =>
     routeClass.routes.some((owned) => (owned.endsWith('*') ? entry.startsWith(owned.slice(0, -1)) : entry === owned)),
   );
 
+/**
+ * The class that owns a React Router route id (`routes/<entry>`, a file entry named without its extension), as
+ * `useMatches()` reports it: the class `tau.load` measures carry (React Router 8 migration RR7).
+ *
+ * @param routeId - A route id.
+ * @returns The owning class, or `undefined` for the root and an unregistered id.
+ */
+export const routeClassOfRouteId = (routeId: string): RouteClass | undefined => {
+  if (!routeId.startsWith('routes/')) {
+    return undefined;
+  }
+  const entry = routeId.slice('routes/'.length);
+  return routeClasses.find((routeClass) =>
+    routeClass.routes.some((owned) =>
+      owned.endsWith('*') ? entry.startsWith(owned.slice(0, -1)) : owned.replace(/\.tsx?$/u, '') === entry,
+    ),
+  );
+};
+
 const escapeRegExp = (text: string): string => text.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
 
 /**

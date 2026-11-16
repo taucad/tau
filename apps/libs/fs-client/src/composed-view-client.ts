@@ -154,7 +154,10 @@ const treeNode = (row: DirectoryStatRow): FileTreeNode => {
   if (row.type === 'dir') {
     return { ...common, children: [] };
   }
-  /* A tree row carries a known classification and never reads for one (I3). */
+  /* A tree row carries a known classification and never reads for one (I3); a pending one has none (I7). */
+  if (row.pending === true) {
+    return { ...common, pending: true };
+  }
   return row.contentKind === undefined ? common : { ...common, contentKind: row.contentKind };
 };
 

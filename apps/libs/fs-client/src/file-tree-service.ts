@@ -1921,6 +1921,7 @@ export class FileTreeService {
       isLoaded,
       ...fileMetadataFields(entry),
       ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+      ...(entry.pending === true ? { pending: true } : {}),
     };
   }
 
@@ -1946,6 +1947,7 @@ export class FileTreeService {
       current.size !== next.size ||
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
+      current.pending !== next.pending ||
       !sameProvenance(current.provenance, next.provenance) ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );

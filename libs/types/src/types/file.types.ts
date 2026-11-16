@@ -69,6 +69,8 @@ export type FileTreeEntry =
       name: string;
       type: 'file';
       size: number;
+      /** A pending entry (see {@link FileStat}): its bytes are not here yet, so it is shown arriving, never as text. */
+      pending?: true;
     } & StatContentMetadata);
 
 /**

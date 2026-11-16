@@ -795,6 +795,26 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     vi.useRealTimers();
   });
 
+  /* STO-25, I7: a row a tree write has yet to land is pending until a re-list finds it on disk. */
+  it('keeps a listed row pending until a re-list finds the file on disk', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, disposeChannel } = createTreeHarness();
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+      { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 0, pending: true },
+    ]);
+    await tree.listDirectory('');
+    expect(tree.getTreeSnapshot().get('a.ts')).toMatchObject({ type: 'file', size: 5, pending: true });
+    vi.mocked(proxy.readDirectory).mockResolvedValueOnce([{ id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 0 }]);
+
+    tree.scheduleRefresh('');
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(tree.getTreeSnapshot().get('a.ts')).not.toHaveProperty('pending');
+    tree.dispose();
+    disposeChannel();
+    vi.useRealTimers();
+  });
+
   it('clears an exact count when a head re-list shows the file moved', async () => {
     vi.useFakeTimers();
     const { tree, proxy, disposeChannel } = createTreeHarness();

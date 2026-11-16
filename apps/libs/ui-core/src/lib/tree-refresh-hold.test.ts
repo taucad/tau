@@ -161,6 +161,22 @@ describe('holdTreeRefreshesWhileApplying', () => {
     dispose();
   });
 
+  /* Readiness is monotonic only within one tree: a second tree write inside one hold reads treeReady, then entryReady. */
+  it('should re-read through the hold on each entry into entryReady within one hold', () => {
+    const source = createSource();
+    const { tree, pauses, readsThrough } = createTree();
+    holdTreeRefreshesWhileApplying({ client: source.client, tree, root: '/projects/alpha' });
+
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'treeReady' });
+    expect(readsThrough()).toBe(1);
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+    source.publish(['/projects/alpha'], { checkoutRoot: '/projects/alpha', readiness: 'entryReady' });
+
+    expect(readsThrough()).toBe(2);
+    expect(pauses()).toBe(1);
+  });
+
   it('should not re-read through the hold for another checkout’s readiness', () => {
     const source = createSource();
     const { tree, readsThrough } = createTree();

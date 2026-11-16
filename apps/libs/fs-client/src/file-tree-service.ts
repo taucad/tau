@@ -378,6 +378,8 @@ export class FileTreeService {
   private refreshPauses = 0;
   /* Leased directories {@link FileTreeService.refreshListedThroughHold} let one re-read through a hold for. */
   private readonly readsThroughHold = new Set<string>();
+  /* Directories {@link FileTreeService.refreshListedThroughHold} still has to re-read, a batch per task. */
+  private readonly throughHoldPaths = new Set<string>();
   /* Set by dispose: a hold released afterwards must not list through a closed proxy. */
   private disposed = false;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -689,6 +691,8 @@ export class FileTreeService {
           dispose: () => {
             unsubscribe();
             watch.dispose();
+            /* A stopped observation reads nothing: a read let through for it lapses with it. */
+            this.readsThroughHold.delete(key);
           },
         };
       },
@@ -889,8 +893,18 @@ export class FileTreeService {
    * re-reads start from a later task.
    */
   public refreshListedThroughHold(): void {
+    const epoch = this._epoch;
     setTimeout(() => {
-      this.readListedThroughHold();
+      if (this.disposed || this._epoch !== epoch) {
+        return;
+      }
+      for (const key of ['', ...this._tree.descendantKeys('')]) {
+        if (this.isDirectoryResolvedKey(key)) {
+          this.pendingRefreshPaths.delete(key);
+          this.throughHoldPaths.add(key);
+        }
+      }
+      this.drainReadsThroughHold(epoch);
     }, 0);
   }
 
@@ -1057,6 +1071,7 @@ export class FileTreeService {
     }
     this.pendingRefreshPaths.clear();
     this.readsThroughHold.clear();
+    this.throughHoldPaths.clear();
     // The new root has not reported native observation yet: poll it promptly.
     this.nativelyObserved = false;
     this.reschedulePoll?.();
@@ -1105,6 +1120,7 @@ export class FileTreeService {
     this.disposed = true;
     this.pendingRefreshPaths.clear();
     this.readsThroughHold.clear();
+    this.throughHoldPaths.clear();
     for (const pending of this.pendingSearches.values()) {
       clearTimeout(pending.timer);
       for (const waiter of pending.waiters) {
@@ -1232,27 +1248,60 @@ export class FileTreeService {
     if (this.refreshPauses > 0) {
       return;
     }
-    const pendingPaths: string[] = [];
-    for (const pendingPath of this.pendingRefreshPaths) {
-      if (pendingPaths.length === refreshesPerTask) {
-        break;
-      }
-      pendingPaths.push(pendingPath);
-    }
-    for (const pendingPath of pendingPaths) {
-      this.pendingRefreshPaths.delete(pendingPath);
-    }
+    const pendingPaths = this.takeRefreshBatch(this.pendingRefreshPaths);
     if (this.pendingRefreshPaths.size > 0) {
       this.refreshTimer = setTimeout(() => {
         this.drainPendingRefreshes();
       }, 0);
     }
-    for (const pendingPath of pendingPaths) {
-      const observation = this.listingObservations.get(pendingPath)?.deref();
+    this.rereadDirectories(pendingPaths, false);
+  }
+
+  /*
+   * The same drain for the directories {@link FileTreeService.refreshListedThroughHold}
+   * lets through a hold: a batch per task, the pause ignored, stopped by a
+   * reset or a dispose.
+   */
+  private drainReadsThroughHold(epoch: number): void {
+    if (this.disposed || this._epoch !== epoch) {
+      this.throughHoldPaths.clear();
+      return;
+    }
+    const paths = this.takeRefreshBatch(this.throughHoldPaths);
+    if (this.throughHoldPaths.size > 0) {
+      setTimeout(() => {
+        this.drainReadsThroughHold(epoch);
+      }, 0);
+    }
+    this.rereadDirectories(paths, true);
+  }
+
+  /* Take up to {@link refreshesPerTask} directories off a queue. */
+  private takeRefreshBatch(queue: Set<string>): string[] {
+    const batch: string[] = [];
+    for (const path of queue) {
+      if (batch.length === refreshesPerTask) {
+        break;
+      }
+      batch.push(path);
+    }
+    for (const path of batch) {
+      queue.delete(path);
+    }
+    return batch;
+  }
+
+  /* Re-read each directory, through its leased observation when it has one. */
+  private rereadDirectories(paths: readonly string[], throughHold: boolean): void {
+    for (const path of paths) {
+      const observation = this.listingObservations.get(path)?.deref();
       if (observation && observation.activeLeaseCount > 0) {
+        if (throughHold) {
+          this.readsThroughHold.add(path);
+        }
         observation.refresh();
       } else {
-        void this.executeRefresh(pendingPath);
+        void this.executeRefresh(path);
       }
     }
   }
@@ -1638,26 +1687,6 @@ export class FileTreeService {
 
   private scheduleRefreshForParent(path: string): void {
     this.scheduleRefresh(this.paths.parentOf(path));
-  }
-
-  /* The re-reads {@link FileTreeService.refreshListedThroughHold} lets through, from their later task. */
-  private readListedThroughHold(): void {
-    if (this.disposed) {
-      return;
-    }
-    for (const key of ['', ...this._tree.descendantKeys('')]) {
-      if (!this.isDirectoryResolvedKey(key)) {
-        continue;
-      }
-      this.pendingRefreshPaths.delete(key);
-      const observation = this.listingObservations.get(key)?.deref();
-      if (observation && observation.activeLeaseCount > 0) {
-        this.readsThroughHold.add(key);
-        observation.refresh();
-      } else {
-        void this.executeRefresh(key);
-      }
-    }
   }
 
   private async executeRefresh(path: string): Promise<void> {

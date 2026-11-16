@@ -21,7 +21,7 @@ const trimRoot = (root: string): string => (root.length > 1 && root.endsWith('/'
  * still holds, and disposing releases any hold still taken.
  *
  * The tree first shows at `entryReady`, while the apply still writes (STO-25):
- * once per hold, when the root's reading reaches it, the tree re-reads what it
+ * each time the root's reading enters it during a hold, the tree re-reads what it
  * has listed, so it shows every entry the apply will land, landed or arriving,
  * never the root as it was before the apply (I7). The worker publishes that
  * reading after the entries are announced and the entry closure has landed, so
@@ -35,28 +35,24 @@ export const holdTreeRefreshesWhileApplying = (
 ): (() => void) => {
   const root = trimRoot(input.root);
   let release: (() => void) | undefined;
-  let shown = false;
+  /* Whether the last reading was this root's `entryReady`: each edge into it is another tree's first view. */
+  let wasEntryReady = false;
   const follow = (): void => {
     const status = input.client.status();
     const applying = status?.applyingRoots?.some((candidate) => trimRoot(candidate) === root) === true;
     if (applying && release === undefined) {
       release = input.tree.pauseRefreshes();
-      shown = false;
     } else if (!applying && release !== undefined) {
       const held = release;
       release = undefined;
       held();
     }
-    if (
-      release !== undefined &&
-      !shown &&
-      status?.readiness === 'entryReady' &&
-      status.checkoutRoot !== undefined &&
-      trimRoot(status.checkoutRoot) === root
-    ) {
-      shown = true;
+    const entryReady =
+      status?.readiness === 'entryReady' && status.checkoutRoot !== undefined && trimRoot(status.checkoutRoot) === root;
+    if (release !== undefined && entryReady && !wasEntryReady) {
       input.tree.refreshListedThroughHold();
     }
+    wasEntryReady = entryReady;
   };
   follow();
   const unsubscribe = input.client.subscribe(follow);

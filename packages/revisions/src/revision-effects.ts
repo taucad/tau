@@ -3278,33 +3278,36 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   const evidenceRefName = 'refs/tau/evidence/exports';
   /*
-   * The remote's evidence record this device has written to disk, per remote (SP2h review): a control record under
-   * `.git`, `""` for none. A projection's fetch moves the remote-tracking ref before it writes a file, and a
-   * projection can stop after that fetch (a failed apply beside it, a deadline, a close), so the tracking ref is no
-   * proof the exports landed. This record moves only once they have. A device with no entry for a remote, as one an
-   * older build restored from, takes the tracking head it holds before the pull's records are fetched, once.
+   * The remote's evidence record this device has written to disk (SP2h review): one control record under `.git` per
+   * remote, holding its head or `""` for none. A projection's fetch moves the remote-tracking ref before it writes a
+   * file, and a projection can stop after that fetch (a failed apply beside it, a deadline, a close), so the tracking
+   * ref is no proof the exports landed. This record moves only once they have. A device with no record for a remote,
+   * as one an older build restored from, takes the tracking head it holds before the pull's records are fetched, once.
+   * Each remote's record is a whole file of its own, so two remotes written at once never read and rewrite each
+   * other's entry (SP2h final review), and a torn or corrupt one reads as absent for its remote alone.
    */
-  const appliedEvidencePath = '.git/tau-applied-evidence.json';
+  /* `.` is escaped too, so one remote's `<record>.<uuid>.writing` siblings never begin with another's record name. */
+  const appliedEvidencePathOf = (remote: string): string =>
+    `.git/tau-applied-evidence-${encodeURIComponent(remote).replaceAll('.', '%2E')}.json`;
   const wholeAppliedEvidence = jsonRecord(
     (value) =>
       typeof value === 'object' &&
       value !== null &&
       !Array.isArray(value) &&
-      Object.values(value).every((head) => typeof head === 'string'),
+      typeof (value as { head?: unknown }).head === 'string',
   );
-  const readAppliedEvidence = async (): Promise<Readonly<Record<string, string>>> => {
-    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), appliedEvidencePath, {
+  const readAppliedEvidence = async (remote: string): Promise<string | undefined> => {
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), appliedEvidencePathOf(remote), {
       accepts: wholeAppliedEvidence,
     });
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `wholeAppliedEvidence` checked the shape.
-    return text !== undefined && wholeAppliedEvidence(text) ? (JSON.parse(text) as Record<string, string>) : {};
+    return text !== undefined && wholeAppliedEvidence(text) ? (JSON.parse(text) as { head: string }).head : undefined;
   };
   const writeAppliedEvidence = async (remote: string, head: string): Promise<void> => {
-    const applied = await readAppliedEvidence();
     await writeControlRecord(
       controlPlaneFiles(await recordsFileSystem()),
-      appliedEvidencePath,
-      `${JSON.stringify({ ...applied, [remote]: head })}\n`,
+      appliedEvidencePathOf(remote),
+      `${JSON.stringify({ head })}\n`,
     );
   };
   /*
@@ -3315,10 +3318,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     remote: string,
     trackingHead: string | undefined,
   ): Promise<string | undefined> => {
-    const applied = await readAppliedEvidence();
-    if (Object.hasOwn(applied, remote)) {
-      const head = applied[remote];
-      return head === '' ? undefined : head;
+    const applied = await readAppliedEvidence(remote);
+    if (applied !== undefined) {
+      return applied === '' ? undefined : applied;
     }
     await writeAppliedEvidence(remote, trackingHead ?? '');
     return trackingHead;

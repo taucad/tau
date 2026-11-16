@@ -5119,6 +5119,87 @@ describe('independent sync record failures', () => {
     expect(await context.filesystem.exists('.tau/artifacts/sync-conflicts')).toBe(false);
   }, 30_000);
 
+  /* SP2h final review: each remote's applied record is its own, so two remotes seeded at once both keep theirs. */
+  it('keeps both remotes’ applied evidence when two pulls seed it at once', async () => {
+    const context = await fixture({ 'tau.json': '{"syncLargeExports":true}\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const write = async (createdAt: number) => {
+      const written = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['exports/shared.step', `output ${createdAt}\n`]]),
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt },
+        summary: { generated: 'Exports' },
+      });
+      return revisionId(written.commitId);
+    };
+    const heads = { tau: await write(1), mirror: await write(2) };
+    const remotes = ['tau', 'mirror'] as const;
+    const moved = await write(3);
+    const trackingOf = (remote: string): string => `refs/remotes/${remote}/tau/evidence/exports`;
+    for (const remote of remotes) {
+      // oxlint-disable-next-line no-await-in-loop -- one ref after another.
+      await context.port.updateRef({ name: trackingOf(remote), expectedHead: undefined, head: heads[remote] });
+    }
+    /* Neither pull writes its applied evidence until both are about to: each has read it first, the interleaving that
+     * loses an entry from a shared record. */
+    const held: Array<() => void> = [];
+    const racing = new Proxy(context.filesystem, {
+      get: (target, key, receiver): unknown => {
+        const value: unknown = Reflect.get(target, key, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        if (key !== 'writeFile') {
+          return value.bind(target) as unknown;
+        }
+        return async (path: string, ...rest: unknown[]): Promise<unknown> => {
+          if (path.includes('tau-applied-evidence') && held.length < 2) {
+            await new Promise<void>((resolve) => {
+              held.push(resolve);
+              if (held.length === 2) {
+                for (const release of held) {
+                  release();
+                }
+              }
+            });
+          }
+          return Reflect.apply(value, target, [path, ...rest]) as unknown;
+        };
+      },
+    });
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: moved }],
+        fetch: async ({ remote }: { remote: string }) => ({ refs: [{ name: trackingOf(remote), head: moved }] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => racing,
+    });
+    const fetchFrom = async (remote: string) =>
+      run<SyncFetchActorOutput>(actors.sync.fetch, { remote, branch: 'main', deadlineMilliseconds: 10_000 });
+
+    const seeded = await Promise.all([fetchFrom('tau'), fetchFrom('mirror')]);
+    expect(seeded.map((fetched) => fetched.recordProjection?.priorEvidenceHead)).toEqual([heads.tau, heads.mirror]);
+
+    /* Both tracking refs have moved since: a remote whose entry was lost would be seeded again from the moved head. */
+    for (const remote of remotes) {
+      // oxlint-disable-next-line no-await-in-loop -- one ref after another.
+      await context.port.updateRef({ name: trackingOf(remote), expectedHead: heads[remote], head: moved });
+    }
+    const again = await Promise.all([fetchFrom('tau'), fetchFrom('mirror')]);
+    expect(again.map((fetched) => fetched.recordProjection?.priorEvidenceHead)).toEqual([heads.tau, heads.mirror]);
+
+    /* A corrupt record is absent for its own remote alone: that remote is seeded again, the other keeps its entry. */
+    await context.filesystem.writeFile('.git/tau-applied-evidence-tau.json', '{"head":');
+    const afterCorruption = await Promise.all([fetchFrom('tau'), fetchFrom('mirror')]);
+    expect(afterCorruption.map((fetched) => fetched.recordProjection?.priorEvidenceHead)).toEqual([
+      moved,
+      heads.mirror,
+    ]);
+  }, 30_000);
+
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({
       'tau.json': '{"syncLargeExports":true}\n',

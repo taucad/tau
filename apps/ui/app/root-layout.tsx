@@ -11,6 +11,7 @@ import { ClientFactsHead, Theme, ThemeProvider, useTheme } from '#hooks/use-them
 import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
+import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -162,12 +163,18 @@ function LayoutDocument({
       )}
       data-pointer-cursors={usePointerCursors ? 'true' : undefined}
       style={color.rootStyles}
+      /* A15b: the pre-paint script sets the frame hint's variables in this style attribute before hydration; React's
+       * per-property style updates leave them alone. */
+      suppressHydrationWarning
     >
       <head>
         <meta charSet='utf-8' />
         <meta name='viewport' content='width=device-width, initial-scale=1' />
         <Meta />
         <ClientFactsHead />
+        {/* A15b: the frame hint's variables and `--wait-offset` on <html> before first paint; before <Links />, so it never waits on a stylesheet. */}
+        {/* oxlint-disable-next-line react/no-danger -- static inline script must run before first paint, as the client facts' does */}
+        <script dangerouslySetInnerHTML={{ __html: buildFrameHintScript() }} suppressHydrationWarning />
         <Links />
       </head>
       <body>

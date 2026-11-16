@@ -402,7 +402,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
 }));
 
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     projectProviderInputs.push(projectId);
     return (
@@ -411,6 +411,8 @@ vi.mock('#hooks/use-project.js', () => ({
       </projectIdContext.Provider>
     );
   },
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectId: useContext(projectIdContext),
     projectRef,
@@ -496,7 +498,7 @@ vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ 
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
   ProjectShareRouteIntent: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({

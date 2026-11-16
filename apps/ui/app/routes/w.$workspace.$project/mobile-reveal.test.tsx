@@ -279,7 +279,7 @@ await Promise.all([
   vi.importActual('#routes/w.$workspace.$project/chat-file-tree.js'),
 ]);
 
-const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
+const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 const { ChatInterfaceMobile } = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');
 
 const renderShell = (): void => {

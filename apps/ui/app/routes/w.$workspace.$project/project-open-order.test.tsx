@@ -356,8 +356,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
   useOptionalFileManager: () => undefined,
 }));
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   SessionProjectProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: () => projectValue,
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
@@ -413,9 +415,11 @@ vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
   ProjectShareRouteIntent: () => null,
   ProjectShareWorkbenchPanel: () => null,
 }));
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
+  ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ProjectWorkspaceContextModule>()),
-  ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   useProjectWorkspace: () => ({
     setChatOpen: () => undefined,
     setWorkbenchOpen: () => undefined,

@@ -19,17 +19,21 @@ import { basename, join } from 'node:path';
 
 import type { ExternalAgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
-import { sniffAttachmentMediaType } from '@taucad/agent-host/wire';
+import { attachmentExtensionOf, isAttachmentMediaType, sniffAttachmentMediaType } from '@taucad/agent-host/wire';
 import { isRecord } from '@taucad/utils/schema';
 
-/** The media a `file-ref` path can name, by the extension its path carries. */
-const attachmentExtensions: Readonly<Record<string, string>> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'application/pdf': 'pdf',
-  'application/json': 'json',
+/**
+ * The extension a chat attachment of this media type is written with: a stored type's from `attachmentMedia` (I2),
+ * or `json` for a GeoSpec report, which only a writer saves and no `file-ref` names.
+ *
+ * @param mimeType - The media type the bytes are stored under.
+ * @returns The extension, or `undefined` for a type no chat attachment may hold.
+ */
+const extensionOf = (mimeType: string): string | undefined => {
+  if (isAttachmentMediaType(mimeType)) {
+    return attachmentExtensionOf(mimeType);
+  }
+  return mimeType === 'application/json' ? 'json' : undefined;
 };
 
 /**
@@ -70,7 +74,7 @@ export const saveChatAttachment = async (input: {
   }
   // The file is named for what the bytes are, not what the agent declared (I1).
   const mimeType = labelOf(bytes, input.mimeType);
-  const extension = attachmentExtensions[mimeType];
+  const extension = extensionOf(mimeType);
   if (extension === undefined) {
     throw new Error(`Chat attachment media type ${mimeType} is unsupported.`);
   }
@@ -152,7 +156,7 @@ export const createAcpMediaStore = (
       return undefined;
     }
     const mimeType = labelOf(bytes, media.mimeType);
-    if (attachmentExtensions[mimeType] === undefined || mimeType === 'application/json') {
+    if (!isAttachmentMediaType(mimeType)) {
       return undefined;
     }
     const saved = await saveChatAttachment({ workspaceRoot, chatId, data: media.data, mimeType });

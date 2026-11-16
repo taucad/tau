@@ -72,11 +72,13 @@ const projectProvider = vi.hoisted(() => vi.fn());
 const viewPing = vi.hoisted(() => vi.fn());
 vi.mock('#components/share/use-view-ping.js', () => ({ useViewPing: viewPing }));
 
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   ProjectProvider: (props: { readonly children: React.JSX.Element; readonly profile: string }): React.JSX.Element => {
     projectProvider(props);
     return props.children;
   },
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: vi.fn(),
   useParameterSetActor: () => undefined,
 }));
@@ -98,7 +100,7 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   RevisionProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
 }));
 
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
 }));
 

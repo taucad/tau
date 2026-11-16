@@ -785,6 +785,92 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     expect(adopted).toHaveBeenCalledOnce();
   });
 
+  /* Review round 6: a painted draft handed over to an editor that holds nothing stays in the box, not as an edit (P-a). */
+  it('should keep a painted draft handed over after the editor exists, not as an edit', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    const setDraftText = vi.fn();
+    const adopted = vi.fn();
+    /* Stable across renders, as the route's are: the draft rehydration effect re-runs on a new list. */
+    const chats: never[] = [];
+    const attachments: never[] = [];
+    const props = (earlyInput?: EarlyChatInput): React.ComponentProps<typeof ChatTextareaDesktop> => ({
+      earlyInput,
+      onEarlyInputAdopted: earlyInput === undefined ? undefined : adopted,
+      enableAutoFocus: false,
+      dragKind: undefined,
+      isSubmitting: false,
+      isAttaching: false,
+      canResume: false,
+      inputText: '',
+      attachments,
+      attachmentDirectory: undefined,
+      sendBlockReason: undefined,
+      attachmentAccept: 'image/png',
+      attachmentInputSupported: true,
+      status: 'ready',
+      formattedCancelKeyCombination: '⇧⌘⌫',
+      treeService: undefined,
+      chats,
+      setDraftText,
+      acpAgentId: 'codex',
+      acpSessionData: codexSession,
+      fileInputReference: { current: null },
+      containerReference: { current: null },
+      focusEditorRef: { current: undefined },
+      addContextChipsRef: { current: undefined },
+      addContextReferencesRef: { current: undefined },
+      handleSubmit: asyncNoop,
+      handleCancelClick: noop,
+      handleDragOver: noop,
+      handleDragLeave: noop,
+      handleDrop: asyncNoop,
+      handlePaste: () => false,
+      handleFileSelect: noop,
+      handleFileChange: noop,
+      handleAddImage: noop,
+      onScreenshotAction: noop,
+      handleTextareaBlur: noop,
+      removeAttachment: noop,
+    });
+    const view = render(
+      <TooltipProvider>
+        <ChatTextareaDesktop {...props()} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          {...props({
+            text: 'Fillet it',
+            edited: false,
+            focused: true,
+            focusUnclaimed: false,
+            start: 3,
+            end: 3,
+            direction: 'none',
+            queuedSend: false,
+            prefilled: true,
+          })}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole('textbox')).toHaveTextContent('Fillet it');
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(globalThis.getSelection()?.anchorOffset).toBe(3);
+    /* The draft takes it from the handover (`onEarlyInputAdopted`), open to the record: no edit is written. */
+    expect(setDraftText).not.toHaveBeenCalled();
+    expect(adopted).toHaveBeenCalledOnce();
+  });
+
   describe('enableMobileCollapse', () => {
     const composerBox = (): HTMLElement =>
       screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;

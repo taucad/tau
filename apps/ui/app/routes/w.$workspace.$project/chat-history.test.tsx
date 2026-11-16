@@ -14,6 +14,8 @@ import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
 import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
+import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
+import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 /* A frame's handover, constant so the provider's value is not built in render. */
 const servedHandover = {
@@ -717,21 +719,28 @@ const readFrame = (): CommitFrame => ({
  * @param history - What the load resolves to: the chat's turns, or none for a truly empty chat.
  * @returns Every commit's frame, and the step that settles the load.
  */
-const renderOverDeferredTranscript = (history: readonly MyUIMessage[]) => {
+/* A fresh performance clock: a document open the lane ends is ended per clock, so a row that times one gets its own. */
+const freshPerformanceClock = (): WaitClock => ({ now: () => performance.now() });
+
+const renderOverDeferredTranscript = (history: readonly MyUIMessage[], clock: WaitClock = freshPerformanceClock()) => {
   const commits: CommitFrame[] = [];
   publishChatState({ messages: [], transcript: 'loading' });
-  render(
-    <Profiler
-      id='chat-history'
-      onRender={() => {
-        commits.push(readFrame());
-      }}
-    >
-      <ChatHistory />
-    </Profiler>,
+  const tree = (
+    <WaitClockProvider clock={clock}>
+      <Profiler
+        id='chat-history'
+        onRender={() => {
+          commits.push(readFrame());
+        }}
+      >
+        <ChatHistory />
+      </Profiler>
+    </WaitClockProvider>
   );
+  const { unmount } = render(tree);
   return {
     commits,
+    unmount,
     resolve: () => {
       act(() => {
         publishChatState({ messages: history, transcript: history.length === 0 ? 'empty' : 'loaded' });
@@ -849,6 +858,36 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
       expect(indicator).not.toHaveAttribute('role', 'status');
     },
   );
+
+  it('times a return to the document project, after leaving it, from its own start', () => {
+    const clock = freshPerformanceClock();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    const first = renderOverDeferredTranscript(history, clock);
+    expect(revealDelay()).toBe(600);
+    /* To Home, which unmounts the lane, and back 10 s later: the transcript loads again, as a later wait. */
+    globalThis.history.replaceState(null, '', '/');
+    first.unmount();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'now').mockReturnValue(10_400);
+    renderOverDeferredTranscript(history, clock);
+
+    expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
+    expect(revealDelay()).toBe(1000);
+  });
+
+  it('keeps timing the open from navigation start when the lane remounts on the document project', () => {
+    const clock = freshPerformanceClock();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/w/acme/bracket')]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    renderOverDeferredTranscript(history, clock).unmount();
+    vi.spyOn(performance, 'now').mockReturnValue(700);
+    renderOverDeferredTranscript(history, clock);
+
+    expect(revealDelay()).toBe(300);
+  });
 
   it('times a load that starts after the open from its own start', () => {
     vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/elsewhere')]);

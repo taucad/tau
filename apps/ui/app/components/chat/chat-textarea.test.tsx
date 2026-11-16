@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => {
     inputText: '',
     earlyInput: undefined as unknown,
     activeChatId: undefined as string | undefined,
+    onEarlyInputAdopted: undefined as (() => void) | undefined,
+    draftSend: vi.fn(),
   };
 });
 
@@ -63,12 +65,15 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
     onScreenshotAction,
     actionItems,
     earlyInput,
+    onEarlyInputAdopted,
   }: {
     readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
     readonly actionItems: ContextSuggestionItem[];
     readonly earlyInput?: unknown;
+    readonly onEarlyInputAdopted?: () => void;
   }) => {
     mocks.earlyInput = earlyInput;
+    mocks.onEarlyInputAdopted = onEarlyInputAdopted;
     mocks.onScreenshotAction = onScreenshotAction;
     mocks.actionItems = actionItems;
     return null;
@@ -108,6 +113,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
     session: mocks.activeChatId === undefined ? undefined : { activeChatId: mocks.activeChatId },
     execution: { execution: { kind: 'native' } },
     runElsewhere: mocks.runElsewhere,
+    draftActorRef: { send: mocks.draftSend },
   }),
 }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSessionSnapshot: () => undefined }));
@@ -294,4 +300,45 @@ describe('ChatTextarea frame early input', () => {
     view.unmount();
     expect(unclaim).toHaveBeenCalled();
   });
+
+  it.each([
+    { draftText: '', isHydrated: true },
+    /* The record is read already and holds a draft, which wins. */
+    { draftText: 'from the record', isHydrated: false },
+  ])(
+    'takes a painted draft nobody edited as the draft while the draft holds $draftText (hydrated: $isHydrated)',
+    ({ draftText, isHydrated }) => {
+      mocks.inputText = draftText;
+      mocks.draftSend.mockClear();
+      const painted: EarlyChatInput = {
+        ...input,
+        text: 'Fillet it',
+        edited: false,
+        queuedSend: false,
+        prefilled: true,
+      };
+      const pending = handoverWith(
+        painted,
+        vi.fn(() => vi.fn()),
+      );
+      render(
+        <EarlyInputHandoverContext.Provider value={pending}>
+          <ChatTextarea onSubmit={vi.fn()} />
+        </EarlyInputHandoverContext.Provider>,
+      );
+      act(() => {
+        mocks.onEarlyInputAdopted?.();
+      });
+      expect(pending.taken).toHaveBeenCalledOnce();
+      if (isHydrated) {
+        expect(mocks.draftSend).toHaveBeenCalledOnce();
+        const [event] = mocks.draftSend.mock.calls[0] as [{ type: string; draft: { parts: unknown[] } }];
+        expect(event.type).toBe('hydrateDraft');
+        expect(event.draft.parts).toEqual([{ type: 'text', text: 'Fillet it' }]);
+      } else {
+        expect(mocks.draftSend).not.toHaveBeenCalled();
+      }
+      mocks.inputText = '';
+    },
+  );
 });

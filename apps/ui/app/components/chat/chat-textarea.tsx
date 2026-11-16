@@ -36,6 +36,7 @@ import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
 import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { buildDraftMessage } from '#hooks/draft.machine.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
@@ -136,7 +137,7 @@ export const ChatTextarea = memo(function ({
   }, [onBlur]);
 
   /* Another device is running this chat (XD3): its host would refuse the send, so the composer holds it. */
-  const { runElsewhere } = useChatComposer();
+  const { runElsewhere, draftActorRef } = useChatComposer();
   const logic = useChatTextareaLogic({
     ref,
     onSubmit,
@@ -402,6 +403,15 @@ export const ChatTextarea = memo(function ({
     ) : undefined;
 
   const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(projectContext?.projectId, mode === 'main');
+  /* A painted draft nobody edited is the hint's copy of this chat's draft: while the draft holds nothing yet (its record
+   * not read), it is the draft, as on Home, so the text does not leave the box and come back when the record lands. The
+   * record still wins: `hydrateDraft` leaves an untouched draft open to it. */
+  const takeFrameInput = useCallback((): void => {
+    if (handedOverInput?.prefilled === true && !handedOverInput.edited && logic.inputText === '') {
+      draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(handedOverInput.text, []) });
+    }
+    earlyInputHandover?.taken();
+  }, [draftActorRef, earlyInputHandover, handedOverInput, logic.inputText]);
 
   const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => void): React.ReactNode => (
     <>
@@ -473,6 +483,8 @@ export const ChatTextarea = memo(function ({
   return enableEarlyInput ? (
     <ChatEarlyInput className={className}>{content}</ChatEarlyInput>
   ) : (
-    <ClientOnly fallback={skeleton}>{content(handedOverInput, earlyInputHandover?.taken)}</ClientOnly>
+    <ClientOnly fallback={skeleton}>
+      {content(handedOverInput, earlyInputHandover === undefined ? undefined : takeFrameInput)}
+    </ClientOnly>
   );
 });

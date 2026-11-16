@@ -466,16 +466,24 @@ describe('WorkspaceFrame served composer', () => {
     }
   });
 
-  it('drops an Enter on a painted draft nobody edited, and says a queued send aloud', async () => {
+  it('drops an Enter on a painted draft nobody edited without showing or saying it as queued', async () => {
     writeDraftHint({ kind: 'project', key: 'home/one' }, { text: 'Fillet it' });
-    let status: Element | undefined;
+    let status: string | undefined;
+    let isQueuedShown: boolean | undefined;
+    let isPrevented: boolean | undefined;
     const { done } = await serveAndHydrate('/w/home/one', (input, container) => {
       input.focus();
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-      status = container.querySelector('[data-slot=queued-send-status]') ?? undefined;
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      input.dispatchEvent(enter);
+      isPrevented = enter.defaultPrevented;
+      status = container.querySelector('[data-slot=queued-send-status]')?.textContent ?? undefined;
+      isQueuedShown = container.querySelector('[data-queued-send]') !== null;
     });
     try {
-      expect(status).toHaveTextContent('Send queued');
+      /* Dropped, so not announced or drawn as pending; and not a line break in the painted draft either. */
+      expect(status).toBe('');
+      expect(isQueuedShown).toBe(false);
+      expect(isPrevented).toBe(true);
       act(() => {
         handover?.claim('p1');
         handover?.release('p1');

@@ -550,6 +550,10 @@ export const ChatTextareaDesktop = memo(function ({
     onEarlyInputAdopted?.();
     if (earlyInput.edited && extractContent(editor).text !== earlyInput.text) {
       editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: true });
+    } else if (earlyInput.prefilled && extractContent(editor).text === '') {
+      /* A painted draft stays in the box while the draft takes it (`onEarlyInputAdopted`), not written as an edit, so
+       * the chat's record still wins when it lands (P-a: nothing leaves and comes back on arrival). */
+      editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: false });
     }
     if (!(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))) {
       return;

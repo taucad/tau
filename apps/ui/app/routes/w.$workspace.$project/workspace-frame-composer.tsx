@@ -205,7 +205,12 @@ function ServedComposer({
     >
       <div className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'>
         <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
-          <EarlyComposerField inputRef={inputRef} bar={<ServedComposerBar isEmpty={isEmpty} />} onChange={onChange} />
+          <EarlyComposerField
+            inputRef={inputRef}
+            bar={<ServedComposerBar isEmpty={isEmpty} />}
+            shouldDropPaintedSend
+            onChange={onChange}
+          />
         </div>
       </div>
     </div>

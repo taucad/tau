@@ -145,7 +145,7 @@ type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: 
  *
  * @returns `true` while the document's own project is the current one.
  */
-const isDocumentOpen = (): boolean => {
+const isOnDocumentProject = (): boolean => {
   const [entry] = globalThis.performance.getEntriesByType('navigation');
   if (entry === undefined) {
     return false;
@@ -156,8 +156,24 @@ const isDocumentOpen = (): boolean => {
   return opened !== undefined && opened === frameHintKey(globalThis.location.pathname);
 };
 
+/**
+ * The wait clocks whose document open is over: a lane on the document's project unmounted after the page left that
+ * project, so a lane mounted on it again (a return from Home or another project) is a later wait, timed from its own
+ * start. Keyed by clock, which is the document's performance clock in the application.
+ */
+const endedDocumentOpens = new WeakSet<WaitClock>();
+
+/**
+ * Whether a lane mounting now is part of the document's own open: the page is on the project the document loaded, and
+ * has not left it since.
+ *
+ * @param clock - The wait clock the lane reads.
+ * @returns `true` during the open.
+ */
+const isDocumentOpen = (clock: WaitClock): boolean => !endedDocumentOpens.has(clock) && isOnDocumentProject();
+
 const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<TranscriptWait, 'active'> => {
-  if (isFirst && isDocumentOpen()) {
+  if (isFirst && isDocumentOpen(clock)) {
     return { startedAt: 0, isGesture: false };
   }
   const { navigator } = globalThis;
@@ -177,6 +193,15 @@ const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<Transcrip
 function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'> {
   const clock = useWaitClockSource();
   const [tracked, setTracked] = useState<TranscriptWait>(() => ({ active, ...startTranscriptWait(clock, true) }));
+  /* A lane unmounted once the page has left the document's project (to Home, to another project) ends the open. */
+  useEffect(
+    () => () => {
+      if (!isOnDocumentProject()) {
+        endedDocumentOpens.add(clock);
+      }
+    },
+    [clock],
+  );
   let current = tracked;
   if (tracked.active !== active) {
     current = active ? { active, ...startTranscriptWait(clock, false) } : { ...tracked, active };

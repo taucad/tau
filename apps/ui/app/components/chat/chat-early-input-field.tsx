@@ -52,6 +52,10 @@ export const queuedSendAttribute = 'data-queued-send';
  * refusing in the first frame of a painted draft and then changed at hydration. */
 export const earlyTextAttribute = 'data-early-text';
 
+/** The attribute a host sets on the served composer when it drops an Enter on a painted draft nobody edited: the script
+ * then does not queue it, so no send is shown or announced as queued. */
+export const dropsPaintedSendAttribute = 'data-drops-painted-send';
+
 /** What a queued send's status says, before and after adoption. */
 export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
 
@@ -75,7 +79,9 @@ export const earlyInputScript =
   `if(e.key!=='Enter'||e.shiftKey||e.altKey||e.ctrlKey||e.metaKey||e.isComposing||e.keyCode===229||state.composing)return;` +
   /* A touch keyboard's return starts a new line, as in the rich composer (Q15): only Send sends there. */
   `if(window.matchMedia?.('(pointer: coarse)').matches)return;` +
-  `e.preventDefault();if(input.value.trim()!=='')q(true)});` +
+  /* Where the host drops an Enter on a painted draft nobody edited (the project route), it is not queued or announced. */
+  `e.preventDefault();if(box.hasAttribute(${JSON.stringify(dropsPaintedSendAttribute)})&&!state.edited&&state.prefill!==''&&input.value===state.prefill)return;` +
+  `if(input.value.trim()!=='')q(true)});` +
   `input.addEventListener('compositionstart',()=>{state.composing=true});` +
   `input.addEventListener('compositionend',()=>{state.composing=false})})()`;
 
@@ -113,7 +119,8 @@ export type EarlyChatInputBarState = {
  * outline — over `bar`, with the inline script after it. Without a `bar` the bar's height is reserved instead. It holds
  * no state of its own: a host adopts it (`readEarlyInput`) and replaces it.
  *
- * @param props - The input's ref, the bar, the box's classes, focus at first paint and the input's change handler.
+ * @param props - The input's ref, the bar, the box's classes, focus at first paint, whether a painted Enter is dropped
+ *   and the input's change handler.
  * @returns The served composer.
  */
 export function EarlyComposerField({
@@ -121,12 +128,15 @@ export function EarlyComposerField({
   className,
   enableAutoFocus = false,
   bar,
+  shouldDropPaintedSend = false,
   onChange,
 }: {
   readonly inputRef: React.Ref<EarlyTextarea>;
   readonly className?: string;
   readonly enableAutoFocus?: boolean;
   readonly bar?: React.ReactNode;
+  /** The host drops an Enter on a painted draft nobody edited: the script does not queue it. */
+  readonly shouldDropPaintedSend?: boolean;
   readonly onChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
 }): React.JSX.Element {
   return (
@@ -135,6 +145,7 @@ export function EarlyComposerField({
       <div
         className={cn(chatComposerFrameClassName, 'rounded-2xl has-[textarea:focus-visible]:focus-outline', className)}
         suppressHydrationWarning
+        {...(shouldDropPaintedSend ? { [dropsPaintedSendAttribute]: '' } : {})}
       >
         {/* Says a queued send aloud, as Send's pending state shows it; the served script writes it. */}
         <span

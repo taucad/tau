@@ -4,10 +4,21 @@ import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { usePlatform } from '@taucad/ui/hooks/use-platform';
-import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '@taucad/ui/utils/keys';
+import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { Loader } from '@taucad/ui/components/loader';
 import { cn } from '@taucad/ui/utils/cn';
+
+/**
+ * The key combination that cancels the stream. Kept here rather than with the composer logic so the served Send button
+ * (the project route's workspace frame) does not pull the composer providers into its bundle.
+ */
+export const cancelChatStreamKeyCombination = {
+  key: 'Backspace',
+  modKey: true,
+  shiftKey: true,
+  requireAllModifiers: true,
+} satisfies KeyCombination;
 
 /** Monochrome action treatment shared by the composer and question replies. */
 export const chatComposerActionButtonClassName =

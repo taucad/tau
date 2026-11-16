@@ -16,6 +16,7 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
+import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
 import { resolveTauBuildRelease, resolveTauCloudBuildEnabled } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
@@ -477,6 +478,9 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   },
 });
 
+/** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
+const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
+
 export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
@@ -592,6 +596,11 @@ export default defineConfig(({ command, mode }) => {
       createAssetIntegrity({ receipt: true }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
       createSentryReleaseRecordPlugin(buildId),
+      /*
+       * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical
+       * budget check (`scripts/check-critical-budget.mts`) can attribute a route's interactive bytes to modules.
+       */
+      moduleIdManifest({ outFile: criticalModuleIdsPath, root: path.resolve(__dirname, '../..') }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm

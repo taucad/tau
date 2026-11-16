@@ -38,6 +38,7 @@ import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
 import { noEngineeringVocabularyInCopyRule } from './rules/no-engineering-vocabulary-in-copy.js';
 import { noSaveRevisionInCopyRule } from './rules/no-save-revision-in-copy.js';
 import { noAuthInstanceOutsideApiAuthRule } from './rules/no-auth-instance-outside-api-auth.js';
+import { noStaticHeavyImportRule } from './rules/no-static-heavy-import.js';
 import { xstateContractRule } from './rules/xstate-contract.js';
 import { xstateOwnerMachineRule } from './rules/xstate-owner-machine.js';
 import { noAsciiEllipsisRule } from './rules/no-ascii-ellipsis.js';
@@ -53,7 +54,7 @@ import { noRaisedOverlayLayerRule } from './rules/no-raised-overlay-layer.js';
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.29.0',
+    version: '1.30.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -87,6 +88,7 @@ const plugin = {
     'no-engineering-vocabulary-in-copy': noEngineeringVocabularyInCopyRule,
     'no-save-revision-in-copy': noSaveRevisionInCopyRule,
     'no-auth-instance-outside-api-auth': noAuthInstanceOutsideApiAuthRule,
+    'no-static-heavy-import': noStaticHeavyImportRule,
     'xstate-contract': xstateContractRule,
     'xstate-owner-machine': xstateOwnerMachineRule,
     'no-ascii-ellipsis': noAsciiEllipsisRule,

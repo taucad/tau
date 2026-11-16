@@ -241,8 +241,10 @@ describe('ci.yml affected-only lanes', () => {
     const steps = ci.jobs['affected-lane']?.steps ?? [];
     const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
     const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
-    expect(build).toBe('pnpm nx affected -t build size check-desktop-payload --parallel=1');
+    expect(build).toBe('pnpm nx affected -t build size check-desktop-payload check-critical-budget --parallel=1');
     expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
+    // The critical-path budget (PL0) runs beside it in the same lane, so a ui change is held to its budget.
+    expect(nxTargets(build)).toContainEqual({ target: 'check-critical-budget', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {

@@ -9,6 +9,9 @@ const harness = vi.hoisted(() => {
   const state: { catalog: ModelCatalog } = { catalog: { status: 'loading' } };
   return Object.assign(state, {
     cloudOpenPending: false,
+    intentListeners: new Set<() => void>(),
+    statusListeners: new Set<() => void>(),
+    syncState: 'pending' as string,
     creditPreflight: vi.fn(),
     awaitAvailability: vi.fn(async () => ({ status: 'available', durability: 'exclusive-append' })),
   });
@@ -23,7 +26,24 @@ vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => har
 vi.mock('#hooks/active-chat-provider.js', () => ({ useActiveChatSession: () => ({ activeChatId: 'chat_1' }) }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => ({ get: () => undefined }) }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_1' }) }));
-vi.mock('#lib/tau-cloud-intent.js', () => ({ isCloudProjectPending: () => harness.cloudOpenPending }));
+vi.mock('#lib/tau-cloud-intent.js', () => ({
+  isCloudProjectPending: () => harness.cloudOpenPending,
+  tauCloudIntent: {
+    subscribe: (listener: () => void) => {
+      harness.intentListeners.add(listener);
+      return () => harness.intentListeners.delete(listener);
+    },
+  },
+}));
+vi.mock('#services/revision-client-registry.js', () => ({
+  peekRevisionClient: () => ({
+    status: () => ({ sync: { state: harness.syncState }, remote: { kind: 'tau', phase: 'connected' } }),
+    subscribe: (listener: () => void) => {
+      harness.statusListeners.add(listener);
+      return () => harness.statusListeners.delete(listener);
+    },
+  }),
+}));
 vi.mock('#lib/agent-host-placement.js', () => ({
   daemonPlacementOf: (execution: { hostId?: string }) => execution.hostId,
   /* The web build: an external agent pinned to Tau Desktop has nowhere to run here. */
@@ -53,18 +73,52 @@ const admit = async (execution: CadAgentExecution) => {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.cloudOpenPending = false;
+  harness.syncState = 'pending';
 });
 
 describe('useTurnAdmission', () => {
-  /* SP2h: chats open while the files still arrive; a turn in this document's checkout waits for the whole apply. */
-  it('should refuse a browser-hosted turn while a Tau Cloud open is still writing the files', async () => {
+  /* SP2h: chats open while the files still arrive; a turn in this document's checkout is held until they land, so a
+   * seeded or linked prompt sent at once still runs (review). */
+  it('should hold a browser-hosted turn until a Tau Cloud open has written the files, then admit it', async () => {
     harness.cloudOpenPending = true;
     harness.catalog = { status: 'loaded', models: [row('anthropic-claude-opus-4.8')] };
-    await expect(admit(opus)).rejects.toMatchObject({
-      code: 'CHAT_PLACEMENT_UNAVAILABLE',
-      message: expect.stringContaining('still arriving') as unknown as string,
-    });
+    let settled = false;
+    const admitted = (async () => {
+      try {
+        return await admit(opus);
+      } finally {
+        settled = true;
+      }
+    })();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
     expect(harness.awaitAvailability).not.toHaveBeenCalled();
+
+    harness.cloudOpenPending = false;
+    for (const listener of harness.intentListeners) {
+      listener();
+    }
+    await expect(admitted).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
+    expect(harness.intentListeners.size).toBe(0);
+    expect(harness.statusListeners.size).toBe(0);
+  });
+
+  it('should refuse a held turn with the reason once the Tau Cloud open fails', async () => {
+    harness.cloudOpenPending = true;
+    const admitted = admit(opus);
+    harness.syncState = 'failed';
+    for (const listener of harness.statusListeners) {
+      listener();
+    }
+    await expect(admitted).rejects.toMatchObject({
+      code: 'CHAT_PLACEMENT_UNAVAILABLE',
+      message: expect.stringContaining('could not finish') as unknown as string,
+    });
+  });
+
+  it('should admit a daemon-placed turn while a Tau Cloud open writes this document’s files', async () => {
+    harness.cloudOpenPending = true;
     /* A daemon runs on its own tree, which this open is not writing. */
     await expect(admit({ kind: 'acp', hostId: 'origin', agentId: 'codex' })).resolves.toEqual({ hostId: 'origin' });
   });

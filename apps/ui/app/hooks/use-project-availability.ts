@@ -59,7 +59,7 @@ export const chatsLanded = (status: Pick<RevisionStatusProjection, 'sync'> | und
  * @param status - The revision client's projection.
  * @returns `true` when the open cannot go on by itself.
  */
-const isFailedOpen = (status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined): boolean =>
+export const isFailedOpen = (status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined): boolean =>
   status?.sync.state === 'failed' ||
   status?.sync.state === 'queued' ||
   status?.sync.state === 'conflicted' ||

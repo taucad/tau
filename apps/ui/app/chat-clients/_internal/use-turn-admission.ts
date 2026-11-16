@@ -12,13 +12,53 @@ import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-p
 import { useModels } from '#hooks/use-models.js';
 import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { randomUuid } from '@taucad/utils/id';
-import { isCloudProjectPending } from '#lib/tau-cloud-intent.js';
+import { isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
+import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { isFailedOpen } from '#hooks/use-project-availability.js';
 
 /**
  * This document's resident agent host, as a CAD turn's execution target names it. The host places the turn itself,
  * so the target names no checkout and no base (W8 TS-S5; `chatExecutionTargetSchema`).
  */
 export const browserHostId = `host_${randomUuid()}`;
+
+/**
+ * Wait until a project's Tau Cloud open has written its files (SP2h): the chats open before they land, and a turn this
+ * document hosts runs in that checkout, where its reads would find files not yet there and a write to one would make
+ * the apply's own write of it refuse. It is held rather than refused, so a seeded or linked prompt sent as the chat
+ * opens still runs; an open that fails ends the wait with its reason. No timer: the open's own bounds end it.
+ *
+ * @param projectId - The project.
+ * @returns Once the open's intent has cleared.
+ */
+const awaitCloudOpenWritten = async (projectId: string): Promise<void> => {
+  if (!isCloudProjectPending(projectId)) {
+    return;
+  }
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const client = peekRevisionClient(projectId);
+  const check = (): void => {
+    if (!isCloudProjectPending(projectId)) {
+      resolve();
+    } else if (isFailedOpen(client?.status())) {
+      reject(
+        Object.assign(
+          new Error('This project’s files could not finish arriving, so the agent did not start. Try again.'),
+          { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
+        ),
+      );
+    }
+  };
+  const stopIntent = tauCloudIntent.subscribe(check);
+  const stopStatus = client?.subscribe(check);
+  try {
+    check();
+    await promise;
+  } finally {
+    stopIntent();
+    stopStatus?.();
+  }
+};
 
 /** The single admission path every verb of one chat goes through. @public */
 export type TurnAdmission = Readonly<{
@@ -59,17 +99,9 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
         throw Object.assign(new Error(unplaceable), { code: 'CHAT_PLACEMENT_UNAVAILABLE' });
       }
       const daemonHostId = daemonPlacementOf(turnExecution);
-      /*
-       * SP2h: a project's chats open while a Tau Cloud open is still writing its files, but a turn this document hosts
-       * runs in that checkout. Its reads would find files that have not landed, and a write to one would make the
-       * apply's own write of it refuse. It waits for the whole apply, as the chats did before; a daemon runs on its
-       * own tree, which this open is not writing.
-       */
-      if (daemonHostId === undefined && isCloudProjectPending(projectId)) {
-        throw Object.assign(
-          new Error('This project’s files are still arriving. The agent can start once they have all landed.'),
-          { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
-        );
+      /* SP2h: a turn this document hosts waits for a Tau Cloud open to write the checkout; a daemon runs on its own tree. */
+      if (daemonHostId === undefined) {
+        await awaitCloudOpenWritten(projectId);
       }
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,

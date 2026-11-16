@@ -88,6 +88,7 @@ type Counts = {
 
 type Harness = Readonly<{
   service: WorkspaceFileService;
+  eventBus: ChangeEventBus;
   counts: Counts;
   /** Every path a content read asked the connection for, in order. */
   read: string[];
@@ -259,6 +260,7 @@ const harness = async (): Promise<Harness> => {
   });
   const entry: Harness = {
     service,
+    eventBus,
     counts,
     read,
     tree,
@@ -432,6 +434,27 @@ describe('a tree write across the worker boundary (STO-25 SP2g)', () => {
       const replaced = fixture.content.peekOutcome(partPath(7));
       expect(replaced.kind === 'text' ? new TextDecoder().decode(replaced.content) : replaced.kind).toBe('sphere(7);');
       expect(await shownListings(fixture.tree)).toEqual(await diskListings(fixture.service));
+    },
+    60_000,
+  );
+
+  it.each([
+    ['another project is deleted', '/projects'],
+    ['an unmapped path changes outside every project', '/'],
+  ])(
+    'should leave an open project as it is when %s',
+    async (_case, summarized) => {
+      const fixture = await harness();
+      await materialize(
+        fixture.service,
+        tree(fileCount, (index) => `cube(${String(index)});`),
+      );
+      await showTree(fixture.tree);
+      await fixture.content.resolve(partPath(7));
+      const delta = await measure(fixture, `summary of ${summarized}`, async () => {
+        fixture.eventBus.emit({ type: 'directoryChanged', path: summarized, backend: 'memory' });
+      });
+      expect(delta).toMatchObject({ fileChangedMessages: 0, treeResets: 0, listings: 0, contentReads: 0, outcomes: 0 });
     },
     60_000,
   );

@@ -7048,6 +7048,9 @@ importers:
 
   packages/revisions:
     dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem

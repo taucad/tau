@@ -41,20 +41,40 @@ describe('coalesceChangeEvents (pure)', () => {
     );
   });
 
-  it('should leave every file path a batch of writes, deletes and moves touched in its final state', () => {
+  it('should leave every path a batch of file and directory writes, deletes, moves and copies touched in its final state', () => {
     const presence = (sequence: readonly PathChangeEvent[]): Map<string, boolean> => {
       const state = new Map<string, boolean>();
       for (const event of sequence) {
-        if (event.type === 'fileRenamed') {
-          state.set(event.oldPath, false);
-          state.set(event.newPath, true);
-        } else if (event.type === 'fileWritten' || event.type === 'fileDeleted') {
-          state.set(event.path, event.type === 'fileWritten');
+        switch (event.type) {
+          case 'fileRenamed':
+          case 'directoryRenamed': {
+            state.set(event.oldPath, false);
+            state.set(event.newPath, true);
+            break;
+          }
+          case 'fileCopied': {
+            state.set(event.targetPath, true);
+            break;
+          }
+          case 'fileWritten':
+          case 'directoryCreated': {
+            state.set(event.path, true);
+            break;
+          }
+          case 'fileDeleted':
+          case 'directoryDeleted': {
+            state.set(event.path, false);
+            break;
+          }
+          default: {
+            break;
+          }
         }
       }
       return state;
     };
     const path = fc.constantFrom('/a', '/b', '/c', '/d/e');
+    const directory = fc.constantFrom('/x', '/y', '/z');
     fc.assert(
       fc.property(
         fc.array(
@@ -62,14 +82,37 @@ describe('coalesceChangeEvents (pure)', () => {
             path.map((at) => written(at)),
             path.map((at) => deleted(at)),
             fc.tuple(path, path).map(([from, to]) => renamed(from, to)),
+            fc.tuple(path, path).map(
+              ([from, to]): PathChangeEvent => ({
+                type: 'fileCopied',
+                sourcePath: from,
+                targetPath: to,
+                backend: testBackend,
+              }),
+            ),
+            directory.map((at): PathChangeEvent => ({ type: 'directoryCreated', path: at, backend: testBackend })),
+            directory.map((at): PathChangeEvent => ({ type: 'directoryDeleted', path: at, backend: testBackend })),
+            fc.tuple(directory, directory).map(
+              ([from, to]): PathChangeEvent => ({
+                type: 'directoryRenamed',
+                oldPath: from,
+                newPath: to,
+                backend: testBackend,
+              }),
+            ),
           ),
           { minLength: 1, maxLength: 40 },
         ),
         (events) => {
-          const valid = events.filter((event) => event.type !== 'fileRenamed' || event.oldPath !== event.newPath);
+          const valid = events.filter((event) =>
+            event.type === 'fileRenamed' || event.type === 'directoryRenamed'
+              ? event.oldPath !== event.newPath
+              : event.type !== 'fileCopied' || event.sourcePath !== event.targetPath,
+          );
           expect(presence(coalesceChangeEvents(valid))).toEqual(presence(valid));
         },
       ),
+      { numRuns: 500 },
     );
   });
 

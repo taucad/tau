@@ -14,7 +14,13 @@
  * page being left, which the frame hides.
  */
 import { useContext, useSyncExternalStore } from 'react';
-import { UNSAFE_DataRouterContext, useLocation } from 'react-router';
+import {
+  /* The live router read (F11, A15b2): the router's own state, outside the transition its hooks render in. The context
+   * still carries `router` on 8.x; `router-context.test.tsx` fails if it stops. */
+  // oxlint-disable-next-line no-restricted-imports -- the shell's live router read above (A15b2, F11).
+  UNSAFE_DataRouterContext,
+  useLocation,
+} from 'react-router';
 
 /** `/w/:workspace/:project`, the URLs the project route matches (`route-classes.ts`, the project class). */
 const projectPathPattern = /^\/w\/[^/.]+\/[^/.]+\/?$/u;

@@ -14,7 +14,7 @@ function Probe(): React.JSX.Element {
   return <output data-testid='frame-state'>{`${String(drawn)} ${String(pending)}`}</output>;
 }
 
-const readState = (): string | null => screen.getByTestId('frame-state').textContent;
+const readState = (): string => screen.getByTestId('frame-state').textContent;
 
 describe('isProjectPath', () => {
   it('matches the project route and nothing else under /w/', () => {
@@ -50,7 +50,7 @@ describe('useWorkspaceFrameState', () => {
 
   it('draws the frame ahead of the route while the router loads a project, and settles once it commits', async () => {
     let release: () => void = () => undefined;
-    const held = new Promise<null>((resolve) => {
+    const held = new Promise<unknown>((resolve) => {
       release = () => {
         resolve(null);
       };
@@ -82,7 +82,7 @@ describe('useWorkspaceFrameState', () => {
 
   it('keeps the frame drawn while leaving a project, until the next route commits', async () => {
     let release: () => void = () => undefined;
-    const held = new Promise<null>((resolve) => {
+    const held = new Promise<unknown>((resolve) => {
       release = () => {
         resolve(null);
       };

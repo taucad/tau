@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { routeClasses } from '#lib/route-classes.js';
 
-const projectRouteModule = vi.hoisted(() => ({ default: (): null => null, handle: { enablePageHeader: false } }));
+const projectRouteModule = vi.hoisted(() => ({
+  default: (): undefined => undefined,
+  handle: { enablePageHeader: false },
+}));
 
 vi.mock('#routes/w.$workspace.$project/route.js', () => projectRouteModule);
 
@@ -9,7 +12,8 @@ const { eagerRouteModules, projectRouteId, registerEagerRouteModules } = await i
 
 describe('registerEagerRouteModules (F11, A15b2)', () => {
   it("adds the project route's module to the router's module cache, so a click commits without loading it", () => {
-    const host = { __reactRouterRouteModules: { root: { default: (): null => null } } as Record<string, unknown> };
+    const modules: Record<string, unknown> = { root: { default: (): undefined => undefined } };
+    const host = { __reactRouterRouteModules: modules };
 
     expect(registerEagerRouteModules(host)).toEqual([projectRouteId]);
     expect(host.__reactRouterRouteModules[projectRouteId]).toEqual(projectRouteModule);
@@ -17,8 +21,9 @@ describe('registerEagerRouteModules (F11, A15b2)', () => {
   });
 
   it('leaves a module the document already loaded for the route', () => {
-    const loaded = { default: (): null => null };
-    const host = { __reactRouterRouteModules: { [projectRouteId]: loaded } as Record<string, unknown> };
+    const loaded = { default: (): undefined => undefined };
+    const modules: Record<string, unknown> = { [projectRouteId]: loaded };
+    const host = { __reactRouterRouteModules: modules };
 
     expect(registerEagerRouteModules(host)).toEqual([]);
     expect(host.__reactRouterRouteModules[projectRouteId]).toBe(loaded);

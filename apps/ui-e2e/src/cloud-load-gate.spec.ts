@@ -403,12 +403,11 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
           workspace: document.querySelector('[data-project-workspace]') !== null,
           alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent.trim().slice(0, 120)),
         }));
-      let offline = await readOffline().catch(() => ({ url: '', frame: false, workspace: false, alerts: [] }));
-      const deadline = Date.now() + 30_000;
-      while (!offline.workspace && Date.now() < deadline) {
-        await target.delay(500);
-        offline = await readOffline().catch(() => offline);
-      }
+      /* Up to 30 s for the workspace; a page that never draws it is the defect, read as it stands. */
+      await target
+        .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
+        .catch(() => undefined);
+      const offline = await readOffline().catch(() => ({ url: '', frame: false, workspace: false, alerts: [] }));
       await target.writeArtifact(
         'cloud-load-gate/f14-offline-reload.json',
         `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,

@@ -2,7 +2,6 @@ import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
 import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
 import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
@@ -15,7 +14,9 @@ import type { BrowserPanelParameters } from '#components/browser/browser-workben
 import {
   createContext,
   Fragment,
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -74,7 +75,7 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { isPrinterFileName } from '#components/printer/printer-file.js';
+import { isPrinterFileName } from '#components/printer/printer-file-kind.js';
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
@@ -101,26 +102,13 @@ import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
-import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
-import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
 import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
-import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
-import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
-import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
-import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
-import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
-import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
-import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
-import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
-import { ChatConsole } from '#routes/w.$workspace.$project/chat-console.js';
-import { ProjectTerminalPane } from '#components/terminal/terminal-pane.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import {
   projectWorkspaceKeyCombinations,
@@ -155,6 +143,69 @@ import type {
   ResolvedFileViewer,
 } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
+
+/*
+ * Each Workbench pane's body is its own chunk, loaded when its pane first mounts (progressive loading PL5), as the
+ * phone's sheets already load theirs: the project route's interactive tier carries the dock's frame and its file
+ * tree, never the explorer's part visuals (three.js), the print preparation (the agent-tool registry), the
+ * configuration forms, the exporter or the debug panes. A body draws inside its pane's frame when it arrives.
+ */
+const BrowserPane = lazy(async () => {
+  const module = await import('#components/browser/browser-pane.js');
+  return { default: module.BrowserPane };
+});
+const ParametersPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-parameters.js');
+  return { default: module.ParametersPanelBody };
+});
+const KinematicsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-kinematics.js');
+  return { default: module.KinematicsPanelBody };
+});
+const ModelPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-explorer.js');
+  return { default: module.ModelPanelBody };
+});
+const RevisionsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-revisions.js');
+  return { default: module.RevisionsPanelBody };
+});
+const AgentsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-agents.js');
+  return { default: module.AgentsPanelBody };
+});
+const JobsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-jobs.js');
+  return { default: module.JobsPanelBody };
+});
+const PrintPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-print.js');
+  return { default: module.PrintPanelBody };
+});
+const ConverterPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-converter.js');
+  return { default: module.ConverterPanelBody };
+});
+const DetailsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-details.js');
+  return { default: module.DetailsPanelBody };
+});
+const TelemetryPanelContent = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-kernel.js');
+  return { default: module.TelemetryPanelContent };
+});
+const ChatConsole = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-console.js');
+  return { default: module.ChatConsole };
+});
+const ProjectTerminalPane = lazy(async () => {
+  const module = await import('#components/terminal/terminal-pane.js');
+  return { default: module.ProjectTerminalPane };
+});
+const ProjectShareWorkbenchPanel = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/project-share-action.js');
+  return { default: module.ProjectShareWorkbenchPanel };
+});
 
 const reportEditorSaveFailure = async (completion: Promise<void>, path: string): Promise<void> => {
   try {
@@ -275,27 +326,52 @@ function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): Re
   );
 }
 
+/** A lazy pane body inside its pane: the pane's frame shows until the body's chunk is in. */
+function PaneBody({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
+
 function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParameters>): React.JSX.Element {
-  return <BrowserPane tabId={params.browserTabId} />;
+  return (
+    <PaneBody>
+      <BrowserPane tabId={params.browserTabId} />
+    </PaneBody>
+  );
 }
 
 function ParametersWorkbenchPanel(): React.JSX.Element {
-  return <ParametersPanelBody />;
+  return (
+    <PaneBody>
+      <ParametersPanelBody />
+    </PaneBody>
+  );
 }
 
 function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
-  return <KinematicsPanelBody panelApi={api} />;
+  return (
+    <PaneBody>
+      <KinematicsPanelBody panelApi={api} />
+    </PaneBody>
+  );
 }
 
 function ModelWorkbenchPanel(): React.JSX.Element {
-  return <ModelPanelBody />;
+  return (
+    <PaneBody>
+      <ModelPanelBody />
+    </PaneBody>
+  );
 }
 
 function RevisionsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const { projectId } = useProject();
   /* The toolbar chip reads as pressed while History is on screen (C2). */
   useReportHistoryPaneShown(projectId, useWorkbenchPanelShown(api));
-  return <RevisionsPanelBody />;
+  return (
+    <PaneBody>
+      <RevisionsPanelBody />
+    </PaneBody>
+  );
 }
 
 /** Dockview retains hidden panels; their transcript queries wait until this panel and lane are shown. */
@@ -320,38 +396,64 @@ function useWorkbenchPanelShown(panelApi: IDockviewPanelProps['api']): boolean {
 
 function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <AgentsPanelBody enableHistory={isShown} />;
+  return (
+    <PaneBody>
+      <AgentsPanelBody enableHistory={isShown} />
+    </PaneBody>
+  );
 }
 
 function JobsWorkbenchPanel(): React.JSX.Element {
-  return <JobsPanelBody />;
+  return (
+    <PaneBody>
+      <JobsPanelBody />
+    </PaneBody>
+  );
 }
 
 export function PrintWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <PrintPanelBody isShown={isShown} />;
+  return (
+    <PaneBody>
+      <PrintPanelBody isShown={isShown} />
+    </PaneBody>
+  );
 }
 
 export function ExportWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
-  return <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />;
+  return (
+    <PaneBody>
+      <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />
+    </PaneBody>
+  );
 }
 
 function ShareWorkbenchPanel(): React.JSX.Element {
-  return <ProjectShareWorkbenchPanel />;
+  return (
+    <PaneBody>
+      <ProjectShareWorkbenchPanel />
+    </PaneBody>
+  );
 }
 
 function DetailsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
-  return <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />;
+  return (
+    <PaneBody>
+      <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />
+    </PaneBody>
+  );
 }
 
 function TelemetryWorkbenchPanel(): React.JSX.Element {
   const enabled = useFeature('tauDebug');
   return enabled ? (
-    <TelemetryPanelContent />
+    <PaneBody>
+      <TelemetryPanelContent />
+    </PaneBody>
   ) : (
     <p className='p-4 text-muted-foreground'>Kernel diagnostics require debug mode.</p>
   );
@@ -359,13 +461,23 @@ function TelemetryWorkbenchPanel(): React.JSX.Element {
 
 function ConsoleWorkbenchPanel(): React.JSX.Element {
   const enabled = useFeature('tauDebug');
-  return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
+  return enabled ? (
+    <PaneBody>
+      <ChatConsole />
+    </PaneBody>
+  ) : (
+    <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>
+  );
 }
 
 /* Closing the Terminal's tab unmounts the pane, which ends its session. */
 function TerminalWorkbenchPanel(): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
-  return <ProjectTerminalPane profile={profile} />;
+  return (
+    <PaneBody>
+      <ProjectTerminalPane profile={profile} />
+    </PaneBody>
+  );
 }
 
 type WorkbenchSurface = {

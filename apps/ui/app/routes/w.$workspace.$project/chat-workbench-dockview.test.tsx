@@ -470,7 +470,7 @@ describe('hidden workbench operation panels', () => {
   it.each([
     ['Print', PrintWorkbenchPanel, mockPrintBody],
     ['Export', ExportWorkbenchPanel, mockExportBody],
-  ] as const)('passes hidden visibility to mounted %s body and wakes it on reveal', (_name, Panel, body) => {
+  ] as const)('passes hidden visibility to mounted %s body and wakes it on reveal', async (_name, Panel, body) => {
     let onVisibilityChange: (() => void) | undefined;
     const api = {
       isVisible: false,
@@ -482,7 +482,10 @@ describe('hidden workbench operation panels', () => {
     const properties = { api } as IDockviewPanelProps;
 
     render(<Panel {...properties} />);
-    expect(body).toHaveBeenLastCalledWith(false);
+    // The body is its own chunk (PL5): it mounts once the lazy import settles.
+    await waitFor(() => {
+      expect(body).toHaveBeenLastCalledWith(false);
+    });
 
     act(() => {
       Object.assign(api, { isVisible: true });

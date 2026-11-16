@@ -312,6 +312,7 @@
   "dependencies": {
     "@rjsf/core": "6.11.0",
     "@rjsf/utils": "6.11.0",
+    "@taucad/camera": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/project-core": "workspace:*",

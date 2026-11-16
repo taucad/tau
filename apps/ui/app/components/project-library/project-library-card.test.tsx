@@ -288,7 +288,8 @@ describe('ProjectLibraryCard live preview', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
 
     expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
-    expect(screen.getByTestId('shared-worker-gate')).toBeInTheDocument();
+    // The live preview is its own chunk (PL5): it mounts once the lazy import settles.
+    expect(await screen.findByTestId('shared-worker-gate')).toBeInTheDocument();
 
     const fm = screen.getByTestId('file-manager-provider');
     expect(fm).toHaveAttribute('data-project-id', mockProject.id);
@@ -306,7 +307,7 @@ describe('ProjectLibraryCard live preview', () => {
 
     const previewToggle = screen.getByRole('button', { name: 'Preview model' });
     await userEvent.click(previewToggle);
-    expect(screen.getByTestId('file-manager-provider')).toBeInTheDocument();
+    expect(await screen.findByTestId('file-manager-provider')).toBeInTheDocument();
 
     await userEvent.click(previewToggle);
     expect(screen.getByLabelText('No saved preview')).toBeInTheDocument();
@@ -317,7 +318,7 @@ describe('ProjectLibraryCard live preview', () => {
   it('should remount the scoped file manager when an open card is retargeted to another project', async () => {
     const view = renderCard();
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
-    const firstToken = screen.getByTestId('file-manager-provider').dataset['mountToken'];
+    const firstToken = (await screen.findByTestId('file-manager-provider')).dataset['mountToken'];
     const nextProject: ProjectListItem = {
       ...mockProject,
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',

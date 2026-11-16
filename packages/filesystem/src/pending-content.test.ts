@@ -380,6 +380,27 @@ describe('marked placeholders (D9)', () => {
     await raw.declarePending!(new Map(), ['models/part.step']);
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
   });
+
+  /* A topology change elsewhere (the authority root's) leaves a declared root reading the same bytes: its marks stand. */
+  it('should keep a declared root declared, its marks answering, across a topology change that left it in place', async () => {
+    const view = service.createRootedFileSystem(route);
+    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+    const indexes = (service as unknown as { _projectIndexes: ProjectIndexes })._projectIndexes;
+    indexes.evict('/');
+    const answer = await Promise.race([
+      view.stat('models/part.step'),
+      new Promise<'waiting'>((resolve) => {
+        setTimeout(() => {
+          resolve('waiting');
+        }, 20);
+      }),
+    ]);
+    expect(answer).toMatchObject({ size: part.byteLength, pending: true });
+    expect(await view.readdirWithStats!('models')).toStrictEqual([
+      expect.objectContaining({ name: 'part.step', size: part.byteLength, pending: true }),
+    ]);
+    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual(['models/part.step']);
+  });
 });
 
 /*

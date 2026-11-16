@@ -152,16 +152,21 @@ type RootState = {
   /** What the latest whole-root observation found. */
   lastCompare?: IndexCompareResult;
   persistTimer?: ReturnType<typeof setTimeout>;
+  /** Where the index was opened, so an eviction can tell whether the root still reads the same bytes. */
+  opened?: Readonly<{ provider: FileSystemProvider; path: string }>;
 };
 
 /*
- * Marks known for a root whose index has not compared yet (D9): its stored snapshot's. Each answers a file only while
- * the file is at the size and mtime it was stored at.
+ * Marks known for a root whose index has not compared yet (D9): its stored snapshot's, or a declared root's own,
+ * kept across an eviction that left its mount as it was. Each answers a file only while the file is at the size and
+ * mtime it was stored at.
  */
 type StoredMarks = Readonly<{
   rows: ReadonlyMap<string, Readonly<{ size: number; mtimeMs: number }>>;
   pending: Readonly<Record<string, PendingObject>>;
   declared: boolean;
+  /** Carried from an evicted index rather than read from a snapshot. */
+  carried: boolean;
 }>;
 
 /**
@@ -782,6 +787,7 @@ export class ProjectIndexes {
         ),
         pending: snapshot.pending ?? {},
         declared: snapshot.declared === true,
+        carried: false,
       });
     }
   }
@@ -990,14 +996,18 @@ export class ProjectIndexes {
   public evict(absolutePath: string): void {
     this._forget(absolutePath);
     const changed = normalizePath(absolutePath);
+    const carried = new Set<string>();
     for (const [root, state] of this._states) {
       if (relativeTo(changed, root) !== undefined || relativeTo(root, changed) !== undefined) {
         clearTimeout(state.persistTimer);
         this._states.delete(root);
+        if (this._carry(root, state)) {
+          carried.add(root);
+        }
       }
     }
-    for (const root of this._stored.keys()) {
-      if (relativeTo(changed, root) !== undefined) {
+    for (const [root, stored] of this._stored) {
+      if (relativeTo(changed, root) !== undefined && !carried.has(root) && !stored.carried) {
         this._stored.delete(root);
         this._peeking.delete(root);
       }
@@ -1019,7 +1029,7 @@ export class ProjectIndexes {
     }
     const mounted = new Set(this._options.mountPrefixes?.() ?? []);
     for (const root of this._declaration.keys()) {
-      if (relativeTo(changed, root) !== undefined) {
+      if (relativeTo(changed, root) !== undefined && !carried.has(root)) {
         if (mounted.has(root)) {
           this._declaration.set(root, 'unknown');
         } else {
@@ -1027,6 +1037,51 @@ export class ProjectIndexes {
         }
       }
     }
+  }
+
+  /*
+   * A carried root's index reopened: each carried mark holds where its file is still at the size and mtime it was
+   * carried at, and any pointer-sized file the marks no longer account for makes the root unknown again.
+   */
+  private _landCarried(root: string, index: ProjectIndex, stored: StoredMarks): void {
+    const changed: string[] = [];
+    for (const entry of index.walk('', { kinds: ['file'] })) {
+      const kept = stored.rows.get(entry.path);
+      const same = kept !== undefined && kept.size === entry.size && kept.mtimeMs === entry.mtimeMs;
+      const object = Object.hasOwn(stored.pending, entry.path) ? stored.pending[entry.path] : undefined;
+      if (same && object !== undefined) {
+        index.markPending(entry.path, object, { size: entry.size });
+      } else if (!same) {
+        changed.push(entry.path);
+      }
+    }
+    this._noteObserved(root, index, changed);
+  }
+
+  /*
+   * Keep a declared root's marks across an eviction that left it reading the same bytes (a topology change elsewhere,
+   * such as the authority root's): it stays declared, its marks answering each file still at its size and mtime, and
+   * its index reopens to check them. Answers whether it carried them.
+   */
+  private _carry(root: string, state: RootState): boolean {
+    if (this._declaration.get(root) !== 'declared' || state.opened === undefined || !state.index.isComplete) {
+      return false;
+    }
+    let now: Readonly<{ provider: FileSystemProvider; path: string }>;
+    try {
+      now = this._resolve(root);
+    } catch {
+      return false;
+    }
+    if (now.provider !== state.opened.provider || now.path !== state.opened.path) {
+      return false;
+    }
+    const rows = new Map<string, Readonly<{ size: number; mtimeMs: number }>>();
+    for (const entry of state.index.walk('', { kinds: ['file'] })) {
+      rows.set(entry.path, { size: entry.size, mtimeMs: entry.mtimeMs });
+    }
+    this._stored.set(root, { rows, pending: state.index.pendingSnapshot(), declared: true, carried: true });
+    return true;
   }
 
   /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
@@ -1244,6 +1299,7 @@ export class ProjectIndexes {
       index,
       seen: { ...snapshot?.vector.seqByTab },
       needsCompare: false,
+      opened: { provider: resolution.provider, path: resolution.path },
     };
     this._states.set(root, state);
     workerTimings.count(usable ? 'index.load' : 'index.scan', 1);
@@ -1265,7 +1321,11 @@ export class ProjectIndexes {
       return index;
     }
     this._inheritMarks(root, index);
+    const stored = this._stored.get(root);
     this._stored.delete(root);
+    if (stored?.carried === true) {
+      this._landCarried(root, index, stored);
+    }
     if (index.declared) {
       /* No pointer-sized row changed against the provider: the stored marks are the root's word, so nothing waits. */
       this._declaration.set(root, 'declared');

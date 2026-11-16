@@ -151,8 +151,8 @@ export function isFileCheckSettled(status: RevisionStatusProjection | undefined,
   if (status === undefined) {
     return false;
   }
-  /* Only the readiness decides `filesChecking`: no closure is asked. */
-  return modelAvailability(projectAvailability(isCloudOpenPending, status), status, []) !== 'filesChecking';
+  /* Only the readiness decides `filesChecking`, as {@link modelAvailability} reads it: no closure is asked. */
+  return status.readiness === undefined || readyFor('model', status.readiness);
 }
 
 /**

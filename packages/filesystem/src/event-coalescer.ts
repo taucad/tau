@@ -315,6 +315,18 @@ function getEventPath(event: PathChangeEvent): string | undefined {
 /** The paths a fact names that its change leaves unknown: never a copy's untouched source. */
 type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', string>>;
 
+/** The loss signals that stand for a netted removal: a re-list of a whole subtree, ports beneath it included. */
+const subtreeResets = new WeakSet<PathChangeEvent>();
+
+/**
+ * Whether a loss signal re-lists a directory a lost window removed and then
+ * filled again, so a port rooted beneath it reads it as its whole-root reset.
+ *
+ * @param event - A fact.
+ * @returns `true` only for such a signal from {@link overflowLossSignals}.
+ */
+export const isSubtreeReset = (event: PathChangeEvent): boolean => subtreeResets.has(event);
+
 /**
  * What a coalescing window that overflowed is replaced with: a
  * `directoryChanged` for each directory a discarded fact touched — a file's
@@ -327,6 +339,9 @@ type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', 
  * discarded removal or move of a directory is kept as itself, ahead of the
  * re-lists: a connection rooted beneath it reads that as its whole-root reset,
  * where an ancestor's re-list says only that the ancestor's listing changed.
+ * When the window fills the removed path again, the directory's re-list stands
+ * for the removal instead ({@link isSubtreeReset}), so no open file under it
+ * reads as gone (I7) while a connection beneath it still resets.
  *
  * @param discarded - The facts the window discarded, in order.
  * @returns The loss signals, in the order their directories first appeared.
@@ -335,31 +350,65 @@ type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', 
 export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): PathChangeEvent[] => {
   const kept = new Map<string, PathChangeEvent>();
   const signals = new Map<string, PathChangeEvent>();
+  /* Directories a netted removal leaves to their re-list, which must still reach every port beneath them. */
+  const subtrees: Array<{ backend: string; path: string }> = [];
+  const named = (event: PathChangeEvent): string[] => {
+    const { path, oldPath, newPath, targetPath } = event as NamedPaths;
+    return [path, oldPath, newPath, targetPath].filter((value) => value !== undefined);
+  };
+  /* Per fact, whether a later fact of its backend names a path at or under the one it removes. */
+  const filledLater = new Set<string>();
+  const netted = Array.from<boolean>({ length: discarded.length });
+  for (let index = discarded.length - 1; index >= 0; index -= 1) {
+    const event = discarded[index]!;
+    if (event.type === 'directoryDeleted' || event.type === 'directoryRenamed') {
+      const removed = event.type === 'directoryDeleted' ? event.path : event.oldPath;
+      netted[index] = filledLater.has(`${event.backend}\0${removed}`);
+    }
+    for (const path of named(event)) {
+      for (let at = path; !filledLater.has(`${event.backend}\0${at}`); at = parentDirectory(at)) {
+        filledLater.add(`${event.backend}\0${at}`);
+        if (at === '/') {
+          break;
+        }
+      }
+    }
+  }
   for (const event of discarded) {
     if (event.type === 'backendChanged') {
       signals.set(event.backend, event);
     }
   }
-  for (const event of discarded) {
+  for (const [index, event] of discarded.entries()) {
     if (signals.has(event.backend)) {
       continue;
     }
-    const { path, oldPath, newPath, targetPath } = event as NamedPaths;
     if (event.type === 'directoryDeleted' || event.type === 'directoryRenamed') {
-      kept.set(`${event.type}\0${event.backend}\0${path ?? `${oldPath!}\0${newPath!}`}`, event);
-    }
-    for (const named of [path, oldPath, newPath, targetPath]) {
-      if (named === undefined) {
-        continue;
+      /* Something lands at or under the removed directory later in the window: told as gone, its open
+       * files would flash orphaned until their re-list (I7), so the re-list alone carries it. */
+      if (netted[index] === true) {
+        for (const path of named(event)) {
+          subtrees.push({ backend: event.backend, path });
+        }
+      } else {
+        kept.set(`${event.type}\0${event.backend}\0${named(event).join('\0')}`, event);
       }
+    }
+    for (const path of named(event)) {
       for (const directory of event.type.startsWith('directory')
-        ? [parentDirectory(named), named]
-        : [parentDirectory(named)]) {
+        ? [parentDirectory(path), path]
+        : [parentDirectory(path)]) {
         const key = `${event.backend}\0${directory}`;
         if (!signals.has(key)) {
           signals.set(key, { type: 'directoryChanged', path: directory, backend: event.backend });
         }
       }
+    }
+  }
+  for (const { backend, path } of subtrees) {
+    const signal = signals.get(`${backend}\0${path}`);
+    if (signal !== undefined) {
+      subtreeResets.add(signal);
     }
   }
   return [...[...kept.values()].filter(({ backend }) => !signals.has(backend)), ...signals.values()];

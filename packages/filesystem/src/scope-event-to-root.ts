@@ -3,6 +3,7 @@
  * (STO-25 SP2g): the fs bridge scopes every fact it fans out with this.
  */
 
+import { isSubtreeReset } from '#event-coalescer.js';
 import type { PathChangeEvent } from '#types.js';
 
 /**
@@ -17,7 +18,8 @@ import type { PathChangeEvent } from '#types.js';
  */
 const rootResetAbove = (event: PathChangeEvent, root: string): PathChangeEvent | undefined => {
   const above = (path: string): boolean => path !== root && (path === '/' || root.startsWith(`${path}/`));
-  return (event.type === 'directoryDeleted' && above(event.path)) ||
+  return ((event.type === 'directoryDeleted' || (event.type === 'directoryChanged' && isSubtreeReset(event))) &&
+    above(event.path)) ||
     (event.type === 'directoryRenamed' && (above(event.oldPath) || above(event.newPath)))
     ? { type: 'directoryChanged', path: '', backend: event.backend }
     : undefined;

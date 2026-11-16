@@ -7,6 +7,7 @@ import {
   pruneDirectorySummaries,
 } from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
+import { scopeEventToRoot } from '#scope-event-to-root.js';
 import type { PathChangeEvent } from '#types.js';
 
 const testBackend = 'memory';
@@ -608,6 +609,31 @@ describe('overflowLossSignals', () => {
         (path): PathChangeEvent => ({ type: 'directoryChanged', path, backend: testBackend }),
       ),
     ]);
+  });
+
+  it('should re-list a removed directory the same window re-created or touched, never tell it gone', () => {
+    const signals = overflowLossSignals([
+      { type: 'directoryDeleted', path: '/p/x', backend: testBackend },
+      written('/p/x/a'),
+      { type: 'directoryRenamed', oldPath: '/p/y', newPath: '/p/z', backend: testBackend },
+      { type: 'directoryCreated', path: '/p/y', backend: testBackend },
+    ]);
+    expect(signals.map((event) => event.type)).not.toContain('directoryDeleted');
+    expect(signals.map((event) => event.type)).not.toContain('directoryRenamed');
+    expect(scopeEventToRoot(signals.find((event) => 'path' in event && event.path === '/p/x')!, '/p/x/deep')).toEqual({
+      type: 'directoryChanged',
+      path: '',
+      backend: testBackend,
+    });
+    expect(scopeEventToRoot(signals.find((event) => 'path' in event && event.path === '/p/z')!, '/p/z/deep')).toEqual({
+      type: 'directoryChanged',
+      path: '',
+      backend: testBackend,
+    });
+    /* An ordinary summary above a root still says only that its listing changed. */
+    expect(
+      scopeEventToRoot({ type: 'directoryChanged', path: '/p/x', backend: testBackend }, '/p/x/deep'),
+    ).toBeUndefined();
   });
 
   it('should keep a discarded backendChanged as its backend’s whole signal, and scope every other backend', () => {

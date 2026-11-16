@@ -210,6 +210,41 @@ describe('scopeEventToRoot', () => {
     }
   });
 
+  /* Re-review a4 (I7): a removal the same lost window netted is re-listed, never told as gone. */
+  it('should re-list, not remove, a directory an overflowed window deleted and re-created', async () => {
+    const { bus, emit, close } = await connectRooted(2);
+    try {
+      bus.emit({ type: 'directoryDeleted', path: `${root}/parts`, backend: 'memory' });
+      bus.emit({ type: 'fileWritten', path: `${root}/parts/a.scad`, backend: 'memory' });
+      bus.emit({ type: 'fileWritten', path: '/elsewhere/b.txt', backend: 'memory' });
+      expect(emit).toHaveBeenCalledExactlyOnceWith('fileChanged', {
+        type: 'changeSet',
+        entries: [
+          { type: 'directoryChanged', path: '', backend: 'memory' },
+          { type: 'directoryChanged', path: 'parts', backend: 'memory' },
+        ],
+      } satisfies ChangeEvent);
+    } finally {
+      close();
+    }
+  });
+
+  it('should still reset the whole root when an overflowed window deleted and re-created a directory above it', async () => {
+    const { bus, emit, close } = await connectRooted(2);
+    try {
+      bus.emit({ type: 'directoryDeleted', path: '/projects', backend: 'memory' });
+      bus.emit({ type: 'directoryCreated', path: '/projects', backend: 'memory' });
+      bus.emit({ type: 'fileWritten', path: '/elsewhere/b.txt', backend: 'memory' });
+      expect(emit).toHaveBeenCalledExactlyOnceWith('fileChanged', {
+        type: 'directoryChanged',
+        path: '',
+        backend: 'memory',
+      } satisfies ChangeEvent);
+    } finally {
+      close();
+    }
+  });
+
   it('should not reset the root when an overflowed window lost only a summary above it', async () => {
     const { bus, emit, close } = await connectRooted(2);
     try {

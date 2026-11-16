@@ -77,8 +77,22 @@ type FrameSubscribe = (
  */
 export const viewportGizmoRenderPriority = 3;
 
-/** The class name the view cube's DOM element carries; hosts place it with this. */
-const className = 'viewport-gizmo-cube';
+/**
+ * The view cube element's classes: `viewport-gizmo-cube`, which hosts place it by, and its look in each state the
+ * library marks on it (styling guide revision 3): the action cursor over a target (`data-hovered`), the grabbing cursor
+ * while a drag turns the view (`data-dragging`), no pointer input while display-only (`data-disabled`, the Axes style,
+ * so a press reaches the canvas below), and Tau's foreground and focus ring on the navigation buttons.
+ *
+ * @public
+ */
+export const viewportGizmoClassName = [
+  'viewport-gizmo-cube',
+  'data-hovered:cursor-action',
+  'data-dragging:cursor-grabbing',
+  'data-disabled:pointer-events-none',
+  '[--viewport-gizmo-button-color:var(--foreground)]',
+  '[--viewport-gizmo-button-focus-ring:var(--focus-outline-color)]',
+].join(' ');
 
 /**
  * The R3F store the view cube draws on: read live, and followed for the canvas's size.
@@ -216,7 +230,7 @@ export const viewportGizmoOptions = ({
   size,
   font: { weight: 500, family: style.font },
   offset: { top: navigationOffset, bottom: navigationOffset, right: navigationOffset },
-  className,
+  className: viewportGizmoClassName,
   resolution: viewportGizmoMetrics.textureSize,
   container,
   ...styleConfig.options,

@@ -298,12 +298,11 @@ export function ViewerStage({
         aria-label={regionLabel}
         aria-busy={isBusy || isWaiting || undefined}
         tabIndex={partMenu === undefined ? undefined : 0}
-        /* The orientation cube's library stacks it at z-index 1000. Under the viewer bar (z-10) instead: on a short
-           stage, such as a phone's at Half, the cube's box reaches the bar and would take its taps. A canvas the
-           renderer has not sized yet (no `width` attribute) fills its box rather than the element's 300 by 150 default,
-           so it is attached at the stage's size (U12). The cube's navigation buttons take Tau's focus ring and
-           foreground; their chip and ring follow the cube's own token colours. */
-        className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline [&_canvas:not([width])]:size-full [&>.viewport-gizmo-cube]:z-[5] [&>.viewport-gizmo-cube]:cursor-action [&>.viewport-gizmo-cube]:[--viewport-gizmo-button-color:var(--foreground)] [&>.viewport-gizmo-cube]:[--viewport-gizmo-button-focus-ring:var(--focus-outline-color)] [&>.viewport-gizmo-cube[data-disabled]]:pointer-events-none [&>.viewport-gizmo-cube[data-dragging]]:cursor-grabbing'
+        /* The orientation cube stacks under the viewer bar (z-10): on a short stage, such as a phone's at Half, the
+           cube's box reaches the bar and would take its taps. The cube styles its own states (`viewportGizmoClassName`).
+           A canvas the renderer has not sized yet (no `width` attribute) fills its box rather than the element's 300 by
+           150 default, so it is attached at the stage's size (U12). */
+        className='relative min-h-0 flex-1 overflow-hidden focus-visible:focus-outline [&_canvas:not([width])]:size-full [&>.viewport-gizmo-cube]:z-[5]'
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerLeave}

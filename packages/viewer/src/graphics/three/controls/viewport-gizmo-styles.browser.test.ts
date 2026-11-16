@@ -5,6 +5,7 @@ import { ViewportGizmo } from 'three-viewport-gizmo';
 import type { GizmoTarget } from 'three-viewport-gizmo';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import { resolveViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
+import { viewportGizmoClassName } from '#graphics/three/controls/viewport-gizmo-adapter.js';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 /*
@@ -19,6 +20,7 @@ afterEach(() => {
     cleanup();
   }
   document.documentElement.classList.remove('dark');
+  delete document.documentElement.dataset['pointerCursors'];
 });
 
 const mountGizmo = (gizmoStyle: GizmoStyleId): Readonly<{ gizmo: ViewportGizmo; camera: PerspectiveCamera }> => {
@@ -44,6 +46,7 @@ const mountGizmo = (gizmoStyle: GizmoStyleId): Readonly<{ gizmo: ViewportGizmo; 
     placement: 'top-left',
     offset: { top: 0, left: 0 },
     animated: false,
+    className: viewportGizmoClassName,
     ...config.options,
   });
   gizmo.enabled = config.clickable;
@@ -127,12 +130,49 @@ describe('gizmo styles in the browser', () => {
   it('axes: shows no target and takes no click, so a press reaches the canvas below (G4)', () => {
     const { gizmo, camera } = mountGizmo('axes');
     const before = camera.quaternion.clone();
-    // Display-only: the host's `[data-disabled]` rule (viewer stage) lets a press through to the canvas.
+    // Display-only: the cube's `[data-disabled]` rule lets a press through to the canvas.
     expect(gizmo.enabled).toBe(false);
     expect(Object.hasOwn(gizmo.domElement.dataset, 'disabled')).toBe(true);
+    expect(getComputedStyle(gizmo.domElement).pointerEvents).toBe('none');
     expect(gizmo.options.corners.enabled).toBe(false);
     expect(gizmo.options.edges.enabled).toBe(false);
     expect(camera.quaternion.equals(before)).toBe(true);
     expect(gizmo.animating).toBe(false);
+  });
+
+  it('takes the action cursor over a target, the grabbing cursor while dragging, and no input when disabled (TA2)', () => {
+    // Pointer cursors on, so the action cursor token resolves to `pointer` rather than the default arrow.
+    document.documentElement.dataset['pointerCursors'] = 'true';
+    const { gizmo } = mountGizmo('cube');
+    const element = gizmo.domElement;
+    const cursor = (): string => getComputedStyle(element).cursor;
+    const { left, top, width, height } = element.getBoundingClientRect();
+    const centre = { clientX: left + width / 2, clientY: top + height / 2 };
+    const pointer = { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+
+    expect(cursor()).toBe('auto');
+
+    element.dispatchEvent(new PointerEvent('pointermove', { ...pointer, ...centre }));
+    expect(gizmo.hovered).not.toBeNull();
+    expect(cursor()).toBe('pointer');
+
+    element.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, ...centre, button: 0, buttons: 1 }));
+    element.dispatchEvent(
+      new PointerEvent('pointermove', {
+        ...pointer,
+        clientX: centre.clientX + 40,
+        clientY: centre.clientY,
+        buttons: 1,
+      }),
+    );
+    expect(gizmo.dragging).toBe(true);
+    expect(cursor()).toBe('grabbing');
+    element.dispatchEvent(
+      new PointerEvent('pointerup', { ...pointer, clientX: centre.clientX + 40, clientY: centre.clientY, button: 0 }),
+    );
+    expect(gizmo.dragging).toBe(false);
+
+    gizmo.enabled = false;
+    expect(getComputedStyle(element).pointerEvents).toBe('none');
   });
 });

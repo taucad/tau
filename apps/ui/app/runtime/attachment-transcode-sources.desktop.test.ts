@@ -19,7 +19,7 @@ describe('desktop attachment transcode sources', () => {
   });
 
   it('should admit only formats the desktop utility converts to jpeg', async () => {
-    // Imported dynamically: the page reaches `@taucad/image` only through lazy edges.
+    // Dynamic, as the page loads `@taucad/image` lazily (`@nx/enforce-module-boundaries`).
     const { image } = await import('@taucad/image');
     const utilitySources = deriveTranscodeSources(defineRuntime({ plugins: [image(), heif()] }), 'jpeg');
     expect(utilitySources).toEqual(expect.arrayContaining([...desktopSources]));

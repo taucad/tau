@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router';
 import { CloudOff, CircleAlert } from 'lucide-react';
 import type { LargeObjectsFacet, RevisionStatusProjection } from '@taucad/revisions';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
-import { useLargeObjects, useModelAvailability, useProjectAvailability } from '#hooks/use-project-availability.js';
+import {
+  useFileCheckSlow,
+  useLargeObjects,
+  useModelAvailability,
+  useProjectAvailability,
+} from '#hooks/use-project-availability.js';
 import type { ModelAvailability, ProjectAvailability } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { formatBytes } from '@taucad/ui-core/lib/format-bytes';
@@ -84,25 +89,15 @@ function ModelFilesPlaceholder({ hasFailed: failed }: { readonly hasFailed: bool
   );
 }
 
-/** How long a check of the model's files may run before the viewer offers a way out. Milliseconds. */
-export const modelCheckPatienceMilliseconds = 10_000;
-
 /**
  * The viewer's wait while no download runs: the files are being checked, which
  * is quick. It never says "Downloading", and a check that outlasts its bound
- * offers Try again, which checks the files again (T5).
+ * offers Try again, which checks the files again (T5). The bound is the
+ * session's (`slow`, A14), counted on its clock from when the check began.
  */
 function ModelCheckPlaceholder(): React.JSX.Element {
   const client = useRevisionClient();
-  const [isSlow, setIsSlow] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsSlow(true);
-    }, modelCheckPatienceMilliseconds);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, []);
+  const isSlow = useFileCheckSlow();
   return (
     <div
       className='flex size-full flex-col items-center justify-center gap-4 p-6 text-center'

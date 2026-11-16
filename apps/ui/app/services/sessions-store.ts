@@ -907,7 +907,9 @@ const unloadOn = (wiring: SessionWiring) =>
 /* A registry composed without wiring (rows that run the registry alone) starts none of these, and its sessions'
  * `revisions` child answers a quiesce at once. */
 const unwiredFileManagerChild = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(() => undefined);
+/* A14: with no revision client there is no file check to wait for, so it is settled at once. */
 const unwiredRevisions = createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack, receive }) => {
+  sendBack({ type: 'fileCheckChanged', settled: true, judged: false });
   receive((event) => {
     answerQuiesce(event, sendBack);
   });

@@ -193,6 +193,8 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
   const focusSignal = createSignal();
   let recording = false;
   const recordingSignal = createSignal();
+  let cloudOpen = false;
+  const cloudOpenSignal = createSignal();
   const chatFacts: Array<Readonly<{ projectId: string; facts: ChatRevisionFacts }>> = [];
   const faults: unknown[] = [];
   const userSignal = createSignal();
@@ -227,6 +229,7 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
       chatFacts.push({ projectId: id, facts });
     },
     recording: { get: () => recording, subscribe: recordingSignal.subscribe },
+    cloudOpen: { get: () => cloudOpen, subscribe: cloudOpenSignal.subscribe },
     reportFault: (error) => {
       faults.push(error);
     },
@@ -259,6 +262,14 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
       recording = next;
       recordingSignal.emit();
     },
+    setCloudOpen: (next: boolean) => {
+      cloudOpen = next;
+      cloudOpenSignal.emit();
+    },
+    /** Another tab ends the open: the stored intent changes and this document hears nothing. */
+    setCloudOpenElsewhere: (next: boolean) => {
+      cloudOpen = next;
+    },
     chatFacts,
     faults,
     saltRequests,
@@ -266,7 +277,13 @@ const createFakePorts = (initial: Readonly<{ user?: RevisionSessionUser; focused
     get unregistered() {
       return unregistered;
     },
-    listeners: () => userSignal.size + anonymitySignal.size + saltSignal.size + focusSignal.size + recordingSignal.size,
+    listeners: () =>
+      userSignal.size +
+      anonymitySignal.size +
+      saltSignal.size +
+      focusSignal.size +
+      recordingSignal.size +
+      cloudOpenSignal.size,
   };
 };
 
@@ -302,6 +319,11 @@ const createSession = (
         });
       },
       revisionChatsChanged: ({ event }, enq) => {
+        enq(() => {
+          received.push(event);
+        });
+      },
+      fileCheckChanged: ({ event }, enq) => {
         enq(() => {
           received.push(event);
         });
@@ -766,13 +788,18 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
   });
 
   /** A started session on one open client, with what it told its session. */
-  const startSession = async (options: Readonly<{ focused?: string; syncProjectRoots?: () => Promise<void> }> = {}) => {
+  const startSession = async (
+    options: Readonly<{ focused?: string; syncProjectRoots?: () => Promise<void>; isCloudOpen?: boolean }> = {},
+  ) => {
     const guard = guardActors();
     const log: ClientLog = [];
     const client = createFakeClient('a', log);
     client.userAnswer.resolve();
     revisionClientTestApi.adopt(projectId, workerA, client);
     const fake = createFakePorts(options.focused === undefined ? {} : { focused: options.focused });
+    if (options.isCloudOpen === true) {
+      fake.setCloudOpen(true);
+    }
     const fileManager = createFileManager({ worker: workerA, rootDirectory: `/projects/${projectId}` });
     const received: SessionRevisionsEmitted[] = [];
     const session = createSession(fake.ports, fileManager.ref, {
@@ -856,6 +883,100 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
       { type: 'revisionChatsChanged', ready: true },
     ]);
     session.stop();
+  });
+
+  /* A14: the session's file check, which focus's open waits for (U13, U20). */
+  const fileChecks = (received: readonly SessionRevisionsEmitted[]) =>
+    received.filter((event) => event.type === 'fileCheckChanged');
+
+  it('A14: should tell the session the file check settles only once a status is published and the model is not checking files', async () => {
+    const guard = guardActors();
+    const log: ClientLog = [];
+    const client = createFakeClient('a', log);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, workerA, client);
+    const fake = createFakePorts();
+    const fileManager = createFileManager({ rootDirectory: `/projects/${projectId}` });
+    const received: SessionRevisionsEmitted[] = [];
+    const session = createSession(fake.ports, fileManager.ref, { guard, received });
+    session.start();
+    await settle();
+
+    /* No worker, so no client and nothing published: the first word is pending, as the session already holds, so a
+     * word it got from before cannot stand. */
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false, judged: false }]);
+
+    client.setStatus({ readiness: 'materialized' });
+    fileManager.set({ worker: workerA });
+    await settle();
+    /* Published, but the fill has not answered for this tree: the model is checking its files, a repeat. */
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false, judged: false }]);
+
+    client.setStatus({ readiness: 'filled' });
+    expect(fileChecks(received)).toEqual([
+      { type: 'fileCheckChanged', settled: false, judged: false },
+      { type: 'fileCheckChanged', settled: true, judged: true },
+    ]);
+
+    /* A later check returns it to pending; a repeat says nothing. */
+    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ projectDirty: true });
+    expect(fileChecks(received)).toEqual([
+      { type: 'fileCheckChanged', settled: false, judged: false },
+      { type: 'fileCheckChanged', settled: true, judged: true },
+      { type: 'fileCheckChanged', settled: false, judged: true },
+    ]);
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('A14: should settle the check of a Tau Cloud open at once, before its client has published anything', async () => {
+    const guard = guardActors();
+    const fake = createFakePorts();
+    fake.setCloudOpen(true);
+    /* No worker yet, so no client and no status. */
+    const fileManager = createFileManager({ rootDirectory: `/projects/${projectId}` });
+    const received: SessionRevisionsEmitted[] = [];
+    const session = createSession(fake.ports, fileManager.ref, { guard, received });
+    session.start();
+    await settle();
+
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: true, judged: false }]);
+
+    /* The open ends before the client's first status: the word says so, so the session takes it as the first check. */
+    fake.setCloudOpen(false);
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false, judged: false });
+    session.stop();
+    expect(guard.take()).toEqual([]);
+  });
+
+  it('A14: should read the Tau Cloud open on each publication, and take the check after an open another tab ends as the first', async () => {
+    /* The open is owed from the start: the statuses the client publishes meanwhile are the open's, not the check's. */
+    const { client, fake, received, session } = await startSession({ isCloudOpen: true });
+    client.setStatus({ readiness: 'connected' });
+    expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: true, judged: false }]);
+
+    /* Another tab performs the open and clears the stored intent; this document hears no signal. */
+    fake.setCloudOpenElsewhere(false);
+    client.setStatus({ readiness: 'materialized' });
+
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false, judged: false });
+    session.stop();
+  });
+
+  it('A14: should not hold a Tau Cloud open behind the file check, whose own placeholder speaks as it does today', async () => {
+    const { client, fake, received, session } = await startSession();
+    client.setStatus({ readiness: 'connected' });
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false, judged: true });
+
+    fake.setCloudOpen(true);
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: true, judged: true });
+
+    /* The open is done and the fill has still to answer: that is a file check again. */
+    fake.setCloudOpen(false);
+    expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false, judged: true });
+    session.stop();
+    expect(fake.listeners()).toBe(0);
   });
 
   it('F12: should tell the client whether its project is focused, on connect and on each flip', async () => {

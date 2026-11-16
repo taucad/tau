@@ -155,8 +155,10 @@ const harness = (options?: {
         }),
         agentHost: child('agentHost', 'agentHost'),
         compute: child('compute', 'compute'),
-        /* The revision client the file manager's change started: it quiesces the project's sync on the close. */
+        /* The revision client the file manager's change started: its first file check settles at once (A14), and it
+         * quiesces the project's sync on the close. */
         revisions: createCallbackLogic<EventObject, ProjectSessionFileManagerInput>(({ sendBack, receive }) => {
+          sendBack({ type: 'fileCheckChanged', settled: true, judged: true });
           receive((received) => {
             const event = received as Command;
             if (event.type === 'quiesce') {
@@ -632,9 +634,9 @@ describe('projectSessionMachine', () => {
     const { actor, order, live } = harness({ parentRef: parent.ref });
     await settle();
     actor.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
-    /* Four regions, the session's presence and unload registration, the file manager's revision client and connector,
-     * and no chat: the store owns each chat's root (PV-S5). */
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(8);
+    /* Four regions, the session's presence and unload registration, its file check's patience (A14), the file
+     * manager's revision client and connector, and no chat: the store owns each chat's root (PV-S5). */
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(9);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });
@@ -810,7 +812,9 @@ describe('projectSessionMachine', () => {
     await settle();
     await settle();
 
-    expect(parent.received.filter((event) => event.type === 'sessionState').map((event) => event['state'])).toEqual([
+    /* A state is reported again when its facts change, as `opening` does when the file check starts (A14). */
+    const states = parent.received.filter((event) => event.type === 'sessionState').map((event) => event['state']);
+    expect(states.filter((state, index) => state !== states[index - 1])).toEqual([
       'opening',
       'live',
       'closing',
@@ -867,8 +871,11 @@ describe('projectSessionMachine', () => {
     const before = parent.received.filter((event) => event.type === 'sessionState');
     expect(before.length).toBeGreaterThanOrEqual(3);
     for (const report of before) {
-      expect(report).toMatchObject({ chatReady: false, availability: 'settled' });
+      expect(report).toMatchObject({ chatReady: false });
     }
+    /* The first check is pending from the file manager's report and settled once its client says so (A14). */
+    expect(before.map((report) => report['availability'])).toContain('pending');
+    expect(before.at(-1)).toMatchObject({ state: 'live', availability: 'settled' });
 
     actor.send({ type: 'chatReady' });
     await settle();

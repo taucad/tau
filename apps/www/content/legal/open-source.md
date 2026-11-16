@@ -242,8 +242,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@radix-ui/react-use-size](https://github.com/radix-ui/primitives) | 1.1.5 | MIT |
 | [@radix-ui/react-visually-hidden](https://github.com/radix-ui/primitives) | 1.2.13 | MIT |
 | [@radix-ui/rect](https://github.com/radix-ui/primitives) | 1.1.3 | MIT |
-| [@react-router/express](https://github.com/remix-run/react-router) | 7.18.2 | MIT |
-| [@react-router/node](https://github.com/remix-run/react-router) | 7.18.2 | MIT |
+| [@react-router/express](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
+| [@react-router/node](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
 | [@react-three/drei](https://github.com/pmndrs/drei) | 10.7.9 | MIT |
 | [@reduxjs/toolkit](https://github.com/reduxjs/redux-toolkit) | 2.13.0 | MIT |
 | [@resvg/resvg-wasm](https://github.com/yisibl/resvg-js) | 2.6.2 | MPL-2.0 |
@@ -773,7 +773,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [react-remove-scroll](https://github.com/theKashey/react-remove-scroll) | 2.7.2 | MIT |
 | [react-remove-scroll-bar](https://github.com/theKashey/react-remove-scroll-bar) | 2.3.8 | MIT |
 | [react-resizable-panels](https://github.com/bvaughn/react-resizable-panels) | 3.0.6 | MIT |
-| [react-router](https://github.com/remix-run/react-router) | 7.18.2 | MIT |
+| [react-router](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
 | [react-style-singleton](https://github.com/theKashey/react-style-singleton) | 2.2.3 | MIT |
 | [react-virtuoso](https://github.com/petyosi/react-virtuoso) | 4.18.16 | MIT |
 | [readable-stream](https://github.com/nodejs/readable-stream) | 2.3.8 | MIT |

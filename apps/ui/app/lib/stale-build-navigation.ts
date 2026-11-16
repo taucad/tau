@@ -17,7 +17,7 @@
  * importing its route module; `replace` navigations replace. Click handlers, analytics and
  * submissions are untouched; `location.state` does not survive a document load. A relative or
  * numeric destination stays with the router; a route module that then fails to load is
- * caught by the React Router patch (`tools/pnpm/patches/react-router@7.18.2.patch`), which loads
+ * caught by the React Router patch (`tools/pnpm/patches/react-router@7.18.5.patch`), which loads
  * the destination instead of reloading the page being left.
  *
  * A navigation is never a loop: each document load lands on the build the server names.

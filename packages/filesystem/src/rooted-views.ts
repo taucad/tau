@@ -47,6 +47,7 @@ import type {
 import type { MountResolution, MountTable } from '#mount-table.js';
 import type { ProjectIndexes, IndexFactsOptions } from '#project-index/project-indexes.js';
 import type {
+  DeclaredPlaceholder,
   ExpectedEntry,
   IndexAdmits,
   IndexChanges,
@@ -59,11 +60,18 @@ import type { BulkMoveEdit, BulkMoveResult, MutationPipeline, ResolvedChangesetE
 import type { AppendFence, Changeset, ChangesetReceipt } from '#changeset.js';
 import type { ChangeSetWatchRequest, WatchRegistry } from '#watch-registry.js';
 import type { ChangeSet, ChangeSetEntry } from '#change-event-bus.js';
-import { RootedFileSystemError, WorkspaceMutationError, isNotFoundError } from '#workspace-errors.js';
+import { RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { getEventOrigin } from '#event-origin-registry.js';
-import { PendingContentError, pendingObjectOf, readThroughPending } from '#pending-content.js';
+import {
+  PendingContentError,
+  asMarkedRow,
+  mayBePointerSize,
+  pendingObjectOf,
+  readAsMarked,
+  readThroughPending,
+} from '#pending-content.js';
 import type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 
 /* A provider's own utf8 read keeps a byte-order mark; so does this one. */
@@ -220,17 +228,39 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      */
     expectEntries?(entries: readonly ExpectedEntry[]): Promise<void>;
     /**
-     * Which of these files the root's index holds as pending entries: their
-     * large object is not on the device yet. Answered from the index, and for
-     * a file the size of a pointer it does not hold as pending, from that
-     * file's bytes read raw: never through, so a consumer that only asks
-     * never starts a download (D9).
+     * Declare which files under this root are placeholders (D9), as the revision layer, their only writer, knows them:
+     * each declared file still at its pointer's size is pending on its object, and every other pending entry the
+     * declaration speaks for stops being one. `paths` names the files it speaks for; omitted, it speaks for the whole
+     * root. `basis` is the {@link declarationBasis} it was found on: a whole declaration a tree write's expectation
+     * has overtaken since speaks for an older tree, and changes nothing. Optional: only the authority's own view
+     * keeps an index.
+     */
+    declarePending?(
+      declared: ReadonlyMap<string, DeclaredPlaceholder>,
+      paths?: readonly string[],
+      options?: Readonly<{ basis?: number }>,
+    ): Promise<void>;
+    /**
+     * Where this root's announced tree writes stand (D10): taken before a look at the checkout and passed with what it
+     * declares, so a declaration a newer tree write has overtaken does not speak for it.
+     */
+    declarationBasis?(): number;
+    /**
+     * Let go of this root before its first whole declaration (D9): the revision layer's first capture of it ended
+     * without one. Every other view, held since the revision layer's view of the root was made so a placeholder is
+     * never shown as a small present file (I7), answers from the marks there are. Heard only from a raw view.
+     */
+    releaseDeclaration?(): void;
+    /**
+     * Which of these files the root's index holds as pending entries: the
+     * placeholders the revision layer declared, as a non-raw view's stat
+     * answers them (D9). Reads no bytes.
      */
     pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
     /** Whether these paths of the expected tree have all landed; `undefined` while no tree is expected here. */
     entriesLanded?(paths: readonly string[]): boolean | undefined;
-    /** End this root's expectation: the tree write is over. */
-    endExpectation?(): void;
+    /** End this root's expectation: the tree write is over, and `failed` when it did not land every path. */
+    endExpectation?(options?: Readonly<{ failed?: boolean }>): void;
     /**
      * Lazy content facts (D4): from the index while they still describe the
      * bytes, otherwise measured from one read within `byteCap` and recorded.
@@ -313,6 +343,13 @@ export class RootedViews {
       throw new RootedFileSystemError('ROOT_UNAVAILABLE');
     }
     const projectIndexes = this._projectIndexes;
+    if (raw) {
+      /*
+       * A configured route is known already, and keeps what it is. A root a host mounted itself (a checkout the
+       * worker mounts on demand) becomes the revision layer's here, unknown until its first declaration.
+       */
+      projectIndexes.awaitDeclaration(root, this._pendingStallMilliseconds);
+    }
 
     const assertCurrent = (): void => {
       if (this._mountTable.getExactMount(root) !== captured) {
@@ -365,8 +402,10 @@ export class RootedViews {
     };
 
     /*
-     * A pointer read is a pending entry (D9): the index records it, and every
-     * view but the revision layer's raw one reads through to its object.
+     * A pending entry is a file the revision layer declared a placeholder (D9),
+     * one mark in the index: a marked file stats as its object and reads
+     * through to it, and anything else is the bytes it holds. The raw view, the
+     * revision layer's own, sees the pointers it wrote.
      */
     const stallMilliseconds = this._pendingStallMilliseconds;
     const pendingSource = this._pendingSource;
@@ -380,38 +419,83 @@ export class RootedViews {
         ...(signal === undefined ? {} : { signal }),
         stallMilliseconds,
       });
-    /* Read one file's bytes, marking a pointer pending unless a write landed after the read began (I7). */
-    const readMarked = async (
-      at: ReturnType<typeof resolveLocal>,
-    ): Promise<Readonly<{ bytes: Uint8Array<ArrayBuffer>; object: PendingObject | undefined }>> => {
-      const generation = projectIndexes.generationAt(at.authorityPath);
-      const bytes = await at.resolution.provider.readFile(at.resolution.path);
-      const object = pendingObjectOf(bytes);
-      if (object !== undefined) {
-        projectIndexes.markPending(at.authorityPath, object, { size: bytes.byteLength, generation });
+    /* The object a file of this size stands for: marked, and still the size of the pointer the index holds. */
+    const markedAt = (authorityPath: string, size: number): PendingObject | undefined =>
+      raw ? undefined : projectIndexes.pendingAt(authorityPath, size);
+    /*
+     * What each row of a listing answers, waiting for nothing (D9, I7): a durable root's stored marks are read first
+     * (one read), and a row nothing answers yet is reported `pending` at its own size, so one such row never holds the
+     * others. Only a stat of a file waits, and only for itself.
+     */
+    const listed = async <Row extends Readonly<{ type: string; size: number; mtimeMs?: number }>>(
+      rows: readonly Row[],
+      at: (row: Row) => string,
+    ): Promise<Row[]> => {
+      if (raw) {
+        return [...rows];
       }
-      return { bytes, object };
+      if (rows.some((row) => row.type === 'file' && mayBePointerSize(row.size))) {
+        await projectIndexes.storedMarks(root);
+      }
+      /* Only a pointer-sized row the index has not answered as its object can be anything but what it is. */
+      return rows.map((row) =>
+        row.type === 'file' && mayBePointerSize(row.size) && !('pending' in row)
+          ? asMarkedRow(row, projectIndexes.markAt(at(row), row))
+          : row,
+      );
     };
-    const throughPending = async (
+    const settledStat = async <Row extends FileStat>(at: ReturnType<typeof resolveLocal>, row: Row): Promise<Row> =>
+      raw || row.type !== 'file'
+        ? row
+        : asMarkedRow(
+            row,
+            await projectIndexes.settleMarks({
+              root,
+              authorityPath: at.authorityPath,
+              size: row.size,
+              mtimeMs: row.mtimeMs,
+              bytes: async () => at.resolution.provider.readFile(at.resolution.path).catch(() => undefined),
+            }),
+          );
+    /* One file's bytes on disk, and what the path answers: through to its object when it is a placeholder. */
+    const readAnswered = async (
       at: ReturnType<typeof resolveLocal>,
-      read: Readonly<{ bytes: Uint8Array<ArrayBuffer>; object: PendingObject | undefined }>,
       signal?: AbortSignal,
-    ): Promise<Uint8Array<ArrayBuffer>> =>
-      raw || read.object === undefined
-        ? read.bytes
-        : ask({ authorityPath: at.authorityPath, root, path: at.localPath, object: read.object }, read.bytes, signal);
+    ): Promise<Readonly<{ bytes: Uint8Array<ArrayBuffer>; answer: Uint8Array<ArrayBuffer> }>> => {
+      const bytes = await at.resolution.provider.readFile(at.resolution.path);
+      if (raw) {
+        return { bytes, answer: bytes };
+      }
+      const answer = await readAsMarked(projectIndexes, pendingSource(), {
+        authorityPath: at.authorityPath,
+        root,
+        path: at.localPath,
+        bytes,
+        mtimeMs: async () => {
+          try {
+            const head = await at.resolution.provider.stat(at.resolution.path);
+            return head.mtimeMs;
+          } catch {
+            return undefined;
+          }
+        },
+        signal,
+        stallMilliseconds,
+      });
+      return { bytes, answer };
+    };
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
     async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
       const at = resolveLocal(path);
       const observedAt = Date.now();
-      const read = await readMarked(at);
+      const { bytes, answer } = await readAnswered(at);
       if (encoding === 'utf8') {
-        return utf8.decode(await throughPending(at, read));
+        return utf8.decode(answer);
       }
       /* A whole read already holds every fact a listing asks for (D4): keep them. */
-      projectIndexes.recordRead(root, at.localPath, { bytes: read.bytes, observedAt });
-      return throughPending(at, read);
+      projectIndexes.recordRead(root, at.localPath, { bytes, observedAt });
+      return answer;
     }
 
     /* One provider call for the whole set: a remote provider digests beside its
@@ -432,7 +516,7 @@ export class RootedViews {
               paths.map((path, index) => [path, answered.get(local[index]!)?.sha256 ?? 'missing']),
             );
           };
-    const hashFiles =
+    const storedHashFiles =
       providerHashFiles === undefined
         ? indexHashFiles
         : async (paths: readonly string[]): Promise<Record<string, string>> => {
@@ -440,6 +524,29 @@ export class RootedViews {
             const digests = await providerHashFiles(providerPaths);
             assertCurrent();
             return Object.fromEntries(paths.map((path, index) => [path, digests[providerPaths[index]!]!]));
+          };
+    /* A pending entry digests as its object: a git-lfs oid is the object's SHA-256, so nothing is fetched (D9). */
+    const hashFiles =
+      storedHashFiles === undefined || raw
+        ? storedHashFiles
+        : async (paths: readonly string[]): Promise<Record<string, string>> => {
+            await projectIndexes.ready(root);
+            /* A mark answers only while the file is still its pointer's size: a stat says so, from metadata alone. */
+            const marks = await mapConcurrent(paths, statConcurrency, async (path) => {
+              const at = resolveLocal(path);
+              if (projectIndexes.pendingAt(at.authorityPath) === undefined) {
+                return undefined;
+              }
+              try {
+                const head = await at.resolution.provider.stat(at.resolution.path);
+                return head.type === 'file' ? projectIndexes.pendingAt(at.authorityPath, head.size) : undefined;
+              } catch {
+                return undefined;
+              }
+            });
+            const rest = paths.filter((_, index) => marks[index] === undefined);
+            const digests = rest.length === 0 ? {} : await storedHashFiles(rest);
+            return Object.fromEntries(paths.map((path, index) => [path, marks[index]?.oid ?? digests[path]!]));
           };
 
     const readFileStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
@@ -461,8 +568,8 @@ export class RootedViews {
       let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
       const open = async (): Promise<ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>> => {
         if (await small()) {
-          const read = await readMarked(at);
-          return bufferToStream(await throughPending(at, read, options?.signal), options).getReader();
+          const { answer } = await readAnswered(at, options?.signal);
+          return bufferToStream(answer, options).getReader();
         }
         return (
           resolution.provider.readFileStream?.(resolution.path, options) ??
@@ -506,13 +613,15 @@ export class RootedViews {
     };
     const readdirWithStats = captured.provider.readdirWithStats
       ? async (path: string): Promise<DirectoryStatRow[]> => {
-          const { resolution } = resolveLocal(path);
-          return resolution.provider.readdirWithStats!(resolution.path);
+          const { authorityPath, resolution } = resolveLocal(path);
+          const rows = await resolution.provider.readdirWithStats!(resolution.path);
+          const parent = authorityPath === '/' ? '' : authorityPath;
+          return listed(rows, (row) => `${parent}/${row.name}`);
         }
       : undefined;
     const stat = async (path: string): Promise<FileStat> => {
-      const { resolution } = resolveLocal(path);
-      return resolution.provider.stat(resolution.path);
+      const at = resolveLocal(path);
+      return settledStat(at, await at.resolution.provider.stat(at.resolution.path));
     };
     const readdirEntries = captured.provider.readdirEntries
       ? async (path: string): Promise<DirectoryEntry[]> => {
@@ -652,11 +761,20 @@ export class RootedViews {
        * object, from the device alone, or refused with PENDING.
        */
       const from = resolveLocal(source);
-      const { bytes, object } = await readMarked(from);
+      const bytes = await from.resolution.provider.readFile(from.resolution.path);
+      /* Only a marked placeholder is one: an unmarked pointer is a person's text, copied as it is. */
+      const object = markedAt(from.authorityPath, bytes.byteLength) === undefined ? undefined : pendingObjectOf(bytes);
+      /* A copy of a marked placeholder is one too, so its stat agrees with its read. */
+      const markCopy = (): void => {
+        if (object !== undefined) {
+          projectIndexes.markPending(to.authorityPath, object, { size: bytes.byteLength });
+        }
+      };
       if (raw || object === undefined || pendingSource() === undefined) {
         /* Nothing is written yet: a copy stopped here leaves the target as it was. */
         options?.signal?.throwIfAborted();
         await writeFile(target, bytes);
+        markCopy();
         return;
       }
       const local = { object, pointer: bytes, localOnly: true } as const;
@@ -677,6 +795,9 @@ export class RootedViews {
         : bytes;
       options?.signal?.throwIfAborted();
       await writeFile(target, copied);
+      if (!untracked) {
+        markCopy();
+      }
     };
     const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
       const resolved = [];
@@ -890,15 +1011,18 @@ export class RootedViews {
       },
     };
     const lstat = async (path: string): Promise<FileStat> => {
-      const { resolution } = resolveLocal(path);
-      return resolution.provider.lstat(resolution.path);
+      const at = resolveLocal(path);
+      return settledStat(at, await at.resolution.provider.lstat(at.resolution.path));
     };
     const search = async (query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]> => {
       assertCurrent();
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return index.search(query, options);
+      return listed(
+        index.search(query, { ...options, asObjects: !raw }),
+        (row) => resolveLocal(row.path).authorityPath,
+      );
     };
     const statTree = async (
       path: string,
@@ -908,18 +1032,32 @@ export class RootedViews {
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return index.statTree(localPath, options);
+      return listed(
+        index.statTree(localPath, { ...options, asObjects: !raw }),
+        (row) => resolveLocal(joinRelativePath(localPath, row.path)).authorityPath,
+      );
     };
     const facts = async (
       paths: readonly string[],
       options?: IndexFactsOptions,
     ): Promise<ReadonlyMap<string, ContentFacts>> => {
-      const local = paths.map((path) => resolveLocal(path).localPath);
-      const answered = await this._projectIndexes.facts(root, local, options);
+      if (!raw) {
+        await projectIndexes.ready(root);
+      }
+      /* A pending entry's facts are unknown until its object lands (I7): the pointer's describe the pointer. */
+      const asked = paths.flatMap((path) => {
+        const at = resolveLocal(path);
+        return !raw && projectIndexes.pendingAt(at.authorityPath) !== undefined ? [] : [[path, at.localPath] as const];
+      });
+      const answered = await this._projectIndexes.facts(
+        root,
+        asked.map(([, local]) => local),
+        options,
+      );
       assertCurrent();
       return new Map(
-        paths.flatMap((path, index) => {
-          const value = answered.get(local[index]!);
+        asked.flatMap(([path, local]) => {
+          const value = answered.get(local);
           return value === undefined ? [] : [[path, value] as const];
         }),
       );
@@ -932,7 +1070,27 @@ export class RootedViews {
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      return index.changes(since, options);
+      if (raw) {
+        return index.changes(since, options);
+      }
+      const changes = index.changes(since, options);
+      /* A pending entry as its object, as a stat answers it, the pointer's own facts dropped; and so are the facts of an
+       * entry nothing answers yet, which may be a placeholder (I7). */
+      return {
+        ...changes,
+        entries: changes.entries.map((entry) => {
+          const unknown =
+            entry.pending === undefined &&
+            entry.kind === 'file' &&
+            mayBePointerSize(entry.size) &&
+            projectIndexes.markAt(resolveLocal(entry.path).authorityPath, entry) === 'unknown';
+          if (entry.pending === undefined && !unknown) {
+            return entry;
+          }
+          const { facts: _facts, factsAt: _factsAt, ...rest } = entry;
+          return entry.pending === undefined ? rest : { ...rest, size: entry.pending.size };
+        }),
+      };
     };
     const compareIndex = async (): Promise<IndexCompareResult> => {
       assertCurrent();
@@ -1146,6 +1304,27 @@ export class RootedViews {
       watchChangeSets,
       search,
       statTree,
+      declarePending: async (
+        declared: ReadonlyMap<string, DeclaredPlaceholder>,
+        paths?: readonly string[],
+        declareOptions?: Readonly<{ basis?: number }>,
+      ): Promise<void> => {
+        assertCurrent();
+        const local = (path: string): string => resolveLocal(path).localPath;
+        await this._projectIndexes.declarePending(
+          root,
+          new Map([...declared].map(([path, placeholder]) => [local(path), placeholder])),
+          { paths: paths?.map((path) => local(path)), basis: declareOptions?.basis },
+        );
+      },
+      declarationBasis: (): number => this._projectIndexes.declarationBasis(root),
+      releaseDeclaration: (): void => {
+        assertCurrent();
+        /* Only the revision layer's own view may let go of its root. */
+        if (raw) {
+          this._projectIndexes.releaseDeclaration(root);
+        }
+      },
       expectEntries: async (entries: readonly ExpectedEntry[]): Promise<void> => {
         assertCurrent();
         await this._projectIndexes.expect(
@@ -1156,41 +1335,15 @@ export class RootedViews {
       pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
         assertCurrent();
         await this._projectIndexes.ready(root);
-        const absent = (error: unknown): undefined => {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
-        };
-        const pending = await mapConcurrent(paths, statConcurrency, async (path): Promise<boolean> => {
-          const at = resolveLocal(path);
-          if (projectIndexes.pendingAt(at.authorityPath) !== undefined) {
-            return true;
-          }
-          /*
-           * The index learns a placeholder from a read or a tree write, and a
-           * lost or rescanned snapshot forgets it: its scans read no bytes
-           * (I3). A file the size of a pointer is read raw, never through, so
-           * no download starts; the read marks it pending. Only an absent path
-           * is not pending: any other failure leaves it unknown, and rejects.
-           */
-          const size = await at.resolution.provider
-            .stat(at.resolution.path)
-            .then((stat) => (stat.type === 'file' ? stat.size : undefined), absent);
-          if (size === undefined || size > 1024) {
-            return false;
-          }
-          const read = await readMarked(at).catch(absent);
-          return read?.object !== undefined;
-        });
-        return paths.filter((_, index) => pending[index]);
+        return paths.filter((path) => projectIndexes.pendingAt(resolveLocal(path).authorityPath) !== undefined);
       },
       entriesLanded: (paths: readonly string[]): boolean | undefined =>
         this._projectIndexes.landed(
           root,
           paths.map((path) => resolveLocal(path).localPath),
         ),
-      endExpectation: (): void => {
-        this._projectIndexes.endExpectation(root);
+      endExpectation: (options?: Readonly<{ failed?: boolean }>): void => {
+        this._projectIndexes.endExpectation(root, options);
       },
       facts,
       compareIndex,

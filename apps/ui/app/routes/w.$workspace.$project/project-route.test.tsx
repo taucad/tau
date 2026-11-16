@@ -419,6 +419,9 @@ vi.mock('#hooks/use-project.js', () => ({
     editorRef,
     parameterService,
     viewGraphics,
+    mainEntryPath: '',
+    viewRecords: new Map(),
+    geometryUnits: new Map(),
   }),
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({

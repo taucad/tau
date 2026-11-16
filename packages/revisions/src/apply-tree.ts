@@ -15,7 +15,8 @@ import type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/index.js'
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
-import { largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
+import { declaredPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
+import type { AttributesReading } from '#workspace-config.js';
 import { entryClosurePaths } from '#open/entry-closure.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -196,6 +197,8 @@ export const createApplyTreeEffects = (
     checkoutTreeId: (checkoutId: string, tree: ImmutableRevisionTree) => Promise<string>;
     temporarySibling: (path: string, role: 'staged' | 'backup') => string;
     unlinkIfPresent: (live: RevisionFileSystem, path: string) => Promise<void>;
+    /** How the repository reads its attributes (`core.ignoreCase`), as the declaration and the fill read them. */
+    attributesReading?: () => Promise<AttributesReading>;
   }>,
 ): Readonly<{
   equalEntry: (
@@ -229,6 +232,7 @@ export const createApplyTreeEffects = (
     temporarySibling,
     unlinkIfPresent,
   } = dependencies;
+  const attributesReading = dependencies.attributesReading ?? (async (): Promise<AttributesReading> => ({}));
 
   const equalEntry = (
     left: Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }> | undefined,
@@ -552,15 +556,15 @@ export const createApplyTreeEffects = (
         });
         if (closure !== undefined) {
           const arriving = new Set(writtenPaths);
-          const placeholders = largeObjectPlaceholders(target);
+          const placeholders = declaredPlaceholders(target, { except: sourced, reading: await attributesReading() });
           try {
             await live.expectEntries?.(
               target.entries().map(({ path, content }) => {
-                const pending = placeholders.get(path);
+                const pending = placeholders.get(path)?.object;
                 return {
                   path,
                   size: sourced.get(path)?.size ?? content.byteLength,
-                  ...(pending === undefined ? {} : { pending: { oid: pending.oid, size: pending.size } }),
+                  ...(pending === undefined ? {} : { pending }),
                   arriving: arriving.has(path),
                 };
               }),
@@ -805,7 +809,7 @@ export const createApplyTreeEffects = (
       } finally {
         workerTimings.record('apply.hold', heldAt);
         if (closure !== undefined) {
-          live.endExpectation?.();
+          live.endExpectation?.({ failed });
         }
         if (failed && applyOptions.held !== undefined && typeof release === 'function') {
           applyOptions.held.release = release;

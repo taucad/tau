@@ -190,9 +190,13 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
    * larger than the cap is ever read whole for its facts. */
   const factsOf = async (
     path: string,
-    known: StatContentMetadata & Readonly<{ size: number }>,
+    known: StatContentMetadata & Readonly<{ size: number; pending?: true }>,
   ): Promise<StatContentMetadata> => {
     if (known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)) {
+      return fileMetadataFields(known);
+    }
+    /* A pending row's size is not its bytes' (D9): a read for its facts would fetch its object or refuse. */
+    if (known.pending === true) {
       return fileMetadataFields(known);
     }
     return known.size > lineCountByteCap

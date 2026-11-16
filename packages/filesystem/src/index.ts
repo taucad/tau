@@ -99,6 +99,7 @@ export { indexRemovalLimit, ProjectIndex, timestampGranularityMilliseconds } fro
 export { PendingContentError, pendingObjectOf, pendingStallMilliseconds } from '#pending-content.js';
 export type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 export type {
+  DeclaredPlaceholder,
   ExpectedEntry,
   FactsAt,
   IndexAdmits,

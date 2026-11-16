@@ -967,10 +967,10 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
      * word it got from before cannot stand. */
     expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false, judged: false }]);
 
-    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ readiness: 'entryReady' });
     fileManager.set({ worker: workerA });
     await settle();
-    /* Published, but the fill has not answered for this tree: the model is checking its files, a repeat. */
+    /* Published, but this tree's authored files are still landing: the model is checking its files, a repeat. */
     expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false, judged: false }]);
 
     client.setStatus({ readiness: 'filled' });
@@ -980,7 +980,7 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     ]);
 
     /* A later check returns it to pending; a repeat says nothing. */
-    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ readiness: 'entryReady' });
     client.setStatus({ projectDirty: true });
     expect(fileChecks(received)).toEqual([
       { type: 'fileCheckChanged', settled: false, judged: false },
@@ -1019,7 +1019,7 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
 
     /* Another tab performs the open and clears the stored intent; this document hears no signal. */
     fake.setCloudOpenElsewhere(false);
-    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ readiness: 'entryReady' });
 
     expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false, judged: false });
     session.stop();

@@ -812,7 +812,7 @@ const composeProjectHost = async (
         },
       }),
       skillResolver,
-      /* The kernel reads the model's files itself, so it runs once every large object has landed. */
+      /* The kernel reads the model's files itself, so it runs once the large objects its closure reads have landed (T6). */
       ...guardLargeObjectKernel(
         /* An entry-less project adopts its first model as main and gains its kernel's package files (blueprint D3). */
         withEntryAdoption(

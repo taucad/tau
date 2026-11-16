@@ -487,8 +487,129 @@ export type HostContentCallOptions = {
 };
 
 /**
+ * The ordinary bridge deadline, in milliseconds: `@taucad/rpc`'s message-port call timeout, which `readFile` had
+ * before it became a long call.
+ */
+export const readFileDeadline = 30_000;
+
+/**
+ * How long a read past {@link readFileDeadline} that is not pending may still answer, in milliseconds: an object that
+ * has just landed leaves the pending set while the read-through is still handing back its bytes.
+ */
+export const readFileGrace = 5000;
+
+type PendingPaths = (paths: readonly string[]) => Promise<readonly string[]>;
+
+const deadlinePassed = Symbol('deadline');
+
+/**
+ * `readFile` under the authority's own bound: a long call on the wire, so a read of a pending entry waits for its
+ * large object under the authority's no-progress stall bound (D9, I10); any other read that has not answered by
+ * {@link readFileDeadline} and a {@link readFileGrace} after it fails as it did on the wire, with
+ * `BRIDGE_CALL_TIMEOUT`. Which reads are pending is
+ * asked of the view's index once the deadline passes; a view without one, or one that cannot answer, bounds every read.
+ *
+ * @param readFile - The handlers' own `readFile`.
+ * @param pendingPaths - The view's `pendingPaths`, where it has one.
+ * @returns The bounded `readFile`.
+ */
+const hostBoundedReadFile =
+  (readFile: (path: string, ...rest: unknown[]) => Promise<unknown>, pendingPaths: PendingPaths | undefined) =>
+  async (path: string, ...rest: unknown[]): Promise<unknown> => {
+    const reading = readFile(path, ...rest);
+    // oxlint-disable-next-line promise/prefer-await-to-then -- marks a late rejection handled; the race awaits it.
+    reading.catch(() => undefined);
+    /* The read's answer, or the sentinel once `milliseconds` have passed without one. */
+    const within = async (milliseconds: number): Promise<unknown> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const passed = new Promise<typeof deadlinePassed>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(deadlinePassed);
+        }, milliseconds);
+      });
+      try {
+        return await Promise.race([reading, passed]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    /* Unknown is not pending: a read the index cannot speak for keeps the ordinary bound. */
+    const isPending = async (): Promise<boolean> => {
+      try {
+        const answered = await pendingPaths?.([path]);
+        return answered?.includes(path) === true;
+      } catch {
+        return false;
+      }
+    };
+    const first = await within(readFileDeadline);
+    if (first !== deadlinePassed) {
+      return first;
+    }
+    if (await isPending()) {
+      return reading;
+    }
+    const late = await within(readFileGrace);
+    if (late !== deadlinePassed) {
+      return late;
+    }
+    if (await isPending()) {
+      return reading;
+    }
+    throw Object.assign(new Error(`Bridge call 'readFile' timed out after ${String(readFileDeadline)}ms`), {
+      code: 'BRIDGE_CALL_TIMEOUT',
+    });
+  };
+
+/*
+ * The handlers' own `readFile` under the authority's bound, or `undefined` where they read no files. Both members are
+ * looked up at each call, so the bound wraps the handler set as it stands then, not a copy taken when it was served.
+ */
+const boundedReadFileOf = (
+  handlers: StringKeyedObject,
+): ((path: string, ...rest: unknown[]) => Promise<unknown>) | undefined => {
+  const own = handlers as Partial<Record<string, unknown>>;
+  if (typeof own['readFile'] !== 'function') {
+    return undefined;
+  }
+  return async (path: string, ...rest: unknown[]): Promise<unknown> => {
+    const readFile = own['readFile'] as (path: string, ...rest: unknown[]) => Promise<unknown>;
+    const pendingPaths = typeof own['pendingPaths'] === 'function' ? (own['pendingPaths'] as PendingPaths) : undefined;
+    return hostBoundedReadFile(readFile.bind(handlers), pendingPaths?.bind(handlers))(path, ...rest);
+  };
+};
+
+/**
+ * A handler set whose `readFile` keeps its bound ({@link hostBoundedReadFile}), for a connection served without the
+ * derived calls. Members stay bound to the original handler set.
+ *
+ * @param handlers - The handlers one connection is served.
+ * @returns The same handlers, `readFile` bounded.
+ */
+export const withBoundedReadFile = <Handlers extends StringKeyedObject>(handlers: Handlers): Handlers => {
+  const readFile = boundedReadFileOf(handlers);
+  if (readFile === undefined) {
+    return handlers;
+  }
+  return new Proxy(handlers, {
+    get(target, property) {
+      if (property === 'readFile') {
+        return readFile;
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      /* A frozen member must be returned as itself (proxy invariant). */
+      return typeof value === 'function' && !(descriptor?.configurable === false && descriptor.writable === false)
+        ? (value as (...args: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+};
+
+/**
  * Serve the derived calls beside a handler set that reads files, each only
- * where the handlers do not bring their own: `hashFiles`, `readMany` and
+ * where the handlers do not bring their own, and `readFile` itself under its
+ * deadline ({@link hostBoundedReadFile}): `hashFiles`, `readMany` and
  * `readRange` from `readFile`; `glob`, `grep` and `indexStats` from
  * `statTree`; `apply` with its receipt's errors as wire data, or refused
  * with `ENOTSUP` where the view serves no changeset; and the index queries
@@ -513,6 +634,7 @@ export const withHostContentCalls = <Handlers extends StringKeyedObject>(
   const stream =
     typeof own['readFileStream'] === 'function' ? (own['readFileStream'] as ReadStream).bind(handlers) : undefined;
   const derived: Record<string, unknown> = {
+    readFile: boundedReadFileOf(handlers),
     ...(typeof own['hashFiles'] === 'function' ? {} : { hashFiles: hostHashFiles(read) }),
     ...(typeof own['readMany'] === 'function' ? {} : { readMany: hostReadMany(read) }),
     ...(typeof own['readRange'] === 'function' ? {} : { readRange: hostReadRange(read, stream) }),

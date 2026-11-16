@@ -42,12 +42,14 @@ import type {
 } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import {
+  agentApprovalToolName,
+  parseAgentHostApproval,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
   projectAgentHostUserTurn,
   runFailureText,
 } from '@taucad/chat-ui/services/agent-host-event-projection';
-import type { AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
+import type { AgentHostApproval, AgentHostLiveBlocks } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { finalizeInterruptedToolParts } from '#utils/chat.utils.js';
 import { isQuestionTool } from '@taucad/chat-ui/utils/question-tool';
 
@@ -1605,6 +1607,63 @@ export const selectRunPhase = (projection: ChatProjection): ChatRunPhase =>
  */
 export const selectOpenInterrupts = (projection: ChatProjection): Readonly<Record<string, RowKey>> =>
   selectCurrentRun(projection)?.pendingInterrupts ?? {};
+
+/** The current run's open interrupts, as the approvals its durable log recorded for them. @public */
+export type OpenApproval = Readonly<{ runId: string; approval: AgentHostApproval }>;
+
+const noOpenApprovals: readonly OpenApproval[] = [];
+const openApprovalsByInterrupts = new WeakMap<
+  Readonly<Record<string, RowKey>>,
+  Readonly<{ view: RunView; approvals: readonly OpenApproval[] }>
+>();
+
+/**
+ * The approvals the current run is waiting on, read from its own durable chunks rather than from the SDK transcript.
+ *
+ * The ledger is what pauses a run, so a card read from it cannot be lost to a transcript that failed to rebuild: every
+ * open interrupt whose request the log projected is here. Until the reader has caught up, an open interrupt may already
+ * be answered further on, so there are none. The answer keeps its identity while the run's interrupts and view do.
+ *
+ * @param projection - The chat's projection.
+ * @returns Each open interrupt's approval, in the order the run opened them.
+ * @public
+ */
+export const selectOpenApprovals = (projection: ChatProjection): readonly OpenApproval[] => {
+  const run = selectCurrentRun(projection);
+  const open = run?.pendingInterrupts;
+  const view = run === undefined ? undefined : projection.views[run.runId];
+  if (run === undefined || open === undefined || view === undefined || !selectCaughtUp(projection)) {
+    return noOpenApprovals;
+  }
+  const cached = openApprovalsByInterrupts.get(open);
+  if (cached?.view === view) {
+    return cached.approvals;
+  }
+  const requested = new Map<string, AgentHostApproval>();
+  if (Object.keys(open).length > 0) {
+    for (const chunks of [...(view.segments ?? []).map((segment) => segment.chunks), view.chunks]) {
+      for (const chunk of chunksSince(chunks)) {
+        if (
+          chunk.type === 'tool-input-available' &&
+          chunk.toolName === agentApprovalToolName &&
+          open[chunk.toolCallId] !== undefined
+        ) {
+          const approval = parseAgentHostApproval(chunk.input);
+          if (approval !== undefined) {
+            requested.set(chunk.toolCallId, approval);
+          }
+        }
+      }
+    }
+  }
+  const approvals = Object.keys(open).flatMap((interruptId) => {
+    const approval = requested.get(interruptId);
+    return approval === undefined ? [] : [{ runId: run.runId, approval }];
+  });
+  const answer = approvals.length === 0 ? noOpenApprovals : approvals;
+  openApprovalsByInterrupts.set(open, { view, approvals: answer });
+  return answer;
+};
 
 /**
  * The tool calls in flight and the one to name, replacing the per-chunk scans (G04, L3 D19).

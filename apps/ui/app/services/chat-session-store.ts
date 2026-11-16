@@ -31,7 +31,6 @@
  */
 
 import type { Chat } from '@ai-sdk/react';
-import { UIMessageStreamError } from 'ai';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -139,14 +138,16 @@ import type {
 import { createChatMessageQueueActor } from '#machines/chat-message-queue.machine.js';
 import type { ChatMessageQueueActor, QueueAdvanceResult } from '#machines/chat-message-queue.machine.js';
 import { commandInvocation } from '@taucad/chat-ui/utils/at-reference.utils';
+import {
+  isTransientPresentationFailure,
+  presentationErrorFacts,
+  warnPresentation,
+} from '#services/chat-presentation-diagnostics.js';
 
-/** Describe a failed SDK frame without exposing tool inputs, outputs, or exception payloads. */
-const presentationErrorFacts = (
-  error: unknown,
-): Readonly<{ errorName: string; chunkId?: string; chunkType?: string }> => ({
-  errorName: error instanceof Error ? error.name : 'UnknownError',
-  ...(UIMessageStreamError.isInstance(error) ? { chunkId: error.chunkId, chunkType: error.chunkType } : {}),
-});
+/** Retries of a transiently failed watch or transcript before it is latched as failed, per run. */
+const presentationRetryLimit = 3;
+/** The first presentation retry's delay, doubling for each later one (250, 500, 1000 ms). Milliseconds. */
+const presentationRetryDelay = 250;
 
 /** Framing can exist even when no assistant content reached the person. */
 const nonOutputChunkTypes: ReadonlySet<string> = new Set([
@@ -615,6 +616,10 @@ type InternalSession = ChatSession & {
   composerTrays: readonly ComposerTray[];
   recoveredRunId: string | undefined;
   blockedPresentationRunId: string | undefined;
+  /** Transient watch or transcript failures retried for {@link InternalSession.presentationRetryRunId}. */
+  presentationRetries: number;
+  presentationRetryRunId: string | undefined;
+  presentationRetry: ReturnType<typeof setTimeout> | undefined;
   recoveringPresentation: boolean;
   failedTranscriptProjection: ChatProjection | undefined;
   transcriptSource: ChatProjection | undefined;
@@ -3849,6 +3854,7 @@ export class ChatSessionStore {
       session.watch = watch;
       session.runHeld = true;
       watch.start();
+      this.#settlePresentationRetries(session, runId);
     } catch (error) {
       if (this.#sessions.get(session.chatId) !== session || session.materializeVersion !== version) {
         return;
@@ -3856,15 +3862,66 @@ export class ChatSessionStore {
       if (session.watchedRunId === runId) {
         session.watchedRunId = undefined;
       }
-      session.blockedPresentationRunId = runId;
-      session.failedTranscriptProjection = projection;
-      console.warn('[ChatSessionStore] projected run could not be watched', {
+      const retry = isTransientPresentationFailure(error) ? this.#retryPresentation(session, runId) : undefined;
+      if (retry === undefined) {
+        session.blockedPresentationRunId = runId;
+        session.failedTranscriptProjection = projection;
+      }
+      warnPresentation('[ChatSessionStore] projected run could not be watched', {
         chatId: session.chatId,
         runId,
         status: session.status,
         cursor: projection.ledger.position.cursor,
         ...presentationErrorFacts(error),
+        ...(retry === undefined ? {} : { retry }),
       });
+    }
+  }
+
+  /**
+   * Read a transiently failed watch or transcript again once its connection is back, from the projection, which
+   * holds every row since the last one shown: bounded per run, and only while this session is still the chat's.
+   *
+   * A sync in the meantime (the attachment answering again, a new row) also retries; a failure while a retry is
+   * already scheduled spends nothing more, so the bound counts backoff rounds, not one connection's echoes.
+   *
+   * @returns The attempt scheduled, or `undefined` once the run has spent its retries.
+   */
+  #retryPresentation(session: InternalSession, runId: string | undefined): number | undefined {
+    if (session.presentationRetryRunId !== runId) {
+      session.presentationRetryRunId = runId;
+      session.presentationRetries = 0;
+    } else if (session.presentationRetry !== undefined) {
+      return session.presentationRetries;
+    }
+    if (session.presentationRetries >= presentationRetryLimit) {
+      return undefined;
+    }
+    session.presentationRetries += 1;
+    const attempt = session.presentationRetries;
+    clearTimeout(session.presentationRetry);
+    const presentationRetry = setTimeout(
+      () => {
+        if (session.presentationRetry !== presentationRetry) {
+          return;
+        }
+        session.presentationRetry = undefined;
+        if (this.#sessions.get(session.chatId) === session) {
+          this.#syncProjection(session.chatId, 'none');
+        }
+      },
+      presentationRetryDelay * 2 ** (attempt - 1),
+    );
+    session.presentationRetry = presentationRetry;
+    return attempt;
+  }
+
+  /** A watch that opened ends its run's transient retries: the run is presented live again. */
+  #settlePresentationRetries(session: InternalSession, runId: string | undefined): void {
+    if (session.presentationRetryRunId === runId) {
+      session.presentationRetries = 0;
+      clearTimeout(session.presentationRetry);
+      session.presentationRetry = undefined;
     }
   }
 
@@ -3897,7 +3954,7 @@ export class ChatSessionStore {
       session.watchedRunId = undefined;
       this.#projections.get(session.chatId)?.send({ type: 'clear-live', runId });
       const projection = this.#projectionContext(session.chatId);
-      console.warn('[ChatSessionStore] presentation recovery', {
+      warnPresentation('[ChatSessionStore] presentation recovery', {
         chatId: session.chatId,
         runId,
         status: session.status,
@@ -4039,16 +4096,24 @@ export class ChatSessionStore {
       if (this.#sessions.get(session.chatId) !== session || session.materializeVersion !== version) {
         return;
       }
-      session.failedTranscriptProjection = projection;
+      const runId = selectCurrentRun(projection)?.runId;
+      const retry = isTransientPresentationFailure(error) ? this.#retryPresentation(session, runId) : undefined;
+      if (retry === undefined) {
+        session.failedTranscriptProjection = projection;
+      } else {
+        // Nothing was read: the same log is materialized again when the retry syncs.
+        session.transcriptSource = undefined;
+      }
       // A failed read has settled too: the lane is not held in `loading` by a transcript that cannot arrive. What the
       // device remembers of the trays stays, since nothing was read.
       this.#latchUnreadTranscript(session);
-      console.warn('[ChatSessionStore] projected transcript could not be materialized', {
+      warnPresentation('[ChatSessionStore] projected transcript could not be materialized', {
         chatId: session.chatId,
-        runId: selectCurrentRun(projection)?.runId,
+        runId,
         status: session.status,
         cursor: projection.ledger.position.cursor,
         ...presentationErrorFacts(error),
+        ...(retry === undefined ? {} : { retry }),
       });
     }
   }
@@ -4858,6 +4923,9 @@ export class ChatSessionStore {
       composerTrays: readRememberedComposerTrays(chatId),
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,
+      presentationRetries: 0,
+      presentationRetryRunId: undefined,
+      presentationRetry: undefined,
       recoveringPresentation: false,
       failedTranscriptProjection: undefined,
       transcriptSource: undefined,
@@ -4886,6 +4954,8 @@ export class ChatSessionStore {
         recordLoadedSubscription.unsubscribe();
         session.commandAbort?.abort();
         session.watch?.stop();
+        clearTimeout(session.presentationRetry);
+        session.presentationRetry = undefined;
         lifecycleSubscription?.unsubscribe();
         unregisterMessages();
         unregisterStatus();

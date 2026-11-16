@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
-  observabilityUrl,
+  isEventEnvelope,
   observabilityRequestKind,
+  observabilityUrl,
   observeHarnessPage,
   pollSentryEventIds,
 } from './observability-staging.ts';
@@ -116,3 +117,25 @@ it('should retain only bounded envelope ids and counts when a failed page closes
     output.mockRestore();
   }
 });
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry envelope header fields are wire names. */
+describe('isEventEnvelope', () => {
+  const header = JSON.stringify({ event_id: 'a'.repeat(32), dsn: 'https://key@o1.ingest.us.sentry.io/2' });
+
+  it('should match an envelope that carries an error event, whatever else it carries', () => {
+    expect(isEventEnvelope([header, '{"type":"event"}', '{"message":"x"}'].join('\n'))).toBe(true);
+    expect(
+      isEventEnvelope([header, '{"type":"attachment","length":2}', 'hi', '{"type":"event"}', '{}'].join('\n')),
+    ).toBe(true);
+  });
+
+  it('should not match a session update, a transaction, or a body that is not an envelope', () => {
+    expect(isEventEnvelope([JSON.stringify({ sent_at: 'now' }), '{"type":"session"}', '{"sid":"s"}'].join('\n'))).toBe(
+      false,
+    );
+    expect(isEventEnvelope([header, '{"type":"transaction"}', '{"type":"event"}'].join('\n'))).toBe(false);
+    expect(isEventEnvelope(undefined)).toBe(false);
+    expect(isEventEnvelope('not json')).toBe(false);
+  });
+});
+/* eslint-enable @typescript-eslint/naming-convention -- Sentry envelope header fields are wire names. */

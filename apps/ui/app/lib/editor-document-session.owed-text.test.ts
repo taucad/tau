@@ -463,4 +463,50 @@ describe('EditorDocumentSession owed text (A7e)', () => {
     session.dispose();
     setEditorTextScope('p-two', undefined);
   });
+
+  it('should record nothing for an unedited file whose bytes decode with a mark or a replaced byte', async () => {
+    for (const raw of [new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x0a]), new Uint8Array([0x63, 0x61, 0x66, 0xe9])]) {
+      const content = service('');
+      const file: FileContentResult = { kind: 'text', content: raw };
+      content.resolve.mockResolvedValue(file);
+      content.peekOutcome.mockReturnValue(file);
+      setEditorTextScope('p-bom', ada);
+      const session = new EditorDocumentSession({
+        contentService: content,
+        projectId: 'p-bom',
+        textDebts: editorTextDebts,
+      });
+      await session.acquire('main.ts');
+      session.recordOwedText();
+      expect(editorTextDebts.list({ scope: ada, projectId: 'p-bom' })).toEqual([]);
+      session.dispose();
+      setEditorTextScope('p-bom', undefined);
+    }
+  });
+
+  it('should keep one record of its own per document when the page goes twice before its save lands', async () => {
+    const content = service('one\n');
+    content.saveEditor.mockReturnValue(Promise.withResolvers<void>().promise);
+    const record = vi.fn(async (): Promise<EditorConflictOutcome> => recorded);
+    setEditorTextScope('p-twice', ada);
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-twice',
+      textDebts: editorTextDebts,
+      recordEditorConflict: record,
+    });
+    await session.acquire('main.ts');
+    session.apply('main.ts', { expectedVersion: 1, origin: 'view', changes: [{ from: 0, to: 3, insert: 'mine' }] });
+    const pending = session.save('main.ts');
+    session.recordOwedText();
+    /* Back from the back/forward cache, typed again, and gone again. */
+    session.apply('main.ts', { expectedVersion: 2, origin: 'view', changes: [{ from: 0, to: 4, insert: 'more' }] });
+    session.recordOwedText();
+    await macrotask();
+    expect(editorTextDebts.list({ scope: ada, projectId: 'p-twice' })).toMatchObject([{ text: 'more\n' }]);
+    expect(record).not.toHaveBeenCalled();
+    session.dispose();
+    setEditorTextScope('p-twice', undefined);
+    expect(pending).toBeInstanceOf(Promise);
+  });
 });

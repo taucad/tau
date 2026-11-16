@@ -278,6 +278,8 @@ const createFakePorts = (
     editorText: {
       setScope: (id, scope) => {
         textScopes.push({ projectId: id, scope });
+        /* As the real store does: a published scope is a change. */
+        editorTextSignal.emit();
       },
       owing: () => owingText,
       subscribe: editorTextSignal.subscribe,
@@ -1445,6 +1447,21 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     const debts = createDebtStore();
     await reload(await openDocument('a', workerA, { log, debts, user: ada }));
     const next = await openDocument('b', workerB, { log, debts, user: ada });
+    await settle();
+    const actorSent = log.findIndex((line) => line.startsWith('b:send:setActor:') && line.includes('"usr_1"'));
+    expect(actorSent).toBeGreaterThanOrEqual(0);
+    expect(log.indexOf('b:saveRevision:close')).toBeGreaterThan(actorSent);
+    next.session.stop();
+  });
+
+  it('should send the person signed in after the open as the actor before asking for their owed cut', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    const next = await openDocument('b', workerB, { log, debts });
+    await settle();
+    expect(cuts(log).filter((line) => line.startsWith('b:'))).toEqual([]);
+    next.fake.setUser(ada);
     await settle();
     const actorSent = log.findIndex((line) => line.startsWith('b:send:setActor:') && line.includes('"usr_1"'));
     expect(actorSent).toBeGreaterThanOrEqual(0);

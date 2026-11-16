@@ -452,7 +452,17 @@ export const sessionRevisionsCallback =
       actorSentFor = { user, anonymous, salt };
       const actor = revisionUserActor({ workspace, user, anonymous, salt });
       recordsAs = actor.id;
-      /* A7e: the project's editor records and replays its owed text as this person, in this workspace. */
+      /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
+      const commitAuthor = githubProjectBinding.get(projectId)?.author;
+      client.send({
+        command: 'setActor',
+        actor,
+        ...(commitAuthor === undefined ? {} : { commitAuthor }),
+      });
+      /*
+       * A7e: the project's editor records and replays its owed text as this person, in this workspace. Published
+       * after the actor is sent: the change wakes the owed close cut, which must be cut as this person.
+       */
       runIsolated(
         [
           () => {
@@ -461,13 +471,6 @@ export const sessionRevisionsCallback =
         ],
         ports.reportFault,
       );
-      /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
-      const commitAuthor = githubProjectBinding.get(projectId)?.author;
-      client.send({
-        command: 'setActor',
-        actor,
-        ...(commitAuthor === undefined ? {} : { commitAuthor }),
-      });
       /* A7d: the person may now be one who owes a close cut here. */
       payDebt();
     };

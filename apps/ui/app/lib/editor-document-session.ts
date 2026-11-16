@@ -597,16 +597,20 @@ export class EditorDocumentSession {
       }
       for (const [path, document] of this.#documents) {
         const base = this.#bases.get(path);
-        if (this.#declarations.has(path) || base === undefined || sameBytes(base, encoder.encode(document.text))) {
+        /* Compared as text, as every other dirty check is: a BOM or a byte the decoder replaced is not an edit. */
+        if (this.#declarations.has(path) || base === undefined || document.text === decodeTextFile(base)) {
           continue;
+        }
+        const place = { scope, projectId: this.#projectId };
+        /* This document's earlier record (a page kept by the back/forward cache going again) is superseded. */
+        const previous = this.#ownTokens.get(path);
+        if (previous !== undefined) {
+          debts.clear(place, path, previous);
         }
         const token = randomUuid();
         /* Known as its own before the write: the store's change signal runs this session's replay at once. */
         this.#ownTokens.set(path, token);
-        debts.write(
-          { scope, projectId: this.#projectId },
-          { token, path, base: uint8ArrayToBase64(base), text: document.text, at: Date.now() },
-        );
+        debts.write(place, { token, path, base: uint8ArrayToBase64(base), text: document.text, at: Date.now() });
       }
     } catch {
       /* Today's behaviour: the text is on its way to disk, or goes with the page. */
@@ -846,11 +850,13 @@ export class EditorDocumentSession {
       if (!live()) {
         return;
       }
-      if (result.kind === 'text' && sameBytes(result.content, encoder.encode(record.text))) {
+      if (result.kind === 'text' && decodeTextFile(result.content) === record.text) {
         debts.clear(place, path, record.token);
         return;
       }
       if (result.kind === 'loading' || result.kind === 'error') {
+        /* Not read yet: taken up again after a confirmed save of this session, or by a later open. */
+        this.#retryAfterSave.add(record.token);
         return;
       }
       const document = this.#documents.get(path);

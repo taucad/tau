@@ -1443,7 +1443,7 @@ const measureComposerBarControls = async (barSelector: string): Promise<readonly
       ...[...controls]
         .map((control) => control.getBoundingClientRect())
         .filter((rect) => rect.width > 0 && rect.height > 0)
-        .map(box),
+        .map((rect) => box(rect)),
     ];
   }, barSelector);
 

@@ -12,7 +12,7 @@ HEIC/HEIF image transcoder for `@taucad/runtime`. It converts HEIC and HEIF stil
 > **Licence and patents.** This package's code is Apache-2.0, but it depends on `libheif-js`, which is
 > **LGPL-3.0** (libheif and libde265). HEIC images are HEVC-coded, and HEVC is covered by patents that pools
 > license; no licence covers a software HEVC decoder you distribute to your users, and this package grants none.
-> Register it only after you have decided that for your product. See [Licence](#licence).
+> Register it only after you have decided that for your product. See [License](#license).
 
 ## Why @taucad/heif?
 
@@ -109,7 +109,7 @@ later upstream security releases. The decoder runs inside WebAssembly in a runti
 50 MP header checks, and a host should discard its runtime client after a failed conversion and set a transcode
 timeout. What remains is wrong pixels in the image being converted, or a crashed worker.
 
-## Licence
+## License
 
 `@taucad/heif` is Apache-2.0 — see [LICENSE](./LICENSE). It bundles no third-party code.
 

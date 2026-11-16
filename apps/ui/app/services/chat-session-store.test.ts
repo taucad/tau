@@ -4048,6 +4048,54 @@ describe('ChatSessionStore', () => {
     unsubscribe();
   });
 
+  it.each([
+    ['a summary of an ancestor', { type: 'change', path: '.tau/chats' }, 2],
+    ['a summary of the project root', { type: 'change', path: '' }, 2],
+    ['a deletion of an ancestor', { type: 'delete', path: '.tau' }, 2],
+    ['a summary of a sibling chat', { type: 'change', path: '.tau/chats/chat_other' }, 1],
+    ['a summary of a sibling whose name shares a prefix', { type: 'change', path: '.tau/chat' }, 1],
+  ] satisfies Array<[string, WatchEvent, number]>)(
+    'refolds a foreign segment directory on %s',
+    async (_case, event, reads) => {
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const client = createMemoryClient();
+      client.files.set(
+        '/projects/project/.tau/chats/chat_foreign/events/peer.jsonl',
+        new TextEncoder().encode(JSON.stringify(lifecycleRow(0, 'running'))),
+      );
+      const readFile = vi.spyOn(client, 'readFile');
+      let listener: ((event: WatchEvent) => void) | undefined;
+      store.setDependencies({
+        ...createStubDeps(client),
+        watchRecordFile: (_directory, callback) => {
+          listener = callback;
+          return {
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              /* Owner-controlled watch. */
+            }),
+            dispose: vi.fn(),
+          };
+        },
+      });
+      const release = store.observe('chat_foreign', 'project');
+      try {
+        await vi.waitFor(() => {
+          expect(readFile).toHaveBeenCalledOnce();
+        });
+        listener?.(event);
+        await settle();
+        await vi.waitFor(() => {
+          expect(readFile).toHaveBeenCalledTimes(reads);
+        });
+        await settle();
+        expect(readFile).toHaveBeenCalledTimes(reads);
+      } finally {
+        release();
+      }
+    },
+  );
+
   it('updates the active tool name from the log when counts stay unchanged (PV-S7)', () => {
     const store = createStore();
     const session = store.acquire('chat_tool_name', 'project_1');

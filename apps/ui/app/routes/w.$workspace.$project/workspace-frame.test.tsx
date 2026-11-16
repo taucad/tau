@@ -1,7 +1,8 @@
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
 import { writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
@@ -52,6 +53,7 @@ const lane = (frame: HTMLElement, name: string): HTMLElement =>
 describe('WorkspaceFrame', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
+    resetHandOffStoreForTest();
   });
 
   afterEach(() => {
@@ -178,5 +180,53 @@ describe('WorkspaceFrame', () => {
     expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
     expect(frame).toHaveTextContent('content');
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
+  });
+
+  // ── PL6: the project composer's native input, in the frame's chat lane ──
+
+  /* The chat lane's composer box takes text from first paint; the live composer adopts it at the reveal. Only that box
+   * is exposed and takes pointer events: the lanes stay decorative. */
+  it("serves the composer's native input in the chat lane's composer box, the one exposed part of the frame", () => {
+    const frame = renderFrame('/w/home/one');
+
+    const input = screen.getByRole('textbox', { name: 'Chat message' });
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+    expect(input.closest('[aria-hidden=true]')).toBeNull();
+    expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
+    expect(frame.querySelector('[data-slot=workspace-frame-lanes] textarea')).toBeNull();
+    /* Above the content, at the chat lane's place and width, and only its box takes pointer events. */
+    const layer = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-composer]');
+    expect(layer).toHaveClass('pointer-events-none', 'z-10');
+    expect(layer?.firstElementChild?.className).toContain('w-(--frame-chat-width,320px)');
+    expect(layer?.firstElementChild?.className).toContain('[display:var(--frame-chat-display,flex)]');
+    expect(input.closest('.pointer-events-auto')).not.toBeNull();
+  });
+
+  it('serves the input on the server, before the render-blocking marker, so it takes text at first paint', () => {
+    const html = renderToString(frameAt('/w/home/one'));
+
+    const input = html.indexOf('aria-label="Chat message"');
+    expect(input).toBeGreaterThan(-1);
+    expect(input).toBeLessThan(html.indexOf(`id="${workspaceFrameEndId}"`));
+  });
+
+  /* The input hides with the lanes: at the reveal, and under a failure in the workspace's place. */
+  it('hides the composer box with the lanes once they are ready, and under a failure', () => {
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.className).toContain(
+      '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-composer]]:hidden',
+    );
+    expect(frame.className).toContain(
+      '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+    );
+  });
+
+  it('serves no input when this project remembers its chat lane closed', () => {
+    writeWideFrameHint('home/one', { ...workbenchOpen, chatOpen: false });
+    renderFrame('/w/home/one');
+
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(document.querySelector('[data-slot=workspace-frame] textarea')).toBeNull();
   });
 });

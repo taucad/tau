@@ -369,7 +369,7 @@ const ExpandedChatHistory = memo(function ({
                 enableMobileCollapse={isMobile}
                 mode='main'
                 enableAutoFocus={false}
-                /* The workspace placeholder served this composer's native input; adopt it (PL6). */
+                /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
                 handOff={composerHandOff}
                 onSubmit={onSubmit}
               />

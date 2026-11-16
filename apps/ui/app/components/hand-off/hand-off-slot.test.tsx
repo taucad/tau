@@ -16,7 +16,7 @@ vi.mock('#components/hand-off/hand-off.js', async (importOriginal) => ({
 /** The project the slots belong to. */
 const target = { surface: 'project-composer', scope: 'home/one' } as const;
 
-/** Two different parents, so swapping them remounts the slot as the workspace's successive skeletons do. */
+/** Two different parents, so swapping them remounts the slot, as any placeholder that remounts before its adopter does. */
 function Stage({
   phase,
   scope = target.scope,

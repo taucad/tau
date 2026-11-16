@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
+import { ProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { defaultWideFrameHint, frameHintKey, frameHintVariables, readWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 
@@ -78,25 +79,37 @@ export function WorkspaceFrame({
         'size-full bg-background md:relative md:isolate',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
+        '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-composer]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route
          * chunk's) shows alone, as it did before the frame: no lane or composer box under it. */
         '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
       )}
       style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
     >
-      <WorkspaceFrameLanes />
+      {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a lane
+       * remembered closed, and the client then drops it. */}
+      <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} />
       {children}
     </div>
   );
 }
 
 /**
- * The frame's own nodes: the lanes layer, and the render-blocking marker after it. One element, so the content
- * after it keeps its slot whether or not the frame is drawn.
+ * The frame's own nodes: the lanes layer, the chat lane's composer box with the composer's native input (PL6), and the
+ * render-blocking marker after them. One element, so the content after it keeps its slot whether or not the frame is
+ * drawn.
  *
- * @returns The lanes and the marker.
+ * The lanes are decorative, under the content and hidden from assistive technology. The composer box is the one part
+ * that stands for something the person uses: the composer takes text from first paint, and the live composer adopts
+ * it when the workspace is revealed. It is its own layer above the content, at the chat lane's place and width and at
+ * the lane frame's composer box, and only the box takes pointer events, so the content under the rest of the layer
+ * gets its pointer as before. It hides with the lanes.
+ *
+ * @param props - Whether the chat lane serves the input: not when this project remembers the lane closed.
+ * @returns The lanes, the composer box and the marker.
  */
-function WorkspaceFrameLanes(): React.JSX.Element {
+function WorkspaceFrameLanes({ isChatServed }: { readonly isChatServed: boolean }): React.JSX.Element {
   return (
     <>
       <div
@@ -118,6 +131,21 @@ function WorkspaceFrameLanes(): React.JSX.Element {
           data-lane='workbench'
           className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
         />
+      </div>
+      <div
+        data-slot='workspace-frame-composer'
+        className='@container pointer-events-none absolute inset-0 z-10 flex max-md:hidden'
+      >
+        {/* The chat lane's box, border included, so the composer box lands on the lane frame's own. */}
+        <div className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'>
+          {isChatServed ? (
+            <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+              <div className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md has-[textarea:focus-visible]:focus-outline'>
+                <ProjectComposerHandOff />
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
        * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the

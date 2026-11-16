@@ -22,13 +22,14 @@ export function useProjectComposerHandOff(): HandOffTarget {
 }
 
 /**
- * The project composer's native input, in the workspace placeholder's composer frame (progressive loading PL6).
+ * The project composer's native input, in the workspace frame's chat-lane composer box (progressive loading PL6, on
+ * A15b's frame).
  *
- * The project page serves its placeholder long before the live composer can mount: the worker, the workspace chunk,
- * the session and the focused chat come first. This input takes text from first paint in the frame where the live
- * composer rests, with the editor's inset and text metrics over the bar's reserved height, and the live composer
- * adopts its text, caret, focus and a queued send when it mounts (`ChatTextarea`'s `handOffSurface`). One input
- * serves the whole load, however many placeholders it passes through (`HandOffSlot`).
+ * The project page serves its frame long before the live composer can mount: the worker, the workspace chunk, the
+ * session and the focused chat come first. This input takes text from first paint in the box where the live composer
+ * rests, with the editor's inset and text metrics over the bar's reserved height, and the live composer adopts its
+ * text, caret, focus and a queued send in the commit that reveals the workspace (`ChatTextarea`'s `handOff`, gated by
+ * `handOffRevealContext`).
  *
  * @returns The input and the bar's reserved height.
  */

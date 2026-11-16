@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
+import { axeAudit } from '#support/page-audit.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
   ShownSpan,
@@ -463,6 +464,39 @@ test('should mark the first input accepted on a direct project load', { timeout:
   expect(accepted.mark, 'the served recorder left no first-input mark').toEqual(expect.any(Number));
   expect(accepted.measure).toEqual({ start: 0, end: accepted.mark, phase: 'input.accepted' });
 });
+
+/*
+ * PL6 on A15b's frame: the composer's native input stands in the frame's chat-lane composer box, the one part of the
+ * frame exposed to assistive technology, and the live composer adopts it when the panes are revealed. Before the
+ * reveal and after it the page has exactly one textbox, and the frame breaks no axe rule (a focusable input under
+ * `aria-hidden` would).
+ */
+test(
+  'should expose exactly one composer textbox before the workspace is revealed and one after',
+  { timeout: loadBudget },
+  async () => {
+    await seedProjects('wide');
+    await holdRequestsUntilReleased(workspaceChunk);
+    await target.reload();
+    const textboxes = selectors.getByRole('textbox');
+    await target.expectVisible(selectors.getByRole('textbox', { name: 'Chat message' }), 60_000);
+    await target.expectCount(textboxes, 1);
+    const before = await axeAudit({ selector: '[data-slot="workspace-frame"]' });
+    await releaseHeldRequests();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+    await target.expectCount(textboxes, 1);
+    await target.expectCount(selectors.getByCss('[data-slot="workspace-frame"] textarea'), 0);
+    const after = await axeAudit({ selector: '[data-slot="workspace-frame"]' });
+    await target.writeArtifact(
+      'project-load-frames/composer-textbox-axe.json',
+      `${JSON.stringify({ before: before.violations, after: after.violations }, null, 2)}\n`,
+    );
+
+    expect(before.violations, 'the frame before the reveal').toEqual([]);
+    expect(after.violations, 'the frame after the reveal').toEqual([]);
+  },
+);
 
 /*
  * U4's placeholder node is, from A15b, the persistent workspace frame (`[data-slot="workspace-frame"]`), which took the
@@ -1330,7 +1364,7 @@ knownDefect(
   'F7 (A15d): text typed at first paint on a project URL, with the entry chunk held until the typing is done, is in the composer after hydration with its caret and focus, and the composer never moved',
   {
     artifact: 'f7-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       const { path } = await seedProjects('wide');

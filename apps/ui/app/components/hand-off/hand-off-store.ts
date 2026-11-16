@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   captureHandOff,
   installHandOffTracker,
@@ -10,9 +10,9 @@ import type { HandOffElement, HandOffOptions, HandOffSnapshot } from '#component
 /**
  * The page's hand-off surfaces: one native input per surface per load (P4 identity).
  *
- * A surface whose placeholder is mounted and unmounted several times before its adopter arrives — the project
- * composer passes through the workspace skeleton of each gate on the way to the live workspace — keeps one native
- * input for the whole load. Each placeholder hosts a {@link HandOffSlot}; the store moves the one element into the
+ * A surface whose placeholder may be mounted and unmounted several times before its adopter arrives keeps one native
+ * input for the whole load. (The project composer's placeholder is the persistent workspace frame's composer box, one
+ * mount per load; a client move to another project mounts the next project's.) Each placeholder hosts a {@link HandOffSlot}; the store moves the one element into the
  * newest mounted slot and restores its caret and focus there, so the text, its order and the person's place in it
  * survive every remount. The adopter takes it over once, through {@link useHandOffAdoption}.
  *
@@ -120,6 +120,7 @@ export const createHandOffStore = (): {
   attach: (target: HandOffTarget, host: HTMLElement) => void;
   detach: (surface: HandOffSurface, host: HTMLElement) => void;
   adopt: (target: HandOffTarget) => HandOffAdoption;
+  holds: (target: HandOffTarget) => boolean;
   isAdopted: (target: HandOffTarget) => boolean;
   version: (surface: HandOffSurface) => number;
   subscribe: (surface: HandOffSurface, listener: () => void) => () => void;
@@ -228,6 +229,11 @@ export const createHandOffStore = (): {
       notify(entry);
       return { kind: 'adopted', snapshot };
     },
+    /** Whether an input served for this scope is waiting for its adopter. */
+    holds: ({ surface, scope }) => {
+      const entry = entryOf(surface);
+      return entry.element !== undefined && entry.scope === scope;
+    },
     isAdopted: ({ surface, scope }) => {
       const entry = entryOf(surface);
       return entry.adopted && entry.scope === scope;
@@ -268,12 +274,22 @@ export function useHandOffAdopted({ surface, scope }: HandOffTarget): boolean {
   return useSyncExternalStore(subscribe, () => handOffStore.isAdopted({ surface, scope }), neverAdopted);
 }
 
+/**
+ * Whether the adopters below are shown. A host whose adopter mounts before it can be seen or typed into, such as the
+ * desktop workspace's panes before the split view's first layout (`content-visibility: hidden`), says no until then:
+ * the native input stays the one to type in, and the adoption runs in the commit that shows the adopter.
+ */
+export const handOffRevealContext = createContext(true);
+
 /** The adopter's view: still waiting on an open composition, or done with what was handed over, if anything. */
 export type HandOffAdoptionState =
   | { readonly kind: 'waiting' }
   | { readonly kind: 'done'; readonly snapshot: HandOffSnapshot | undefined };
 
 const noVersion = (): number => 0;
+
+const initialAdoptionState = (scope: string | undefined): HandOffAdoptionState =>
+  scope === undefined ? { kind: 'done', snapshot: undefined } : { kind: 'waiting' };
 const noSubscription = (): (() => void) => () => undefined;
 
 /**
@@ -281,7 +297,9 @@ const noSubscription = (): (() => void) => () => undefined;
  *
  * The attempt runs in a layout effect and its result re-renders before the browser paints or delivers another key,
  * so the snapshot and the rich surface's first commit are one step: nothing typed between them is lost. While a
- * composition is open the state stays `waiting`, and the attempt runs again when it closes.
+ * composition is open the state stays `waiting`, and the attempt runs again when it closes. Behind a host that is not
+ * shown yet ({@link handOffRevealContext}) a served input also keeps the state `waiting`, and the attempt runs in the
+ * commit that shows the adopter; with nothing served there is nothing to wait for. A move to another scope starts over.
  *
  * @param target - The surface and scope to adopt, or undefined for a mount that adopts nothing.
  * @param onAdopted - Called once with the snapshot, before the rich surface renders it; it moves the text into its
@@ -303,9 +321,12 @@ export function useHandOffAdoption(
     () => (surface === undefined ? 0 : handOffStore.version(surface)),
     noVersion,
   );
-  const [state, setState] = useState<HandOffAdoptionState>(() =>
-    surface === undefined ? { kind: 'done', snapshot: undefined } : { kind: 'waiting' },
+  const isShown = useContext(handOffRevealContext);
+  /* The state is the scope's: a move to another scope waits again, for that scope's input. */
+  const [scoped, setScoped] = useState<{ readonly scope: string | undefined; readonly state: HandOffAdoptionState }>(
+    () => ({ scope, state: initialAdoptionState(scope) }),
   );
+  const state = scoped.scope === scope ? scoped.state : initialAdoptionState(scope);
   const isWaiting = state.kind === 'waiting';
   /* The scope and store version this mount last tried at: a closed composition bumps the version, a move to another
    * scope changes the scope, and either runs the attempt again. */
@@ -315,7 +336,8 @@ export function useHandOffAdoption(
       !isWaiting ||
       surface === undefined ||
       scope === undefined ||
-      (lastAttempt.current?.scope === scope && lastAttempt.current.version === version)
+      (lastAttempt.current?.scope === scope && lastAttempt.current.version === version) ||
+      (!isShown && handOffStore.holds({ surface, scope }))
     ) {
       return;
     }
@@ -328,7 +350,10 @@ export function useHandOffAdoption(
       onAdopted(adoption.snapshot);
     }
     // oxlint-disable-next-line react/set-state-in-effect -- A layout-effect update renders before paint, so the snapshot and the rich surface commit as one step.
-    setState({ kind: 'done', snapshot: adoption.kind === 'adopted' ? adoption.snapshot : undefined });
-  }, [isWaiting, surface, scope, version, onAdopted]);
+    setScoped({
+      scope,
+      state: { kind: 'done', snapshot: adoption.kind === 'adopted' ? adoption.snapshot : undefined },
+    });
+  }, [isWaiting, isShown, surface, scope, version, onAdopted]);
   return state;
 }

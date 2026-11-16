@@ -5,7 +5,7 @@ import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
 import { describeHandOffContract } from '#testing/hand-off-contract.js';
 
 /* A store-backed surface: the native input lives in a placeholder's slot, and the adopter mounts beside the
- * placeholder still standing, as the project composer mounts under the workspace's last skeleton. */
+ * placeholder still standing, as the project composer mounts under the persistent workspace frame. */
 let mounts = 0;
 let adopted: HandOffSnapshot | undefined;
 const noteAdopted = (snapshot: HandOffSnapshot): void => {

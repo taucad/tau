@@ -318,7 +318,8 @@ describe('ProjectLibraryCard live preview', () => {
   it('should remount the scoped file manager when an open card is retargeted to another project', async () => {
     const view = renderCard();
     await userEvent.click(screen.getByRole('button', { name: 'Preview model' }));
-    const firstToken = (await screen.findByTestId('file-manager-provider')).dataset['mountToken'];
+    const firstProvider = await screen.findByTestId('file-manager-provider');
+    const firstToken = firstProvider.dataset['mountToken'];
     const nextProject: ProjectListItem = {
       ...mockProject,
       id: 'proj_bbbbbbbbbbbbbbbbbbbbb',

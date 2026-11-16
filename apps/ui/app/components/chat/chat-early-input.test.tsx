@@ -411,6 +411,8 @@ describe('Home early input: queued send and stored draft (C10)', () => {
     { name: 'Shift+Enter', init: { key: 'Enter', shiftKey: true }, value: 'A line' },
     { name: 'Enter in an empty input', init: { key: 'Enter' }, value: '' },
     { name: 'Enter that ends a composition', init: { key: 'Enter', isComposing: true }, value: 'に' },
+    /* Safari commits a conversion with an Enter after compositionend, marked only by keyCode 229 (review round 3). */
+    { name: "Safari's Enter that commits a conversion", init: { key: 'Enter', keyCode: 229 }, value: '日本' },
   ])('should queue no send for $name', ({ init, value }) => {
     const { content } = adopting();
     const { container, input } = serve(content);
@@ -422,6 +424,30 @@ describe('Home early input: queued send and stored draft (C10)', () => {
       /* Shift+Enter and a composition's Enter are the input's own; only an empty input's plain Enter is swallowed. */
       expect(event.defaultPrevented).toBe(value === '');
     } finally {
+      container.remove();
+    }
+  });
+
+  /* Q15: a touch keyboard's return breaks the line, as in the rich composer; only Send sends (review round 3). */
+  it("should leave a touch keyboard's return to break the line", () => {
+    /* The served script runs in the document's realm, which has its own window: set its matchMedia there. */
+    const inRealm = (source: string): void => {
+      const script = document.createElement('script');
+      script.textContent = source;
+      document.body.append(script);
+      script.remove();
+    };
+    inRealm("window.__tauMatchMedia=window.matchMedia;window.matchMedia=(q)=>({matches:q==='(pointer: coarse)'})");
+    const { content } = adopting();
+    const { container, input } = serve(content);
+    try {
+      type(input, 'Make a bracket');
+      const event = press(input, { key: 'Enter' });
+      expect(event.defaultPrevented).toBe(false);
+      expect(container.querySelector('[data-queued-send]')).toBeNull();
+      expect(input.tauEarlyDraft?.['queued']).toBe(false);
+    } finally {
+      inRealm('window.matchMedia=window.__tauMatchMedia;delete window.__tauMatchMedia');
       container.remove();
     }
   });

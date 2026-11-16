@@ -1379,12 +1379,21 @@ const measureComposerBarControls = async (barSelector: string): Promise<readonly
     const controls = bar.querySelectorAll(
       ':scope > [data-slot=composer-left] > :not(input):not([data-slot=composer-collapsible]), :scope [data-slot=composer-collapsible] > *, :scope > [data-slot=composer-right] > :not([data-slot=composer-collapsible])',
     );
-    return [...controls]
-      .map((control) => control.getBoundingClientRect())
-      .filter((rect) => rect.width > 0 && rect.height > 0)
-      .map(
-        (rect) => `${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}`,
-      );
+    const box = (rect: DOMRect): string =>
+      `${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    /* The composer's input row: the box child that holds the input (the native textarea, or the editor). */
+    let row = bar.parentElement?.querySelector('textarea, .tiptap') ?? undefined;
+    while (row?.parentElement && row.parentElement !== bar.parentElement) {
+      row = row.parentElement;
+    }
+    return [
+      `bar ${box(bar.getBoundingClientRect())}`,
+      `input row ${row ? box(row.getBoundingClientRect()) : 'none'}`,
+      ...[...controls]
+        .map((control) => control.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map(box),
+    ];
   }, barSelector);
 
 knownDefect(
@@ -1417,16 +1426,17 @@ knownDefect(
     },
     assert: ({ early, before, after }) => {
       precondition(early.found && !early.hydratedBeforeAct, 'F7b: the served page had no composer before hydration');
-      /* Add and Send keep their whole rect. The mode and model controls keep their slot, the edge the bar lays them
+      /* The bar, its input row, Add and Send keep their whole rect. The mode and model controls keep their slot, the edge the bar lays them
        * out from (mode's left, model's right beside Send) and their height; their widths follow their labels, which
        * the frame cannot know (label parity is A10's, programme control 13:30Z). */
       const parse = (rect: string | undefined): readonly number[] => (rect ?? '').split(/[ ,x]/u).map(Number);
       const slot = (rects: readonly string[]): readonly string[] =>
         rects.map((rect, index) => {
           const [x = 0, y = 0, width = 0, height = 0] = parse(rect);
-          return index === 1
+          /* After the bar and its input row: add, mode, model, Send. */
+          return index === 3
             ? `left ${x}, y ${y}, h ${height}`
-            : index === 2
+            : index === 4
               ? `right ${x + width}, y ${y}, h ${height}`
               : rect;
         });

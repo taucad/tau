@@ -143,7 +143,15 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   );
 
   if (availability !== 'ready') {
-    return <ProjectSyncPlaceholder state={availability} />;
+    return (
+      <>
+        <ProjectSyncPlaceholder state={availability} />
+        {/* Lasting states hold no composer until a person acts; a later composer starts without this input. */}
+        {availability === 'failed' || availability === 'account' || availability === 'offline' ? (
+          <DeclineServedComposer />
+        ) : null}
+      </>
+    );
   }
   if (focusedChatId === undefined && !focusedChatError) {
     return (

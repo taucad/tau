@@ -414,6 +414,29 @@ describe('WorkspaceFrame served composer', () => {
     }
   });
 
+  /* Review round 3: the frame persists across a navigation to another project, which must not take this input. */
+  it('ends the served input on a navigation to another project', async () => {
+    const { container, rerender, done } = await serveAndHydrate('/w/home/one', (input) => {
+      input.value = 'make it blue';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    try {
+      act(() => {
+        handover?.release();
+      });
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
+      globalThis.history.replaceState(null, '', '/w/home/two');
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+      act(() => {
+        handover?.claim();
+      });
+      expect(handover?.pending).toBeUndefined();
+    } finally {
+      await done();
+    }
+  });
+
   it('drops an Enter on a painted draft nobody edited, and says a queued send aloud', async () => {
     writeDraftHint({ kind: 'project', key: 'home/one' }, { text: 'Fillet it' });
     let status: Element | undefined;

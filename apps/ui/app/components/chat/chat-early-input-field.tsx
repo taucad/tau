@@ -57,7 +57,8 @@ export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
 // rather than beside the input because a browser may paint the half-parsed document when the parser reaches a script:
 // here that cut can only fall after the box and its bar, never between them.
 //
-// Enter (no modifier, no composition) queues a send instead of breaking the line, and marks the box so the send
+// Enter (no modifier, no composition, including Safari's IME commit with keyCode 229; not a touch keyboard's return,
+// which breaks the line as the rich composer's does) queues a send instead of breaking the line, and marks the box so the send
 // button shows its pending state at once; any edit or Escape cancels it. Shift+Enter still breaks the line.
 export const earlyInputScript =
   `(()=>{const box=document.currentScript.previousElementSibling;const input=box.querySelector('textarea');` +
@@ -66,7 +67,9 @@ export const earlyInputScript =
   `const st=box.querySelector('[data-slot=queued-send-status]');const q=(v)=>{state.queued=v;if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:'';if(v){box.setAttribute(${JSON.stringify(queuedSendAttribute)},'')}else{box.removeAttribute(${JSON.stringify(queuedSendAttribute)})}};` +
   `input.addEventListener('input',()=>{state.edited=true;if(state.queued)q(false)});` +
   `input.addEventListener('keydown',(e)=>{if(e.key==='Escape'){if(state.queued)q(false);return}` +
-  `if(e.key!=='Enter'||e.shiftKey||e.altKey||e.ctrlKey||e.metaKey||e.isComposing||state.composing)return;` +
+  `if(e.key!=='Enter'||e.shiftKey||e.altKey||e.ctrlKey||e.metaKey||e.isComposing||e.keyCode===229||state.composing)return;` +
+  /* A touch keyboard's return starts a new line, as in the rich composer (Q15): only Send sends there. */
+  `if(window.matchMedia?.('(pointer: coarse)').matches)return;` +
   `e.preventDefault();if(input.value.trim()!=='')q(true)});` +
   `input.addEventListener('compositionstart',()=>{state.composing=true});` +
   `input.addEventListener('compositionend',()=>{state.composing=false})})()`;

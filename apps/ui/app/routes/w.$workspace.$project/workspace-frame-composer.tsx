@@ -19,6 +19,11 @@ import {
   readEarlyInput,
 } from '#components/chat/chat-early-input-field.js';
 import type { EarlyChatInput, EarlyInputHandover, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
+import { frameHintKey } from '#lib/frame-hint.js';
+
+/** The document's path, read when the frame renders (a navigation renders it); the server has none. */
+const readPath = (): string => globalThis.location.pathname;
+const noPathOnServer = (): undefined => undefined;
 
 /** Nothing to subscribe to: only the hydration pass reads the server snapshot. */
 const subscribeToNothing = (): (() => void) => {
@@ -50,8 +55,17 @@ type ServedComposerState = 'served' | EarlyChatInput | 'gone';
 export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; handover: EarlyInputHandover } {
   const isOnClient = useSyncExternalStore(subscribeToNothing, isClientRender, isServerRender);
   const [state, setState] = useState<ServedComposerState>(() => (isOnClient ? 'gone' : 'served'));
-  /* A navigation off the project route ends the served input: a frame drawn again later was not served with it. */
-  if (!isDrawn && state !== 'gone') {
+  /* A navigation ends the served input, off the project route or to another project: the frame persists across both,
+   * but only the project the document was served for owns what was typed into it. */
+  const path = useSyncExternalStore(subscribeToNothing, readPath, noPathOnServer);
+  const [servedPath, setServedPath] = useState<string>();
+  if (state !== 'gone' && path !== undefined) {
+    if (servedPath === undefined) {
+      setServedPath(path);
+    } else if (!isDrawn || frameHintKey(path) !== frameHintKey(servedPath)) {
+      setState('gone');
+    }
+  } else if (!isDrawn && state !== 'gone') {
     setState('gone');
   }
   const inputRef = useRef<EarlyTextarea>(null);

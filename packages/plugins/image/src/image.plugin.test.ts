@@ -22,7 +22,7 @@ describe('@taucad/image', () => {
     expect(capabilities.kernels.map(({ id }) => id)).toEqual([]);
     expect(capabilities.middleware.map(({ id }) => id)).toEqual([]);
     expect(capabilities.bundlers.map(({ id }) => id)).toEqual([]);
-    expect(capabilities.transcoders.map(({ id }) => id)).toEqual(['image', 'svg-image']);
+    expect(capabilities.transcoders.map(({ id }) => id)).toEqual(['render', 'svg', 'raster']);
     expect(backendMock.load).not.toHaveBeenCalled();
   });
 

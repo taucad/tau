@@ -135,9 +135,9 @@ const resolveBoundsCamera = ({
 };
 
 /** GLB-to-image transcoder with strict single and ordered batch modes. @public */
-export const imageTranscoder = defineTranscoder({
-  id: 'image',
-  name: 'ImageTranscoder',
+export const renderTranscoder = defineTranscoder({
+  id: 'render',
+  name: 'RenderTranscoder',
   // Bump whenever the renderer's output bytes change for identical input, or
   // persisted export caches keep serving images from the previous renderer.
   // 12.0.0 = scale-independent ambient occlusion normals.

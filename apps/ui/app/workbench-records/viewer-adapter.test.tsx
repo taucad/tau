@@ -165,7 +165,8 @@ function mountProject() {
 
 function baseFacts(overrides: Partial<ViewerAdapterFacts> = {}): ViewerAdapterFacts {
   return {
-    admitsDemand: false,
+    admitsView: false,
+    admitsGeometry: false,
     mainEntryPath: 'main.ts',
     viewRecords: new Map<string, WorkbenchView>(),
     entriesRecord: undefined,
@@ -360,7 +361,8 @@ describe('viewer adapter (A8d)', () => {
     const createViewRecord = vi.fn();
     const facts = createViewerAdapterFactsPort(
       baseFacts({
-        admitsDemand: true,
+        admitsView: true,
+        admitsGeometry: true,
         viewRecords: new Map([
           ['view-a', newViewRecord('a.ts')],
           ['view-b', newViewRecord('b.ts')],
@@ -501,7 +503,7 @@ describe('viewer adapter (A8d)', () => {
     expect(project.sent).toEqual([]);
 
     await act(async () => {
-      facts.set({ ...facts.get(), admitsDemand: true });
+      facts.set({ ...facts.get(), admitsView: true, admitsGeometry: true });
     });
     expect(project.sent.map((event) => [event.type, event.viewId ?? event.entryPath, event.entryPath])).toEqual([
       ['createViewGraphics', 'front', undefined],
@@ -532,6 +534,125 @@ describe('viewer adapter (A8d)', () => {
       adapter.stop();
     });
     expect(project.sent).toEqual([{ type: 'setViewerGeometryDemand', viewId: 'front' }]);
+  });
+
+  /* A15e: the stage mounts once, through the first file check; the kernel still waits for the files (P-j). */
+  it('should create a view graphics owner and bind its entry while the files are checked, and its geometry unit and demand only once they settle', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const records = new Map([['front', newViewRecord('main.ts')]]);
+    const setViewEntryPath = vi.fn();
+    const facts = createViewerAdapterFactsPort(baseFacts({ viewRecords: records, setViewEntryPath }));
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: {
+          profile: 'editor',
+          projectId: 'p',
+          project: project.project,
+          layout: undefined,
+          facts,
+        },
+      });
+    });
+
+    /* The project is ready and its files are being checked. */
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsView: true });
+    });
+    expect(project.sent.map((event) => event.type)).toEqual(['createViewGraphics']);
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', 'main.ts');
+    expect((api.getPanel('front')!.params as { entryPath?: string }).entryPath).toBe('main.ts');
+
+    /* The files settle: the geometry unit and its demand follow, and the graphics owner is not made again. */
+    project.sent.length = 0;
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: true });
+    });
+    expect(project.sent.map((event) => [event.type, event.viewId ?? event.entryPath])).toEqual([
+      ['createGeometryUnit', 'main.ts'],
+      ['setViewerGeometryDemand', 'front'],
+    ]);
+
+    /* A later check holds new geometry back and keeps what is admitted: nothing is released or made again. */
+    project.sent.length = 0;
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: false });
+    });
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: true });
+    });
+    expect(project.sent).toEqual([]);
+  });
+
+  /* D21 round 2, D2: a view with no recorded entry is not bound to main, nor main persisted, while the files are
+     checked: main can still change, and the record is not written in the middle of the tree write. */
+  it('should bind and persist main for a view without an entry only once the files settle, to the main they settle on', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const setViewEntryPath = vi.fn();
+    const facts = createViewerAdapterFactsPort(baseFacts({ mainEntryPath: 'a.ts', setViewEntryPath }));
+    const { edit } = facts.get().viewCommands;
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
+    });
+
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsView: true });
+    });
+    await act(async () => {
+      facts.set({ ...facts.get(), mainEntryPath: 'b.ts' });
+    });
+    expect(edit).not.toHaveBeenCalled();
+    expect((api.getPanel('front')!.params as { entryPath?: string }).entryPath).toBeUndefined();
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', 'b.ts');
+
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: true });
+    });
+    expect((api.getPanel('front')!.params as { entryPath?: string }).entryPath).toBe('b.ts');
+    expect(edit).toHaveBeenCalledTimes(1);
+    const units = project.sent.filter((event) => event.type === 'createGeometryUnit').map((event) => event.entryPath);
+    expect(units).toEqual(['b.ts']);
+  });
+
+  /* D21 round 4: an entry-less project's main (`''`) binds no entry during a check, so no view stands in as main's. */
+  it('should record no entry for an unrecorded view during a check of an entry-less project', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const setViewEntryPath = vi.fn();
+    const facts = createViewerAdapterFactsPort(baseFacts({ mainEntryPath: '', setViewEntryPath }));
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
+    });
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsView: true });
+    });
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', null);
   });
 
   it('should delete the record of a view an apply removes once, not again as a person removal', async () => {
@@ -636,7 +757,13 @@ describe('viewer adapter (A8d)', () => {
       ['iso', newViewRecord('iso.ts')],
       ['top', newViewRecord('top.ts')],
     ]);
-    const facts = createViewerAdapterFactsPort(baseFacts({ admitsDemand: true, viewRecords: records }));
+    const facts = createViewerAdapterFactsPort(
+      baseFacts({
+        admitsView: true,
+        admitsGeometry: true,
+        viewRecords: records,
+      }),
+    );
     await act(async () => {
       harness.layout.send({
         type: 'dockReady',

@@ -1234,6 +1234,10 @@ knownDefect(
         return [
           ...(standing === undefined ? [`${name} at first paint (${painted} ms): absent`] : []),
           ...boxChanges(fromPaint).map((change) => `${name} ${change}`),
+          /* In its box is not enough: a part held there but hidden is not drawn. */
+          ...fromPaint
+            .filter((entry) => entry.present && !entry.visible)
+            .map((entry) => `${name} hidden ${describeEntry(entry)}`),
         ];
       });
       const sheetAnimations = regionsOf(record, 'sheet').filter((entry) => entry.animations > 0);

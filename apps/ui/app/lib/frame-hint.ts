@@ -66,8 +66,9 @@ export const phoneFrameHintVariableNames = ['--frame-sheet-display', '--frame-sh
 export type PhoneFrameHintVariables = Readonly<Record<(typeof phoneFrameHintVariableNames)[number], string>>;
 
 /**
- * The attribute naming the tab bar's selected destination (`chat`, `parameters`, `model` or `all`). The pre-paint
- * script sets it on `<html>`; on the client `WorkspaceFrame` sets it on itself, and the frame's own value wins.
+ * The attribute naming the tab bar's selected destination (`chat`, `parameters`, `model` or `all`) on `<html>`. The
+ * pre-paint script sets it for the document's first project; on the client `WorkspaceFrame` sets it again for its own
+ * project before paint.
  */
 export const frameTabAttribute = 'data-frame-tab';
 

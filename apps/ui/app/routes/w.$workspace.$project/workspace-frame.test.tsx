@@ -56,6 +56,8 @@ describe('WorkspaceFrame', () => {
 
   afterEach(() => {
     globalThis.history.replaceState(null, '', '/');
+    document.documentElement.removeAttribute('style');
+    document.documentElement.removeAttribute(frameTabAttribute);
   });
 
   // ── Known defects (A0.9), flipped by A15b ──
@@ -229,8 +231,6 @@ describe('WorkspaceFrame', () => {
     expect(frame.style.getPropertyValue('--frame-sheet-display')).toBe('none');
     expect(frame.style.getPropertyValue('--frame-sheet-height')).toBe('0px');
     expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('model');
-    document.documentElement.removeAttribute('style');
-    document.documentElement.removeAttribute(frameTabAttribute);
   });
 
   it('gives each phone part way to the live one in its own box, and the whole phone frame to a failure or notice', () => {

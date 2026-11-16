@@ -613,6 +613,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
 
   return (
     <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
+      {/* The route's busy state while the workspace is drawn but not shown, outside it so it is exposed: the phone
+       * frame is hidden from assistive technology, and the gates' marker is gone once the workspace mounts. */}
+      {isLayoutRestored ? null : <WorkspaceOpening />}
       <div
         /* Until the stored layout is read the surface is the default, not this project's: the phone frame stands in for
          * the workspace, which is drawn but not shown, and gives way to it in the commit the layout is restored

@@ -140,7 +140,9 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
   ProjectManifestIssueBanner: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({ WorkspaceOpening: () => null }));
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <span role='status' aria-label='Opening project' />,
+}));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
@@ -1223,6 +1225,7 @@ describe('ChatInterfaceMobile on load', () => {
     expect(workspace()).toHaveAttribute('data-mobile-workspace', 'opening');
     /* Drawn at the default surface but not shown: the phone frame stands in until the stored layout is read. */
     expect(workspace().className).toContain('data-[mobile-workspace=opening]:invisible');
+    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
 
     act(() => {
       state.isEditorReady = true;
@@ -1230,6 +1233,7 @@ describe('ChatInterfaceMobile on load', () => {
     });
     expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'chat', snap: 0.5 });
     expect(workspace()).toHaveAttribute('data-mobile-workspace', 'ready');
+    expect(screen.queryByRole('status', { name: 'Opening project' })).toBeNull();
 
     act(() => {
       selectSurface('editor');

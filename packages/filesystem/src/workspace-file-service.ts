@@ -1403,6 +1403,10 @@ export class WorkspaceFileService {
     if (changed.length > 0) {
       this._resetTopologyState(changed);
     }
+    /* Every project and checkout route is the revision layer's: unknown until it declares one (D9, I7). */
+    for (const prefix of [...stagedPrefixes, ...stagedCheckoutPrefixes]) {
+      this._projectIndexes.awaitDeclaration(prefix, this._pendingStallMilliseconds);
+    }
     await this._externalChanges.syncRoots(stagedRoots);
   }
 

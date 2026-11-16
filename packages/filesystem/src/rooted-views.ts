@@ -333,7 +333,10 @@ export class RootedViews {
     }
     const projectIndexes = this._projectIndexes;
     if (raw) {
-      /* The revision layer mounts the root: until its first word, a file the size of a pointer may be a placeholder. */
+      /*
+       * A configured route is known already, and keeps what it is. A root a host mounted itself (a checkout the
+       * worker mounts on demand) becomes the revision layer's here, unknown until its first declaration.
+       */
       projectIndexes.awaitDeclaration(root, this._pendingStallMilliseconds);
     }
 

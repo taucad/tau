@@ -178,6 +178,8 @@ export type PendingMarks = Readonly<{
   endPending: (authorityPath: string) => void;
   /** Settle a file the size of a pointer: its root's index open, and its root's hold over (see {@link untilDeclared}). */
   settleMarks: (file: SettledFile, signal?: AbortSignal) => Promise<void>;
+  /** Whether the path's marks are the whole answer: its revision root, if any, is declared. */
+  declaredAt: (authorityPath: string) => boolean;
 }>;
 
 /**
@@ -216,6 +218,10 @@ export const readAsMarked = async (
   }
   const marked = marks.pendingAt(at.authorityPath, bytes.byteLength);
   if (marked === undefined) {
+    if (object !== undefined && !marks.declaredAt(at.authorityPath)) {
+      /* Its root's placeholders are not declared yet: a pointer may be one, so it is never answered as text (I7). */
+      throw new PendingContentError(at.path, object);
+    }
     return bytes;
   }
   if (object?.oid !== marked.oid || object.size !== marked.size) {

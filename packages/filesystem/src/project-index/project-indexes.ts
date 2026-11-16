@@ -168,6 +168,12 @@ export class ProjectIndexes {
   >();
   /** Roots whose hold ended this session: declared, released or timed out. None is held again until evicted. */
   private readonly _settled = new Set<string>();
+  /**
+   * Every revision root and what its marks are (D9): `declared` once a whole declaration ran since it was mounted
+   * and no observation since found a pointer-sized file changed, `unknown` otherwise. A path under no such root is
+   * answered by its marks alone.
+   */
+  private readonly _declaration = new Map<string, 'declared' | 'unknown'>();
   private readonly _opening = new Map<string, Promise<ProjectIndex>>();
   private readonly _options: ProjectIndexesOptions;
   /** Notices from sibling tabs, joined into every root's vector. */
@@ -611,18 +617,22 @@ export class ProjectIndexes {
   }
 
   /**
-   * Hold every path under one root that may be a placeholder until the revision layer first declares the root: it
-   * owns the root's placeholders, and until its word a file the size of a pointer is unknown (I7). Armed as the
-   * revision layer mounts the root, once per root: a whole declaration of it or of a root above it, a release, an
-   * eviction or the bound ends it, and after that the marks alone answer. A root whose index loaded a declared
-   * snapshot is not held at all.
+   * Know one root as the revision layer's (D9): until its whole declaration, its marks are `unknown`, so a file the
+   * size of a pointer that no mark names may be a placeholder (I7). Called as the root is configured or mounted; a
+   * root already known keeps what it is. While unknown, a stat of such a file waits for the declaration, once per
+   * root and at most the bound, then answers from the marks; a read of one whose bytes are a pointer refuses with
+   * `PENDING` until the declaration. A root whose index loaded a declared snapshot that its compare left whole is
+   * declared at once.
    *
    * @param root - Absolute root the revision layer will declare.
-   * @param boundMilliseconds - How long the root is held at most; {@link pendingStallMilliseconds} when omitted.
+   * @param boundMilliseconds - How long a stat waits at most; {@link pendingStallMilliseconds} when omitted.
    */
   public awaitDeclaration(root: string, boundMilliseconds?: number): void {
     const key = normalizePath(root);
-    if (this._holds.has(key) || this._settled.has(key) || this._states.get(key)?.index.declared === true) {
+    if (!this._declaration.has(key)) {
+      this._declaration.set(key, this._states.get(key)?.index.declared === true ? 'declared' : 'unknown');
+    }
+    if (this._declaration.get(key) === 'declared' || this._holds.has(key) || this._settled.has(key)) {
       return;
     }
     let release: () => void = () => undefined;
@@ -638,8 +648,26 @@ export class ProjectIndexes {
   }
 
   /**
-   * End the hold on one root and every root under it, declared or not: the revision layer let go of it (its first
-   * capture ended, or it unmounted), and what waited answers from the marks it finds.
+   * Whether the marks are the whole answer for one path (D9): it lies under no revision root, or under one the
+   * revision layer has declared since anything could have changed its placeholders.
+   *
+   * @param absolutePath - Absolute path.
+   * @returns `false` while the path's revision root is unknown.
+   */
+  public declaredAt(absolutePath: string): boolean {
+    const normalized = normalizePath(absolutePath);
+    for (const [root, state] of this._declaration) {
+      if (state === 'unknown' && relativeTo(root, normalized) !== undefined) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * End the wait on one root and every root under it: the revision layer let go of it (its first capture ended
+   * without a declaration). What waited answers from the marks it finds; the root stays as known as it was, so a
+   * pointer it never declared still refuses a read.
    *
    * @param root - Absolute root.
    */
@@ -717,6 +745,13 @@ export class ProjectIndexes {
     const key = normalizePath(root);
     try {
       await this._declare(key, declared, paths);
+      if (paths === undefined) {
+        for (const known of this._declaration.keys()) {
+          if (relativeTo(key, known) !== undefined) {
+            this._declaration.set(known, 'declared');
+          }
+        }
+      }
     } finally {
       /* A whole declaration ends the hold, even one that failed: what waited answers from the marks there are. */
       if (paths === undefined) {
@@ -890,11 +925,24 @@ export class ProjectIndexes {
         this._states.delete(root);
       }
     }
-    /* An unmounted root is no longer the revision layer's to declare: what waited answers now, and a remount holds again. */
+    /*
+     * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
+     * is unknown again and held again when it is configured, and an unmounted one is no revision root.
+     */
     this.releaseDeclaration(changed);
     for (const root of this._settled) {
       if (relativeTo(changed, root) !== undefined) {
         this._settled.delete(root);
+      }
+    }
+    const mounted = new Set(this._options.mountPrefixes?.() ?? []);
+    for (const root of this._declaration.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        if (mounted.has(root)) {
+          this._declaration.set(root, 'unknown');
+        } else {
+          this._declaration.delete(root);
+        }
       }
     }
   }
@@ -911,6 +959,33 @@ export class ProjectIndexes {
     /* Nothing will declare a root now: what waited answers from the marks it finds. */
     this.releaseDeclaration('/');
     this._settled.clear();
+    this._declaration.clear();
+  }
+
+  /*
+   * An observation found these paths of one index created or changed: a file now the size of a pointer that no mark
+   * names may be a placeholder written from outside (a reload's compare, another program, a crash before a snapshot
+   * kept the marks), so every revision root holding it is unknown again until its next whole declaration.
+   */
+  private _noteObserved(root: string, index: ProjectIndex, paths: Iterable<string>): void {
+    for (const path of paths) {
+      const entry = index.entry(path);
+      if (entry?.kind !== 'file' || entry.pending !== undefined || !mayBePointerSize(entry.size)) {
+        continue;
+      }
+      const absolute = normalizePath(root === '/' ? `/${path}` : `${root}/${path}`);
+      for (const [known, state] of this._declaration) {
+        if (state === 'declared' && relativeTo(known, absolute) !== undefined) {
+          this._declaration.set(known, 'unknown');
+          if (this._states.get(known)?.index.forgetDeclared() === true) {
+            this._schedulePersist(known);
+          }
+        }
+      }
+      if (index.forgetDeclared()) {
+        this._schedulePersist(root);
+      }
+    }
   }
 
   /* End one root's hold, for this session: its marks alone answer from here. */
@@ -1052,7 +1127,8 @@ export class ProjectIndexes {
     }
     this._inheritMarks(root, index);
     if (index.declared) {
-      /* The rows held against the provider: the stored marks are the root's word, so nothing waits for it again. */
+      /* No pointer-sized row changed against the provider: the stored marks are the root's word, so nothing waits. */
+      this._declaration.set(root, 'declared');
       this._release(root);
     }
     if (!usable) {
@@ -1139,6 +1215,9 @@ export class ProjectIndexes {
           ? undefined
           : { path, kind: stat.type, size: stat.size, mtimeMs: stat.mtimeMs },
       );
+      if ((index.entry(path)?.generation ?? 0) > generation) {
+        this._noteObserved(root, index, [path]);
+      }
       if (stat?.type === 'dir') {
         // oxlint-disable-next-line no-await-in-loop -- scoped refreshes are few and ordered.
         await this._observe(root, index, path);
@@ -1165,6 +1244,7 @@ export class ProjectIndexes {
     }
     workerTimings.count('index.compare', 1);
     const result = index.completeObservation(start, prefix, rows);
+    this._noteObserved(root, index, result.mismatched);
     const state = this._states.get(root);
     if (state !== undefined && prefix === '') {
       state.lastCompare = result;

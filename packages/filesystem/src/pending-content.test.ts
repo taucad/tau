@@ -292,23 +292,22 @@ describe('marked placeholders (D9)', () => {
   });
 
   /* Once declared, the marks are the whole answer: an outside edit is the next capture's to declare, not a read's. */
-  it('should answer a pointer nobody declared as the text it is, in a stat and a read alike, asking no source', async () => {
-    const plain = await createService(undefined, { declared: false });
+  it('should answer a pointer a declared root never marked as the text it is, in a stat and a read alike, asking no source', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);
-    plain.setPendingObjectSource(source);
-    const view = plain.createRootedFileSystem(route);
-    const stat = await view.stat('models/part.step');
+    service.setPendingObjectSource(source);
+    /* Written through the authority after the declaration: a person's text, known as it is written. */
+    await service.writeFile(`${route}/notes/pointer.txt`, pointer);
+    const view = service.createRootedFileSystem(route);
+    const stat = await view.stat('notes/pointer.txt');
     expect(stat).toMatchObject({ size: pointer.byteLength });
     expect(stat).not.toHaveProperty('pending');
-    expect(await view.readFile('models/part.step')).toStrictEqual(pointer);
-    expect(await plain.readFile(`${route}/models/part.step`)).toStrictEqual(pointer);
-    expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
-    expect(await view.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
+    expect(await view.readFile('notes/pointer.txt')).toStrictEqual(pointer);
+    expect(await service.readFile(`${route}/notes/pointer.txt`)).toStrictEqual(pointer);
+    expect(await view.pendingPaths!(['notes/pointer.txt'])).toStrictEqual([]);
     /* A copy of it is the text it is, too. */
-    await view.duplicate!('models/part.step', 'notes/copy.txt');
+    await view.duplicate!('notes/pointer.txt', 'notes/copy.txt');
     expect(await view.readFile('notes/copy.txt')).toStrictEqual(pointer);
     expect(source).not.toHaveBeenCalled();
-    plain.dispose();
   });
 
   it('should refuse a declared placeholder whose object cannot be had, never answering the pointer (I7)', async () => {
@@ -384,6 +383,17 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
       }, milliseconds);
     });
 
+  /* Configuring the route makes it the revision layer's: a stat before any view of the revision layer's waits too. */
+  it('should hold a file the size of a pointer as soon as the route is configured, before the revision layer has a view', async () => {
+    const cold = await createService(undefined, { declared: false });
+    const view = cold.createRootedFileSystem(route);
+    const statting = view.stat('models/part.step');
+    expect(await Promise.race([statting, waiting()])).toBe('waiting');
+    await declarePart(cold);
+    expect(await statting).toMatchObject({ size: part.byteLength, pending: true });
+    cold.dispose();
+  });
+
   /* Mounting the root is the revision layer's word that it will declare it: no capture has to start first. */
   it('should hold a file the size of a pointer from the moment the revision layer mounts the root, until it declares it', async () => {
     const cold = await createService(undefined, { declared: false });
@@ -428,7 +438,7 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
       view.statTree!('models'),
       view.search!('part'),
       view.changedSince!(0),
-      view.readFile('models/part.step'),
+      view.readFile('models/part.step').catch((error: unknown) => error),
     ]);
     expect(Date.now() - started).toBeGreaterThanOrEqual(bound - 10);
     const [stat, rows, tree, found, changed, bytes] = answers;
@@ -438,7 +448,8 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     expect(tree.find((row) => row.path === 'part.step')).toMatchObject(asPointer);
     expect(found.find((row) => row.path === 'models/part.step')).toMatchObject(asPointer);
     expect(changed.entries.find((entry) => entry.path === 'models/part.step')).toMatchObject(asPointer);
-    expect(bytes).toStrictEqual(pointer);
+    /* The bound ends the wait, never the doubt: a pointer nobody declared is not read as text (I7). */
+    expect(bytes).toMatchObject({ code: 'PENDING' });
     /* Once per root: neither a later call nor a later view of the revision layer's waits again. */
     bounded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     expect(await Promise.race([view.stat('models/part.step'), waiting(bound / 2)])).toMatchObject(asPointer);
@@ -458,6 +469,10 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
       'declaration failed',
     );
     expect(await statting).toMatchObject({ size: pointer.byteLength });
+    /* A failed declaration declares nothing: the pointer still refuses a read until one succeeds. */
+    await expect(view.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
+    await raw.declarePending!(new Map());
+    expect(await view.readFile('models/part.step')).toStrictEqual(pointer);
     failing.dispose();
   });
 
@@ -469,6 +484,8 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     expect(await Promise.race([statting, waiting()])).toBe('waiting');
     raw.releaseDeclaration!();
     expect(await statting).toMatchObject({ size: pointer.byteLength });
+    /* Letting go is not a declaration: a first capture that failed or stopped leaves the pointer refused. */
+    await expect(view.readFile('models/part.step')).rejects.toMatchObject({ code: 'PENDING' });
     released.dispose();
 
     const disposed = await createService(undefined, { declared: false });

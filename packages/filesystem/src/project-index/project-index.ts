@@ -398,6 +398,17 @@ export class ProjectIndex {
     return this._declared;
   }
 
+  /**
+   * Drop the declared stamp: something since may have written a placeholder the marks do not name (D9).
+   *
+   * @returns Whether the stamp was set.
+   */
+  public forgetDeclared(): boolean {
+    const was = this._declared;
+    this._declared = false;
+    return was;
+  }
+
   /** Whether an observation of the whole root has completed (a scan, or a load and its compare). */
   public get isComplete(): boolean {
     return this._complete;

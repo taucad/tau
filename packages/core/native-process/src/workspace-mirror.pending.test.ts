@@ -33,7 +33,10 @@ let service: WorkspaceFileService;
 const scope = { backend: 'memory', storageRootKey: 'memory:pending-mirror' } as const;
 
 /* One authority over a registry's provider, as a page or a host process opens it: a reload is another over the same. */
-const serviceOver = async (providerRegistry: ProviderRegistry): Promise<WorkspaceFileService> => {
+const serviceOver = async (
+  providerRegistry: ProviderRegistry,
+  pendingStallMilliseconds?: number,
+): Promise<WorkspaceFileService> => {
   const provider = await providerRegistry.getProvider(scope);
   const mountTable = new MountTable();
   mountTable.mount('/', provider, { class: 'authored', ...scope });
@@ -42,6 +45,7 @@ const serviceOver = async (providerRegistry: ProviderRegistry): Promise<Workspac
     resourceQueue: new ResourceQueue(),
     eventBus: new ChangeEventBus(),
     mountTable,
+    ...(pendingStallMilliseconds === undefined ? {} : { pendingStallMilliseconds }),
   });
   await opened.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'mirror' }], roots: [] });
   return opened;
@@ -174,7 +178,8 @@ describe('a workspace mirror on a cold reload', () => {
     return reloaded;
   };
 
-  it('should mirror a placeholder as its object from the declared snapshot, holding nothing for the revision layer', async () => {
+  /* A durable project the revision layer declared, its snapshot written with the marks and the declared stamp. */
+  const declaredDurable = async () => {
     const providerRegistry = new ProviderRegistry();
     const provider = await providerRegistry.getProvider(scope);
     /* A durable provider whose mtime keys facts: the root keeps a snapshot of its index, marks and all. */
@@ -200,7 +205,11 @@ describe('a workspace mirror on a cold reload', () => {
         },
       )
       .toBeGreaterThan(0);
+    return { providerRegistry, provider, before };
+  };
 
+  it('should mirror a placeholder as its object from the declared snapshot, holding nothing for the revision layer', async () => {
+    const { providerRegistry, before } = await declaredDurable();
     const reloads: WorkspaceFileService[] = [];
     try {
       /* Before the revision layer mounts the root, and as it does: the snapshot it declared answers at once. */
@@ -213,6 +222,46 @@ describe('a workspace mirror on a cold reload', () => {
       for (const reloaded of reloads) {
         reloaded.dispose();
       }
+      before.dispose();
+    }
+  }, 20_000);
+
+  /*
+   * The stamp is trusted only while the reload's compare finds no pointer-sized file changed: a pointer written while
+   * the project was closed, or after the marks were last stored, is not answered as text until the revision layer
+   * declares the root again (I7).
+   */
+  it('should refuse to mirror a pointer written since the declared snapshot, never consuming its text', async () => {
+    const { providerRegistry, provider, before } = await declaredDurable();
+    const other = encoder.encode(new TextDecoder().decode(pointer).replace(oid, 'e'.repeat(64)));
+    await provider.writeFile('mirror/models/added.step', other);
+    const reloaded = await serviceOver(providerRegistry, 50);
+    reloaded.setPendingObjectSource(async () => part);
+    const filesystem = kernelFileSystemOver(reloaded.createRootedFileSystem(route));
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-added-mirror-', displayName: 'Test' });
+    try {
+      await expect(mirror.sync(filesystem)).rejects.toMatchObject({ code: 'PENDING' });
+      await expect(readFile(join(mirror.workspacePath, 'models/added.step'))).rejects.toMatchObject({ code: 'ENOENT' });
+      /* The revision layer's next capture declares the root: the new pointer is a placeholder, and mirrors as one. */
+      await reloaded.createRootedFileSystem(route, undefined, { placeholders: 'raw' }).declarePending!(
+        new Map([
+          ['models/part.step', placeholder],
+          [
+            'models/added.step',
+            { object: { oid: 'e'.repeat(64), size: part.byteLength }, pointerSize: other.byteLength },
+          ],
+        ]),
+      );
+      await expect(mirror.sync(filesystem)).resolves.toStrictEqual([
+        'main.py',
+        'models/added.step',
+        'models/part.step',
+        'notes/pointer.txt',
+      ]);
+      expect(new Uint8Array(await readFile(join(mirror.workspacePath, 'models/added.step')))).toStrictEqual(part);
+    } finally {
+      await mirror.cleanup();
+      reloaded.dispose();
       before.dispose();
     }
   }, 20_000);

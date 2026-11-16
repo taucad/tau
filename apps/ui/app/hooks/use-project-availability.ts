@@ -62,7 +62,14 @@ export function projectAvailability(
   if (!canOpen) {
     return 'account';
   }
-  if (firstView !== undefined && firstViewOpens(firstView)) {
+  const failed =
+    status?.sync.state === 'failed' ||
+    status?.sync.state === 'queued' ||
+    status?.sync.state === 'conflicted' ||
+    status?.remote.phase === 'reconnectRequired' ||
+    status?.remote.phase === 'failed';
+  /* A failed or abandoned apply left a partial tree whose readiness stays where it got to (I7): the failure speaks. */
+  if (firstView !== undefined && firstViewOpens(firstView) && (!failed || status?.sync.hasAppliedRemote === true)) {
     return 'ready';
   }
   if (status?.sync.hasAppliedRemote === true) {
@@ -77,16 +84,7 @@ export function projectAvailability(
   if (status?.sync.pullPhase === 'fetching') {
     return 'downloading';
   }
-  if (
-    status?.sync.state === 'failed' ||
-    status?.sync.state === 'queued' ||
-    status?.sync.state === 'conflicted' ||
-    status?.remote.phase === 'reconnectRequired' ||
-    status?.remote.phase === 'failed'
-  ) {
-    return 'failed';
-  }
-  return 'connecting';
+  return failed ? 'failed' : 'connecting';
 }
 
 /**

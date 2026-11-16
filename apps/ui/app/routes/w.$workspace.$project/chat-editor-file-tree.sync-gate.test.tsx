@@ -209,6 +209,19 @@ describe('the Files tree while the open pull is running', () => {
     expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 
+  /* I7: an apply that failed after its entry closure landed left a partial tree; the failure speaks, not the tree. */
+  it('should show the failure, not the partial tree, when the open fails after the entry closure landed', () => {
+    pending.current = true;
+    sync.current = { ...facet('queued'), reason: 'offline' };
+    readiness.current = 'entryReady';
+    tree.current = new Map<string, FileEntry>([arrived]);
+
+    renderTree();
+
+    expect(screen.queryByRole('treeitem', { name: /bracket\.scad/u })).not.toBeInTheDocument();
+    expect(screen.queryByText('No files available')).not.toBeInTheDocument();
+  });
+
   it('says nothing about a remote a project does not have', () => {
     sync.current = facet('noRemote');
 

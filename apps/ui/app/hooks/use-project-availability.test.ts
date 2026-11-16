@@ -102,6 +102,18 @@ describe('first-open availability', () => {
       'ready',
     );
   });
+  /* I7: a failed or abandoned apply left a partial tree; it must never read as the project. */
+  it('lets a failed open win over a first view whose entry closure had landed', () => {
+    for (const failed of [
+      status({ state: 'failed' }),
+      status({ state: 'queued', reason: 'offline' }),
+      status({ state: 'conflicted' }),
+    ]) {
+      expect(projectAvailability(true, failed, { firstView: { surface: 'tree', readiness: 'entryReady' } })).toBe(
+        'failed',
+      );
+    }
+  });
   it('never opens a first view for an account that cannot open the project', () => {
     expect(
       projectAvailability(true, status(), { canOpen: false, firstView: { surface: 'tree', readiness: 'filled' } }),

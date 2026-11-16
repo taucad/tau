@@ -209,11 +209,7 @@ describe('modelList', () => {
   });
 
   it('should offer PDF input on every Gemini catalog model', () => {
-    const geminiModelIds = [
-      'google-gemini-4-argon',
-      'google-gemini-4-carbon',
-      'google-gemini-4-hydrogen',
-    ];
+    const geminiModelIds = ['google-gemini-4-argon', 'google-gemini-4-carbon', 'google-gemini-4-hydrogen'];
 
     for (const id of geminiModelIds) {
       const model = getCloudCatalogEntries().find((entry) => entry.id === id);
@@ -416,24 +412,21 @@ describe('ModelService', () => {
     ['gemini-4-argon', ['low', 'medium', 'high']],
     ['gemini-4-carbon', ['low', 'medium', 'high']],
     ['gemini-4-hydrogen', ['low', 'medium', 'high', 'xhigh']],
-  ])(
-    'should list %s with image and PDF input and selectable reasoning',
-    async (model, levels) => {
-      const listedModels = await createModelService().getModels();
-      const entry = listedModels.find((listed) => listed.id === `google-${model}`);
+  ])('should list %s with image and PDF input and selectable reasoning', async (model, levels) => {
+    const listedModels = await createModelService().getModels();
+    const entry = listedModels.find((listed) => listed.id === `google-${model}`);
 
-      expect(entry).toMatchObject({
-        model,
-        provider: { id: 'vertexai', name: 'Google' },
-        support: {
-          tools: true,
-          toolChoice: false,
-          modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
-          reasoning: { levels },
-        },
-      });
-    },
-  );
+    expect(entry).toMatchObject({
+      model,
+      provider: { id: 'vertexai', name: 'Google' },
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+        reasoning: { levels },
+      },
+    });
+  });
 
   it('lists GLM 5.3 as an enabled text-only tool-capable model', async () => {
     const service = createModelService();

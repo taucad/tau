@@ -1,8 +1,13 @@
 // @vitest-environment node
 /*
- * HEIC in the composer (blueprint WP7). The attachment runtime registers `@taucad/heif`, so the picker offers HEIC
- * everywhere except iOS WebKit and the storage policy converts it. A host without the plugin derives no HEIC source:
- * its picker has no HEIC and the policy refuses a HEIC by name, telling the person to export it as JPEG.
+ * The composer's convertible formats are written out, so the page never imports a transcoder (I3). This test keeps
+ * the list equal to the formats the web worker's attachment runtime converts to `jpeg`, and inside what the desktop
+ * utility converts: its `default` runtime registers the raster transcoder through `image()` and HEIC through `heif()`.
+ * A format added to either transcoder fails here until the list names it.
+ *
+ * HEIC (blueprint WP7): the picker offers HEIC everywhere except iOS WebKit and the storage policy converts it. A host
+ * without `@taucad/heif` derives no HEIC source: its picker has no HEIC and the policy refuses a HEIC by name, telling
+ * the person to export it as JPEG.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -17,11 +22,25 @@ const heic = new Uint8Array(
   readFileSync(new URL('../../../../packages/plugins/heif/src/fixtures/small.heic', import.meta.url)),
 );
 
-describe('HEIC attachment sources', () => {
-  it('should derive HEIC and HEIF from the attachment runtime, after every raster format', () => {
-    expect(attachmentTranscodeSources).toEqual(['jpeg', 'png', 'webp', 'gif', 'avif', 'bmp', 'tiff', 'heic', 'heif']);
+describe('attachment transcode sources', () => {
+  it('should admit exactly the formats the attachment runtime converts to jpeg', async () => {
+    const { attachmentImageRuntime } = await import('#runtime/attachment-image-runtime.definition.js');
+    expect(attachmentTranscodeSources).toEqual(deriveTranscodeSources(attachmentImageRuntime, 'jpeg'));
   });
 
+  it('should admit only formats the desktop utility converts to jpeg', async () => {
+    // Dynamic, as the page loads `@taucad/image` and `@taucad/heif` lazily (`@nx/enforce-module-boundaries`).
+    const [{ image }, { heif }] = await Promise.all([import('@taucad/image'), import('@taucad/heif')]);
+    const utilitySources = deriveTranscodeSources(defineRuntime({ plugins: [image(), heif()] }), 'jpeg');
+    expect(utilitySources).toEqual(expect.arrayContaining([...attachmentTranscodeSources]));
+  });
+
+  it('should list HEIC and HEIF after every raster format', () => {
+    expect(attachmentTranscodeSources).toEqual(['jpeg', 'png', 'webp', 'gif', 'avif', 'bmp', 'tiff', 'heic', 'heif']);
+  });
+});
+
+describe('HEIC attachment sources', () => {
   it('should offer HEIC in the picker, except on iOS WebKit', () => {
     const accept = (isIos: boolean) =>
       attachmentAccept({ images: true, documents: true, transcodeSources: attachmentTranscodeSources, isIos });

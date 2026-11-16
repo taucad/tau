@@ -1,9 +1,25 @@
-import { deriveTranscodeSources } from '@taucad/runtime/plugin';
-import { attachmentImageRuntime } from '#runtime/attachment-image-runtime.definition.js';
-
 /**
- * The image formats the composer admits for conversion: every source with an edge to `jpeg` in
- * {@link attachmentImageRuntime}. Loaded by dynamic import only, so the definition and its codecs stay outside the
- * entry's static import graph. Replaced at module resolution in desktop builds, whose renderer carries no transcoder.
+ * The image formats the composer admits for conversion: every source the raster transcoder and `@taucad/heif` convert
+ * to `jpeg`.
+ *
+ * Written out rather than derived, because deriving the list means importing the transcoder, and the page converts
+ * only in a worker (web) or the utility process (desktop), never on the main thread (I3). Importing it here put the
+ * transcoder and its codecs in the desktop renderer (`ui:check-desktop-payload`) and, on the web, moved the image
+ * probe the composer shares with the transcoder into a chunk on Home's critical path (`ui:check-critical-budget`).
+ *
+ * `attachment-transcode-sources.test.ts` holds the list equal to `deriveTranscodeSources(attachmentImageRuntime,
+ * 'jpeg')` and inside the edges the desktop utility registers through `image()` and `heif()`, the way
+ * `assertKernelRosterCoverage` holds the kernel catalog against each host's runtime roster. A format added to either
+ * transcoder fails that test until it is named here.
  */
-export const attachmentTranscodeSources: readonly string[] = deriveTranscodeSources(attachmentImageRuntime, 'jpeg');
+export const attachmentTranscodeSources: readonly string[] = [
+  'jpeg',
+  'png',
+  'webp',
+  'gif',
+  'avif',
+  'bmp',
+  'tiff',
+  'heic',
+  'heif',
+];

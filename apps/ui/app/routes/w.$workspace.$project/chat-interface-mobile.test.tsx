@@ -1225,7 +1225,8 @@ describe('ChatInterfaceMobile on load', () => {
     expect(workspace()).toHaveAttribute('data-mobile-workspace', 'opening');
     /* Drawn at the default surface but not shown: the phone frame stands in until the stored layout is read. */
     expect(workspace().className).toContain('data-[mobile-workspace=opening]:invisible');
-    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    /* Beside the hidden workspace, not in it, so assistive technology hears it. */
+    expect(workspace()).not.toContainElement(screen.getByRole('status', { name: 'Opening project' }));
 
     act(() => {
       state.isEditorReady = true;

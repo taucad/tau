@@ -12,6 +12,9 @@ const harness = vi.hoisted(() => {
     intentListeners: new Set<() => void>(),
     statusListeners: new Set<() => void>(),
     syncState: 'pending' as string,
+    canOpen: true,
+    hasClient: true,
+    clientListeners: new Set<() => void>(),
     creditPreflight: vi.fn(),
     awaitAvailability: vi.fn(async () => ({ status: 'available', durability: 'exclusive-append' })),
   });
@@ -28,6 +31,8 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: (
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_1' }) }));
 vi.mock('#lib/tau-cloud-intent.js', () => ({
   isCloudProjectPending: () => harness.cloudOpenPending,
+  canOpenCloudProject: () => harness.canOpen,
+  cloudOpenAccountReason: 'Use the account that opened this project from Tau Cloud.',
   tauCloudIntent: {
     subscribe: (listener: () => void) => {
       harness.intentListeners.add(listener);
@@ -35,15 +40,23 @@ vi.mock('#lib/tau-cloud-intent.js', () => ({
     },
   },
 }));
-vi.mock('#services/revision-client-registry.js', () => ({
-  peekRevisionClient: () => ({
+vi.mock('#services/revision-client-registry.js', () => {
+  /* One client object, as the registry holds one per project. */
+  const client = {
     status: () => ({ sync: { state: harness.syncState }, remote: { kind: 'tau', phase: 'connected' } }),
     subscribe: (listener: () => void) => {
       harness.statusListeners.add(listener);
       return () => harness.statusListeners.delete(listener);
     },
-  }),
-}));
+  };
+  return {
+    peekRevisionClient: () => (harness.hasClient ? client : undefined),
+    subscribeRevisionClients: (listener: () => void) => {
+      harness.clientListeners.add(listener);
+      return () => harness.clientListeners.delete(listener);
+    },
+  };
+});
 vi.mock('#lib/agent-host-placement.js', () => ({
   daemonPlacementOf: (execution: { hostId?: string }) => execution.hostId,
   /* The web build: an external agent pinned to Tau Desktop has nowhere to run here. */
@@ -65,15 +78,28 @@ vi.mock('#hooks/use-models.js', () => ({
 
 const opus: CadAgentExecution = { kind: 'tau', model: 'anthropic-claude-opus-4.8' };
 
-const admit = async (execution: CadAgentExecution) => {
+const admit = async (execution: CadAgentExecution, signal?: AbortSignal) => {
   const { result } = renderHook(() => useTurnAdmission(execution));
-  return result.current.admitExecution();
+  return result.current.admitExecution(undefined, signal);
 };
+
+const notify = (listeners: ReadonlySet<() => void>): void => {
+  /* A snapshot: a listener that resubscribes while it runs must not run again in this pass. */
+  const snapshot = new Set(listeners);
+  for (const listener of snapshot) {
+    listener();
+  }
+};
+
+const listening = (): number =>
+  harness.intentListeners.size + harness.statusListeners.size + harness.clientListeners.size;
 
 beforeEach(() => {
   vi.clearAllMocks();
   harness.cloudOpenPending = false;
   harness.syncState = 'pending';
+  harness.canOpen = true;
+  harness.hasClient = true;
 });
 
 describe('useTurnAdmission', () => {
@@ -96,25 +122,53 @@ describe('useTurnAdmission', () => {
     expect(harness.awaitAvailability).not.toHaveBeenCalled();
 
     harness.cloudOpenPending = false;
-    for (const listener of harness.intentListeners) {
-      listener();
-    }
+    notify(harness.intentListeners);
     await expect(admitted).resolves.toEqual({ hostId: expect.any(String) as unknown as string });
-    expect(harness.intentListeners.size).toBe(0);
-    expect(harness.statusListeners.size).toBe(0);
+    expect(listening()).toBe(0);
   });
 
   it('should refuse a held turn with the reason once the Tau Cloud open fails', async () => {
     harness.cloudOpenPending = true;
     const admitted = admit(opus);
     harness.syncState = 'failed';
-    for (const listener of harness.statusListeners) {
-      listener();
-    }
+    notify(harness.statusListeners);
     await expect(admitted).rejects.toMatchObject({
       code: 'CHAT_PLACEMENT_UNAVAILABLE',
       message: expect.stringContaining('could not finish') as unknown as string,
     });
+  });
+
+  it('should end a held turn when its dispatch is stopped, and stop listening', async () => {
+    harness.cloudOpenPending = true;
+    const stop = new AbortController();
+    const admitted = admit(opus, stop.signal);
+    await Promise.resolve();
+    expect(listening()).toBeGreaterThan(0);
+    stop.abort(new Error('Stopped.'));
+    await expect(admitted).rejects.toThrow('Stopped.');
+    expect(listening()).toBe(0);
+  });
+
+  it('should hear a failed open from a revision client that arrives after the wait began', async () => {
+    harness.cloudOpenPending = true;
+    harness.hasClient = false;
+    const admitted = admit(opus);
+    await Promise.resolve();
+    harness.hasClient = true;
+    harness.syncState = 'failed';
+    notify(harness.clientListeners);
+    await expect(admitted).rejects.toMatchObject({ code: 'CHAT_PLACEMENT_UNAVAILABLE' });
+    expect(listening()).toBe(0);
+  });
+
+  it('should refuse a held turn at once with the account reason when this account cannot open the project', async () => {
+    harness.cloudOpenPending = true;
+    harness.canOpen = false;
+    await expect(admit(opus)).rejects.toMatchObject({
+      code: 'CHAT_PLACEMENT_UNAVAILABLE',
+      message: 'Use the account that opened this project from Tau Cloud.',
+    });
+    expect(listening()).toBe(0);
   });
 
   it('should admit a daemon-placed turn while a Tau Cloud open writes this document’s files', async () => {

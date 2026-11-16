@@ -21,6 +21,12 @@ import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logi
 import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
 import { useTelemetryConsent } from '#hooks/use-telemetry-consent.js';
 
+/* One stop for whichever of a dispatch's stop and its host's unmount comes first. */
+const eitherStop = (...stops: ReadonlyArray<AbortSignal | undefined>): AbortSignal | undefined => {
+  const present = stops.filter((stop) => stop !== undefined);
+  return present.length === 0 ? undefined : AbortSignal.any(present);
+};
+
 /** The route publishes command composition; project-scoped host observation lives in ProjectSessionBinding. */
 export function ChatTurnHost(): ReactNode {
   const agent = useCadAgentConfig();
@@ -60,8 +66,19 @@ export function ChatTurnHost(): ReactNode {
     isAutoRef.current = kernelPreference === 'auto';
   }, [agent, consent, resolveModel, setActiveExecution, kernelOwner, kernelPreference]);
 
+  /* Aborted when this turn host unmounts (the chat closes, the project switches): a turn held for a cloud open's files
+   * then stops waiting (SP2h review); one already admitted runs on, as a turn outlives its view. */
+  const mountedRef = useRef<AbortController | undefined>(undefined);
+  useEffect(() => {
+    const mounted = new AbortController();
+    mountedRef.current = mounted;
+    return () => {
+      mounted.abort(new Error('This chat closed before its turn started.'));
+    };
+  }, []);
+
   const admit = useCallback(
-    async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
+    async (gesture: ChatTurnGesture, signal?: AbortSignal): Promise<ChatTurn> => {
       if (gesture.kind === 'send' && gesture.command !== undefined) {
         return {
           runId: gesture.command.payload.runId,
@@ -105,7 +122,7 @@ export function ChatTurnHost(): ReactNode {
                 ? { kind: 'continue' }
                 : { kind: 'regenerate' },
         );
-        await admitExecution(execution);
+        await admitExecution(execution, eitherStop(signal, mountedRef.current?.signal));
         /* The skills catalog is pinned into the chat's cached prompt on its first turn, so a turn waits for the
          * catalog the way it waits for the host probe (a seeded first turn fires at chat load, ahead of both). */
         const contextPayload =

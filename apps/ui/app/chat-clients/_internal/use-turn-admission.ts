@@ -12,8 +12,14 @@ import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-p
 import { useModels } from '#hooks/use-models.js';
 import { tauModelReadiness, tauModelRefusal } from '@taucad/chat-ui/utils/new-chat-execution';
 import { randomUuid } from '@taucad/utils/id';
-import { isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import {
+  canOpenCloudProject,
+  cloudOpenAccountReason,
+  isCloudProjectPending,
+  tauCloudIntent,
+} from '#lib/tau-cloud-intent.js';
+import { peekRevisionClient, subscribeRevisionClients } from '#services/revision-client-registry.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import { isFailedOpen } from '#hooks/use-project-availability.js';
 
 /**
@@ -22,41 +28,65 @@ import { isFailedOpen } from '#hooks/use-project-availability.js';
  */
 export const browserHostId = `host_${randomUuid()}`;
 
+/* A refusal on the banner a placement refusal uses. */
+const placementRefusal = (message: string): Error =>
+  Object.assign(new Error(message), { code: 'CHAT_PLACEMENT_UNAVAILABLE' });
+
 /**
  * Wait until a project's Tau Cloud open has written its files (SP2h): the chats open before they land, and a turn this
  * document hosts runs in that checkout, where its reads would find files not yet there and a write to one would make
  * the apply's own write of it refuse. It is held rather than refused, so a seeded or linked prompt sent as the chat
- * opens still runs; an open that fails ends the wait with its reason. No timer: the open's own bounds end it.
+ * opens still runs. The wait ends with a refusal when the open fails (on whichever client the project has, one that
+ * arrives later or replaces it included), at once when this account may not continue the open, and with the stop's
+ * reason when its dispatch stops. No timer: the open's own bounds end it.
  *
  * @param projectId - The project.
+ * @param signal - The dispatch's stop: Stop, the chat's disposal, or its turn host's unmount.
  * @returns Once the open's intent has cleared.
  */
-const awaitCloudOpenWritten = async (projectId: string): Promise<void> => {
+const awaitCloudOpenWritten = async (projectId: string, signal?: AbortSignal): Promise<void> => {
   if (!isCloudProjectPending(projectId)) {
     return;
   }
   const { promise, resolve, reject } = Promise.withResolvers<void>();
-  const client = peekRevisionClient(projectId);
+  let client: RevisionClient | undefined;
+  let stopStatus: (() => void) | undefined;
   const check = (): void => {
+    if (signal?.aborted === true) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('This turn was stopped before it started.'));
+      return;
+    }
     if (!isCloudProjectPending(projectId)) {
       resolve();
-    } else if (isFailedOpen(client?.status())) {
+      return;
+    }
+    if (!canOpenCloudProject(projectId)) {
+      reject(placementRefusal(cloudOpenAccountReason));
+      return;
+    }
+    const current = peekRevisionClient(projectId);
+    if (current !== client) {
+      stopStatus?.();
+      client = current;
+      stopStatus = current?.subscribe(check);
+    }
+    if (isFailedOpen(current?.status())) {
       reject(
-        Object.assign(
-          new Error('This project’s files could not finish arriving, so the agent did not start. Try again.'),
-          { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
-        ),
+        placementRefusal('This project’s files could not finish arriving, so the agent did not start. Try again.'),
       );
     }
   };
   const stopIntent = tauCloudIntent.subscribe(check);
-  const stopStatus = client?.subscribe(check);
+  const stopClients = subscribeRevisionClients(check);
+  signal?.addEventListener('abort', check);
   try {
     check();
     await promise;
   } finally {
     stopIntent();
+    stopClients();
     stopStatus?.();
+    signal?.removeEventListener('abort', check);
   }
 };
 
@@ -69,7 +99,7 @@ export type TurnAdmission = Readonly<{
    * @param turnExecution - The execution this dispatch runs, when not the live one.
    * @returns The daemon a daemon-placed turn runs on; nothing for a browser-hosted one.
    */
-  admitExecution: (turnExecution?: CadAgentExecution) => Promise<ChatExecutionTarget>;
+  admitExecution: (turnExecution?: CadAgentExecution, signal?: AbortSignal) => Promise<ChatExecutionTarget>;
   /** Surface a dropped dispatch on the same banner the transport errors use. */
   surfaceDispatchFailure: (error: unknown) => void;
 }>;
@@ -91,7 +121,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   const { resolveModel, ensureModelCatalog } = useModels();
   const creditPreflight = useCreditPreflight();
   const admitExecution = useCallback(
-    async (turnExecution: CadAgentExecution = liveExecution): Promise<ChatExecutionTarget> => {
+    async (turnExecution: CadAgentExecution = liveExecution, signal?: AbortSignal): Promise<ChatExecutionTarget> => {
       /* An external agent pinned to a host this device cannot reach is refused at once: nothing will publish
        * that host here, and the chat keeps its pin rather than moving to Tau. */
       const unplaceable = unplaceableExecutionReason(turnExecution);
@@ -101,7 +131,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
       const daemonHostId = daemonPlacementOf(turnExecution);
       /* SP2h: a turn this document hosts waits for a Tau Cloud open to write the checkout; a daemon runs on its own tree. */
       if (daemonHostId === undefined) {
-        await awaitCloudOpenWritten(projectId);
+        await awaitCloudOpenWritten(projectId, signal);
       }
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,

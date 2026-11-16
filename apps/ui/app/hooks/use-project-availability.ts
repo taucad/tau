@@ -41,6 +41,19 @@ const firstViewOpens = (view: FirstView): boolean =>
   readyFor(view.surface, view.readiness) && reachesReadiness(view.readiness, 'entryReady');
 
 /**
+ * Whether the open's pull failed, was abandoned, conflicted, or its remote needs reconnecting.
+ *
+ * @param status - The revision client's projection.
+ * @returns `true` when the open cannot go on by itself.
+ */
+const isFailedOpen = (status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined): boolean =>
+  status?.sync.state === 'failed' ||
+  status?.sync.state === 'queued' ||
+  status?.sync.state === 'conflicted' ||
+  status?.remote.phase === 'reconnectRequired' ||
+  status?.remote.phase === 'failed';
+
+/**
  * Never equate an empty local checkout with an authoritative missing file.
  *
  * @param isPending - Whether a Tau Cloud open is still owed for the project.
@@ -62,17 +75,13 @@ export function projectAvailability(
   if (!canOpen) {
     return 'account';
   }
-  const failed =
-    status?.sync.state === 'failed' ||
-    status?.sync.state === 'queued' ||
-    status?.sync.state === 'conflicted' ||
-    status?.remote.phase === 'reconnectRequired' ||
-    status?.remote.phase === 'failed';
+  const failed = isFailedOpen(status);
+  const applied = status?.sync.hasAppliedRemote === true;
   /* A failed or abandoned apply left a partial tree whose readiness stays where it got to (I7): the failure speaks. */
-  if (firstView !== undefined && firstViewOpens(firstView) && (!failed || status?.sync.hasAppliedRemote === true)) {
+  if (firstView !== undefined && firstViewOpens(firstView) && (!failed || applied)) {
     return 'ready';
   }
-  if (status?.sync.hasAppliedRemote === true) {
+  if (applied) {
     return 'preparing';
   }
   if (status?.sync.online === false) {

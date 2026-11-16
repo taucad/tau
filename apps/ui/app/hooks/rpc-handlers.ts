@@ -307,7 +307,8 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       try {
         /* A row a tree write has yet to land is listed for the person as arriving; it is not on disk, so the agent
            could not read it (I7). */
-        const entries = (await treeService.listDirectoryExact(path)).filter((entry) => entry.arriving !== true);
+        const listed = await treeService.listDirectoryExact(path);
+        const entries = listed.filter((entry) => entry.arriving !== true);
         return await mapConcurrent(entries, factsConcurrency, async (entry): Promise<RpcDirectoryEntry> => {
           const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
           const common = {

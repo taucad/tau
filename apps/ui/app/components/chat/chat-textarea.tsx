@@ -29,6 +29,7 @@ import type { CadAgentExecution } from '@taucad/chat';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
@@ -99,6 +100,8 @@ export const ChatTextarea = memo(function ({
   const [isFocused, setIsFocused] = useState(false);
   const handleFocus = useCallback((): void => {
     setIsFocused(true);
+    /* PL1: the AI SDK loads on demand; focus starts its fetch so the first send is not slowed by it. */
+    prewarmChatSdk();
   }, []);
   const handleBlur = useCallback((): void => {
     setIsFocused(false);

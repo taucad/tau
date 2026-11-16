@@ -7928,6 +7928,21 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
 };
 
 /**
+ * What a close cut over every checkout came to (A7e, 22:19Z).
+ *
+ * - `recorded`: a checkout minted a revision, and every other one had nothing to save.
+ * - `nothingToRecord`: every checkout answered that its tree was unchanged.
+ * - `refused`: a checkout could not be cut. There was no checkout, a turn held one (and minting there would credit
+ *   the turn's work to the close), or one answered `nothingToSave` because another holder's lease or a git
+ *   operation was in the way. The bytes are still on disk for the next cut.
+ *
+ * A cut that failed or lost its compare-and-swap still rejects.
+ *
+ * @public
+ */
+export type CheckoutCutsOutcome = 'recorded' | 'nothingToRecord' | 'refused';
+
+/**
  * Record every checkout no turn holds, and wait for each one's answer.
  *
  * The close ruling (D6, rule 7): closing or quitting saves every dirty
@@ -7949,15 +7964,15 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
  * @param timeoutMilliseconds - One bound for all the cuts. `hidden` defaults to {@link closeCutMilliseconds}, because
  *   a frozen page answers nothing; `close` has none (B8, B3: each cut is answered by its request id, and the quit
  *   itself is bounded by its owner, B9).
- * @returns Once every cut has answered. Rejects with the first refusal (a failed cut, a
- *   lost compare-and-swap) once all have answered, or at the bound.
+ * @returns Once every cut has answered, what they came to ({@link CheckoutCutsOutcome}). Rejects with the first
+ *   refusal (a failed cut, a lost compare-and-swap) once all have answered, or at the bound.
  * @public
  */
 export const awaitCheckoutCuts = async (
   actor: ProjectRevisionsActor,
   trigger: 'hidden' | 'close',
   timeoutMilliseconds: number | undefined = trigger === 'hidden' ? closeCutMilliseconds : undefined,
-): Promise<void> => {
+): Promise<CheckoutCutsOutcome> => {
   const { checkouts, checkoutRefs, turnFacts } = actor.getSnapshot().context;
   const turnCheckouts = Object.values(turnFacts)
     .filter((fact) => !fact.settled && fact.abandoned !== true)
@@ -7971,6 +7986,11 @@ export const awaitCheckoutCuts = async (
         !turnCheckouts.some((id) => id === undefined || id === checkout.id),
     )
     .map((checkout) => checkout.id);
+  /* A checkout skipped for a turn, or none to cut at all, leaves bytes no cut here records. */
+  const skipped =
+    ids.length === 0 || ids.length < checkouts.filter((checkout) => checkoutRefs[checkout.id] !== undefined).length;
+  /* What each checkout answered when it did not refuse: minted, unchanged, or held off. */
+  const outcomes = new Map<string, CheckoutCutsOutcome>();
   /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record.
    * Keyed by the request id each cut mints, which every answer echoes (RM-R1, RM-R2). */
   const requests = new Map(ids.map((id) => [`${trigger}:${id}:${randomUuid()}`, id]));
@@ -7984,9 +8004,18 @@ export const awaitCheckoutCuts = async (
   };
   const subscriptions = [
     actor.on('revisionMinted', (event) => {
+      if (event.requestId !== undefined && requests.has(event.requestId)) {
+        outcomes.set(event.requestId, 'recorded');
+      }
       answer(event);
     }),
     actor.on('nothingToSave', (event) => {
+      if (event.requestId !== undefined && requests.has(event.requestId)) {
+        outcomes.set(
+          event.requestId,
+          event.heldBy === undefined && event.waitFor === undefined ? 'nothingToRecord' : 'refused',
+        );
+      }
       answer(event);
     }),
     actor.on('cutFailed', (event) => {
@@ -8017,6 +8046,11 @@ export const awaitCheckoutCuts = async (
     if (refused !== undefined) {
       throw new Error(refused);
     }
+    const answered = new Set(outcomes.values());
+    if (skipped || answered.has('refused')) {
+      return 'refused';
+    }
+    return answered.has('recorded') ? 'recorded' : 'nothingToRecord';
   } finally {
     clearTimeout(bound);
     for (const subscription of subscriptions) {

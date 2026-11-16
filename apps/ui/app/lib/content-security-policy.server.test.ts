@@ -142,6 +142,15 @@ describe('write-content-security-policy-headers', () => {
     expect(written).toBe(`/*\n  Content-Security-Policy-Report-Only: ${productionPolicy}\n`);
   });
 
+  it('should offer the JS profiler to static documents off production only, as function documents do (OQ-P11, C6)', () => {
+    expect(contentSecurityPolicyHeaders('production')).not.toContain('Document-Policy');
+    for (const environment of ['staging', 'development'] as const) {
+      expect(contentSecurityPolicyHeaders(environment)).toBe(
+        `/*\n  Content-Security-Policy-Report-Only: ${buildReportOnlyContentSecurityPolicy(environment)}\n  Document-Policy: js-profiling\n`,
+      );
+    }
+  });
+
   it('should run in every netlify.toml build command right after the UI build', async () => {
     const toml = await readFile(join(appRoot, 'netlify.toml'), 'utf8');
     const commands = [...toml.matchAll(/^command = "(.*)"$/gmu)]

@@ -32,9 +32,7 @@ export default async function handleRequest(
   if (!(rootData && typeof rootData === 'object' && 'launch' in rootData && rootData.launch === true)) {
     headers.set('X-Robots-Tag', 'noindex, nofollow');
   }
-  headers.set('Referrer-Policy', 'no-referrer');
-  headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // `Referrer-Policy`, `nosniff` and `Permissions-Policy` are on every response: the root middleware sets them.
   headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
   headers.set(
     'Netlify-CDN-Cache-Control',

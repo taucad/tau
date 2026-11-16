@@ -1,7 +1,6 @@
+import { RouterContextProvider } from 'react-router';
 import { describe, it, expect } from 'vitest';
 import { loader } from '#routes/assets.$/route.js';
-import type { AppLoadContext } from 'react-router';
-import { mock } from 'vitest-mock-extended';
 
 const callLoader = async (pathname: string): Promise<Response> => {
   try {
@@ -11,7 +10,7 @@ const callLoader = async (pathname: string): Promise<Response> => {
       url: new URL(request.url),
       pattern: '/assets/*',
       params: { '*': pathname.replace(/^\/assets\//u, '') },
-      context: mock<AppLoadContext>(),
+      context: new RouterContextProvider(),
     });
     throw new Error('Loader did not throw');
   } catch (error) {

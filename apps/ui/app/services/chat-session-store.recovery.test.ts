@@ -1,9 +1,10 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { UIMessageChunk, ChatStatus } from 'ai';
-import type { Chat } from '@ai-sdk/react';
+import type { ChatView } from '#services/deferred-chat.js';
 import type { MyUIMessage } from '@taucad/chat';
 import type * as SharedChat from '@taucad/chat-ui/chat-clients/_internal/shared-chat-transport';
 import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
@@ -68,7 +69,7 @@ const poisonedStream = (status: 'submitted' | 'streaming' = 'submitted'): Readab
   });
 
 /** Hydrate a real store without filesystem or execution effects. */
-const acquire = (): Readonly<{ store: ChatSessionStore; chat: Chat<MyUIMessage>; deps: ChatSessionDeps }> => {
+const acquire = (): Readonly<{ store: ChatSessionStore; chat: ChatView; deps: ChatSessionDeps }> => {
   const deps = mock<ChatSessionDeps>({
     getChat: vi.fn(async () => ({
       id: 'chat_1',
@@ -133,6 +134,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
   harness.errorStatuses.length = 0;
   resetChatTurnServices();
+});
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
 });
 
 describe('ChatSessionStore real SDK presentation recovery', () => {
@@ -307,7 +314,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     );
     const { store, chat } = acquire();
     stores.push(store);
-    let replacement: Chat<MyUIMessage> | undefined;
+    let replacement: ChatView | undefined;
     const unregister = chat['~registerStatusCallback'](() => {
       if (chat.status === 'error') {
         publishLogRows(store, 'chat_1', [lifecycleRow(2, 'completed')], 2);

@@ -1,15 +1,12 @@
 import { PassThrough } from 'node:stream';
 
 import { createReadableStreamFromReadable } from '@react-router/node';
-import { applyHandleRequestHeaders } from '@taucad/runtime/react-router';
 import { isbot } from 'isbot';
 import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
-import type { AppLoadContext, EntryContext, HandleErrorFunction } from 'react-router';
+import type { EntryContext, HandleErrorFunction, RouterContextProvider } from 'react-router';
 import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.constants';
-import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
-import { reportingEndpoints } from '#lib/browser-reports.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
@@ -44,7 +41,7 @@ export default function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  loadContext: AppLoadContext,
+  loadContext: RouterContextProvider,
 ): Promise<Response> | Response {
   /* LB0a: the cold-instance mark, the loader's catalog entry and the render time to the headers go out as
    * `Server-Timing`. A streamed document's headers leave at shell ready, so all-ready and bytes are not in them. */
@@ -52,10 +49,8 @@ export default function handleRequest(
   const routeId = leafRouteId(routerContext);
   // Errors `handleError` took for this document go out with its route and status (SB10).
   claimSsrErrors(request, routeId, responseStatusCode);
-  applyHandleRequestHeaders(responseHeaders);
-  responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
-  // SB6: CSP violations (`report-to default`) and Chromium crash reports go to the same-origin receiver.
-  responseHeaders.set('Reporting-Endpoints', reportingEndpoints);
+  /* Cross-origin isolation, the report-only CSP and `Reporting-Endpoints` are on every response, so the root
+   * middleware sets them (`#lib/root-middleware.server`); what follows is right on a document only. */
   /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
    * cache may answer a load or refresh with a stored document without asking the server. It is
    * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex

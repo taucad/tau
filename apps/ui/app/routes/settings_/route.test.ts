@@ -1,6 +1,5 @@
-import type { AppLoadContext } from 'react-router';
+import { RouterContextProvider } from 'react-router';
 import { describe, expect, it } from 'vitest';
-import { mock } from 'vitest-mock-extended';
 import { loader } from '#routes/settings_/route.js';
 
 const redirectFor = (search = ''): string | undefined => {
@@ -10,7 +9,7 @@ const redirectFor = (search = ''): string | undefined => {
     url: new URL(request.url),
     pattern: '/settings',
     params: {},
-    context: mock<AppLoadContext>(),
+    context: new RouterContextProvider(),
   });
   return response.headers.get('Location') ?? undefined;
 };

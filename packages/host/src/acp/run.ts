@@ -51,6 +51,7 @@ import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
 import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
 import { createAcpMediaStore } from '#acp/media.js';
+import type { AgentMediaTranscoder } from '#acp/media.js';
 import type { AcpLentSeams } from '#acp/acp-session-logic.js';
 import type { AcpLimitReset } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
@@ -145,6 +146,11 @@ export type AcpExternalAgentPortOptions = {
    * answer, so a host with no revision port still runs.
    */
   readonly checkouts?: ReadonlyMap<string, { readonly cwd: string; readonly mode: string }> | undefined;
+  /**
+   * The host runtime's image transcoder, for agent media the chat cannot store as sent (an AVIF, a GIF, an oversized
+   * JPEG): converted to JPEG before it is filed. Absent, media is filed as sent and an unstorable type stays inline.
+   */
+  readonly mediaTranscoder?: AgentMediaTranscoder | undefined;
 };
 
 const publishSystemSkills = async (
@@ -946,7 +952,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       };
       /* Every durable row of the turn names agent media by attachment rather
        * than carrying it inline (see `createAcpMediaStore`). */
-      const moveMedia = createAcpMediaStore(options.workspaceRoot, turn.chatId);
+      const moveMedia = createAcpMediaStore(options.workspaceRoot, turn.chatId, options.mediaTranscoder);
       turns.set(requestId, {
         ...turn,
         append: async (events) => turn.append(await moveMedia(events)),

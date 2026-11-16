@@ -424,7 +424,7 @@ const projectContextOf = (projectId: string): unknown => {
   projectContexts.set(projectId, created);
   return created;
 };
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     return (
       <StubProjectContext.Provider value={projectId}>
@@ -432,6 +432,8 @@ vi.mock('#hooks/use-project.js', () => ({
       </StubProjectContext.Provider>
     );
   },
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: () => projectContextOf(useContext(StubProjectContext)),
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
@@ -515,7 +517,7 @@ vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ Proje
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ ProjectPrintRouteIntent: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({ ProjectShareRouteIntent: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({ ChatInterface: () => null }));

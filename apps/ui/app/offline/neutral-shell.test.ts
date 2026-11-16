@@ -6,6 +6,7 @@
  * view's.
  */
 /* eslint-disable @typescript-eslint/naming-convention -- client environment keys are an external contract. */
+import { RouterContextProvider } from 'react-router';
 import { expect, it, vi } from 'vitest';
 import type * as EnvironmentConfig from '#environment.config.js';
 import { loader, shouldRevalidate } from '#root.js';
@@ -30,7 +31,7 @@ vi.mock('#environment.config.js', async (loadOriginal) => ({
 type LoaderArguments = Parameters<typeof loader>[0];
 
 /** The root loader never reads its router context. */
-const emptyContext = {};
+const emptyContext = new RouterContextProvider();
 
 const callLoader = async (cookie: string): ReturnType<typeof loader> => {
   const url = new URL('https://tau.new/usage');

@@ -39,7 +39,7 @@ export default {
    * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
    */
   // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
-  future: { unstable_optimizeDeps: true },
+  future: { unstable_optimizeDeps: true, v8_middleware: true },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *

@@ -543,6 +543,33 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     before.dispose();
   }, 20_000);
 
+  /* A stamped root is the revision layer's even before it opens it again: a pointer written since refuses a read (I7). */
+  it('should refuse a pointer written since a declared snapshot, before the revision layer opens the reloaded root', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const before = await createService(undefined, { providerRegistry, durable: true });
+    const provider = memory;
+    await expect
+      .poll(
+        async () =>
+          provider.readFile('gear/.tau/index/snapshot.json').then(
+            (bytes) => bytes.byteLength,
+            () => 0,
+          ),
+        {
+          timeout: 10_000,
+        },
+      )
+      .toBeGreaterThan(0);
+    await provider.writeFile('gear/notes/added.step', pointer);
+    const reloaded = await createService(undefined, { providerRegistry, durable: true, reload: true });
+    reloaded.setPendingObjectSource(async () => part);
+    const view = reloaded.createRootedFileSystem(route);
+    await expect(view.readFile('notes/added.step')).rejects.toBeInstanceOf(PendingContentError);
+    expect(await view.readFile('main.scad')).toStrictEqual(encoder.encode('import("models/part.step");'));
+    reloaded.dispose();
+    before.dispose();
+  }, 20_000);
+
   it('should end the hold once, at the bound, and answer every row from the marks, never refusing a listing', async () => {
     const bound = 150;
     const bounded = await createService(bound, { declared: false });

@@ -692,6 +692,10 @@ export class ProjectIndexes {
         const object = Object.hasOwn(marks.pending, relative!) ? marks.pending[relative!] : undefined;
         return object ?? (marks.declared || !this._unknownAt(normalized) ? undefined : 'unknown');
       }
+      if (relative !== undefined && marks.declared && mayBePointerSize(row.size)) {
+        /* A stamp vouches only for the rows it stored: a pointer-sized file written since is not known (I7). */
+        return 'unknown';
+      }
     }
     const covering = this._covering(normalized);
     if (covering !== undefined) {
@@ -1166,6 +1170,10 @@ export class ProjectIndexes {
       }
       if (index.forgetDeclared()) {
         this._schedulePersist(root);
+        /* A stamped snapshot is the revision layer's word that this is its root, opened again or not yet. */
+        if (!this._declaration.has(root)) {
+          this._declaration.set(root, 'unknown');
+        }
       }
     }
   }

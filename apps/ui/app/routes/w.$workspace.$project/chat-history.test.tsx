@@ -817,6 +817,7 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     entryType: 'navigation',
     startTime: 0,
     duration: 0,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- The DOM's PerformanceEntry names this member.
     toJSON: () => ({ name }),
   });
   const revealDelay = (): number => {

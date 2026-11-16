@@ -2,12 +2,13 @@
 import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium, devices, webkit } from 'playwright';
-import type { BrowserContext, BrowserType } from 'playwright';
+import type { BrowserContext, BrowserType, Response as BrowserResponse } from 'playwright';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable no-restricted-imports -- The Node-only target runs without browser aliases.
 import {
   createObservabilityRunId,
   harnessNavigationTimeout,
+  isEventEnvelope,
   observeHarnessPage,
   observabilityUrl,
   pollSentryEventIds,
@@ -120,13 +121,15 @@ const engines = [
   ['webkit', webkit, devices['iPhone 14']],
 ] as const;
 
-/** Open the harness on one trigger and wait until the tunnel answered, so the browser does not close first. */
+/** The tunnel's answer to the envelope that carries the error, not to a session update or a transaction before it. */
+const isEventDelivery = (response: BrowserResponse): boolean =>
+  new URL(response.url()).pathname === '/api/monitoring' && isEventEnvelope(response.request().postData() ?? undefined);
+
+/** Open the harness on one trigger and wait until the tunnel answered its error, so the browser does not close first. */
 const triggerAndAwaitDelivery = async (context: BrowserContext, runId: string, trigger: string): Promise<void> => {
   const page = await context.newPage();
   observeHarnessPage(page, runId);
-  const delivered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/monitoring', {
-    timeout: 60_000,
-  });
+  const delivered = page.waitForResponse(isEventDelivery, { timeout: 60_000 });
   await page.goto(observabilityUrl(runId, trigger), { timeout: harnessNavigationTimeout, waitUntil: 'load' });
   await delivered;
 };
@@ -196,10 +199,9 @@ describe('P2 staging delivery acceptance (A1, A5, A10)', () => {
               tunnelled += 1;
             }
           });
-          const delivered = page.waitForResponse(
-            (response) => new URL(response.url()).pathname === '/api/monitoring' && response.ok(),
-            { timeout: 60_000 },
-          );
+          const delivered = page.waitForResponse((response) => isEventDelivery(response) && response.ok(), {
+            timeout: 60_000,
+          });
           await page.goto(observabilityUrl(runId, 'uncaught'), {
             timeout: harnessNavigationTimeout,
             waitUntil: 'load',

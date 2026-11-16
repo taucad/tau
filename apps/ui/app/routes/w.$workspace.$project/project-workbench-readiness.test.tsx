@@ -11,6 +11,8 @@ vi.mock('#flags/use-feature.js', () => ({ useFeature: () => mocks.enabled }));
 
 const mocks = vi.hoisted(() => ({
   availability: 'downloading' as ProjectAvailability,
+  /* The chats surface's own availability (SP2h); `undefined` follows the whole apply. */
+  chatsAvailability: undefined as ProjectAvailability | undefined,
   enabled: true,
   machines: vi.fn(() => ({ available: false, reason: 'not-supported' })),
   approvalBridge: vi.fn(() => {
@@ -23,7 +25,8 @@ const mocks = vi.hoisted(() => ({
 const editorSnapshot = { context: { focusedChatId: undefined } };
 const editorRef = { getSnapshot: () => editorSnapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
 vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => mocks.availability,
+  useProjectAvailability: (surface?: string) =>
+    surface === 'chats' ? (mocks.chatsAvailability ?? mocks.availability) : mocks.availability,
   useModelAvailability: () => mocks.availability,
   useLargeObjectPending: () => false,
   useLargeObjects: () => undefined,
@@ -40,6 +43,7 @@ vi.mock('#hooks/use-revision-status.js', () => ({
 
 beforeEach(() => {
   mocks.availability = 'downloading';
+  mocks.chatsAvailability = undefined;
   mocks.enabled = true;
   vi.clearAllMocks();
 });
@@ -72,6 +76,21 @@ describe('Workbench first-checkout readiness', () => {
     expect(mocks.machines).not.toHaveBeenCalled();
     expect(mocks.approvalBridge).not.toHaveBeenCalled();
     expect(mocks.agents).not.toHaveBeenCalled();
+  });
+
+  /* SP2h: the Agents panel is a projection of the chats, so it opens on their records, not on the whole apply. */
+  it('should mount the Agents projection once the chats may open, while the apply still writes', () => {
+    mocks.availability = 'preparing';
+    mocks.chatsAvailability = 'ready';
+    /* The content mounts, and its first chat-session hook finds no store here; the placeholder would render. */
+    expect(() =>
+      render(
+        <MemoryRouter>
+          <AgentsPanelBody />
+        </MemoryRouter>,
+      ),
+    ).toThrow('useChatSessionStore');
+    expect(screen.queryByRole('region')).toBeNull();
   });
 
   it('should open the Print pane without a chat approval provider once files are ready', () => {

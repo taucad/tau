@@ -10,7 +10,11 @@ import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.j
  * resources — and called by `chatSessionMachine`'s `queued` state, never by
  * React. @public
  */
-export type ChatTurnAdmit = (gesture: ChatTurnGesture) => Promise<ChatTurn>;
+export type ChatTurnAdmit = (
+  gesture: ChatTurnGesture,
+  /** The dispatch's stop: aborted when its admission actor stops (Stop, a replacing gesture, the chat's disposal). */
+  signal?: AbortSignal,
+) => Promise<ChatTurn>;
 
 const admissionsByChat = new Map<string, ChatTurnAdmit>();
 
@@ -118,7 +122,7 @@ export const chatTurnAdmission = fromSafeAsync<
     throw new Error('This chat is not ready to run a turn yet.');
   }
   await awaitChatTurnHold('admission');
-  const turn = await admit(input.gesture);
+  const turn = await admit(input.gesture, signal);
   if (signal.aborted) {
     throw new Error('This turn was replaced before it started.');
   }

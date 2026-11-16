@@ -224,7 +224,7 @@ export const attachmentImageService = (): AttachmentImageService => {
 };
 
 const importTranscodeSources = async (): Promise<readonly string[]> => {
-  const { attachmentTranscodeSources } = await import('#runtime/attachment-image-runtime.definition.js');
+  const { attachmentTranscodeSources } = await import('#runtime/attachment-transcode-sources.js');
   return attachmentTranscodeSources;
 };
 
@@ -234,9 +234,10 @@ let loadedSources = noSources;
 const sourcesLoaded = new Topic<readonly string[]>({ name: 'attachment-transcode-sources' });
 
 /**
- * The image formats the composer converts, derived from the conversion runtime's registered edges to `jpeg`. The
- * runtime definition is loaded on first use, outside the entry's static import graph; no worker starts. A failed load
- * admits only stored types and is retried on the next call.
+ * The image formats the composer converts, derived from the conversion runtime's registered edges to `jpeg` (on
+ * desktop, the utility's list; see `attachment-transcode-sources.desktop.ts`). The list is loaded on first use, outside
+ * the entry's static import graph; no worker starts. A failed load admits only stored types and is retried on the
+ * next call.
  *
  * @returns The convertible source formats.
  */

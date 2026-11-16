@@ -625,7 +625,7 @@ describe('overflowLossSignals', () => {
 });
 
 describe('pruneDirectorySummaries', () => {
-  const summary = (path: string, backend = testBackend): PathChangeEvent => ({
+  const summary = (path: string, backend: PathChangeEvent['backend'] = testBackend): PathChangeEvent => ({
     type: 'directoryChanged',
     path,
     backend,

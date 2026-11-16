@@ -485,7 +485,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
             typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-server-output --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --graph="$graph" > /dev/null ;;
             pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
@@ -540,7 +540,9 @@ jobs:
       # It also runs `ui:check-critical-budget`, the critical-path budget (progressive loading
       # guard G3): each route class's interactive tier in the client build `ui:build` just made,
       # with no build of its own. Its source guards (G1 lint, G2 graph test) run in the lint and
-      # test lanes.
+      # test lanes. `ui:check-static-shells` (PL3) renders each static shell through that build's
+      # server output: neutral and deterministic bytes, the function's own document, its build id
+      # and headers, no rendered placeholder.
       #
       # `size` selects `ui:size`, the SSR bundle budget on `ui:build`'s server output, and
       # `check-server-output` selects `ui:check-server-output` and `docs:check-server-output`
@@ -556,7 +558,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-server-output --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1 ;;
             pkgcheck-*)
               # The three package-check shards deal the affected projects with a package
               # check by measured uncached `pkgcheck` seconds, with the test shards' dealer

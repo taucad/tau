@@ -24,6 +24,13 @@
 #   WORKER_PATH    Path of a worker script (default: discovered)
 #   SCAN_LIMIT     Chunks read while discovering WASM and worker paths (default: 400)
 #
+# Optional, for a host that serves a static shell (progressive loading PL3, shell invariant 5):
+#   SHELL_PATH     A URL the host answers with a static shell, e.g. /w/home/example. Its COOP, COEP, CORP,
+#                  Content-Security-Policy-Report-Only, Reporting-Endpoints and Document-Policy must equal those of
+#                  PARITY_PATH, and it must expire the skew protection cookie (tau_skew).
+#   PARITY_PATH    A function-rendered document of the same host to compare with (default: /projects)
+#   NO_DOCUMENT_POLICY  1 to also require that neither carries Document-Policy (production, check C6)
+#
 # Usage:
 #   apps/ui/scripts/static-host-conformance.sh https://taucad-prod-us.netlify.app
 #   WASM_PATH=/assets/kernel-abc.wasm apps/ui/scripts/static-host-conformance.sh http://127.0.0.1:8080
@@ -162,9 +169,37 @@ check chunk "$chunk_path" "$([[ -z "$chunk_path" ]] || fetch "$chunk_path" "$wor
 check wasm "$wasm_path" "$([[ -z "$wasm_path" ]] || fetch "$wasm_path" "$work/wasm")" "$work/wasm.headers" '^application/wasm(;|$)'
 check worker "$worker_path" "$([[ -z "$worker_path" ]] || fetch "$worker_path" "$work/worker")" "$work/worker.headers" '^(text|application)/javascript(;|$)'
 
+resources=4
+if [[ -n "${SHELL_PATH:-}" ]]; then
+  resources=6
+  parity_path="${PARITY_PATH:-/projects}"
+  shell_code="$(fetch "$SHELL_PATH" "$work/shell")"
+  parity_code="$(fetch "$parity_path" "$work/parity")"
+  check shell "$SHELL_PATH" "$shell_code" "$work/shell.headers" '^text/html(;|$)'
+  problems=()
+  [[ "$parity_code" == 200 ]] || problems+=("$parity_path status $parity_code")
+  for name in cross-origin-opener-policy cross-origin-embedder-policy cross-origin-resource-policy \
+    content-security-policy-report-only reporting-endpoints document-policy; do
+    shell_value="$(header "$work/shell.headers" "$name")"
+    parity_value="$(header "$work/parity.headers" "$name")"
+    [[ "$shell_value" == "$parity_value" ]] || problems+=("$name '${shell_value}' differs from $parity_path '${parity_value}'")
+    if [[ "$name" == document-policy && "${NO_DOCUMENT_POLICY:-}" == 1 && -n "$shell_value$parity_value" ]]; then
+      problems+=("Document-Policy present")
+    fi
+  done
+  [[ -n "$(header "$work/shell.headers" content-security-policy-report-only)" ]] || problems+=("no report-only CSP")
+  grep -qiE '^set-cookie:[[:space:]]*tau_skew=;.*max-age=0' "$work/shell.headers" || problems+=("tau_skew not expired")
+  if [[ ${#problems[@]} -eq 0 ]]; then
+    printf 'PASS %-8s %s matches %s\n' parity "$SHELL_PATH" "$parity_path"
+  else
+    printf 'FAIL %-8s %s: %s\n' parity "$SHELL_PATH" "$(IFS=';'; echo "${problems[*]}")"
+    failures=$((failures + 1))
+  fi
+fi
+
 if [[ "$failures" -eq 0 ]]; then
-  echo "conformant: 4 of 4 resources"
+  echo "conformant: $resources of $resources resources"
 else
-  echo "not conformant: $failures of 4 resources fail"
+  echo "not conformant: $failures of $resources resources fail"
   exit 1
 fi
